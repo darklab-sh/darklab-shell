@@ -22,7 +22,14 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Open TODOs
 
-No open TODOs at this time.
+- **Workspace-enabled smoke fixtures**
+  - Add deterministic smoke-test fixtures for workspace-aware file input/output commands once the container smoke harness can create session workspace files before running a case.
+  - Keep these separate from normal user-facing examples until fixtures exist; commands like `nmap -iL targets.txt` are valid only after `targets.txt` has been created in the active session workspace.
+  - Candidate fixture cases:
+    - create `targets.txt`, run `nmap -iL targets.txt`, verify target output
+    - run `curl -o response.html https://ip.darklab.sh`, verify the workspace file exists and is non-empty
+    - create `urls.txt`, run `pd-httpx -l urls.txt -o httpx.txt`, verify output file creation
+    - create `words.txt`, run `ffuf -w words.txt -u https://ip.darklab.sh/FUZZ -o ffuf.json`, verify JSON output file creation
 
 ---
 
@@ -91,7 +98,6 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
 
 | Idea | Benefit | Complexity | Notes |
 |------|---------|------------|-------|
-| Ephemeral per-session workspace | H | H | Needs allowlist workspace mode, quota, cleanup, and isolation model — not just tmpfs allocation |
 | Parameterized command forms | M | H | Depends on structured command catalog; do not build independently |
 | Run collections / case folders | M | H | New data model + grouping UI |
 | Snapshot diff against current tab | M | H | Builds on run comparison; defer until comparison is done |
@@ -301,20 +307,6 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
 
 - **Plugin-style helper command registry**
   - Turn the fake-command layer into a cleaner extension surface for future app-native helpers.
-
-- **Ephemeral per-session workspace mode**
-  - Add an optional tmpfs-backed per-session working directory so users can create short-lived files and use more natural shell workflows such as `ls`, `cat`, `rm`, and output redirection into files.
-  - Treat this as a separate execution mode with its own validation, cleanup, quota, and audit model rather than as a small shell-ergonomics enhancement.
-  - The existing allowed_commands system would need a paired workspace mode — `ls`, `cat`, `rm`, `mv`, and output redirection (`>`, `>>`) are either blocked metacharacters or not in the allowlist today. A workspace mode needs explicit allowlist support, not just a tmpfs allocation.
-  - Scope the safety model explicitly:
-    - per-session byte quota
-    - max file size
-    - max file count / inode-style limit
-    - aggressive cleanup on expiry
-    - optional app-mediated file download support from the active session workspace
-  - Consider a stronger isolation path as a later phase:
-    - a real per-session chroot-style jail or equivalent container-level filesystem jail so the shell process cannot see outside the session workspace at all
-    - this would make the feature feel much more like a real shell while reducing accidental filesystem exposure
 
 - **Lightweight Jinja base template**
   - `index.html`, `permalink_base.html`, and `diag.html` now all share the same ~10 lines of `<head>` bootstrap (charset, viewport, color-scheme meta, favicon, `fonts.css`, `styles.css`, theme var includes, and the two vendor scripts). With three templates the duplication is starting to pay for the indirection.

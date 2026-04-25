@@ -7,6 +7,7 @@ Then open http://localhost:8888 or read the README.md for Docker instructions.
 
 import logging
 import signal  # noqa: F401 — re-exported for test compatibility
+import time
 
 from flask import Flask, jsonify, request
 
@@ -35,10 +36,15 @@ from blueprints.content import content_bp  # noqa: E402
 from blueprints.run import run_bp, SUDO_BIN, KILL_BIN  # noqa: E402, F401 — re-exported
 from blueprints.history import history_bp  # noqa: E402
 from blueprints.session import session_bp  # noqa: E402
+from blueprints.workspace import workspace_bp  # noqa: E402
+from workspace import cleanup_inactive_workspaces  # noqa: E402
 
 app = Flask(__name__, template_folder="templates")
 app.config["RATELIMIT_ENABLED"] = CFG.get("rate_limit_enabled", True)
 limiter.init_app(app)
+
+_WORKSPACE_CLEANUP_INTERVAL_SECONDS = 300
+_last_workspace_cleanup_monotonic = 0.0
 
 
 @app.errorhandler(429)
@@ -46,6 +52,27 @@ def _rate_limit_handler(e):
     ip = get_client_ip()
     log.warning("RATE_LIMIT", extra={"ip": ip, "path": request.path, "limit": str(e.description)})
     return jsonify({"error": "Rate limit exceeded. Please slow down."}), 429
+
+
+@app.before_request
+def _run_periodic_workspace_cleanup():
+    _maybe_cleanup_workspaces()
+
+
+def _maybe_cleanup_workspaces():
+    global _last_workspace_cleanup_monotonic
+    if not CFG.get("workspace_enabled"):
+        return
+    now = time.monotonic()
+    if now - _last_workspace_cleanup_monotonic < _WORKSPACE_CLEANUP_INTERVAL_SECONDS:
+        return
+    _last_workspace_cleanup_monotonic = now
+    try:
+        removed = cleanup_inactive_workspaces(CFG)
+        if removed:
+            log.info("WORKSPACE_CLEANUP", extra={"removed": removed})
+    except Exception:
+        log.exception("WORKSPACE_CLEANUP_ERROR")
 
 
 @app.before_request
@@ -77,6 +104,7 @@ app.register_blueprint(content_bp)
 app.register_blueprint(run_bp)
 app.register_blueprint(history_bp)
 app.register_blueprint(session_bp)
+app.register_blueprint(workspace_bp)
 
 
 if __name__ == "__main__":

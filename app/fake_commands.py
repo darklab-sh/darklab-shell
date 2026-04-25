@@ -28,6 +28,16 @@ from commands import (
 from config import APP_VERSION, CFG, PROJECT_README
 from database import db_connect
 from process import active_runs_for_session, redis_client
+from workspace import (
+    InvalidWorkspacePath,
+    WorkspaceDisabled,
+    WorkspaceFileNotFound,
+    WorkspaceQuotaExceeded,
+    list_workspace_files,
+    read_workspace_text_file,
+    workspace_settings,
+    workspace_usage,
+)
 
 
 _STARTED_AT = datetime.now(timezone.utc)
@@ -158,6 +168,7 @@ _SPECIAL_FAKE_COMMANDS = {
 _BACKSPACE_RE = re.compile(r".\x08")
 _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "banner", "description": "Print the configured banner art without replaying welcome.", "root": "banner"},
+    {"name": "cat <file>", "description": "Show a file from the session workspace.", "root": "cat"},
     {"name": "clear", "description": "Clear the current terminal tab output.", "root": "clear"},
     {"name": "commands", "description": "List built-in and allowed external commands.", "root": "commands"},
     {"name": "config", "description": "Show or update user options from the terminal.", "root": "config"},
@@ -177,10 +188,12 @@ _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "jobs", "description": "List active jobs for this session.", "root": "jobs"},
     {"name": "last", "description": "Show recent completed runs with timestamps and exit codes.", "root": "last"},
     {"name": "limits", "description": "Show configured runtime, history, and retention limits.", "root": "limits"},
+    {"name": "ls", "description": "List files in the session workspace.", "root": "ls"},
     {"name": "man <cmd>", "description": "Show the real man page for an allowed command.", "root": "man"},
     {"name": "ps", "description": "Show the current shell process view plus recent session commands.", "root": "ps"},
     {"name": "pwd", "description": "Show the web shell workspace path.", "root": "pwd"},
     {"name": "retention", "description": "Show retention and persisted-output settings.", "root": "retention"},
+    {"name": "rm <file>", "description": "Remove a file from the session workspace after confirmation.", "root": "rm"},
     {"name": "route", "description": "Show the shell routing table summary.", "root": "route"},
     {"name": "session-token", "description": "Show session token status.", "root": "session-token"},
     {"name": "shortcuts", "description": "Show current keyboard shortcuts.", "root": "shortcuts"},
@@ -192,6 +205,7 @@ _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "uname [-a]", "description": "Show the shell platform string.", "root": "uname"},
     {"name": "uptime", "description": "Show app uptime since process start.", "root": "uptime"},
     {"name": "version", "description": "Show shell, app, Flask, and Python version details.", "root": "version"},
+    {"name": "workspace", "description": "List, view, or remove files in the session workspace.", "root": "workspace"},
     {"name": "which <cmd>", "description": "Locate a built-in command or allowed runtime command.", "root": "which"},
     {"name": "who", "description": "Show the current shell user and session.", "root": "who"},
     {"name": "whoami", "description": "Describe this shell and link to the project README.", "root": "whoami"},
@@ -199,6 +213,8 @@ _DOCUMENTED_FAKE_COMMANDS = [
 _FAKE_COMMAND_HELP = [(entry["name"], entry["description"]) for entry in _DOCUMENTED_FAKE_COMMANDS]
 _DOCUMENTED_FAKE_COMMAND_ROOTS = {entry["root"] for entry in _DOCUMENTED_FAKE_COMMANDS if "root" in entry}
 _FAKE_COMMANDS = _DOCUMENTED_FAKE_COMMAND_ROOTS | {"reboot", "sudo"}
+_WORKSPACE_ALIAS_ROOTS = {"cat", "ls", "rm"}
+_SYNTHETIC_MAN_EXCLUDED_ROOTS = {"cat", "ls", "rm"}
 
 
 def _split_command(command: str) -> list[str]:
@@ -216,6 +232,25 @@ def _resolve_special_fake_command(command: str) -> str | None:
     return None
 
 
+def _safe_workspace_alias_path(value: str) -> bool:
+    raw = str(value or "").strip()
+    if not raw or raw.startswith("/") or "\\" in raw or "\x00" in raw:
+        return False
+    parts = raw.split("/")
+    return all(part and part not in {".", ".."} and not part.startswith(".") for part in parts)
+
+
+def _resolve_workspace_alias_command(parts: list[str]) -> str | None:
+    if not parts:
+        return None
+    root = parts[0].lower()
+    if root == "ls":
+        return "ls" if len(parts) == 1 else None
+    if root in {"cat", "rm"}:
+        return root if len(parts) == 2 and _safe_workspace_alias_path(parts[1]) else None
+    return None
+
+
 def resolve_fake_command(command: str) -> str | None:
     special = _resolve_special_fake_command(command)
     if special is not None:
@@ -224,6 +259,8 @@ def resolve_fake_command(command: str) -> str | None:
     if not parts:
         return None
     root = parts[0].lower()
+    if root in _WORKSPACE_ALIAS_ROOTS:
+        return _resolve_workspace_alias_command(parts)
     return root if root in _FAKE_COMMANDS else None
 
 
@@ -252,6 +289,7 @@ def get_fake_command_roots() -> list[str]:
 
 _FAKE_COMMAND_DISPATCH = {
     "banner":    lambda cmd, sid: _run_fake_banner(),
+    "cat":       lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
     "clear":     lambda cmd, sid: _run_fake_clear(),
     "commands":  lambda cmd, sid: _run_fake_commands(cmd),
     "config":    lambda cmd, sid: _run_fake_client_side_command("config"),
@@ -268,12 +306,14 @@ _FAKE_COMMAND_DISPATCH = {
     "jobs":      lambda cmd, sid: _run_fake_jobs(sid),
     "last":      lambda cmd, sid: _run_fake_last(sid),
     "limits":    lambda cmd, sid: _run_fake_limits(),
+    "ls":        lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
     "man":       lambda cmd, sid: _run_fake_man(cmd),
     "ps":        lambda cmd, sid: _run_fake_ps(sid, cmd),
     "pwd":       lambda cmd, sid: _run_fake_pwd(),
     "poweroff":  lambda cmd, sid: _run_fake_poweroff(),
     "reboot":    lambda cmd, sid: _run_fake_reboot(),
     "retention": lambda cmd, sid: _run_fake_retention(),
+    "rm":        lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
     "rm_root":   lambda cmd, sid: _run_fake_rm_root(),
     "route":     lambda cmd, sid: _run_fake_route(),
     "session-token": lambda cmd, sid: _run_fake_session_token(cmd, sid),
@@ -288,6 +328,7 @@ _FAKE_COMMAND_DISPATCH = {
     "uname":     lambda cmd, sid: _run_fake_uname(cmd),
     "uptime":    lambda cmd, sid: _run_fake_uptime(),
     "version":   lambda cmd, sid: _run_fake_version(),
+    "workspace": lambda cmd, sid: _run_fake_workspace(cmd, sid),
     "which":     lambda cmd, sid: _run_fake_which(cmd),
     "who":       lambda cmd, sid: _run_fake_who(sid),
     "whoami":    lambda cmd, sid: _run_fake_whoami(),
@@ -416,6 +457,17 @@ def _format_stats_duration(total_seconds: float | None) -> str:
         return f"{minutes}m {seconds:02d}s"
     hours, minutes = divmod(minutes, 60)
     return f"{hours}h {minutes:02d}m {seconds:02d}s"
+
+
+def _format_bytes(value: int) -> str:
+    size = max(0.0, float(value))
+    units = ("B", "KB", "MB", "GB")
+    unit = units[0]
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            break
+        size /= 1024
+    return f"{int(size)} {unit}" if unit == "B" else f"{size:.1f} {unit}"
 
 
 def _format_percent(numerator: int, denominator: int) -> str:
@@ -818,7 +870,7 @@ def _run_fake_man(command: str) -> list[dict[str, str]]:
         return [{"type": "output", "text": "Usage: man <allowed-command>"}]
 
     topic = parts[1].strip().lower()
-    if topic in _FAKE_COMMANDS:
+    if topic in _FAKE_COMMANDS and topic not in _SYNTHETIC_MAN_EXCLUDED_ROOTS:
         return _run_fake_man_for_synthetic_topic(topic)
 
     allowed_topics = _allowed_man_topics()
@@ -934,6 +986,7 @@ def _run_fake_last(session_id: str) -> list[dict[str, str]]:
 
 def _run_fake_limits() -> list[dict[str, str]]:
     width = 20
+    workspace_enabled = bool(CFG.get("workspace_enabled", False))
     return [
         _output_line("Configured limits:", "fake-section"),
         _output_line(
@@ -976,6 +1029,30 @@ def _run_fake_limits() -> list[dict[str, str]]:
             _format_native_record(
                 "rate limit",
                 f"{CFG['rate_limit_per_minute']}/min, {CFG['rate_limit_per_second']}/sec",
+                width,
+            ),
+            "fake-kv",
+        ),
+        _output_line(
+            _format_native_record("files enabled", _format_yes_no(workspace_enabled), width),
+            "fake-kv",
+        ),
+        _output_line(
+            _format_native_record("files quota", f"{CFG.get('workspace_quota_mb', 0)} MB", width),
+            "fake-kv",
+        ),
+        _output_line(
+            _format_native_record("files max size", f"{CFG.get('workspace_max_file_mb', 0)} MB", width),
+            "fake-kv",
+        ),
+        _output_line(
+            _format_native_record("files max count", str(CFG.get('workspace_max_files', 0)), width),
+            "fake-kv",
+        ),
+        _output_line(
+            _format_native_record(
+                "files cleanup",
+                f"{CFG.get('workspace_inactivity_ttl_hours', 0)}h (0 = disabled)",
                 width,
             ),
             "fake-kv",
@@ -1037,6 +1114,112 @@ def _run_fake_pwd() -> list[dict[str, str]]:
     return [{"type": "output", "text": f"/app/{CFG['app_name']}/bin"}]
 
 
+def _workspace_command_error(exc: Exception) -> list[dict[str, str]]:
+    if isinstance(exc, WorkspaceDisabled):
+        return [_output_line("workspace: workspace storage is disabled on this instance")]
+    if isinstance(exc, WorkspaceFileNotFound):
+        return [_output_line("workspace: file was not found")]
+    if isinstance(exc, (InvalidWorkspacePath, WorkspaceQuotaExceeded)):
+        return [_output_line(f"workspace: {exc}")]
+    raise exc
+
+
+def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
+    parts = _split_command(command)
+    subcommand = parts[1].lower() if len(parts) > 1 else "help"
+
+    if subcommand in {"help", "--help", "-h"}:
+        return [
+            _output_line("Session file commands:", "fake-section"),
+            _output_line("  workspace list", "fake-help-row"),
+            _output_line("  workspace show <file>", "fake-help-row"),
+            _output_line("  workspace rm <file>", "fake-help-row"),
+            _output_line("", "fake-spacer"),
+            _output_line("Aliases:", "fake-section"),
+            _output_line("  ls          -> workspace list", "fake-help-row"),
+            _output_line("  cat <file>  -> workspace show <file>", "fake-help-row"),
+            _output_line("  rm <file>   -> workspace rm <file>", "fake-help-row"),
+            _output_line("", "fake-spacer"),
+            _output_line("Example flow:", "fake-section"),
+            _output_line("  Create targets.txt from the Files panel.", "fake-note"),
+            _output_line("  Run: nmap -iL targets.txt", "fake-help-row"),
+            _output_line("  Run: curl -o response.html https://ip.darklab.sh", "fake-help-row"),
+        ]
+
+    if subcommand in {"list", "ls"}:
+        try:
+            settings = workspace_settings(CFG)
+            files = list_workspace_files(session_id, CFG)
+            usage = workspace_usage(session_id, CFG)
+        except Exception as exc:
+            return _workspace_command_error(exc)
+
+        remaining_bytes = max(0, settings.quota_bytes - usage.bytes_used)
+        lines = [
+            _output_line("Session files:", "fake-section"),
+            _output_line(_format_native_record("files", f"{usage.file_count}/{settings.max_files}", 11), "fake-kv"),
+            _output_line(
+                _format_native_record(
+                    "usage",
+                    f"{_format_bytes(usage.bytes_used)} / {_format_bytes(settings.quota_bytes)}",
+                    11,
+                ),
+                "fake-kv",
+            ),
+            _output_line(_format_native_record("remaining", _format_bytes(remaining_bytes), 11), "fake-kv"),
+        ]
+        if not files:
+            lines.append(_output_line("  No workspace files yet.", "fake-note"))
+            return lines
+
+        width = max((len(str(item["path"])) for item in files), default=4)
+        lines.append(_output_line(f"  {'file':<{width}}  size      modified", "fake-help-row"))
+        for item in files:
+            path = str(item["path"])
+            size = _format_bytes(int(item.get("size") or 0))
+            mtime = _format_clock(str(item.get("mtime") or ""))
+            lines.append(_output_line(f"  {path:<{width}}  {size:<8}  {mtime}", "fake-help-row"))
+        return lines
+
+    if subcommand in {"show", "cat"}:
+        if len(parts) != 3:
+            return [_output_line("Usage: workspace show <file>")]
+        try:
+            text = read_workspace_text_file(session_id, parts[2])
+        except Exception as exc:
+            return _workspace_command_error(exc)
+        file_lines = text.splitlines() or [""]
+        return [_output_line(f"workspace: {parts[2]}", "fake-section")] + _text_lines(file_lines)
+
+    if subcommand in {"rm", "delete"}:
+        if len(parts) != 3:
+            return [_output_line("Usage: workspace rm <file>")]
+        return [_output_line("workspace rm requires browser confirmation — reload the page and try again.")]
+
+    return [
+        _output_line(f"workspace: unknown subcommand '{subcommand}'"),
+        _output_line("Usage: workspace [list | show <file> | rm <file> | help]"),
+    ]
+
+
+def _run_fake_workspace_alias(command: str, session_id: str) -> list[dict[str, str]]:
+    parts = _split_command(command)
+    root = parts[0].lower() if parts else ""
+    if root == "ls":
+        if len(parts) != 1:
+            return [_output_line("Usage: ls")]
+        return _run_fake_workspace("workspace list", session_id)
+    if root == "cat":
+        if len(parts) != 2:
+            return [_output_line("Usage: cat <file>")]
+        return _run_fake_workspace(f"workspace show {parts[1]}", session_id)
+    if root == "rm":
+        if len(parts) != 2:
+            return [_output_line("Usage: rm <file>")]
+        return _run_fake_workspace(f"workspace rm {parts[1]}", session_id)
+    return [_output_line("Usage: workspace [list | show <file> | rm <file> | help]")]
+
+
 def _run_fake_poweroff() -> list[dict[str, str]]:
     return [{"type": "output", "text": random.choice(_SNARKY_POWEROFF_RESPONSES)}]
 
@@ -1061,7 +1244,7 @@ def _run_fake_route() -> list[dict[str, str]]:
 def _run_fake_status(session_id: str) -> list[dict[str, str]]:
     width = 18
     session_label = _mask_session_token(session_id) if session_id else "anonymous"
-    return [
+    lines = [
         _output_line("Shell status:", "fake-section"),
         _output_line(_format_native_record("app", CFG['app_name'], width), "fake-kv"),
         _output_line(_format_native_record("session", session_label, width), "fake-kv"),
@@ -1105,6 +1288,18 @@ def _run_fake_status(session_id: str) -> list[dict[str, str]]:
         _output_line(_format_native_record("tab limit", _format_limit_value(CFG['max_tabs']), width), "fake-kv"),
         _output_line(_format_native_record("retention", _format_limit_value(CFG['permalink_retention_days']), width), "fake-kv"),
     ]
+    if bool(CFG.get("workspace_enabled", False)):
+        try:
+            settings = workspace_settings(CFG)
+            usage = workspace_usage(session_id, CFG)
+            files_label = (
+                f"{usage.file_count}/{settings.max_files} files, "
+                f"{_format_bytes(usage.bytes_used)} / {_format_bytes(settings.quota_bytes)}"
+            )
+        except Exception:
+            files_label = "unavailable"
+        lines.append(_output_line(_format_native_record("files", files_label, width), "fake-kv"))
+    return lines
 
 
 def _run_fake_stats(session_id: str) -> list[dict[str, str]]:

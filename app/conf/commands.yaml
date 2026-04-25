@@ -396,6 +396,15 @@ commands:
         - curl localhost
         - curl 127.0.0.1
         - curl 0.0.0.0
+    workspace_flags:
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
+      - flag: --output
+        mode: write
+        value: separate_or_attached
+        format: text
     autocomplete:
       examples:
         - value: curl -h
@@ -787,7 +796,28 @@ commands:
     policy:
       allow:
         - pd-httpx
-      deny: []
+      deny:
+        - pd-httpx -l
+        - pd-httpx -list
+        - pd-httpx -o
+        - pd-httpx --output
+    workspace_flags:
+      - flag: -l
+        mode: read
+        value: separate
+        format: text
+      - flag: -list
+        mode: read
+        value: separate
+        format: text
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
+      - flag: --output
+        mode: write
+        value: separate_or_attached
+        format: text
     autocomplete:
       examples:
         - value: pd-httpx -h
@@ -819,6 +849,12 @@ commands:
           description: Detect technologies
         - value: -follow-redirects
           description: Follow redirects
+        - value: -l
+          description: File with URLs to probe
+          takes_value: true
+        - value: -o
+          description: Write probe results to a workspace file
+          takes_value: true
   - root: assetfinder
     category: Network Reconnaissance
     policy:
@@ -918,6 +954,15 @@ commands:
         - gobuster dir -o
         - gobuster dns -o
         - gobuster vhost -o
+    workspace_flags:
+      - flag: -w
+        mode: read
+        value: separate
+        format: text
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
     autocomplete:
       examples:
         - value: gobuster -h
@@ -959,6 +1004,9 @@ commands:
               description: Common extension list
         - value: -k
           description: Skip TLS certificate verification
+        - value: -o
+          description: Write results to a workspace file
+          takes_value: true
   - root: ffuf
     category: Network Reconnaissance
     policy:
@@ -967,6 +1015,19 @@ commands:
       deny:
         - ffuf -o
         - ffuf --output
+    workspace_flags:
+      - flag: -w
+        mode: read
+        value: separate
+        format: text
+      - flag: -o
+        mode: write
+        value: separate
+        format: json
+      - flag: --output
+        mode: write
+        value: separate_or_attached
+        format: json
     autocomplete:
       examples:
         - value: ffuf -h
@@ -1022,6 +1083,27 @@ commands:
         - naabu -l
         - naabu --list
         - naabu -list
+    workspace_flags:
+      - flag: -l
+        mode: read
+        value: separate
+        format: text
+      - flag: --list
+        mode: read
+        value: separate
+        format: text
+      - flag: -list
+        mode: read
+        value: separate
+        format: text
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
+      - flag: --output
+        mode: write
+        value: separate_or_attached
+        format: text
     autocomplete:
       examples:
         - value: naabu -help
@@ -1062,6 +1144,12 @@ commands:
           description: Minimal output
         - value: -v
           description: Verbose output
+        - value: -l
+          description: File with hosts to scan
+          takes_value: true
+        - value: -o
+          description: Write results to a workspace file
+          takes_value: true
         - value: -exclude-ports
           description: Ports to exclude from scan
           takes_value: true
@@ -1077,6 +1165,19 @@ commands:
         - katana -o
         - katana --output
         - katana -list
+    workspace_flags:
+      - flag: -list
+        mode: read
+        value: separate
+        format: text
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
+      - flag: --output
+        mode: write
+        value: separate_or_attached
+        format: text
     autocomplete:
       examples:
         - value: katana -help
@@ -1124,6 +1225,12 @@ commands:
           takes_value: true
         - value: -silent
           description: Suppress banner and output headers
+        - value: -list
+          description: File with URLs to crawl
+          takes_value: true
+        - value: -o
+          description: Write crawl results to a workspace file
+          takes_value: true
       arguments:
         - placeholder: <target>
           description: Usually provided through -u
@@ -1287,6 +1394,23 @@ commands:
         - nmap --output
         - nmap -iL
         - nmap --script-args-file
+    workspace_flags:
+      - flag: -iL
+        mode: read
+        value: separate
+        format: text
+      - flag: -oN
+        mode: write
+        value: separate_or_attached
+        format: text
+      - flag: -oX
+        mode: write
+        value: separate_or_attached
+        format: xml
+      - flag: -oG
+        mode: write
+        value: separate_or_attached
+        format: text
     autocomplete:
       examples:
         - value: nmap -h
@@ -1512,6 +1636,19 @@ commands:
         - nuclei -o
         - nuclei --output
         - nuclei -me
+    workspace_flags:
+      - flag: -l
+        mode: read
+        value: separate
+        format: text
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
+      - flag: --output
+        mode: write
+        value: separate_or_attached
+        format: text
     autocomplete:
       examples:
         - value: nuclei -h

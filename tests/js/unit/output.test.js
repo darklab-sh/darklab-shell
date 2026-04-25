@@ -119,6 +119,43 @@ describe('appendLine', () => {
     expect(tab.rawLines[1].text).toBe('three')
   })
 
+  it('avoids full output scans while trimming in default prefix mode', () => {
+    const { appendLine } = loadOutputFns()
+    const out = document.getElementById('out')
+    out.querySelectorAll = () => {
+      throw new Error('appendLine should not full-scan output rows when prefixes are inactive')
+    }
+
+    appendLine('one', '', 'tab-1')
+    appendLine('two', '', 'tab-1')
+    appendLine('three', '', 'tab-1')
+
+    const lines = out.getElementsByClassName('line')
+    expect(lines).toHaveLength(2)
+    expect(lines[0].textContent).toContain('two')
+    expect(lines[1].textContent).toContain('three')
+  })
+
+  it('keeps line-number appends incremental after max-line trimming', () => {
+    const { appendLine, _setLnMode } = loadOutputFns()
+    const out = document.getElementById('out')
+
+    _setLnMode('on')
+    out.querySelectorAll = () => {
+      throw new Error('appendLine should not full-scan output rows when line numbers are active')
+    }
+
+    appendLine('one', '', 'tab-1')
+    appendLine('two', '', 'tab-1')
+    appendLine('three', '', 'tab-1')
+
+    const lines = out.getElementsByClassName('line')
+    expect(lines).toHaveLength(2)
+    expect(lines[0].dataset.lineNumber).toBe('2')
+    expect(lines[1].dataset.lineNumber).toBe('3')
+    expect(document.getElementById('shell-prompt-wrap')?.dataset.lineNumber).toBe('4')
+  })
+
   it('adds timestamp dataset fields', () => {
     const { appendLine } = loadOutputFns()
 
@@ -190,8 +227,9 @@ describe('appendLine', () => {
     _setLnMode('on')
     appendLine('hello', '', 'tab-1')
 
-    expect(document.querySelector('.line')?.dataset.prefix).toBe('1')
-    expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('2')
+    expect(document.querySelector('.line')?.dataset.prefix).toBe('')
+    expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('')
+    expect(document.getElementById('out').style.getPropertyValue('--output-prefix-width')).toBe('1ch')
   })
 
   it('does not assign prefixes to welcome animation lines', () => {
@@ -202,8 +240,9 @@ describe('appendLine', () => {
     appendLine('hello', '', 'tab-1')
 
     expect(document.querySelector('.line.welcome-status-line')?.dataset.prefix).toBe('')
-    expect(document.querySelector('.line:not(.welcome-status-line)')?.dataset.prefix).toBe('1')
-    expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('2')
+    expect(document.querySelector('.line:not(.welcome-status-line)')?.dataset.prefix).toBe('')
+    expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('')
+    expect(document.getElementById('out').style.getPropertyValue('--output-prefix-width')).toBe('1ch')
   })
 
   it('does not assign prefixes to synthetic summary lines', () => {
@@ -219,7 +258,7 @@ describe('appendLine', () => {
     expect(lines[0]?.dataset.prefix || '').toBe('')
     expect(lines[1]?.dataset.prefix || '').toBe('')
     expect(lines[2]?.dataset.prefix || '').toBe('')
-    expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('1 +0.0s')
+    expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('+0.0s')
   })
 
   it('combines line numbers and timestamps into a compact shared prefix', () => {
@@ -230,8 +269,9 @@ describe('appendLine', () => {
 
     appendLine('timed line', '', 'tab-1')
 
-    expect(document.querySelector('.line')?.dataset.prefix).toMatch(/^1\s+\+\d+\.\ds$/)
-    expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('2 +0.0s')
+    expect(document.querySelector('.line')?.dataset.prefix).toMatch(/^\+\d+\.\ds$/)
+    expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('+0.0s')
+    expect(document.getElementById('out').style.getPropertyValue('--output-prefix-width')).toBe('10ch')
   })
 
   it('shows +0.0s for the active prompt in elapsed mode', () => {

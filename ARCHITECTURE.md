@@ -37,7 +37,7 @@ At a high level, it works like this:
 - `Redis` provides the shared state that must work correctly across multiple Gunicorn workers: rate limiting and active run PID tracking for `/kill`.
 - `SQLite` persists completed run metadata, preview output, snapshots, and full-output artifact metadata so history, canonical run permalinks, and snapshot permalinks survive restarts.
 - The browser client stays build-step-free. Classic scripts share one global runtime, while browser cookies and storage cover local continuity and cache layers around session identity, session-scoped preferences, and reload restore.
-- The Docker runtime enforces a two-user model: Gunicorn runs as `appuser`, while user-submitted commands run as `scanner`.
+- The Docker runtime enforces a two-user model: Gunicorn runs as `appuser`, while user-submitted commands run as `scanner`. `scanner` is a supplementary member of the `appuser` group only so validated session workspace files can be shared with group-readable, non-world-readable permissions.
 
 The rest of this document is organized by concern rather than by historical file order: stable system structure first, then browser/backend composition, then the core runtime stories such as run lifecycle, state, observability, and security.
 
@@ -416,7 +416,7 @@ The contract:
 - **One at a time.** A second `showConfirm()` call while another is open is rejected. The shell never stacks confirms.
 - **Role-based action ids.** Each action carries `role: 'primary' | 'secondary' | 'ghost' | 'cancel'` and an optional `tone: 'danger' | 'warning'`. `role` drives the button primitive class (`btn-primary` / `btn-secondary` / `btn-ghost`); `tone` adds the destructive overlay. Callers receive the id of the activated action, or `null` for cancel.
 - **Default focus on cancel.** For confirmations, the cancel action is focused on open so browser native Enter-activates-focused-button makes `Enter === cancel`. Callers with a form input in the `content` slot can override via `defaultFocus`.
-- **Focus is trapped inside the card.** `bindFocusTrap` in `app/static/js/ui_focus_trap.js` keeps Tab / Shift+Tab cycling between the card's focusable descendants so keyboard focus cannot fall through to the rail, tabs, or HUD behind the backdrop while a modal is open. Every modal surface in the shell uses this helper: `#confirm-host` binds per-open because its card content changes between shows, and the four app-level modals (`#options-modal`, `#theme-modal`, `#faq-modal`, `#workflows-modal`) bind once at startup via `setupModalFocusTraps()` in `controller.js` because their DOM is persistent.
+- **Focus is trapped inside the card.** `bindFocusTrap` in `app/static/js/ui_focus_trap.js` keeps Tab / Shift+Tab cycling between the card's focusable descendants so keyboard focus cannot fall through to the rail, tabs, or HUD behind the backdrop while a modal is open. Every modal surface in the shell uses this helper: `#confirm-host` binds per-open because its card content changes between shows, and the app-level modals (`#options-modal`, `#theme-modal`, `#faq-modal`, `#workspace-modal`, `#workflows-modal`) bind once at startup via `setupModalFocusTraps()` in `controller.js` because their DOM is persistent.
 - **Dismissal is layered.** `bindDismissible` at `level: 'modal'` owns Escape + backdrop click. `bindMobileSheet` owns the drag-down-to-close handle on mobile. Both resolve the promise with `null` so callers cannot accidentally treat dismissal as confirmation.
 - **Actions stack at narrow widths.** The action row adds `.modal-actions-stacked` when the viewport is ≤480px or the action count is ≥3. A `matchMedia` listener keeps the class reactive to resize while the modal is open.
 - **Gate via `onActivate`.** An action can supply `onActivate` to run validation before close. Returning a falsy value (or a Promise resolving to one) keeps the modal open so form errors stay on screen; any truthy return closes and resolves with the action id.
@@ -529,7 +529,7 @@ The `/run` generator keeps the transport alive with heartbeat comments during id
 
 ### Output Prefixes And Follow State
 
-Line numbers and timestamps are rendered from stored per-line metadata rather than by rebuilding transcript text. Each appended `.line` keeps timestamp attributes and a synchronized `data-prefix` string, while `syncOutputPrefixes()` recomputes shared prefix width whenever rows are added or the prefix mode changes. That keeps prompt rows, output rows, and exit rows aligned without re-rendering the transcript body.
+Line numbers and timestamps are rendered from stored per-line metadata rather than by rebuilding transcript text. Each appended `.line` keeps timestamp attributes plus a stable `data-line-number` assigned at append time; trimming old rows at `max_output_lines` does not renumber the remaining DOM. The `data-prefix` attribute carries only the active timestamp fragment, and the shared prefix width is updated incrementally during normal appends while `syncOutputPrefixes()` is reserved for restore/toggle paths that intentionally revisit existing rows. Output appends flush in larger batches for bursty commands, offscreen rows opt into browser `content-visibility`, and live trimming uses a live row collection instead of snapshotting every `.line` on each append.
 
 Welcome rows are excluded from normal prefix numbering, and `tab.runStart` is captured after the submitted prompt line is appended so elapsed timing applies only to run output.
 
@@ -775,7 +775,11 @@ The container uses two unprivileged system users:
   - does not get write access to `./data`
   - runs with `HOME=/tmp` so tools that expect config/cache directories stay inside tmpfs rather than a persistent home directory
 
-The container starts as root only long enough for `entrypoint.sh` to fix `/data` ownership after volume mount, set `/tmp` to `1777`, pre-create `/tmp/.config` and `/tmp/.cache` for `scanner`, and then drop to `appuser` via `gosu`.
+The container starts as root only long enough for `entrypoint.sh` to fix `/data` ownership after volume mount, normalize the optional workspace root, set `/tmp` to `1777`, pre-create `/tmp/.config` and `/tmp/.cache` for `scanner`, and then drop to `appuser` via `gosu`.
+
+For workspace-backed host bind mounts, the host path should already be owned by the numeric UID/GID for the image's `appuser` account. The current image creates `appuser` as `995:995` and `scanner` as `994:994`, with `scanner` also in the `appuser` group. The runtime still attempts to repair ownership and modes on startup, but pre-setting the bind mount keeps rootless Docker, NFS-like mounts, and stricter host policies from leaving the workspace root owned by `root:root`. The expected mode model is `0730` for the workspace root, `3730` for hashed session directories, `0640` for app-created files, and `0660` for command-created files that must remain writable by the `scanner` process through its supplementary `appuser` group.
+
+Workspace cleanup is request-driven rather than a separate daemon. Each worker checks periodically before handling a request, then calls the backend cleanup helper when workspace storage is enabled. Cleanup evaluates the hashed session directory mtime as the workspace activity marker and only deletes resolved `sess_*` roots under the configured workspace root.
 
 ### Trust Boundary Notes
 
@@ -799,7 +803,7 @@ The app also injects `--privileged` into `nmap` commands during rewrite so the b
 
 The Flask index route embeds the same normalized browser config payload that `/config` returns, and `config.js` reads that server-rendered JSON into `APP_CONFIG` before the rest of the classic-script frontend loads. The `/config` endpoint remains available for runtime refresh and diagnostics, but both paths are built from the same Python payload helper. That payload is the browser bootstrap boundary for runtime values the frontend actually needs: naming, prompt text, limits, welcome timing, and selected browser-facing feature flags. It is intentionally narrower than `config.yaml`; backend-only persistence and storage controls do not cross that boundary.
 
-Not every `config.yaml` key is exposed to the browser. Server-side persistence controls such as `persist_full_run_output` and `full_output_max_mb` stay backend-only because the frontend does not need to know them to render the normal tab or history flows. The MB value is converted to bytes internally before any artifact truncation logic runs.
+Not every `config.yaml` key is exposed to the browser. Server-side persistence and storage controls such as `persist_full_run_output`, `full_output_max_mb`, and the `workspace_*` settings stay backend-only because the frontend does not need to know them to render the normal tab or history flows. The MB values are converted to bytes internally before artifact or workspace quota logic runs.
 
 This is also where backend configuration crosses into presentation: the browser bootstrap payload, the resolved theme palette, and the frontend-owned preference layer all meet here, but they do not collapse into one generic config blob.
 
@@ -819,10 +823,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 929
-- `vitest`: 781
-- `playwright`: 207
-- total: 1,917
+- `pytest`: 956
+- `vitest`: 795
+- `playwright`: 209
+- total: 1,960
 
 ### Testing Architecture
 

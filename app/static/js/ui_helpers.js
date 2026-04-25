@@ -498,6 +498,12 @@
   global.showOptionsOverlay = () => showPanelOverlay(optionsOverlay || null);
   global.hideOptionsOverlay = () => hidePanelOverlay(optionsOverlay || null);
   global.isOptionsOverlayOpen = () => isPanelOverlayOpen(optionsOverlay || null);
+  const getWorkspaceOverlay = () => (
+    typeof workspaceOverlay !== 'undefined' && workspaceOverlay ? workspaceOverlay : null
+  );
+  global.showWorkspaceOverlay = () => showPanelOverlay(getWorkspaceOverlay());
+  global.hideWorkspaceOverlay = () => hidePanelOverlay(getWorkspaceOverlay());
+  global.isWorkspaceOverlayOpen = () => isPanelOverlayOpen(getWorkspaceOverlay());
   global.showHistoryLoadOverlay = () => {
     if (historyLoadOverlay && historyLoadOverlay.classList) historyLoadOverlay.classList.add('open');
     if (historyLoadOverlay) historyLoadOverlay.setAttribute('aria-hidden', 'false');

@@ -19,6 +19,7 @@ from fake_commands import (
 from commands import (
     load_welcome,
     is_command_allowed,
+    validate_command,
 )
 
 
@@ -199,6 +200,188 @@ class TestIsCommandAllowedEdges:
         assert not ok
         assert "/tmp" in reason
 
+    def test_workspace_enabled_exempts_declared_file_flags_and_rewrites_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            registry = {
+                "commands": [
+                    {
+                        "root": "nmap",
+                        "category": "Scanning",
+                        "policy": {"allow": ["nmap"], "deny": ["nmap -iL", "nmap -oN"]},
+                        "workspace_flags": [
+                            {"flag": "-iL", "mode": "read", "value": "separate"},
+                            {"flag": "-oN", "mode": "write", "value": "separate_or_attached"},
+                        ],
+                    },
+                ],
+                "pipe_helpers": [],
+            }
+            with mock.patch("commands.load_commands_registry", return_value=registry):
+                from workspace import session_workspace_name, write_workspace_text_file
+                write_workspace_text_file("session-1", "targets.txt", "ip.darklab.sh\n", cfg)
+                target_path = os.path.join(
+                    tmp,
+                    session_workspace_name("session-1"),
+                    "targets.txt",
+                )
+                os.chmod(target_path, 0o600)
+
+                result = validate_command(
+                    "nmap -iL targets.txt -oN scan.txt",
+                    session_id="session-1",
+                    cfg=cfg,
+                )
+                target_mode = os.stat(target_path).st_mode & 0o777
+
+        assert result.allowed
+        assert result.workspace_reads == ["targets.txt"]
+        assert result.workspace_writes == ["scan.txt"]
+        assert result.exec_command != result.display_command
+        assert str(tmp) in result.exec_command
+        assert target_mode == 0o640
+
+    def test_workspace_disabled_keeps_declared_file_flags_denied(self):
+        registry = {
+            "commands": [
+                {
+                    "root": "nmap",
+                    "category": "Scanning",
+                    "policy": {"allow": ["nmap"], "deny": ["nmap -iL"]},
+                    "workspace_flags": [{"flag": "-iL", "mode": "read", "value": "separate"}],
+                },
+            ],
+            "pipe_helpers": [],
+        }
+        with mock.patch("commands.load_commands_registry", return_value=registry):
+            result = validate_command(
+                "nmap -iL targets.txt",
+                session_id="session-1",
+                cfg={"workspace_enabled": False},
+            )
+
+        assert not result.allowed
+        assert "Command not allowed" in result.reason
+
+    def test_workspace_read_flags_rewrite_relative_files_but_keep_packaged_wordlists(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            registry = {
+                "commands": [
+                    {
+                        "root": "ffuf",
+                        "category": "Scanning",
+                        "policy": {"allow": ["ffuf"], "deny": ["ffuf -o"]},
+                        "workspace_flags": [
+                            {"flag": "-w", "mode": "read", "value": "separate"},
+                            {"flag": "-o", "mode": "write", "value": "separate"},
+                        ],
+                    },
+                ],
+                "pipe_helpers": [],
+            }
+            with mock.patch("commands.load_commands_registry", return_value=registry):
+                from workspace import write_workspace_text_file
+                write_workspace_text_file("session-1", "words.txt", "admin\nlogin\n", cfg)
+
+                workspace_result = validate_command(
+                    "ffuf -u https://ip.darklab.sh/FUZZ -w words.txt -o ffuf.json",
+                    session_id="session-1",
+                    cfg=cfg,
+                )
+                packaged_result = validate_command(
+                    "ffuf -u https://ip.darklab.sh/FUZZ "
+                    "-w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
+                    session_id="session-1",
+                    cfg=cfg,
+                )
+
+        assert workspace_result.allowed
+        assert workspace_result.workspace_reads == ["words.txt"]
+        assert workspace_result.workspace_writes == ["ffuf.json"]
+        assert str(tmp) in workspace_result.exec_command
+        assert packaged_result.allowed
+        assert packaged_result.workspace_reads == []
+        assert "/usr/share/wordlists/seclists/Discovery/Web-Content/common.txt" in packaged_result.exec_command
+
+    def test_workspace_write_flags_keep_dev_null_exception(self):
+        result = validate_command(
+            'curl -o /dev/null -w "%{http_code}" https://ip.darklab.sh',
+            session_id="session-1",
+            cfg={"workspace_enabled": True},
+        )
+
+        assert result.allowed
+        assert result.reason == ""
+        assert result.workspace_reads == []
+        assert result.workspace_writes == []
+
+    def test_workspace_flags_cover_common_list_wordlist_and_output_tools(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            from workspace import write_workspace_text_file
+            write_workspace_text_file("session-1", "urls.txt", "https://ip.darklab.sh\n", cfg)
+            write_workspace_text_file("session-1", "hosts.txt", "ip.darklab.sh\n", cfg)
+            write_workspace_text_file("session-1", "words.txt", "admin\nlogin\n", cfg)
+
+            cases = [
+                (
+                    "pd-httpx -l urls.txt -o httpx.txt",
+                    ["urls.txt"],
+                    ["httpx.txt"],
+                ),
+                (
+                    "gobuster dir -u https://ip.darklab.sh -w words.txt -o gobuster.txt",
+                    ["words.txt"],
+                    ["gobuster.txt"],
+                ),
+                (
+                    "naabu -list hosts.txt -o naabu.txt",
+                    ["hosts.txt"],
+                    ["naabu.txt"],
+                ),
+                (
+                    "katana -list urls.txt -o katana.txt",
+                    ["urls.txt"],
+                    ["katana.txt"],
+                ),
+            ]
+
+            results = [
+                (validate_command(command, session_id="session-1", cfg=cfg), reads, writes)
+                for command, reads, writes in cases
+            ]
+
+        for result, reads, writes in results:
+            assert result.allowed, result.reason
+            assert result.workspace_reads == reads
+            assert result.workspace_writes == writes
+            assert str(tmp) in result.exec_command
+
 
 class TestFakeCommandResolution:
     def test_documented_fake_commands_are_backed_by_runtime_dispatch(self):
@@ -243,8 +426,14 @@ class TestFakeCommandResolution:
         assert resolve_fake_command("who") == "who"
         assert resolve_fake_command("whoami") == "whoami"
         assert resolve_fake_command("ps aux") == "ps"
+        assert resolve_fake_command("ls") == "ls"
+        assert resolve_fake_command("cat targets.txt") == "cat"
+        assert resolve_fake_command("rm targets.txt") == "rm"
 
     def test_rejects_non_fake_commands(self):
         assert resolve_fake_command("ping darklab.sh") is None
+        assert resolve_fake_command("cat /etc/passwd") is None
         assert resolve_fake_command("rm /tmp/file") is None
+        assert resolve_fake_command("rm ../file") is None
+        assert resolve_fake_command("ls /tmp") is None
         assert resolve_fake_command("") is None

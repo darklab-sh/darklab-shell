@@ -43,6 +43,14 @@ from commands import (
 from permalinks import _format_retention, _expiry_note, _permalink_error_page, _normalize_permalink_lines, _prompt_echo_text
 from output_signals import OutputSignalClassifier, classify_line, command_root, extract_target
 from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
+from workspace import (
+    InvalidWorkspacePath, WorkspaceDisabled, WorkspaceQuotaExceeded,
+    cleanup_inactive_workspaces, delete_workspace_file, ensure_session_workspace,
+    list_workspace_files, prepare_workspace_file_for_command, read_workspace_text_file,
+    resolve_workspace_path, session_workspace_name, workspace_usage,
+    touch_session_workspace, write_workspace_text_file, WORKSPACE_COMMAND_WRITE_FILE_MODE,
+    WORKSPACE_DIR_MODE, WORKSPACE_FILE_MODE,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SEED_HISTORY_PATH = REPO_ROOT / "scripts" / "seed_history.py"
@@ -141,6 +149,12 @@ class TestLoadConfig:
         assert cfg["full_output_max_bytes"] == 7 * 1024 * 1024
         assert cfg["rate_limit_per_minute"] == 99
         assert cfg["trusted_proxy_cidrs"] == ["127.0.0.1/32", "::1/128"]
+        assert cfg["workspace_enabled"] is False
+        assert cfg["workspace_backend"] == "tmpfs"
+        assert cfg["workspace_quota_mb"] == 50
+        assert cfg["workspace_max_file_mb"] == 5
+        assert cfg["workspace_max_files"] == 100
+        assert cfg["workspace_inactivity_ttl_hours"] == 1
 
     def test_share_redaction_enabled_defaults_true(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -169,6 +183,166 @@ class TestLoadConfig:
             ],
         })
         assert rules == []
+
+
+class TestSessionWorkspace:
+    def _cfg(self, root, **overrides):
+        cfg = {
+            "workspace_enabled": True,
+            "workspace_backend": "tmpfs",
+            "workspace_root": str(root),
+            "workspace_quota_mb": 1,
+            "workspace_max_file_mb": 1,
+            "workspace_max_files": 10,
+            "workspace_inactivity_ttl_hours": 1,
+        }
+        cfg.update(overrides)
+        return cfg
+
+    def test_disabled_workspace_rejects_operations(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp, workspace_enabled=False)
+            try:
+                ensure_session_workspace("session-1", cfg)
+                assert False, "expected disabled workspace to reject operations"
+            except WorkspaceDisabled:
+                pass
+
+    def test_session_workspace_uses_hashed_session_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            path = ensure_session_workspace("tok_secret_value", cfg)
+
+            assert path.name == session_workspace_name("tok_secret_value")
+            assert "tok_secret_value" not in str(path)
+            assert path.exists()
+            mode = path.stat().st_mode & 0o7777
+            assert WORKSPACE_DIR_MODE == 0o3730
+            assert mode & 0o1730 == 0o1730
+            assert not mode & 0o004
+
+    def test_write_read_list_delete_text_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+
+            written = write_workspace_text_file("session-1", "targets.txt", "darklab.sh\n", cfg)
+            assert written == {"path": "targets.txt", "size": 11}
+            written_path = resolve_workspace_path("session-1", "targets.txt", cfg)
+            assert (written_path.stat().st_mode & 0o777) == WORKSPACE_FILE_MODE
+            assert not written_path.stat().st_mode & 0o007
+            assert read_workspace_text_file("session-1", "targets.txt", cfg) == "darklab.sh\n"
+            assert list_workspace_files("session-1", cfg)[0]["path"] == "targets.txt"
+            assert workspace_usage("session-1", cfg).bytes_used == 11
+
+            delete_workspace_file("session-1", "targets.txt", cfg)
+            assert list_workspace_files("session-1", cfg) == []
+
+    def test_prepare_workspace_file_for_command_uses_limited_write_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            write_workspace_text_file("session-1", "output.txt", "old\n", cfg)
+            path = resolve_workspace_path("session-1", "output.txt", cfg)
+
+            prepare_workspace_file_for_command(path, mode="write")
+
+            assert (path.stat().st_mode & 0o777) == WORKSPACE_COMMAND_WRITE_FILE_MODE
+            assert not path.stat().st_mode & 0o007
+
+    def test_rejects_absolute_traversal_hidden_and_backslash_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            for bad_path in ["/etc/passwd", "../escape", "safe/../../escape", ".env", "safe\\.txt"]:
+                try:
+                    resolve_workspace_path("session-1", bad_path, cfg, ensure_parent=True)
+                    assert False, f"expected invalid path rejection for {bad_path}"
+                except InvalidWorkspacePath:
+                    pass
+
+    def test_rejects_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            root = ensure_session_workspace("session-1", cfg)
+            outside = Path(tmp) / "outside"
+            outside.mkdir()
+            (root / "link").symlink_to(outside, target_is_directory=True)
+
+            try:
+                resolve_workspace_path("session-1", "link/file.txt", cfg)
+                assert False, "expected symlink path rejection"
+            except InvalidWorkspacePath:
+                pass
+
+    def test_enforces_file_size_quota_and_file_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(
+                tmp,
+                workspace_quota_mb=0,
+                workspace_max_file_mb=0,
+                workspace_max_files=1,
+            )
+            try:
+                write_workspace_text_file("session-1", "too-big.txt", "x", cfg)
+                assert False, "expected max file size rejection"
+            except WorkspaceQuotaExceeded:
+                pass
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp, workspace_max_files=1)
+            write_workspace_text_file("session-1", "one.txt", "1", cfg)
+            try:
+                write_workspace_text_file("session-1", "two.txt", "2", cfg)
+                assert False, "expected max file count rejection"
+            except WorkspaceQuotaExceeded:
+                pass
+
+    def test_cleanup_removes_only_expired_session_directories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
+            old_root = ensure_session_workspace("old-session", cfg)
+            fresh_root = ensure_session_workspace("fresh-session", cfg)
+            unrelated = Path(tmp) / "manual"
+            unrelated.mkdir()
+            old_ts = 1000
+            fresh_ts = 2000
+            os.utime(old_root, (old_ts, old_ts))
+            os.utime(fresh_root, (fresh_ts, fresh_ts))
+
+            removed = cleanup_inactive_workspaces(cfg, now=4601)
+
+            assert removed == 1
+            assert not old_root.exists()
+            assert fresh_root.exists()
+            assert unrelated.exists()
+
+    def test_cleanup_uses_session_directory_activity_not_file_mtime(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
+            root = ensure_session_workspace("session-1", cfg)
+            file_path = root / "fresh-output.txt"
+            file_path.write_text("fresh\n", encoding="utf-8")
+            old_ts = 1000
+            fresh_ts = 4500
+            os.utime(root, (old_ts, old_ts))
+            os.utime(file_path, (fresh_ts, fresh_ts))
+
+            removed = cleanup_inactive_workspaces(cfg, now=4601)
+
+            assert removed == 1
+            assert not root.exists()
+
+    def test_touch_session_workspace_extends_cleanup_activity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
+            root = ensure_session_workspace("session-1", cfg)
+            os.utime(root, (1000, 1000))
+
+            touch_session_workspace("session-1", cfg)
+
+            removed = cleanup_inactive_workspaces(cfg, now=4601)
+
+            assert removed == 0
+            assert root.exists()
+
 class TestDerivedCommandRegistry:
     def test_commands_registry_loader_normalizes_policy_and_autocomplete(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -184,6 +358,17 @@ class TestDerivedCommandRegistry:
                     - ping
                   deny:
                     - ping -f
+                workspace_flags:
+                  - flag: -iL
+                    mode: read
+                    value: separate
+                    format: text
+                  - flag: -oN
+                    mode: write
+                    value: separate_or_attached
+                    format: text
+                  - flag: ""
+                    mode: write
                 autocomplete:
                   flags:
                     - value: -c
@@ -213,6 +398,10 @@ class TestDerivedCommandRegistry:
         assert ping["category"] == "Network"
         assert ping["policy"]["allow"] == ["ping"]
         assert ping["policy"]["deny"] == ["ping -f"]
+        assert ping["workspace_flags"] == [
+            {"flag": "-iL", "mode": "read", "value": "separate", "format": "text"},
+            {"flag": "-oN", "mode": "write", "value": "separate_or_attached", "format": "text"},
+        ]
         assert ping["autocomplete"]["flags"][0] == {"value": "-c", "description": "Count"}
         assert ping["autocomplete"]["expects_value"] == ["-c"]
         assert ping["autocomplete"]["arg_hints"]["-c"][0]["value"] == "4"
@@ -235,6 +424,10 @@ class TestDerivedCommandRegistry:
                   allow:
                     - ping
                   deny: []
+                workspace_flags:
+                  - flag: -iL
+                    mode: read
+                    value: separate
                 autocomplete:
                   flags:
                     - value: -c
@@ -255,6 +448,10 @@ class TestDerivedCommandRegistry:
                     - ping -c
                   deny:
                     - ping -f
+                workspace_flags:
+                  - flag: -oN
+                    mode: write
+                    value: separate_or_attached
                 autocomplete:
                   examples:
                     - value: ping -c 4 darklab.sh
@@ -285,6 +482,10 @@ class TestDerivedCommandRegistry:
         assert by_root["ping"]["category"] == "Network Diagnostics"
         assert by_root["ping"]["policy"]["allow"] == ["ping", "ping -c"]
         assert by_root["ping"]["policy"]["deny"] == ["ping -f"]
+        assert by_root["ping"]["workspace_flags"] == [
+            {"flag": "-iL", "mode": "read", "value": "separate"},
+            {"flag": "-oN", "mode": "write", "value": "separate_or_attached"},
+        ]
         assert by_root["ping"]["autocomplete"]["flags"][0]["value"] == "-c"
         assert by_root["ping"]["autocomplete"]["examples"][0]["value"] == "ping -c 4 darklab.sh"
         assert by_root["curl"]["policy"]["deny"] == ["curl -O"]

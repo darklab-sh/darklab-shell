@@ -79,8 +79,11 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # Create two unprivileged users:
 #   appuser — owns /data and runs Gunicorn (can write SQLite database)
 #   scanner — runs all user-submitted commands, no write access to /data
+# scanner is also a supplementary member of appuser so validated session
+# workspace files can use group-readable permissions instead of world-readable
+# permissions.
 RUN groupadd -r appuser && useradd -r -g appuser appuser && \
-    groupadd -r scanner && useradd -r -g scanner -s /usr/sbin/nologin scanner
+    groupadd -r scanner && useradd -r -g scanner -G appuser -s /usr/sbin/nologin scanner
 
 # Grant raw socket capabilities to tools that require elevated network access,
 # so the scanner user can use them without full root privileges.

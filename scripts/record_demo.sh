@@ -62,6 +62,25 @@ echo "Container is up."
 
 cd "$ROOT_DIR"
 
+require_workspace_enabled() {
+  local status
+  status="$(
+    curl -sS -o /dev/null -w '%{http_code}' \
+      -H "X-Session-ID: ${DEMO_SESSION_TOKEN}" \
+      "${BASE_URL}/workspace/files" || true
+  )"
+  if [ "$status" = "200" ]; then
+    return
+  fi
+
+  echo "Error: demo recording requires Files/workspace API access so the Files panel can show response.html."
+  echo "Workspace probe returned HTTP ${status:-000} for GET /workspace/files."
+  echo "Add this to app/conf/config.local.yaml and restart the container:"
+  echo "  workspace_enabled: true"
+  echo "  docker compose down && docker compose up -d"
+  exit 1
+}
+
 seed_demo_history() {
   case "$BASE_URL" in
     http://localhost:*|http://127.0.0.1:*|https://localhost:*|https://127.0.0.1:*)
@@ -80,6 +99,7 @@ seed_demo_history() {
 }
 
 seed_demo_history
+require_workspace_enabled
 
 # Clear previous frames and Playwright output
 rm -rf "$FRAMES_DIR" "$PLAYWRIGHT_OUTPUT_DIR"

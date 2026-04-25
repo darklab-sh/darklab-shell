@@ -9,9 +9,11 @@ import logging
 import os
 import re
 import sqlite3
+import tempfile
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 import unittest.mock as mock
 
 import app as shell_app
@@ -929,6 +931,189 @@ class TestMobileWelcomeHintsRoute:
         data = json.loads(client.get("/welcome/hints-mobile").data)
         assert "items" in data
         assert isinstance(data["items"], list)
+
+
+# ── /workspace/files ──────────────────────────────────────────────────────────
+
+class TestWorkspaceRoutes:
+    def _cfg(self, root, **overrides):
+        cfg = {
+            "workspace_enabled": True,
+            "workspace_backend": "tmpfs",
+            "workspace_root": str(root),
+            "workspace_quota_mb": 1,
+            "workspace_max_file_mb": 1,
+            "workspace_max_files": 10,
+            "workspace_inactivity_ttl_hours": 1,
+        }
+        cfg.update(overrides)
+        return cfg
+
+    def test_requires_active_session_header(self):
+        client = get_client()
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            resp = client.get("/workspace/files")
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "workspace requires an active session"
+
+    def test_disabled_workspace_returns_403(self):
+        client = get_client()
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            config.CFG,
+            self._cfg(tmp, workspace_enabled=False),
+        ):
+            resp = client.get("/workspace/files", headers={"X-Session-ID": "workspace-disabled"})
+        assert resp.status_code == 403
+        assert json.loads(resp.data)["error"] == "workspace storage is disabled"
+
+    def test_write_list_read_delete_lifecycle(self):
+        client = get_client()
+        session = "workspace-lifecycle-" + uuid.uuid4().hex[:8]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            created = client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": "targets.txt", "text": "darklab.sh\n"},
+            )
+            assert created.status_code == 200
+            created_data = json.loads(created.data)
+            assert created_data["file"] == {"path": "targets.txt", "size": 11}
+            assert created_data["workspace"]["usage"]["bytes_used"] == 11
+
+            listed = json.loads(client.get("/workspace/files", headers={"X-Session-ID": session}).data)
+            assert listed["files"][0]["path"] == "targets.txt"
+            assert listed["limits"]["max_files"] == 10
+
+            read = client.get(
+                "/workspace/files/read?path=targets.txt",
+                headers={"X-Session-ID": session},
+            )
+            assert json.loads(read.data) == {"path": "targets.txt", "text": "darklab.sh\n"}
+
+            deleted = client.delete(
+                "/workspace/files?path=targets.txt",
+                headers={"X-Session-ID": session},
+            )
+            assert deleted.status_code == 200
+            assert json.loads(deleted.data)["workspace"]["files"] == []
+
+    def test_workspace_files_are_session_isolated(self):
+        client = get_client()
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            resp = client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": "workspace-owner"},
+                json={"path": "targets.txt", "text": "owned\n"},
+            )
+            assert resp.status_code == 200
+
+            other = client.get(
+                "/workspace/files/read?path=targets.txt",
+                headers={"X-Session-ID": "workspace-other"},
+            )
+            assert other.status_code == 404
+
+    def test_rejects_unsafe_paths(self):
+        client = get_client()
+        session = "workspace-paths-" + uuid.uuid4().hex[:8]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            for bad_path in ("../escape.txt", "/tmp/escape.txt", ".secret", "nested/.secret", "a\\b.txt"):
+                resp = client.post(
+                    "/workspace/files",
+                    headers={"X-Session-ID": session},
+                    json={"path": bad_path, "text": "x"},
+                )
+                assert resp.status_code == 400
+
+    def test_rejects_unsafe_paths_on_read_delete_and_download(self):
+        client = get_client()
+        session = "workspace-route-paths-" + uuid.uuid4().hex[:8]
+        bad_paths = ("../escape.txt", "/tmp/escape.txt", ".secret", "nested/.secret", "a\\b.txt")
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            for bad_path in bad_paths:
+                encoded = quote(bad_path, safe="")
+                read = client.get(
+                    f"/workspace/files/read?path={encoded}",
+                    headers={"X-Session-ID": session},
+                )
+                deleted = client.delete(
+                    f"/workspace/files?path={encoded}",
+                    headers={"X-Session-ID": session},
+                )
+                downloaded = client.get(
+                    f"/workspace/files/download?path={encoded}",
+                    headers={"X-Session-ID": session},
+                )
+
+                assert read.status_code == 400
+                assert deleted.status_code == 400
+                assert downloaded.status_code == 400
+
+    def test_enforces_quota_and_type_checks(self):
+        client = get_client()
+        session = "workspace-quota-" + uuid.uuid4().hex[:8]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            config.CFG,
+            self._cfg(tmp, workspace_quota_mb=0, workspace_max_file_mb=0, workspace_max_files=1),
+        ):
+            non_object = client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                data="not-json",
+                content_type="text/plain",
+            )
+            assert non_object.status_code == 400
+
+            non_text = client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": "targets.txt", "text": ["darklab.sh"]},
+            )
+            assert non_text.status_code == 400
+            assert json.loads(non_text.data)["error"] == "text must be a string"
+
+            too_big = client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": "targets.txt", "text": "x"},
+            )
+            assert too_big.status_code == 413
+
+    def test_download_streams_session_owned_file(self):
+        client = get_client()
+        session = "workspace-download-" + uuid.uuid4().hex[:8]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": "notes/targets.txt", "text": "darklab.sh\n"},
+            )
+            resp = client.get(
+                "/workspace/files/download?path=notes/targets.txt",
+                headers={"X-Session-ID": session},
+            )
+        assert resp.status_code == 200
+        assert resp.get_data(as_text=True) == "darklab.sh\n"
+        assert "attachment" in resp.headers["Content-Disposition"]
+        assert "targets.txt" in resp.headers["Content-Disposition"]
+
+    def test_periodic_cleanup_runs_before_requests_when_workspace_enabled(self):
+        client = get_client()
+        previous_cleanup = shell_app._last_workspace_cleanup_monotonic
+        try:
+            shell_app._last_workspace_cleanup_monotonic = 0
+            with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+                from workspace import ensure_session_workspace
+                expired_root = ensure_session_workspace("expired-session", config.CFG)
+                os.utime(expired_root, (1000, 1000))
+
+                with mock.patch("app.time.monotonic", return_value=1000):
+                    resp = client.get("/health")
+
+                assert resp.status_code == 200
+                assert not expired_root.exists()
+        finally:
+            shell_app._last_workspace_cleanup_monotonic = previous_cleanup
 
 
 # ── /run ──────────────────────────────────────────────────────────────────────

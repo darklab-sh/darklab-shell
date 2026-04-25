@@ -216,6 +216,11 @@
           <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
           <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
+        <button type="button" class="menu-item" data-menu-action="workspace">
+          <span class="menu-item-icon" aria-hidden="true">▣</span>
+          <span class="menu-item-label">files</span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+        </button>
         <button type="button" class="menu-item" data-menu-action="theme">
           <span class="menu-item-icon" aria-hidden="true">◐</span>
           <span class="menu-item-label">theme</span>
@@ -282,6 +287,7 @@
     <nav class="rail-nav" id="rail-nav">
       <button class="rail-nav-item" data-action="options" type="button" title="Display and preference options (Alt+,)"><span class="rail-nav-glyph">≡</span><span class="rail-nav-label">options</span></button>
       <button class="rail-nav-item" data-action="history" type="button" title="Run history (Alt+H)"><span class="rail-nav-glyph">⧖</span><span class="rail-nav-label">history</span></button>
+      <button class="rail-nav-item" data-action="workspace" type="button" title="Session workspace files"><span class="rail-nav-glyph">▣</span><span class="rail-nav-label">files</span></button>
       <button class="rail-nav-item" data-action="theme" type="button" title="Theme selector (Alt+Shift+T)"><span class="rail-nav-glyph">◑</span><span class="rail-nav-label">theme</span></button>
       <button class="rail-nav-item" data-action="faq" type="button" title="FAQ (Alt+/)"><span class="rail-nav-glyph">?</span><span class="rail-nav-label">FAQ</span></button>
       <a class="rail-nav-item u-hidden" data-action="diag" id="rail-diag-btn" href="/diag" target="_blank" rel="noopener noreferrer" title="Operator diagnostics"><span class="rail-nav-glyph">⊕</span><span class="rail-nav-label">diag</span></a>
@@ -486,6 +492,47 @@
   </div>
 </div>
 
+<!-- Workspace Modal -->
+<div id="workspace-overlay" class="mobile-sheet-overlay">
+  <div id="workspace-modal" class="mobile-sheet-surface">
+    <div class="faq-header">
+      <span class="faq-title">FILES</span>
+      <button type="button" class="close-btn workspace-close" aria-label="Close files">✕</button>
+    </div>
+    <div class="workspace-body nice-scroll">
+      <div class="workspace-toolbar">
+        <div>
+          <div class="workspace-heading">Session files</div>
+          <div class="workspace-subtitle" id="workspace-summary">Not loaded</div>
+        </div>
+        <button type="button" class="btn btn-secondary btn-compact" id="workspace-new-btn">New file</button>
+      </div>
+      <div id="workspace-message" class="workspace-message u-hidden"></div>
+      <div id="workspace-file-list" class="workspace-file-list" aria-live="polite"></div>
+      <section id="workspace-viewer" class="workspace-viewer u-hidden" aria-live="polite">
+        <div class="workspace-viewer-header">
+          <div>
+            <div class="workspace-label">Viewing</div>
+            <div id="workspace-viewer-title" class="workspace-file-name"></div>
+          </div>
+          <button type="button" class="btn btn-secondary btn-compact" id="workspace-close-viewer-btn">Close view</button>
+        </div>
+        <pre id="workspace-viewer-text" class="workspace-viewer-text nice-scroll"></pre>
+      </section>
+      <form id="workspace-editor" class="workspace-editor u-hidden">
+        <label class="workspace-label" for="workspace-path-input">File Name</label>
+        <input id="workspace-path-input" class="form-input" type="text" placeholder="targets.txt" autocomplete="off" spellcheck="false">
+        <label class="workspace-label" for="workspace-text-input">Contents</label>
+        <textarea id="workspace-text-input" class="workspace-textarea" rows="12" placeholder="Paste file contents here"></textarea>
+        <div class="workspace-editor-actions">
+          <button type="button" class="btn btn-secondary btn-compact" id="workspace-cancel-edit-btn">Close editor</button>
+          <button type="submit" class="btn btn-primary btn-compact" id="workspace-save-btn">Save file</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <!-- Workflows Modal -->
 <div id="workflows-overlay" class="mobile-sheet-overlay">
   <div id="workflows-modal" class="mobile-sheet-surface">
@@ -639,6 +686,7 @@
 <script src="/static/js/search.js"></script>
 <script src="/static/js/autocomplete.js"></script>
 <script src="/static/js/history.js"></script>
+<script src="/static/js/workspace.js"></script>
 <script src="/static/js/welcome.js"></script>
 <script src="/static/js/runner.js"></script>
 <script src="/static/js/app.js"></script>

@@ -42,6 +42,9 @@ Run 'theme list' to inspect installed themes or 'theme set <name>' to apply one 
 Run 'config list' to inspect user options or 'config set <option> <value>' to change them.
 Run 'session-token generate' to carry history, starred commands, snapshots, and user options across devices.
 Run 'status' for a compact summary of session type, runs, snapshots, stars, saved options, and active jobs.
+Use Files to create small input files like targets.txt for file-aware commands.
+Files written by commands such as curl -o response.html appear in the Files panel.
+Run 'workspace help' to see file commands and aliases such as ls, cat, and rm.
 Use the Workflows rail menu to load multi-step diagnostic playbooks into the prompt.
 Workflow inputs let you run the same playbook against your own target.
 Use Run all in a workflow to execute its rendered steps sequentially in the same tab.

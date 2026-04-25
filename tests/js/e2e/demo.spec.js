@@ -26,6 +26,8 @@ import { CAPTURE_SESSION_TOKEN } from '../../../config/playwright.visual.contrac
 
 // Keystroke delay — intentionally closer to a real person than a script.
 const TYPE_DELAY_MS = 62
+const WORKSPACE_DEMO_CMD = 'curl -L -o response.html https://noc.darklab.sh'
+const DEMO_THEME_NAME = 'charcoal_lavender'
 
 function typingDelay(char, index, baseDelay) {
   const cadence = [0, 18, 7, 28, 11, 23, 5, 34, 14]
@@ -77,6 +79,24 @@ async function submitCommand(page) {
   await page.waitForTimeout(1_300)
 }
 
+async function openFilesPanelWithResponseFile(page) {
+  await page.locator('.rail-nav [data-action="workspace"]').hover()
+  await page.waitForTimeout(700)
+  await page.locator('.rail-nav [data-action="workspace"]').click()
+  await page.locator('#workspace-modal').waitFor({ state: 'visible', timeout: 10_000 })
+  const row = page.locator('.workspace-file-row', { hasText: 'response.html' }).first()
+  await row.waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(1_700)
+  await row.locator('[data-workspace-action="view"]').click()
+  await expect(page.locator('#workspace-viewer-title')).toHaveText('response.html')
+  await page.waitForTimeout(3_600)
+  await page.locator('.workspace-close').hover()
+  await page.waitForTimeout(600)
+  await page.locator('.workspace-close').click()
+  await page.locator('#workspace-overlay').waitFor({ state: 'hidden' })
+  await page.waitForTimeout(1_000)
+}
+
 /**
  * Select a theme by calling applyThemeSelection() directly in the page
  * context, bypassing any DOM click event.
@@ -102,7 +122,9 @@ async function switchTheme(page, themeName) {
  * rendered; the layout must be stable before calling.
  */
 async function centeredScrollTop(page, themeName) {
-  return page.locator(`[data-theme-name="${themeName}"]`).evaluate((card) => {
+  const cardLocator = page.locator(`[data-theme-name="${themeName}"]`)
+  await expect(cardLocator, `theme card ${themeName} should exist`).toHaveCount(1, { timeout: 10_000 })
+  return cardLocator.evaluate((card) => {
     const container = card.closest('.theme-body')
     if (!container) return 0
     const cRect = container.getBoundingClientRect()
@@ -294,10 +316,13 @@ test('demo', async ({ page }) => {
   await page.waitForTimeout(1_600)
 
   await ensurePromptReady(page)
-  await typeSlowly(page, 'dig @8.8.8.8 darklab.sh A')
+  await typeSlowly(page, WORKSPACE_DEMO_CMD)
   await page.waitForTimeout(700)
-  await waitForFinished(page, 'dig @8.8.8.8 darklab.sh A')
+  await waitForFinished(page, WORKSPACE_DEMO_CMD, { timeoutMs: 45_000 })
   await page.waitForTimeout(1_700)
+
+  // ── Files panel: captured response file ──────────────────────────────────
+  await openFilesPanelWithResponseFile(page)
 
   // ── Switch back to tab 1 to show ping still running ───────────────────────
   await page.locator('.tab').first().hover()
@@ -358,18 +383,18 @@ test('demo', async ({ page }) => {
   })
   await page.waitForTimeout(3_400)
   // Compute actual card positions now that the grid is rendered.
-  const charcoalTop = await centeredScrollTop(page, 'charcoal_violet')
+  const charcoalTop = await centeredScrollTop(page, DEMO_THEME_NAME)
   await smoothScroll(page, '.theme-body', 250, { durationMs: 1_650 }) // scrolling down
   await page.waitForTimeout(1_600)
   await smoothScroll(page, '.theme-body', Math.max(charcoalTop + 130, 620), { durationMs: 1_900 }) // past the card
   await page.waitForTimeout(1_600)
   await smoothScroll(page, '.theme-body', charcoalTop, { durationMs: 1_250 }) // settle on card
   await page.waitForTimeout(2_500) // hover — deciding
-  await page.locator('[data-theme-name="charcoal_violet"]').hover()
+  await page.locator(`[data-theme-name="${DEMO_THEME_NAME}"]`).hover()
   await page.waitForTimeout(900)
-  await switchTheme(page, 'charcoal_violet')
+  await switchTheme(page, DEMO_THEME_NAME)
   await page
-    .locator('[data-theme-name="charcoal_violet"].theme-card-active')
+    .locator(`[data-theme-name="${DEMO_THEME_NAME}"].theme-card-active`)
     .waitFor({ state: 'attached', timeout: 5_000 })
   await freezeFrame(3_800) // see the selected card
   await page.locator('.theme-close').hover()

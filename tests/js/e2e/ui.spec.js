@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady } from './helpers.js'
+import { ensurePromptReady, runCommand } from './helpers.js'
 
 test.describe('theme selector', () => {
   test.beforeEach(async ({ page }) => {
@@ -113,6 +113,59 @@ test.describe('FAQ modal', () => {
     // The allowed-commands section is inside a collapsed accordion — expand it first
     await page.locator('.faq-q').filter({ hasText: 'What commands are allowed?' }).click()
     await expect(page.locator('#faq-allowed-text')).toBeVisible()
+  })
+})
+
+test.describe('workspace modal', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.locator('#cmd').waitFor()
+  })
+
+  test('creates, views, edits, downloads, and consumes session files', async ({ page }) => {
+    await expect(page.locator('.rail-nav [data-action="workspace"] .rail-nav-label')).toHaveText('files')
+    await page.locator('.rail-nav [data-action="workspace"]').click()
+
+    await expect(page.locator('#workspace-overlay')).toHaveClass(/open/)
+    await expect(page.locator('#workspace-modal .faq-title')).toHaveText('FILES')
+    await expect(page.locator('#workspace-summary')).toContainText('0 / 100 files')
+    await expect(page.locator('#workspace-editor')).not.toBeVisible()
+    await expect(page.locator('label[for="workspace-path-input"]')).toHaveText('File Name')
+
+    await page.locator('#workspace-new-btn').click()
+    await expect(page.locator('#workspace-editor')).toBeVisible()
+    await page.locator('#workspace-path-input').fill('targets.txt')
+    await page.locator('#workspace-text-input').fill('darklab.sh\n')
+    await page.locator('#workspace-save-btn').click()
+
+    const row = page.locator('.workspace-file-row').filter({ hasText: 'targets.txt' })
+    await expect(row).toBeVisible()
+    await expect(page.locator('#workspace-summary')).toContainText('1 / 100 files')
+
+    await row.locator('[data-workspace-action="view"]').click()
+    await expect(page.locator('#workspace-viewer')).toBeVisible()
+    await expect(page.locator('#workspace-viewer-title')).toHaveText('targets.txt')
+    await expect(page.locator('#workspace-viewer-text')).toHaveText('darklab.sh')
+
+    await row.locator('[data-workspace-action="edit"]').click()
+    await expect(page.locator('#workspace-editor')).toBeVisible()
+    await page.locator('#workspace-text-input').fill('darklab.sh\nip.darklab.sh\n')
+    await page.locator('#workspace-save-btn').click()
+    await row.locator('[data-workspace-action="view"]').click()
+    await expect(page.locator('#workspace-viewer-text')).toContainText('ip.darklab.sh')
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      row.locator('[data-workspace-action="download"]').click(),
+    ])
+    expect(download.suggestedFilename()).toBe('targets.txt')
+
+    await page.locator('.workspace-close').click()
+    await expect(page.locator('#workspace-overlay')).not.toHaveClass(/open/)
+
+    await runCommand(page, 'cat targets.txt')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('workspace: targets.txt')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('ip.darklab.sh')
   })
 })
 

@@ -81,6 +81,16 @@ def load_config(conf_dir=None):
         "max_output_lines":           5000,
         "persist_full_run_output":    True,
         "full_output_max_mb":         5,
+        "workspace_enabled":          False,
+        "workspace_backend":          "tmpfs",
+        # Intentional server-side workspace root default. Workspaces are
+        # disabled unless explicitly enabled and all file names are validated
+        # relative to hashed per-session directories before use.
+        "workspace_root":             "/tmp/darklab_shell-workspaces",  # nosec
+        "workspace_quota_mb":         50,
+        "workspace_max_file_mb":      5,
+        "workspace_max_files":        100,
+        "workspace_inactivity_ttl_hours": 1,
         "max_tabs":                   8,
         "command_timeout_seconds":    3600,
         "heartbeat_interval_seconds": 20,

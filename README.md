@@ -31,11 +31,12 @@ darklab_shell is a full-stack, self-hosted web terminal for running network diag
 - **Mobile shell** — dedicated mobile composer, keyboard helper row with character and word-level cursor movement, stable Firefox-friendly layout, shared desktop/mobile Run-button state, output-follow behavior that keeps the latest lines visible when the keyboard opens, and a mobile history sheet with the same type / command name / exit / date / starred filtering model as desktop
 - **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy and a `save ▾` dropdown (txt / html / pdf), a jump-to-live / jump-to-bottom helper when you scroll away from the tail, and export output that keeps the live header/title/meta treatment aligned across permalink pages, saved HTML, and PDF as closely as the PDF renderer allows
 - **History and sharing** — recent command chips, a persistent history surface on desktop and mobile with full-text search across command text and stored output text (SQLite FTS5), filtering by type / command name / exit code / date range / starred status, starring/favorites, reconnect-to-active-run continuity after reload, session restore for non-running tabs and drafts, canonical run permalinks, snapshot rows with open/copy/delete actions, snapshot permalinks with native share-sheet support, and full-output artifacts for longer runs
+- **Session files** — optional app-mediated per-session file access for tools that need small input/output files, with a Files panel for creating, viewing, editing, downloading, and deleting session-scoped files; strict relative filenames, quota enforcement, hashed session directories, visible file-count/usage/remaining quota in `workspace list`, compact session file usage in `status`, terminal-native `workspace` helpers plus `ls` / `cat` / confirmed `rm` aliases, and command-registry metadata that safely rewrites selected file flags without enabling shell navigation or redirection
 - **Session tokens** — generate a persistent `tok_` session token to carry your run history, shell identity, and saved user options across browsers and devices; `session-token generate/set/copy/clear/rotate/list/revoke` manage the full token lifecycle with optional history migration, atomic rotate with rollback on failure, terminal-native yes/no confirmations for the interactive CLI flows, automatic cross-tab identity sync with session-scoped UI refresh, server-side revocation, masked token arguments in local history, and a destructive clear-confirm in Options that can copy the token before the browser forgets it; the Options modal exposes the common inline actions (`Generate`, `Set`, `Copy`, `Rotate`, `Clear`) without entering commands
 - **Safer sharing** — a built-in basic redaction baseline can mask common secrets or infrastructure details on snapshot permalinks, with optional operator regex rules appended on top. Permalink creation can choose raw vs redacted sharing per snapshot without changing the stored run history; local `save txt/html/pdf` exports remain raw
 - **Run notifications** — optional browser desktop notifications fire on run completion (any exit code or kill); toggled from the Options panel on desktop and intentionally hidden from the mobile Options sheet; uses only the command root in the notification title to avoid exposing arguments or token values
 - **Themes and presentation** — named theme variants, a terminal-native `theme` command, theme-aware permalink/export rendering, mobile/desktop theme parity, browser-aligned permalink/saved-HTML export styling with best-effort PDF parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), an operator-configurable FAQ modal, and user options for welcome-intro behavior plus default share-snapshot redaction that now follow the active session token instead of staying browser-local
-- **Built-in commands** — native shell commands like `help`, `commands`, `history`, `last`, `limits`, `status`, `stats`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available; `help` points users to the README, FAQ, shortcuts, and the command catalog, `commands` groups built-ins and allowed external tools in one place, `status` summarizes session type, runs, snapshots, starred commands, saved options, active jobs, and backend health, and `stats` summarizes session activity by command root
+- **Built-in commands** — native shell commands like `help`, `commands`, `history`, `last`, `limits`, `status`, `stats`, `workspace`, `ls`, `cat`, `rm`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available; `help` points users to the README, FAQ, shortcuts, and the command catalog, `commands` groups built-ins and allowed external tools in one place, `status` summarizes session type, runs, snapshots, starred commands, saved options, active jobs, and backend health, and `stats` summarizes session activity by command root
 - **Guided workflows** — built-in diagnostic sequences for DNS, TLS/HTTPS, HTTP, reachability, email, passive domain recon, subdomain validation, directory discovery, CDN/edge checks, API recon, network path analysis, and fast port/service triage with reusable target inputs, per-step prompt fills, and sequential `Run all`; extendable with site-specific sequences via `conf/workflows.yaml`
 - **Security and operations** — registry-backed command policy with deny-prefix lists for loopback and path blocking, shell metacharacter blocking, Redis-backed rate limiting and PID tracking, structured logging with `text` and `gelf` format support, and an IP-gated `/diag` page showing app health, database and Redis status, activity stats, top commands, and per-tool availability
 - **Pre-installed security tooling** — nmap, rustscan, naabu, masscan, nuclei, ffuf, feroxbuster, wfuzz, katana, wafw00f, sslscan, sslyze, openssl, and more, all sandboxed under a dedicated `scanner` user with enforced allowlists and the full [SecLists](https://github.com/danielmiessler/SecLists) collection pre-installed at `/usr/share/wordlists/seclists/`
@@ -167,9 +168,16 @@ All application settings live in `app/conf/config.yaml`. The values below are th
 | `rate_limit_per_minute` | `30` | Max `/run` requests per minute per IP |
 | `rate_limit_per_second` | `5` | Max `/run` requests per second per IP |
 | `max_tabs` | `8` | Maximum number of tabs a user can have open at once. `0` = unlimited |
-| `max_output_lines` | `5000` | Max lines retained in the live tab and in the SQLite run preview. Oldest lines are dropped from the top when exceeded. `0` = unlimited |
+| `max_output_lines` | `5000` | Max rows retained in the live tab DOM and in the SQLite run preview. Oldest rendered rows are dropped from the top when exceeded, while visible line numbers continue reflecting emitted output order. `0` = unlimited |
 | `persist_full_run_output` | `true` | Server-side only. Persists full output for completed runs as compressed artifacts while the history drawer and normal run permalink keep using the capped SQLite preview |
 | `full_output_max_mb` | `5 MB` | Server-side only. Hard cap on the uncompressed UTF-8 payload written into a full-output artifact before gzip compression. The app multiplies this value by `1024 * 1024` internally. `0` = unlimited |
+| `workspace_enabled` | `false` | Server-side only. Enables the app-mediated per-session workspace foundation. This does not enable shell navigation or redirection by itself |
+| `workspace_backend` | `tmpfs` | Server-side only. Storage intent label for workspaces: `tmpfs` for short-lived in-memory storage or `volume` for a Docker-mounted location |
+| `workspace_root` | `/tmp/darklab_shell-workspaces` | Server-side only. Root directory that contains hashed per-session workspace directories |
+| `workspace_quota_mb` | `50 MB` | Server-side only. Per-session workspace quota |
+| `workspace_max_file_mb` | `5 MB` | Server-side only. Maximum single app-mediated text file size |
+| `workspace_max_files` | `100` | Server-side only. Maximum file count per session workspace |
+| `workspace_inactivity_ttl_hours` | `1` | Server-side only. Inactive session workspace cleanup threshold in hours; `0` disables age-based cleanup. Workspace activity touches the hashed session directory, and periodic cleanup removes expired `sess_*` directories rather than aging out individual files |
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` = disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
 | `welcome_char_ms` | `18` | Base delay between each typed character in the welcome animation (ms). Lower = faster typing |
@@ -424,7 +432,11 @@ This section is intentionally operator-focused. For the developer-facing details
 The container filesystem is set to read-only (`read_only: true`) and the app volume is mounted read-only (`./app:/app:ro`). There are two intentional exceptions:
 
 - **`/data`** — a writable bind mount for the SQLite database, owned by `appuser` with `chmod 700`. Only Gunicorn can write here; the `scanner` user that runs commands has no access
-- **`/tmp`** — a `tmpfs` mount (in-memory, wiped on restart) used by tools that need scratch space for templates, sessions, and cache files
+- **`/tmp`** — a `tmpfs` mount (in-memory, wiped on restart) used by tools that need scratch space for templates, sessions, cache files, and optional session workspaces. Workspace session directories are app-mediated, sticky, setgid, and group-scoped so `appuser` and `scanner` can share validated files without making them world-readable
+
+The production Compose override uses a host bind mount from `./workspaces` to `/workspaces` and sets `WORKSPACE_ROOT=/workspaces`. This keeps persistent session files easy to inspect, back up, and manage from host automation while leaving all path access app-mediated.
+
+For a host bind mount, prepare the host directory with the numeric UID/GID used by `appuser` inside the built image, not a host username. The current image creates `appuser` as `995:995` and `scanner` as `994:994`, with `scanner` also in the `appuser` group. A production host or Ansible role should create the bind-mount source with ownership `995:995` and mode `0730` before startup. Existing session directories should be owned by `995:995` with mode `3730`; existing app-created files should be `0640`, while command-created output files may be `0660` so the `scanner` user can update them through its supplementary `appuser` group. If you point `workspace_root` at a different mounted path, set the matching `WORKSPACE_ROOT` environment variable for the entrypoint or prepare that directory with equivalent ownership and permissions.
 
 To prevent commands from writing to either path directly, the app blocks any command that references `/data` or `/tmp` as a filesystem argument (using a negative lookbehind so URLs containing `/data` or `/tmp` as path segments are still permitted).
 
@@ -502,7 +514,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── seed_history.py         # Populates history.db with registry-backed example runs under a UUID or tok_ session; includes the named visual-flows preset used by capture/demo work
 │   ├── build_vendor.mjs        # Generates the committed browser builds in app/static/js/vendor/ from npm packages (run via npm run vendor:sync)
 │   ├── lint_json.mjs           # Validates that all tracked JSON files parse cleanly — used by the lint pipeline
-│   ├── record_demo.sh          # Records the desktop demo video — health-checks container, runs Playwright, stitches frames with ffmpeg
+│   ├── record_demo.sh          # Records the desktop demo video — health/workspace checks, Playwright, ffmpeg stitch
 │   ├── record_demo_mobile.sh   # Same as record_demo.sh but for the mobile shell UI
 │   └── capture_ui_screenshots.sh # Drives the UI screenshot capture pipeline (desktop + mobile, all themes or one) — emits PNGs, manifests, and a review index to /tmp/darklab_shell-ui-capture/
 ├── assets/                        # README media assets (demo videos)
@@ -540,6 +552,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │       │   ├── button_primitives_allowlist.test.js # positive contract — scans HTML templates and fails if a button-like element uses a class outside the primitive family (with fixture-backed exceptions)
 │       │   ├── button_primitives_runtime.test.js # runtime contract — mounts JS-rendered history/mobile pagination controls and verifies they still use shared button primitives
 │       │   ├── mobile_running_indicator.test.js # mobile running-indicator chip + edge-glow contract — mount, ?ri=off/?ri=0 kill switch, chip count, active-tab exclusion, cycle-tap dispatch
+│       │   ├── workspace.test.js    # Files panel rendering and route-call helpers
 │       │   ├── session.test.js     # session ID persistence, apiFetch() header injection, and session-switch preference reloads
 │       │   ├── config.test.js      # frontend APP_CONFIG bootstrap coverage
 │       │   ├── export_pdf.test.js  # PDF export rendering — header layout, ANSI escape handling, theme color resolution
@@ -603,7 +616,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*
     │   ├── run.py              # /run (rate-limited SSE), /kill; run-output capture helpers
     │   ├── history.py          # /history*, /share*; preview/full-output shaping helpers
-    │   └── session.py          # /session/token/*, /session/preferences, /session/migrate, /session/starred*
+    │   ├── session.py          # /session/token/*, /session/preferences, /session/migrate, /session/starred*
+    │   └── workspace.py        # /workspace/files* app-mediated session file routes
     ├── fake_commands.py        # Synthetic shell helpers handled through /run before spawn
     ├── config.py               # load_config(), CFG defaults, SCANNER_PREFIX detection, theme registry
     ├── logging_setup.py        # structured logging formatters and logger configuration
@@ -613,6 +627,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     ├── commands.py             # Command loading, validation (is_command_allowed), and rewrites
     ├── permalinks.py           # Flask context/render helpers for /history/<id> and /share/<id>
     ├── output_signals.py       # Server-side findings/warnings/errors/summaries classifier
+    ├── workspace.py            # App-mediated per-session workspace path, quota, and cleanup helpers
     ├── run_output_store.py     # Preview/full-output capture and artifact persistence helpers
     ├── favicon.ico             # Site favicon
     ├── conf/                   # Operator-configurable files — edit these to customize the deployment
@@ -672,6 +687,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
             ├── export_html.js  # Shared export HTML builder / embedded-font helper
             ├── export_pdf.js   # Shared PDF export module — used by the desktop tab bar and permalink page
             ├── history.js      # Command history chips and drawer (with starring)
+            ├── workspace.js    # Session Files panel — list/create/edit/delete/download helpers
             ├── welcome.js      # Welcome startup animation (ASCII, status lines, samples, hints)
             ├── runner.js       # Command execution, SSE stream, kill, stall detection
             ├── permalink.js    # Permalink page controller — loaded only on /history/<id> and /share/<id>

@@ -362,6 +362,7 @@ function loadRunnerFns({
   Notification: NotificationOverride = undefined,
   handleThemeCommand: handleThemeCommandOverride = undefined,
   handleConfigCommand: handleConfigCommandOverride = undefined,
+  refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride = undefined,
   runnerInitCode = '',
 } = {}) {
   const normalizedTabs = tabs.map((tab) => ({
@@ -507,6 +508,7 @@ function loadRunnerFns({
       getRunNotifyPreference: getRunNotifyPreferenceOverride,
       ...(handleThemeCommandOverride ? { handleThemeCommand: handleThemeCommandOverride } : {}),
       ...(handleConfigCommandOverride ? { handleConfigCommand: handleConfigCommandOverride } : {}),
+      ...(refreshWorkspaceFileCacheOverride ? { refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride } : {}),
       ...(NotificationOverride !== undefined ? { Notification: NotificationOverride } : {}),
     },
     `{
@@ -1875,6 +1877,91 @@ describe('session-token clear', () => {
 
     expect(storage.getItem('session_token')).toBe('tok_abcd1234efgh5678ijkl9012mnop3456')
     expect(updateSessionId).not.toHaveBeenCalled()
+    expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
+    expect(status.className).toBe('status-pill ok')
+  })
+})
+
+describe('workspace file delete confirmation', () => {
+  it('opens a terminal yes/no confirmation before deleting a workspace file', async () => {
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const apiFetch = vi.fn()
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      setComposerPromptMode,
+      apiFetch,
+    })
+
+    await submitCommand('workspace rm targets.txt')
+
+    expect(appendLine).toHaveBeenNthCalledWith(1, 'workspace rm targets.txt', 'prompt-echo', 'tab-1')
+    expect(appendLine).toHaveBeenNthCalledWith(2, "delete workspace file 'targets.txt'?", '', 'tab-1')
+    expect(setComposerPromptMode).toHaveBeenCalledWith('confirm')
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(status.className).toBe('status-pill idle')
+  })
+
+  it('deletes the workspace file only after answering yes', async () => {
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn()
+    const apiFetch = vi.fn((url, opts) => {
+      if (String(url).startsWith('/workspace/files?path=targets.txt') && opts?.method === 'DELETE') {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      if (url === '/run/client') {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      return Promise.resolve(new Response('{}', { status: 404 }))
+    })
+    const { submitCommand, status, tabs } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      setComposerPromptMode,
+      apiFetch,
+      refreshWorkspaceFileCache,
+    })
+
+    await submitCommand('rm targets.txt')
+    await submitCommand('yes')
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith(
+      '/workspace/files?path=targets.txt',
+      { method: 'DELETE' },
+    ))
+
+    expect(appendLine).toHaveBeenCalledWith('workspace: removed targets.txt', '', 'tab-1')
+    expect(refreshWorkspaceFileCache).toHaveBeenCalled()
+    expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
+    await vi.waitFor(() => expect(tabs[0].st).toBe('ok'))
+    expect(status.className).toBe('status-pill ok')
+  })
+
+  it('leaves the workspace file untouched when the user answers no', async () => {
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const apiFetch = vi.fn()
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      setComposerPromptMode,
+      apiFetch,
+    })
+
+    await submitCommand('workspace rm targets.txt')
+    await submitCommand('no')
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith('Workspace file delete canceled.', '', 'tab-1'),
+    )
+
+    expect(apiFetch).not.toHaveBeenCalled()
     expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
     expect(status.className).toBe('status-pill ok')
   })

@@ -235,6 +235,37 @@ test.describe('keyboard shortcuts', () => {
       { timeout: 15_000 },
     )
   })
+
+  test('paste routes to the prompt after copying selected transcript text', async ({
+    page,
+  }) => {
+    await runCommand(page, 'hostname')
+
+    await page.evaluate(() => {
+      const firstLine = document.querySelector('.tab-panel.active .output .line')
+      const searchBtn = document.getElementById('search-toggle-btn')
+      if (!firstLine || !searchBtn) throw new Error('selection setup failed')
+      const selection = window.getSelection()
+      const range = document.createRange()
+      range.selectNodeContents(firstLine)
+      selection.removeAllRanges()
+      selection.addRange(range)
+      searchBtn.focus()
+    })
+
+    await page.evaluate(() => {
+      const event = new Event('paste', { bubbles: true, cancelable: true })
+      Object.defineProperty(event, 'clipboardData', {
+        value: {
+          getData: (type) => (type === 'text/plain' || type === 'text' ? 'host darklab.sh' : ''),
+        },
+      })
+      document.dispatchEvent(event)
+    })
+
+    await expect(page.locator('#cmd')).toHaveValue('host darklab.sh')
+    await expect(page.locator('#cmd')).toBeFocused()
+  })
 })
 
 test.describe('Ctrl+R reverse-history search', () => {

@@ -125,6 +125,7 @@ const _permalinkToastHomeParent = typeof permalinkToast !== 'undefined' && perma
 const _confirmHostEl = document.getElementById('confirm-host');
 const _confirmHostHomeParent = _confirmHostEl ? _confirmHostEl.parentElement : null;
 const _workflowsOverlayHomeParent = typeof workflowsOverlay !== 'undefined' && workflowsOverlay ? workflowsOverlay.parentElement : null;
+const _workspaceOverlayHomeParent = typeof workspaceOverlay !== 'undefined' && workspaceOverlay ? workspaceOverlay.parentElement : null;
 const _faqOverlayHomeParent = typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay.parentElement : null;
 const _themeOverlayHomeParent = typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay.parentElement : null;
 const _optionsOverlayHomeParent = typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay.parentElement : null;
@@ -196,10 +197,12 @@ function _getMobileUiLayoutRefs() {
 // These refs let the same DOM nodes move between the desktop document flow and
 // the simplified mobile shell without duplicating markup or event handlers.
 const _mobileUiLayoutRefs = _getMobileUiLayoutRefs();
+const _workspaceOverlayEl = typeof workspaceOverlay !== 'undefined' && workspaceOverlay ? workspaceOverlay : null;
 const _uiOverlayRefs = {
   mobileMenu: mobileMenu || null,
   hamburgerBtn: hamburgerBtn || null,
   workflowsOverlay: typeof workflowsOverlay !== 'undefined' && workflowsOverlay ? workflowsOverlay : null,
+  workspaceOverlay: _workspaceOverlayEl,
   faqOverlay: typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay : null,
   themeOverlay: typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay : null,
   optionsOverlay: typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay : null,
@@ -293,7 +296,8 @@ const _mobileShellOverlayNodes = [
   { node: _confirmHostEl, homeParent: _confirmHostHomeParent, desktopAnchor: faqOverlay || null },
   { node: faqOverlay, homeParent: _faqOverlayHomeParent, desktopAnchor: themeOverlay || null },
   { node: themeOverlay, homeParent: _themeOverlayHomeParent, desktopAnchor: optionsOverlay || null },
-  { node: optionsOverlay, homeParent: _optionsOverlayHomeParent, desktopAnchor: workflowsOverlay || null },
+  { node: optionsOverlay, homeParent: _optionsOverlayHomeParent, desktopAnchor: _workspaceOverlayEl || workflowsOverlay || null },
+  { node: _workspaceOverlayEl, homeParent: _workspaceOverlayHomeParent, desktopAnchor: workflowsOverlay || null },
   { node: workflowsOverlay, homeParent: _workflowsOverlayHomeParent, desktopAnchor: null },
 ];
 
@@ -749,6 +753,10 @@ function _closeMajorOverlays() {
   if (isWorkflowsOverlayOpen()) {
     if (typeof closeWorkflows === 'function') closeWorkflows();
     else hideWorkflowsOverlay();
+  }
+  if (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen()) {
+    if (typeof closeWorkspace === 'function') closeWorkspace();
+    else hideWorkspaceOverlay();
   }
   if (isFaqOverlayOpen()) hideFaqOverlay();
   if (isThemeOverlayOpen()) hideThemeOverlay();
@@ -2137,6 +2145,7 @@ function _runtimeContextSpec({
 
 const _runtimeBuiltinCommandInfo = [
   ['banner', 'built-in: print the configured banner art'],
+  ['cat', 'built-in: show a session workspace file'],
   ['clear', 'built-in: clear the current terminal tab output'],
   ['commands', 'built-in: list built-in and allowed external commands'],
   ['config', 'built-in: show or update user options'],
@@ -2155,10 +2164,12 @@ const _runtimeBuiltinCommandInfo = [
   ['jobs', 'built-in: list active jobs for this session'],
   ['last', 'built-in: show recent completed runs with timestamps and exit codes'],
   ['limits', 'built-in: show configured runtime, history, and retention limits'],
+  ['ls', 'built-in: list session workspace files'],
   ['man', 'built-in: show a real or built-in manual page'],
   ['ps', 'built-in: show the current shell process view'],
   ['pwd', 'built-in: show the web shell workspace path'],
   ['retention', 'built-in: show retention and persisted-output settings'],
+  ['rm', 'built-in: remove a session workspace file after confirmation'],
   ['route', 'built-in: show the shell routing table summary'],
   ['session-token', 'built-in: show or manage persistent session tokens'],
   ['shortcuts', 'built-in: show current keyboard shortcuts'],
@@ -2170,6 +2181,7 @@ const _runtimeBuiltinCommandInfo = [
   ['uname', 'built-in: show the shell platform string'],
   ['uptime', 'built-in: show app uptime since process start'],
   ['version', 'built-in: show shell, app, Flask, and Python version details'],
+  ['workspace', 'built-in: list, view, or remove session workspace files'],
   ['which', 'built-in: locate a built-in command or allowed runtime command'],
   ['who', 'built-in: show the current shell user and session'],
   ['whoami', 'built-in: describe this shell and link to the project README'],
@@ -2232,6 +2244,15 @@ function _runtimeStaticBuiltinContext() {
       _runtimeHint('--external', 'Show only allowed external commands'),
     ],
   });
+  context.cat = _runtimeContextSpec({
+    argumentLimit: 1,
+    argHints: { __positional__: _runtimeWorkspaceFileHints() },
+  });
+  context.ls = _runtimeContextSpec({ argumentLimit: 0 });
+  context.rm = _runtimeContextSpec({
+    argumentLimit: 1,
+    argHints: { __positional__: _runtimeWorkspaceFileHints() },
+  });
   context['session-token'] = _runtimeContextSpec({
     expectsValue: ['set', 'revoke'],
     argHints: {
@@ -2254,6 +2275,33 @@ function _runtimeStaticBuiltinContext() {
     },
   });
   return context;
+}
+
+function _runtimeWorkspaceFileHints() {
+  if (typeof getWorkspaceAutocompleteFileHints !== 'function') return [];
+  return getWorkspaceAutocompleteFileHints();
+}
+
+function _runtimeWorkspaceContext() {
+  const fileHints = _runtimeWorkspaceFileHints();
+  return _runtimeContextSpec({
+    expectsValue: ['show', 'cat', 'rm', 'delete'],
+    argHints: {
+      list: [],
+      ls: [],
+      help: [],
+      show: fileHints,
+      cat: fileHints,
+      rm: fileHints,
+      delete: fileHints,
+      __positional__: [
+        _runtimeHint('list', 'List current session workspace files'),
+        _runtimeHint('show <file>', 'Print a workspace file in the terminal', 'show '),
+        _runtimeHint('rm <file>', 'Remove a workspace file from this session', 'rm '),
+        _runtimeHint('help', 'Show workspace command usage'),
+      ],
+    },
+  });
 }
 
 function _runtimeThemeContext() {
@@ -2299,6 +2347,7 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
   const lookupHints = _runtimeCommandLookupHints(baseRegistry);
   context.theme = _runtimeThemeContext();
   context.config = _runtimeConfigContext();
+  context.workspace = _runtimeWorkspaceContext();
   context.man = _runtimeContextSpec({
     argumentLimit: 1,
     argHints: { __positional__: lookupHints },

@@ -5,6 +5,17 @@
 chown -R appuser:appuser /data 2>/dev/null || true
 chmod 700 /data 2>/dev/null || true
 
+# Normalize the optional per-session workspace mount before dropping to
+# appuser. Bind mounts are commonly root-owned on first boot, so app-mediated
+# workspace files need their shared appuser/scanner group restored here.
+WORKSPACE_ROOT="${WORKSPACE_ROOT:-/tmp/darklab_shell-workspaces}"
+mkdir -p "$WORKSPACE_ROOT" 2>/dev/null || true
+chown -R appuser:appuser "$WORKSPACE_ROOT" 2>/dev/null || true
+chmod 730 "$WORKSPACE_ROOT" 2>/dev/null || true
+find "$WORKSPACE_ROOT" -mindepth 1 -type d -name 'sess_*' -exec chmod 3730 {} \; 2>/dev/null || true
+find "$WORKSPACE_ROOT" -mindepth 2 -type d -exec chmod 3730 {} \; 2>/dev/null || true
+find "$WORKSPACE_ROOT" -type f -exec chmod 640 {} \; 2>/dev/null || true
+
 # Ensure /tmp is world-writable so the scanner user can write tool cache/config
 # (nuclei templates, wapiti sessions, etc.) to the tmpfs mount
 chmod 1777 /tmp 2>/dev/null || true

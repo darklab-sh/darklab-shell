@@ -55,6 +55,7 @@ async function loadAppFns({
   hydrateCmdHistory: hydrateCmdHistoryOverride = vi.fn(),
   hasPendingTerminalConfirm: hasPendingTerminalConfirmOverride = vi.fn(() => false),
   cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride = vi.fn(() => false),
+  getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride = vi.fn(() => []),
   sessionId = 'session-old',
 } = {}) {
   document.body.className = ''
@@ -426,6 +427,7 @@ async function loadAppFns({
       _seedLocalStorageStarsToServer: seedLocalStorageStarsToServerOverride,
       hasPendingTerminalConfirm: hasPendingTerminalConfirmOverride,
       cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride,
+      getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride,
       ...domBindings,
       getOutput: getOutputOverride || (() => document.getElementById('history-list')),
       renderMotd: (text) => text,
@@ -1223,6 +1225,12 @@ describe('app helpers', () => {
     expect(context.commands.flags.map(item => item.value)).toEqual(['--built-in', '--external'])
     expect(context['session-token'].arg_hints.__positional__.map(item => item.value)).toContain('set <token>')
     expect(context['session-token'].arg_hints.set[0].value).toBe('<token>')
+    expect(context.workspace.arg_hints.__positional__.map(item => item.value)).toEqual([
+      'list',
+      'show <file>',
+      'rm <file>',
+      'help',
+    ])
     expect(context.status).toBeTruthy()
     expect(context.whoami).toBeTruthy()
     expect(context.man.arg_hints.__positional__.map(item => item.value)).toEqual(
@@ -1236,16 +1244,35 @@ describe('app helpers', () => {
     )
   })
 
+  it('serves loaded workspace files as workspace command autocomplete values', async () => {
+    const { getRuntimeAutocompleteContext } = await loadAppFns({
+      getWorkspaceAutocompleteFileHints: () => [
+        { value: 'targets.txt', description: 'workspace file · 11 B' },
+        { value: 'ffuf.json', description: 'workspace file · 2 KB' },
+      ],
+    })
+
+    const context = getRuntimeAutocompleteContext({})
+
+    expect(context.workspace.arg_hints.show.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
+    expect(context.workspace.arg_hints.rm.map(item => item.description)).toEqual([
+      'workspace file · 11 B',
+      'workspace file · 2 KB',
+    ])
+    expect(context.cat.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
+    expect(context.rm.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
+  })
+
   it('keeps code-owned built-ins out of commands.yaml', () => {
     const commandsYaml = readFileSync(resolve(REPO_ROOT, 'app/conf/commands.yaml'), 'utf8')
     const yamlRoots = new Set(
       [...commandsYaml.matchAll(/^- root: ([a-z0-9_-]+)/gm)].map(match => match[1]),
     )
     const runtimeRoots = [
-      'banner', 'clear', 'commands', 'config', 'date', 'df', 'env', 'faq', 'fortune', 'free',
-      'groups', 'help', 'history', 'hostname', 'id', 'ip', 'jobs', 'last', 'limits', 'man',
-      'ps', 'pwd', 'retention', 'route', 'session-token', 'shortcuts', 'status', 'theme', 'tty',
-      'type', 'uname', 'uptime', 'version', 'which', 'who', 'whoami',
+      'banner', 'cat', 'clear', 'commands', 'config', 'date', 'df', 'env', 'faq', 'fortune', 'free',
+      'groups', 'help', 'history', 'hostname', 'id', 'ip', 'jobs', 'last', 'limits', 'ls', 'man',
+      'ps', 'pwd', 'retention', 'rm', 'route', 'session-token', 'shortcuts', 'stats', 'status', 'theme',
+      'tty', 'type', 'uname', 'uptime', 'version', 'workspace', 'which', 'who', 'whoami',
     ]
 
     expect(runtimeRoots.filter(root => yamlRoots.has(root))).toEqual([])

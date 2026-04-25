@@ -21,6 +21,9 @@ Use the type filter to switch mobile history between runs, snapshots, or both.
 Mobile history pagination keeps large sessions browsable without losing filters.
 Pull up the Recent peek row to reopen the recents sheet and reload a past command.
 Starred history entries stay easier to find when the drawer gets crowded.
+Use Files from the mobile menu to create, view, download, or delete session files.
+Files written by commands such as curl -o response.html appear in the Files panel.
+Run 'workspace help' to see file commands and aliases such as ls, cat, and rm.
 Use the search bar to scan long output without leaving the current tab.
 Tap the F, W, E, or S chips to jump through findings, warnings, errors, or summaries.
 Tap summarize to append a command findings recap for the current tab.

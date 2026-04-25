@@ -35,7 +35,7 @@ let tsMode = 'off';
 let lnMode = 'off';
 
 const _OUTPUT_SYNC_BURST_LIMIT = 60;
-const _OUTPUT_BATCH_SIZE = 80;
+const _OUTPUT_BATCH_SIZE = 300;
 const _pendingOutputBatches = new Map();
 
 function _outputPromptPrefix() {
@@ -58,6 +58,59 @@ function _formatOutputPrefix(index, tsText, includeTimestamp) {
   return parts.join(' ');
 }
 
+function _outputPrefixesActive() {
+  return lnMode === 'on' || tsMode === 'elapsed' || tsMode === 'clock';
+}
+
+function _lineTimestampPrefix(line) {
+  if (tsMode === 'elapsed') return String(line?.dataset?.tsE || '');
+  if (tsMode === 'clock') return String(line?.dataset?.tsC || '');
+  return '';
+}
+
+function _promptTimestampPrefix() {
+  if (tsMode === 'elapsed') return '+0.0s';
+  if (tsMode === 'clock') return new Date().toTimeString().slice(0, 8);
+  return '';
+}
+
+function _prefixWidthForOutput(out) {
+  if (!_outputPrefixesActive()) return 0;
+  const lineNumber = Number(out?.dataset?.outputLineCounter || 0) + 1;
+  const lineDigits = lnMode === 'on' ? String(Math.max(1, lineNumber)).length : 0;
+  const timestampWidth = tsMode === 'clock'
+    ? 8
+    : tsMode === 'elapsed'
+      ? 8
+      : 0;
+  return lineDigits + timestampWidth + (lineDigits && timestampWidth ? 1 : 0);
+}
+
+function _trimOutputToMaxLines(out) {
+  const max = APP_CONFIG.max_output_lines;
+  if (!(max > 0) || !out || typeof out.getElementsByClassName !== 'function') return 0;
+  const lines = out.getElementsByClassName('line');
+  let removed = 0;
+  while (lines.length > max) {
+    lines[0].remove();
+    removed += 1;
+  }
+  return removed;
+}
+
+function _syncOutputPrefixesForAppend(out, appendedLine = null) {
+  if (!out || !out.style) return;
+  if (appendedLine) {
+    appendedLine.dataset.prefix = _isPrefixExcludedLine(appendedLine) ? '' : _lineTimestampPrefix(appendedLine);
+  }
+  const prompt = out.querySelector?.('#shell-prompt-wrap');
+  if (prompt) {
+    prompt.dataset.lineNumber = String((Number(out.dataset.outputLineCounter || 0) || 0) + 1);
+    prompt.dataset.prefix = _promptTimestampPrefix();
+  }
+  out.style.setProperty('--output-prefix-width', `${_prefixWidthForOutput(out)}ch`);
+}
+
 function _isWelcomeLine(line) {
   if (!line || !line.classList) return false;
   return [...line.classList].some(cls => cls.startsWith('welcome-') || cls.startsWith('wlc-'));
@@ -72,6 +125,32 @@ function _isSyntheticSummaryLine(line) {
     'fake-signal-summary-note',
     'fake-signal-summary-sep',
   ].some(cls => line.classList.contains(cls));
+}
+
+function _isPrefixExcludedLine(line) {
+  return _isWelcomeLine(line) || _isSyntheticSummaryLine(line);
+}
+
+function _assignOutputLineNumber(out, tab, line) {
+  if (!out || !line) return;
+  if (_isPrefixExcludedLine(line)) {
+    delete line.dataset.lineNumber;
+    return;
+  }
+  const existing = Number(line.dataset.lineNumber || 0);
+  if (existing > 0) {
+    if (tab) tab._outputLineCounter = Math.max(Number(tab._outputLineCounter || 0), existing);
+    out.dataset.outputLineCounter = String(Math.max(Number(out.dataset.outputLineCounter || 0), existing));
+    return;
+  }
+  const base = Math.max(
+    Number(tab?._outputLineCounter || 0),
+    Number(out.dataset.outputLineCounter || 0),
+  );
+  const next = base + 1;
+  line.dataset.lineNumber = String(next);
+  if (tab) tab._outputLineCounter = next;
+  out.dataset.outputLineCounter = String(next);
 }
 
 function _getPendingOutputBatch(tabId) {
@@ -309,20 +388,15 @@ function _flushPendingOutputBatch(tabId) {
   const fragment = document.createDocumentFragment();
   const batch = state.items.splice(0, _OUTPUT_BATCH_SIZE);
   batch.forEach(entry => {
+    entry.span.dataset.prefix = _isPrefixExcludedLine(entry.span) ? '' : _lineTimestampPrefix(entry.span);
     fragment.appendChild(entry.span);
     _syncTabRawLines(tab, entry.rawLine);
   });
   _appendOutputSpan(out, fragment);
 
-  const max = APP_CONFIG.max_output_lines;
-  if (max > 0) {
-    const lines = out.querySelectorAll('.line');
-    if (lines.length > max) {
-      for (let i = 0; i < lines.length - max; i++) lines[i].remove();
-    }
-  }
+  _trimOutputToMaxLines(out);
 
-  syncOutputPrefixes(out);
+  _syncOutputPrefixesForAppend(out);
   if (shouldStickToBottom) {
     setTimeout(() => _stickOutputToBottom(out, tab), 0);
   }
@@ -380,35 +454,33 @@ function syncOutputPrefixes(scope = document) {
     const lines = [...out.querySelectorAll('.line')];
     const prefixStrings = [];
     let visibleIndex = 0;
+    let maxLineNumber = 0;
 
     lines.forEach(line => {
-      if (_isWelcomeLine(line) || _isSyntheticSummaryLine(line)) {
+      if (_isPrefixExcludedLine(line)) {
         line.dataset.prefix = '';
+        delete line.dataset.lineNumber;
         return;
       }
       visibleIndex += 1;
-      const tsText = tsMode === 'elapsed'
-        ? String(line.dataset.tsE || '')
-        : tsMode === 'clock'
-          ? String(line.dataset.tsC || '')
-          : '';
-      const prefix = _formatOutputPrefix(visibleIndex, tsText, true);
-      line.dataset.prefix = prefix;
-      prefixStrings.push(prefix);
+      const existingNumber = Number(line.dataset.lineNumber || 0);
+      const lineNumber = existingNumber > 0 ? existingNumber : visibleIndex;
+      line.dataset.lineNumber = String(lineNumber);
+      maxLineNumber = Math.max(maxLineNumber, lineNumber);
+      const tsText = _lineTimestampPrefix(line);
+      line.dataset.prefix = tsText;
+      prefixStrings.push(_formatOutputPrefix(lineNumber, tsText, true));
     });
 
   const prompt = out.querySelector('#shell-prompt-wrap');
   if (prompt) {
-    const promptTsText = tsMode === 'elapsed'
-      ? '+0.0s'
-      : tsMode === 'clock'
-        ? new Date().toTimeString().slice(0, 8)
-        : '';
-    const promptPrefix = _formatOutputPrefix(visibleIndex + 1, promptTsText, true);
-    prompt.dataset.prefix = promptPrefix;
-    prefixStrings.push(promptPrefix);
+    const promptTsText = _promptTimestampPrefix();
+    prompt.dataset.lineNumber = String(maxLineNumber + 1);
+    prompt.dataset.prefix = promptTsText;
+    prefixStrings.push(_formatOutputPrefix(maxLineNumber + 1, promptTsText, true));
   }
 
+    out.dataset.outputLineCounter = String(maxLineNumber);
     const prefixWidth = Math.max(0, ...prefixStrings.map(s => String(s || '').length));
     out.style.setProperty('--output-prefix-width', `${prefixWidth}ch`);
   });
@@ -458,6 +530,7 @@ function appendLine(text, cls, tabId, metadata = null) {
   const state = _getPendingOutputBatch(id);
   const shouldBatch = state.scheduled || state.items.length > 0 || state.burstCount >= _OUTPUT_SYNC_BURST_LIMIT;
   const { span, rawLine } = _buildOutputLine(text, cls, id, now, runStart, metadata);
+  _assignOutputLineNumber(out, tab, span);
 
   if (shouldBatch) {
     state.items.push({ span, rawLine });
@@ -469,16 +542,10 @@ function appendLine(text, cls, tabId, metadata = null) {
 
   _appendOutputSpan(out, span);
 
-  // Enforce max output lines — drop oldest lines from the top
-  const max = APP_CONFIG.max_output_lines;
-  if (max > 0) {
-    const lines = out.querySelectorAll('.line');
-    if (lines.length > max) {
-      for (let i = 0; i < lines.length - max; i++) lines[i].remove();
-    }
-  }
+  // Enforce max output lines — drop oldest lines from the top.
+  _trimOutputToMaxLines(out);
 
-  syncOutputPrefixes(out);
+  _syncOutputPrefixesForAppend(out, span);
   if (tab?.followOutput !== false) {
     setTimeout(() => _stickOutputToBottom(out, tab), 0);
   }

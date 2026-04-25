@@ -700,6 +700,20 @@ function _isClientSideUiCommand(cmd) {
   return root === 'theme' || root === 'config';
 }
 
+function _workspaceDeleteTarget(cmd) {
+  const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
+  const root = (parts[0] || '').toLowerCase();
+  if (root === 'rm' && parts.length === 2) return parts[1];
+  if (root === 'workspace' && parts.length === 3 && ['rm', 'delete'].includes((parts[1] || '').toLowerCase())) {
+    return parts[2];
+  }
+  return '';
+}
+
+function _isWorkspaceDeleteCommand(cmd) {
+  return !!_workspaceDeleteTarget(cmd);
+}
+
 function _historySafeCommand(cmd) {
   const value = String(cmd || '').trim();
   if (!value) return '';
@@ -1289,6 +1303,43 @@ async function _handleSessionTokenCommand(cmd, tabId) {
   }
 }
 
+async function _handleWorkspaceDeleteCommand(cmd, tabId) {
+  const target = _workspaceDeleteTarget(cmd);
+  appendCommandEcho(cmd);
+  if (!target) {
+    appendLine('Usage: workspace rm <file>', 'exit-fail', tabId);
+    setStatus('fail');
+    return;
+  }
+  appendLine(`delete workspace file '${target}'?`, '', tabId);
+  _setPendingTerminalConfirm({
+    tabId,
+    onYes: async () => {
+      try {
+        const resp = await apiFetch(`/workspace/files?path=${encodeURIComponent(target)}`, { method: 'DELETE' });
+        if (!resp.ok) {
+          const data = await resp.json().catch(() => ({}));
+          throw new Error(data && data.error ? data.error : `workspace delete failed (${resp.status})`);
+        }
+        appendLine(`workspace: removed ${target}`, '', tabId);
+        if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache();
+        _recordSuccessfulLocalCommand(cmd);
+        _persistClientSideRun(cmd, [{ text: `workspace: removed ${target}` }], 'ok');
+        setStatus('ok');
+      } catch (err) {
+        appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
+        logClientError('workspace rm', err);
+        setStatus('fail');
+      }
+    },
+    onNo: async () => {
+      appendLine('Workspace file delete canceled.', '', tabId);
+      setStatus('idle');
+    },
+  });
+  setStatus('idle');
+}
+
 async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand) {
   const spec = _parseSyntheticPostFilterCommand(cmd);
   const baseCommand = spec ? (spec.baseCommand || cmd) : cmd;
@@ -1421,6 +1472,13 @@ function submitCommand(rawCmd) {
   if (_isSessionTokenSubcommand(cmd)) {
     void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
       _handleSessionTokenCommand(baseCommand, activeTabId)
+    ));
+    return true;
+  }
+
+  if (_isWorkspaceDeleteCommand(cmd)) {
+    void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
+      _handleWorkspaceDeleteCommand(baseCommand, activeTabId)
     ));
     return true;
   }
@@ -1616,6 +1674,7 @@ function submitCommand(rawCmd) {
                   return;
                 }
                 if (isHistoryPanelOpen()) refreshHistoryPanel();
+                if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache();
                 if (typeof _maybeMountDeferredPrompt === 'function') _maybeMountDeferredPrompt(tabId);
               } else if (msg.type === 'error') {
                 _clearStalledTimeout(tabId);

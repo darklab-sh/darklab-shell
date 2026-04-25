@@ -221,7 +221,14 @@ body.mobile-terminal-mode { padding: 0; gap: 0; }
   font-style: italic;
 }
 
-.line { display: block; position: relative; animation: fade-in 0.05s ease; }
+.line {
+  display: block;
+  position: relative;
+  animation: fade-in 0.05s ease;
+  content-visibility: auto;
+  contain-intrinsic-size: 1.45em;
+}
+
 @keyframes fade-in { from { opacity:0; } to { opacity:1; } }
 
 body.ln-on .output .line::before,
@@ -230,7 +237,6 @@ body.ts-elapsed .output .line::before,
 body.ts-clock .output .line::before,
 body.ts-elapsed .output .shell-prompt-wrap::before,
 body.ts-clock .output .shell-prompt-wrap::before {
-  content: attr(data-prefix);
   position: absolute;
   left: 0;
   top: 0;
@@ -243,6 +249,25 @@ body.ts-clock .output .shell-prompt-wrap::before {
   user-select: none;
   white-space: pre;
   pointer-events: none;
+}
+
+body.ln-on:not(.ts-elapsed):not(.ts-clock) .output .line::before,
+body.ln-on:not(.ts-elapsed):not(.ts-clock) .output .shell-prompt-wrap::before {
+  content: attr(data-line-number);
+}
+
+body:not(.ln-on).ts-elapsed .output .line::before,
+body:not(.ln-on).ts-clock .output .line::before,
+body:not(.ln-on).ts-elapsed .output .shell-prompt-wrap::before,
+body:not(.ln-on).ts-clock .output .shell-prompt-wrap::before {
+  content: attr(data-prefix);
+}
+
+body.ln-on.ts-elapsed .output .line::before,
+body.ln-on.ts-clock .output .line::before,
+body.ln-on.ts-elapsed .output .shell-prompt-wrap::before,
+body.ln-on.ts-clock .output .shell-prompt-wrap::before {
+  content: attr(data-line-number) ' ' attr(data-prefix);
 }
 
 .output .line-content,
@@ -267,7 +292,12 @@ body.ts-clock .output .shell-prompt-wrap {
 }
 
 .output .line[class*="welcome-"]::before,
-.output .line[class*="wlc-"]::before {
+.output .line[class*="wlc-"]::before,
+.output .line.fake-signal-summary-header::before,
+.output .line.fake-signal-summary-section::before,
+.output .line.fake-signal-summary-row::before,
+.output .line.fake-signal-summary-note::before,
+.output .line.fake-signal-summary-sep::before {
   content: none !important;
   display: none !important;
   width: 0 !important;
@@ -580,6 +610,11 @@ body.mobile-terminal-mode .output-follow-btn {
   width: min(720px, 94vw);
 }
 
+#workspace-modal {
+  width: min(900px, 94vw);
+  height: min(760px, 86vh);
+}
+
 #theme-modal {
   width: min(1080px, 96vw);
 }
@@ -677,6 +712,183 @@ body.mobile-terminal-mode .output-follow-btn {
 
 .theme-body {
   gap: 20px;
+}
+
+.workspace-body {
+  overflow-y: auto;
+  padding: 18px 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.workspace-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.workspace-heading {
+  font-family: var(--font-display);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.workspace-subtitle,
+.workspace-file-details {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.workspace-message {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 10px 12px;
+}
+
+.workspace-message-error {
+  border-color: color-mix(in srgb, var(--red) 55%, var(--border));
+  color: var(--red);
+}
+
+.workspace-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workspace-empty,
+.workspace-file-row {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--theme-panel-alt-bg) 80%, transparent);
+}
+
+.workspace-empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 16px;
+}
+
+.workspace-file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px;
+}
+
+.workspace-file-name {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  word-break: break-word;
+}
+
+.workspace-file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.workspace-editor,
+.workspace-viewer {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.workspace-editor.u-hidden,
+.workspace-viewer.u-hidden {
+  display: none;
+}
+
+.workspace-viewer-header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.workspace-viewer-text {
+  background: var(--theme-form-control-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 0;
+  max-height: min(54vh, 520px);
+  min-height: 260px;
+  overflow: auto;
+  padding: 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.workspace-viewer-text.workspace-viewer-json {
+  white-space: pre;
+  word-break: normal;
+}
+
+.workspace-label {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.workspace-textarea {
+  min-height: 220px;
+  resize: vertical;
+}
+
+.workspace-textarea,
+.form-input {
+  background: var(--theme-form-control-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 10px 12px;
+}
+
+.workspace-editor-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+@media (max-width: 720px) {
+  .workspace-file-row,
+  .workspace-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .workspace-file-actions,
+  .workspace-editor-actions,
+  .workspace-viewer-header {
+    justify-content: flex-start;
+  }
+  .workspace-viewer-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 #theme-overlay {
@@ -1281,6 +1493,7 @@ body #output { color: var(--text); }
 body #faq-modal { background: var(--theme-faq-modal-bg); }
 body #options-modal { background: var(--theme-options-modal-bg); }
 body #workflows-modal { background: var(--theme-faq-modal-bg); }
+body #workspace-modal { background: var(--theme-faq-modal-bg); }
 body .faq-a {
   color: var(--text);
 }

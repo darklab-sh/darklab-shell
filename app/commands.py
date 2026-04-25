@@ -6,6 +6,7 @@ imported and tested in isolation.
 """
 
 from copy import deepcopy
+from dataclasses import dataclass, field
 import html
 import os
 import re
@@ -14,6 +15,13 @@ import shutil
 import yaml
 
 import config as app_config
+from workspace import (
+    InvalidWorkspacePath,
+    WorkspaceDisabled,
+    WorkspaceFileNotFound,
+    prepare_workspace_file_for_command,
+    resolve_workspace_path,
+)
 
 _HERE = os.path.dirname(__file__)
 _CONF = os.path.join(_HERE, "conf")
@@ -25,6 +33,18 @@ ASCII_FILE            = os.path.join(_CONF, "ascii.txt")
 ASCII_MOBILE_FILE     = os.path.join(_CONF, "ascii_mobile.txt")
 APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
 APP_HINTS_MOBILE_FILE = os.path.join(_CONF, "app_hints_mobile.txt")
+
+
+@dataclass(frozen=True)
+class CommandValidationResult:
+    allowed: bool
+    reason: str = ""
+    display_command: str = ""
+    exec_command: str = ""
+    workspace_reads: list[str] = field(default_factory=list)
+    workspace_writes: list[str] = field(default_factory=list)
+    workspace_exec_paths: list[str] = field(default_factory=list)
+    notices: list[str] = field(default_factory=list)
 
 
 def _project_readme_url(project_readme=None):
@@ -611,6 +631,34 @@ def _normalize_policy_list(items, *, lowercase: bool) -> list[str]:
     return result
 
 
+def _normalize_workspace_flags(items) -> list[dict[str, object]]:
+    result: list[dict[str, object]] = []
+    seen = set()
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        flag = str(item.get("flag") or "").strip()
+        mode = str(item.get("mode") or "").strip().lower()
+        value = str(item.get("value") or "").strip().lower()
+        if not flag or mode not in {"read", "write", "read_write"}:
+            continue
+        if value not in {"required", "separate", "attached", "separate_or_attached"}:
+            value = "required"
+        key = (flag, mode, value)
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized: dict[str, object] = {"flag": flag, "mode": mode, "value": value}
+        output_format = str(item.get("format") or "").strip().lower()
+        if output_format:
+            normalized["format"] = output_format
+        max_file_mb = item.get("max_file_mb")
+        if isinstance(max_file_mb, int | float) and max_file_mb > 0:
+            normalized["max_file_mb"] = max_file_mb
+        result.append(normalized)
+    return result
+
+
 def _normalize_registry_autocomplete(root: str, raw_spec) -> dict:
     if not isinstance(raw_spec, dict) or not raw_spec:
         return {}
@@ -638,6 +686,7 @@ def _normalize_commands_registry_entry(raw_entry, *, pipe_helper: bool = False) 
         "allow": _normalize_policy_list(raw_policy.get("allow"), lowercase=True),
         "deny": _normalize_policy_list(raw_policy.get("deny"), lowercase=False),
     }
+    entry["workspace_flags"] = _normalize_workspace_flags(raw_entry.get("workspace_flags"))
     return entry
 
 
@@ -672,6 +721,24 @@ def _merge_command_registry_entries(base_entry: dict, overlay_entry: dict, *, pi
         for deny in overlay_entry.get("policy", {}).get("deny", []) or []:
             if deny not in policy.setdefault("deny", []):
                 policy["deny"].append(deny)
+        workspace_flags = merged.setdefault("workspace_flags", [])
+        existing_workspace_flags = {
+            (
+                item.get("flag"),
+                item.get("mode"),
+                item.get("value"),
+            )
+            for item in workspace_flags if isinstance(item, dict)
+        }
+        for workspace_flag in overlay_entry.get("workspace_flags", []) or []:
+            key = (
+                workspace_flag.get("flag"),
+                workspace_flag.get("mode"),
+                workspace_flag.get("value"),
+            )
+            if key not in existing_workspace_flags:
+                workspace_flags.append(deepcopy(workspace_flag))
+                existing_workspace_flags.add(key)
 
     base_autocomplete = merged.get("autocomplete") or _empty_autocomplete_context_entry()
     overlay_autocomplete = overlay_entry.get("autocomplete") or {}
@@ -1652,7 +1719,124 @@ def _flag_matches_token(flag: str, token: str) -> bool:
     return token == flag
 
 
-def _is_denied(command: str, deny_entries: list[str]) -> bool:
+def _workspace_flag_specs_by_root() -> dict[str, list[dict[str, object]]]:
+    registry = load_commands_registry()
+    specs: dict[str, list[dict[str, object]]] = {}
+    for entry in registry.get("commands", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        root = str(entry.get("root") or "").strip().lower()
+        if root:
+            specs[root] = [
+                item for item in entry.get("workspace_flags", []) or []
+                if isinstance(item, dict)
+            ]
+    return specs
+
+
+def _workspace_flag_matches_token(token: str, spec: dict[str, object]) -> bool:
+    flag = str(spec.get("flag") or "")
+    if not flag:
+        return False
+    if token == flag:
+        return True
+    value_kind = str(spec.get("value") or "required")
+    if value_kind not in {"attached", "separate_or_attached"}:
+        return False
+    if flag.startswith("--"):
+        return token.startswith(f"{flag}=")
+    return token.startswith(flag) and token != flag
+
+
+def _workspace_flag_value(tokens: list[str], index: int, spec: dict[str, object]) -> tuple[str | None, int | None, str | None]:
+    flag = str(spec.get("flag") or "")
+    value_kind = str(spec.get("value") or "required")
+    token = tokens[index]
+    if token == flag:
+        if index + 1 >= len(tokens):
+            return None, None, f"{flag} requires a workspace file name"
+        return tokens[index + 1], index + 1, None
+    if value_kind in {"attached", "separate_or_attached"}:
+        if flag.startswith("--") and token.startswith(f"{flag}="):
+            return token[len(flag) + 1:], index, None
+        if not flag.startswith("--") and token.startswith(flag) and token != flag:
+            return token[len(flag):], index, None
+    return None, None, None
+
+
+def _rewrite_workspace_file_flags(
+    command: str,
+    session_id: str,
+    cfg: dict | None = None,
+) -> tuple[str, set[str], list[str], list[str], list[str], str]:
+    cfg = cfg or app_config.CFG
+    if not cfg.get("workspace_enabled"):
+        return command, set(), [], [], [], ""
+
+    tokens = split_command_argv(command)
+    if not tokens:
+        return command, set(), [], [], [], ""
+
+    specs = _workspace_flag_specs_by_root().get(tokens[0].lower(), [])
+    if not specs:
+        return command, set(), [], [], [], ""
+
+    rewritten_tokens = list(tokens)
+    exempt_flags: set[str] = set()
+    reads: list[str] = []
+    writes: list[str] = []
+    exec_paths: list[str] = []
+    index = 1
+    while index < len(tokens):
+        matched_spec = next((spec for spec in specs if _workspace_flag_matches_token(tokens[index], spec)), None)
+        if not matched_spec:
+            index += 1
+            continue
+
+        flag = str(matched_spec.get("flag") or "")
+        user_value, value_index, error = _workspace_flag_value(tokens, index, matched_spec)
+        if error:
+            return command, set(), [], [], [], error
+        if not user_value or value_index is None:
+            index += 1
+            continue
+
+        mode = str(matched_spec.get("mode") or "")
+        if os.path.isabs(user_value):
+            index = value_index + 1
+            continue
+
+        try:
+            resolved = resolve_workspace_path(
+                session_id,
+                user_value,
+                cfg,
+                ensure_parent=mode in {"write", "read_write"},
+            )
+            if mode in {"read", "read_write"} and not resolved.is_file():
+                raise WorkspaceFileNotFound(f"workspace file not found: {user_value}")
+            prepare_workspace_file_for_command(resolved, mode=mode)
+        except (InvalidWorkspacePath, WorkspaceDisabled, WorkspaceFileNotFound) as exc:
+            return command, set(), [], [], [], str(exc)
+
+        resolved_value = str(resolved)
+        if value_index == index and tokens[index] != flag:
+            rewritten_tokens[index] = f"{flag}={resolved_value}" if flag.startswith("--") else f"{flag}{resolved_value}"
+        else:
+            rewritten_tokens[value_index] = resolved_value
+
+        exempt_flags.add(flag)
+        exec_paths.append(resolved_value)
+        if mode in {"read", "read_write"}:
+            reads.append(user_value)
+        if mode in {"write", "read_write"}:
+            writes.append(user_value)
+        index = value_index + 1
+
+    return shlex.join(rewritten_tokens), exempt_flags, reads, writes, exec_paths, ""
+
+
+def _is_denied(command: str, deny_entries: list[str], *, exempt_flags: set[str] | None = None) -> bool:
     """Return True if command matches any deny entry.
     Deny entries match tool/subcommand prefixes case-insensitively, but flags are
     matched exactly as written. A deny entry like 'curl -o' is matched if:
@@ -1670,6 +1854,7 @@ def _is_denied(command: str, deny_entries: list[str]) -> bool:
     if not command_tokens:
         return False
 
+    exempt_flags = exempt_flags or set()
     for d in deny_entries:
         deny_tokens = split_command_argv(d)
         if not deny_tokens:
@@ -1682,6 +1867,8 @@ def _is_denied(command: str, deny_entries: list[str]) -> bool:
 
         tool_prefix = deny_tokens[:-1]
         flag = deny_tokens[-1]
+        if flag in exempt_flags:
+            continue
         if not _tokens_start_with(command_tokens, tool_prefix):
             continue
 
@@ -1695,42 +1882,100 @@ def _is_denied(command: str, deny_entries: list[str]) -> bool:
     return False
 
 
-def is_command_allowed(command: str) -> tuple[bool, str]:
-    """Return (allowed, reason). Blocks if any chained segment isn't on the allowlist,
-    or if the raw input contains shell operators or references to protected paths.
-    Deny prefixes from the command registry take priority over
-    allow prefixes, letting operators block specific flags on an otherwise-allowed command."""
+def validate_command(
+    command: str,
+    *,
+    session_id: str = "",
+    cfg: dict | None = None,
+) -> CommandValidationResult:
+    """Validate a command and return the display command plus execution command.
+
+    Workspace-aware file flags are still denied by default. When workspace
+    storage is enabled, declared workspace file flags are validated and rewritten
+    to the current session workspace before deny-prefix checks run.
+    """
+    cfg = cfg or app_config.CFG
     allowed, denied = load_command_policy()
     if allowed is None:
-        return True, ""  # no file or empty file = unrestricted
+        return CommandValidationResult(True, display_command=command, exec_command=command)
 
     synthetic_postfilter, postfilter_error = parse_synthetic_postfilter(command)
     if postfilter_error:
-        return False, postfilter_error
+        return CommandValidationResult(False, postfilter_error, display_command=command, exec_command=command)
     command_to_validate = synthetic_postfilter["base_command"] if synthetic_postfilter else command
 
     # Block shell chaining/redirection operators outright when restrictions are active
     if not synthetic_postfilter and SHELL_CHAIN_RE.search(command):
-        return False, "Shell operators (&&, |, ;, >, etc.) are not permitted."
+        return CommandValidationResult(
+            False,
+            "Shell operators (&&, |, ;, >, etc.) are not permitted.",
+            display_command=command,
+            exec_command=command_to_validate,
+        )
 
     if _PATH_DATA_RE.search(command_to_validate):
-        return False, "Access to /data is not permitted."
+        return CommandValidationResult(
+            False, "Access to /data is not permitted.",
+            display_command=command, exec_command=command_to_validate,
+        )
     if _PATH_TMP_RE.search(command_to_validate):
-        return False, "Access to /tmp is not permitted."
+        return CommandValidationResult(
+            False, "Access to /tmp is not permitted.",
+            display_command=command, exec_command=command_to_validate,
+        )
     if _LOOPBACK_RE.search(command_to_validate):
-        return False, "Connections to the local host are not permitted."
+        return CommandValidationResult(
+            False, "Connections to the local host are not permitted.",
+            display_command=command, exec_command=command_to_validate,
+        )
+
+    exec_command, exempt_flags, reads, writes, exec_paths, workspace_error = _rewrite_workspace_file_flags(
+        command_to_validate,
+        session_id,
+        cfg,
+    )
+    if workspace_error:
+        return CommandValidationResult(
+            False,
+            workspace_error,
+            display_command=command,
+            exec_command=command_to_validate,
+        )
 
     cmd_lower = command_to_validate.strip().lower()
 
     # Deny prefixes take priority — checked before allow list
-    if denied and _is_denied(command_to_validate.strip(), denied):
-        return False, f"Command not allowed: '{command.strip()}'"
+    if denied and _is_denied(command_to_validate.strip(), denied, exempt_flags=exempt_flags):
+        return CommandValidationResult(
+            False,
+            f"Command not allowed: '{command.strip()}'",
+            display_command=command,
+            exec_command=command_to_validate,
+        )
 
     if not any(cmd_lower == prefix or cmd_lower.startswith(prefix + " ")
                for prefix in allowed):
-        return False, f"Command not allowed: '{command.strip()}'"
+        return CommandValidationResult(
+            False,
+            f"Command not allowed: '{command.strip()}'",
+            display_command=command,
+            exec_command=command_to_validate,
+        )
 
-    return True, ""
+    return CommandValidationResult(
+        True,
+        display_command=command,
+        exec_command=exec_command,
+        workspace_reads=reads,
+        workspace_writes=writes,
+        workspace_exec_paths=exec_paths,
+    )
+
+
+def is_command_allowed(command: str) -> tuple[bool, str]:
+    """Return (allowed, reason) for legacy callers."""
+    result = validate_command(command)
+    return result.allowed, result.reason
 
 
 def rewrite_command(command: str) -> tuple[str, str | None]:

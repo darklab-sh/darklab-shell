@@ -139,6 +139,7 @@ class TestRunStreaming:
         fake_proc = _FakeProc(lines=["darklab.sh has address 104.21.4.35\n", ""])
 
         with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
@@ -166,6 +167,7 @@ class TestRunStreaming:
         fake_proc = _FakeProc(lines=["darklab.sh has address 104.21.4.35\n", ""])
 
         with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
@@ -718,6 +720,103 @@ class TestRunStreaming:
         assert "curl -I\\n" not in body
         assert '"type": "exit"' in body
 
+    def test_fake_workspace_lists_shows_and_removes_session_files(self, tmp_path):
+        client = get_client()
+        session = "sess-workspace-command"
+        workspace_cfg = {
+            "workspace_enabled": True,
+            "workspace_backend": "tmpfs",
+            "workspace_root": str(tmp_path / "workspaces"),
+            "workspace_quota_mb": 1,
+            "workspace_max_file_mb": 1,
+            "workspace_max_files": 10,
+            "workspace_inactivity_ttl_hours": 1,
+        }
+
+        with mock.patch.dict(shell_app.CFG, workspace_cfg):
+            created = client.post(
+                "/workspace/files",
+                json={"path": "targets.txt", "text": "darklab.sh\nip.darklab.sh\n"},
+                headers={"X-Session-ID": session},
+            )
+            list_resp = client.post(
+                "/run",
+                json={"command": "workspace list"},
+                headers={"X-Session-ID": session},
+            )
+            show_resp = client.post(
+                "/run",
+                json={"command": "workspace show targets.txt"},
+                headers={"X-Session-ID": session},
+            )
+
+        assert created.status_code == 200
+        assert list_resp.status_code == 200
+        list_body = list_resp.get_data(as_text=True)
+        assert "Session files:\\n" in list_body
+        assert "usage" in list_body
+        assert "25 B / 1.0 MB\\n" in list_body
+        assert "remaining" in list_body
+        assert "targets.txt" in list_body
+
+        assert show_resp.status_code == 200
+        show_body = show_resp.get_data(as_text=True)
+        assert "workspace: targets.txt\\n" in show_body
+        assert "darklab.sh\\n" in show_body
+        assert "ip.darklab.sh\\n" in show_body
+
+    def test_fake_workspace_aliases_list_and_show_session_files(self, tmp_path):
+        client = get_client()
+        session = "sess-workspace-aliases"
+        workspace_cfg = {
+            "workspace_enabled": True,
+            "workspace_backend": "tmpfs",
+            "workspace_root": str(tmp_path / "workspaces"),
+            "workspace_quota_mb": 1,
+            "workspace_max_file_mb": 1,
+            "workspace_max_files": 10,
+            "workspace_inactivity_ttl_hours": 1,
+        }
+
+        with mock.patch.dict(shell_app.CFG, workspace_cfg):
+            created = client.post(
+                "/workspace/files",
+                json={"path": "urls.txt", "text": "https://ip.darklab.sh\n"},
+                headers={"X-Session-ID": session},
+            )
+            ls_resp = client.post(
+                "/run",
+                json={"command": "ls"},
+                headers={"X-Session-ID": session},
+            )
+            cat_resp = client.post(
+                "/run",
+                json={"command": "cat urls.txt"},
+                headers={"X-Session-ID": session},
+            )
+            help_resp = client.post(
+                "/run",
+                json={"command": "workspace help"},
+                headers={"X-Session-ID": session},
+            )
+
+        assert created.status_code == 200
+        assert ls_resp.status_code == 200
+        assert "Session files:\\n" in ls_resp.get_data(as_text=True)
+        assert "urls.txt" in ls_resp.get_data(as_text=True)
+
+        assert cat_resp.status_code == 200
+        cat_body = cat_resp.get_data(as_text=True)
+        assert "workspace: urls.txt\\n" in cat_body
+        assert "https://ip.darklab.sh\\n" in cat_body
+
+        assert help_resp.status_code == 200
+        help_body = help_resp.get_data(as_text=True)
+        assert "Session file commands:\\n" in help_body
+        assert "Aliases:\\n" in help_body
+        assert "Create targets.txt from the Files panel.\\n" in help_body
+        assert "curl -o response.html https://ip.darklab.sh\\n" in help_body
+
     def test_fake_shortcuts_lists_current_shortcuts(self):
         client = get_client()
 
@@ -777,10 +876,19 @@ class TestRunStreaming:
         assert type_resp.status_code == 200
         assert "history is a built-in command\\n" in type_body
 
-    def test_fake_limits_and_status_show_configuration(self):
+    def test_fake_limits_and_status_show_configuration(self, tmp_path):
         client = get_client()
 
-        with mock.patch("fake_commands.CFG", {**shell_app.CFG, "max_tabs": 4, "permalink_retention_days": 365}):
+        with mock.patch.dict(shell_app.CFG, {
+            "max_tabs": 4,
+            "permalink_retention_days": 365,
+            "workspace_enabled": True,
+            "workspace_quota_mb": 50,
+            "workspace_max_file_mb": 5,
+            "workspace_max_files": 100,
+            "workspace_inactivity_ttl_hours": 90,
+            "workspace_root": str(tmp_path / "workspaces"),
+        }):
             limits_resp = client.post("/run", json={"command": "limits"}, headers={"X-Session-ID": "sess-limits"})
             limits_body = limits_resp.get_data(as_text=True)
             status_resp = client.post("/run", json={"command": "status"}, headers={"X-Session-ID": "sess-limits"})
@@ -789,6 +897,12 @@ class TestRunStreaming:
         assert limits_resp.status_code == 200
         assert "live preview lines" in limits_body
         assert f"{shell_app.CFG['max_output_lines']}\\n" in limits_body
+        assert "files enabled" in limits_body
+        assert "yes\\n" in limits_body
+        assert "files quota" in limits_body
+        assert "50 MB\\n" in limits_body
+        assert "files cleanup" in limits_body
+        assert "90h (0 = disabled)\\n" in limits_body
         assert status_resp.status_code == 200
         assert "session" in status_body
         assert "sess-lim" in status_body
@@ -797,6 +911,8 @@ class TestRunStreaming:
         assert "4\\n" in status_body
         assert "retention" in status_body
         assert "365\\n" in status_body
+        assert "files" in status_body
+        assert "0/100 files, 0 B / 50.0 MB\\n" in status_body
 
     def test_fake_last_lists_recent_completed_runs(self):
         client = get_client()
@@ -1352,6 +1468,66 @@ class TestRunStreaming:
         assert "Command is not installed on this instance: nmap\\n" in body
         assert '"type": "exit"' in body
         popen.assert_not_called()
+
+    def test_run_rewrites_workspace_file_flags_and_emits_notices(self, tmp_path):
+        client = get_client()
+        session_id = "sess-workspace-run"
+        fake_proc = _FakeProc(lines=["scan complete\n", ""])
+        cfg = {
+            "workspace_enabled": True,
+            "workspace_backend": "tmpfs",
+            "workspace_root": str(tmp_path),
+            "workspace_quota_mb": 1,
+            "workspace_max_file_mb": 1,
+            "workspace_max_files": 10,
+            "workspace_inactivity_ttl_hours": 1,
+        }
+        registry = {
+            "commands": [
+                {
+                    "root": "nmap",
+                    "category": "Scanning",
+                    "policy": {"allow": ["nmap"], "deny": ["nmap -iL", "nmap -oN"]},
+                    "workspace_flags": [
+                        {"flag": "-iL", "mode": "read", "value": "separate"},
+                        {"flag": "-oN", "mode": "write", "value": "separate"},
+                    ],
+                },
+            ],
+            "pipe_helpers": [],
+        }
+        from workspace import session_workspace_name, write_workspace_text_file
+        write_workspace_text_file(session_id, "targets.txt", "ip.darklab.sh\n", cfg)
+        workspace_dir = tmp_path / session_workspace_name(session_id)
+
+        with mock.patch("config.CFG", {**shell_app.CFG, **cfg}), \
+             mock.patch("blueprints.run.CFG", {**shell_app.CFG, **cfg}), \
+             mock.patch("commands.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = client.post(
+                "/run",
+                json={"command": "nmap -iL targets.txt -oN scan.txt"},
+                headers={"X-Session-ID": session_id},
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        launched = popen.call_args.args[0]
+        shell_command = launched[-1]
+        assert str(workspace_dir / "targets.txt") in shell_command
+        assert str(workspace_dir / "scan.txt") in shell_command
+        assert "nmap --privileged" in shell_command
+        assert "nmap -iL targets.txt -oN scan.txt" not in shell_command
+        assert "[workspace] reading targets.txt" in body
+        assert "[workspace] writing scan.txt" in body
+        assert "scan complete\\n" in body
+        hist = client.get("/history", headers={"X-Session-ID": session_id})
+        data = json.loads(hist.data)
+        assert data["runs"][0]["command"] == "nmap -iL targets.txt -oN scan.txt"
 
 
 class TestRunOutputArtifacts:

@@ -17,6 +17,7 @@ fi
 TMP_ROOT="/tmp/darklab_shell-playwright"
 mkdir -p "$TMP_ROOT"
 DATA_DIR="$(mktemp -d "$TMP_ROOT/${SLOT}.data.XXXXXX")"
+WORKSPACE_DIR="$DATA_DIR/workspaces"
 
 # Build a per-slot conf dir so tests always have a predictable config regardless
 # of whether a local config.local.yaml exists on the host.  The base config.yaml
@@ -24,10 +25,14 @@ DATA_DIR="$(mktemp -d "$TMP_ROOT/${SLOT}.data.XXXXXX")"
 # so Playwright tests can navigate to /diag without forging IP headers.
 CONF_DIR="$(mktemp -d "$TMP_ROOT/${SLOT}.conf.XXXXXX")"
 cp "$APP_DIR/conf/config.yaml" "$CONF_DIR/config.yaml"
-cat > "$CONF_DIR/config.local.yaml" << 'EOF'
+cat > "$CONF_DIR/config.local.yaml" << EOF
 # E2E test overlay — not for production use.
 diagnostics_allowed_cidrs:
   - 127.0.0.0/8
+workspace_enabled: true
+workspace_backend: tmpfs
+workspace_root: "$WORKSPACE_DIR"
+workspace_inactivity_ttl_hours: 1
 EOF
 
 cd "$APP_DIR"

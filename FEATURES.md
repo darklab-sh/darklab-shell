@@ -24,6 +24,7 @@ Full per-feature reference for darklab_shell. See the [README](README.md) for th
 - [Share Redaction](#share-redaction)
 - [Mobile Shell](#mobile-shell)
 - [Built-In Commands](#built-in-commands)
+- [Session Files](#session-files)
 - [Command Allowlist](#command-allowlist)
 - [Wordlists](#wordlists)
 - [Welcome Animation](#welcome-animation)
@@ -359,7 +360,8 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 - Command output arrives line-by-line over SSE; fast commands batch flushes, slow scans stream each line as it arrives.
 - The output view follows the live tail automatically, including during bursty runs that repaint quickly; only an actual user scroll-away disables follow mode and surfaces the tab-scoped jump-to-live / jump-to-bottom helper until the tail is rejoined.
 - A live elapsed run-timer sits next to the status pill while a command runs; the final elapsed time is recorded in the exit line.
-- Timestamps (elapsed or clock) and line numbers are independently toggleable from the tabbar controls (or the mobile menu); both are rendered from shared per-line prefix metadata so toggling updates existing output in place without re-fetching.
+- Timestamps (elapsed or clock) and line numbers are independently toggleable from the tabbar controls (or the mobile menu). Timestamp fragments stay on each row, while line numbers are assigned once as output is emitted so high-volume commands do not have to renumber thousands of visible rows after `max_output_lines` trimming begins.
+- Live output rendering batches bursty streams, skips full transcript scans on normal appends, uses browser content visibility for offscreen rows, and trims old rendered rows without changing the retained raw-output model. Once `max_output_lines` is reached, visible line numbers continue increasing with the command's emitted output order rather than resetting to `1` for the remaining rendered window.
 - When the SSE stream goes quiet for 45 seconds, the shell shows inline warning copy instead of waiting indefinitely with a spinning run state.
 - If the original stream later resumes, the shell prints an inline reconnection success line, restores the tab/HUD to `RUNNING`, re-enables the kill affordance, and continues streaming output in place.
 
@@ -680,8 +682,9 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 **Utility commands**
 
 - `help`, `commands`, `history`, `last`, `limits`, `retention`, `status`, `stats`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `fortune`, `jobs`, `shortcuts`, `clear`, `version`, and `whoami` are available in every session.
-- `status` prints a compact session summary: masked active session ID, session type, run count, snapshot count, starred-command count, whether saved Options exist for the session, active-job count, and the current instance-level save/retention limits.
+- `status` prints a compact session summary: masked active session ID, session type, run count, snapshot count, starred-command count, whether saved Options exist for the session, active-job count, compact session file usage when Files are enabled, and the current instance-level save/retention limits.
 - `stats` prints session activity totals and external-tool command-root breakdowns: runs, snapshots, starred commands, active jobs, success rate, average duration, and the top non-built-in command roots by run count.
+- `workspace list`, `workspace show <file>`, `workspace rm <file>`, plus the convenience aliases `ls`, `cat <file>`, and `rm <file>`, expose keyboard-first access to the current session workspace when workspace storage is enabled. `workspace list` reports current file count, used quota, and remaining quota before listing files.
 - `theme` lists and applies runtime theme variants from the terminal. `config` lists, reads, and updates user options such as line numbers, timestamps, welcome behavior, share redaction defaults, run notifications, and HUD clock mode.
 - `ps` lists currently running processes for the session (PID, TTY, STAT, START, CMD columns), or shows a `no running processes` notice when idle.
 
@@ -703,6 +706,32 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 **Configuration:** none. The built-in command surface is defined in application code, not in operator config.
 
 **Related files:** `app/fake_commands.py` (built-in command registry + output rendering), `app/commands.py` (dispatch + man routing), `app/static/js/app.js` (built-in autocomplete context, client-side command flows, and Options/theme command handling), `app/static/js/runner.js` (client-side command interception).
+
+---
+
+## Session Files
+
+**Purpose:** optional app-mediated per-session file access for commands that need small input or output files, without turning the app into a general-purpose shell filesystem.
+
+**Behavior:**
+
+- Session file storage is disabled by default and controlled by server-side `workspace_*` config keys.
+- Each browser/session token gets a hashed session directory under the configured workspace root.
+- Session directories use sticky, setgid, group-scoped permissions and app-created files are group-readable but not world-readable; commands run as the unprivileged `scanner` user with a restrictive umask so tool-created workspace outputs follow the same boundary.
+- Production session file storage uses a host bind mount by default. The current image uses `appuser` `995:995` and `scanner` `994:994`; bind-mount roots should be pre-owned by `995:995`, with the workspace root set to `0730`, session directories set to `3730`, app-created files set to `0640`, and command-created writable outputs allowed as `0660`.
+- Workspace access updates the hashed session directory activity timestamp. Periodic cleanup removes inactive `sess_*` directories after `workspace_inactivity_ttl_hours`; it does not delete individual files solely because their file timestamps are old.
+- File names are relative and display-friendly; absolute paths, traversal, backslashes, hidden names, symlinks, and paths outside the session root are rejected.
+- The Files panel can create, view, edit, download, and delete text files owned by the current session; obvious JSON files are pretty-printed in the read-only viewer.
+- The `workspace` built-in provides terminal access to the same file model through `workspace list`, `workspace show <file>`, and `workspace rm <file>`; `workspace list` reports file count, used quota, and remaining quota before listing files.
+- The `ls`, `cat <file>`, and `rm <file>` aliases map to workspace list/show/remove operations only; they do not expose arbitrary host/container filesystem access.
+- `workspace rm <file>` and `rm <file>` require the same transcript-owned yes/no confirmation model as other destructive terminal-native actions.
+- Loaded workspace file names feed autocomplete for `workspace show`, `workspace rm`, and `cat`.
+- Selected command flags declared in `commands.yaml` can consume or write session files. At execution time, user-facing names such as `targets.txt` are validated and rewritten to the session workspace path passed to the subprocess.
+- Shell navigation and redirection remain blocked; all file access must go through the Files panel, workspace routes, the `workspace` built-in, or explicitly declared command flags.
+
+**Configuration:** `workspace_enabled`, `workspace_backend`, `workspace_root`, `workspace_quota_mb`, `workspace_max_file_mb`, `workspace_max_files`, and `workspace_inactivity_ttl_hours` in `conf/config.yaml`; per-command `workspace_flags` in `conf/commands.yaml`.
+
+**Related files:** `app/workspace.py` (path, quota, permission, and cleanup helpers), `app/blueprints/workspace.py` (workspace file routes), `app/static/js/workspace.js` (Files panel), `app/fake_commands.py` (`workspace` built-in), `app/commands.py` (workspace flag validation and rewrite).
 
 ---
 
@@ -1009,7 +1038,7 @@ If a session has run history, the terminal flows (`generate`, `set`, `clear`) us
 **Behavior:**
 
 - **Shell injection protection.** The app blocks metacharacters that enable command chaining and redirection — `&&`, `||`, `;`, backticks, `$()`, and redirection operators. `|` is allowed only within the constrained pipe model described in [Built-In Pipe Support](#built-in-pipe-support). Direct filesystem references to `/data` and `/tmp` are blocked as command arguments (using a negative lookbehind so URLs containing those strings as path segments are still permitted). Loopback targets (`localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]`) are blocked at the validation layer.
-- **Process isolation.** Gunicorn runs as unprivileged `appuser`; user-submitted commands run as separate unprivileged `scanner` processes. The container filesystem is read-only (`read_only: true`); `/data` is the only writable path and is accessible only to `appuser` (`chmod 700`). Container startup installs an OS-level guard so `scanner` cannot connect back to the app port.
+- **Process isolation.** Gunicorn runs as unprivileged `appuser`; user-submitted commands run as separate unprivileged `scanner` processes. The container filesystem is read-only (`read_only: true`); `/data` is accessible only to `appuser` (`chmod 700`), while optional session workspaces use a shared appuser/scanner group with non-world-readable files. Container startup installs an OS-level guard so `scanner` cannot connect back to the app port.
 - **Rate limiting + process tracking.** Redis-backed rate limiting prevents burst abuse across multiple Gunicorn workers. PID tracking in Redis keeps kill behavior correct when a kill request lands on a different worker than the one that started the process.
 - **Session tracking.** Browsers send a stable `X-Session-ID` so history entries, rate-limit state, and test isolation remain scoped per client without requiring authentication.
 

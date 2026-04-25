@@ -23,6 +23,8 @@ const freshCaptureHome = (page, opts = {}) => freshHome(page, {
   guardrailMode: 'mobile',
 })
 
+const WORKSPACE_CAPTURE_CMD = 'curl -L -o response.html https://noc.darklab.sh'
+
 async function runCommandMobile(page, cmd) {
   await setComposerValueForTest(page, cmd, { mobile: true })
   await page.locator('#mobile-run-btn').click()
@@ -64,6 +66,18 @@ async function openRecentsSheet(page) {
   await openMenu(page)
   await page.locator('#mobile-menu-sheet [data-menu-action="history"]').click()
   await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
+}
+
+async function createAndOpenWorkspaceResponseFileMobile(page) {
+  await runCommandMobile(page, WORKSPACE_CAPTURE_CMD)
+  await openMenu(page)
+  await page.locator('#mobile-menu-sheet [data-menu-action="workspace"]').click()
+  await expect(page.locator('#workspace-modal')).toBeVisible()
+  const row = page.locator('.workspace-file-row', { hasText: 'response.html' }).first()
+  await expect(row).toBeVisible()
+  await row.locator('[data-workspace-action="view"]').click()
+  await expect(page.locator('#workspace-viewer')).toBeVisible()
+  await expect(page.locator('#workspace-viewer-title')).toHaveText('response.html')
 }
 
 const scenes = [
@@ -162,6 +176,15 @@ const scenes = [
       await page.locator('#mobile-menu-sheet [data-menu-action="search"]').click()
       await page.locator('#search-input').fill('localhost')
       await expect(page.locator('.tab-panel.active .output mark.search-hl').first()).toBeVisible()
+    },
+  },
+  {
+    slug: 'files-panel-response-file',
+    title: 'Main UI - Files panel with captured response file',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await createAndOpenWorkspaceResponseFileMobile(page)
     },
   },
   {

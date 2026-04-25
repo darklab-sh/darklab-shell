@@ -22,11 +22,13 @@ from typing import cast
 from flask import Blueprint, Response, jsonify, request
 
 from commands import (
+    CommandValidationResult,
     is_command_allowed,
     parse_synthetic_postfilter,
     rewrite_command,
     runtime_missing_command_message,
     runtime_missing_command_name,
+    validate_command,
 )
 from config import CFG, SCANNER_PREFIX
 from database import db_connect
@@ -45,11 +47,42 @@ log = logging.getLogger("shell")
 
 run_bp = Blueprint("run", __name__)
 
+
+def _validate_command_for_run(command: str, session_id: str) -> CommandValidationResult:
+    # Several route tests monkeypatch this module's legacy is_command_allowed
+    # symbol to keep subprocess behavior focused. Honor that seam while the
+    # runtime path uses the richer validator for workspace rewrites.
+    if getattr(is_command_allowed, "__module__", "") != "commands":
+        allowed, reason = is_command_allowed(command)
+        return CommandValidationResult(
+            allowed,
+            reason,
+            display_command=command,
+            exec_command=command,
+        )
+    return validate_command(command, session_id=session_id, cfg=CFG)
+
+
+def _workspace_notice_lines(validation: CommandValidationResult) -> list[str]:
+    notices: list[str] = []
+    for path in validation.workspace_reads:
+        notices.append(f"[workspace] reading {path}")
+    for path in validation.workspace_writes:
+        notices.append(f"[workspace] writing {path}")
+    return notices
+
+
 SHELL_BIN = shutil.which("sh") or "/bin/sh"
 SUDO_BIN  = shutil.which("sudo") or "/usr/bin/sudo"
 KILL_BIN  = shutil.which("kill") or "/bin/kill"
 
 CLIENT_SIDE_RUN_ROOTS = {"theme", "config", "session-token"}
+RUN_SUBPROCESS_UMASK = 0o027
+
+
+def _prepare_run_child() -> None:
+    os.setsid()
+    os.umask(RUN_SUBPROCESS_UMASK)
 
 
 # ── Run output helpers ────────────────────────────────────────────────────────
@@ -647,13 +680,14 @@ def run_command():
         events = filtered_events
         return _synthetic_run_response(original_command, session_id, client_ip, events, exit_code)
 
-    allowed, reason = is_command_allowed(original_command)
-    if not allowed:
+    validation = _validate_command_for_run(original_command, session_id)
+    if not validation.allowed:
         log.warning("CMD_DENIED", extra={
             "ip": client_ip, "session": get_log_session_id(session_id),
-            "cmd": original_command, "reason": reason,
+            "cmd": original_command, "reason": validation.reason,
         })
-        return jsonify({"error": reason}), 403
+        return jsonify({"error": validation.reason}), 403
+    execution_command = validation.exec_command or execution_command
 
     command, notice = rewrite_command(execution_command)
     if command != execution_command:
@@ -693,7 +727,7 @@ def run_command():
             text=True,
             bufsize=1,
             universal_newlines=True,
-            preexec_fn=os.setsid,
+            preexec_fn=_prepare_run_child,
         )  # nosec B603
     except Exception as e:
         log.error("RUN_SPAWN_ERROR", exc_info=True, extra={
@@ -823,6 +857,18 @@ def run_command():
                     ts_elapsed=f"+{(notice_dt - run_started_dt).total_seconds():.1f}s",
                 )
                 yield _sse_output_event("notice", notice, metadata=metadata)
+
+            for workspace_notice in _workspace_notice_lines(validation):
+                notice_dt = datetime.now(timezone.utc)
+                metadata = _capture_add_line_with_signals(
+                    capture,
+                    signal_classifier,
+                    workspace_notice,
+                    cls="notice",
+                    ts_clock=notice_dt.strftime("%H:%M:%S"),
+                    ts_elapsed=f"+{(notice_dt - run_started_dt).total_seconds():.1f}s",
+                )
+                yield _sse_output_event("notice", workspace_notice, metadata=metadata)
 
             if proc.stdout is None:
                 raise RuntimeError("Process stdout pipe was not created")
@@ -960,8 +1006,8 @@ def kill_command():
         return jsonify({"error": "No such process"}), 404
     active_run_remove(run_id)
     try:
-        # Subprocesses are spawned with preexec_fn=os.setsid, which makes
-        # PGID == PID at creation time. Use the stored PID directly as the
+        # Subprocesses call os.setsid() during child setup, which makes PGID
+        # == PID at creation time. Use the stored PID directly as the
         # PGID rather than calling os.getpgid() — if the subprocess has
         # already exited and its PID was reused (e.g. by a new Gunicorn
         # worker), os.getpgid() would return the wrong PGID and we would

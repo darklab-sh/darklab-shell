@@ -331,6 +331,10 @@
       global.openThemeSelector();
       return;
     }
+    if (action === 'workspace' && typeof global.openWorkspace === 'function') {
+      global.openWorkspace();
+      return;
+    }
     if (action === 'faq' && typeof global.openFaq === 'function') {
       global.openFaq();
     }

@@ -106,11 +106,13 @@ function setupMobileSheetDragClose() {
   if (typeof bindMobileSheet !== 'function') return;
   const faqModal = document.getElementById('faq-modal');
   const optionsModal = document.getElementById('options-modal');
+  const workspaceModal = document.getElementById('workspace-modal');
   const workflowsModal = document.getElementById('workflows-modal');
 
   bindMobileSheet(mobileMenu,         { onClose: () => hideMobileMenu() });
   bindMobileSheet(historyPanel,       { onClose: () => hideHistoryPanel() });
   bindMobileSheet(workflowsModal,     { onClose: () => closeWorkflows() });
+  bindMobileSheet(workspaceModal,     { onClose: () => { if (typeof closeWorkspace === 'function') closeWorkspace(); } });
   bindMobileSheet(faqModal,           { onClose: () => closeFaq() });
   bindMobileSheet(optionsModal,       { onClose: () => closeOptions() });
 }
@@ -131,6 +133,12 @@ function setupDismissibleOverlays() {
     isOpen: isWorkflowsOverlayOpen,
     onClose: closeWorkflows,
     closeButtons: workflowsCloseBtn,
+  });
+  bindDismissible(_uiOverlayRefs.workspaceOverlay, {
+    level: 'panel',
+    isOpen: () => typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen(),
+    onClose: () => { if (typeof closeWorkspace === 'function') closeWorkspace(); },
+    closeButtons: typeof workspaceCloseBtn !== 'undefined' ? workspaceCloseBtn : null,
   });
   bindDismissible(_uiOverlayRefs.faqOverlay, {
     level: 'panel',
@@ -181,7 +189,7 @@ function setupModalFocusTraps() {
   // hidden (display: none on the overlay wrapper), so the listener is only
   // reachable while the modal is open.
   if (typeof bindFocusTrap !== 'function') return;
-  const ids = ['options-modal', 'theme-modal', 'faq-modal', 'workflows-modal'];
+  const ids = ['options-modal', 'theme-modal', 'faq-modal', 'workspace-modal', 'workflows-modal'];
   ids.forEach((id) => {
     const card = document.getElementById(id);
     if (card) bindFocusTrap(card);
@@ -303,6 +311,7 @@ function dispatchMobileMenuAction(action, btn = null) {
   if (action === 'options') openOptions();
   if (action === 'theme') openThemeSelector();
   if (action === 'workflows') openWorkflows();
+  if (action === 'workspace' && typeof openWorkspace === 'function') openWorkspace();
   if (action === 'faq') openFaq();
   if (action === 'diag') window.location.href = '/diag';
 }
@@ -1098,6 +1107,37 @@ function _replayPromptShortcutAfterSelection(e) {
   return true;
 }
 
+function _isMajorSurfaceOpenForPromptPaste() {
+  return (
+    isFaqOverlayOpen()
+    || isOptionsOverlayOpen()
+    || isThemeOverlayOpen()
+    || isWorkflowsOverlayOpen()
+    || (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen())
+    || isHistoryPanelOpen()
+    || (typeof isConfirmOpen === 'function' && isConfirmOpen())
+  );
+}
+
+document.addEventListener('paste', e => {
+  if (!cmdInput || isEditableTarget(e.target) || _isMajorSurfaceOpenForPromptPaste()) return;
+  const clipboard = e.clipboardData || (typeof window !== 'undefined' ? window.clipboardData : null);
+  const text = clipboard && typeof clipboard.getData === 'function'
+    ? (clipboard.getData('text/plain') || clipboard.getData('text') || '')
+    : '';
+  if (!text) return;
+
+  e.preventDefault();
+  if (typeof window !== 'undefined' && typeof window.getSelection === 'function') {
+    const selection = window.getSelection();
+    if (selection && typeof selection.removeAllRanges === 'function') selection.removeAllRanges();
+  }
+  refocusComposerAfterAction({ preventScroll: true });
+  const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || '');
+  const { start, end } = getCmdSelection(value);
+  replaceCmdRange(value, start, end, text);
+});
+
 // ── Global click: dismiss history panel, autocomplete ──
 // bindOutsideClickClose owns ambient click dismissal for the two surfaces
 // that have no scrim of their own (the history side panel and the
@@ -1309,9 +1349,9 @@ cmdInput.addEventListener('input', () => {
 });
 
 cmdInput.addEventListener('keydown', e => {
-  if (isFaqOverlayOpen() || isWorkflowsOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen()) {
+  if (isFaqOverlayOpen() || isWorkflowsOverlayOpen() || isWorkspaceOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen()) {
     if (e.key === 'Escape') {
-      closeFaq(); closeWorkflows(); closeOptions(); closeThemeSelector();
+      closeFaq(); closeWorkflows(); if (typeof closeWorkspace === 'function') closeWorkspace(); closeOptions(); closeThemeSelector();
       refocusComposerAfterAction({ defer: true });
       e.preventDefault();
     }

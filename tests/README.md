@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 929
-- `vitest`: 781
-- `playwright`: 207
-- total: 1,917
+- `pytest`: 956
+- `vitest`: 795
+- `playwright`: 209
+- total: 1,960
 
 This document is organized in two parts:
 
@@ -174,7 +174,7 @@ scripts/record_demo_mobile.sh                       # mobile (430×932 iPhone 15
 scripts/record_demo.sh --base-url http://localhost:9000
 ```
 
-Wrappers health-check the container, set `RUN_DEMO=1`, run the spec, and stitch frames into `assets/darklab_shell_demo.mp4` / `assets/darklab_shell_mobile_demo.mp4` with ffmpeg (HEVC/VideoToolbox on macOS, VP9/libvpx on Linux). See the appendix [Demo Recording Specs](#demo-recording-specs) for per-spec details and [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
+Wrappers health-check the container, seed/register the demo session token, probe `GET /workspace/files` with that token so the Files segment can create `response.html`, set `RUN_DEMO=1`, run the spec, and stitch frames into `assets/darklab_shell_demo.mp4` / `assets/darklab_shell_mobile_demo.mp4` with ffmpeg (HEVC/VideoToolbox on macOS, VP9/libvpx on Linux). See the appendix [Demo Recording Specs](#demo-recording-specs) for per-spec details and [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
 
 Desktop and mobile demo configs share a central visual contract in [config/playwright.visual.contracts.js](../config/playwright.visual.contracts.js), and both specs assert that contract at startup through `tests/js/e2e/visual_guardrails.js`. That keeps viewport, pixel density, touch/mobile-mode assumptions, and `/status` health aligned with the wrapper/config setup instead of drifting silently.
 
@@ -192,7 +192,7 @@ scripts/capture_ui_screenshots.sh --theme all
 scripts/capture_ui_screenshots.sh --theme all --theme-variant light
 ```
 
-The wrapper sets `RUN_CAPTURE=1` and writes PNGs, per-UI manifest JSON files, and a static `index.html` review page to `/tmp/darklab_shell-ui-capture/`. Unset `--theme` and `--theme default` resolve to the configured app default theme slug from `app/config.py`, so default captures are stored under that real theme name instead of a duplicate `default/` folder. The review page groups scenes by UI/theme and includes a full-screen image viewer with left/right keyboard navigation. Capture runs boot an isolated temp app instance with seeded history, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, and history-heavy states look production-like. See the appendix [UI Screenshot Capture Specs](#ui-screenshot-capture-specs) for per-spec details, and [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
+The wrapper sets `RUN_CAPTURE=1` and writes PNGs, per-UI manifest JSON files, and a static `index.html` review page to `/tmp/darklab_shell-ui-capture/`. Unset `--theme` and `--theme default` resolve to the configured app default theme slug from `app/config.py`, so default captures are stored under that real theme name instead of a duplicate `default/` folder. The review page groups scenes by UI/theme and includes a full-screen image viewer with left/right keyboard navigation. Capture runs boot an isolated temp app instance with seeded history, workspace storage enabled, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, history-heavy states, and Files panel states look production-like. See the appendix [UI Screenshot Capture Specs](#ui-screenshot-capture-specs) for per-spec details, and [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
 
 The capture configs use the same shared visual contract file as the demo pipeline, and `ui_capture_shared.js` runs `visual_guardrails.js` during each `freshHome(...)` reset. That means every captured scene re-checks viewport, density, touch/mobile-mode expectations, `/status` health, the fixed capture token, and the minimum seeded `/history` shape before screenshots are taken.
 
@@ -327,6 +327,16 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadConfig.test_share_redaction_enabled_defaults_true` | Checks that share redaction defaults enabled when omitted from config. |
 | `TestLoadConfig.test_get_share_redaction_rules_includes_builtins_and_custom_rules_when_enabled` | Checks that effective share redaction rules include the built-in baseline plus operator rules when enabled. |
 | `TestLoadConfig.test_get_share_redaction_rules_returns_empty_when_disabled` | Checks that effective share redaction rules are empty when the feature is disabled. |
+| `TestSessionWorkspace.test_disabled_workspace_rejects_operations` | Verifies that workspace helpers reject operations while the feature is disabled. |
+| `TestSessionWorkspace.test_session_workspace_uses_hashed_session_directory` | Verifies that session workspace directories use hashed session names instead of raw session identifiers. |
+| `TestSessionWorkspace.test_write_read_list_delete_text_file` | Verifies the backend workspace text-file lifecycle for write, read, list, usage, and delete operations. |
+| `TestSessionWorkspace.test_prepare_workspace_file_for_command_uses_limited_write_mode` | Verifies that command output targets get limited group-write permissions without becoming world-readable. |
+| `TestSessionWorkspace.test_rejects_absolute_traversal_hidden_and_backslash_paths` | Verifies that unsafe workspace paths are rejected before touching the filesystem. |
+| `TestSessionWorkspace.test_rejects_symlink_escape` | Verifies that symlinked workspace paths cannot escape the session directory. |
+| `TestSessionWorkspace.test_enforces_file_size_quota_and_file_count` | Verifies max-file-size, total-quota, and max-file-count enforcement. |
+| `TestSessionWorkspace.test_cleanup_removes_only_expired_session_directories` | Verifies that cleanup removes only expired hashed session directories and leaves unrelated paths alone. |
+| `TestSessionWorkspace.test_cleanup_uses_session_directory_activity_not_file_mtime` | Verifies that workspace cleanup uses the session directory activity timestamp rather than preserving a session because one file has a newer timestamp. |
+| `TestSessionWorkspace.test_touch_session_workspace_extends_cleanup_activity` | Verifies that app-mediated workspace access refreshes the session directory activity timestamp so active workspaces are retained. |
 | `TestDerivedCommandRegistry.test_commands_registry_loader_normalizes_policy_and_autocomplete` | Verifies that the `commands.yaml` loader normalizes policy entries and autocomplete metadata, including pipe-helper entries. |
 | `TestDerivedCommandRegistry.test_commands_registry_local_overlay_appends_policy_and_context` | Verifies that `commands.local.yaml` appends policy entries, adds new roots, overrides categories, and merges autocomplete hints without replacing the base registry. |
 | `TestDerivedCommandRegistry.test_autocomplete_context_can_be_derived_from_commands_registry` | Verifies that browser autocomplete context can be derived from command and pipe-helper registry entries. |
@@ -650,6 +660,11 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIsCommandAllowedEdges.test_deny_rule_takes_priority_over_allow` | Checks that deny rule takes priority over allow. |
 | `TestIsCommandAllowedEdges.test_tmp_url_path_is_allowed` | Checks that /tmp URL path is allowed. |
 | `TestIsCommandAllowedEdges.test_local_tmp_path_is_blocked` | Checks that local /tmp path is blocked. |
+| `TestIsCommandAllowedEdges.test_workspace_enabled_exempts_declared_file_flags_and_rewrites_paths` | Verifies that declared workspace file flags can bypass deny entries only when workspace storage is enabled and the file names rewrite into the session workspace. |
+| `TestIsCommandAllowedEdges.test_workspace_disabled_keeps_declared_file_flags_denied` | Verifies that declared workspace file flags remain denied while workspace storage is disabled. |
+| `TestIsCommandAllowedEdges.test_workspace_read_flags_rewrite_relative_files_but_keep_packaged_wordlists` | Verifies that workspace-aware read flags rewrite relative session file names while preserving allowed packaged absolute wordlists. |
+| `TestIsCommandAllowedEdges.test_workspace_write_flags_keep_dev_null_exception` | Verifies that workspace-aware write flags do not break the existing `/dev/null` output exception. |
+| `TestIsCommandAllowedEdges.test_workspace_flags_cover_common_list_wordlist_and_output_tools` | Verifies workspace read/write flag rewrites for `pd-httpx`, `gobuster`, `naabu`, and `katana` using the real command registry metadata. |
 | `TestFakeCommandResolution.test_documented_fake_commands_are_backed_by_runtime_dispatch` | Checks that every entry in `_DOCUMENTED_FAKE_COMMANDS` has a corresponding runtime dispatch handler. |
 | `TestFakeCommandResolution.test_resolves_supported_fake_commands` | Checks that resolves supported fake commands. |
 | `TestFakeCommandResolution.test_rejects_non_fake_commands` | Checks that rejects non fake commands. |
@@ -754,6 +769,15 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWelcomeHintsRoute.test_items_key_present` | Checks items key present handling. |
 | `TestMobileWelcomeHintsRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestMobileWelcomeHintsRoute.test_items_key_present` | Checks items key present handling. |
+| `TestWorkspaceRoutes.test_requires_active_session_header` | Verifies that workspace routes reject requests without an active session identity. |
+| `TestWorkspaceRoutes.test_disabled_workspace_returns_403` | Verifies that workspace routes stay unavailable while workspace storage is disabled. |
+| `TestWorkspaceRoutes.test_write_list_read_delete_lifecycle` | Verifies the route-level workspace lifecycle for write, list, read, and delete operations. |
+| `TestWorkspaceRoutes.test_workspace_files_are_session_isolated` | Verifies that a file created under one session cannot be read from another session workspace. |
+| `TestWorkspaceRoutes.test_rejects_unsafe_paths` | Verifies that route writes reject traversal, absolute, hidden, and backslash paths. |
+| `TestWorkspaceRoutes.test_rejects_unsafe_paths_on_read_delete_and_download` | Verifies that workspace read, delete, and download routes reject traversal, absolute, hidden, and backslash file names before touching disk. |
+| `TestWorkspaceRoutes.test_enforces_quota_and_type_checks` | Verifies request-body validation and workspace quota errors at the HTTP boundary. |
+| `TestWorkspaceRoutes.test_download_streams_session_owned_file` | Verifies that validated session-owned files can be downloaded without exposing absolute paths. |
+| `TestWorkspaceRoutes.test_periodic_cleanup_runs_before_requests_when_workspace_enabled` | Verifies that request-driven workspace cleanup removes expired session directories when workspace storage is enabled. |
 | `TestRunRoute.test_missing_command_returns_400` | Checks that missing command returns 400. |
 | `TestRunRoute.test_empty_command_returns_400` | Checks that empty command returns 400. |
 | `TestRunRoute.test_non_string_command_returns_400` | Checks that non string command returns 400. |
@@ -874,6 +898,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunStreaming.test_fake_commands_lists_built_in_and_external_catalogs` | Checks that fake `commands` prints built-in and allowed external sections while deduping external command variants down to roots. |
 | `TestRunStreaming.test_fake_commands_supports_built_in_only_filter` | Checks that `commands --built-in` prints only the built-in command section. |
 | `TestRunStreaming.test_fake_commands_supports_external_only_filter` | Checks that `commands --external` prints only the allowed external command section. |
+| `TestRunStreaming.test_fake_workspace_lists_shows_and_removes_session_files` | Verifies that the `workspace` built-in can list, show, and remove session-owned workspace files. |
+| `TestRunStreaming.test_fake_workspace_aliases_list_and_show_session_files` | Verifies that `ls` lists session workspace files and `cat <file>` shows a session workspace file without exposing arbitrary filesystem access. |
 | `TestRunStreaming.test_fake_shortcuts_lists_current_shortcuts` | Checks that fake shortcuts lists current shortcuts. |
 | `TestRunStreaming.test_fake_shortcuts_renders_mac_keys_for_mac_user_agent` | Confirms a Macintosh User-Agent switches the built-in command's Tabs/UI rendering to `Option+*` chords. |
 | `TestRunStreaming.test_fake_banner_renders_ascii_art` | Checks that fake banner renders ascii art. |
@@ -912,6 +938,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunStreaming.test_fake_ps_lists_active_session_processes` | Checks that `ps aux` lists active run processes for the current session. |
 | `TestRunStreaming.test_run_reports_missing_allowlisted_command_without_spawning` | Checks that run reports missing allowlisted command without spawning. |
 | `TestRunStreaming.test_run_checks_missing_binary_after_rewrite` | Checks that run checks missing binary after rewrite. |
+| `TestRunStreaming.test_run_rewrites_workspace_file_flags_and_emits_notices` | Verifies that `/run` executes workspace-aware file flags with rewritten session paths, emits friendly workspace read/write notices, and preserves the original command in history. |
 | `TestRunOutputArtifacts.test_delete_run_removes_output_artifact` | Checks that delete run removes output artifact. |
 | `TestRunOutputArtifacts.test_clear_history_removes_output_artifacts_for_session` | Checks that clear history removes output artifacts for session. |
 | `TestHistoryIsolation.test_history_only_returns_runs_for_current_session` | Checks that history only returns runs for current session. |
@@ -1155,6 +1182,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `keeps config command output pinned to the tail when the tab is already following` | Verifies that terminal-native `config set` output preserves tail-follow state after async preference application. |
 | `serves runtime autocomplete context for theme and config values` | Verifies that theme slugs, config keys, and config values are generated into the shared autocomplete context instead of duplicated static lists. |
 | `serves runtime autocomplete context for built-in command lookup helpers` | Verifies that runtime built-in context covers `session-token`, simple built-ins, and dynamic `man` / `which` / `type` lookup suggestions. |
+| `serves loaded workspace files as workspace command autocomplete values` | Verifies that loaded session workspace files are offered as autocomplete values for `workspace show`, `workspace rm`, and `cat`. |
 | `keeps code-owned built-ins out of commands.yaml` | Verifies that app-owned built-ins are not duplicated in the operator-facing command registry. |
 | `groups theme cards into labeled sections in the preview modal` | Verifies that groups theme cards into labeled sections in the preview modal. |
 | `falls back to the current/default theme when localStorage references a missing theme` | Verifies that falls back to the current/default theme when localStorage references a missing theme. |
@@ -1480,6 +1508,8 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `falls back to plain-text rendering when AnsiUp is unavailable` | Verifies that falls back to plain-text rendering when AnsiUp is unavailable. |
 | `wraps output content in a line-content container so prefix mode does not reshape the line flow` | Verifies that wraps output content in a line-content container so prefix mode does not reshape the line flow. |
 | `trims old lines and keeps rawLines in sync` | Verifies that trims old lines and keeps rawLines in sync. |
+| `avoids full output scans while trimming in default prefix mode` | Verifies that appending lines in the default no-prefix mode trims max-line output without rescanning every rendered row. |
+| `keeps line-number appends incremental after max-line trimming` | Verifies that line-number mode assigns stable row numbers without rescanning every rendered row after max-line trimming. |
 | `adds timestamp dataset fields` | Verifies that adds timestamp dataset fields. |
 | `stores server-provided signal metadata on DOM lines and rawLines` | Verifies that streamed backend signal metadata is attached to rendered output rows and retained in tab rawLines. |
 | `uses +0.0s for lines without a true elapsed runtime` | Verifies that synthetic or untimed lines surface `+0.0s` instead of a blank elapsed prefix. |
@@ -1627,6 +1657,9 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `clears the token only after answering yes to the terminal confirmation` | Verifies that `session-token clear` removes the active token only after an explicit `yes` answer. |
 | `leaves the session token untouched when the user answers no` | Verifies that answering `no` leaves the active session token unchanged. |
 | `treats Ctrl+C as no and cancels the clear confirmation` | Verifies that `Ctrl+C` cancels the terminal clear-confirm prompt and leaves the token untouched. |
+| `opens a terminal yes/no confirmation before deleting a workspace file` | Verifies that `workspace rm <file>` opens a transcript-owned confirmation prompt instead of deleting immediately. |
+| `deletes the workspace file only after answering yes` | Verifies that `rm <file>` deletes through the workspace route only after an explicit `yes` answer. |
+| `leaves the workspace file untouched when the user answers no` | Verifies that answering `no` cancels the workspace delete confirmation without calling the delete route. |
 | `copies the active token to the clipboard from the terminal` | Verifies that `session-token copy` copies the active token and reports success without exposing the raw value. |
 | `shows an error when clipboard copy fails` | Verifies that `session-token copy` surfaces a terminal error when the clipboard write fails. |
 | `filters client-side session-token output through the built-in pipe helpers` | Verifies that terminal-native `session-token` output supports built-in pipe helpers before rendering. |
@@ -1699,6 +1732,19 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `storage event calls _updateOptionsSessionTokenStatus when available` | Verifies that storage event calls _updateOptionsSessionTokenStatus when available. |
 | `storage event calls loadSessionPreferences when available` | Verifies that passive-tab `session_token` changes trigger `loadSessionPreferences()` so session-scoped options refresh without a reload. |
 | `storage event does not throw when reloadSessionHistory, loadSessionPreferences, and _updateOptionsSessionTokenStatus are absent` | Verifies that the passive-tab session-sync path stays safe even when the optional history, preference, and token-status refresh helpers are not present. |
+
+#### `workspace.test.js`
+
+| Test | Description |
+| --- | --- |
+| `renders workspace files with usage summary and row actions` | Verifies that workspace payloads render usage totals, file rows, and edit/download/delete actions. |
+| `shows an empty state when the workspace has no files` | Verifies that the workspace modal explains the empty state before any files exist. |
+| `keeps the editor hidden until the user starts or closes an edit` | Verifies that the workspace editor stays collapsed until New File or edit mode opens it, and closes cleanly afterward. |
+| `shows file contents in a read-only viewer and keeps edit mode separate` | Verifies that View opens a read-only file display without exposing the larger edit form. |
+| `formats obvious JSON files in the read-only viewer` | Verifies that JSON-looking workspace files render as pretty-printed JSON in the read-only viewer. |
+| `serves current workspace files as autocomplete hints after the file list is loaded` | Verifies that the workspace file cache exposes file names as autocomplete hints. |
+| `refreshes from the workspace route` | Verifies that the modal refresh path calls `/workspace/files` and renders the returned file list. |
+| `saves editor contents through the workspace route` | Verifies that saving posts the file name and text content to `/workspace/files` and refreshes the visible state. |
 
 #### `state.test.js`
 
@@ -2244,6 +2290,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `macOS Option+B and Option+F move by word without inserting symbols into the prompt` | Verifies that macOS Option+B and Option+F move by word without inserting symbols into the prompt. |
 | `desktop prompt cursor follows repeated caret moves while arrowing across the command` | Verifies that desktop prompt cursor follows repeated caret moves while arrowing across the command. |
 | `history and submit shortcuts still work after transcript text is selected` | Verifies that history and submit shortcuts still work after transcript text is selected. |
+| `paste routes to the prompt after copying selected transcript text` | Verifies that paste after selecting transcript text clears the page selection, focuses the command prompt, and inserts clipboard text into the composer. |
 | `Ctrl+R opens the hist-search dropdown after a command has been run` | Ctrl+R opens the hist-search dropdown after a command has been run. |
 | `typing while hist-search is open filters matches in the dropdown` | Verifies that typing while hist-search is open filters matches in the dropdown. |
 | `Enter in hist-search accepts the match and runs the command` | Enter in hist-search accepts the match and runs the command. |
@@ -2313,6 +2360,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `close button inside the FAQ modal closes it` | Verifies that close button inside the FAQ modal closes it. |
 | `clicking the overlay backdrop closes the FAQ modal` | Verifies that clicking the overlay backdrop closes the FAQ modal. |
 | `renders backend-driven FAQ content and allowlist chips` | Verifies that renders backend-driven FAQ content and allowlist chips. |
+| `creates, views, edits, downloads, and consumes session files` | Verifies that the workspace modal can create, view, edit, and download a session file, and that the terminal can consume it through `cat`. |
 | `input-driven workflows render prefilled form fields and runnable rendered steps` | Verifies that input-driven workflow cards render prefilled fields, runnable rendered steps, and a `Run all` control. |
 | `step layout is a two-row grid with chip on row 1 and note on row 2` | Verifies that the workflow step layout is a CSS grid with `.workflow-step-main` on row 1 and `.workflow-step-note` on row 2. |
 | `clearing a required workflow input disables step actions until the value is restored` | Verifies that required workflow inputs gate both per-step run buttons and the `Run all` action until the value is restored. |
@@ -2361,7 +2409,7 @@ Desktop demo recording spec. Drives a tightened README-first interaction sequenc
 
 | Test | Description |
 | --- | --- |
-| `demo` | Full desktop shell demo sequence: ping, DNS lookups, history drawer, workflows modal, theme switching. |
+| `demo` | Full desktop shell demo sequence: ping, DNS lookup, `curl -L -o response.html https://noc.darklab.sh`, Files panel, history drawer, workflows modal, theme switching. |
 
 #### `demo.mobile.spec.js`
 
@@ -2369,7 +2417,7 @@ Mobile demo recording spec. Mirrors `demo.spec.js` for the mobile shell UI (`#mo
 
 | Test | Description |
 | --- | --- |
-| `demo-mobile` | Full mobile shell demo sequence: ping, nslookup, history sheet, workflows modal, theme switching with README-first pacing. |
+| `demo-mobile` | Full mobile shell demo sequence: ping, nslookup, `curl -L -o response.html https://noc.darklab.sh`, Files panel, history sheet, workflows modal, theme switching with README-first pacing. |
 
 ### UI Screenshot Capture Specs
 
@@ -2381,7 +2429,7 @@ Desktop UI screenshot capture spec. Walks the desktop shell through a curated pa
 
 | Test | Description |
 | --- | --- |
-| `desktop screenshot capture pack` | Full desktop screenshot pack: welcome, autocomplete, tabs, running states, rail/history/modal states, snapshot-row actions, session-token clear confirmation, confirmation modals (kill + 3-action stacked variant), keyboard-shortcuts overlay, line numbers/timestamps, snapshot/permalink/diag. |
+| `desktop screenshot capture pack` | Full desktop screenshot pack: welcome, autocomplete, tabs, running states, rail/history/modal states, Files panel with a captured response file, snapshot-row actions, session-token clear confirmation, confirmation modals (kill + 3-action stacked variant), keyboard-shortcuts overlay, line numbers/timestamps, snapshot/permalink/diag. |
 
 #### `ui-capture.mobile.capture.js`
 
@@ -2389,7 +2437,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 
 | Test | Description |
 | --- | --- |
-| `mobile screenshot capture pack` | Full mobile screenshot pack: settled welcome, tabs, running states (including the trailing running-indicator chip with two inactive running tabs), sheets/modals, snapshot-row actions, session-token clear confirmation, search, line numbers/timestamps, snapshot/permalink/diag. |
+| `mobile screenshot capture pack` | Full mobile screenshot pack: settled welcome, tabs, running states (including the trailing running-indicator chip with two inactive running tabs), sheets/modals, Files panel with a captured response file, snapshot-row actions, session-token clear confirmation, search, line numbers/timestamps, snapshot/permalink/diag. |
 
 ### Container Smoke Test Reference
 

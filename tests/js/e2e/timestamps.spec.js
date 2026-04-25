@@ -74,10 +74,10 @@ test.describe('timestamp toggle', () => {
     await expect(page.locator('#hud-last-exit')).toHaveText('0')
 
     const prefixedLine = page.locator('.tab-panel.active .output .line[data-prefix]').first()
-    await expect(prefixedLine).toHaveAttribute('data-prefix', /^\d+(\s+\+\d+\.\ds)?$/)
+    await expect(prefixedLine).toHaveAttribute('data-prefix', /^\+\d+\.\ds$/)
     await expect(page.locator('#shell-prompt-wrap')).toHaveAttribute(
       'data-prefix',
-      /^\d+\s+\+0\.0s$/,
+      /^\+0\.0s$/,
     )
   })
 

@@ -27,6 +27,8 @@ const freshCaptureHome = (page, opts = {}) => freshHome(page, {
   guardrailMode: 'desktop',
 })
 
+const WORKSPACE_CAPTURE_CMD = 'curl -L -o response.html https://noc.darklab.sh'
+
 async function runLongCaptureCommand(page) {
   await page.locator('#cmd').fill(LONG_RUN_CMD)
   await page.keyboard.press('Enter')
@@ -54,6 +56,17 @@ async function openScopedWorkflow(page) {
   if (workflowsClosed) await page.locator('#rail-workflows-header').click()
   await page.locator('#rail-workflows-list .rail-item').first().click()
   await expect(page.locator('#workflows-modal')).toBeVisible()
+}
+
+async function createAndOpenWorkspaceResponseFile(page) {
+  await runCommand(page, WORKSPACE_CAPTURE_CMD)
+  await page.locator('.rail-nav [data-action="workspace"]').click()
+  await expect(page.locator('#workspace-modal')).toBeVisible()
+  const row = page.locator('.workspace-file-row', { hasText: 'response.html' }).first()
+  await expect(row).toBeVisible()
+  await row.locator('[data-workspace-action="view"]').click()
+  await expect(page.locator('#workspace-viewer')).toBeVisible()
+  await expect(page.locator('#workspace-viewer-title')).toHaveText('response.html')
 }
 
 const scenes = [
@@ -243,6 +256,15 @@ const scenes = [
       await page.locator('#search-toggle-btn').click()
       await page.locator('#search-input').fill('localhost')
       await expect(page.locator('.tab-panel.active .output mark.search-hl').first()).toBeVisible()
+    },
+  },
+  {
+    slug: 'files-panel-response-file',
+    title: 'Main UI - Files panel with captured response file',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await createAndOpenWorkspaceResponseFile(page)
     },
   },
   {

@@ -35,6 +35,9 @@ const KEYBOARD_SRC = `data:image/png;base64,${readFileSync(resolve(__dir, 'fixtu
 // Keystroke delay — intentionally closer to a real person than a script.
 const TYPE_DELAY_MS = 68
 const DEMO_TOP_SAFE_AREA_PX = 16
+const WORKSPACE_DEMO_CMD = 'curl -L -o response.html https://noc.darklab.sh'
+const DEMO_THEME_NAME = 'charcoal_lavender'
+const DEMO_TIMEOUT_MS = Number(process.env.DEMO_TIMEOUT_MS || 600_000)
 
 function typingDelay(char, index, baseDelay) {
   const cadence = [0, 20, 8, 30, 12, 25, 6, 36, 15]
@@ -103,6 +106,28 @@ async function submitCommand(page, { pauseMs = 1_200 } = {}) {
   await page.waitForTimeout(pauseMs)
 }
 
+async function openFilesPanelWithResponseFile(page) {
+  await page.locator('#hamburger-btn').click()
+  await expect(page.locator('#mobile-menu-sheet')).toBeVisible()
+  await page.waitForTimeout(750)
+  await page.locator('#mobile-menu-sheet [data-menu-action="workspace"]').click()
+  await expect(page.locator('#workspace-modal')).toBeVisible()
+  const row = page.locator('.workspace-file-row', { hasText: 'response.html' }).first()
+  await row.waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(1_600)
+  await row.locator('[data-workspace-action="view"]').click()
+  await expect(page.locator('#workspace-viewer')).toBeVisible()
+  await expect(page.locator('#workspace-viewer-title')).toHaveText('response.html')
+  await page.waitForTimeout(3_300)
+  await page.locator('#workspace-close-viewer-btn').click()
+  await expect(page.locator('#workspace-viewer')).toHaveClass(/u-hidden/)
+  await page.evaluate(() => {
+    if (typeof closeWorkspace === 'function') closeWorkspace()
+  })
+  await expect(page.locator('#workspace-overlay')).not.toHaveClass(/open/)
+  await page.waitForTimeout(1_000)
+}
+
 /**
  * Remove the keyboard overlay and restore the full transcript area.
  * Call after the run button is clicked — mimics the keyboard dismissing
@@ -140,7 +165,9 @@ async function switchTheme(page, themeName) {
  * rendered; the layout must be stable before calling.
  */
 async function centeredScrollTop(page, themeName) {
-  return page.locator(`[data-theme-name="${themeName}"]`).evaluate((card) => {
+  const cardLocator = page.locator(`[data-theme-name="${themeName}"]`)
+  await expect(cardLocator, `theme card ${themeName} should exist`).toHaveCount(1, { timeout: 10_000 })
+  return cardLocator.evaluate((card) => {
     const container = card.closest('.theme-body')
     if (!container) return 0
     const cRect = container.getBoundingClientRect()
@@ -223,7 +250,7 @@ test('demo-mobile', async ({ page }) => {
     !process.env.RUN_DEMO,
     'set RUN_DEMO=1 to record the demo (use scripts/record_demo_mobile.sh)',
   )
-  test.setTimeout(300_000)
+  test.setTimeout(DEMO_TIMEOUT_MS)
 
   await page.addInitScript((token) => {
     try {
@@ -304,9 +331,13 @@ test('demo-mobile', async ({ page }) => {
   // frame shows real content rather than the blank pre-navigation page.
   const TARGET_FPS = 15
   capture.loop = (async () => {
-    while (!capture.done) {
+    while (!capture.done && !page.isClosed()) {
       if (capture.paused) {
-        await page.waitForTimeout(16)
+        try {
+          await page.waitForTimeout(16)
+        } catch {
+          break
+        }
         continue
       }
       const t0 = Date.now()
@@ -325,7 +356,11 @@ test('demo-mobile', async ({ page }) => {
       }
       const elapsed = Date.now() - t0
       const remaining = Math.max(1, Math.round(1000 / TARGET_FPS) - elapsed)
-      await page.waitForTimeout(remaining)
+      try {
+        await page.waitForTimeout(remaining)
+      } catch {
+        break
+      }
     }
   })()
 
@@ -399,6 +434,17 @@ test('demo-mobile', async ({ page }) => {
   // nslookup output fills the screen briefly.
   await page.waitForTimeout(2_100)
 
+  await mountKeyboard(page)
+  await page.waitForTimeout(700)
+  await typeSlowly(page, WORKSPACE_DEMO_CMD)
+  await page.waitForTimeout(800)
+  await waitForFinished(page, WORKSPACE_DEMO_CMD, { timeoutMs: 45_000 })
+  await unmountKeyboard(page)
+  await page.waitForTimeout(1_500)
+
+  // ── Files panel: captured response file ──────────────────────────────────
+  await openFilesPanelWithResponseFile(page)
+
   // ── Switch back to tab 1 — show ping still scrolling ──────────────────────
   await page.waitForTimeout(900)
   await page.locator('.tab').first().click()
@@ -463,16 +509,16 @@ test('demo-mobile', async ({ page }) => {
   })
   await page.waitForTimeout(3_200)
   // Compute actual card positions now that the grid is rendered.
-  const charcoalTop = await centeredScrollTop(page, 'charcoal_violet')
+  const charcoalTop = await centeredScrollTop(page, DEMO_THEME_NAME)
   await smoothScroll(page, '.theme-body', 210, { durationMs: 1_350 }) // quick peek
   await page.waitForTimeout(1_500)
   await smoothScroll(page, '.theme-body', Math.max(charcoalTop + 120, 570), { durationMs: 1_700 }) // past the card
   await page.waitForTimeout(1_500)
   await smoothScroll(page, '.theme-body', charcoalTop, { durationMs: 1_150 }) // settle on card
   await page.waitForTimeout(2_400) // hover — deciding
-  await switchTheme(page, 'charcoal_violet')
+  await switchTheme(page, DEMO_THEME_NAME)
   await page
-    .locator('[data-theme-name="charcoal_violet"].theme-card-active')
+    .locator(`[data-theme-name="${DEMO_THEME_NAME}"].theme-card-active`)
     .waitFor({ state: 'attached', timeout: 5_000 })
   await freezeFrame(3_600) // see the selected card
 
