@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 921
-- `vitest`: 775
+- `pytest`: 929
+- `vitest`: 781
 - `playwright`: 207
-- total: 1,903
+- total: 1,917
 
 This document is organized in two parts:
 
@@ -403,8 +403,14 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWelcomeAssetLoading.test_mobile_ascii_art_local_overlay_replaces_base` | Checks that mobile ascii art local overlay replaces base. |
 | `TestWelcomeAssetLoading.test_local_hints_overlay_appends_entries` | Checks that local hints overlay appends entries. |
 | `TestWelcomeAssetLoading.test_mobile_hints_overlay_appends_entries` | Checks that mobile hints overlay appends entries. |
+| `TestOutputSignals.test_command_root_and_target_extraction` | Verifies that backend output-signal classification extracts command roots and useful targets from common surfaced commands. |
+| `TestOutputSignals.test_classifies_common_findings` | Verifies that backend output-signal classification marks common scanner, DNS, and service rows as findings. |
+| `TestOutputSignals.test_classifies_warning_error_and_summary_lines` | Verifies that backend output-signal classification separates warning, error, and summary-style lines. |
+| `TestOutputSignals.test_user_killed_process_is_not_an_error` | Verifies that user-killed process notices are not classified as errors. |
+| `TestOutputSignals.test_builtin_classifier_keeps_metadata_but_omits_signals` | Verifies that built-in command output keeps line metadata while omitting findings, warnings, errors, and summaries. |
 | `TestRunOutputCapture.test_preview_keeps_only_last_n_lines` | Checks that preview keeps only last n lines. |
 | `TestRunOutputCapture.test_full_output_artifact_round_trips_lines` | Checks that full output artifact round trips lines. |
+| `TestRunOutputCapture.test_full_output_artifact_round_trips_signal_metadata` | Verifies that persisted full-output artifacts preserve backend signal metadata with each line. |
 | `TestRunOutputCapture.test_full_output_artifact_respects_byte_cap` | Checks that full output artifact respects byte cap. |
 | `TestRunOutputCapture.test_full_output_artifact_loads_legacy_plain_text_rows` | Checks that full output artifact loads legacy plain text rows. |
 | `TestRunOutputCapture.test_missing_hints_file_returns_empty_list` | Checks that missing hints file returns empty list. |
@@ -843,6 +849,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | Test | Description |
 | --- | --- |
 | `TestRunStreaming.test_run_emits_started_notice_output_and_exit` | Checks that run emits started notice output and exit. |
+| `TestRunStreaming.test_run_output_events_include_signal_metadata` | Verifies that live `/run` output events include backend signal metadata for classified lines. |
+| `TestRunStreaming.test_history_restore_json_preserves_signal_metadata` | Verifies that history restore JSON preserves per-line signal metadata from persisted run output. |
 | `TestRunStreaming.test_run_returns_500_when_spawn_fails` | Checks that run returns 500 when spawn fails. |
 | `TestRunStreaming.test_run_emits_heartbeat_when_silent` | Checks that run emits heartbeat when silent. |
 | `TestRunStreaming.test_run_persists_completed_run_to_history` | Checks that run persists completed run to history. |
@@ -1404,6 +1412,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `refreshHistoryPanel sends the active server-side filters to /history` | Verifies that the history drawer sends the current search and filter state to `/history`. |
 | `refreshHistoryPanel renders pagination controls and advances to the next page` | Verifies that the history drawer shows a paginated window and advances with the control buttons. |
 | `populates command root suggestions from loaded history runs` | Verifies that the history drawer populates command-root suggestions from the server-provided root list. |
+| `keeps root suggestions stable when a refresh returns no roots while typing` | Verifies that auto-refresh responses cannot erase the command-root suggestion list while the user is typing in the focused command-name filter. |
 | `renders active filter chips for the current history filters` | Verifies that active history filters render as removable chips. |
 | `removes an individual filter when its active filter chip is cleared` | Verifies that removing a single history filter chip updates the request state and control value. |
 | `keeps the history drawer open when removing an active filter chip` | Verifies that clearing a filter chip does not trip the global outside-click handler and close the drawer. |
@@ -1472,6 +1481,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `wraps output content in a line-content container so prefix mode does not reshape the line flow` | Verifies that wraps output content in a line-content container so prefix mode does not reshape the line flow. |
 | `trims old lines and keeps rawLines in sync` | Verifies that trims old lines and keeps rawLines in sync. |
 | `adds timestamp dataset fields` | Verifies that adds timestamp dataset fields. |
+| `stores server-provided signal metadata on DOM lines and rawLines` | Verifies that streamed backend signal metadata is attached to rendered output rows and retained in tab rawLines. |
 | `uses +0.0s for lines without a true elapsed runtime` | Verifies that synthetic or untimed lines surface `+0.0s` instead of a blank elapsed prefix. |
 | `toggles the line-number body class and button labels` | Verifies that toggles the line-number body class and button labels. |
 | `numbers the prompt line after the current output rows` | Verifies that numbers the prompt line after the current output rows. |
@@ -1641,18 +1651,22 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `merges adjacent text nodes between searches so a fragmented line is not re-split per fragment` | Verifies that merges adjacent text nodes between searches so a fragmented line is not re-split per fragment. |
 | `navigates by logical match across inline-element boundaries` | Verifies that navigates by logical match across inline-element boundaries. |
 | `scopes to warning lines and navigates between them` | Verifies that the warning scope filters down to warning lines and cycles through them independently of plain-text matches. |
-| `scopes to finding lines using command-like output heuristics` | Verifies that findings mode matches high-signal scanner, DNS, and service-result rows rather than banners and boilerplate. |
-| `treats nslookup answer rows as findings without matching the server header` | Verifies that `nslookup` answer sections count as findings while the resolver header does not. |
+| `scopes to finding lines using server-provided signal metadata` | Verifies that findings mode matches server-tagged high-signal scanner, DNS, and service-result rows rather than untagged banners and boilerplate. |
+| `treats nslookup answer rows as findings when the server marks them` | Verifies that server-tagged `nslookup` answer sections count as findings while the untagged resolver header does not. |
 | `clearSearch resets scoped search back to text mode` | Verifies that closing search clears any active findings/warnings/errors/summaries scope and returns to plain text mode. |
 | `updates the search button and scope labels with scoped counts` | Verifies that the tabbar search affordance and scoped buttons expose live signal counts. |
 | `signal chips are clickable and route to the matching scope` | Verifies that F/W/E/S chips open search in the matching scope. |
 | `disables summarize when there are no signals` | Verifies that summarize stays disabled until the current tab has at least one finding, warning, error, or summary line. |
+| `uses server-provided signal metadata for scoped counts and highlights` | Verifies that server-provided line signals drive scoped search counts and highlight navigation. |
+| `does not classify plain text without server-provided signal metadata` | Verifies that untagged transcript text is treated as signal-unavailable instead of being reclassified by browser heuristics. |
 | `prefers the findings scope when opening search for findings-heavy output` | Verifies that search opens directly in findings mode when the current transcript is findings-heavy. |
 | `scopes to summary lines and ignores detail rows` | Verifies that summaries mode targets roll-up lines without re-matching the detailed output underneath them. |
 | `does not count user-killed runs as errors` | Verifies that `[killed by user ...]` lines stay out of the error count and error scope. |
 | `appends a synthetic signal summary without inflating scoped counts` | Verifies that the generated command-findings block does not feed back into the signal counters or scoped search matches. |
 | `summarizes each command block in a reused tab` | Verifies that summarize walks every command block in the current tab instead of recapping only the first or last command. |
-| `groups summary output by command and extracted target` | Verifies that summarize clusters repeated command runs under the same command and target while preserving their findings, warnings, and summary lines. |
+| `groups summary output by server-provided command and target metadata` | Verifies that summarize clusters repeated command runs under the same server-provided command and target while preserving their findings, warnings, and summary lines. |
+| `deduplicates repeated full commands in grouped summary output` | Verifies that grouped command-findings summaries collapse identical full commands and show a repeat count instead of listing duplicate command labels. |
+| `groups summary output by server-provided command metadata for opaque command text` | Verifies that command-findings summaries use backend-provided command root and target metadata even when the displayed command text is opaque. |
 | `groups nc summary output by host instead of positional ports` | Verifies that `nc` summaries group repeated port checks by host while ignoring positional port arguments. |
 | `falls back to command summaries when a target cannot be extracted` | Verifies that summarize keeps the per-command output shape when a command has signals but no reliable target extractor. |
 | `omits command blocks that have no signals` | Verifies that summarize skips commands with zero findings, warnings, errors, and summary lines. |

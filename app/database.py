@@ -154,7 +154,7 @@ def _populate_output_search_text(conn):
                 try:
                     entries = load_full_output_entries(row["rel_path"])
                     search_text = "\n".join(
-                        e.get("text", "") for e in entries if isinstance(e, dict)
+                        str(e.get("text", "")) for e in entries if isinstance(e, dict)
                     )
                 except Exception:  # noqa: BLE001
                     search_text = _extract_search_text_from_preview_json(row["output_preview"])

@@ -1,84 +1,5 @@
 // ── Shared search logic ──
 
-const _SEARCH_SIGNAL_PATTERNS = {
-  findings: [
-    /^\d+\/(?:tcp|udp)\s+open\b/i,
-    /\bdiscovered open port\b/i,
-    /^\S+\s+\[[^\]]+\]\s+\d+\s+\([^)]+\)\s+open\b/i,
-    /\[(?:info|low|medium|high|critical)\]/i,
-    /^\s*\/\S+\s+\[status:\s*\d{3}\b/i,
-    /\bHTTP\/[\d.]+\s+\d{3}\b/i,
-    /\bVULNERABLE\b/i,
-    /\bnot vulnerable\b/i,
-    /\bverify return code:\s*0\b/i,
-    /\bnotAfter=/i,
-    /^\S+\.\s+\d+\s+(?:IN\s+)?(?:A|AAAA|CNAME|MX|NS|TXT|SOA|PTR)\b/i,
-    /^\S+\s+(?:A|AAAA|CNAME|MX|NS|TXT|SOA|PTR)\s+\S+/,
-    /^(?:\d{1,3}\.){3}\d{1,3}$/i,
-    /^[0-9a-f:]+:+[0-9a-f:]+$/i,
-    /^\S+\s+has address\s+[0-9a-f:.]+\b/i,
-    /^\S+\s+mail is handled by\s+\d+\s+\S+/i,
-    /\bService Info:/i,
-    /\bOS details:/i,
-    /\bssl-issuer\b/i,
-  ],
-  warnings: [
-    /\bwarning\b/i,
-    /\bwarn\b/i,
-    /\bnote:/i,
-    /\bunreliable\b/i,
-    /\bretrying\b/i,
-    /\brate limited\b/i,
-  ],
-  errors: [
-    /\berror\b/i,
-    /\bfailed\b/i,
-    /\bdenied\b/i,
-    /\btimeout\b/i,
-    /\bunreachable\b/i,
-    /\brefused\b/i,
-    /no servers could be reached/i,
-    /\bcould not\b/i,
-    /\binvalid\b/i,
-    /\bstalled\b/i,
-  ],
-  summaries: [
-    /\bsummary\b/i,
-    /\bNmap done:\b/i,
-    /\bhosts? up\b/i,
-    /\bpacket loss\b/i,
-    /\brtt min\/avg\/max\b/i,
-    /\berrors?:\s*\d+\b/i,
-    /\bfound:\s*\d+\b/i,
-    /\bTotal requests:\b/i,
-    /\bDuration:\b/i,
-    /\bRequests\/sec:\b/i,
-    /\bProcessed Requests:\b/i,
-  ],
-};
-
-const _SEARCH_FINDINGS_EXCLUDES = [
-  /^Starting Nmap/i,
-  /^Nmap \d/i,
-  /^Nmap scan initiated/i,
-  /^Progress:\s*/i,
-  /^:: Progress:/i,
-  /^Fuzz Faster U Fool/i,
-  /^Templates loaded for current scan/i,
-  /^Using Interactsh Server/i,
-  /^; <<>> DiG/i,
-  /^;;/i,
-  /^Usage:\s+/i,
-  /^usage:\s+/i,
-  /^\[options\]$/i,
-  /^the tool you love/i,
-  /^rustscan$/i,
-  /^Testing SSL server/i,
-  /^CHECKING CONNECTIVITY/i,
-  /^OpenSSL$/i,
-  /^projectdiscovery\.io$/i,
-];
-
 const _SEARCH_SCOPE_LABELS = {
   text: 'text',
   findings: 'findings',
@@ -188,6 +109,13 @@ function syncSearchScopeUi() {
   }
 }
 
+function _lineServerSignals(line) {
+  if (!(line instanceof Element)) return [];
+  const raw = String(line.dataset?.signals || '').trim();
+  if (!raw) return [];
+  return raw.split(',').map(signal => signal.trim()).filter(Boolean);
+}
+
 function _lineMatchesSearchScopeForRoot(line, scope, root = null) {
   if (!(line instanceof Element) || scope === 'text') return false;
   if (
@@ -199,47 +127,24 @@ function _lineMatchesSearchScopeForRoot(line, scope, root = null) {
   ) {
     return false;
   }
-  const useRoot = root === null ? _lineCommandRoot(line) : root;
+  const metadataRoot = String(line.dataset?.commandRoot || '').trim();
+  const useRoot = metadataRoot || (root === null ? _lineCommandRoot(line) : root);
   if (_isBuiltinCommandRoot(useRoot)) return false;
-  const text = (line.textContent || '').trim();
-  if (!text) return false;
-  if (scope === 'warnings' && line.classList.contains('notice')) return true;
-  if (scope === 'errors' && (line.classList.contains('denied') || line.classList.contains('exit-fail'))) {
-    if (/^\[killed by user(?:\b|[^\w])/i.test(text)) return false;
-    return true;
-  }
-  if (scope === 'errors' && /^\[killed by user(?:\b|[^\w])/i.test(text)) return false;
-  if (scope === 'findings' && _SEARCH_FINDINGS_EXCLUDES.some((pattern) => pattern.test(text))) {
-    return false;
-  }
-  if (scope === 'findings') {
-    if (/\bmail exchanger\s*=\s*\S+/i.test(text)) return true;
-    if (/\btext\s*=\s*.+/i.test(text)) return true;
-    if (/\bcanonical name\s*=\s*\S+/i.test(text)) return true;
-    if (/^Address(?:es)?:\s+[0-9a-f:.]+\b/i.test(text)) {
-      const prevText = String(line.previousElementSibling?.textContent || '').trim();
-      if (/^Name:\s+\S+/i.test(prevText)) return true;
-    }
-  }
-  const patterns = _SEARCH_SIGNAL_PATTERNS[scope] || [];
-  return patterns.some((pattern) => pattern.test(text));
+  const serverSignals = _lineServerSignals(line);
+  return serverSignals.includes(scope);
 }
 
 function _getSearchSignalCounts(out) {
   const counts = { findings: 0, warnings: 0, errors: 0, summaries: 0 };
   if (!(out instanceof Element)) return counts;
   const lines = Array.from(out.querySelectorAll('.line'));
-  let currentRoot = _summaryCommandRoot(String((typeof getTab === 'function' ? getTab(activeTabId) : null)?.command || ''));
   lines.forEach((line) => {
     if (!(line instanceof Element)) return;
-    if (line.classList.contains('prompt-echo')) {
-      currentRoot = _summaryCommandRoot(_promptEchoCommandText(line));
-      return;
-    }
-    if (_lineMatchesSearchScopeForRoot(line, 'findings', currentRoot)) counts.findings += 1;
-    if (_lineMatchesSearchScopeForRoot(line, 'warnings', currentRoot)) counts.warnings += 1;
-    if (_lineMatchesSearchScopeForRoot(line, 'errors', currentRoot)) counts.errors += 1;
-    if (_lineMatchesSearchScopeForRoot(line, 'summaries', currentRoot)) counts.summaries += 1;
+    if (line.classList.contains('prompt-echo')) return;
+    if (_lineMatchesSearchScope(line, 'findings')) counts.findings += 1;
+    if (_lineMatchesSearchScope(line, 'warnings')) counts.warnings += 1;
+    if (_lineMatchesSearchScope(line, 'errors')) counts.errors += 1;
+    if (_lineMatchesSearchScope(line, 'summaries')) counts.summaries += 1;
   });
   return counts;
 }
@@ -480,7 +385,15 @@ function _promptEchoCommandText(line) {
   return text.replace(/^\$\s*/, '').trim();
 }
 
+function _summaryCommandRoot(command) {
+  return String(command || '').trim().split(/\s+/, 1)[0]?.toLowerCase() || '';
+}
+
 function _lineCommandRoot(line) {
+  if (line instanceof Element) {
+    const metadataRoot = String(line.dataset?.commandRoot || '').trim();
+    if (metadataRoot) return metadataRoot;
+  }
   let cursor = line;
   while (cursor instanceof Element) {
     if (cursor.classList.contains('prompt-echo')) {
@@ -490,11 +403,6 @@ function _lineCommandRoot(line) {
   }
   const tab = typeof getTab === 'function' ? getTab(activeTabId) : null;
   return _summaryCommandRoot(String(tab?.command || ''));
-}
-
-function _lineBelongsToBuiltinCommand(line) {
-  const root = _lineCommandRoot(line);
-  return _isBuiltinCommandRoot(root);
 }
 
 function _isBuiltinCommandRoot(root) {
@@ -536,153 +444,6 @@ function _collectSearchCommandBlocks(out) {
   return blocks.filter((block) => block.command || block.lines.length);
 }
 
-function _tokenizeSummaryCommand(command) {
-  const tokens = [];
-  const source = String(command || '').trim();
-  let current = '';
-  let quote = '';
-  for (let i = 0; i < source.length; i += 1) {
-    const ch = source[i];
-    if (quote) {
-      if (ch === quote) {
-        quote = '';
-      } else if (ch === '\\' && i + 1 < source.length) {
-        i += 1;
-        current += source[i];
-      } else {
-        current += ch;
-      }
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      continue;
-    }
-    if (/\s/.test(ch)) {
-      if (current) {
-        tokens.push(current);
-        current = '';
-      }
-      continue;
-    }
-    current += ch;
-  }
-  if (current) tokens.push(current);
-  return tokens;
-}
-
-function _summaryCommandRoot(command) {
-  const tokens = _tokenizeSummaryCommand(command);
-  return String(tokens[0] || '').toLowerCase();
-}
-
-function _summaryStripUrlTarget(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  try {
-    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) {
-      const parsed = new URL(raw);
-      return parsed.host || raw;
-    }
-  } catch (_) {
-    return raw;
-  }
-  return raw.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/[/?#].*$/, '');
-}
-
-function _summaryFindFlagValue(tokens, names) {
-  const wanted = new Set(names);
-  for (let i = 1; i < tokens.length; i += 1) {
-    const token = tokens[i];
-    if (wanted.has(token) && tokens[i + 1] && !tokens[i + 1].startsWith('-')) {
-      return tokens[i + 1];
-    }
-    const eq = token.match(/^([^=]+)=(.+)$/);
-    if (eq && wanted.has(eq[1])) return eq[2];
-  }
-  return '';
-}
-
-function _summaryPositionalTargets(tokens, { skipValuesAfter = new Set(), skipValuesForPrefix = /^$/ } = {}) {
-  const result = [];
-  for (let i = 1; i < tokens.length; i += 1) {
-    const token = tokens[i];
-    if (!token) continue;
-    if (token.startsWith('-')) {
-      if (skipValuesAfter.has(token) || skipValuesForPrefix.test(token)) {
-        const next = tokens[i + 1] || '';
-        if (next && !next.startsWith('-')) i += 1;
-      }
-      continue;
-    }
-    result.push(token);
-  }
-  return result;
-}
-
-function _summaryDnsTarget(tokens, root) {
-  const recordTypes = new Set(['a', 'aaaa', 'cname', 'mx', 'ns', 'txt', 'soa', 'ptr', 'srv', 'caa', 'any']);
-  const positionals = [];
-  for (let i = 1; i < tokens.length; i += 1) {
-    const token = tokens[i];
-    if (!token || token.startsWith('-') || token.startsWith('+') || token.startsWith('@')) continue;
-    if (recordTypes.has(token.toLowerCase())) continue;
-    positionals.push(token);
-  }
-  if (root === 'nslookup' && /^server$/i.test(positionals[0] || '')) return positionals[1] || '';
-  return positionals[0] || '';
-}
-
-function _summaryExtractTarget(command) {
-  const tokens = _tokenizeSummaryCommand(command);
-  const root = String(tokens[0] || '').toLowerCase();
-  if (!root) return null;
-
-  if (['dig', 'host', 'nslookup'].includes(root)) {
-    const target = _summaryDnsTarget(tokens, root);
-    return target ? _summaryStripUrlTarget(target) : null;
-  }
-
-  if (['curl', 'httpx', 'pd-httpx', 'wafw00f'].includes(root)) {
-    const positionals = _summaryPositionalTargets(tokens, {
-      skipValuesAfter: new Set(['-H', '--header', '-A', '--user-agent', '-o', '--output', '-w', '--write-out', '--connect-timeout', '-m', '--max-time']),
-    });
-    const target = positionals.find((token) => /^[a-z][a-z0-9+.-]*:\/\//i.test(token))
-      || positionals.find((token) => /\./.test(token));
-    return target ? _summaryStripUrlTarget(target) : null;
-  }
-
-  if (['ffuf', 'gobuster', 'feroxbuster', 'katana', 'nikto'].includes(root)) {
-    const target = _summaryFindFlagValue(tokens, ['-u', '--url', '-target', '--target']);
-    return target ? _summaryStripUrlTarget(target.replace(/\/FUZZ\b.*$/i, '')) : null;
-  }
-
-  if (['nmap', 'rustscan', 'naabu', 'sslscan', 'sslyze', 'testssl'].includes(root)) {
-    const positionals = _summaryPositionalTargets(tokens, {
-      skipValuesAfter: new Set([
-        '-p', '--ports', '--top-ports', '-oA', '-oG', '-oN', '-oX', '-iL',
-        '--script', '--script-args', '--rate', '--timeout', '--host-timeout',
-      ]),
-      skipValuesForPrefix: /^-o[AGNX]$/i,
-    }).filter((token) => !/^\d+(?:,\d+)*$/.test(token));
-    return positionals.length ? positionals.join(', ') : null;
-  }
-
-  if (root === 'nc') {
-    const positionals = _summaryPositionalTargets(tokens, {
-      skipValuesAfter: new Set(['-w', '-i', '-s', '-p']),
-    }).filter((token) => !/^\d+(?:-\d+)?$/.test(token));
-    return positionals.length ? _summaryStripUrlTarget(positionals[0]) : null;
-  }
-
-  if (root === 'openssl') {
-    const connect = _summaryFindFlagValue(tokens, ['-connect']);
-    return connect ? _summaryStripUrlTarget(connect) : null;
-  }
-
-  return null;
-}
-
 function _summaryBlockSections(block, root = null) {
   return [
     ['findings', block.lines.filter((line) => _lineMatchesSearchScopeForRoot(line, 'findings', root)).map((line) => (line.textContent || '').trim()).filter(Boolean)],
@@ -692,6 +453,15 @@ function _summaryBlockSections(block, root = null) {
   ];
 }
 
+function _summaryFirstLineDatasetValue(lines, name) {
+  for (const line of Array.isArray(lines) ? lines : []) {
+    if (!(line instanceof Element)) continue;
+    const value = String(line.dataset?.[name] || '').trim();
+    if (value) return value;
+  }
+  return '';
+}
+
 function _summarySectionsTotal(sections) {
   return sections.reduce((sum, [, lines]) => sum + lines.length, 0);
 }
@@ -699,9 +469,9 @@ function _summarySectionsTotal(sections) {
 function _summaryBuildItems(blocks, tab) {
   return blocks.map((block, index) => {
     const commandLabel = block.command || String(tab?.command || '').trim() || `segment ${index + 1}`;
-    const root = _summaryCommandRoot(commandLabel);
+    const root = _summaryFirstLineDatasetValue(block.lines, 'commandRoot') || _summaryCommandRoot(commandLabel);
     const sections = _summaryBlockSections(block, root);
-    const target = _summaryExtractTarget(commandLabel);
+    const target = _summaryFirstLineDatasetValue(block.lines, 'signalTarget');
     return {
       command: commandLabel,
       sections,
@@ -763,6 +533,24 @@ function _summaryGroupedItems(items) {
   return groups;
 }
 
+function _summaryCommandLabels(items) {
+  const counts = new Map();
+  const ordered = [];
+  items.forEach((item) => {
+    const command = String(item?.command || '').trim();
+    if (!command) return;
+    if (!counts.has(command)) {
+      ordered.push(command);
+      counts.set(command, 0);
+    }
+    counts.set(command, counts.get(command) + 1);
+  });
+  return ordered.map((command) => {
+    const count = counts.get(command) || 0;
+    return count > 1 ? `${command} (${count})` : command;
+  });
+}
+
 function _summaryRenderGroupedItems(items) {
   const groupedItems = items.filter((item) => item.root && item.target);
   if (!groupedItems.length) return 0;
@@ -776,13 +564,14 @@ function _summaryRenderGroupedItems(items) {
       if (targetIndex > 0) appendLine('------------', 'fake-signal-summary-sep', activeTabId);
       appendLine(`target              ${targetGroup.target}`, 'fake-kv', activeTabId);
       if (targetGroup.items.length > 1) {
+        const commandLabels = _summaryCommandLabels(targetGroup.items);
         appendLine(
-          `full commands (${targetGroup.items.length})`,
+          `full commands (${commandLabels.length})`,
           'fake-signal-summary-section',
           activeTabId,
         );
-        targetGroup.items.forEach((item) => {
-          appendLine(`- ${item.command}`, 'fake-signal-summary-row', activeTabId);
+        commandLabels.forEach((command) => {
+          appendLine(`- ${command}`, 'fake-signal-summary-row', activeTabId);
         });
       } else {
         appendLine(`full command        ${targetGroup.items[0].command}`, 'fake-kv', activeTabId);
@@ -809,10 +598,10 @@ function summarizeCurrentOutputSignals() {
   const tab = typeof getTab === 'function' ? getTab(activeTabId) : null;
   const blocks = _collectSearchCommandBlocks(out);
   if (!blocks.length) {
-    const fallbackLines = Array.from(out.querySelectorAll('.line')).filter((line) => line instanceof Element);
+    const transcriptLines = Array.from(out.querySelectorAll('.line')).filter((line) => line instanceof Element);
     blocks.push({
       command: String(tab?.command || '').trim(),
-      lines: fallbackLines,
+      lines: transcriptLines,
     });
   }
 
@@ -820,9 +609,9 @@ function summarizeCurrentOutputSignals() {
 
   const items = _summaryBuildItems(blocks, tab);
   const groupedCount = _summaryRenderGroupedItems(items);
-  const fallbackItems = items.filter((item) => !(item.root && item.target));
-  if (groupedCount && fallbackItems.length) appendLine('------------', 'fake-signal-summary-sep', activeTabId);
-  _summaryRenderCommandItems(fallbackItems);
+  const ungroupedItems = items.filter((item) => !(item.root && item.target));
+  if (groupedCount && ungroupedItems.length) appendLine('------------', 'fake-signal-summary-sep', activeTabId);
+  _summaryRenderCommandItems(ungroupedItems);
 
   if (!items.length) {
     appendLine(
@@ -838,14 +627,10 @@ function summarizeCurrentOutputSignals() {
 function _collectScopedSearchMatches(out, scope) {
   const lines = Array.from(out.querySelectorAll('.line'));
   const matches = [];
-  let currentRoot = _summaryCommandRoot(String((typeof getTab === 'function' ? getTab(activeTabId) : null)?.command || ''));
   lines.forEach((line) => {
     if (!(line instanceof Element)) return;
-    if (line.classList.contains('prompt-echo')) {
-      currentRoot = _summaryCommandRoot(_promptEchoCommandText(line));
-      return;
-    }
-    if (!_lineMatchesSearchScopeForRoot(line, scope, currentRoot)) return;
+    if (line.classList.contains('prompt-echo')) return;
+    if (!_lineMatchesSearchScope(line, scope)) return;
     line.classList.add('search-signal-hl');
     matches.push([line]);
   });

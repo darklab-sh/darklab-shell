@@ -89,6 +89,15 @@ class _FakeProc:
         return self.returncode
 
 
+def _sse_events(body: str) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = []
+    for chunk in body.split("\n\n"):
+        if not chunk.startswith("data: "):
+            continue
+        events.append(json.loads(chunk.removeprefix("data: ")))
+    return events
+
+
 # ── /run streaming ────────────────────────────────────────────────────────────
 
 class TestRunStreaming:
@@ -124,6 +133,66 @@ class TestRunStreaming:
         assert '"type": "exit"' in body
         assert "hello\\n" in body
         assert "world\\n" in body
+
+    def test_run_output_events_include_signal_metadata(self):
+        client = get_client()
+        fake_proc = _FakeProc(lines=["darklab.sh has address 104.21.4.35\n", ""])
+
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[
+                 True,
+                 True,
+             ]):
+            resp = client.post(
+                "/run",
+                json={"command": "host darklab.sh"},
+                headers={"X-Session-ID": "sess-signal-sse"},
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        output_events = [event for event in _sse_events(body) if event.get("type") == "output"]
+        assert output_events
+        assert output_events[0]["signals"] == ["findings"]
+        assert output_events[0]["line_index"] == 0
+        assert output_events[0]["command_root"] == "host"
+        assert output_events[0]["target"] == "darklab.sh"
+
+    def test_history_restore_json_preserves_signal_metadata(self):
+        client = get_client()
+        fake_proc = _FakeProc(lines=["darklab.sh has address 104.21.4.35\n", ""])
+
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[
+                 True,
+                 True,
+             ]):
+            resp = client.post(
+                "/run",
+                json={"command": "host darklab.sh"},
+                headers={"X-Session-ID": "sess-signal-history"},
+            )
+            resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+
+        hist = client.get("/history", headers={"X-Session-ID": "sess-signal-history"})
+        run_id = json.loads(hist.data)["runs"][0]["id"]
+        restored = client.get(f"/history/{run_id}?json&preview=1")
+        data = json.loads(restored.data)
+        entry = data["output_entries"][0]
+
+        assert entry["text"] == "darklab.sh has address 104.21.4.35"
+        assert entry["signals"] == ["findings"]
+        assert entry["line_index"] == 0
+        assert entry["command_root"] == "host"
+        assert entry["target"] == "darklab.sh"
 
     def test_nonblocking_stream_reader_preserves_partial_lines_until_finalize(self):
         read_fd, write_fd = os.pipe()
@@ -1417,7 +1486,14 @@ class TestShareRoundTrip:
             "label": "test snapshot",
             "content": [
                 {"text": "$ echo hi", "cls": "cmd"},
-                {"text": "hi", "cls": "out"},
+                {
+                    "text": "hi",
+                    "cls": "out",
+                    "signals": ["findings"],
+                    "line_index": 0,
+                    "command_root": "echo",
+                    "target": "darklab.sh",
+                },
                 {"text": "done", "cls": "notice"},
             ],
         }

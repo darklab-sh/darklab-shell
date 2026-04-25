@@ -22,54 +22,7 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Open TODOs
 
-- **Server-side output signals and summaries migration**
-  - Wait to begin until the current E2E suite has passed repeatedly after the recent intermittent-test fixes. The goal is to start this migration from a known-stable baseline rather than mixing architecture work with flake cleanup.
-  - Move findings, warnings, errors, summary-line detection, command grouping, and target extraction out of browser DOM scanning and into backend-owned output metadata.
-  - Treat this as the long-term source of truth rather than building a polished hybrid bridge. The frontend should render and navigate signal metadata, not independently decide what a finding/error/warning/summary is.
-
-  - Backend model:
-    - Add a Python signal classifier module, likely `app/output_signals.py`.
-    - Port the current frontend detection rules from `app/static/js/search.js` into backend tests and classifier logic.
-    - Classify output with command context: command root, full command, target, built-in command exclusion, signal kind, line text, and line index.
-    - Preserve the current behavior that built-in command output is excluded from findings, warnings, errors, and summaries.
-    - Preserve user-killed process behavior: do not classify user-killed output as an error.
-    - Keep raw output primary; metadata is additive.
-
-  - SSE/live stream model:
-    - Add signal metadata directly to streamed output events so the live UI can mark lines immediately.
-    - Prefer stable per-line metadata in each event, for example: `line_index`, `signals`, `command_root`, `target`, and `line_text` where appropriate.
-    - Ensure multi-line output chunks produce deterministic line indexes and metadata for each visible rendered line.
-    - Keep frontend line rendering responsible for CSS classes, chips, navigation, and active-match state.
-
-  - Persistence/API model:
-    - Persist signal metadata with completed run history.
-    - Include signal metadata in history restore responses and share/permalink payloads.
-    - Avoid rescanning restored DOM output when server-provided metadata exists.
-    - Decide whether older runs without metadata should be lazily classified on read or treated as metadata-unavailable.
-
-  - Frontend migration:
-    - Replace DOM regex classification in `search.js` with metadata-driven counts, chips, filters, highlight navigation, and summarize output.
-    - Keep only minimal fallback scanning if needed for legacy/no-metadata output, and remove it once all active surfaces provide server metadata.
-    - Keep the summarize button behavior, but generate grouped summaries from backend-provided command/target/signal metadata.
-    - Confirm search chips (`F`, `W`, `E`, `S`) still open search and cycle through scoped matches.
-
-  - Tests:
-    - Add Python fixture tests for classifier output using real-ish command samples:
-      - `dig`, `dig +short`, `host`, `nslookup`
-      - `nc -zv ip.darklab.sh ...`
-      - `nmap` open-port/service output
-      - `curl` status/redirect output
-      - denied commands, failed commands, timeout notices, and user-killed runs
-      - built-in command output exclusion
-    - Add backend/API tests verifying `/run`, history restore, and share payloads include signal metadata.
-    - Reduce frontend tests to rendering/navigation behavior using metadata fixtures instead of duplicating classifier rules in JS.
-    - Add at least one E2E proving live SSE metadata marks findings during streaming and restored history renders the same signals.
-
-  - Acceptance criteria:
-    - Live output, restored history, share/permalink views, search chips, and command findings summaries all agree on signal counts.
-    - Large restored transcripts do not require repeated DOM-wide regex rescans for discoverability counts.
-    - Existing findings behavior remains covered for `dig`, `host`, `nslookup`, `nc`, and built-in exclusion.
-    - Full E2E, unit, and relevant Python suites pass after migration.
+No open TODOs at this time.
 
 ---
 

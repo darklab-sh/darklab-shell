@@ -67,6 +67,7 @@ let _historyRootSuggestions = [];
 let _historyRootFiltered = [];
 let _historyRootIndex = -1;
 let _historyRootSuppressInputOnce = false;
+let _historyRootInputFocused = false;
 let _historyPaging = {
   page: 1,
   pageSize: (typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.history_panel_limit)
@@ -152,7 +153,20 @@ function _historyCommandRootsFromRuns(runs) {
 }
 
 function _renderHistoryRootSuggestions(runs) {
-  _historyRootSuggestions = _historyCommandRootsFromRuns(runs);
+  const nextSuggestions = _historyCommandRootsFromRuns(runs);
+  const currentQuery = typeof historyRootInput !== 'undefined' && historyRootInput
+    ? _normalizeHistoryFilterValue(historyRootInput.value)
+    : _historyFilters.commandRoot;
+  if (_historyRootInputFocused && currentQuery) {
+    // The server-side command_root filter is exact-root oriented. While the
+    // user is typing a partial root, a refresh can legitimately return no
+    // matching rows; do not let that transient response erase the suggestion
+    // pool the user is actively choosing from.
+    const merged = new Set([..._historyRootSuggestions, ...nextSuggestions]);
+    _historyRootSuggestions = [...merged].sort((a, b) => a.localeCompare(b));
+  } else {
+    _historyRootSuggestions = nextSuggestions;
+  }
   _historyRefreshRootDropdown();
 }
 
@@ -162,6 +176,28 @@ function _appendHistoryCommandEcho(tabId, command) {
     return;
   }
   appendLine(command, 'prompt-echo', tabId);
+}
+
+function _historyOutputLineMetadata(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const metadata = {};
+  if (Array.isArray(entry.signals) && entry.signals.length) metadata.signals = entry.signals;
+  if (Number.isInteger(entry.line_index)) metadata.line_index = entry.line_index;
+  if (typeof entry.command_root === 'string' && entry.command_root) metadata.command_root = entry.command_root;
+  if (typeof entry.target === 'string' && entry.target) metadata.target = entry.target;
+  return Object.keys(metadata).length ? metadata : null;
+}
+
+function _appendHistoryOutputLine(entry, tabId) {
+  if (entry && typeof entry === 'object') {
+    const text = String(entry.text || '');
+    const cls = String(entry.cls || '');
+    const metadata = _historyOutputLineMetadata(entry);
+    if (metadata) appendLine(text, cls, tabId, metadata);
+    else appendLine(text, cls, tabId);
+    return;
+  }
+  appendLine(String(entry || ''), '', tabId);
 }
 
 function _hideHistoryRootDropdown() {
@@ -928,7 +964,8 @@ function restoreHistoryRunIntoTab(run, { targetTabId = null, hidePanelOnSuccess 
         t.reconnectedRun = false;
       }
       _appendHistoryCommandEcho(tabId, fullRun.command);
-      (fullRun.output || []).forEach(line => appendLine(line, '', tabId));
+      const outputLines = Array.isArray(fullRun.output_entries) ? fullRun.output_entries : (fullRun.output || []);
+      outputLines.forEach(line => _appendHistoryOutputLine(line, tabId));
       if (previewNotice) appendLine(previewNotice, 'notice', tabId);
       appendLine(
         `[history — exit ${fullRun.exit_code}]`,
@@ -1115,11 +1152,15 @@ if (typeof historyRootInput !== 'undefined' && historyRootInput) {
     _setHistoryFilter('commandRoot', e.target.value, { debounce: true });
   });
   historyRootInput.addEventListener('focus', () => {
+    _historyRootInputFocused = true;
     _historyRootIndex = -1;
     _historyRefreshRootDropdown();
   });
   historyRootInput.addEventListener('blur', () => {
-    setTimeout(() => _hideHistoryRootDropdown(), 0);
+    setTimeout(() => {
+      _historyRootInputFocused = false;
+      _hideHistoryRootDropdown();
+    }, 0);
   });
   historyRootInput.addEventListener('keydown', e => {
     if (e.key === 'Escape') {

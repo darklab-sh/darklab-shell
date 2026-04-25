@@ -110,7 +110,34 @@ function _schedulePendingOutputFlush(tabId) {
   state.handle = setTimeout(() => _flushPendingOutputBatch(tabId), 16);
 }
 
-function _buildOutputLine(text, cls, tabId, now, runStart) {
+function _normalizeOutputSignals(signals) {
+  return Array.isArray(signals)
+    ? signals.map(signal => String(signal || '')).filter(Boolean)
+    : [];
+}
+
+function _applyOutputSignalMetadata(span, rawLine, metadata) {
+  if (!metadata || typeof metadata !== 'object') return;
+  const signals = _normalizeOutputSignals(metadata.signals);
+  if (signals.length) {
+    rawLine.signals = signals;
+    span.dataset.signals = signals.join(',');
+  }
+  if (Number.isInteger(metadata.line_index)) {
+    rawLine.line_index = metadata.line_index;
+    span.dataset.lineIndex = String(metadata.line_index);
+  }
+  if (typeof metadata.command_root === 'string' && metadata.command_root) {
+    rawLine.command_root = metadata.command_root;
+    span.dataset.commandRoot = metadata.command_root;
+  }
+  if (typeof metadata.target === 'string' && metadata.target) {
+    rawLine.target = metadata.target;
+    span.dataset.signalTarget = metadata.target;
+  }
+}
+
+function _buildOutputLine(text, cls, tabId, now, runStart, metadata = null) {
   const span = document.createElement('span');
   span.className = 'line' + (cls ? ' ' + cls : '');
   const content = document.createElement('span');
@@ -140,10 +167,10 @@ function _buildOutputLine(text, cls, tabId, now, runStart) {
   }
   span.appendChild(content);
 
-  return {
-    span,
-    rawLine: { text: rawTextForStorage, cls: cls || '', tsC, tsE: span.dataset.tsE || '' },
-  };
+  const rawLine = { text: rawTextForStorage, cls: cls || '', tsC, tsE: span.dataset.tsE || '' };
+  _applyOutputSignalMetadata(span, rawLine, metadata);
+
+  return { span, rawLine };
 }
 
 function _appendOutputSpan(out, span) {
@@ -198,6 +225,7 @@ function _appendRestoredOutputSpan(out, rawLine) {
   span.className = 'line' + (cls ? ' ' + cls : '');
   span.dataset.tsC = String(rawLine && rawLine.tsC || '');
   if (rawLine && rawLine.tsE) span.dataset.tsE = String(rawLine.tsE);
+  _applyOutputSignalMetadata(span, {}, rawLine);
 
   const content = document.createElement('span');
   content.className = 'line-content';
@@ -237,6 +265,10 @@ function renderRestoredTabOutput(tabId, rawLines) {
     cls: String(line && line.cls || ''),
     tsC: String(line && line.tsC || ''),
     tsE: String(line && line.tsE || ''),
+    signals: _normalizeOutputSignals(line && line.signals),
+    line_index: Number.isInteger(line && line.line_index) ? line.line_index : undefined,
+    command_root: String(line && line.command_root || ''),
+    target: String(line && line.target || ''),
   })) : [];
   out.innerHTML = '';
   tab.rawLines = lines;
@@ -415,7 +447,7 @@ _setLnMode('off');
 // HTML export — ansi_up processes codes into HTML spans, so we capture them
 // before rendering. Each line also receives data-ts-e (elapsed) and data-ts-c
 // (clock) attributes used by the CSS ::before timestamp display.
-function appendLine(text, cls, tabId) {
+function appendLine(text, cls, tabId, metadata = null) {
   const id = tabId || activeTabId;
   const out = getOutput(id);
   if (!out) return;
@@ -425,7 +457,7 @@ function appendLine(text, cls, tabId) {
   const runStart = tab?.runStart || 0;
   const state = _getPendingOutputBatch(id);
   const shouldBatch = state.scheduled || state.items.length > 0 || state.burstCount >= _OUTPUT_SYNC_BURST_LIMIT;
-  const { span, rawLine } = _buildOutputLine(text, cls, id, now, runStart);
+  const { span, rawLine } = _buildOutputLine(text, cls, id, now, runStart, metadata);
 
   if (shouldBatch) {
     state.items.push({ span, rawLine });

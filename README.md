@@ -612,6 +612,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     ├── redaction.py            # Snapshot-share redaction helpers and built-in rule application
     ├── commands.py             # Command loading, validation (is_command_allowed), and rewrites
     ├── permalinks.py           # Flask context/render helpers for /history/<id> and /share/<id>
+    ├── output_signals.py       # Server-side findings/warnings/errors/summaries classifier
     ├── run_output_store.py     # Preview/full-output capture and artifact persistence helpers
     ├── favicon.ico             # Site favicon
     ├── conf/                   # Operator-configurable files — edit these to customize the deployment

@@ -111,10 +111,26 @@ test.describe('output actions', () => {
   test('summarize appends a signal summary block for the active tab output', async ({ page }) => {
     await page.evaluate(() => {
       clearTab(activeTabId)
-      appendLine('443/tcp open https', '', activeTabId)
-      appendLine('warning: retrying request', 'notice', activeTabId)
-      appendLine('connection timed out', 'exit-fail', activeTabId)
-      appendLine('Nmap done: 1 IP address (1 host up) scanned in 1.23 seconds', '', activeTabId)
+      appendLine('443/tcp open https', '', activeTabId, {
+        signals: ['findings'],
+        command_root: 'nmap',
+        target: 'ip.darklab.sh',
+      })
+      appendLine('warning: retrying request', 'notice', activeTabId, {
+        signals: ['warnings'],
+        command_root: 'nmap',
+        target: 'ip.darklab.sh',
+      })
+      appendLine('connection timed out', 'exit-fail', activeTabId, {
+        signals: ['errors'],
+        command_root: 'nmap',
+        target: 'ip.darklab.sh',
+      })
+      appendLine('Nmap done: 1 IP address (1 host up) scanned in 1.23 seconds', '', activeTabId, {
+        signals: ['summaries'],
+        command_root: 'nmap',
+        target: 'ip.darklab.sh',
+      })
     })
 
     await page.locator('#search-summary-btn').click()
@@ -327,13 +343,41 @@ test.describe('output search scopes', () => {
     await page.evaluate(() => {
       clearTab(activeTabId)
       appendLine('noise line', '', activeTabId)
-      appendLine('warning: API returned a retry-after header', 'notice', activeTabId)
-      appendLine('warning: host seems down; retrying with TCP probe', 'notice', activeTabId)
-      appendLine('443/tcp open https', '', activeTabId)
-      appendLine('connection timed out', 'exit-fail', activeTabId)
-      appendLine('connection refused', 'exit-fail', activeTabId)
-      appendLine('verify return code: 0 (ok)', '', activeTabId)
-      appendLine('Nmap done: 1 IP address (1 host up) scanned in 2.31 seconds', '', activeTabId)
+      appendLine('warning: API returned a retry-after header', 'notice', activeTabId, {
+        signals: ['warnings'],
+        command_root: 'nmap',
+        target: 'ip.darklab.sh',
+      })
+      appendLine('warning: host seems down; retrying with TCP probe', 'notice', activeTabId, {
+        signals: ['warnings'],
+        command_root: 'nmap',
+        target: 'ip.darklab.sh',
+      })
+      appendLine('443/tcp open https', '', activeTabId, {
+        signals: ['findings'],
+        command_root: 'nmap',
+        target: 'ip.darklab.sh',
+      })
+      appendLine('connection timed out', 'exit-fail', activeTabId, {
+        signals: ['errors'],
+        command_root: 'nmap',
+        target: 'ip.darklab.sh',
+      })
+      appendLine('connection refused', 'exit-fail', activeTabId, {
+        signals: ['errors'],
+        command_root: 'nmap',
+        target: 'ip.darklab.sh',
+      })
+      appendLine('verify return code: 0 (ok)', '', activeTabId, {
+        signals: ['findings'],
+        command_root: 'nmap',
+        target: 'ip.darklab.sh',
+      })
+      appendLine('Nmap done: 1 IP address (1 host up) scanned in 2.31 seconds', '', activeTabId, {
+        signals: ['summaries'],
+        command_root: 'nmap',
+        target: 'ip.darklab.sh',
+      })
     })
   })
 

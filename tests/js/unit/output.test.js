@@ -129,6 +129,31 @@ describe('appendLine', () => {
     expect(line.dataset.tsE).toMatch(/^\+\d+\.\d+s$/)
   })
 
+  it('stores server-provided signal metadata on DOM lines and rawLines', () => {
+    const { appendLine, _getTabs } = loadOutputFns()
+
+    appendLine('443/tcp open https', '', 'tab-1', {
+      signals: ['findings'],
+      line_index: 7,
+      command_root: 'nmap',
+      target: 'ip.darklab.sh',
+    })
+
+    const line = document.querySelector('.line')
+    expect(line?.dataset.signals).toBe('findings')
+    expect(line?.dataset.lineIndex).toBe('7')
+    expect(line?.dataset.commandRoot).toBe('nmap')
+    expect(line?.dataset.signalTarget).toBe('ip.darklab.sh')
+
+    expect(_getTabs()[0].rawLines[0]).toMatchObject({
+      text: '443/tcp open https',
+      signals: ['findings'],
+      line_index: 7,
+      command_root: 'nmap',
+      target: 'ip.darklab.sh',
+    })
+  })
+
   it('uses +0.0s for lines without a true elapsed runtime', () => {
     const { appendLine } = loadOutputFns({
       extraGlobals: {

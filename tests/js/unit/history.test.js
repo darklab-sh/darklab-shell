@@ -1044,6 +1044,59 @@ describe('history panel actions', () => {
     expect(suggestions).toEqual(['dig'])
   })
 
+  it('keeps root suggestions stable when a refresh returns no roots while typing', async () => {
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({
+        json: () =>
+          Promise.resolve({
+            roots: [],
+            runs: [],
+          }),
+      }),
+    )
+      .mockResolvedValueOnce({
+        json: () =>
+          Promise.resolve({
+            roots: ['curl', 'dig', 'ping'],
+            runs: [
+              {
+                id: 'run-1',
+                command: 'dig darklab.sh A',
+                started: '2026-01-01T00:00:00Z',
+                exit_code: 0,
+              },
+            ],
+          }),
+      })
+      .mockResolvedValueOnce({
+        json: () =>
+          Promise.resolve({
+            roots: [],
+            runs: [],
+          }),
+      })
+    const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const input = document.getElementById('history-root-input')
+    input.dispatchEvent(new Event('focus'))
+    input.value = 'd'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const suggestions = [...document.querySelectorAll('#history-root-dropdown .ac-item')].map(
+      (el) => el.textContent.trim(),
+    )
+    expect(suggestions).toEqual(['dig'])
+    expect(document.getElementById('history-root-dropdown').classList.contains('u-hidden')).toBe(
+      false,
+    )
+  })
+
   it('keeps the root suggestion menu hidden until at least one character is typed', async () => {
     const { refreshHistoryPanel } = loadHistoryPanel({
       apiFetchImpl: vi.fn(() =>
@@ -1500,6 +1553,17 @@ describe('history panel actions', () => {
             Promise.resolve({
               command: 'ping darklab.sh',
               output: ['ok line 1', 'ok line 2'],
+              output_entries: [
+                {
+                  text: 'ok line 1',
+                  cls: '',
+                  signals: ['findings'],
+                  line_index: 0,
+                  command_root: 'ping',
+                  target: 'darklab.sh',
+                },
+                { text: 'ok line 2', cls: '' },
+              ],
               exit_code: 0,
               full_output_available: true,
             }),
@@ -1522,7 +1586,13 @@ describe('history panel actions', () => {
     expect(apiFetch).toHaveBeenCalledWith('/history/run-1?json')
     expect(document.getElementById('history-load-overlay').classList.contains('open')).toBe(false)
     expect(appendCommandEcho).toHaveBeenCalledWith('ping darklab.sh', 'tab-2')
-    expect(appendLine).toHaveBeenCalledWith('ok line 1', '', 'tab-2')
+    expect(appendLine).toHaveBeenCalledWith('ok line 1', '', 'tab-2', {
+      signals: ['findings'],
+      line_index: 0,
+      command_root: 'ping',
+      target: 'darklab.sh',
+    })
+    expect(appendLine).toHaveBeenCalledWith('ok line 2', '', 'tab-2')
     expect(appendLine).not.toHaveBeenCalledWith(
       expect.stringContaining('preview truncated'),
       'notice',

@@ -330,6 +330,22 @@ function _previewTruncationNotice(outputLineCount, fullOutputAvailable) {
   return `[preview truncated — only the last ${shown} lines are shown here, but the full output had ${total} lines. Full output persistence is disabled or unavailable]`;
 }
 
+function _streamOutputMetadata(msg) {
+  if (!msg || typeof msg !== 'object') return null;
+  const metadata = {};
+  if (Array.isArray(msg.signals) && msg.signals.length) metadata.signals = msg.signals;
+  if (Number.isInteger(msg.line_index)) metadata.line_index = msg.line_index;
+  if (typeof msg.command_root === 'string' && msg.command_root) metadata.command_root = msg.command_root;
+  if (typeof msg.target === 'string' && msg.target) metadata.target = msg.target;
+  return Object.keys(metadata).length ? metadata : null;
+}
+
+function _appendStreamLine(text, cls, tabId, msg) {
+  const metadata = _streamOutputMetadata(msg);
+  if (metadata) appendLine(text, cls, tabId, metadata);
+  else appendLine(text, cls, tabId);
+}
+
 function appendCommandEcho(cmd, tabId) {
   appendLine(cmd, 'prompt-echo', tabId);
 }
@@ -1531,7 +1547,7 @@ function submitCommand(rawCmd) {
                   }
                 }
               } else if (msg.type === 'notice') {
-                appendLine(msg.text, 'notice', tabId);
+                _appendStreamLine(msg.text, 'notice', tabId, msg);
               } else if (msg.type === 'clear') {
                 clearTab(tabId);
                 const t = getTab(tabId);
@@ -1543,7 +1559,7 @@ function submitCommand(rawCmd) {
                 }
                 msg.text.split('\n').forEach((line, i, arr) => {
                   if ((i < arr.length - 1 || line) && !_shouldSuppressStreamOutputLine(t, line)) {
-                    appendLine(line, msg.cls || '', tabId);
+                    _appendStreamLine(line, msg.cls || '', tabId, msg);
                   }
                 });
               } else if (msg.type === 'exit') {

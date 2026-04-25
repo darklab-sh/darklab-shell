@@ -39,6 +39,7 @@ from fake_commands import (
 from helpers import get_client_ip, get_log_session_id, get_session_id
 from process import active_run_register, active_run_remove, pid_pop, pid_register
 from run_output_store import RunOutputCapture, load_full_output_entries
+from output_signals import OutputSignalClassifier
 
 log = logging.getLogger("shell")
 
@@ -62,6 +63,37 @@ def _run_output_capture(run_id):
         persist_full_output=CFG.get("persist_full_run_output", False),
         full_output_max_bytes=CFG.get("full_output_max_bytes", 0),
     )
+
+
+def _capture_add_line_with_signals(capture, classifier, text, *, cls="", ts_clock="", ts_elapsed=""):
+    metadata = classifier.classify_line(text, cls=cls) if classifier else {}
+    capture.add_line(
+        text,
+        cls=cls,
+        ts_clock=ts_clock,
+        ts_elapsed=ts_elapsed,
+        signals=metadata.get("signals") if isinstance(metadata.get("signals"), list) else None,
+        line_index=metadata.get("line_index") if isinstance(metadata.get("line_index"), int) else None,
+        command_root=str(metadata.get("command_root", "")),
+        target=str(metadata.get("target", "")),
+    )
+    return metadata
+
+
+def _sse_output_event(event_type, text, *, cls="", metadata=None):
+    payload = {"type": event_type, "text": text}
+    if cls:
+        payload["cls"] = cls
+    if isinstance(metadata, dict):
+        if isinstance(metadata.get("signals"), list):
+            payload["signals"] = metadata["signals"]
+        if isinstance(metadata.get("line_index"), int):
+            payload["line_index"] = metadata["line_index"]
+        if isinstance(metadata.get("command_root"), str):
+            payload["command_root"] = metadata["command_root"]
+        if isinstance(metadata.get("target"), str):
+            payload["target"] = metadata["target"]
+    return f"data: {json.dumps(payload)}\n\n"
 
 
 def _extract_output_search_text(preview_lines):
@@ -245,6 +277,7 @@ def _synthetic_run_response(original_command, session_id, client_ip, events, exi
     run_id      = str(uuid.uuid4())
     run_started = datetime.now(timezone.utc).isoformat()
     capture = _run_output_capture(run_id)
+    signal_classifier = OutputSignalClassifier(original_command, cmd_type=cmd_type)
 
     log.info("RUN_START", extra={
         "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
@@ -259,13 +292,20 @@ def _synthetic_run_response(original_command, session_id, client_ip, events, exi
                 if event.get("type") == "output":
                     line = event.get("text", "")
                     line_dt = datetime.now(timezone.utc)
-                    capture.add_line(
+                    metadata = _capture_add_line_with_signals(
+                        capture,
+                        signal_classifier,
                         line,
                         cls=str(event.get("cls", "")),
                         ts_clock=line_dt.strftime("%H:%M:%S"),
                         ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
                     )
-                    yield f"data: {json.dumps({'type': 'output', 'text': line + chr(10), 'cls': str(event.get('cls', ''))})}\n\n"
+                    yield _sse_output_event(
+                        "output",
+                        line + "\n",
+                        cls=str(event.get("cls", "")),
+                        metadata=metadata,
+                    )
                 elif event.get("type") == "clear":
                     yield f"data: {json.dumps({'type': 'clear'})}\n\n"
 
@@ -639,6 +679,7 @@ def run_command():
     run_id      = str(uuid.uuid4())
     run_started = datetime.now(timezone.utc).isoformat()
     capture = _run_output_capture(run_id)
+    signal_classifier = OutputSignalClassifier(original_command, cmd_type="real")
 
     # Start the process immediately — before the generator runs — so the PID
     # is registered before any kill request could arrive
@@ -680,7 +721,8 @@ def run_command():
             stream_reader = _make_nonblocking_stream_reader(proc.stdout)
             while True:
                 if COMMAND_TIMEOUT:
-                    elapsed = (datetime.now(timezone.utc) - run_started_dt).total_seconds()
+                    now_dt = datetime.now(timezone.utc)
+                    elapsed = (now_dt - run_started_dt).total_seconds()
                     if elapsed >= COMMAND_TIMEOUT:
                         try:
                             pgid = os.getpgid(proc.pid)
@@ -694,8 +736,10 @@ def run_command():
                         except (ProcessLookupError, OSError):
                             pass
                         timeout_msg = _timeout_notice(COMMAND_TIMEOUT)
-                        line_dt = datetime.now(timezone.utc)
-                        capture.add_line(
+                        line_dt = now_dt
+                        _capture_add_line_with_signals(
+                            capture,
+                            signal_classifier,
                             timeout_msg,
                             cls="notice",
                             ts_clock=line_dt.strftime("%H:%M:%S"),
@@ -714,7 +758,9 @@ def run_command():
                         filtered_lines = postfilter.process_output_line(line)
                         for filtered_line in filtered_lines:
                             line_dt = datetime.now(timezone.utc)
-                            capture.add_line(
+                            _capture_add_line_with_signals(
+                                capture,
+                                signal_classifier,
                                 filtered_line,
                                 ts_clock=line_dt.strftime("%H:%M:%S"),
                                 ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
@@ -728,14 +774,18 @@ def run_command():
                 filtered_lines = postfilter.process_output_line(line)
                 for filtered_line in filtered_lines:
                     line_dt = datetime.now(timezone.utc)
-                    capture.add_line(
+                    _capture_add_line_with_signals(
+                        capture,
+                        signal_classifier,
                         filtered_line,
                         ts_clock=line_dt.strftime("%H:%M:%S"),
                         ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
                     )
             for filtered_line in postfilter.finalize_output_lines():
                 line_dt = datetime.now(timezone.utc)
-                capture.add_line(
+                _capture_add_line_with_signals(
+                    capture,
+                    signal_classifier,
                     filtered_line,
                     ts_clock=line_dt.strftime("%H:%M:%S"),
                     ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
@@ -764,13 +814,15 @@ def run_command():
             # If the command was rewritten, surface a notice to the user
             if notice:
                 notice_dt = datetime.now(timezone.utc)
-                capture.add_line(
+                metadata = _capture_add_line_with_signals(
+                    capture,
+                    signal_classifier,
                     f"[notice] {notice}",
                     cls="notice",
                     ts_clock=notice_dt.strftime("%H:%M:%S"),
                     ts_elapsed=f"+{(notice_dt - run_started_dt).total_seconds():.1f}s",
                 )
-                yield f"data: {json.dumps({'type': 'notice', 'text': notice})}\n\n"
+                yield _sse_output_event("notice", notice, metadata=metadata)
 
             if proc.stdout is None:
                 raise RuntimeError("Process stdout pipe was not created")
@@ -779,7 +831,8 @@ def run_command():
                 # Check timeout at the top of every iteration so it fires even
                 # during continuous output, not only during idle heartbeat periods.
                 if COMMAND_TIMEOUT:
-                    elapsed = (datetime.now(timezone.utc) - run_started_dt).total_seconds()
+                    now_dt = datetime.now(timezone.utc)
+                    elapsed = (now_dt - run_started_dt).total_seconds()
                     if elapsed >= COMMAND_TIMEOUT:
                         try:
                             pgid = os.getpgid(proc.pid)
@@ -797,7 +850,16 @@ def run_command():
                             "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
                             "timeout": COMMAND_TIMEOUT, "cmd": original_command,
                         })
-                        yield f"data: {json.dumps({'type': 'notice', 'text': timeout_msg})}\n\n"
+                        line_dt = now_dt
+                        metadata = _capture_add_line_with_signals(
+                            capture,
+                            signal_classifier,
+                            timeout_msg,
+                            cls="notice",
+                            ts_clock=line_dt.strftime("%H:%M:%S"),
+                            ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
+                        )
+                        yield _sse_output_event("notice", timeout_msg, metadata=metadata)
                         break
                 # Wait up to HEARTBEAT_INTERVAL seconds for output
                 if _stdout_ready(proc.stdout, HEARTBEAT_INTERVAL):
@@ -809,12 +871,14 @@ def run_command():
                         filtered_lines = postfilter.process_output_line(line)
                         for filtered_line in filtered_lines:
                             line_dt = datetime.now(timezone.utc)
-                            capture.add_line(
+                            metadata = _capture_add_line_with_signals(
+                                capture,
+                                signal_classifier,
                                 filtered_line,
                                 ts_clock=line_dt.strftime("%H:%M:%S"),
                                 ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
                             )
-                            yield f"data: {json.dumps({'type': 'output', 'text': filtered_line})}\n\n"
+                            yield _sse_output_event("output", filtered_line, metadata=metadata)
                 else:
                     # No output within the interval — send a heartbeat comment
                     # to keep nginx and the browser from treating the connection as idle
@@ -827,20 +891,24 @@ def run_command():
                 filtered_lines = postfilter.process_output_line(line)
                 for filtered_line in filtered_lines:
                     line_dt = datetime.now(timezone.utc)
-                    capture.add_line(
+                    metadata = _capture_add_line_with_signals(
+                        capture,
+                        signal_classifier,
                         filtered_line,
                         ts_clock=line_dt.strftime("%H:%M:%S"),
                         ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
                     )
-                    yield f"data: {json.dumps({'type': 'output', 'text': filtered_line})}\n\n"
+                    yield _sse_output_event("output", filtered_line, metadata=metadata)
             for filtered_line in postfilter.finalize_output_lines():
                 line_dt = datetime.now(timezone.utc)
-                capture.add_line(
+                metadata = _capture_add_line_with_signals(
+                    capture,
+                    signal_classifier,
                     filtered_line,
                     ts_clock=line_dt.strftime("%H:%M:%S"),
                     ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
                 )
-                yield f"data: {json.dumps({'type': 'output', 'text': filtered_line})}\n\n"
+                yield _sse_output_event("output", filtered_line, metadata=metadata)
             exit_code = _wait_for_proc_exit_code(proc)
             elapsed = _finalize_completed_run(
                 run_id, session_id, client_ip, original_command, run_started, exit_code, capture,

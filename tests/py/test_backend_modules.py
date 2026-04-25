@@ -41,6 +41,7 @@ from commands import (
     is_command_allowed, rewrite_command,
 )
 from permalinks import _format_retention, _expiry_note, _permalink_error_page, _normalize_permalink_lines, _prompt_echo_text
+from output_signals import OutputSignalClassifier, classify_line, command_root, extract_target
 from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -1041,6 +1042,45 @@ class TestWelcomeAssetLoading:
 
 # ── run_output_store ──────────────────────────────────────────────────────────
 
+class TestOutputSignals:
+    def test_command_root_and_target_extraction(self):
+        assert command_root("nmap -sV ip.darklab.sh") == "nmap"
+        assert extract_target("nuclei -u https://ip.darklab.sh -t http/") == "ip.darklab.sh"
+        assert extract_target("nc -zv ip.darklab.sh 443 80") == "ip.darklab.sh"
+        assert extract_target("dig @8.8.8.8 darklab.sh A") == "darklab.sh"
+        assert extract_target("assetfinder -subs-only darklab.sh") == "darklab.sh"
+
+    def test_classifies_common_findings(self):
+        assert classify_line("443/tcp open https", command="nmap ip.darklab.sh") == ["findings"]
+        assert classify_line("ip.darklab.sh [107.178.109.44] 80 (http) open", command="nc -zv ip.darklab.sh 80") == ["findings"]
+        assert classify_line("darklab.sh has address 104.21.4.35", command="host darklab.sh") == ["findings"]
+        assert classify_line("104.21.4.35", command="dig darklab.sh +short") == ["findings"]
+        assert classify_line("1 aspmx.l.google.com.", command="dig MX darklab.sh +short") == ["findings"]
+        assert classify_line("fw-vx1.darklab.sh", command="assetfinder -subs-only darklab.sh") == ["findings"]
+        assert classify_line("darklab.sh", command="assetfinder -subs-only darklab.sh") == ["findings"]
+        assert classify_line("104.21.4.35", command="cat ips.txt") == []
+        assert classify_line("fw-vx1.darklab.sh", command="cat hosts.txt") == []
+
+    def test_classifies_warning_error_and_summary_lines(self):
+        assert classify_line("warning: retrying request", cls="notice", command="curl https://darklab.sh") == ["warnings"]
+        assert classify_line("connection timed out", cls="exit-fail", command="nc -zv ip.darklab.sh 80") == ["errors"]
+        assert classify_line(
+            "Nmap done: 1 IP address (1 host up) scanned in 1.23 seconds",
+            command="nmap ip.darklab.sh",
+        ) == ["summaries"]
+
+    def test_user_killed_process_is_not_an_error(self):
+        assert classify_line("[killed by user after 2.0s]", cls="exit-fail", command="ping darklab.sh") == []
+
+    def test_builtin_classifier_keeps_metadata_but_omits_signals(self):
+        classifier = OutputSignalClassifier("status", cmd_type="builtin")
+        metadata = classifier.classify_line("warning: fake status line", cls="notice")
+
+        assert metadata["line_index"] == 0
+        assert metadata["command_root"] == "status"
+        assert "signals" not in metadata
+
+
 class TestRunOutputCapture:
     def teardown_method(self):
         if os.path.isdir(RUN_OUTPUT_DIR):
@@ -1076,6 +1116,31 @@ class TestRunOutputCapture:
             {"text": "alpha", "cls": "", "tsC": "", "tsE": ""},
             {"text": "beta", "cls": "", "tsC": "", "tsE": ""},
         ]
+
+    def test_full_output_artifact_round_trips_signal_metadata(self):
+        capture = RunOutputCapture("test-run-output-signals", preview_limit=5, persist_full_output=True, full_output_max_bytes=0)
+        capture.add_line(
+            "443/tcp open https",
+            signals=["findings"],
+            line_index=0,
+            command_root="nmap",
+            target="ip.darklab.sh",
+        )
+        capture.finalize()
+
+        expected = [{
+            "text": "443/tcp open https",
+            "cls": "",
+            "tsC": "",
+            "tsE": "",
+            "signals": ["findings"],
+            "line_index": 0,
+            "command_root": "nmap",
+            "target": "ip.darklab.sh",
+        }]
+        assert list(capture.preview_lines) == expected
+        assert capture.artifact_rel_path is not None
+        assert load_full_output_entries(capture.artifact_rel_path) == expected
 
     def test_full_output_artifact_respects_byte_cap(self):
         capture = RunOutputCapture("test-run-output-cap", preview_limit=10, persist_full_output=True, full_output_max_bytes=60)

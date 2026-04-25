@@ -189,12 +189,21 @@ def _preview_output_entries_from_run(run):
     entries = []
     for item in loaded:
         if isinstance(item, dict) and isinstance(item.get("text"), str):
-            entries.append({
+            entry = {
                 "text": item["text"],
                 "cls": str(item.get("cls", "")),
                 "tsC": str(item.get("tsC", "")),
                 "tsE": str(item.get("tsE", "")),
-            })
+            }
+            if isinstance(item.get("signals"), list):
+                entry["signals"] = [str(signal) for signal in item["signals"] if str(signal)]
+            if isinstance(item.get("line_index"), int):
+                entry["line_index"] = item["line_index"]
+            if isinstance(item.get("command_root"), str):
+                entry["command_root"] = item["command_root"]
+            if isinstance(item.get("target"), str):
+                entry["target"] = item["target"]
+            entries.append(entry)
         elif isinstance(item, str):
             entries.append({"text": item, "cls": "", "tsC": "", "tsE": ""})
     return entries

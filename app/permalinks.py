@@ -105,12 +105,21 @@ def _normalize_permalink_lines(content_lines, label: str):
             if isinstance(entry, str):
                 normalized_lines.append({"text": entry, "cls": "", "tsC": "", "tsE": ""})
             else:
-                normalized_lines.append({
+                normalized: dict[str, object] = {
                     "text": str(entry.get("text", "")),
                     "cls": str(entry.get("cls", "")),
                     "tsC": str(entry.get("tsC", "")),
                     "tsE": str(entry.get("tsE", "")),
-                })
+                }
+                if isinstance(entry.get("signals"), list):
+                    normalized["signals"] = [str(signal) for signal in entry["signals"] if str(signal)]
+                if isinstance(entry.get("line_index"), int):
+                    normalized["line_index"] = entry["line_index"]
+                if isinstance(entry.get("command_root"), str):
+                    normalized["command_root"] = entry["command_root"]
+                if isinstance(entry.get("target"), str):
+                    normalized["target"] = entry["target"]
+                normalized_lines.append(normalized)
     else:
         normalized_lines.append({"text": echo_text, "cls": "prompt-echo", "tsC": "", "tsE": ""})
         normalized_lines.append({"text": "", "cls": "", "tsC": "", "tsE": ""})

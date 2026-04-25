@@ -278,9 +278,9 @@ describe('search helpers', () => {
     const { setSearchScope, navigateSearch } = loadSearchFns()
     document.getElementById('out').innerHTML = [
       '<span class="line">normal line</span>',
-      '<span class="line notice">warning: API returned a retry-after header</span>',
+      '<span class="line notice" data-signals="warnings">warning: API returned a retry-after header</span>',
       '<span class="line">another normal line</span>',
-      '<span class="line">Note: Host seems down. If it is really up, but blocking our ping probes...</span>',
+      '<span class="line" data-signals="warnings">Note: Host seems down. If it is really up, but blocking our ping probes...</span>',
     ].join('')
 
     setSearchScope('warnings')
@@ -297,23 +297,23 @@ describe('search helpers', () => {
     expect(matches[1].classList.contains('current')).toBe(true)
   })
 
-  it('scopes to finding lines using command-like output heuristics', () => {
+  it('scopes to finding lines using server-provided signal metadata', () => {
     const { setSearchScope } = loadSearchFns()
     document.getElementById('out').innerHTML = [
       '<span class="line">Starting Nmap 7.95 ( https://nmap.org )</span>',
       '<span class="line">:: Progress: [10/100] ::</span>',
       '<span class="line">; <<>> DiG 9.18 <<>> darklab.sh MX</span>',
       '<span class="line">noise</span>',
-      '<span class="line">443/tcp open https</span>',
-      '<span class="line">ip.darklab.sh [107.178.109.44] 80 (http) open</span>',
-      '<span class="line">/admin [Status: 200, Size: 420]</span>',
-      '<span class="line">darklab.sh. 300 IN MX 10 aspmx.l.google.com.</span>',
-      '<span class="line">104.21.4.35</span>',
-      '<span class="line">172.67.131.156</span>',
-      '<span class="line">darklab.sh has address 104.21.4.35</span>',
-      '<span class="line">darklab.sh mail is handled by 10 aspmx.l.google.com.</span>',
-      '<span class="line">[medium] [http] [exposed-panel] https://target</span>',
-      '<span class="line">verify return code: 0 (ok)</span>',
+      '<span class="line" data-signals="findings">443/tcp open https</span>',
+      '<span class="line" data-signals="findings">ip.darklab.sh [107.178.109.44] 80 (http) open</span>',
+      '<span class="line" data-signals="findings">/admin [Status: 200, Size: 420]</span>',
+      '<span class="line" data-signals="findings">darklab.sh. 300 IN MX 10 aspmx.l.google.com.</span>',
+      '<span class="line" data-signals="findings">104.21.4.35</span>',
+      '<span class="line" data-signals="findings">172.67.131.156</span>',
+      '<span class="line" data-signals="findings">darklab.sh has address 104.21.4.35</span>',
+      '<span class="line" data-signals="findings">darklab.sh mail is handled by 10 aspmx.l.google.com.</span>',
+      '<span class="line" data-signals="findings">[medium] [http] [exposed-panel] https://target</span>',
+      '<span class="line" data-signals="findings">verify return code: 0 (ok)</span>',
     ].join('')
 
     setSearchScope('findings')
@@ -334,16 +334,16 @@ describe('search helpers', () => {
     expect(document.getElementById('searchCount').textContent).toBe('1 / 10')
   })
 
-  it('treats nslookup answer rows as findings without matching the server header', () => {
+  it('treats nslookup answer rows as findings when the server marks them', () => {
     const { setSearchScope } = loadSearchFns()
     document.getElementById('out').innerHTML = [
       '<span class="line">Server:  10.0.0.1</span>',
       '<span class="line">Address: 10.0.0.1#53</span>',
       '<span class="line">Non-authoritative answer:</span>',
       '<span class="line">Name: darklab.sh</span>',
-      '<span class="line">Address: 104.21.4.35</span>',
-      '<span class="line">darklab.sh mail exchanger = 10 aspmx.l.google.com.</span>',
-      '<span class="line">darklab.sh text = "v=spf1 include:_spf.google.com ~all"</span>',
+      '<span class="line" data-signals="findings">Address: 104.21.4.35</span>',
+      '<span class="line" data-signals="findings">darklab.sh mail exchanger = 10 aspmx.l.google.com.</span>',
+      '<span class="line" data-signals="findings">darklab.sh text = "v=spf1 include:_spf.google.com ~all"</span>',
     ].join('')
 
     setSearchScope('findings')
@@ -360,7 +360,7 @@ describe('search helpers', () => {
   it('clearSearch resets scoped search back to text mode', () => {
     const { setSearchScope, clearSearch } = loadSearchFns()
     document.getElementById('out').innerHTML =
-      '<span class="line exit-fail">connection timed out</span>'
+      '<span class="line exit-fail" data-signals="errors">connection timed out</span>'
 
     setSearchScope('errors')
     clearSearch()
@@ -372,9 +372,9 @@ describe('search helpers', () => {
   it('updates the search button and scope labels with scoped counts', () => {
     const { refreshSearchDiscoverabilityUi } = loadSearchFns()
     document.getElementById('out').innerHTML = [
-      '<span class="line notice">warning: retrying after rate limit</span>',
-      '<span class="line">443/tcp open https</span>',
-      '<span class="line exit-fail">connection timed out</span>',
+      '<span class="line notice" data-signals="warnings">warning: retrying after rate limit</span>',
+      '<span class="line" data-signals="findings">443/tcp open https</span>',
+      '<span class="line exit-fail" data-signals="errors">connection timed out</span>',
     ].join('')
 
     refreshSearchDiscoverabilityUi()
@@ -393,10 +393,10 @@ describe('search helpers', () => {
   it('signal chips are clickable and route to the matching scope', () => {
     const { refreshSearchDiscoverabilityUi } = loadSearchFns()
     document.getElementById('out').innerHTML = [
-      '<span class="line">443/tcp open https</span>',
-      '<span class="line notice">warning: retrying after rate limit</span>',
-      '<span class="line exit-fail">connection timed out</span>',
-      '<span class="line">Nmap done: 1 IP address (1 host up) scanned in 2.31 seconds</span>',
+      '<span class="line" data-signals="findings">443/tcp open https</span>',
+      '<span class="line notice" data-signals="warnings">warning: retrying after rate limit</span>',
+      '<span class="line exit-fail" data-signals="errors">connection timed out</span>',
+      '<span class="line" data-signals="summaries">Nmap done: 1 IP address (1 host up) scanned in 2.31 seconds</span>',
     ].join('')
 
     refreshSearchDiscoverabilityUi()
@@ -417,9 +417,43 @@ describe('search helpers', () => {
     expect(document.getElementById('searchSummaryBtn').disabled).toBe(true)
   })
 
+  it('uses server-provided signal metadata for scoped counts and highlights', () => {
+    const { refreshSearchDiscoverabilityUi, setSearchScope, runSearch } = loadSearchFns()
+    document.getElementById('out').innerHTML = [
+      '<span class="line" data-signals="findings">plain server finding</span>',
+      '<span class="line">443/tcp open https</span>',
+    ].join('')
+
+    refreshSearchDiscoverabilityUi()
+
+    expect(document.querySelector('[data-search-scope="findings"]').textContent).toBe('findings (1)')
+
+    setSearchScope('findings')
+    runSearch()
+
+    expect(document.querySelectorAll('.search-signal-hl')).toHaveLength(1)
+  })
+
+  it('does not classify plain text without server-provided signal metadata', () => {
+    const { refreshSearchDiscoverabilityUi, setSearchScope, runSearch } = loadSearchFns()
+    document.getElementById('out').innerHTML = [
+      '<span class="line" data-line-index="0" data-command-root="nmap">443/tcp open https</span>',
+      '<span class="line">80/tcp open http</span>',
+    ].join('')
+
+    refreshSearchDiscoverabilityUi()
+
+    expect(document.querySelector('[data-search-scope="findings"]').textContent).toBe('findings (0)')
+
+    setSearchScope('findings')
+    runSearch()
+
+    expect(document.querySelectorAll('.search-signal-hl')).toHaveLength(0)
+  })
+
   it('prefers the findings scope when opening search for findings-heavy output', () => {
     const { prepareSearchBarForOpen } = loadSearchFns()
-    document.getElementById('out').innerHTML = '<span class="line">443/tcp open https</span>'
+    document.getElementById('out').innerHTML = '<span class="line" data-signals="findings">443/tcp open https</span>'
 
     prepareSearchBarForOpen()
 
@@ -430,10 +464,10 @@ describe('search helpers', () => {
   it('scopes to summary lines and ignores detail rows', () => {
     const { setSearchScope } = loadSearchFns()
     document.getElementById('out').innerHTML = [
-      '<span class="line">443/tcp open https</span>',
-      '<span class="line">Nmap done: 1 IP address (1 host up) scanned in 2.31 seconds</span>',
-      '<span class="line">3 packets transmitted, 3 received, 0% packet loss</span>',
-      '<span class="line">Errors: 12</span>',
+      '<span class="line" data-signals="findings">443/tcp open https</span>',
+      '<span class="line" data-signals="summaries">Nmap done: 1 IP address (1 host up) scanned in 2.31 seconds</span>',
+      '<span class="line" data-signals="summaries">3 packets transmitted, 3 received, 0% packet loss</span>',
+      '<span class="line" data-signals="summaries">Errors: 12</span>',
     ].join('')
 
     setSearchScope('summaries')
@@ -451,7 +485,7 @@ describe('search helpers', () => {
     const { refreshSearchDiscoverabilityUi, setSearchScope } = loadSearchFns()
     document.getElementById('out').innerHTML = [
       '<span class="line exit-fail">[killed by user after 54.3s]</span>',
-      '<span class="line exit-fail">connection timed out</span>',
+      '<span class="line exit-fail" data-signals="errors">connection timed out</span>',
     ].join('')
 
     refreshSearchDiscoverabilityUi()
@@ -466,10 +500,10 @@ describe('search helpers', () => {
   it('appends a synthetic signal summary without inflating scoped counts', () => {
     const { summarizeCurrentOutputSignals, refreshSearchDiscoverabilityUi } = loadSearchFns()
     document.getElementById('out').innerHTML = [
-      '<span class="line">443/tcp open https</span>',
-      '<span class="line notice">warning: retrying request</span>',
-      '<span class="line exit-fail">connection timeout reached</span>',
-      '<span class="line">Nmap done: 1 IP address (1 host up) scanned in 1.23 seconds</span>',
+      '<span class="line" data-signals="findings">443/tcp open https</span>',
+      '<span class="line notice" data-signals="warnings">warning: retrying request</span>',
+      '<span class="line exit-fail" data-signals="errors">connection timeout reached</span>',
+      '<span class="line" data-signals="summaries">Nmap done: 1 IP address (1 host up) scanned in 1.23 seconds</span>',
     ].join('')
 
     summarizeCurrentOutputSignals()
@@ -496,14 +530,14 @@ describe('search helpers', () => {
     })
     document.getElementById('out').innerHTML = [
       '<span class="line prompt-echo">$ curl old.example</span>',
-      '<span class="line">HTTP/1.1 200 OK</span>',
-      '<span class="line notice">warning: old warning</span>',
-      '<span class="line exit-fail">old error</span>',
+      '<span class="line" data-signals="findings" data-command-root="curl" data-signal-target="old.example">HTTP/1.1 200 OK</span>',
+      '<span class="line notice" data-signals="warnings" data-command-root="curl" data-signal-target="old.example">warning: old warning</span>',
+      '<span class="line exit-fail" data-signals="errors" data-command-root="curl" data-signal-target="old.example">old error</span>',
       '<span class="line prompt-echo">$ nmap -sV ip.darklab.sh</span>',
-      '<span class="line">443/tcp open https</span>',
-      '<span class="line notice">warning: fresh warning</span>',
-      '<span class="line exit-fail">fresh error</span>',
-      '<span class="line">Nmap done: 1 IP address (1 host up) scanned in 1.23 seconds</span>',
+      '<span class="line" data-signals="findings" data-command-root="nmap" data-signal-target="ip.darklab.sh">443/tcp open https</span>',
+      '<span class="line notice" data-signals="warnings" data-command-root="nmap" data-signal-target="ip.darklab.sh">warning: fresh warning</span>',
+      '<span class="line exit-fail" data-signals="errors" data-command-root="nmap" data-signal-target="ip.darklab.sh">fresh error</span>',
+      '<span class="line" data-signals="summaries" data-command-root="nmap" data-signal-target="ip.darklab.sh">Nmap done: 1 IP address (1 host up) scanned in 1.23 seconds</span>',
     ].join('')
 
     summarizeCurrentOutputSignals()
@@ -520,7 +554,7 @@ describe('search helpers', () => {
     expect(lines).toContain('- fresh error')
   })
 
-  it('groups summary output by command and extracted target', () => {
+  it('groups summary output by server-provided command and target metadata', () => {
     const { summarizeCurrentOutputSignals } = loadSearchFns({
       tab: {
         id: 'tab-1',
@@ -529,11 +563,11 @@ describe('search helpers', () => {
     })
     document.getElementById('out').innerHTML = [
       '<span class="line prompt-echo">$ nmap -sV ip.darklab.sh</span>',
-      '<span class="line">80/tcp open http</span>',
-      '<span class="line">Nmap done: 1 IP address (1 host up) scanned in 2.11 seconds</span>',
+      '<span class="line" data-signals="findings" data-command-root="nmap" data-signal-target="ip.darklab.sh">80/tcp open http</span>',
+      '<span class="line" data-signals="summaries" data-command-root="nmap" data-signal-target="ip.darklab.sh">Nmap done: 1 IP address (1 host up) scanned in 2.11 seconds</span>',
       '<span class="line prompt-echo">$ nmap --top-ports 20 ip.darklab.sh</span>',
-      '<span class="line">443/tcp open https</span>',
-      '<span class="line notice">warning: timing results may be unreliable</span>',
+      '<span class="line" data-signals="findings" data-command-root="nmap" data-signal-target="ip.darklab.sh">443/tcp open https</span>',
+      '<span class="line notice" data-signals="warnings" data-command-root="nmap" data-signal-target="ip.darklab.sh">warning: timing results may be unreliable</span>',
     ].join('')
 
     summarizeCurrentOutputSignals()
@@ -551,6 +585,54 @@ describe('search helpers', () => {
     expect(lines).toContain('summaries (1)')
   })
 
+  it('deduplicates repeated full commands in grouped summary output', () => {
+    const { summarizeCurrentOutputSignals } = loadSearchFns({
+      tab: {
+        id: 'tab-1',
+        command: 'nmap -sT ip.darklab.sh',
+      },
+    })
+    document.getElementById('out').innerHTML = [
+      '<span class="line prompt-echo">$ nmap -sT ip.darklab.sh</span>',
+      '<span class="line" data-signals="findings" data-command-root="nmap" data-signal-target="ip.darklab.sh">80/tcp open http</span>',
+      '<span class="line prompt-echo">$ nmap -sT ip.darklab.sh</span>',
+      '<span class="line" data-signals="findings" data-command-root="nmap" data-signal-target="ip.darklab.sh">443/tcp open https</span>',
+      '<span class="line prompt-echo">$ nmap -sV ip.darklab.sh</span>',
+      '<span class="line" data-signals="findings" data-command-root="nmap" data-signal-target="ip.darklab.sh">22/tcp open ssh</span>',
+    ].join('')
+
+    summarizeCurrentOutputSignals()
+
+    const lines = Array.from(document.querySelectorAll('#out .line')).map((line) => line.textContent)
+    expect(lines).toContain('full commands (2)')
+    expect(lines).toContain('- nmap -sT ip.darklab.sh (2)')
+    expect(lines).toContain('- nmap -sV ip.darklab.sh')
+    expect(lines.filter((line) => line === '- nmap -sT ip.darklab.sh')).toHaveLength(0)
+    expect(lines).toContain('findings (3)')
+  })
+
+  it('groups summary output by server-provided command metadata for opaque command text', () => {
+    const { summarizeCurrentOutputSignals } = loadSearchFns({
+      tab: {
+        id: 'tab-1',
+        command: 'scanner --opaque',
+      },
+    })
+    document.getElementById('out').innerHTML = [
+      '<span class="line prompt-echo">$ scanner --opaque</span>',
+      '<span class="line" data-signals="findings" data-command-root="nmap" data-signal-target="ip.darklab.sh">plain server finding</span>',
+    ].join('')
+
+    summarizeCurrentOutputSignals()
+
+    const lines = Array.from(document.querySelectorAll('#out .line')).map((line) => line.textContent)
+    expect(lines).toContain('command             nmap')
+    expect(lines).toContain('target              ip.darklab.sh')
+    expect(lines).toContain('full command        scanner --opaque')
+    expect(lines).toContain('findings (1)')
+    expect(lines).toContain('- plain server finding')
+  })
+
   it('groups nc summary output by host instead of positional ports', () => {
     const { summarizeCurrentOutputSignals } = loadSearchFns({
       tab: {
@@ -560,10 +642,10 @@ describe('search helpers', () => {
     })
     document.getElementById('out').innerHTML = [
       '<span class="line prompt-echo">$ nc -zv ip.darklab.sh 80</span>',
-      '<span class="line">ip.darklab.sh [107.178.109.44] 80 (http) open</span>',
+      '<span class="line" data-signals="findings" data-command-root="nc" data-signal-target="ip.darklab.sh">ip.darklab.sh [107.178.109.44] 80 (http) open</span>',
       '<span class="line prompt-echo">$ nc -zv ip.darklab.sh 443 80</span>',
-      '<span class="line">ip.darklab.sh [107.178.109.44] 443 (https) open</span>',
-      '<span class="line">ip.darklab.sh [107.178.109.44] 80 (http) open</span>',
+      '<span class="line" data-signals="findings" data-command-root="nc" data-signal-target="ip.darklab.sh">ip.darklab.sh [107.178.109.44] 443 (https) open</span>',
+      '<span class="line" data-signals="findings" data-command-root="nc" data-signal-target="ip.darklab.sh">ip.darklab.sh [107.178.109.44] 80 (http) open</span>',
     ].join('')
 
     summarizeCurrentOutputSignals()
@@ -588,8 +670,8 @@ describe('search helpers', () => {
     })
     document.getElementById('out').innerHTML = [
       '<span class="line prompt-echo">$ customscan --latest</span>',
-      '<span class="line">warning: custom scanner found something</span>',
-      '<span class="line">summary: 1 issue</span>',
+      '<span class="line" data-signals="warnings" data-command-root="customscan">warning: custom scanner found something</span>',
+      '<span class="line" data-signals="summaries" data-command-root="customscan">summary: 1 issue</span>',
     ].join('')
 
     summarizeCurrentOutputSignals()
@@ -616,7 +698,7 @@ describe('search helpers', () => {
       '<span class="line exit-fail">built-in timeout</span>',
       '<span class="line">summary: built-in summary</span>',
       '<span class="line prompt-echo">$ host darklab.sh</span>',
-      '<span class="line">darklab.sh has address 104.21.4.35</span>',
+      '<span class="line" data-signals="findings" data-command-root="host" data-signal-target="darklab.sh">darklab.sh has address 104.21.4.35</span>',
     ].join('')
 
     const counts = refreshSearchDiscoverabilityUi()
@@ -650,8 +732,8 @@ describe('search helpers', () => {
       '<span class="line">host</span>',
       '<span class="line">whois</span>',
       '<span class="line prompt-echo">$ host darklab.sh</span>',
-      '<span class="line">darklab.sh has address 104.21.4.35</span>',
-      '<span class="line">darklab.sh mail is handled by 1 aspmx.l.google.com.</span>',
+      '<span class="line" data-signals="findings" data-command-root="host" data-signal-target="darklab.sh">darklab.sh has address 104.21.4.35</span>',
+      '<span class="line" data-signals="findings" data-command-root="host" data-signal-target="darklab.sh">darklab.sh mail is handled by 1 aspmx.l.google.com.</span>',
       '<span class="line prompt-echo">$ whois darklab.sh</span>',
       '<span class="line">Domain Name: DARKLAB.SH</span>',
       '<span class="line">Registry Expiry Date: 2027-04-01T00:00:00Z</span>',

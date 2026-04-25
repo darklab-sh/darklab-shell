@@ -122,10 +122,17 @@ test.describe('workflows modal', () => {
     await page.locator('#cmd').waitFor()
   })
 
-  test('input-driven workflows render prefilled form fields and runnable rendered steps', async ({ page }) => {
+  async function openWorkflowsModal(page) {
     await page.keyboard.press('Alt+g')
     await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
     const firstCard = page.locator('.workflow-card').first()
+    await expect(firstCard).toBeVisible()
+    await expect(firstCard.locator('.workflow-input-control')).toBeVisible()
+    return firstCard
+  }
+
+  test('input-driven workflows render prefilled form fields and runnable rendered steps', async ({ page }) => {
+    const firstCard = await openWorkflowsModal(page)
     const input = firstCard.locator('.workflow-input-control')
     await expect(input).toHaveCount(1)
     await expect(input).toHaveValue('darklab.sh')
@@ -140,9 +147,8 @@ test.describe('workflows modal', () => {
   })
 
   test('step layout is a two-row grid with chip on row 1 and note on row 2', async ({ page }) => {
-    await page.keyboard.press('Alt+g')
-    await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
-    const firstStep = page.locator('.workflow-card').first().locator('.workflow-step').first()
+    const firstCard = await openWorkflowsModal(page)
+    const firstStep = firstCard.locator('.workflow-step').first()
     const layout = await firstStep.evaluate((el) => ({
       display: getComputedStyle(el).display,
       children: Array.from(el.children).map((c) => c.className),
@@ -153,8 +159,7 @@ test.describe('workflows modal', () => {
   })
 
   test('clearing a required workflow input disables step actions until the value is restored', async ({ page }) => {
-    await page.keyboard.press('Alt+g')
-    const firstCard = page.locator('.workflow-card').first()
+    const firstCard = await openWorkflowsModal(page)
     const input = firstCard.locator('.workflow-input-control')
     const runBtn = firstCard.locator('.workflow-step').first().locator('.workflow-step-run')
     const runAllBtn = firstCard.locator('.workflow-run-all')
@@ -168,10 +173,10 @@ test.describe('workflows modal', () => {
   })
 
   test('editing workflow inputs rerenders steps and step run submits the rendered command', async ({ page }) => {
-    await page.keyboard.press('Alt+g')
-    await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
-    const firstCard = page.locator('.workflow-card').first()
-    await firstCard.locator('.workflow-input-control').fill('example.com')
+    const firstCard = await openWorkflowsModal(page)
+    const input = firstCard.locator('.workflow-input-control')
+    await input.fill('example.com')
+    await expect(input).toHaveValue('example.com')
     const runBtn = firstCard.locator('.workflow-step').first().locator('.workflow-step-run')
     await expect(runBtn).toBeEnabled()
     const cmd = await runBtn.getAttribute('data-workflow-step-cmd')
@@ -182,23 +187,24 @@ test.describe('workflows modal', () => {
   })
 
   test('rendered workflow chips load interpolated commands into the prompt', async ({ page }) => {
-    await page.keyboard.press('Alt+g')
-    const firstCard = page.locator('.workflow-card').first()
-    await firstCard.locator('.workflow-input-control').fill('example.com')
+    const firstCard = await openWorkflowsModal(page)
+    const input = firstCard.locator('.workflow-input-control')
+    await input.fill('example.com')
+    await expect(input).toHaveValue('example.com')
     const chip = firstCard.locator('.workflow-step').nth(1).locator('.workflow-step-cmd')
     await expect(chip).toContainText('dig example.com NS')
+    await expect(chip).toHaveAttribute('data-faq-command', 'dig example.com NS')
     await chip.click()
     await expect(page.locator('#cmd')).toHaveValue('dig example.com NS ')
   })
 
   test('workflow inputs persist when the workflow modal is reopened', async ({ page }) => {
-    await page.keyboard.press('Alt+g')
-    const firstCard = page.locator('.workflow-card').first()
+    const firstCard = await openWorkflowsModal(page)
     const input = firstCard.locator('.workflow-input-control')
     await input.fill('persist.example')
     await page.locator('.workflows-close').click()
     await expect(page.locator('#workflows-overlay')).not.toHaveClass(/\bopen\b/)
-    await page.keyboard.press('Alt+g')
+    await openWorkflowsModal(page)
     await expect(page.locator('.workflow-card').first().locator('.workflow-input-control')).toHaveValue('persist.example')
     await expect(page.locator('.workflow-card').first().locator('.workflow-step').first().locator('.workflow-step-cmd')).toContainText('dig persist.example A')
   })
@@ -221,9 +227,10 @@ test.describe('workflows modal', () => {
     })
 
     await ensurePromptReady(page)
-    await page.keyboard.press('Alt+g')
-    const firstCard = page.locator('.workflow-card').first()
-    await firstCard.locator('.workflow-input-control').fill('example.com')
+    const firstCard = await openWorkflowsModal(page)
+    const input = firstCard.locator('.workflow-input-control')
+    await input.fill('example.com')
+    await expect(input).toHaveValue('example.com')
     await expect(firstCard.locator('.workflow-run-all')).toBeEnabled()
     await firstCard.locator('.workflow-run-all').click()
     await expect(page.locator('#workflows-overlay')).not.toHaveClass(/\bopen\b/)

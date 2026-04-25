@@ -505,23 +505,24 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
   - **S** — summary lines
 - Clicking a signal chip opens the search bar in that scope immediately. Re-clicking the same chip cycles to the next match in the same way as the search bar’s **↓** button.
 - The search bar now supports scope buttons for **text**, **findings**, **warnings**, **errors**, and **summaries**. Scope buttons show live counts, and findings-heavy output opens directly into the **findings** scope.
-- Findings are pattern-driven rather than command-whitelisted. The current matcher is tuned for the tool output the shell already surfaces most often:
+- Findings are pattern-driven rather than command-whitelisted. Live `/run` output is classified server-side and carries additive per-line signal metadata through history restore and share/permalink payloads; the browser uses that metadata as the source of truth for counts, scoped navigation, and summaries. The current server matcher is tuned for the tool output the shell already surfaces most often:
   - open-port and service rows from scanners such as `nmap`, `naabu`, `rustscan`, and `nc`
   - hit rows from `ffuf`, `gobuster`, and related directory fuzzers
+  - passive subdomain rows from `assetfinder`
   - severity-tagged result rows from `nuclei`
   - DNS answers from `dig`, `host`, and `nslookup`
   - certificate and TLS verdict lines from `openssl s_client`, `sslscan`, `sslyze`, and `testssl`
 - Noise-heavy lines are intentionally excluded from findings when they behave like banners, progress meters, or startup chatter instead of actionable results.
 - User-killed runs are intentionally **not** counted as errors; the transcript still shows the kill line, but the signal counts stay focused on issues the operator may need to investigate.
-- The **summarize** button appends a synthetic **[command findings]** block to the active tab. The summary groups external command blocks by command and extracted target when possible, merges repeated runs for the same command/target, includes only command blocks that produced at least one finding/warning/error/summary line, and falls back to per-command sections when a clean target cannot be inferred.
+- The **summarize** button appends a synthetic **[command findings]** block to the active tab. The summary groups external command blocks by server-provided command and target metadata when present, merges repeated runs for the same command/target, collapses duplicate full-command labels with a repeat count, includes only command blocks that produced at least one finding/warning/error/summary line, and falls back to per-command sections when target metadata is unavailable.
 - Built-in command output is intentionally excluded from findings, warnings, errors, summaries, and generated command-findings blocks so help/status/catalog text does not create review noise.
 - Summary blocks are helper UI output, not raw command output. They do not feed back into the signal counters or search matches.
 
-**Limits:** signal detection is heuristic, scoped to the active tab’s rendered transcript, and intentionally favors the project’s supported toolset over arbitrary command output. A command with no matched findings, warnings, errors, or summary lines does not appear in the generated summary block.
+**Limits:** signal detection is server-classified, scoped to the active tab’s transcript, and intentionally favors the project’s supported toolset over arbitrary command output. Browser-side signal fallback is intentionally not used; older restored output without signal metadata is treated as signal-unavailable. A command with no matched findings, warnings, errors, or summary lines does not appear in the generated summary block.
 
-**Configuration:** none — the current scopes, heuristics, and summary format are app-defined and not operator-configurable.
+**Configuration:** none — the current scopes, server matchers, and summary format are app-defined and not operator-configurable.
 
-**Related files:** `app/static/js/search.js` (signal matching, scoped navigation, summaries), `app/static/js/controller.js` (chip-to-search navigation), `app/static/js/output.js` (summary line rendering behavior), `app/static/css/components.css` and `app/static/css/shell-chrome.css` (tabbar signal controls).
+**Related files:** `app/output_signals.py` (server-side signal classification), `app/blueprints/run.py` (SSE metadata), `app/run_output_store.py` (signal metadata persistence), `app/static/js/search.js` (metadata-driven scoped navigation and summaries), `app/static/js/controller.js` (chip-to-search navigation), `app/static/js/output.js` (metadata rendering and summary line behavior), `app/static/css/components.css` and `app/static/css/shell-chrome.css` (tabbar signal controls).
 
 ---
 
