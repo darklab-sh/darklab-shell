@@ -7,8 +7,7 @@
 services:
   shell:
     container_name: shell.darklab.sh
-    ports:
-      - "8888:8888"
+    ports: !reset []
     expose:
       - "${APP_PORT:-8888}"
     environment:
