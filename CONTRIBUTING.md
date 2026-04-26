@@ -134,7 +134,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **972 pytest + 805 Vitest + 209 Playwright = 1,986 tests**.
+Current totals: **982 pytest + 809 Vitest + 211 Playwright = 2,002 tests**.
 
 Playwright notes:
 

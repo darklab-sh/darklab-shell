@@ -594,7 +594,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── py/                     # Python / pytest tests
 │   │   ├── conftest.py         # pytest configuration (sets working directory and sys.path to app/)
 │   │   ├── fixtures/
-│   │   │   └── container_smoke_test-expectations.json # Stored expected output for the Container Smoke Test corpus
+│   │   │   ├── container_smoke_test-expectations.json # Stored expected output for the Container Smoke Test corpus
+│   │   │   └── container_smoke_test-workspace-expectations.json # Workspace file-flag smoke fixtures
 │   │   ├── test_validation.py  # Tests for command validation, rewrites, and runtime availability helpers
 │   │   ├── test_routes.py      # Flask integration tests via test client (all HTTP routes)
 │   │   ├── test_run_history_share.py # Higher-value /run, history, share, built-in command, and persistence flows

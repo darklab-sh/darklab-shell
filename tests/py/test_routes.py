@@ -754,6 +754,24 @@ class TestAutocompleteWorkspaceRoute:
         assert {"file", "cat", "ls", "rm"}.isdisjoint(disabled_roots)
         assert {"file", "cat", "ls", "rm"}.issubset(enabled_roots)
 
+    def test_workspace_autocomplete_examples_follow_workspace_config(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {"workspace_enabled": False}):
+            disabled = json.loads(client.get("/autocomplete").data)
+        with mock.patch.dict("config.CFG", {"workspace_enabled": True}):
+            enabled = json.loads(client.get("/autocomplete").data)
+
+        disabled_nmap = disabled["context"]["nmap"]
+        enabled_nmap = enabled["context"]["nmap"]
+        assert "nmap -iL targets.txt -p 80,443 --open -oN nmap-web.txt" not in {
+            item["value"] for item in disabled_nmap["examples"]
+        }
+        assert "-iL" not in {item["value"] for item in disabled_nmap["flags"]}
+        assert "nmap -iL targets.txt -p 80,443 --open -oN nmap-web.txt" in {
+            item["value"] for item in enabled_nmap["examples"]
+        }
+        assert "-iL" in {item["value"] for item in enabled_nmap["flags"]}
+
 
 # ── /faq ──────────────────────────────────────────────────────────────────────
 

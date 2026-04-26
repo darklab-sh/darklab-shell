@@ -92,7 +92,60 @@ test.describe('keyboard shortcuts', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
-  test('macOS Option+ArrowRight and Option+ArrowLeft cycle tabs', async ({ page }) => {
+  test('macOS Option+ArrowRight and Option+ArrowLeft move by word', async ({ page }) => {
+    await page.locator('#new-tab-btn').click()
+    await page.locator('#new-tab-btn').click()
+    await expect(page.locator('.tab')).toHaveCount(3)
+    await expect(page.locator('.tab.active .tab-label')).toHaveText('shell 3')
+
+    const input = page.locator('#cmd')
+    await input.fill('dig darklab.sh A')
+    await input.evaluate((el) => el.setSelectionRange(el.value.length, el.value.length))
+
+    await dispatchMacOptionKey(page, '#cmd', {
+      key: 'ArrowLeft',
+      code: 'ArrowLeft',
+      altKey: true,
+    })
+    let selection = await input.evaluate((el) => ({
+      value: el.value,
+      start: el.selectionStart,
+      end: el.selectionEnd,
+    }))
+    expect(selection.value).toBe('dig darklab.sh A')
+    expect(selection.start).toBe(15)
+    expect(selection.end).toBe(15)
+    await expect(page.locator('.tab.active .tab-label')).toHaveText('shell 3')
+
+    await dispatchMacOptionKey(page, '#cmd', {
+      key: 'ArrowLeft',
+      code: 'ArrowLeft',
+      altKey: true,
+    })
+    selection = await input.evaluate((el) => ({
+      value: el.value,
+      start: el.selectionStart,
+      end: el.selectionEnd,
+    }))
+    expect(selection.start).toBe(4)
+    expect(selection.end).toBe(4)
+
+    await dispatchMacOptionKey(page, '#cmd', {
+      key: 'ArrowRight',
+      code: 'ArrowRight',
+      altKey: true,
+    })
+    selection = await input.evaluate((el) => ({
+      value: el.value,
+      start: el.selectionStart,
+      end: el.selectionEnd,
+    }))
+    expect(selection.start).toBe(14)
+    expect(selection.end).toBe(14)
+    await expect(page.locator('.tab.active .tab-label')).toHaveText('shell 3')
+  })
+
+  test('macOS Shift+Option+ArrowRight and Shift+Option+ArrowLeft cycle tabs', async ({ page }) => {
     await page.locator('#new-tab-btn').click()
     await page.locator('#new-tab-btn').click()
     await expect(page.locator('.tab')).toHaveCount(3)
@@ -102,6 +155,7 @@ test.describe('keyboard shortcuts', () => {
       key: 'ArrowLeft',
       code: 'ArrowLeft',
       altKey: true,
+      shiftKey: true,
     })
     await expect(page.locator('.tab.active .tab-label')).toHaveText('shell 2')
 
@@ -109,6 +163,7 @@ test.describe('keyboard shortcuts', () => {
       key: 'ArrowRight',
       code: 'ArrowRight',
       altKey: true,
+      shiftKey: true,
     })
     await expect(page.locator('.tab.active .tab-label')).toHaveText('shell 3')
     await expect(page.locator('#cmd')).toHaveValue('')
@@ -408,6 +463,52 @@ test.describe('? keyboard-shortcuts overlay', () => {
     await page.keyboard.press('?')
     await expect(page.locator('#shortcuts-overlay')).not.toHaveClass(/\bopen\b/)
     await expect(page.locator('#cmd')).toHaveValue('curl ?')
+  })
+
+  test('? opens after word-jump shortcuts and deleting the prompt', async ({ page }) => {
+    const input = page.locator('#cmd')
+    const overlay = page.locator('#shortcuts-overlay')
+
+    async function resetPrompt() {
+      await input.focus()
+      await input.fill('dig darklab.sh A')
+      await input.evaluate((el) => el.setSelectionRange(el.value.length, el.value.length))
+    }
+
+    await resetPrompt()
+    await dispatchMacOptionKey(page, '#cmd', {
+      key: 'ArrowLeft',
+      code: 'ArrowLeft',
+      altKey: true,
+    })
+    await dispatchMacOptionKey(page, '#cmd', {
+      key: 'ArrowRight',
+      code: 'ArrowRight',
+      altKey: true,
+    })
+    for (let i = 0; i < 16; i += 1) await page.keyboard.press('Backspace')
+    await expect(input).toHaveValue('')
+    await expect(page.locator('#shell-prompt-wrap')).toHaveClass(/\bshell-prompt-empty\b/)
+    await expect(page.locator('#shell-prompt-wrap')).not.toHaveClass(/\bshell-prompt-has-value\b/)
+    await page.keyboard.press('?')
+    await expect(overlay).toHaveClass(/\bopen\b/)
+    await page.keyboard.press('Escape')
+
+    await resetPrompt()
+    await dispatchMacOptionKey(page, '#cmd', {
+      key: '∫',
+      code: 'KeyB',
+      altKey: true,
+    })
+    await dispatchMacOptionKey(page, '#cmd', {
+      key: 'ƒ',
+      code: 'KeyF',
+      altKey: true,
+    })
+    await input.press('Control+u')
+    await expect(input).toHaveValue('')
+    await page.keyboard.press('?')
+    await expect(overlay).toHaveClass(/\bopen\b/)
   })
 
   test('overlay and shortcuts built-in share the same source', async ({ page }) => {

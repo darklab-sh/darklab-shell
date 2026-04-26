@@ -415,6 +415,9 @@ commands:
           description: "Verbose \u2014 full request and response headers"
         - value: curl -o /dev/null -w "%{http_code}" https://ip.darklab.sh
           description: Print just the HTTP status code
+        - value: curl -L -o response.html https://noc.darklab.sh
+          description: Save the response body to a session file
+          feature_required: workspace
       flags:
         - value: -h
           description: Show help and usage
@@ -432,6 +435,9 @@ commands:
           suggest:
             - value: /dev/null
               description: Discard body and keep metadata
+            - value: response.html
+              description: Save response body as a session file
+              feature_required: workspace
         - value: -w
           description: Write selected metadata after the transfer
           takes_value: true
@@ -828,6 +834,9 @@ commands:
           description: Check HTTP status code
         - value: pd-httpx -u https://ip.darklab.sh -follow-redirects
           description: Follow and report redirects
+        - value: pd-httpx -l urls.txt -status-code -title -o httpx-results.txt
+          description: Probe URLs from a session file and save results
+          feature_required: workspace
       flags:
         - value: -h
           description: Show help and usage
@@ -852,9 +861,17 @@ commands:
         - value: -l
           description: File with URLs to probe
           takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: urls.txt
+              description: Session file containing one URL per line
         - value: -o
           description: Write probe results to a session file
           takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: httpx-results.txt
+              description: Save probe results for later viewing
   - root: assetfinder
     category: Network Reconnaissance
     policy:
@@ -971,6 +988,9 @@ commands:
           description: Directory brute force with common wordlist
         - value: gobuster vhost -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
           description: Virtual host brute force
+        - value: gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -o gobuster-dir.txt
+          description: Save directory brute-force results to a session file
+          feature_required: workspace
       flags:
         - value: -h
           description: Show help and usage
@@ -1007,6 +1027,10 @@ commands:
         - value: -o
           description: Write results to a session file
           takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: gobuster-dir.txt
+              description: Save discovered paths to a session file
   - root: ffuf
     category: Network Reconnaissance
     policy:
@@ -1040,6 +1064,9 @@ commands:
         - value: 'ffuf -u https://FUZZ.ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
             -H "Host: FUZZ.ip.darklab.sh"'
           description: Virtual host brute force with Host header injection
+        - value: ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -o ffuf-results.json
+          description: Save fuzzing results as JSON in session files
+          feature_required: workspace
       flags:
         - value: -h
           description: Show help and usage
@@ -1069,6 +1096,13 @@ commands:
         - value: -t
           description: Concurrent threads
           takes_value: true
+        - value: -o
+          description: Write JSON results to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: ffuf-results.json
+              description: Save machine-readable fuzzing results
       arguments:
         - placeholder: <target-url>
           description: Usually provided through -u
@@ -1112,6 +1146,9 @@ commands:
           description: Scan web ports on a host
         - value: naabu -host ip.darklab.sh -silent
           description: Scan with minimal output
+        - value: naabu -l targets.txt -p 80,443 -o naabu-results.txt
+          description: Scan hosts from a session file and save open ports
+          feature_required: workspace
       flags:
         - value: -help
           description: Show help and usage
@@ -1147,9 +1184,17 @@ commands:
         - value: -l
           description: File with hosts to scan
           takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: targets.txt
+              description: Session file containing one host per line
         - value: -o
           description: Write results to a session file
           takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: naabu-results.txt
+              description: Save open-port results
         - value: -exclude-ports
           description: Ports to exclude from scan
           takes_value: true
@@ -1184,6 +1229,9 @@ commands:
           description: Show help and usage
         - value: katana -u https://ip.darklab.sh -d 1 -silent
           description: Shallow crawl with minimal output
+        - value: katana -list urls.txt -d 1 -silent -o katana-urls.txt
+          description: Crawl URLs from a session file and save discovered URLs
+          feature_required: workspace
       flags:
         - value: -help
           description: Show help and usage
@@ -1228,9 +1276,17 @@ commands:
         - value: -list
           description: File with URLs to crawl
           takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: urls.txt
+              description: Session file containing seed URLs
         - value: -o
           description: Write crawl results to a session file
           takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: katana-urls.txt
+              description: Save crawled URLs
       arguments:
         - placeholder: <target>
           description: Usually provided through -u
@@ -1421,6 +1477,9 @@ commands:
           description: Aggressive scan with OS and service detection
         - value: nmap -Pn --top-ports 100 ip.darklab.sh
           description: Top 100 ports, skip host discovery
+        - value: nmap -iL targets.txt -p 80,443 --open -oN nmap-web.txt
+          description: Scan targets from a session file and save normal output
+          feature_required: workspace
       flags:
         - value: -h
           description: Show help and usage
@@ -1473,6 +1532,27 @@ commands:
           description: Do not resolve DNS names
         - value: -vv
           description: More verbose output
+        - value: -iL
+          description: Read targets from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: targets.txt
+              description: Session file containing one target per line
+        - value: -oN
+          description: Write normal output to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nmap-web.txt
+              description: Save scan output for the Files panel
+        - value: -oX
+          description: Write XML output to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nmap-web.xml
+              description: Save XML scan output
       arguments:
         - placeholder: <target>
           description: Hostname, IP, or CIDR
@@ -1659,6 +1739,9 @@ commands:
           description: Run only high and critical severity templates
         - value: nuclei -u https://ip.darklab.sh -t ssl/
           description: Run TLS/SSL detection templates
+        - value: nuclei -l urls.txt -severity high,critical -o nuclei-findings.txt
+          description: Scan URLs from a session file and save findings
+          feature_required: workspace
       flags:
         - value: -h
           description: Show help and usage
@@ -1669,6 +1752,10 @@ commands:
         - value: -l
           description: File with targets
           takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: urls.txt
+              description: Session file containing one URL per line
         - value: -t
           description: Template or template directory
           takes_value: true
@@ -1684,6 +1771,13 @@ commands:
         - value: -rl
           description: Rate limit requests
           takes_value: true
+        - value: -o
+          description: Write findings to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-findings.txt
+              description: Save nuclei findings
       arguments:
         - placeholder: <target>
           description: Usually provided through -u or -l

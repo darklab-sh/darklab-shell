@@ -358,6 +358,22 @@
     _syncComposerCaretVisibility(target, orderedStart, orderedEnd);
     return { start: orderedStart, end: orderedEnd };
   };
+  global.syncFocusedComposerState = (input = null) => {
+    const target = input || global.getActiveComposerInput();
+    if (!target || typeof target.value !== 'string') return null;
+    const value = target.value;
+    const start = typeof target.selectionStart === 'number' ? target.selectionStart : value.length;
+    const end = typeof target.selectionEnd === 'number' ? target.selectionEnd : start;
+    if (typeof setComposerState === 'function') {
+      setComposerState({
+        value,
+        selectionStart: start,
+        selectionEnd: end,
+        activeInput: target === global.getComposerInputs().mobile ? 'mobile' : 'desktop',
+      });
+    }
+    return { value, start, end, input: target };
+  };
   global.handleComposerInputChange = (sourceInput) => {
     if (!sourceInput) return;
     // Typing always snaps the output back to bottom so the prompt stays visible.
@@ -389,8 +405,11 @@
       return;
     }
     const usedContextMatcher = typeof getAutocompleteMatches === 'function';
+    const contextMatches = usedContextMatcher ? getAutocompleteMatches(value, start) : [];
     acFiltered = usedContextMatcher
-      ? getAutocompleteMatches(value, start).slice(0, 12)
+      ? (typeof limitAutocompleteMatchesForDisplay === 'function'
+        ? limitAutocompleteMatchesForDisplay(contextMatches, 12)
+        : contextMatches.slice(0, 12))
       : ((typeof acSuggestions !== 'undefined' && acSuggestions ? acSuggestions : [])
         .filter(s => s.toLowerCase().startsWith(value.toLowerCase()))
         .slice(0, 12));

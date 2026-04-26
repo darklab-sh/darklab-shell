@@ -398,6 +398,23 @@ function getAutocompleteMatches(value, cursorPos) {
   return items;
 }
 
+function limitAutocompleteMatchesForDisplay(items, maxItems = 12) {
+  if (!Array.isArray(items)) return [];
+  const limit = Math.max(0, Number(maxItems) || 0);
+  if (!limit) return [];
+  if (items.length <= limit) return items.slice();
+
+  const visible = items.slice(0, limit);
+  if (visible.some(item => item && typeof item === 'object' && item.hintOnly)) {
+    return visible;
+  }
+
+  const firstHiddenHint = items.slice(limit).find(item => item && typeof item === 'object' && item.hintOnly);
+  if (!firstHiddenHint) return visible;
+
+  return visible.slice(0, limit - 1).concat(firstHiddenHint);
+}
+
 function _positionAutocomplete(itemsCount) {
   // Desktop anchors the dropdown to the prompt row; mobile anchors it above the
   // simplified composer so suggestions never hide behind the keyboard.

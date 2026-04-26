@@ -38,6 +38,15 @@ function syncShellPrompt() {
   // the hidden input directly, so selection/caret state stays correct across
   // desktop/mobile and while welcome owns the tab.
   if (typeof shellPromptText === 'undefined' || !shellPromptText) return;
+  if (
+    typeof document !== 'undefined'
+    && typeof syncFocusedComposerState === 'function'
+    && typeof getComposerInputs === 'function'
+  ) {
+    const { desktop, mobile } = getComposerInputs();
+    const active = document.activeElement;
+    if (active && (active === desktop || active === mobile)) syncFocusedComposerState(active);
+  }
   const composer = typeof getComposerState === 'function' ? getComposerState() : null;
   const fallbackInput = typeof cmdInput !== 'undefined' && cmdInput ? cmdInput : null;
   const value = composer && typeof composer.value === 'string'
@@ -1092,12 +1101,12 @@ function handleTabShortcut(e) {
     e.preventDefault();
     return true;
   }
-  if (e.key === 'ArrowRight') {
+  if (e.shiftKey && e.key === 'ArrowRight') {
     activateRelativeTab(1);
     e.preventDefault();
     return true;
   }
-  if (e.key === 'ArrowLeft') {
+  if (e.shiftKey && e.key === 'ArrowLeft') {
     activateRelativeTab(-1);
     e.preventDefault();
     return true;
@@ -1257,6 +1266,32 @@ function setCmdCaret(position) {
   if (typeof syncComposerSelection === 'function') syncComposerSelection(next, next, { input: getVisibleComposerInput() });
   else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(next, next);
   syncShellPrompt();
+}
+
+function moveCmdCaretByWord(direction) {
+  const input = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : cmdInput;
+  if (typeof syncFocusedComposerState === 'function') syncFocusedComposerState(input);
+  const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || '');
+  const { start, end } = getCmdSelection(value);
+  const next = direction < 0
+    ? findWordBoundaryLeft(value, start)
+    : findWordBoundaryRight(value, end);
+  if (typeof syncComposerSelection === 'function') syncComposerSelection(next, next, { input });
+  if (input && typeof input.setSelectionRange === 'function' && input.selectionStart !== next) {
+    input.setSelectionRange(next, next);
+  } else if (!input && cmdInput && typeof cmdInput.setSelectionRange === 'function') {
+    cmdInput.setSelectionRange(next, next);
+  }
+  syncShellPrompt();
+}
+
+function handleComposerWordArrowShortcut(e) {
+  if (!e || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return false;
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return false;
+  e.preventDefault();
+  e.stopPropagation();
+  moveCmdCaretByWord(e.key === 'ArrowLeft' ? -1 : 1);
+  return true;
 }
 
 function deleteCmdWordLeft() {
@@ -1502,6 +1537,7 @@ function bindMobileComposerSubmitAndInputListeners(mobileInput) {
   });
 
   mobileInput.addEventListener('keydown', e => {
+    if (typeof handleComposerWordArrowShortcut === 'function' && handleComposerWordArrowShortcut(e)) return;
     if (e.key === 'Enter') {
       e.preventDefault();
       _mobileSubmit();

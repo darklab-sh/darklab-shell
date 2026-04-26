@@ -355,6 +355,12 @@ document.addEventListener('keydown', e => {
       isEditable;
     if (tag === 'select') return;
     if (isTextInput) {
+      if (
+        (ae === cmdInput || ae === mobileCmdInput)
+        && typeof syncFocusedComposerState === 'function'
+      ) {
+        syncFocusedComposerState(ae);
+      }
       const raw = isEditable ? (ae.textContent || '') : (ae.value || '');
       if (raw.length > 0) return;
     }
@@ -927,7 +933,7 @@ histClearAllBtn.addEventListener('click', () => {
 // App-safe key bindings stay narrow:
 // - Alt+T / Alt+W for new/close tab
 // - Alt+Tab / Alt+Shift+Tab for tab cycling (forward/backward)
-// - Alt+ArrowLeft / Alt+ArrowRight for tab cycling (same as Tab)
+// - Alt+Shift+ArrowLeft / Alt+Shift+ArrowRight for tab cycling
 // - Alt+P for permalink, Alt+Shift+C for copy
 // Confirmation dialogs (kill, history-delete, share-redaction, ...) use
 // default-focus-on-cancel so Enter resolves to the safe action via the
@@ -1364,6 +1370,28 @@ cmdInput.addEventListener('keydown', e => {
     if (typeof handleHistSearchKey === 'function' && handleHistSearchKey(e)) return;
   }
 
+  const isWordArrowLeft = e.key === 'ArrowLeft' || eventMatchesCode(e, 'ArrowLeft');
+  const isWordArrowRight = e.key === 'ArrowRight' || eventMatchesCode(e, 'ArrowRight');
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (isWordArrowLeft || isWordArrowRight)) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof syncFocusedComposerState === 'function') syncFocusedComposerState(cmdInput);
+    const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
+    const { start, end } = getCmdSelection(value);
+    const next = isWordArrowLeft
+      ? findWordBoundaryLeft(value, start)
+      : findWordBoundaryRight(value, end);
+    const input = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : cmdInput;
+    if (typeof syncComposerSelection === 'function') syncComposerSelection(next, next, { input });
+    if (input && typeof input.setSelectionRange === 'function' && input.selectionStart !== next) {
+      input.setSelectionRange(next, next);
+    } else if (!input && cmdInput && typeof cmdInput.setSelectionRange === 'function') {
+      cmdInput.setSelectionRange(next, next);
+    }
+    syncShellPrompt();
+    return;
+  }
+
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'r' || e.key === 'R')) {
     e.preventDefault();
     if (typeof enterHistSearch === 'function') enterHistSearch();
@@ -1454,6 +1482,7 @@ cmdInput.addEventListener('keydown', e => {
 
   if (e.altKey && !e.ctrlKey && !e.metaKey && eventMatchesLetter(e, 'b')) {
     e.preventDefault();
+    if (typeof syncFocusedComposerState === 'function') syncFocusedComposerState(cmdInput);
     const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
     const { start } = getCmdSelection(value);
     const next = findWordBoundaryLeft(value, start);
@@ -1465,6 +1494,7 @@ cmdInput.addEventListener('keydown', e => {
 
   if (e.altKey && !e.ctrlKey && !e.metaKey && eventMatchesLetter(e, 'f')) {
     e.preventDefault();
+    if (typeof syncFocusedComposerState === 'function') syncFocusedComposerState(cmdInput);
     const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
     const { end } = getCmdSelection(value);
     const next = findWordBoundaryRight(value, end);

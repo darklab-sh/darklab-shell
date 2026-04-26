@@ -27,6 +27,7 @@ function loadAutocompleteFns() {
     acAccept,
     acExpandSharedPrefix,
     getAutocompleteMatches,
+    limitAutocompleteMatchesForDisplay,
     _getAutocompleteSharedPrefix,
     _setAcIndex: (value) => { acIndex = value; },
   }`,
@@ -563,6 +564,49 @@ describe('autocomplete helpers', () => {
     // prompt.
     expect(items[2].hintOnly).toBe(true)
     expect(items[2].insertValue).toBe('')
+  })
+
+  it('keeps positional hints visible when the displayed autocomplete list is capped', () => {
+    const { getAutocompleteMatches, limitAutocompleteMatchesForDisplay } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'nmap ',
+        acSuggestions: [],
+        acContextRegistry: {
+          nmap: {
+            flags: Array.from({ length: 12 }, (_, index) => ({
+              value: `-f${index}`,
+              description: `Flag ${index}`,
+            })),
+            expects_value: [],
+            arg_hints: {
+              __positional__: [{ value: '<target>', description: 'Hostname, IP, or CIDR' }],
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+      limitAutocompleteMatchesForDisplay,
+    }`,
+    )
+
+    const items = getAutocompleteMatches('nmap ', 5)
+    expect(items.map((item) => item.value)).toContain('<target>')
+
+    const visible = limitAutocompleteMatchesForDisplay(items, 12)
+    expect(visible).toHaveLength(12)
+    expect(visible.map((item) => item.value)).toContain('<target>')
+    expect(visible[11].value).toBe('<target>')
+    expect(visible[11].hintOnly).toBe(true)
   })
 
   it('marks <placeholder> arg_hints as hintOnly and preserves insertValue whitespace', () => {

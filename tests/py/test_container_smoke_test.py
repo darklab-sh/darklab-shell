@@ -36,6 +36,9 @@ from commands import load_container_smoke_test_commands, split_command_argv
 
 ROOT = Path(__file__).resolve().parents[2]
 EXPECTATIONS_FILE = ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-expectations.json"
+WORKSPACE_EXPECTATIONS_FILE = (
+    ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-workspace-expectations.json"
+)
 DEFAULT_BUILD_TIMEOUT = int(
     os.environ.get("RUN_CONTAINER_SMOKE_TEST_BUILD_TIMEOUT", "3600")
 )
@@ -50,26 +53,6 @@ SMOKE_COMMAND_RETRY_DELAY_SECONDS = float(
     os.environ.get("RUN_CONTAINER_SMOKE_TEST_RETRY_DELAY_SECONDS", "3")
 )
 SMOKE_PROJECT_PREFIX = "darklab_shell-test-"
-WORKSPACE_SMOKE_CASES: list[dict[str, object]] = [
-    {
-        "name": "nmap_reads_targets_file",
-        "setup_files": {
-            "targets.txt": "ip.darklab.sh\n",
-        },
-        "command": "nmap -iL targets.txt -p 80 --open",
-        "expected_text": ["80/tcp", "open"],
-        "cleanup_files": ["targets.txt"],
-    },
-    {
-        "name": "curl_writes_response_file",
-        "command": "curl -L -o response.html https://noc.darklab.sh",
-        "expected_text": [],
-        "assert_files": {
-            "response.html": ["<!DOCTYPE html", "darklab.sh - noc"],
-        },
-        "cleanup_files": ["response.html"],
-    },
-]
 
 UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
 TIME_RE = re.compile(r"\b\d{2}:\d{2}:\d{2}\b")
@@ -359,6 +342,19 @@ def _load_expectations() -> dict[str, dict[str, object]]:
     return records
 
 
+def _load_workspace_cases() -> list[dict[str, object]]:
+    data = json.loads(WORKSPACE_EXPECTATIONS_FILE.read_text())
+    cases: list[dict[str, object]] = []
+    for index, record in enumerate(data["records"], start=1):
+        if not isinstance(record, dict):
+            raise TypeError(f"Workspace smoke record {index} must be an object")
+        case = dict(record)
+        if not case.get("name"):
+            case["name"] = _slugify(str(case.get("command", f"workspace-case-{index}")))
+        cases.append(case)
+    return cases
+
+
 def _slugify(command: str) -> str:
     return re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9]+", "-", command.lower()).strip("-"))[:96] or "command"
 
@@ -438,6 +434,10 @@ def _needs_nuclei_template_warmup(cases: Sequence[Mapping[str, object]]) -> bool
         if "-u " in command or " -t " in command or " -severity " in command:
             return True
     return False
+
+
+def _needs_nuclei_workspace_template_warmup() -> bool:
+    return _needs_nuclei_template_warmup(WORKSPACE_SMOKE_CASES)
 
 
 def _missing_expectation_commands() -> list[str]:
@@ -888,6 +888,7 @@ def container_smoke_test_session_id() -> str:
 
 
 _SELECTED_COMMANDS = _selected_commands_from_env()
+WORKSPACE_SMOKE_CASES = _load_workspace_cases()
 _WORKSPACE_SMOKE_COMMANDS = {str(case["command"]) for case in WORKSPACE_SMOKE_CASES}
 SMOKE_TEST_CASES = _load_cases()
 if _SELECTED_COMMANDS:
@@ -904,7 +905,7 @@ if _SELECTED_COMMANDS:
 
 @pytest.fixture(scope="module")
 def container_smoke_test_nuclei_templates(container_smoke_test, container_smoke_test_session_id) -> None:
-    if not _needs_nuclei_template_warmup(SMOKE_TEST_CASES):
+    if not _needs_nuclei_template_warmup(SMOKE_TEST_CASES) and not _needs_nuclei_workspace_template_warmup():
         return
 
     warmup_session_id = f"{container_smoke_test_session_id}-nuclei-warmup"
@@ -1045,32 +1046,38 @@ def _assert_workspace_command_runs(
     expected_exit_code = _case_exit_code(case)
     expected_text = _case_string_list(case, "expected_text")
     expected_patterns = _case_string_list(case, "expected_patterns")
+    stop_text = _case_string_list(case, "stop_text") or None
+    stop_patterns = _case_string_list(case, "stop_patterns") or None
+    allow_killed_early = bool(case.get("allow_killed_early"))
 
     events, killed_early = _post_run(
         base_url,
         command,
         session_id,
         timeout=DEFAULT_RUN_TIMEOUT,
-        stop_text=None,
-        stop_patterns=None,
+        stop_text=stop_text,
+        stop_patterns=stop_patterns,
     )
 
     event_types = [str(event.get("type", "")) for event in events]
     texts = [str(event.get("text", "")) for event in events if isinstance(event.get("text"), str)]
 
-    assert not killed_early, f"{command!r} was unexpectedly killed early; events={events[:10]}"
+    assert allow_killed_early or not killed_early, (
+        f"{command!r} was unexpectedly killed early; events={events[:10]}"
+    )
     assert "error" not in event_types, f"{command!r} emitted an error event; events={events[:10]}"
     assert "Command is not installed" not in "\n".join(texts), (
         f"{command!r} referenced a missing runtime command; events={events[:10]}"
     )
 
-    exit_events = [event for event in events if event.get("type") == "exit"]
-    assert exit_events, f"{command!r} never emitted an exit event; events={events[:5]}"
-    assert len(exit_events) == 1, f"{command!r} emitted multiple exit events; events={events[:5]}"
-    if expected_exit_code is not None:
-        assert exit_events[0].get("code") == expected_exit_code, (
-            f"{command!r} exited with the wrong status; events={events[:10]}"
-        )
+    if not killed_early:
+        exit_events = [event for event in events if event.get("type") == "exit"]
+        assert exit_events, f"{command!r} never emitted an exit event; events={events[:5]}"
+        assert len(exit_events) == 1, f"{command!r} emitted multiple exit events; events={events[:5]}"
+        if expected_exit_code is not None:
+            assert exit_events[0].get("code") == expected_exit_code, (
+                f"{command!r} exited with the wrong status; events={events[:10]}"
+            )
 
     visible_lines = _collect_visible_lines(events, command)
     if expected_text:
@@ -1146,7 +1153,11 @@ def test_container_smoke_test_command_matches_expected_output(
 
 
 @pytest.mark.parametrize("case", WORKSPACE_SMOKE_CASES, ids=lambda case: str(case["name"]))
-def test_container_smoke_test_workspace_file_flags(container_smoke_test, case):
+def test_container_smoke_test_workspace_file_flags(
+    container_smoke_test,
+    container_smoke_test_nuclei_templates,
+    case,
+):
     command = str(case["command"])
     if _SELECTED_COMMANDS and command not in set(_SELECTED_COMMANDS):
         pytest.skip("workspace smoke case was not selected by RUN_CONTAINER_SMOKE_TEST_COMMANDS")

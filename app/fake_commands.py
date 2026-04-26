@@ -65,12 +65,16 @@ _CURRENT_SHORTCUTS = [
         ("Ctrl+K", "delete to the end of the line"),
         ("Ctrl+E", "move to the end of the line"),
         ({"mac": "Option+B / Option+F", "other": "Alt+B / Alt+F"}, "move backward / forward by word"),
+        ({"mac": "Option+Left / Option+Right", "other": "Alt+Left / Alt+Right"}, "move backward / forward by word"),
         ("Ctrl+L", "clear the active tab"),
     ]),
     ("Tabs", [
         ({"mac": "Option+T", "other": "Alt+T"}, "open a new tab"),
         ({"mac": "Option+W", "other": "Alt+W"}, "close the current tab"),
-        ({"mac": "Option+Left / Option+Right", "other": "Alt+Left / Alt+Right"}, "switch to previous / next tab"),
+        (
+            {"mac": "Shift+Option+Left / Shift+Option+Right", "other": "Shift+Alt+Left / Shift+Alt+Right"},
+            "switch to previous / next tab",
+        ),
         ({"mac": "Option+Tab", "other": "Alt+Tab"}, "cycle to next tab (add Shift to reverse)"),
         ({"mac": "Option+1 … Option+9", "other": "Alt+1 … Alt+9"}, "jump directly to tab 1 … 9"),
         ({"mac": "Option+P", "other": "Alt+P"}, "create a permalink for the active tab"),

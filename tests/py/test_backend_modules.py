@@ -535,6 +535,51 @@ class TestDerivedCommandRegistry:
         assert context["ping"]["examples"][0]["value"] == "ping -c 4 darklab.sh"
         assert context["grep"]["pipe_command"] is True
 
+    def test_autocomplete_context_filters_workspace_feature_hints(self):
+        registry = {
+            "commands": [
+                {
+                    "root": "nmap",
+                    "autocomplete": {
+                        "examples": [
+                            {"value": "nmap ip.darklab.sh", "description": "Scan host"},
+                            {
+                                "value": "nmap -iL targets.txt -oN nmap.txt",
+                                "description": "Scan file targets",
+                                "feature_required": "workspace",
+                            },
+                        ],
+                        "flags": [
+                            {"value": "-sV", "description": "Service detection"},
+                            {
+                                "value": "-iL",
+                                "description": "Read session file",
+                                "feature_required": "workspace",
+                            },
+                        ],
+                        "expects_value": ["-iL"],
+                        "arg_hints": {
+                            "-iL": [{"value": "targets.txt", "description": "Targets file"}],
+                        },
+                    },
+                },
+            ],
+        }
+
+        disabled = autocomplete_context_from_commands_registry(registry, cfg={"workspace_enabled": False})
+        enabled = autocomplete_context_from_commands_registry(registry, cfg={"workspace_enabled": True})
+
+        assert [item["value"] for item in disabled["nmap"]["examples"]] == ["nmap ip.darklab.sh"]
+        assert [item["value"] for item in disabled["nmap"]["flags"]] == ["-sV"]
+        assert "-iL" not in disabled["nmap"]["expects_value"]
+        assert "-iL" not in disabled["nmap"]["arg_hints"]
+        assert [item["value"] for item in enabled["nmap"]["examples"]] == [
+            "nmap ip.darklab.sh",
+            "nmap -iL targets.txt -oN nmap.txt",
+        ]
+        assert [item["value"] for item in enabled["nmap"]["flags"]] == ["-sV", "-iL"]
+        assert enabled["nmap"]["arg_hints"]["-iL"][0]["value"] == "targets.txt"
+
     def test_command_policy_can_be_derived_from_commands_registry(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "commands.yaml"
@@ -1373,6 +1418,21 @@ class TestOutputSignals:
             command="nmap ip.darklab.sh",
         ) == ["summaries"]
 
+    def test_nmap_input_file_sections_update_signal_target(self):
+        classifier = OutputSignalClassifier("nmap -iL darklab_inputs.txt -sT")
+
+        first_header = classifier.classify_line("Nmap scan report for ip.darklab.sh (192.168.20.5)")
+        first_port = classifier.classify_line("80/tcp   open  http")
+        second_header = classifier.classify_line("Nmap scan report for h.darklab.sh (108.79.194.246)")
+        second_port = classifier.classify_line("443/tcp  open   https")
+
+        assert first_header["target"] == "ip.darklab.sh"
+        assert first_port["target"] == "ip.darklab.sh"
+        assert first_port["signals"] == ["findings"]
+        assert second_header["target"] == "h.darklab.sh"
+        assert second_port["target"] == "h.darklab.sh"
+        assert second_port["signals"] == ["findings"]
+
     def test_user_killed_process_is_not_an_error(self):
         assert classify_line("[killed by user after 2.0s]", cls="exit-fail", command="ping darklab.sh") == []
 
@@ -1666,6 +1726,39 @@ class TestAutocompleteContextLoading:
                 result = load_container_smoke_test_commands()
 
         assert result == ["dig darklab.sh A"]
+
+    def test_container_smoke_test_commands_skip_workspace_required_examples(self):
+        registry_context = {
+            "curl": {
+                "examples": [
+                    {"value": "curl -I https://ip.darklab.sh", "description": "Headers"},
+                    {
+                        "value": "curl -L -o response.html https://noc.darklab.sh",
+                        "description": "Save response",
+                        "feature_required": "workspace",
+                    },
+                ],
+            },
+            "nmap": {
+                "examples": [
+                    {
+                        "value": "nmap -iL targets.txt -p 80,443 --open -oN nmap-web.txt",
+                        "description": "Workspace targets",
+                        "feature_required": "workspace",
+                    },
+                ],
+            },
+        }
+
+        with mock.patch(
+            "commands.load_autocomplete_context_from_commands_registry",
+            return_value=registry_context,
+        ) as load_context:
+            with mock.patch("commands.load_all_workflows", return_value=[]):
+                result = load_container_smoke_test_commands()
+
+        load_context.assert_called_once_with({"workspace_enabled": False})
+        assert result == ["curl -I https://ip.darklab.sh"]
 
 
 class TestWorkflowInputLoading:

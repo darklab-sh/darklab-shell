@@ -825,7 +825,7 @@ def load_command_policy():
     return (allow_prefixes if allow_prefixes else None), deny_prefixes
 
 
-def autocomplete_context_from_commands_registry(registry: dict) -> dict:
+def autocomplete_context_from_commands_registry(registry: dict, cfg=None) -> dict:
     """Return the browser autocomplete context from a loaded command registry."""
     context = {}
     for section in ("commands", "pipe_helpers"):
@@ -834,12 +834,12 @@ def autocomplete_context_from_commands_registry(registry: dict) -> dict:
             autocomplete = entry.get("autocomplete")
             if root and isinstance(autocomplete, dict) and autocomplete:
                 context[root] = autocomplete
-    return context
+    return _filter_autocomplete_context_by_features(context, app_config.CFG if cfg is None else cfg)
 
 
-def load_autocomplete_context_from_commands_registry() -> dict:
+def load_autocomplete_context_from_commands_registry(cfg=None) -> dict:
     """Read autocomplete metadata from commands.yaml."""
-    return autocomplete_context_from_commands_registry(load_commands_registry())
+    return autocomplete_context_from_commands_registry(load_commands_registry(), cfg=cfg)
 
 
 def _feature_enabled(feature, cfg=None):
@@ -1367,7 +1367,58 @@ def _normalize_context_suggestion(item):
             result["label"] = label
     if "hintOnly" in item:
         result["hintOnly"] = bool(item.get("hintOnly"))
+    feature_required = item.get("feature_required") or item.get("requires_feature") or item.get("feature")
+    if feature_required:
+        if isinstance(feature_required, (list, tuple, set)):
+            result["feature_required"] = [str(value).strip().lower() for value in feature_required if str(value).strip()]
+        else:
+            result["feature_required"] = str(feature_required).strip().lower()
     return result
+
+
+def _suggestion_enabled_for_features(item, cfg=None) -> bool:
+    if not isinstance(item, dict):
+        return True
+    feature_required = item.get("feature_required") or item.get("requires_feature") or item.get("feature")
+    if not feature_required:
+        return True
+    if isinstance(feature_required, (list, tuple, set)):
+        return all(_feature_enabled(value, cfg) for value in feature_required)
+    return _feature_enabled(feature_required, cfg)
+
+
+def _filter_autocomplete_context_by_features(context: dict, cfg=None) -> dict:
+    filtered: dict[str, dict] = {}
+    for root, raw_spec in (context or {}).items():
+        if not isinstance(raw_spec, dict):
+            continue
+        spec = deepcopy(raw_spec)
+        raw_flags = [item for item in spec.get("flags", []) or [] if isinstance(item, dict)]
+        enabled_flags = [item for item in raw_flags if _suggestion_enabled_for_features(item, cfg)]
+        disabled_flag_tokens = {
+            str(item.get("value") or "")
+            for item in raw_flags
+            if item not in enabled_flags and item.get("value")
+        }
+        spec["flags"] = enabled_flags
+        spec["expects_value"] = [
+            token for token in spec.get("expects_value", []) or []
+            if str(token) not in disabled_flag_tokens
+        ]
+        spec["arg_hints"] = {
+            trigger: [
+                item for item in hints or []
+                if _suggestion_enabled_for_features(item, cfg)
+            ]
+            for trigger, hints in (spec.get("arg_hints") or {}).items()
+            if str(trigger) not in disabled_flag_tokens
+        }
+        spec["examples"] = [
+            item for item in spec.get("examples", []) or []
+            if _suggestion_enabled_for_features(item, cfg)
+        ]
+        filtered[root] = spec
+    return filtered
 
 
 def _append_unique_context_token(bucket, seen, raw_token):
@@ -1671,11 +1722,15 @@ def load_container_smoke_test_commands():
     commands = []
     seen = set()
 
-    for spec in load_autocomplete_context_from_commands_registry().values():
+    # The generic smoke corpus has no per-command file setup. Workspace-only
+    # examples are covered by dedicated workspace smoke fixtures instead.
+    for spec in load_autocomplete_context_from_commands_registry({"workspace_enabled": False}).values():
         if not isinstance(spec, dict):
             continue
         for example in spec.get("examples") or []:
             if not isinstance(example, dict):
+                continue
+            if not _suggestion_enabled_for_features(example, {"workspace_enabled": False}):
                 continue
             command = str(example.get("value") or "").strip()
             if not command or command in seen:

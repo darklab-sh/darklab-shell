@@ -696,6 +696,36 @@ describe('search helpers', () => {
     expect(lines).not.toContain('target              ip.darklab.sh, 80')
   })
 
+  it('splits one command block by server-provided per-line targets', () => {
+    const { summarizeCurrentOutputSignals } = loadSearchFns({
+      tab: {
+        id: 'tab-1',
+        command: 'nmap -iL darklab_inputs.txt -sT',
+      },
+    })
+    document.getElementById('out').innerHTML = [
+      '<span class="line prompt-echo">$ nmap -iL darklab_inputs.txt -sT</span>',
+      '<span class="line" data-command-root="nmap" data-signal-target="ip.darklab.sh">Nmap scan report for ip.darklab.sh (192.168.20.5)</span>',
+      '<span class="line" data-signals="findings" data-command-root="nmap" data-signal-target="ip.darklab.sh">80/tcp   open  http</span>',
+      '<span class="line" data-signals="findings" data-command-root="nmap" data-signal-target="ip.darklab.sh">443/tcp  open  https</span>',
+      '<span class="line" data-command-root="nmap" data-signal-target="h.darklab.sh">Nmap scan report for h.darklab.sh (108.79.194.246)</span>',
+      '<span class="line" data-signals="findings" data-command-root="nmap" data-signal-target="h.darklab.sh">80/tcp   open   http</span>',
+      '<span class="line" data-signals="findings" data-command-root="nmap" data-signal-target="h.darklab.sh">443/tcp  open   https</span>',
+    ].join('')
+
+    summarizeCurrentOutputSignals()
+
+    const lines = Array.from(document.querySelectorAll('#out .line')).map((line) => line.textContent)
+    expect(lines).toContain('command             nmap')
+    expect(lines).toContain('target              ip.darklab.sh')
+    expect(lines).toContain('target              h.darklab.sh')
+    expect(lines.filter((line) => line === 'full command        nmap -iL darklab_inputs.txt -sT')).toHaveLength(2)
+    expect(lines).toContain('- 80/tcp   open  http')
+    expect(lines).toContain('- 443/tcp  open  https')
+    expect(lines).toContain('- 80/tcp   open   http')
+    expect(lines).toContain('- 443/tcp  open   https')
+  })
+
   it('falls back to command summaries when a target cannot be extracted', () => {
     const { summarizeCurrentOutputSignals } = loadSearchFns({
       tab: {

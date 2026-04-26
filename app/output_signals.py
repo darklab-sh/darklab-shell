@@ -101,6 +101,7 @@ _HOSTNAME_RE = re.compile(
     r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}\.?$",
     re.I,
 )
+_NMAP_REPORT_TARGET_RE = re.compile(r"^Nmap scan report for\s+(.+?)(?:\s+\(([^)]+)\))?$", re.I)
 
 
 def tokenize_command(command: str) -> list[str]:
@@ -271,12 +272,26 @@ class OutputSignalClassifier:
     def __post_init__(self) -> None:
         self.root = command_root(self.command)
         self.target = extract_target(self.command)
+        self.current_target: str | None = None
         self.line_index = 0
         self.previous_text = ""
+
+    def _line_target(self, text: str) -> str | None:
+        stripped = str(text or "").strip()
+        if self.root == "nmap":
+            report_match = _NMAP_REPORT_TARGET_RE.match(stripped)
+            if report_match:
+                self.current_target = report_match.group(1).strip()
+            elif re.match(r"^Nmap done:\b", stripped, re.I):
+                return self.target
+            if self.current_target:
+                return self.current_target
+        return self.target
 
     def classify_line(self, text: str, cls: str = "") -> dict[str, object]:
         text = str(text or "").rstrip("\n")
         cls = str(cls or "")
+        target = self._line_target(text)
         scopes = classify_line(
             text,
             cls=cls,
@@ -289,8 +304,8 @@ class OutputSignalClassifier:
             "line_index": self.line_index,
             "command_root": self.root,
         }
-        if self.target:
-            metadata["target"] = self.target
+        if target:
+            metadata["target"] = target
         if scopes:
             metadata["signals"] = scopes
         self.line_index += 1

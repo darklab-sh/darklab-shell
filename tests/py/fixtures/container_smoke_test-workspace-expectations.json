@@ -1,0 +1,134 @@
+{
+  "version": 1,
+  "records": [
+    {
+      "name": "nmap_reads_targets_file",
+      "setup_files": {
+        "targets.txt": "ip.darklab.sh\n"
+      },
+      "command": "nmap -iL targets.txt -p 80,443 --open -oN nmap-web.txt",
+      "expected_text": [
+        "80/tcp",
+        "open"
+      ],
+      "assert_files": {
+        "nmap-web.txt": [
+          "Nmap scan report",
+          "80/tcp"
+        ]
+      },
+      "cleanup_files": [
+        "targets.txt",
+        "nmap-web.txt"
+      ]
+    },
+    {
+      "name": "curl_writes_response_file",
+      "command": "curl -L -o response.html https://noc.darklab.sh",
+      "expected_text": [],
+      "assert_files": {
+        "response.html": [
+          "<!DOCTYPE html",
+          "darklab.sh - noc"
+        ]
+      },
+      "cleanup_files": [
+        "response.html"
+      ]
+    },
+    {
+      "name": "pd_httpx_reads_urls_and_writes_results",
+      "setup_files": {
+        "urls.txt": "https://ip.darklab.sh\n"
+      },
+      "command": "pd-httpx -l urls.txt -status-code -title -o httpx-results.txt",
+      "assert_files": {
+        "httpx-results.txt": [
+          "https://ip.darklab.sh"
+        ]
+      },
+      "cleanup_files": [
+        "urls.txt",
+        "httpx-results.txt"
+      ]
+    },
+    {
+      "name": "gobuster_writes_results",
+      "command": "gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -o gobuster-dir.txt",
+      "exit_code": null,
+      "assert_files": {
+        "gobuster-dir.txt": []
+      },
+      "cleanup_files": [
+        "gobuster-dir.txt"
+      ]
+    },
+    {
+      "name": "ffuf_writes_json_results",
+      "command": "ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -o ffuf-results.json",
+      "assert_files": {
+        "ffuf-results.json": [
+          "\"results\""
+        ]
+      },
+      "cleanup_files": [
+        "ffuf-results.json"
+      ]
+    },
+    {
+      "name": "naabu_reads_targets_and_writes_results",
+      "setup_files": {
+        "targets.txt": "ip.darklab.sh\n"
+      },
+      "command": "naabu -l targets.txt -p 80,443 -o naabu-results.txt",
+      "assert_files": {
+        "naabu-results.txt": [
+          "ip.darklab.sh"
+        ]
+      },
+      "cleanup_files": [
+        "targets.txt",
+        "naabu-results.txt"
+      ]
+    },
+    {
+      "name": "katana_reads_urls_and_writes_results",
+      "setup_files": {
+        "urls.txt": "https://ip.darklab.sh\n"
+      },
+      "command": "katana -list urls.txt -d 1 -silent -o katana-urls.txt",
+      "assert_files": {
+        "katana-urls.txt": [
+          "https://ip.darklab.sh"
+        ]
+      },
+      "cleanup_files": [
+        "urls.txt",
+        "katana-urls.txt"
+      ]
+    },
+    {
+      "name": "nuclei_reads_urls_and_writes_findings",
+      "setup_files": {
+        "urls.txt": "https://ip.darklab.sh\n"
+      },
+      "command": "nuclei -l urls.txt -severity high,critical -o nuclei-findings.txt",
+      "exit_code": null,
+      "stop_text": [
+        "[workspace] reading urls.txt",
+        "[workspace] writing nuclei-findings.txt",
+        "Targets loaded for current scan"
+      ],
+      "expected_text": [
+        "[workspace] reading urls.txt",
+        "[workspace] writing nuclei-findings.txt",
+        "Targets loaded for current scan"
+      ],
+      "allow_killed_early": true,
+      "cleanup_files": [
+        "urls.txt",
+        "nuclei-findings.txt"
+      ]
+    }
+  ]
+}

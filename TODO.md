@@ -22,14 +22,54 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Open TODOs
 
-- **Workspace-enabled smoke fixtures**
-  - Add deterministic smoke-test fixtures for workspace-aware file input/output commands once the container smoke harness can create session workspace files before running a case.
-  - Keep these separate from normal user-facing examples until fixtures exist; commands like `nmap -iL targets.txt` are valid only after `targets.txt` has been created in the active session workspace.
-  - Candidate fixture cases:
-    - create `targets.txt`, run `nmap -iL targets.txt`, verify target output
-    - run `curl -o response.html https://ip.darklab.sh`, verify the workspace file exists and is non-empty
-    - create `urls.txt`, run `pd-httpx -l urls.txt -o httpx.txt`, verify output file creation
-    - create `words.txt`, run `ffuf -w words.txt -u https://ip.darklab.sh/FUZZ -o ffuf.json`, verify JSON output file creation
+- **Session command variables**
+  - Explore app-mediated variable substitution for repeated command sets without exposing real shell environment mutation.
+  - Use cases:
+    - define `HOST=ip.darklab.sh`, `PORT=443`, `IP_ADDR=107.178.109.44`
+    - run a sequence of commands that reference `$HOST`, `$PORT`, or `$IP_ADDR`
+    - update the variables and re-run the same commands or workflow against a different target
+  - Possible user-facing model:
+    - `var set HOST ip.darklab.sh`
+    - `var list`
+    - `var unset HOST`
+    - command input can reference `$HOST`, `${HOST}`, `$PORT`, `${PORT}` before policy validation and execution
+  - Security and correctness constraints:
+    - Treat variables as app-owned text substitution, not process environment variables.
+    - Apply substitution before command allow/deny checks so expanded commands still go through the existing command policy.
+    - Restrict variable names to a small safe pattern such as `[A-Z][A-Z0-9_]{0,31}`.
+    - Preserve command history in a way that makes both the typed command and expanded command understandable.
+    - Redact or discourage sensitive values; this should be for targets/ports/paths, not secrets.
+  - UX integration:
+    - Add autocomplete for defined variable names.
+    - Show current variables in `status` or a small Variables modal if the feature grows beyond a few CLI helpers.
+    - Let workflow inputs optionally map to session variables so users can update one target value and replay a saved sequence.
+  - Testing:
+    - Unit-test substitution order, quoting behavior, undefined variables, and policy validation after expansion.
+    - E2E-test a variable-driven command sequence and history/share display.
+
+- **Workspace-native chained recon workflows**
+  - Add guided workflows that demonstrate the Files feature as an app-mediated pipeline: one recon tool writes a session file, and a later tool reads that generated file through declared workspace-aware flags.
+  - Keep these workflows small and reviewable. They should show why Files exists without turning `Run all` into a huge scanner blast.
+  - Registry prerequisites:
+    - Add `subfinder -o` as a workspace write flag so subdomain discovery can produce a clean line-oriented `subdomains.txt`.
+    - Verify `pd-httpx -silent -o live-urls.txt` emits clean URL lines suitable for `nuclei -l` and follow-up probes.
+    - Keep all file-reading/file-writing examples marked with `feature_required: workspace` so they only appear when Files are enabled and so generic smoke cases do not run them without setup.
+  - Candidate workflow: **Subdomain HTTP Triage**
+    - Input: `domain`
+    - `subfinder -d {{domain}} -silent -o subdomains.txt`
+    - `pd-httpx -l subdomains.txt -silent -o live-urls.txt`
+    - `pd-httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt`
+    - Output files: `subdomains.txt`, `live-urls.txt`, `http-summary.txt`
+  - Candidate workflow: **Crawl And Scan**
+    - Input: `url`
+    - `katana -u {{url}} -d 1 -silent -o crawled-urls.txt`
+    - `pd-httpx -l crawled-urls.txt -status-code -title -o crawled-http.txt`
+    - `nuclei -l crawled-urls.txt -severity high,critical -o nuclei-findings.txt`
+    - Output files: `crawled-urls.txt`, `crawled-http.txt`, `nuclei-findings.txt`
+  - Test coverage:
+    - Add/update smoke workspace fixtures for each new chained example that reaches `commands.yaml`.
+    - Add workflow rendering coverage so `Run all` preserves sequential same-tab behavior with generated file names.
+    - Verify workflows are hidden or clearly disabled when Files are disabled if their steps depend on workspace-only flags.
 
 ---
 

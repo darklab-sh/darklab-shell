@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 972
-- `vitest`: 805
-- `playwright`: 209
-- total: 1,986
+- `pytest`: 982
+- `vitest`: 809
+- `playwright`: 211
+- total: 2,002
 
 This document is organized in two parts:
 
@@ -344,6 +344,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDerivedCommandRegistry.test_commands_registry_loader_normalizes_policy_and_autocomplete` | Verifies that the `commands.yaml` loader normalizes policy entries and autocomplete metadata, including pipe-helper entries. |
 | `TestDerivedCommandRegistry.test_commands_registry_local_overlay_appends_policy_and_context` | Verifies that `commands.local.yaml` appends policy entries, adds new roots, overrides categories, and merges autocomplete hints without replacing the base registry. |
 | `TestDerivedCommandRegistry.test_autocomplete_context_can_be_derived_from_commands_registry` | Verifies that browser autocomplete context can be derived from command and pipe-helper registry entries. |
+| `TestDerivedCommandRegistry.test_autocomplete_context_filters_workspace_feature_hints` | Verifies that workspace-only autocomplete examples, flags, and value hints are hidden unless Files are enabled. |
 | `TestDerivedCommandRegistry.test_command_policy_can_be_derived_from_commands_registry` | Verifies that command-policy allow and deny prefixes are derived from `commands.yaml` policy entries. |
 | `TestLoadFaq.test_missing_file_returns_empty_list` | Checks that missing file returns empty list. |
 | `TestLoadFaq.test_valid_entries_returned` | Checks valid entries returned handling. |
@@ -424,6 +425,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestOutputSignals.test_command_root_and_target_extraction` | Verifies that backend output-signal classification extracts command roots and useful targets from common surfaced commands. |
 | `TestOutputSignals.test_classifies_common_findings` | Verifies that backend output-signal classification marks common scanner, DNS, and service rows as findings. |
 | `TestOutputSignals.test_classifies_warning_error_and_summary_lines` | Verifies that backend output-signal classification separates warning, error, and summary-style lines. |
+| `TestOutputSignals.test_nmap_input_file_sections_update_signal_target` | Verifies that nmap input-file scans update output metadata targets as each `Nmap scan report for ...` section starts. |
 | `TestOutputSignals.test_user_killed_process_is_not_an_error` | Verifies that user-killed process notices are not classified as errors. |
 | `TestOutputSignals.test_builtin_classifier_keeps_metadata_but_omits_signals` | Verifies that built-in command output keeps line metadata while omitting findings, warnings, errors, and summaries. |
 | `TestRunOutputCapture.test_preview_keeps_only_last_n_lines` | Checks that preview keeps only last n lines. |
@@ -440,6 +442,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_spread_sensitive_roots` | Verifies that the smoke-test command corpus spaces repeated `dig` and `whois` commands apart during smoke execution without changing the source-owned registry or workflow order. |
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_include_registry_examples_and_workflows` | Verifies that the shared container smoke corpus includes both registry examples and workflow commands while deduplicating overlaps in stable order. |
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_render_workflow_defaults` | Verifies that workflow-backed smoke commands render declared default input values instead of leaking raw `{{token}}` placeholders into the shared smoke corpus. |
+| `TestAutocompleteContextLoading.test_container_smoke_test_commands_skip_workspace_required_examples` | Verifies that workspace-only command examples stay out of the generic smoke corpus because they need per-session file setup. |
 | `TestWorkflowInputLoading.test_load_workflows_keeps_declared_inputs` | Verifies that workflow input metadata is preserved when every referenced token is declared in the workflow schema. |
 | `TestWorkflowInputLoading.test_load_workflows_drops_steps_with_undeclared_tokens` | Verifies that workflow steps referencing undeclared input tokens are rejected instead of reaching the client as partially renderable templates. |
 | `TestRewriteIdempotent.test_mtr_already_report_wide_unchanged` | Checks that mtr already report wide unchanged. |
@@ -846,6 +849,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWelcomeRoute.test_returns_cmd_and_out_fields_when_configured` | Returns command and out fields when configured. |
 | `TestWelcomeRoute.test_returns_empty_list_when_no_welcome_file` | Returns empty list when no welcome file. |
 | `TestAutocompleteWorkspaceRoute.test_workspace_roots_follow_workspace_config` | Verifies that file built-in roots are included in autocomplete only when Files are enabled. |
+| `TestAutocompleteWorkspaceRoute.test_workspace_autocomplete_examples_follow_workspace_config` | Verifies that workspace-only command examples and file flags are hidden from `/autocomplete` until Files are enabled. |
 | `TestAutocompleteRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestAutocompleteRoute.test_has_suggestions_key` | Checks has suggestions key handling. |
 | `TestAutocompleteRoute.test_returns_configured_context` | Checks that the autocomplete endpoint returns the configured context object. |
@@ -1255,6 +1259,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `prefers contextual autocomplete suggestions after the command root` | Verifies that prefers contextual autocomplete suggestions after the command root. |
 | `suppresses duplicate contextual flags that were already used in the command` | Verifies that suppresses duplicate contextual flags that were already used in the command. |
 | `renders cursor and selection state from composer state` | Verifies that renders cursor and selection state from composer state. |
+| `refreshes prompt rendering from the focused input before drawing the caret` | Verifies that the visible prompt caret returns to the empty focused state when the DOM input has been cleared but shared composer state is stale. |
 | `supports ctrl+w to delete one word to the left` | Verifies that supports ctrl+w to delete one word to the left. |
 | `supports ctrl+u to delete to the beginning of the line` | Verifies that supports ctrl+u to delete to the beginning of the line. |
 | `supports ctrl+a to move to the beginning of the line` | Verifies that supports ctrl+a to move to the beginning of the line. |
@@ -1271,7 +1276,8 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `supports macOS Option+T to create a new tab via physical key code` | Verifies that supports macOS Option+T to create a new tab via physical key code. |
 | `supports Alt+W to close the active tab` | Verifies that supports Alt+W to close the active tab. |
 | `supports macOS Option+W to close the active tab via physical key code` | Verifies that supports macOS Option+W to close the active tab via physical key code. |
-| `supports Alt+ArrowLeft and Alt+ArrowRight to cycle between tabs` | Verifies that supports Alt+ArrowLeft and Alt+ArrowRight to cycle between tabs. |
+| `supports Alt+ArrowLeft and Alt+ArrowRight to move by word` | Verifies that terminal-style Option/Alt+ArrowLeft and Option/Alt+ArrowRight move the prompt caret by word without cycling tabs. |
+| `supports Shift+Alt+ArrowLeft and Shift+Alt+ArrowRight to cycle between tabs` | Verifies that Shift+Alt+ArrowLeft and Shift+Alt+ArrowRight cycle between tabs. |
 | `supports Alt+digit to jump directly to a tab` | Verifies that supports Alt+digit to jump directly to a tab. |
 | `supports macOS Option+digit tab jumps via physical key code` | Verifies that supports macOS Option+digit tab jumps via physical key code. |
 | `supports Alt+P to create a permalink for the active tab` | Verifies that supports Alt+P to create a permalink for the active tab. |
@@ -1343,6 +1349,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `keeps an exact single flag match visible so its description is still shown` | Verifies that typing a full flag token such as `curl -w` keeps the single matching flag row visible long enough to expose its description instead of collapsing the dropdown immediately. |
 | `still collapses an exact single non-flag match` | Verifies that the exact-match dropdown auto-hide rule still applies to normal non-flag suggestions such as a flat `ping` root match. |
 | `shows positional hints alongside flag hints at command-root whitespace` | Verifies that positional guidance like `<target>` appears alongside root-level flag hints after a known command plus trailing space, and that `<placeholder>` entries are flagged `hintOnly` with an empty `insertValue`. |
+| `keeps positional hints visible when the displayed autocomplete list is capped` | Verifies that display-only positional guidance remains visible when a long flag list reaches the autocomplete display cap. |
 | `marks <placeholder> value hints as hintOnly and preserves trailing insert whitespace` | Verifies that `session-token se` + Tab inserts `set ` with the trailing space preserved (not trimmed), that `session-token set ` surfaces `<token>` as a display-only `hintOnly` item with `insertValue: ''`, and that calling `acAccept` on a `hintOnly` item is a no-op. |
 | `keeps direct placeholder hints visible while typing the argument value` | Verifies that a direct placeholder hint such as `session-token set <token>` stays visible as guidance even after the user starts typing the real token value. |
 | `returns value hints after a value-taking flag and trailing space` | Verifies that value hints appear after accepting or typing a value-taking flag such as `curl -o `. |
@@ -1723,6 +1730,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `deduplicates repeated findings in grouped summary output` | Verifies that command-findings summaries collapse identical finding lines and show a repeat count instead of listing duplicate findings. |
 | `groups summary output by server-provided command metadata for opaque command text` | Verifies that command-findings summaries use backend-provided command root and target metadata even when the displayed command text is opaque. |
 | `groups nc summary output by host instead of positional ports` | Verifies that `nc` summaries group repeated port checks by host while ignoring positional port arguments. |
+| `splits one command block by server-provided per-line targets` | Verifies that one command using an input file can summarize findings under each server-provided target instead of merging all host output together. |
 | `falls back to command summaries when a target cannot be extracted` | Verifies that summarize keeps the per-command output shape when a command has signals but no reliable target extractor. |
 | `omits command blocks that have no signals` | Verifies that summarize skips commands with zero findings, warnings, errors, and summary lines. |
 | `ignores built-in command output for signals and summaries` | Verifies that built-in command output is excluded from findings, warnings, errors, summaries, and generated command-findings blocks. |
@@ -2309,7 +2317,8 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `macOS Option+W closes the active tab without inserting a symbol into the prompt` | Verifies that macOS Option+W closes the active tab without inserting a symbol into the prompt. |
 | `macOS Option+Shift+C copies active-tab output without inserting a symbol into the prompt` | Verifies that macOS Option+Shift+C copies active-tab output without inserting a symbol into the prompt. |
 | `macOS Option+P creates a permalink without inserting a symbol into the prompt` | Verifies that macOS Option+P creates a permalink without inserting a symbol into the prompt. |
-| `macOS Option+ArrowRight and Option+ArrowLeft cycle tabs` | Verifies that macOS Option+ArrowRight and Option+ArrowLeft cycle tabs. |
+| `macOS Option+ArrowRight and Option+ArrowLeft move by word` | Verifies that macOS Option+ArrowRight and Option+ArrowLeft move by word without cycling tabs. |
+| `macOS Shift+Option+ArrowRight and Shift+Option+ArrowLeft cycle tabs` | Verifies that macOS Shift+Option+ArrowRight and Shift+Option+ArrowLeft cycle tabs. |
 | `macOS Option+digit jumps directly to a tab without inserting a symbol` | Verifies that macOS Option+digit jumps directly to a tab without inserting a symbol. |
 | `Ctrl+L clears the active tab output in the browser` | Ctrl+L clears the active tab output in the browser. |
 | `macOS Option+B and Option+F move by word without inserting symbols into the prompt` | Verifies that macOS Option+B and Option+F move by word without inserting symbols into the prompt. |
@@ -2327,6 +2336,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `Escape closes the overlay` | Escape closes an open shortcuts overlay. |
 | `? opens the overlay from the empty command prompt` | Pressing `?` while the command prompt has focus but is empty opens the overlay and does not insert `?` into the input. |
 | `? types normally when the command prompt already has text` | Once the prompt has any text, `?` types normally and does not open the overlay. |
+| `? opens after word-jump shortcuts and deleting the prompt` | Verifies the shortcuts overlay still opens after Option-word navigation and prompt deletion resync the composer state. |
 | `overlay and shortcuts built-in share the same source` | Verifies the `shortcuts` command output and the overlay payload list the same keys. |
 | `Alt+H toggles the history drawer from the composer` | Pressing Alt+H with the composer focused opens the history drawer and pressing it again closes it — without leaking `˙` into the prompt. |
 | `Alt+, opens the options panel from the composer` | Pressing Alt+, with the composer focused opens the options modal without leaking `≤`. |

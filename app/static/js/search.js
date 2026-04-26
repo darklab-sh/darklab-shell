@@ -474,19 +474,57 @@ function _summarySectionsTotal(sections) {
 }
 
 function _summaryBuildItems(blocks, tab) {
-  return blocks.map((block, index) => {
+  const items = [];
+  blocks.forEach((block, index) => {
     const commandLabel = block.command || String(tab?.command || '').trim() || `segment ${index + 1}`;
     const root = _summaryFirstLineDatasetValue(block.lines, 'commandRoot') || _summaryCommandRoot(commandLabel);
+    const targetBuckets = new Map();
+    const ungroupedLines = [];
+    (Array.isArray(block.lines) ? block.lines : []).forEach((line) => {
+      if (!(line instanceof Element)) return;
+      const target = String(line.dataset?.signalTarget || '').trim();
+      if (!target) {
+        ungroupedLines.push(line);
+        return;
+      }
+      if (!targetBuckets.has(target)) targetBuckets.set(target, []);
+      targetBuckets.get(target).push(line);
+    });
+
+    if (targetBuckets.size) {
+      targetBuckets.forEach((lines, target) => {
+        const sections = _summaryBlockSections({ command: commandLabel, lines }, root);
+        items.push({
+          command: commandLabel,
+          sections,
+          total: _summarySectionsTotal(sections),
+          root,
+          target,
+        });
+      });
+      if (ungroupedLines.length) {
+        const sections = _summaryBlockSections({ command: commandLabel, lines: ungroupedLines }, root);
+        items.push({
+          command: commandLabel,
+          sections,
+          total: _summarySectionsTotal(sections),
+          root,
+          target: '',
+        });
+      }
+      return;
+    }
+
     const sections = _summaryBlockSections(block, root);
-    const target = _summaryFirstLineDatasetValue(block.lines, 'signalTarget');
-    return {
+    items.push({
       command: commandLabel,
       sections,
       total: _summarySectionsTotal(sections),
       root,
-      target,
-    };
-  }).filter((item) => item.total > 0);
+      target: '',
+    });
+  });
+  return items.filter((item) => item.total > 0);
 }
 
 function _summaryAppendSections(sections) {

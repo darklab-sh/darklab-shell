@@ -226,7 +226,7 @@ def shortcuts():
 @content_bp.route("/autocomplete")
 def autocomplete():
     """Return external-tool autocomplete context from the command registry."""
-    context = load_autocomplete_context_from_commands_registry()
+    context = load_autocomplete_context_from_commands_registry(_config.CFG)
     builtin_command_roots = get_fake_command_roots()
     special_commands = get_special_command_keys()
     _log_content_view("/autocomplete")

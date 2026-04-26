@@ -152,6 +152,7 @@ How the keys work:
     - `value_hint` adds display-only guidance for that value slot
     - `suggest` adds concrete insertable examples for that value slot
     - `closes: true` suppresses further autocomplete after that token is accepted
+    - `feature_required: workspace` hides workspace-only flags, examples, and value suggestions unless Files are enabled
 - `arguments`
   - ordered unflagged argument slots like `<target>`, `<url>`, or `<domain>`
   - these appear both at `command ` and while the user types the argument value
@@ -324,9 +325,9 @@ Shipped app-safe shortcuts:
 |----------|--------|-------|
 | `Option+T` (`Alt+T`) | New tab | Preferred app-safe binding |
 | `Option+W` (`Alt+W`) | Close current tab | Avoids fighting browser `Ctrl/Cmd+W` |
-| `Option+ArrowRight` (`Alt+ArrowRight`) | Next tab | |
-| `Option+ArrowLeft` (`Alt+ArrowLeft`) | Previous tab | |
-| `Option+Tab` (`Alt+Tab`) | Next tab (Shift reverses) | Arrow and Tab are interchangeable |
+| `Shift+Option+ArrowRight` (`Shift+Alt+ArrowRight`) | Next tab | Keeps plain Option/Alt+Arrow available for terminal word movement |
+| `Shift+Option+ArrowLeft` (`Shift+Alt+ArrowLeft`) | Previous tab | Keeps plain Option/Alt+Arrow available for terminal word movement |
+| `Option+Tab` (`Alt+Tab`) | Next tab (Shift reverses) | App-level tab cycling |
 | `Option+1` ... `Option+9` (`Alt+1` ... `Alt+9`) | Jump to tab 1 ... 9 | |
 | `Enter` / `Escape` in kill confirmation | Confirm / cancel kill | Mirrors modal button intent |
 | `Option+P` (`Alt+P`) | Create share snapshot for active tab | |
@@ -338,6 +339,7 @@ Shipped app-safe shortcuts:
 | `Ctrl+K` | Delete from cursor to end of line | Readline-style editing |
 | `Ctrl+W` | Delete one word to the left | Readline-style editing |
 | `Option+B` / `Option+F` (`Alt+B` / `Alt+F`) | Move backward / forward by word | Readline-style editing |
+| `Option+ArrowLeft` / `Option+ArrowRight` (`Alt+ArrowLeft` / `Alt+ArrowRight`) | Move backward / forward by word | Terminal-style cursor movement |
 | `Ctrl+R` | Reverse-history search | Type to filter; Enter runs; Tab accepts without running; Escape restores draft |
 
 Browser-native combos like `Cmd+T`, `Cmd+W`, and `Ctrl+Tab` are intentionally treated as optional fallbacks rather than the primary contract because browser interception is inconsistent across environments, especially on macOS browsers.
@@ -517,6 +519,7 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 - Noise-heavy lines are intentionally excluded from findings when they behave like banners, progress meters, or startup chatter instead of actionable results.
 - User-killed runs are intentionally **not** counted as errors; the transcript still shows the kill line, but the signal counts stay focused on issues the operator may need to investigate.
 - The **summarize** button appends a synthetic **Command Findings:** block to the active tab. The summary groups external command blocks by server-provided command and target metadata when present, merges repeated runs for the same command/target, collapses duplicate full-command labels with a repeat count, includes only command blocks that produced at least one finding/warning/error/summary line, and falls back to per-command sections when target metadata is unavailable.
+- If a single command produces per-target metadata for multiple targets, such as `nmap -iL ...` output with multiple `Nmap scan report for ...` sections, the summary splits that one command into separate target sections instead of combining every host's findings together.
 - Built-in command output is intentionally excluded from findings, warnings, errors, summaries, and generated command-findings blocks so help/status/catalog text does not create review noise.
 - Summary blocks are helper UI output, not raw command output. They do not feed back into the signal counters or search matches.
 
@@ -726,6 +729,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - The `ls`, `cat <file>`, and `rm <file>` aliases map to file list/show/remove operations only; they do not expose arbitrary host/container filesystem access.
 - `file rm <file>` and `rm <file>` first verify the file exists, then require the same transcript-owned yes/no confirmation model as other destructive terminal-native actions.
 - Loaded workspace file names feed autocomplete for `file show`, `file edit`, `file rm`, and `cat`.
+- Workspace-only external-tool examples and flags in `commands.yaml` are hidden from autocomplete unless Files are enabled, so operators can add discoverable file workflows without exposing unusable suggestions on instances that keep Files disabled.
 - Selected command flags declared in `commands.yaml` can consume or write session files. At execution time, user-facing names such as `targets.txt` are validated and rewritten to the session workspace path passed to the subprocess.
 - Shell navigation and redirection remain blocked; all file access must go through the Files panel, workspace routes, the `file` built-in, or explicitly declared command flags.
 

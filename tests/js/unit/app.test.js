@@ -536,6 +536,7 @@ async function loadAppFns({
     setComposerValue,
     moveCmdCaret,
     setCmdCaret,
+    handleComposerWordArrowShortcut,
     deleteCmdWordLeft,
     performMobileEditAction,
     syncMobileComposerKeyboardState,
@@ -2865,10 +2866,34 @@ describe('app helpers', () => {
     expect(shellPromptWrap.classList.contains('shell-prompt-has-selection')).toBe(true)
   })
 
+  it('refreshes prompt rendering from the focused input before drawing the caret', async () => {
+    const { cmdInput, setComposerState, syncShellPrompt } = await loadAppFns()
+    const shellPromptText = document.getElementById('shell-prompt-text')
+    const shellPromptWrap = document.getElementById('shell-prompt-wrap')
+
+    setComposerState({
+      value: 'stale text',
+      selectionStart: 10,
+      selectionEnd: 10,
+      activeInput: 'desktop',
+    })
+    cmdInput.value = ''
+    cmdInput.setSelectionRange(0, 0)
+    const activeElementSpy = vi.spyOn(document, 'activeElement', 'get').mockReturnValue(cmdInput)
+
+    syncShellPrompt()
+
+    expect(shellPromptText.textContent).toBe('')
+    expect(shellPromptWrap.classList.contains('shell-prompt-empty')).toBe(true)
+    expect(shellPromptWrap.classList.contains('shell-prompt-has-value')).toBe(false)
+    activeElementSpy.mockRestore()
+  })
+
   it('supports ctrl+w to delete one word to the left', async () => {
     const { cmdInput, setComposerState } = await loadAppFns()
 
     cmdInput.value = 'dig darklab.sh A'
+    cmdInput.focus()
     cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
     setComposerState({
       value: 'dig darklab.sh A',
@@ -3196,7 +3221,63 @@ describe('app helpers', () => {
     expect(closeTab).toHaveBeenCalledWith('tab-1')
   })
 
-  it('supports Alt+ArrowLeft and Alt+ArrowRight to cycle between tabs', async () => {
+  it('supports Alt+ArrowLeft and Alt+ArrowRight to move by word', async () => {
+    const activateTab = vi.fn()
+    const { cmdInput, getComposerState, handleComposerWordArrowShortcut, setComposerValue } = await loadAppFns({
+      activateTab,
+      activeTabId: 'tab-2',
+      tabs: [
+        { id: 'tab-1', st: 'idle' },
+        { id: 'tab-2', st: 'idle' },
+        { id: 'tab-3', st: 'idle' },
+      ],
+    })
+
+    setComposerValue('dig darklab.sh A', 16, 16, { dispatch: false })
+    cmdInput.focus()
+
+    expect(handleComposerWordArrowShortcut({
+      key: 'ArrowLeft',
+      code: 'ArrowLeft',
+      altKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    })).toBe(true)
+    expect(getComposerState().selectionStart).toBe(15)
+    expect(getComposerState().selectionEnd).toBe(15)
+
+    handleComposerWordArrowShortcut({
+      key: 'ArrowLeft',
+      code: 'ArrowLeft',
+      altKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    })
+    expect(getComposerState().selectionStart).toBe(4)
+    expect(getComposerState().selectionEnd).toBe(4)
+
+    handleComposerWordArrowShortcut({
+      key: 'ArrowRight',
+      code: 'ArrowRight',
+      altKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    })
+    expect(getComposerState().selectionStart).toBe(14)
+    expect(getComposerState().selectionEnd).toBe(14)
+    expect(activateTab).not.toHaveBeenCalled()
+  })
+
+  it('supports Shift+Alt+ArrowLeft and Shift+Alt+ArrowRight to cycle between tabs', async () => {
     const activateTab = vi.fn()
     const { cmdInput } = await loadAppFns({
       activateTab,
@@ -3209,13 +3290,13 @@ describe('app helpers', () => {
     })
 
     cmdInput.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }),
+      new KeyboardEvent('keydown', { key: 'ArrowRight', code: 'ArrowRight', altKey: true, shiftKey: true, bubbles: true }),
     )
     expect(activateTab).toHaveBeenCalledWith('tab-3')
 
     activateTab.mockClear()
     cmdInput.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'ArrowLeft', altKey: true, bubbles: true }),
+      new KeyboardEvent('keydown', { key: 'ArrowLeft', code: 'ArrowLeft', altKey: true, shiftKey: true, bubbles: true }),
     )
     expect(activateTab).toHaveBeenCalledWith('tab-1')
   })
