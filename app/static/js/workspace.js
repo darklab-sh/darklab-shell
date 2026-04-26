@@ -16,7 +16,7 @@ function _formatWorkspaceBytes(bytes) {
   return `${(value / (1024 * 1024)).toFixed(1).replace(/\.0$/, '')} MB`;
 }
 
-function _workspaceErrorMessage(err, fallback = 'Workspace request failed') {
+function _workspaceErrorMessage(err, fallback = 'Files request failed') {
   if (err && typeof err.message === 'string' && err.message.trim()) return err.message.trim();
   return fallback;
 }
@@ -29,7 +29,7 @@ async function _workspaceJson(resp) {
     data = {};
   }
   if (!resp.ok) {
-    throw new Error(data && data.error ? data.error : `Workspace request failed (${resp.status})`);
+    throw new Error(data && data.error ? data.error : `Files request failed (${resp.status})`);
   }
   return data;
 }
@@ -269,7 +269,7 @@ async function openWorkspace() {
     _workspaceFiles = [];
     if (workspaceFileList) workspaceFileList.textContent = '';
     if (workspaceSummary) workspaceSummary.textContent = 'Unavailable';
-    setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to load workspace'), 'error');
+    setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to load files'), 'error');
   }
 }
 
@@ -312,7 +312,7 @@ async function handleWorkspaceFileAction(action, path) {
     } else if (action === 'delete') {
       const confirmed = typeof showConfirm === 'function'
         ? await showConfirm({
-            body: { text: `Delete ${path}?`, note: 'This only removes the session workspace copy.' },
+            body: { text: `Delete ${path}?`, note: 'This only removes the session file.' },
             tone: 'danger',
             actions: [
               { id: 'cancel', label: 'Cancel', role: 'cancel' },

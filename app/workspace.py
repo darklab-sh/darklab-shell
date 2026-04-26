@@ -105,7 +105,7 @@ def workspace_settings(cfg: dict[str, Any] | None = None) -> WorkspaceSettings:
 
 def _require_enabled(settings: WorkspaceSettings) -> None:
     if not settings.enabled:
-        raise WorkspaceDisabled("workspace storage is disabled")
+        raise WorkspaceDisabled("Files are disabled on this instance")
 
 
 def session_workspace_name(session_id: str) -> str:
@@ -157,8 +157,6 @@ def _validate_relative_path(relative_path: str) -> PurePosixPath:
     for part in parts:
         if part in {"", ".", ".."}:
             raise InvalidWorkspacePath("file name cannot contain traversal")
-        if part.startswith("."):
-            raise InvalidWorkspacePath("hidden file names are not allowed")
         if len(part) > 255:
             raise InvalidWorkspacePath("file name is too long")
     return path
@@ -177,7 +175,7 @@ def _reject_symlink_components(root: Path, candidate: Path) -> None:
     for part in candidate.relative_to(root).parts:
         cursor = cursor / part
         if cursor.exists() and cursor.is_symlink():
-            raise InvalidWorkspacePath("workspace symlinks are not allowed")
+            raise InvalidWorkspacePath("session file symlinks are not allowed")
 
 
 def resolve_workspace_path(
@@ -196,7 +194,7 @@ def resolve_workspace_path(
     if parent.exists():
         resolved_parent = parent.resolve(strict=True)
         if not _is_relative_to(resolved_parent, root):
-            raise InvalidWorkspacePath("workspace path escapes the session directory")
+            raise InvalidWorkspacePath("file path escapes the session directory")
     elif ensure_parent:
         parent.mkdir(mode=WORKSPACE_DIR_MODE, parents=True, exist_ok=True)
         try:
@@ -205,12 +203,12 @@ def resolve_workspace_path(
             pass
         resolved_parent = parent.resolve(strict=True)
         if not _is_relative_to(resolved_parent, root):
-            raise InvalidWorkspacePath("workspace path escapes the session directory")
+            raise InvalidWorkspacePath("file path escapes the session directory")
     else:
-        raise InvalidWorkspacePath("workspace parent directory does not exist")
+        raise InvalidWorkspacePath("parent directory does not exist")
     resolved = resolved_parent / candidate.name
     if not _is_relative_to(resolved.resolve(strict=False), root):
-        raise InvalidWorkspacePath("workspace path escapes the session directory")
+        raise InvalidWorkspacePath("file path escapes the session directory")
     return resolved
 
 
@@ -227,7 +225,7 @@ def prepare_workspace_file_for_command(path: Path, *, mode: str) -> None:
 def prepare_workspace_directory_for_command(path: Path, *, mode: str) -> None:
     """Make a validated workspace directory usable by command-managed databases."""
     if path.exists() and not path.is_dir():
-        raise InvalidWorkspacePath("workspace path is not a directory")
+        raise InvalidWorkspacePath("session path is not a directory")
     sudo_bin = shutil.which("sudo")
     scanner_exists = True
     try:
@@ -261,7 +259,7 @@ def prepare_workspace_directory_for_command(path: Path, *, mode: str) -> None:
                     pass
         if not path.exists():
             if mode not in {"write", "read_write"}:
-                raise WorkspaceFileNotFound(f"workspace directory not found: {path.name}")
+                raise WorkspaceFileNotFound(f"session directory not found: {path.name}")
             try:
                 subprocess.run(
                     [sudo_bin, "-u", "scanner", "-g", "appuser", "mkdir", "-p", str(path)],
@@ -279,10 +277,10 @@ def prepare_workspace_directory_for_command(path: Path, *, mode: str) -> None:
                 )  # nosec B603
                 return
             except (subprocess.SubprocessError, OSError) as exc:
-                raise InvalidWorkspacePath("failed to prepare workspace directory for scanner") from exc
+                raise InvalidWorkspacePath("failed to prepare session directory for command") from exc
     if not path.exists():
         if mode not in {"write", "read_write"}:
-            raise WorkspaceFileNotFound(f"workspace directory not found: {path.name}")
+            raise WorkspaceFileNotFound(f"session directory not found: {path.name}")
         path.mkdir(mode=WORKSPACE_COMMAND_DIR_MODE, parents=True, exist_ok=True)
     try:
         os.chmod(path, WORKSPACE_COMMAND_DIR_MODE)
@@ -297,7 +295,7 @@ def workspace_usage(session_id: str, cfg: dict[str, Any] | None = None) -> Works
     file_count = 0
     for path in root.rglob("*"):
         if path.is_symlink():
-            raise InvalidWorkspacePath("workspace symlinks are not allowed")
+            raise InvalidWorkspacePath("session file symlinks are not allowed")
         if path.is_file():
             file_count += 1
             bytes_used += path.stat().st_size
@@ -310,7 +308,7 @@ def list_workspace_files(session_id: str, cfg: dict[str, Any] | None = None) -> 
     items: list[dict[str, Any]] = []
     for path in root.rglob("*"):
         if path.is_symlink():
-            raise InvalidWorkspacePath("workspace symlinks are not allowed")
+            raise InvalidWorkspacePath("session file symlinks are not allowed")
         if not path.is_file():
             continue
         stat = path.stat()
@@ -330,15 +328,15 @@ def _check_write_limits(
     cfg: dict[str, Any] | None,
 ) -> None:
     if new_size > settings.max_file_bytes:
-        raise WorkspaceQuotaExceeded("file exceeds workspace max file size")
+        raise WorkspaceQuotaExceeded("file exceeds session max file size")
     usage = workspace_usage(session_id, cfg)
     existing_size = destination.stat().st_size if destination.exists() and destination.is_file() else 0
     new_file_count = usage.file_count + (0 if destination.exists() else 1)
     if new_file_count > settings.max_files:
-        raise WorkspaceQuotaExceeded("workspace file count limit exceeded")
+        raise WorkspaceQuotaExceeded("session file count limit exceeded")
     projected = usage.bytes_used - existing_size + new_size
     if projected > settings.quota_bytes:
-        raise WorkspaceQuotaExceeded("workspace quota exceeded")
+        raise WorkspaceQuotaExceeded("session file quota exceeded")
 
 
 def write_workspace_text_file(
@@ -377,9 +375,9 @@ def read_workspace_text_file(
     _require_enabled(settings)
     path = resolve_workspace_path(session_id, relative_path, cfg)
     if not path.is_file():
-        raise WorkspaceFileNotFound("workspace file was not found")
+        raise WorkspaceFileNotFound("session file was not found")
     if path.stat().st_size > settings.max_file_bytes:
-        raise WorkspaceQuotaExceeded("file exceeds workspace max file size")
+        raise WorkspaceQuotaExceeded("file exceeds session max file size")
     content = path.read_bytes()
     if b"\x00" in content:
         raise WorkspaceBinaryFile("file appears to be binary; download it instead")
@@ -398,7 +396,7 @@ def delete_workspace_file(
     _require_enabled(settings)
     path = resolve_workspace_path(session_id, relative_path, cfg)
     if not path.is_file():
-        raise WorkspaceFileNotFound("workspace file was not found")
+        raise WorkspaceFileNotFound("session file was not found")
     path.unlink()
 
 

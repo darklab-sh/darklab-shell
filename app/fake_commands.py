@@ -195,7 +195,7 @@ _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "ls", "description": "List session files.", "root": "ls"},
     {"name": "man <cmd>", "description": "Show the real man page for an allowed command.", "root": "man"},
     {"name": "ps", "description": "Show the current shell process view plus recent session commands.", "root": "ps"},
-    {"name": "pwd", "description": "Show the web shell workspace path.", "root": "pwd"},
+    {"name": "pwd", "description": "Show the session files path.", "root": "pwd"},
     {"name": "retention", "description": "Show retention and persisted-output settings.", "root": "retention"},
     {"name": "rm <file>", "description": "Remove a session file after confirmation.", "root": "rm"},
     {"name": "route", "description": "Show the shell routing table summary.", "root": "route"},

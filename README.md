@@ -262,6 +262,8 @@ The following tools are installed in the Docker image and available for use:
 
 ### Tool Notes
 
+The notes below cover operator-visible behavior. For the developer-facing integration contracts behind command rewrites, environment overrides, and workspace file handling, see [`docs/external-command-integrations.md`](docs/external-command-integrations.md).
+
 #### mtr
 
 `mtr` normally runs as a live, full-screen interactive display that continuously redraws in place using ncurses. This requires a real TTY, which is not available in a web-based shell environment.
@@ -569,6 +571,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── playwright.demo.mobile.config.js # Playwright config for recording the mobile demo video
 │   ├── playwright.capture.desktop.config.js # Playwright config for the desktop UI screenshot capture pipeline
 │   └── playwright.capture.mobile.config.js  # Playwright config for the mobile UI screenshot capture pipeline
+├── docs/
+│   └── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
 ├── requirements-dev.txt        # Dev-only dependencies (pytest, flake8, bandit, pip-audit)
 ├── scripts/
 │   ├── hooks/

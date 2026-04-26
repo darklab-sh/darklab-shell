@@ -1002,7 +1002,7 @@ class TestWorkspaceRoutes:
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             resp = client.get("/workspace/files")
         assert resp.status_code == 400
-        assert json.loads(resp.data)["error"] == "workspace requires an active session"
+        assert json.loads(resp.data)["error"] == "Files require an active session"
 
     def test_disabled_workspace_returns_403(self):
         client = get_client()
@@ -1012,7 +1012,7 @@ class TestWorkspaceRoutes:
         ):
             resp = client.get("/workspace/files", headers={"X-Session-ID": "workspace-disabled"})
         assert resp.status_code == 403
-        assert json.loads(resp.data)["error"] == "workspace storage is disabled"
+        assert json.loads(resp.data)["error"] == "Files are disabled on this instance"
 
     def test_write_list_read_delete_lifecycle(self):
         client = get_client()
@@ -1075,7 +1075,7 @@ class TestWorkspaceRoutes:
         client = get_client()
         session = "workspace-paths-" + uuid.uuid4().hex[:8]
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
-            for bad_path in ("../escape.txt", "/tmp/escape.txt", ".secret", "nested/.secret", "a\\b.txt"):
+            for bad_path in ("../escape.txt", "/tmp/escape.txt", "a\\b.txt"):
                 resp = client.post(
                     "/workspace/files",
                     headers={"X-Session-ID": session},
@@ -1086,7 +1086,7 @@ class TestWorkspaceRoutes:
     def test_rejects_unsafe_paths_on_read_delete_and_download(self):
         client = get_client()
         session = "workspace-route-paths-" + uuid.uuid4().hex[:8]
-        bad_paths = ("../escape.txt", "/tmp/escape.txt", ".secret", "nested/.secret", "a\\b.txt")
+        bad_paths = ("../escape.txt", "/tmp/escape.txt", "a\\b.txt")
         with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
             for bad_path in bad_paths:
                 encoded = quote(bad_path, safe="")
@@ -1106,6 +1106,27 @@ class TestWorkspaceRoutes:
                 assert read.status_code == 400
                 assert deleted.status_code == 400
                 assert downloaded.status_code == 400
+
+    def test_allows_hidden_workspace_paths_when_listed(self):
+        client = get_client()
+        session = "workspace-hidden-" + uuid.uuid4().hex[:8]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            created = client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": ".config/amass.txt", "text": "hidden ok\n"},
+            )
+            listed = client.get("/workspace/files", headers={"X-Session-ID": session})
+            read = client.get(
+                "/workspace/files/read?path=.config%2Famass.txt",
+                headers={"X-Session-ID": session},
+            )
+
+            assert created.status_code == 200
+            assert listed.status_code == 200
+            assert ".config/amass.txt" in {item["path"] for item in listed.get_json()["files"]}
+            assert read.status_code == 200
+            assert read.get_json()["text"] == "hidden ok\n"
 
     def test_enforces_quota_and_type_checks(self):
         client = get_client()

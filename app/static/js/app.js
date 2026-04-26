@@ -2210,7 +2210,7 @@ const _runtimeBuiltinCommandInfo = [
   ['ls', 'built-in: list session files'],
   ['man', 'built-in: show a real or built-in manual page'],
   ['ps', 'built-in: show the current shell process view'],
-  ['pwd', 'built-in: show the web shell workspace path'],
+  ['pwd', 'built-in: show the session files path'],
   ['retention', 'built-in: show retention and persisted-output settings'],
   ['rm', 'built-in: remove a session file after confirmation'],
   ['route', 'built-in: show the shell routing table summary'],

@@ -32,7 +32,7 @@ workspace_bp = Blueprint("workspace", __name__)
 def _session_or_error() -> tuple[str | None, tuple[Response, int] | None]:
     session_id = get_session_id()
     if not session_id:
-        return None, (jsonify({"error": "workspace requires an active session"}), 400)
+        return None, (jsonify({"error": "Files require an active session"}), 400)
     return session_id, None
 
 
@@ -57,7 +57,7 @@ def _workspace_payload(session_id: str) -> dict[str, Any]:
 
 def _workspace_error_response(exc: Exception) -> tuple[Response, int]:
     if isinstance(exc, WorkspaceDisabled):
-        return jsonify({"error": "workspace storage is disabled"}), 403
+        return jsonify({"error": "Files are disabled on this instance"}), 403
     if isinstance(exc, WorkspaceQuotaExceeded):
         return jsonify({"error": str(exc)}), 413
     if isinstance(exc, WorkspaceFileNotFound):
@@ -149,7 +149,7 @@ def workspace_files_download():
     try:
         resolved = resolve_workspace_path(str(session_id), path)
         if not resolved.is_file():
-            raise WorkspaceFileNotFound("workspace file was not found")
+            raise WorkspaceFileNotFound("session file was not found")
         return send_file(
             resolved,
             as_attachment=True,

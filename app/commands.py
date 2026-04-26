@@ -35,6 +35,7 @@ ASCII_MOBILE_FILE     = os.path.join(_CONF, "ascii_mobile.txt")
 APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
 APP_HINTS_MOBILE_FILE = os.path.join(_CONF, "app_hints_mobile.txt")
 AMASS_DEFAULT_WORKSPACE_DIR = "amass"
+AMASS_MANAGED_DATABASE_SUBCOMMANDS = {"enum", "subs", "track", "viz"}
 
 
 @dataclass(frozen=True)
@@ -666,11 +667,20 @@ def _normalize_workspace_flags(items) -> list[dict[str, object]]:
             continue
         if value not in {"required", "separate", "attached", "separate_or_attached"}:
             value = "required"
-        key = (flag, mode, value)
+        subcommands = tuple(
+            sorted(
+                str(subcommand).strip().lower()
+                for subcommand in item.get("subcommands", []) or []
+                if str(subcommand).strip()
+            )
+        )
+        key = (flag, mode, value, str(item.get("kind") or "").strip().lower(), subcommands)
         if key in seen:
             continue
         seen.add(key)
         normalized: dict[str, object] = {"flag": flag, "mode": mode, "value": value}
+        if subcommands:
+            normalized["subcommands"] = list(subcommands)
         kind = str(item.get("kind") or "").strip().lower()
         if kind == "directory":
             normalized["kind"] = kind
@@ -752,6 +762,8 @@ def _merge_command_registry_entries(base_entry: dict, overlay_entry: dict, *, pi
                 item.get("flag"),
                 item.get("mode"),
                 item.get("value"),
+                item.get("kind"),
+                tuple(item.get("subcommands", []) or []),
             )
             for item in workspace_flags if isinstance(item, dict)
         }
@@ -760,6 +772,8 @@ def _merge_command_registry_entries(base_entry: dict, overlay_entry: dict, *, pi
                 workspace_flag.get("flag"),
                 workspace_flag.get("mode"),
                 workspace_flag.get("value"),
+                workspace_flag.get("kind"),
+                tuple(workspace_flag.get("subcommands", []) or []),
             )
             if key not in existing_workspace_flags:
                 workspace_flags.append(deepcopy(workspace_flag))
@@ -1852,6 +1866,16 @@ def _workspace_flag_specs_by_root() -> dict[str, list[dict[str, object]]]:
     return specs
 
 
+def _workspace_flag_applies_to_command(spec: dict[str, object], tokens: list[str]) -> bool:
+    subcommands = spec.get("subcommands")
+    if not subcommands:
+        return True
+    if not isinstance(subcommands, list) or len(tokens) < 2:
+        return False
+    command_sub = tokens[1].strip().lower()
+    return command_sub in {str(item).strip().lower() for item in subcommands}
+
+
 def _workspace_flag_matches_token(token: str, spec: dict[str, object]) -> bool:
     flag = str(spec.get("flag") or "")
     if not flag:
@@ -1871,8 +1895,9 @@ def _workspace_flag_value(tokens: list[str], index: int, spec: dict[str, object]
     value_kind = str(spec.get("value") or "required")
     token = tokens[index]
     if token == flag:
-        if index + 1 >= len(tokens):
-            return None, None, f"{flag} requires a workspace file name"
+        label = "session directory name" if str(spec.get("kind") or "") == "directory" else "session file name"
+        if index + 1 >= len(tokens) or str(tokens[index + 1]).startswith("-"):
+            return None, None, f"{flag} requires a {label}"
         return tokens[index + 1], index + 1, None
     if value_kind in {"attached", "separate_or_attached"}:
         if flag.startswith("--") and token.startswith(f"{flag}="):
@@ -1892,7 +1917,10 @@ def _rewrite_workspace_file_flags(
     if not tokens:
         return command, set(), [], [], [], ""
 
-    specs = _workspace_flag_specs_by_root().get(tokens[0].lower(), [])
+    specs = [
+        spec for spec in _workspace_flag_specs_by_root().get(tokens[0].lower(), [])
+        if _workspace_flag_applies_to_command(spec, tokens)
+    ]
     if not specs:
         return command, set(), [], [], [], ""
 
@@ -1913,7 +1941,7 @@ def _rewrite_workspace_file_flags(
                     [],
                     [],
                     [],
-                    "Files are disabled on this instance; workspace file flags are not available.",
+                    "Files are disabled on this instance; session file flags are not available.",
                 )
             index = (value_index + 1) if value_index is not None else index + 1
         return command, set(), [], [], [], ""
@@ -1927,7 +1955,7 @@ def _rewrite_workspace_file_flags(
     is_amass_database_command = (
         tokens[0].lower() == "amass"
         and len(tokens) > 1
-        and tokens[1].lower() in {"enum", "subs"}
+        and tokens[1].lower() in AMASS_MANAGED_DATABASE_SUBCOMMANDS
         and not any(token in {"-h", "-help", "--help"} for token in tokens[1:])
     )
     if is_amass_database_command and not has_amass_dir:
@@ -1948,7 +1976,7 @@ def _rewrite_workspace_file_flags(
                     [],
                     [],
                     [],
-                    f"Amass database commands use the managed {AMASS_DEFAULT_WORKSPACE_DIR} workspace directory.",
+                    f"Amass database commands use the managed {AMASS_DEFAULT_WORKSPACE_DIR} session directory.",
                 )
             break
 
@@ -1989,7 +2017,7 @@ def _rewrite_workspace_file_flags(
                 prepare_workspace_directory_for_command(resolved, mode=mode)
             else:
                 if mode in {"read", "read_write"} and not resolved.is_file():
-                    raise WorkspaceFileNotFound(f"workspace file not found: {user_value}")
+                    raise WorkspaceFileNotFound(f"session file not found: {user_value}")
                 prepare_workspace_file_for_command(resolved, mode=mode)
         except (InvalidWorkspacePath, WorkspaceDisabled, WorkspaceFileNotFound) as exc:
             return command, set(), [], [], [], str(exc)

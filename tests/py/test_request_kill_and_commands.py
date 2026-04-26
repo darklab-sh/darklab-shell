@@ -395,6 +395,21 @@ class TestIsCommandAllowedEdges:
                     [],
                     ["amass"],
                 ),
+                (
+                    "amass subs -d darklab.sh -names -o amass-subdomains.txt",
+                    [],
+                    ["amass-subdomains.txt", "amass"],
+                ),
+                (
+                    "amass track -d darklab.sh",
+                    [],
+                    ["amass"],
+                ),
+                (
+                    "amass viz -d darklab.sh -d3 -o amass-viz",
+                    [],
+                    ["amass-viz", "amass"],
+                ),
             ]
 
             results = [
@@ -414,7 +429,15 @@ class TestIsCommandAllowedEdges:
             cfg=cfg,
         )
         assert not denied.allowed
-        assert "managed amass workspace directory" in denied.reason
+        assert "managed amass session directory" in denied.reason
+
+        denied = validate_command(
+            "amass enum -d darklab.sh -o unmanaged.txt",
+            session_id="session-1",
+            cfg=cfg,
+        )
+        assert not denied.allowed
+        assert "Command not allowed" in denied.reason
 
 
 class TestFakeCommandResolution:

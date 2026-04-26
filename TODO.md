@@ -118,6 +118,28 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
     - Unit-test substitution order, quoting behavior, undefined variables, and policy validation after expansion.
     - E2E-test a variable-driven command sequence and history/share display.
 
+- **Subcommand-scoped autocomplete schema**
+  - The current command registry autocomplete model is mostly flat: command roots expose one shared list of examples, flags, and positional hints.
+  - This gets noisy for tools with meaningful subcommands such as `amass`, where `enum`, `subs`, `track`, and `viz` each have different useful flags. Examples:
+    - `amass subs` should suggest `-names`, `-ip`, `-summary`, and `-o`.
+    - `amass viz` should suggest `-d3`, `-dot`, `-gexf`, and directory-style `-o`.
+    - `amass enum` should not suggest `subs`-only or `viz`-only flags.
+  - Design a YAML shape that treats subcommands as command modes rather than ordinary flags. Candidate shape:
+    - keep top-level `autocomplete.flags` for root/global flags such as `-h` or `--version`
+    - add `autocomplete.subcommands.<name>.description`
+    - add `autocomplete.subcommands.<name>.flags`
+    - add `autocomplete.subcommands.<name>.examples`
+  - Start with one nesting level: `root -> subcommand -> flags/examples`. Do not attempt a full shell grammar or arbitrary-depth parser until a concrete command needs it.
+  - Align this with the new subcommand-scoped `workspace_flags` support so UI hints match validation behavior.
+  - Backward compatibility:
+    - continue loading existing flat `autocomplete.flags` entries
+    - optionally allow a migration period where subcommands appear in both flat flags and nested subcommands, but avoid duplicate UI suggestions
+  - Testing:
+    - Add unit coverage for `amass ` showing subcommands and global flags.
+    - Add unit coverage for `amass subs ` only showing `subs` flags.
+    - Add unit coverage for `amass viz ` only showing `viz` flags.
+    - Add route/registry coverage proving nested autocomplete metadata survives YAML normalization and local overlays.
+
 - **Workspace-native chained recon workflows**
   - Add guided workflows that demonstrate the Files feature as an app-mediated pipeline: one recon tool writes a session file, and a later tool reads that generated file through declared workspace-aware flags.
   - Keep these workflows small and reviewable. They should show why Files exists without turning `Run all` into a huge scanner blast.
@@ -168,6 +190,29 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
   - Testing:
     - Add route coverage for migrating with no source workspace, source-only workspace, destination-only workspace, and conflicting files.
     - Add E2E coverage proving Files contents remain visible after accepting a session-token migration.
+
+- **Files modal folder navigation and viewer actions**
+  - Replace the flat Files list for nested paths with a folder-aware browser.
+  - Current behavior lists nested artifacts as long paths such as `amass-viz/amass.html`, which becomes hard to navigate once tools create output directories.
+  - Desired folder navigation:
+    - show folders and files as separate rows in the current directory
+    - use breadcrumbs for the current path
+    - support entering folders and returning to parent/root
+    - keep file actions scoped to files and folder actions scoped to folders
+    - preserve existing session path safety rules; folder navigation must still be app-mediated, not shell navigation
+  - Consider adding a `New Folder` action as a manual organization helper, but keep command integrations responsible for preparing declared directory outputs such as `amass viz -o amass-viz`.
+  - Viewer action layout:
+    - when viewing a file, show `Edit`, `Download`, and `Delete` in the viewer header beside the filename and `Close View`
+    - avoid forcing the user to scroll back to the file list to act on the file they are already viewing
+    - keep destructive actions behind the existing confirmation path
+  - Backend/API considerations:
+    - decide whether `/workspace/files` should keep returning a flat list and let the browser build the tree, or add a directory-aware response shape
+    - decide whether directory rows count against `workspace_max_files`; current quota accounting counts files only
+    - add route support for creating/deleting empty directories only if the UI needs `New Folder` or folder deletion
+  - Testing:
+    - Add unit coverage for tree rendering, breadcrumbs, folder enter/back behavior, and viewer header actions.
+    - Add route coverage if directory create/delete endpoints are introduced.
+    - Add E2E coverage with a tool-created nested output such as `amass-viz/*.html`.
 
 ---
 

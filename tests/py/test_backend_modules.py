@@ -276,15 +276,23 @@ class TestSessionWorkspace:
             assert (path.stat().st_mode & 0o777) == WORKSPACE_COMMAND_WRITE_FILE_MODE
             assert not path.stat().st_mode & 0o007
 
-    def test_rejects_absolute_traversal_hidden_and_backslash_paths(self):
+    def test_rejects_absolute_traversal_and_backslash_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
-            for bad_path in ["/etc/passwd", "../escape", "safe/../../escape", ".env", "safe\\.txt"]:
+            for bad_path in ["/etc/passwd", "../escape", "safe/../../escape", "safe\\.txt"]:
                 try:
                     resolve_workspace_path("session-1", bad_path, cfg, ensure_parent=True)
                     assert False, f"expected invalid path rejection for {bad_path}"
                 except InvalidWorkspacePath:
                     pass
+
+    def test_allows_hidden_files_that_are_listed_by_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            hidden = resolve_workspace_path("session-1", ".config/amass.txt", cfg, ensure_parent=True)
+
+            assert hidden.name == "amass.txt"
+            assert hidden.parent.name == ".config"
 
     def test_rejects_symlink_escape(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -572,6 +580,11 @@ class TestDerivedCommandRegistry:
                 "amass enum -df domains.txt -timeout 10": (["domains.txt"], ["amass"]),
                 "amass subs -d darklab.sh -names": ([], ["amass"]),
                 "amass subs -d darklab.sh -names -dir amass": ([], ["amass"]),
+                "amass subs -d darklab.sh -names -o amass-subdomains.txt": (
+                    [], ["amass-subdomains.txt", "amass"],
+                ),
+                "amass track -d darklab.sh": ([], ["amass"]),
+                "amass viz -d darklab.sh -d3 -o amass-viz": ([], ["amass-viz", "amass"]),
                 "dnsx -l subdomains.txt -o dnsx.txt": (["subdomains.txt"], ["dnsx.txt"]),
                 "wafw00f -i urls.txt -o wafw00f.txt": (["urls.txt"], ["wafw00f.txt"]),
                 "masscan -iL targets.txt -oL masscan.txt -p 80": (["targets.txt"], ["masscan.txt"]),
@@ -605,7 +618,15 @@ class TestDerivedCommandRegistry:
                 cfg=cfg,
             )
             assert not result.allowed
-            assert "managed amass workspace directory" in result.reason
+            assert "managed amass session directory" in result.reason
+
+            result = commands.validate_command(
+                "amass enum -d darklab.sh -o unmanaged.txt",
+                session_id=session_id,
+                cfg=cfg,
+            )
+            assert not result.allowed
+            assert "Command not allowed" in result.reason
 
     def test_autocomplete_context_filters_workspace_feature_hints(self):
         registry = {

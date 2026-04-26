@@ -972,6 +972,7 @@ commands:
         - amass -blf
         - amass -rf
         - amass -w
+        - amass -o
     workspace_flags:
       - flag: -df
         mode: read
@@ -1005,20 +1006,44 @@ commands:
         mode: read_write
         value: separate
         kind: directory
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
+        subcommands:
+          - subs
+      - flag: -o
+        mode: write
+        value: separate
+        kind: directory
+        subcommands:
+          - viz
     autocomplete:
       examples:
         - value: amass -h
           description: Show help and usage
-        - value: amass enum -d darklab.sh -timeout 10
+        - value: amass enum -d darklab.sh
           description: Enumerate a domain using the session-scoped Amass database
-        - value: amass enum -d darklab.sh -timeout 10 -dir amass
+        - value: amass enum -d darklab.sh
           description: Enumerate using a session-scoped Amass database
           feature_required: workspace
         - value: amass subs -d darklab.sh -names
           description: Print names from the session-scoped Amass database
           feature_required: workspace
-        - value: amass subs -d darklab.sh -names -dir amass
-          description: Print names from a session-scoped Amass database
+        - value: amass subs -d darklab.sh -names -ip -summary
+          description: Show discovered names with IP and ASN summary data
+          feature_required: workspace
+        - value: amass subs -d darklab.sh -show
+          description: Display subdomains and related ASNs from the session database
+          feature_required: workspace
+        - value: amass subs -d darklab.sh -names -o amass-subdomains.txt
+          description: Save discovered names from the session-scoped database
+          feature_required: workspace
+        - value: amass viz -d darklab.sh -d3 -o amass-viz
+          description: Generate a D3 HTML graph visualization in a session directory
+          feature_required: workspace
+        - value: amass viz -d darklab.sh -dot -o amass-viz-dot
+          description: Export database information for the domain as a flat DOT text file
           feature_required: workspace
       flags:
         - value: -h
@@ -1028,6 +1053,10 @@ commands:
           description: Enumerate attack surface assets
         - value: subs
           description: Read discovered subdomains from the Amass database
+        - value: track
+          description: Show newly discovered assets over time from the database
+        - value: viz
+          description: Generate graph visualizations from the Amass database
         - value: -passive
           description: Use passive data sources only (default in Amass v5)
         - value: -d
@@ -1048,6 +1077,30 @@ commands:
           description: Disable colorized output
         - value: -names
           description: Print names only when reading Amass database results
+        - value: -ip
+          description: Show IP addresses for discovered names
+        - value: -ipv4
+          description: Show IPv4 addresses for discovered names
+        - value: -ipv6
+          description: Show IPv6 addresses for discovered names
+        - value: -summary
+          description: Print ASN summary data from discovered names
+        - value: -show
+          description: Print all available result data for matching domains
+        - value: -demo
+          description: Censor output for demonstrations
+        - value: -since
+          description: Limit track or viz output to assets after a timestamp
+          takes_value: true
+          suggest:
+            - value: "04/26 00:00:00 2026 CDT"
+              description: Amass timestamp format example
+        - value: -d3
+          description: Generate a D3 HTML graph with amass viz
+        - value: -dot
+          description: Generate Graphviz DOT output with amass viz
+        - value: -gexf
+          description: Generate Gephi GEXF output with amass viz
         - value: -df
           description: Read target domains from a session file
           takes_value: true
@@ -1076,6 +1129,15 @@ commands:
           suggest:
             - value: amass-errors.log
               description: Save Amass error log
+        - value: -o
+          description: Write amass subs output to a session file or amass viz output to a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: amass-subdomains.txt
+              description: Save amass subs text output
+            - value: amass-viz
+              description: Save amass viz artifacts in a session directory
         - value: -dir
           description: Use a session directory for Amass database/output files
           takes_value: true

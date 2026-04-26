@@ -516,6 +516,9 @@ These rewrites happen in `rewrite_command()` silently (no user-visible notice un
 | `nmap` | Adds `--privileged` | Required for raw socket features with setcap. Silent. |
 | `nuclei` | Adds `-ud /tmp/nuclei-templates` | Redirects template storage to tmpfs. Silent. |
 | `wapiti` | Adds `-f txt -o /dev/stdout` | wapiti writes reports to file by default; this streams to terminal. Silent. |
+| `naabu` | Adds `-scan-type c` | Uses TCP connect scanning instead of raw SYN mode for container reliability. Silent. |
+
+Workspace-aware validation also rewrites declared file and directory flags from `app/conf/commands.yaml` into the active session workspace. Amass uses an additional runtime environment override: database-backed subcommands such as `amass enum`, `amass subs`, `amass track`, and `amass viz` get a managed `-dir amass` workspace directory and `XDG_CONFIG_HOME` is pointed at the session workspace so `amass engine` and the CLI share the same per-session database path. See [External Command Integrations](docs/external-command-integrations.md) for the command-specific integration contracts.
 
 Synthetic post-filters also sit on this run-lifecycle boundary rather than on the shell-parser path. `parse_synthetic_postfilter()` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the `/run` stream applies the selected helper before lines are emitted or persisted.
 
@@ -823,10 +826,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 984
+- `pytest`: 986
 - `vitest`: 810
 - `playwright`: 211
-- total: 2,005
+- total: 2,007
 
 ### Testing Architecture
 
@@ -886,6 +889,7 @@ Application log format still remains an application-level choice, so operators m
 
 - [README.md](README.md) — quick summary, quick start, installed tools, and configuration reference
 - [FEATURES.md](FEATURES.md) — full per-feature reference including purpose and use
+- [docs/external-command-integrations.md](docs/external-command-integrations.md) — external-tool rewrite, environment, workspace, and smoke-test contracts
 - [CONTRIBUTING.md](CONTRIBUTING.md) — local setup, test workflow, linting, and merge request guidance
 - [DECISIONS.md](DECISIONS.md) — architectural rationale, tradeoffs, and implementation-history notes
 - [THEME.md](THEME.md) — theme registry, selector metadata, and override behavior
