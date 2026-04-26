@@ -535,6 +535,63 @@ class TestDerivedCommandRegistry:
         assert context["ping"]["examples"][0]["value"] == "ping -c 4 darklab.sh"
         assert context["grep"]["pipe_command"] is True
 
+    def test_real_registry_workspace_file_flags_cover_supported_file_io_tools(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 20,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            session_id = "registry-workspace-flags"
+            for path, text in {
+                "urls.txt": "https://ip.darklab.sh\n",
+                "tls-targets.txt": "ip.darklab.sh\n",
+                "subdomains.txt": "www.darklab.sh\n",
+                "domains.txt": "darklab.sh\n",
+                "targets.txt": "ip.darklab.sh\n",
+                "ca.pem": "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n",
+                "nmap-script-args.txt": "http.useragent=darklab\n",
+            }.items():
+                write_workspace_text_file(session_id, path, text, cfg)
+
+            cases = {
+                "wget -i urls.txt -O response.html": (["urls.txt"], ["response.html"]),
+                "openssl s_client -connect ip.darklab.sh:443 -CAfile ca.pem": (["ca.pem"], []),
+                "sslscan --xml sslscan.xml ip.darklab.sh": ([], ["sslscan.xml"]),
+                "sslyze --targets_in tls-targets.txt --json_out sslyze.json": (
+                    ["tls-targets.txt"], ["sslyze.json"],
+                ),
+                "dnsrecon -d darklab.sh -D subdomains.txt -c dnsrecon.csv": (
+                    ["subdomains.txt"], ["dnsrecon.csv"],
+                ),
+                "subfinder -dL domains.txt -o subfinder.txt": (["domains.txt"], ["subfinder.txt"]),
+                "amass enum -passive -df domains.txt -o amass-subdomains.txt": (
+                    ["domains.txt"], ["amass-subdomains.txt"],
+                ),
+                "dnsx -l subdomains.txt -o dnsx.txt": (["subdomains.txt"], ["dnsx.txt"]),
+                "wafw00f -i urls.txt -o wafw00f.txt": (["urls.txt"], ["wafw00f.txt"]),
+                "masscan -iL targets.txt -oL masscan.txt -p 80": (["targets.txt"], ["masscan.txt"]),
+                "testssl --fast --jsonfile testssl.json https://ip.darklab.sh": ([], ["testssl.json"]),
+                "nikto -h ip.darklab.sh -o nikto.txt": ([], ["nikto.txt"]),
+                "wpscan --url https://ip.darklab.sh -o wpscan.txt": ([], ["wpscan.txt"]),
+                "nmap --script http-headers --script-args-file nmap-script-args.txt ip.darklab.sh": (
+                    ["nmap-script-args.txt"], [],
+                ),
+            }
+
+            for command, (reads, writes) in cases.items():
+                result = commands.validate_command(command, session_id=session_id, cfg=cfg)
+                assert result.allowed, f"{command!r} should be workspace-allowed: {result.reason}"
+                assert result.workspace_reads == reads
+                assert result.workspace_writes == writes
+                exec_tokens = commands.split_command_argv(result.exec_command)
+                for original in reads + writes:
+                    assert original not in exec_tokens
+
     def test_autocomplete_context_filters_workspace_feature_hints(self):
         registry = {
             "commands": [

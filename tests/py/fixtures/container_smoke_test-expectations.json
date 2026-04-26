@@ -284,6 +284,14 @@
     {
       "no_output": false,
       "exit_code": 0,
+      "command": "amass -h",
+      "expected_text": [
+        "Usage:"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
       "command": "pd-httpx -h",
       "expected_text": [
         "httpx is a fast and"

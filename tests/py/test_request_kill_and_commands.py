@@ -347,6 +347,7 @@ class TestIsCommandAllowedEdges:
             write_workspace_text_file("session-1", "urls.txt", "https://ip.darklab.sh\n", cfg)
             write_workspace_text_file("session-1", "hosts.txt", "ip.darklab.sh\n", cfg)
             write_workspace_text_file("session-1", "words.txt", "admin\nlogin\n", cfg)
+            write_workspace_text_file("session-1", "domains.txt", "darklab.sh\n", cfg)
 
             cases = [
                 (
@@ -368,6 +369,11 @@ class TestIsCommandAllowedEdges:
                     "katana -list urls.txt -o katana.txt",
                     ["urls.txt"],
                     ["katana.txt"],
+                ),
+                (
+                    "amass enum -passive -df domains.txt -o amass.txt",
+                    ["domains.txt"],
+                    ["amass.txt"],
                 ),
             ]
 
