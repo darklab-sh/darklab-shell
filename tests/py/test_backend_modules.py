@@ -590,9 +590,8 @@ class TestDerivedCommandRegistry:
                 assert result.workspace_writes == writes
                 exec_tokens = commands.split_command_argv(result.exec_command)
                 if command.startswith("amass "):
-                    assert exec_tokens[0] == "env"
-                    assert exec_tokens[1].startswith("XDG_CONFIG_HOME=")
-                    assert f"/{writes[0]}/xdg-config" in exec_tokens[1]
+                    assert exec_tokens[0] == "amass"
+                    assert "-dir" in exec_tokens
                 for original in reads + writes:
                     assert original not in exec_tokens
 

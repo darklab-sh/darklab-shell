@@ -145,9 +145,29 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 - **Session-scoped Amass database workspace**
   - Amass v5 is database-first for useful results: `amass enum ...` can populate the local Amass database, and `amass subs -d <domain> -names` reads results back from that database.
   - Initial directory-aware workspace support is in place for `amass -dir amass-db`, and `amass enum` / `amass subs` auto-inject that default when the user does not provide `-dir`.
-  - Runtime validation confirmed Amass stores and reads its database from the session workspace when `XDG_CONFIG_HOME` is scoped alongside `-dir`, without creating `/tmp/.config/amass`.
+  - Runtime validation should confirm Amass stores and reads its database from the rewritten session `-dir` path without creating `/tmp/.config/amass` and without nested `xdg-config` database copies.
   - Testing:
     - Add a container smoke or manual-QA fixture only if the command can be bounded enough to avoid long passive enumeration.
+
+- **Workspace migration when changing session identity**
+  - `/session/migrate` currently moves database-backed state such as runs, snapshots, starred commands, and saved preferences, but it does not move or merge the filesystem workspace directory.
+  - This creates a real identity gap: if a user starts anonymously, creates workspace files, then generates or sets a `tok_...` session token and chooses to migrate history, their history follows the token but their workspace files remain under the old anonymous workspace hash.
+  - Decide the desired product behavior before implementing:
+    - move the source workspace into the destination when the destination workspace is empty
+    - merge files when both source and destination workspaces exist
+    - refuse migration with a clear warning if both sides contain files
+    - keep workspaces separate but make that explicit in the migration prompt
+  - Implementation constraints:
+    - preserve per-session path validation and symlink rejection
+    - avoid overwriting destination files silently
+    - preserve scanner/appuser group permissions and sticky/setgid directory modes
+    - account for workspace backend differences (`tmpfs` vs volume) and quota checks
+  - UX:
+    - update `session-token generate`, `session-token set`, and `session-token rotate` migration prompts to mention workspace files once the behavior is defined
+    - show the number of migrated or skipped workspace files in the migration result
+  - Testing:
+    - Add route coverage for migrating with no source workspace, source-only workspace, destination-only workspace, and conflicting files.
+    - Add E2E coverage proving Files contents remain visible after accepting a session-token migration.
 
 ---
 

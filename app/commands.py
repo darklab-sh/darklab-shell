@@ -1992,21 +1992,6 @@ def _rewrite_workspace_file_flags(
     return shlex.join(rewritten_tokens), exempt_flags, reads, writes, exec_paths, ""
 
 
-def _apply_workspace_runtime_environment(command: str) -> str:
-    tokens = split_command_argv(command)
-    if not tokens or tokens[0].lower() != "amass":
-        return command
-    for index, token in enumerate(tokens[:-1]):
-        if token != "-dir":
-            continue
-        directory = tokens[index + 1]
-        if not os.path.isabs(directory):
-            return command
-        xdg_config_home = os.path.join(directory, "xdg-config")
-        return f"env XDG_CONFIG_HOME={shlex.quote(xdg_config_home)} {command}"
-    return command
-
-
 def _is_denied(command: str, deny_entries: list[str], *, exempt_flags: set[str] | None = None) -> bool:
     """Return True if command matches any deny entry.
     Deny entries match tool/subcommand prefixes case-insensitively, but flags are
@@ -2132,8 +2117,6 @@ def validate_command(
             display_command=command,
             exec_command=command_to_validate,
         )
-
-    exec_command = _apply_workspace_runtime_environment(exec_command)
 
     return CommandValidationResult(
         True,
