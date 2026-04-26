@@ -964,35 +964,61 @@ commands:
       allow:
         - amass
       deny:
-        - amass -o
-        - amass --output
+        - amass -log
         - amass -df
-        - amass --domain-file
         - amass -dir
-        - amass --dir
+        - amass -config
+        - amass -nf
+        - amass -blf
+        - amass -rf
+        - amass -w
     workspace_flags:
       - flag: -df
         mode: read
         value: separate
         format: text
-      - flag: --domain-file
+      - flag: -config
         mode: read
-        value: separate_or_attached
+        value: separate
         format: text
-      - flag: -o
+      - flag: -nf
+        mode: read
+        value: separate
+        format: text
+      - flag: -blf
+        mode: read
+        value: separate
+        format: text
+      - flag: -rf
+        mode: read
+        value: separate
+        format: text
+      - flag: -w
+        mode: read
+        value: separate
+        format: text
+      - flag: -log
         mode: write
         value: separate
         format: text
-      - flag: --output
-        mode: write
-        value: separate_or_attached
-        format: text
+      - flag: -dir
+        mode: read_write
+        value: separate
+        kind: directory
     autocomplete:
       examples:
         - value: amass -h
           description: Show help and usage
-        - value: amass enum -passive -d darklab.sh -o amass-subdomains.txt
-          description: Passive subdomain enumeration with results saved to a session file
+        - value: amass enum -d darklab.sh -timeout 10
+          description: Enumerate a domain using the session-scoped Amass database
+        - value: amass enum -d darklab.sh -timeout 10 -dir amass-db
+          description: Enumerate using a session-scoped Amass database
+          feature_required: workspace
+        - value: amass subs -d darklab.sh -names
+          description: Print names from the session-scoped Amass database
+          feature_required: workspace
+        - value: amass subs -d darklab.sh -names -dir amass-db
+          description: Print names from a session-scoped Amass database
           feature_required: workspace
       flags:
         - value: -h
@@ -1000,14 +1026,28 @@ commands:
           closes: true
         - value: enum
           description: Enumerate attack surface assets
+        - value: subs
+          description: Read discovered subdomains from the Amass database
         - value: -passive
-          description: Use passive data sources only
+          description: Use passive data sources only (default in Amass v5)
         - value: -d
           description: Target domain
           takes_value: true
           value_hint:
             placeholder: <domain>
             description: Target domain to enumerate
+        - value: -timeout
+          description: Minutes to run without progress before terminating
+          takes_value: true
+          suggest:
+            - value: "10"
+              description: Short bounded run for testing
+        - value: -v
+          description: Output status and troubleshooting information
+        - value: -nocolor
+          description: Disable colorized output
+        - value: -names
+          description: Print names only when reading Amass database results
         - value: -df
           description: Read target domains from a session file
           takes_value: true
@@ -1015,27 +1055,34 @@ commands:
           suggest:
             - value: domains.txt
               description: Session file containing one domain per line
-        - value: --domain-file
-          description: Read target domains from a session file
+        - value: -config
+          description: Read Amass YAML configuration from a session file
           takes_value: true
           feature_required: workspace
           suggest:
-            - value: domains.txt
-              description: Session file containing one domain per line
-        - value: -o
-          description: Write discovered names to a session file
+            - value: amass-config.yaml
+              description: Session Amass config file
+        - value: -nf
+          description: Read known subdomain names from a session file
           takes_value: true
           feature_required: workspace
           suggest:
-            - value: amass-subdomains.txt
-              description: Save discovered names
-        - value: --output
-          description: Write discovered names to a session file
+            - value: known-subdomains.txt
+              description: Session file containing known names
+        - value: -log
+          description: Write Amass errors to a session log file
           takes_value: true
           feature_required: workspace
           suggest:
-            - value: amass-subdomains.txt
-              description: Save discovered names
+            - value: amass-errors.log
+              description: Save Amass error log
+        - value: -dir
+          description: Use a session directory for Amass database/output files
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: amass-db
+              description: Session-scoped Amass database directory
       arguments:
         - placeholder: <domain>
           description: Usually provided through enum -d

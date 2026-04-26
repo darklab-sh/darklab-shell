@@ -12,6 +12,7 @@ from helpers import get_client_ip, get_log_session_id, get_session_id
 from workspace import (
     InvalidWorkspacePath,
     WorkspaceDisabled,
+    WorkspaceBinaryFile,
     WorkspaceFileNotFound,
     WorkspaceQuotaExceeded,
     delete_workspace_file,
@@ -61,6 +62,8 @@ def _workspace_error_response(exc: Exception) -> tuple[Response, int]:
         return jsonify({"error": str(exc)}), 413
     if isinstance(exc, WorkspaceFileNotFound):
         return jsonify({"error": str(exc)}), 404
+    if isinstance(exc, WorkspaceBinaryFile):
+        return jsonify({"error": str(exc)}), 415
     if isinstance(exc, InvalidWorkspacePath):
         return jsonify({"error": str(exc)}), 400
     raise exc

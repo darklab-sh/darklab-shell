@@ -306,6 +306,44 @@ describe('autocomplete helpers', () => {
     expect(items[0].value).toBe('-sV')
   })
 
+  it('prefers matching subcommand tokens over positional placeholders while typing', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'amass en',
+        acSuggestions: [],
+        acContextRegistry: {
+          amass: {
+            flags: [
+              { value: 'enum', description: 'Enumerate attack surface assets' },
+              { value: 'subs', description: 'Read discovered subdomains' },
+              { value: '-d', description: 'Target domain' },
+            ],
+            expects_value: ['-d'],
+            arg_hints: {
+              __positional__: [{ value: '<domain>', description: 'Domain name' }],
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    const items = getAutocompleteMatches('amass en', 8)
+    expect(items.map(item => item.value)).toEqual(['enum'])
+    expect(items[0].hintOnly).toBe(false)
+  })
+
   it('prefers runtime autocomplete suggestions for client-side commands', () => {
     const { getAutocompleteMatches } = fromDomScripts(
       ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],

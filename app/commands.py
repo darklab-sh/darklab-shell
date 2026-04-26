@@ -19,6 +19,7 @@ from workspace import (
     InvalidWorkspacePath,
     WorkspaceDisabled,
     WorkspaceFileNotFound,
+    prepare_workspace_directory_for_command,
     prepare_workspace_file_for_command,
     resolve_workspace_path,
 )
@@ -33,6 +34,7 @@ ASCII_FILE            = os.path.join(_CONF, "ascii.txt")
 ASCII_MOBILE_FILE     = os.path.join(_CONF, "ascii_mobile.txt")
 APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
 APP_HINTS_MOBILE_FILE = os.path.join(_CONF, "app_hints_mobile.txt")
+AMASS_DEFAULT_WORKSPACE_DIR = "amass-db"
 
 
 @dataclass(frozen=True)
@@ -669,6 +671,9 @@ def _normalize_workspace_flags(items) -> list[dict[str, object]]:
             continue
         seen.add(key)
         normalized: dict[str, object] = {"flag": flag, "mode": mode, "value": value}
+        kind = str(item.get("kind") or "").strip().lower()
+        if kind == "directory":
+            normalized["kind"] = kind
         output_format = str(item.get("format") or "").strip().lower()
         if output_format:
             normalized["format"] = output_format
@@ -1913,6 +1918,21 @@ def _rewrite_workspace_file_flags(
             index = (value_index + 1) if value_index is not None else index + 1
         return command, set(), [], [], [], ""
 
+    amass_dir_specs = [spec for spec in specs if spec.get("flag") == "-dir"]
+    has_amass_dir = any(
+        _workspace_flag_matches_token(token, spec)
+        for token in tokens[1:]
+        for spec in amass_dir_specs
+    )
+    is_amass_database_command = (
+        tokens[0].lower() == "amass"
+        and len(tokens) > 1
+        and tokens[1].lower() in {"enum", "subs"}
+        and not any(token in {"-h", "-help", "--help"} for token in tokens[1:])
+    )
+    if is_amass_database_command and not has_amass_dir:
+        tokens = tokens + ["-dir", AMASS_DEFAULT_WORKSPACE_DIR]
+
     rewritten_tokens = list(tokens)
     exempt_flags: set[str] = set()
     reads: list[str] = []
@@ -1934,6 +1954,7 @@ def _rewrite_workspace_file_flags(
             continue
 
         mode = str(matched_spec.get("mode") or "")
+        kind = str(matched_spec.get("kind") or "file")
         if os.path.isabs(user_value):
             index = value_index + 1
             continue
@@ -1943,11 +1964,14 @@ def _rewrite_workspace_file_flags(
                 session_id,
                 user_value,
                 cfg,
-                ensure_parent=mode in {"write", "read_write"},
+                ensure_parent=mode in {"write", "read_write"} or kind == "directory",
             )
-            if mode in {"read", "read_write"} and not resolved.is_file():
-                raise WorkspaceFileNotFound(f"workspace file not found: {user_value}")
-            prepare_workspace_file_for_command(resolved, mode=mode)
+            if kind == "directory":
+                prepare_workspace_directory_for_command(resolved, mode=mode)
+            else:
+                if mode in {"read", "read_write"} and not resolved.is_file():
+                    raise WorkspaceFileNotFound(f"workspace file not found: {user_value}")
+                prepare_workspace_file_for_command(resolved, mode=mode)
         except (InvalidWorkspacePath, WorkspaceDisabled, WorkspaceFileNotFound) as exc:
             return command, set(), [], [], [], str(exc)
 
@@ -1959,13 +1983,28 @@ def _rewrite_workspace_file_flags(
 
         exempt_flags.add(flag)
         exec_paths.append(resolved_value)
-        if mode in {"read", "read_write"}:
+        if kind != "directory" and mode in {"read", "read_write"}:
             reads.append(user_value)
         if mode in {"write", "read_write"}:
             writes.append(user_value)
         index = value_index + 1
 
     return shlex.join(rewritten_tokens), exempt_flags, reads, writes, exec_paths, ""
+
+
+def _apply_workspace_runtime_environment(command: str) -> str:
+    tokens = split_command_argv(command)
+    if not tokens or tokens[0].lower() != "amass":
+        return command
+    for index, token in enumerate(tokens[:-1]):
+        if token != "-dir":
+            continue
+        directory = tokens[index + 1]
+        if not os.path.isabs(directory):
+            return command
+        xdg_config_home = os.path.join(directory, "xdg-config")
+        return f"env XDG_CONFIG_HOME={shlex.quote(xdg_config_home)} {command}"
+    return command
 
 
 def _is_denied(command: str, deny_entries: list[str], *, exempt_flags: set[str] | None = None) -> bool:
@@ -2022,9 +2061,9 @@ def validate_command(
 ) -> CommandValidationResult:
     """Validate a command and return the display command plus execution command.
 
-    Workspace-aware file flags are still denied by default. When workspace
-    storage is enabled, declared workspace file flags are validated and rewritten
-    to the current session workspace before deny-prefix checks run.
+    Workspace-aware file/directory flags are still denied by default. When
+    workspace storage is enabled, declared workspace flags are validated and
+    rewritten to the current session workspace before deny-prefix checks run.
     """
     cfg = cfg or app_config.CFG
     allowed, denied = load_command_policy()
@@ -2093,6 +2132,8 @@ def validate_command(
             display_command=command,
             exec_command=command_to_validate,
         )
+
+    exec_command = _apply_workspace_runtime_environment(exec_command)
 
     return CommandValidationResult(
         True,

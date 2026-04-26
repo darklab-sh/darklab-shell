@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 984
-- `vitest`: 809
+- `vitest`: 810
 - `playwright`: 211
-- total: 2,004
+- total: 2,005
 
 This document is organized in two parts:
 
@@ -1344,6 +1344,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `expands example suggestions to the command root before cycling examples` | Verifies that Tab expands partial command-root text to the root before cycling full example suggestions. |
 | `expands the shared prefix for contextual token suggestions in place` | Verifies that contextual token suggestions can expand to a shared in-token prefix without disturbing the rest of the command. |
 | `returns root-aware contextual matches and suppresses already-used flags` | Verifies that contextual autocomplete stays root-aware and does not resuggest flags already present in the command. |
+| `prefers matching subcommand tokens over positional placeholders while typing` | Verifies that partial subcommand input such as `amass en` prefers concrete matching subcommands over generic positional placeholders like `<domain>`. |
 | `prefers runtime autocomplete suggestions for client-side commands` | Verifies that client-side commands can provide dynamic autocomplete suggestions before falling back to the static autocomplete registry. |
 | `merges runtime autocomplete context with the YAML-loaded context registry` | Verifies that runtime built-in context and YAML-loaded tool context feed the same autocomplete matching engine. |
 | `uses sequence-specific runtime value hints without leaking them to sibling subcommands` | Verifies that runtime context can offer values for sequences such as `config set line-numbers` without also suggesting those values after `config get line-numbers`. |

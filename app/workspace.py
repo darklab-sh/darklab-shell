@@ -12,7 +12,9 @@ from datetime import datetime, timezone
 import hashlib
 import os
 from pathlib import Path, PurePosixPath
+import pwd
 import shutil
+import subprocess  # nosec B404
 import tempfile
 from typing import Any
 
@@ -23,6 +25,7 @@ from config import CFG
 WORKSPACE_DIR_MODE = 0o3730
 WORKSPACE_FILE_MODE = 0o640
 WORKSPACE_COMMAND_WRITE_FILE_MODE = 0o660
+WORKSPACE_COMMAND_DIR_MODE = 0o3770
 
 
 class WorkspaceError(ValueError):
@@ -43,6 +46,10 @@ class WorkspaceQuotaExceeded(WorkspaceError):
 
 class WorkspaceFileNotFound(WorkspaceError):
     """Raised when a validated workspace path does not point at a file."""
+
+
+class WorkspaceBinaryFile(WorkspaceError):
+    """Raised when a workspace file is not safe to display as text."""
 
 
 @dataclass(frozen=True)
@@ -217,6 +224,72 @@ def prepare_workspace_file_for_command(path: Path, *, mode: str) -> None:
             pass
 
 
+def prepare_workspace_directory_for_command(path: Path, *, mode: str) -> None:
+    """Make a validated workspace directory usable by command-managed databases."""
+    if path.exists() and not path.is_dir():
+        raise InvalidWorkspacePath("workspace path is not a directory")
+    sudo_bin = shutil.which("sudo")
+    scanner_exists = True
+    try:
+        pwd.getpwnam("scanner")
+    except KeyError:
+        scanner_exists = False
+    if sudo_bin and scanner_exists:
+        if path.exists():
+            try:
+                subprocess.run(
+                    [sudo_bin, "-u", "scanner", "-g", "appuser", "chmod", "0755", str(path)],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                )  # nosec B603
+                subprocess.run(
+                    [sudo_bin, "-u", "scanner", "-g", "appuser", "chmod", f"{WORKSPACE_COMMAND_DIR_MODE:o}", str(path)],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                )  # nosec B603
+                return
+            except (subprocess.SubprocessError, OSError):
+                try:
+                    next(path.iterdir())
+                except StopIteration:
+                    path.rmdir()
+                except OSError:
+                    pass
+        if not path.exists():
+            if mode not in {"write", "read_write"}:
+                raise WorkspaceFileNotFound(f"workspace directory not found: {path.name}")
+            try:
+                subprocess.run(
+                    [sudo_bin, "-u", "scanner", "-g", "appuser", "mkdir", "-p", str(path)],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                )  # nosec B603
+                subprocess.run(
+                    [sudo_bin, "-u", "scanner", "-g", "appuser", "chmod", f"{WORKSPACE_COMMAND_DIR_MODE:o}", str(path)],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                )  # nosec B603
+                return
+            except (subprocess.SubprocessError, OSError) as exc:
+                raise InvalidWorkspacePath("failed to prepare workspace directory for scanner") from exc
+    if not path.exists():
+        if mode not in {"write", "read_write"}:
+            raise WorkspaceFileNotFound(f"workspace directory not found: {path.name}")
+        path.mkdir(mode=WORKSPACE_COMMAND_DIR_MODE, parents=True, exist_ok=True)
+    try:
+        os.chmod(path, WORKSPACE_COMMAND_DIR_MODE)
+    except OSError:
+        pass
+
+
 def workspace_usage(session_id: str, cfg: dict[str, Any] | None = None) -> WorkspaceUsage:
     root = ensure_session_workspace(session_id, cfg).resolve(strict=True)
     touch_session_workspace(session_id, cfg)
@@ -307,7 +380,13 @@ def read_workspace_text_file(
         raise WorkspaceFileNotFound("workspace file was not found")
     if path.stat().st_size > settings.max_file_bytes:
         raise WorkspaceQuotaExceeded("file exceeds workspace max file size")
-    return path.read_text(encoding="utf-8")
+    content = path.read_bytes()
+    if b"\x00" in content:
+        raise WorkspaceBinaryFile("file appears to be binary; download it instead")
+    try:
+        return content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise WorkspaceBinaryFile("file is not valid UTF-8 text; download it instead") from exc
 
 
 def delete_workspace_file(

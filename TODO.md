@@ -22,6 +22,77 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Open TODOs
 
+- **PID-aware idle/stalled run UX**
+  - The current browser-side stalled-stream behavior fires when no client-visible stream chunk arrives for 45s. The backend does yield idle SSE heartbeat comments, and the runner resets its timer on raw `fetch().body` chunks, but real runs can still hit the warning consistently when those tiny heartbeat frames are buffered or otherwise not delivered to the browser.
+  - Treat "server yielded a heartbeat" and "browser observed stream activity" as separate facts. The current implementation assumes they are equivalent often enough to drive UX state, which is too optimistic for quiet long-running commands behind Docker, WSGI, or reverse-proxy buffering.
+  - Also treat "stdout is readable" and "the app emitted an SSE event" as separate facts. Progress-style tools can write partial/no-newline status bytes often enough to keep `_stdout_ready()` returning true, while `_read_available_stream_lines()` buffers the partial text and returns no complete lines; in that path the backend can skip both output events and idle heartbeats.
+  - This is not the same problem as quiet long-running commands. If client-visible heartbeats are flowing, the tab should remain active even when the tool emits no stdout for minutes. The risky case is when the browser stops receiving the stream while the backend process may still be alive.
+  - Improve this by checking server-side active-run state before changing the tab back to idle:
+    - if the PID/process group is still active, keep the tab in the running state
+    - show an honest warning such as "live stream activity paused, but the process is still running"
+    - keep kill/status affordances available while the process is alive
+    - only fall back to "check history" messaging when the live stream is genuinely detached or the process is no longer active
+  - Reuse or extend the existing active-run status path used by reload reconnects (`/history/active`) rather than inventing a parallel PID API if possible.
+  - Keep the first version intentionally narrow:
+    - do not attempt to replay missed live output
+    - do not turn this into full reconnectable live streaming
+    - keep history restore as the fallback once the process exits or the stream cannot be recovered
+  - The existing `ps` and `jobs` app commands already make active PIDs observable, so this should align tab state with information the user can independently confirm.
+  - Acceptance criteria:
+    - a command that emits no output but still delivers client-visible heartbeats never shows the stalled warning
+    - a command that emits partial/no-newline progress bytes still delivers a heartbeat or safe progress event often enough to keep the browser stream alive
+    - a command whose backend is still active but whose heartbeat frames are buffered does not get dumped back to a normal prompt
+    - a dropped SSE stream for a still-active PID keeps the tab running and keeps Kill available
+    - a dropped SSE stream for a no-longer-active PID moves to the existing history/final-result recovery path
+    - resumed stream activity clears the warning without duplicating prompt state
+  - Testing:
+    - Add backend coverage for active-run/PID status reporting during idle periods.
+    - Add backend coverage for readable stdout that produces no complete lines and verify it still emits a heartbeat.
+    - Add runner/unit coverage for "heartbeat/no output", "stream stalled/process alive", and "stream stalled/process gone".
+    - Add E2E coverage with a command that sleeps quietly and then resumes output in the same tab.
+
+- **App-native active run monitor**
+  - Add a `runs` built-in for darklab_shell-specific active command metadata instead of overloading `ps` or `jobs`.
+  - Keep `ps` process-shaped and `jobs` shell-job-shaped; use `runs` for richer app context such as run ID, tab, PID, elapsed time, stream state, and command.
+  - Start with `runs` showing active runs for the current session:
+    - short run ID
+    - PID/process group when available
+    - elapsed duration
+    - command text
+    - tab ID/title once the frontend sends that metadata on `/run`
+  - Add useful follow-ups after the basic view:
+    - `runs -v` for full IDs, started timestamps, and active-run storage source
+    - `runs --json` for debugging and automation
+    - `runs --stalled` once PID-aware stalled-stream state exists
+  - Backend notes:
+    - preserve `pid` in `active_runs_for_session()` responses instead of dropping it from the registered payload
+    - extend `/run` start payload to include tab ID/title so active-run metadata can identify the originating tab
+    - consider recording `last_output_at` and `last_stream_at` so `runs` can distinguish quiet, streaming, stalled, and detached states
+  - Testing:
+    - Add fake-command coverage for empty and populated `runs` output.
+    - Add active-run metadata coverage proving PID and tab fields survive through `/history/active`.
+
+- **Tab-local command history traversal**
+  - Make Up/Down command recall behave more like separate shell tabs while a session is active.
+  - Current behavior appears to use the latest session/global command history, so pressing Up in one tab can recall a command that was entered in another tab.
+  - Desired behavior:
+    - each tab should prefer its own in-tab command history for Up/Down traversal
+    - commands from other tabs should not appear in that tab's immediate Up/Down stack while the app session is active
+    - global/session history can still exist for the history drawer, search, saved runs, and persisted history after commands complete
+  - Shell-inspired model:
+    - maintain a tab-local "live history" buffer for interactive recall
+    - commit commands to global persisted history separately
+    - decide whether tab-local buffers survive reload/reconnect or are intentionally ephemeral
+  - UX details to resolve:
+    - whether a new tab starts with an empty recall stack or inherits the current session's global history
+    - whether switching tabs should restore any partially typed input draft along with that tab's recall cursor
+    - how Down behaves after editing a recalled command in one tab
+    - whether there should be an explicit shortcut or command palette action for searching global history when tab-local recall is too narrow
+  - Testing:
+    - Add unit coverage for independent recall stacks across two tabs.
+    - Add E2E coverage proving Up in tab A recalls tab A's previous command even after tab B runs a newer command.
+    - Add coverage for tab switching with a partially typed draft.
+
 - **Session command variables**
   - Explore app-mediated variable substitution for repeated command sets without exposing real shell environment mutation.
   - Use cases:
@@ -70,6 +141,13 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
     - Add/update smoke workspace fixtures for each new chained example that reaches `commands.yaml`.
     - Add workflow rendering coverage so `Run all` preserves sequential same-tab behavior with generated file names.
     - Verify workflows are hidden or clearly disabled when Files are disabled if their steps depend on workspace-only flags.
+
+- **Session-scoped Amass database workspace**
+  - Amass v5 is database-first for useful results: `amass enum ...` can populate the local Amass database, and `amass subs -d <domain> -names` reads results back from that database.
+  - Initial directory-aware workspace support is in place for `amass -dir amass-db`, and `amass enum` / `amass subs` auto-inject that default when the user does not provide `-dir`.
+  - Runtime validation confirmed Amass stores and reads its database from the session workspace when `XDG_CONFIG_HOME` is scoped alongside `-dir`, without creating `/tmp/.config/amass`.
+  - Testing:
+    - Add a container smoke or manual-QA fixture only if the command can be bounded enough to avoid long passive enumeration.
 
 ---
 

@@ -20,6 +20,7 @@ import app as shell_app
 import blueprints.assets as shell_assets
 import config
 from database import DB_PATH
+from workspace import resolve_workspace_path
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -1037,12 +1038,22 @@ class TestWorkspaceRoutes:
             )
             assert json.loads(read.data) == {"path": "targets.txt", "text": "darklab.sh\n"}
 
+            binary_path = resolve_workspace_path(session, "asset.db", config.CFG, ensure_parent=True)
+            binary_path.write_bytes(b"SQLite format 3\x00binary")
+            binary = client.get(
+                "/workspace/files/read?path=asset.db",
+                headers={"X-Session-ID": session},
+            )
+            assert binary.status_code == 415
+            assert "download it instead" in json.loads(binary.data)["error"]
+
             deleted = client.delete(
                 "/workspace/files?path=targets.txt",
                 headers={"X-Session-ID": session},
             )
             assert deleted.status_code == 200
-            assert json.loads(deleted.data)["workspace"]["files"] == []
+            deleted_files = json.loads(deleted.data)["workspace"]["files"]
+            assert "targets.txt" not in {item["path"] for item in deleted_files}
 
     def test_workspace_files_are_session_isolated(self):
         client = get_client()

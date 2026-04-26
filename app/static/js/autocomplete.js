@@ -283,6 +283,21 @@ function _buildContextAutocomplete(ctx) {
     );
   }
 
+  const concreteCommandTokens = (spec.flags || [])
+    .filter(flag => {
+      const value = String(flag.value || '');
+      return value && !value.startsWith('-') && !value.startsWith('+');
+    })
+    .map(flag => _buildAutocompleteItem({
+      value: flag.value,
+      description: flag.description || '',
+      replaceStart: ctx.tokenStart,
+      replaceEnd: ctx.tokenEnd,
+      insertValue: flag.value,
+    }));
+  const matchingCommandTokens = _filterAutocompleteItems(concreteCommandTokens, ctx.currentToken);
+  if (matchingCommandTokens.length) return matchingCommandTokens;
+
   const positionalHints = Object.prototype.hasOwnProperty.call(argHints, '__positional__')
     ? argHints.__positional__
     : [];

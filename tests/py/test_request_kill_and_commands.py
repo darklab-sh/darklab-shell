@@ -220,6 +220,7 @@ class TestIsCommandAllowedEdges:
                         "workspace_flags": [
                             {"flag": "-iL", "mode": "read", "value": "separate"},
                             {"flag": "-oN", "mode": "write", "value": "separate_or_attached"},
+                            {"flag": "-dir", "mode": "read_write", "value": "separate", "kind": "directory"},
                         ],
                     },
                 ],
@@ -236,18 +237,27 @@ class TestIsCommandAllowedEdges:
                 os.chmod(target_path, 0o600)
 
                 result = validate_command(
-                    "nmap -iL targets.txt -oN scan.txt",
+                    "nmap -iL targets.txt -oN scan.txt -dir tool-db",
                     session_id="session-1",
                     cfg=cfg,
                 )
                 target_mode = os.stat(target_path).st_mode & 0o777
+                db_dir = os.path.join(
+                    tmp,
+                    session_workspace_name("session-1"),
+                    "tool-db",
+                )
+                db_mode = os.stat(db_dir).st_mode & 0o777
+                db_is_dir = os.path.isdir(db_dir)
 
         assert result.allowed
         assert result.workspace_reads == ["targets.txt"]
-        assert result.workspace_writes == ["scan.txt"]
+        assert result.workspace_writes == ["scan.txt", "tool-db"]
         assert result.exec_command != result.display_command
         assert str(tmp) in result.exec_command
         assert target_mode == 0o640
+        assert db_is_dir
+        assert db_mode == 0o770
 
     def test_workspace_disabled_keeps_declared_file_flags_denied(self):
         registry = {
@@ -371,9 +381,19 @@ class TestIsCommandAllowedEdges:
                     ["katana.txt"],
                 ),
                 (
-                    "amass enum -passive -df domains.txt -o amass.txt",
+                    "amass enum -df domains.txt -timeout 10",
                     ["domains.txt"],
-                    ["amass.txt"],
+                    ["amass-db"],
+                ),
+                (
+                    "amass subs -d darklab.sh -names",
+                    [],
+                    ["amass-db"],
+                ),
+                (
+                    "amass subs -d darklab.sh -names -dir custom-amass-db",
+                    [],
+                    ["custom-amass-db"],
                 ),
             ]
 

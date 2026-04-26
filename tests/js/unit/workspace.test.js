@@ -43,6 +43,7 @@ function setupWorkspace(apiFetch = vi.fn()) {
     blurVisibleComposerInputIfMobile: vi.fn(),
     refocusComposerAfterAction: vi.fn(),
     showConfirm: vi.fn(() => Promise.resolve('delete')),
+    showToast: vi.fn(),
     setTimeout: (fn) => {
       if (typeof fn === 'function') fn()
       return 0
@@ -161,8 +162,9 @@ describe('workspace UI helpers', () => {
       }
       return Promise.resolve(responseJson({}))
     })
-    const { handleWorkspaceFileAction, showWorkspaceEditor, hideWorkspaceViewer } = setupWorkspace(apiFetch)
+    const { handleWorkspaceFileAction, showWorkspaceEditor, hideWorkspaceViewer, globals } = setupWorkspace(apiFetch)
     const viewer = document.getElementById('workspace-viewer')
+    viewer.scrollIntoView = vi.fn()
     const editor = document.getElementById('workspace-editor')
 
     showWorkspaceEditor('response.html', '<html></html>')
@@ -170,6 +172,7 @@ describe('workspace UI helpers', () => {
 
     expect(apiFetch).toHaveBeenCalledWith('/workspace/files/read?path=response.html')
     expect(viewer.classList.contains('u-hidden')).toBe(false)
+    expect(viewer.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
     expect(editor.classList.contains('u-hidden')).toBe(true)
     expect(document.getElementById('workspace-viewer-title').textContent).toBe('response.html')
     expect(document.getElementById('workspace-viewer-text').textContent).toBe('<html></html>')
@@ -177,6 +180,14 @@ describe('workspace UI helpers', () => {
     hideWorkspaceViewer()
 
     expect(viewer.classList.contains('u-hidden')).toBe(true)
+
+    apiFetch.mockImplementation(() => Promise.resolve(responseJson({
+      error: 'file appears to be binary; download it instead',
+    }, 415)))
+    await handleWorkspaceFileAction('view', 'asset.db')
+
+    expect(document.getElementById('workspace-message').classList.contains('u-hidden')).toBe(true)
+    expect(globals.showToast).toHaveBeenCalledWith('file appears to be binary; download it instead', 'error')
   })
 
   it('formats obvious JSON files in the read-only viewer', () => {

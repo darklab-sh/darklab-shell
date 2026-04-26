@@ -13,8 +13,9 @@ mkdir -p "$WORKSPACE_ROOT" 2>/dev/null || true
 chown -R appuser:appuser "$WORKSPACE_ROOT" 2>/dev/null || true
 chmod 730 "$WORKSPACE_ROOT" 2>/dev/null || true
 find "$WORKSPACE_ROOT" -mindepth 1 -type d -name 'sess_*' -exec chmod 3730 {} \; 2>/dev/null || true
-find "$WORKSPACE_ROOT" -mindepth 2 -type d -exec chmod 3730 {} \; 2>/dev/null || true
-find "$WORKSPACE_ROOT" -type f -exec chmod 640 {} \; 2>/dev/null || true
+find "$WORKSPACE_ROOT" -mindepth 2 -exec chown scanner:appuser {} \; 2>/dev/null || true
+find "$WORKSPACE_ROOT" -mindepth 2 -type d -exec chmod 3770 {} \; 2>/dev/null || true
+find "$WORKSPACE_ROOT" -mindepth 2 -type f -exec chmod 660 {} \; 2>/dev/null || true
 
 # Ensure /tmp is world-writable so the scanner user can write tool cache/config
 # (nuclei templates, wapiti sessions, etc.) to the tmpfs mount

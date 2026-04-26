@@ -41,6 +41,13 @@ function setWorkspaceMessage(message = '', tone = 'muted') {
   workspaceMessage.classList.toggle('workspace-message-error', tone === 'error');
 }
 
+function _showWorkspaceToast(message, tone = 'error') {
+  const text = String(message || '').trim();
+  if (!text) return;
+  if (typeof showToast === 'function') showToast(text, tone);
+  else setWorkspaceMessage(text, tone);
+}
+
 function hideWorkspaceEditor() {
   if (workspaceEditor) workspaceEditor.classList.add('u-hidden');
 }
@@ -87,6 +94,9 @@ function showWorkspaceViewer(path = '', text = '') {
   if (workspaceViewer) {
     workspaceViewer.dataset.format = payload.format;
     workspaceViewer.classList.remove('u-hidden');
+    if (typeof workspaceViewer.scrollIntoView === 'function') {
+      workspaceViewer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   }
 }
 
@@ -313,7 +323,7 @@ async function handleWorkspaceFileAction(action, path) {
       if (confirmed === 'delete') await deleteWorkspaceFile(path);
     }
   } catch (err) {
-    setWorkspaceMessage(_workspaceErrorMessage(err), 'error');
+    _showWorkspaceToast(_workspaceErrorMessage(err), 'error');
   }
 }
 
