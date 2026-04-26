@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 986
-- `vitest`: 810
+- `pytest`: 988
+- `vitest`: 818
 - `playwright`: 211
-- total: 2,007
+- total: 2,017
 
 This document is organized in two parts:
 
@@ -346,6 +346,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDerivedCommandRegistry.test_commands_registry_local_overlay_appends_policy_and_context` | Verifies that `commands.local.yaml` appends policy entries, adds new roots, overrides categories, and merges autocomplete hints without replacing the base registry. |
 | `TestDerivedCommandRegistry.test_autocomplete_context_can_be_derived_from_commands_registry` | Verifies that browser autocomplete context can be derived from command and pipe-helper registry entries. |
 | `TestDerivedCommandRegistry.test_real_registry_workspace_file_flags_cover_supported_file_io_tools` | Verifies that supported file input/output flags in the real command registry are rewritten through session workspace paths. |
+| `TestDerivedCommandRegistry.test_real_registry_amass_uses_subcommand_scoped_autocomplete` | Verifies that Amass autocomplete exposes root subcommands and keeps subcommand-specific flags and examples scoped to the matching subcommand. |
+| `TestDerivedCommandRegistry.test_real_registry_openssl_uses_subcommand_scoped_autocomplete` | Verifies that OpenSSL autocomplete exposes allowlisted subcommands and keeps `s_client` and `ciphers` flags scoped to the matching subcommand. |
+| `TestDerivedCommandRegistry.test_real_registry_gobuster_uses_subcommand_scoped_autocomplete` | Verifies that Gobuster autocomplete exposes mode subcommands and keeps mode-specific flags scoped to the matching subcommand. |
 | `TestDerivedCommandRegistry.test_autocomplete_context_filters_workspace_feature_hints` | Verifies that workspace-only autocomplete examples, flags, and value hints are hidden unless Files are enabled. |
 | `TestDerivedCommandRegistry.test_command_policy_can_be_derived_from_commands_registry` | Verifies that command-policy allow and deny prefixes are derived from `commands.yaml` policy entries. |
 | `TestLoadFaq.test_missing_file_returns_empty_list` | Checks that missing file returns empty list. |
@@ -1347,6 +1350,14 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `expands the shared prefix for contextual token suggestions in place` | Verifies that contextual token suggestions can expand to a shared in-token prefix without disturbing the rest of the command. |
 | `returns root-aware contextual matches and suppresses already-used flags` | Verifies that contextual autocomplete stays root-aware and does not resuggest flags already present in the command. |
 | `prefers matching subcommand tokens over positional placeholders while typing` | Verifies that partial subcommand input such as `amass en` prefers concrete matching subcommands over generic positional placeholders like `<domain>`. |
+| `shows nested subcommands and root flags after a command root` | Verifies that nested autocomplete subcommands are suggested alongside root/global flags after a command root. |
+| `shows root and subcommand examples while a unique command root is being typed` | Verifies that root-command discovery includes examples defined on the root and nested subcommands while the root token is being typed. |
+| `shows scoped examples while typing a unique command root prefix` | Verifies that a unique partial root command can surface nested subcommand examples, while ambiguous root prefixes still show command choices. |
+| `uses subcommand-scoped flags without leaking sibling flags` | Verifies that selecting a subcommand narrows flag suggestions to that subcommand plus root/global flags. |
+| `shows subcommand-scoped examples when a subcommand token is complete` | Verifies that exact subcommand tokens such as `amass subs` surface examples from that subcommand and replace the full typed prefix when accepted. |
+| `shows subcommand-scoped examples when a partial subcommand uniquely matches` | Verifies that partial subcommand input such as `amass s` surfaces examples once it uniquely matches one subcommand. |
+| `keeps ambiguous partial subcommands as token suggestions instead of examples` | Verifies that ambiguous partial subcommands such as `gobuster d` keep showing matching subcommand tokens instead of prematurely expanding examples. |
+| `uses subcommand-scoped value hints` | Verifies that value hints for repeated flags such as `-o` come from the active subcommand context. |
 | `prefers runtime autocomplete suggestions for client-side commands` | Verifies that client-side commands can provide dynamic autocomplete suggestions before falling back to the static autocomplete registry. |
 | `merges runtime autocomplete context with the YAML-loaded context registry` | Verifies that runtime built-in context and YAML-loaded tool context feed the same autocomplete matching engine. |
 | `uses sequence-specific runtime value hints without leaking them to sibling subcommands` | Verifies that runtime context can offer values for sequences such as `config set line-numbers` without also suggesting those values after `config get line-numbers`. |

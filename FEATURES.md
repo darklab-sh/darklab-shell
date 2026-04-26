@@ -91,7 +91,11 @@ Full per-feature reference for darklab_shell. See the [README](README.md) for th
 - App-owned built-in commands complete from a runtime context that uses the same matching engine as YAML-backed tools.
 - The dropdown opens below the prompt when there is room and flips above when space is tight, preserving top-to-bottom keyboard navigation order.
 - `Tab` expands to the longest shared prefix, then cycles matches; `Shift+Tab` cycles backward; `Enter` accepts the highlighted match or runs the command if none is selected.
-- After a known command root, the dropdown switches to contextual flag/value hints for that tool; after `|`, it switches into the built-in pipe stage (`grep`, `head`, `tail`, `wc -l`, `sort`, `uniq`).
+- While typing a command root, a unique root match shows real example invocations for discoverability. For commands with scoped subcommands, this includes both root-level examples and subcommand examples.
+- After a known command root plus a trailing space, the dropdown switches to grammar-style suggestions for that tool: root/global flags, subcommands, and positional hints.
+- While typing a subcommand token, examples narrow to the matching subcommand once the prefix is unique. For example, `amass s` can show `amass subs ...` examples, while an ambiguous prefix such as `gobuster d` keeps showing `dir` and `dns` token choices.
+- After a known subcommand plus a trailing space, the dropdown switches to that subcommand's scoped flags and value hints.
+- After `|`, autocomplete switches into the built-in pipe stage (`grep`, `head`, `tail`, `wc -l`, `sort`, `uniq`).
 - Already-used singleton-style flags are suppressed from contextual suggestions.
 
 **Limits:** external-tool completions come from the static command-registry YAML, while app-owned built-ins come from the browser runtime. There is no shell introspection, no `--help` parsing, and no fuzzy matching beyond prefix + expand.
@@ -145,6 +149,10 @@ How the keys work:
 - `argument_limit`
   - optional cap on how many positional arguments should keep receiving autocomplete guidance
   - once that many positional arguments are already filled, positional hints stop, but flags and other non-positional suggestions can still appear
+- `examples`
+  - complete command invocations used for discovery while a root command or unique subcommand prefix is being typed
+  - root examples and scoped subcommand examples are flattened only for the root-typing discovery view; they stay separate in the schema so subcommand-specific matching remains clean
+  - when an example is accepted, it replaces the typed command prefix rather than only the active token
 - `flags`
   - suggestions shown when the current token is a flag position for that command root, for example `nmap -`
   - each flag can carry its own next-token behavior:
@@ -160,6 +168,8 @@ How the keys work:
 - `subcommands`
   - command trees such as `gobuster dir`, `gobuster vhost`, or other external-tool subcommands
   - each subcommand can also use `takes_value`, `value_hint`, `suggest`, `insert`, and `closes`
+  - for tools where each subcommand has its own flags and examples, use a mapping of subcommand names to scoped autocomplete blocks
+  - nested examples surface during root discovery and while typing a unique matching subcommand prefix; nested flags surface after the subcommand has been selected
 - `pipe_helpers`
   - top-level registry entries for helpers that appear after `command |`
   - each helper has its own `autocomplete.pipe.enabled`, flags, arguments, and optional insert/display metadata
@@ -235,13 +245,50 @@ session-token:
       closes: true
 ```
 
+For external tools with richer subcommands, prefer subcommand-scoped blocks. Root flags stay global, root and nested examples are visible during root discovery, and the selected subcommand contributes its own scoped flags, examples, value hints, and positional argument hints:
+
+```yaml
+amass:
+  flags:
+    - value: -h
+      description: Show help
+      closes: true
+  subcommands:
+    enum:
+      description: Enumerate discovered assets
+      examples:
+        - value: amass enum -d darklab.sh
+          description: Enumerate a root domain
+      flags:
+        - value: -d
+          description: Domain to enumerate
+          takes_value: true
+          value_hint:
+            placeholder: <domain>
+            description: Root domain
+        - value: -timeout
+          description: Minutes to run without progress before terminating
+          takes_value: true
+          suggest:
+            - value: "10"
+              description: Ten-minute timeout
+    subs:
+      description: Print subdomains from the Amass database
+      examples:
+        - value: amass subs -d darklab.sh -names
+          description: Print discovered names
+      flags:
+        - value: -names
+          description: Print discovered names
+        - value: -ip
+          description: Include IP addresses when used with -names
+```
+
 Practical authoring guidance:
 
 - use `context` when the next useful suggestion depends on the command root or the preceding flag/subcommand
 - use `argument_limit` for commands such as `man`, `which`, or `type` where the shell should stop suggesting additional positional operands after one topic/command has already been provided
-- group related behavior together:
-  - if a flag takes a value, describe that under the flag
-  - if a command has subcommands, keep their insert/hint/close behavior under `subcommands`
+- group related behavior together: root `examples` for broadly useful top-level invocations, subcommand `examples` for complete mode-specific invocations, flag value hints under the flag, and subcommand-specific flags under `subcommands`
 - use `arguments` for unflagged inputs like hosts, URLs, domains, files, or CIDR targets
 - use `placeholder: "<...>"` when the hint is explanatory and should persist while typing
 - use `value: "..."` when the suggestion should be inserted and prefix-filtered normally

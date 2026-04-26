@@ -361,7 +361,7 @@ Command editing is split into separate state machines rather than one overloaded
 - `controller.js` routes keyboard events into the appropriate mode before the normal submit/edit handlers run
 - navigation semantics stay consistent regardless of whether a dropdown opens above or below the prompt
 
-The structured autocomplete path is intentionally token-aware rather than shell-aware. It inspects command root, current token, and prior tokens to decide whether a suggestion should replace the whole input or only the active token. That preserves the classic-shell feel for long scanner commands without turning the frontend into a general shell parser.
+The structured autocomplete path is intentionally token-aware rather than shell-aware. It inspects command root, current token, and prior tokens to decide whether a suggestion should replace the whole input or only the active token. Examples act as discovery suggestions: a unique root prefix can flatten root and subcommand examples into full-command replacements, while a selected subcommand switches the matcher to subcommand-scoped flags and value hints. Ambiguous subcommand prefixes remain token suggestions until only one subcommand matches. That preserves the classic-shell feel for long scanner commands without turning the frontend into a general shell parser.
 
 Synthetic post-filters also sit on a distinct path before the normal shell-operator denial logic. `parse_synthetic_postfilter()` in `commands.py` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the `/run` stream applies the selected helper before lines are emitted or persisted. That keeps shell-like helpers app-native without reopening general shell piping or chaining.
 
@@ -826,10 +826,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 986
-- `vitest`: 810
+- `pytest`: 988
+- `vitest`: 818
 - `playwright`: 211
-- total: 2,007
+- total: 2,017
 
 ### Testing Architecture
 

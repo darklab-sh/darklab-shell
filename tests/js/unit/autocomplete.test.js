@@ -344,6 +344,392 @@ describe('autocomplete helpers', () => {
     expect(items[0].hintOnly).toBe(false)
   })
 
+  it('shows nested subcommands and root flags after a command root', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'amass ',
+        acSuggestions: [],
+        acContextRegistry: {
+          amass: {
+            flags: [{ value: '-h', description: 'Show help' }],
+            expects_value: [],
+            arg_hints: {
+              __positional__: [
+                { value: 'enum', insertValue: 'enum ', description: 'Enumerate assets' },
+                { value: 'subs', insertValue: 'subs ', description: 'Read subdomains' },
+              ],
+            },
+            subcommands: {
+              enum: { flags: [{ value: '-passive', description: 'Passive mode' }] },
+              subs: { flags: [{ value: '-names', description: 'Print names' }] },
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('amass ', 6).map(item => item.value)).toEqual(['-h', 'enum', 'subs'])
+  })
+
+  it('shows root and subcommand examples while a unique command root is being typed', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'openssl',
+        acSuggestions: [],
+        acContextRegistry: {
+          openssl: {
+            examples: [{ value: 'openssl version', description: 'Show version' }],
+            flags: [{ value: '-help', description: 'Show help' }],
+            expects_value: [],
+            arg_hints: { __positional__: [] },
+            subcommands: {
+              s_client: {
+                examples: [{ value: 'openssl s_client -connect ip.darklab.sh:443', description: 'Inspect TLS' }],
+                flags: [{ value: '-connect', description: 'Connect target' }],
+              },
+              ciphers: {
+                examples: [{ value: 'openssl ciphers -v', description: 'List ciphers' }],
+                flags: [{ value: '-v', description: 'Verbose' }],
+              },
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('openssl', 7).map(item => item.value)).toEqual([
+      'openssl version',
+      'openssl s_client -connect ip.darklab.sh:443',
+      'openssl ciphers -v',
+    ])
+  })
+
+  it('shows scoped examples while typing a unique command root prefix', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'open',
+        acSuggestions: [],
+        acContextRegistry: {
+          openssl: {
+            examples: [],
+            flags: [{ value: '-help', description: 'Show help' }],
+            expects_value: [],
+            arg_hints: { __positional__: [] },
+            subcommands: {
+              s_client: {
+                examples: [{ value: 'openssl s_client -connect ip.darklab.sh:443', description: 'Inspect TLS' }],
+                flags: [{ value: '-connect', description: 'Connect target' }],
+              },
+              ciphers: {
+                examples: [{ value: 'openssl ciphers -v', description: 'List ciphers' }],
+                flags: [{ value: '-v', description: 'Verbose' }],
+              },
+            },
+          },
+          oping: {
+            examples: [{ value: 'oping darklab.sh', description: 'Ping host' }],
+            flags: [],
+            expects_value: [],
+            arg_hints: {},
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('open', 4).map(item => item.value)).toEqual([
+      'openssl s_client -connect ip.darklab.sh:443',
+      'openssl ciphers -v',
+    ])
+    expect(getAutocompleteMatches('op', 2).map(item => item.value)).toEqual(['openssl', 'oping'])
+  })
+
+  it('uses subcommand-scoped flags without leaking sibling flags', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'amass subs ',
+        acSuggestions: [],
+        acContextRegistry: {
+          amass: {
+            flags: [{ value: '-h', description: 'Show help' }],
+            expects_value: [],
+            arg_hints: {
+              __positional__: [
+                { value: 'enum', insertValue: 'enum ', description: 'Enumerate assets' },
+                { value: 'subs', insertValue: 'subs ', description: 'Read subdomains' },
+                { value: 'viz', insertValue: 'viz ', description: 'Visualize assets' },
+              ],
+            },
+            subcommands: {
+              enum: { flags: [{ value: '-passive', description: 'Passive mode' }] },
+              subs: {
+                flags: [
+                  { value: '-names', description: 'Print names' },
+                  { value: '-ip', description: 'Show IPs' },
+                  { value: '-summary', description: 'Show summary' },
+                ],
+              },
+              viz: { flags: [{ value: '-d3', description: 'Generate D3' }] },
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    const values = getAutocompleteMatches('amass subs ', 11).map(item => item.value)
+    expect(values).toEqual(['-h', '-names', '-ip', '-summary'])
+    expect(values).not.toContain('-passive')
+    expect(values).not.toContain('-d3')
+    expect(values).not.toContain('enum')
+  })
+
+  it('shows subcommand-scoped examples when a subcommand token is complete', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'amass subs',
+        acSuggestions: [],
+        acContextRegistry: {
+          amass: {
+            flags: [{ value: '-h', description: 'Show help' }],
+            expects_value: [],
+            arg_hints: {
+              __positional__: [
+                { value: 'enum', insertValue: 'enum ', description: 'Enumerate assets' },
+                { value: 'subs', insertValue: 'subs ', description: 'Read subdomains' },
+              ],
+            },
+            subcommands: {
+              enum: {
+                examples: [{ value: 'amass enum -d darklab.sh', description: 'Enumerate domain' }],
+                flags: [{ value: '-passive', description: 'Passive mode' }],
+              },
+              subs: {
+                examples: [
+                  { value: 'amass subs -d darklab.sh -names', description: 'Print names' },
+                  { value: 'amass subs -d darklab.sh -show', description: 'Show ASN data' },
+                ],
+                flags: [{ value: '-names', description: 'Print names' }],
+              },
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    const items = getAutocompleteMatches('amass subs', 10)
+    expect(items.map(item => item.value)).toEqual([
+      'amass subs -d darklab.sh -names',
+      'amass subs -d darklab.sh -show',
+    ])
+    expect(items.every(item => item.isExample)).toBe(true)
+    expect(items[0].replaceStart).toBe(0)
+    expect(items[0].replaceEnd).toBe(10)
+  })
+
+  it('shows subcommand-scoped examples when a partial subcommand uniquely matches', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'amass s',
+        acSuggestions: [],
+        acContextRegistry: {
+          amass: {
+            flags: [{ value: '-h', description: 'Show help' }],
+            expects_value: [],
+            arg_hints: {
+              __positional__: [
+                { value: 'enum', insertValue: 'enum ', description: 'Enumerate assets' },
+                { value: 'subs', insertValue: 'subs ', description: 'Read subdomains' },
+              ],
+            },
+            subcommands: {
+              enum: {
+                examples: [{ value: 'amass enum -d darklab.sh', description: 'Enumerate domain' }],
+                flags: [{ value: '-passive', description: 'Passive mode' }],
+              },
+              subs: {
+                examples: [
+                  { value: 'amass subs -d darklab.sh -names', description: 'Print names' },
+                  { value: 'amass subs -d darklab.sh -show', description: 'Show ASN data' },
+                ],
+                flags: [{ value: '-names', description: 'Print names' }],
+              },
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    const items = getAutocompleteMatches('amass s', 7)
+    expect(items.map(item => item.value)).toEqual([
+      'amass subs -d darklab.sh -names',
+      'amass subs -d darklab.sh -show',
+    ])
+    expect(items.every(item => item.isExample)).toBe(true)
+    expect(items[0].replaceStart).toBe(0)
+    expect(items[0].replaceEnd).toBe(7)
+  })
+
+  it('keeps ambiguous partial subcommands as token suggestions instead of examples', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'gobuster d',
+        acSuggestions: [],
+        acContextRegistry: {
+          gobuster: {
+            flags: [{ value: '-h', description: 'Show help' }],
+            expects_value: [],
+            arg_hints: {
+              __positional__: [
+                { value: 'dir', insertValue: 'dir ', description: 'Directory mode' },
+                { value: 'dns', insertValue: 'dns ', description: 'DNS mode' },
+                { value: 'vhost', insertValue: 'vhost ', description: 'Vhost mode' },
+              ],
+            },
+            subcommands: {
+              dir: {
+                examples: [{ value: 'gobuster dir -u https://ip.darklab.sh -w wordlist.txt' }],
+                flags: [{ value: '-u', description: 'URL' }],
+              },
+              dns: {
+                examples: [{ value: 'gobuster dns -d darklab.sh -w subdomains.txt' }],
+                flags: [{ value: '-d', description: 'Domain' }],
+              },
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    const items = getAutocompleteMatches('gobuster d', 10)
+    expect(items.map(item => item.value)).toEqual(['dir', 'dns'])
+    expect(items.some(item => item.isExample)).toBe(false)
+  })
+
+  it('uses subcommand-scoped value hints', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'amass viz -o ',
+        acSuggestions: [],
+        acContextRegistry: {
+          amass: {
+            flags: [],
+            expects_value: [],
+            arg_hints: { __positional__: [{ value: 'viz', insertValue: 'viz ' }] },
+            subcommands: {
+              subs: {
+                flags: [{ value: '-o', description: 'Write subs output' }],
+                expects_value: ['-o'],
+                arg_hints: { '-o': [{ value: 'amass-subdomains.txt', description: 'Text output' }] },
+              },
+              viz: {
+                flags: [{ value: '-o', description: 'Write viz output' }],
+                expects_value: ['-o'],
+                arg_hints: { '-o': [{ value: 'amass-viz', description: 'Viz output directory' }] },
+              },
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('amass viz -o ', 13).map(item => item.value)).toEqual(['amass-viz'])
+  })
+
   it('prefers runtime autocomplete suggestions for client-side commands', () => {
     const { getAutocompleteMatches } = fromDomScripts(
       ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],

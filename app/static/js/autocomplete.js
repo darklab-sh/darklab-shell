@@ -185,9 +185,132 @@ function _countCompletedPositionalArgs(ctx, spec) {
   return count;
 }
 
+function _mergeAutocompleteSpecForSubcommand(baseSpec, subSpec) {
+  const merged = Object.assign({}, baseSpec || {}, subSpec || {});
+  const flags = [];
+  const seenFlags = new Set();
+  [...((baseSpec && baseSpec.flags) || []), ...((subSpec && subSpec.flags) || [])].forEach(flag => {
+    const key = String(flag && flag.value || '').toLowerCase();
+    if (!key || seenFlags.has(key)) return;
+    seenFlags.add(key);
+    flags.push(flag);
+  });
+  const expectsValue = [];
+  const seenValueTokens = new Set();
+  [...((baseSpec && baseSpec.expects_value) || []), ...((subSpec && subSpec.expects_value) || [])].forEach(token => {
+    const key = String(token || '');
+    if (!key || seenValueTokens.has(key)) return;
+    seenValueTokens.add(key);
+    expectsValue.push(token);
+  });
+  const argHints = Object.assign({}, (baseSpec && baseSpec.arg_hints) || {}, (subSpec && subSpec.arg_hints) || {});
+  if (subSpec && Object.prototype.hasOwnProperty.call(subSpec.arg_hints || {}, '__positional__')) {
+    argHints.__positional__ = subSpec.arg_hints.__positional__;
+  } else {
+    argHints.__positional__ = [];
+  }
+  return Object.assign(merged, {
+    flags,
+    expects_value: expectsValue,
+    arg_hints: argHints,
+    subcommands: {},
+    examples: (subSpec && subSpec.examples) || [],
+  });
+}
+
+function _autocompleteSpecForContext(ctx, spec) {
+  const subcommands = spec && spec.subcommands && typeof spec.subcommands === 'object'
+    ? spec.subcommands
+    : {};
+  const names = Object.keys(subcommands);
+  if (!names.length) return { spec, activeSubcommand: '', subcommandToken: null };
+  for (let index = 1; index < ctx.tokens.length; index += 1) {
+    const token = ctx.tokens[index];
+    if (!token) continue;
+    const isCurrentToken = token.start === ctx.tokenStart && token.end === ctx.tokenEnd;
+    if (token.end > ctx.tokenStart && !isCurrentToken) continue;
+    const value = String(token.value || '').toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(subcommands, value)) {
+      return {
+        spec: _mergeAutocompleteSpecForSubcommand(spec, subcommands[value]),
+        activeSubcommand: value,
+        subcommandToken: token,
+      };
+    }
+  }
+  return { spec, activeSubcommand: '', subcommandToken: null };
+}
+
+function _buildExampleAutocompleteItems(examples, { replaceStart, replaceEnd, completionPrefix }) {
+  return (examples || []).map(ex => Object.assign(_buildAutocompleteItem({
+    value: ex.value,
+    description: ex.description || '',
+    replaceStart,
+    replaceEnd,
+    insertValue: ex.value,
+  }), { isExample: true, completionPrefix }));
+}
+
+function _collectAutocompleteExamples(spec) {
+  const examples = [];
+  const seen = new Set();
+
+  function appendExample(example) {
+    if (!example || typeof example !== 'object') return;
+    const value = String(example.value || '').trim();
+    if (!value) return;
+    const key = value.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    examples.push(example);
+  }
+
+  ((spec && spec.examples) || []).forEach(appendExample);
+  Object.values((spec && spec.subcommands) || {}).forEach(subSpec => {
+    ((subSpec && subSpec.examples) || []).forEach(appendExample);
+  });
+  return examples;
+}
+
+function _filterExampleAutocompleteItems(items, typedPrefix) {
+  const q = String(typedPrefix || '').trim().toLowerCase();
+  if (!q) return items.slice();
+  return items.filter(item => _acItemInsertValue(item).toLowerCase().startsWith(q));
+}
+
+function _buildUniqueSubcommandExampleAutocomplete(ctx, rootSpec) {
+  const subcommands = rootSpec && rootSpec.subcommands && typeof rootSpec.subcommands === 'object'
+    ? rootSpec.subcommands
+    : {};
+  if (!Object.keys(subcommands).length) return [];
+  if (ctx.atWhitespace || ctx.tokens.length !== 2 || !ctx.currentToken || ctx.currentToken.startsWith('-')) return [];
+  const secondToken = ctx.tokens[1];
+  if (!secondToken || secondToken.start !== ctx.tokenStart || secondToken.end !== ctx.tokenEnd) return [];
+
+  const q = ctx.currentToken.toLowerCase();
+  const matches = Object.keys(subcommands).filter(name => name.toLowerCase().startsWith(q));
+  if (matches.length !== 1) return [];
+
+  const subcommand = matches[0];
+  const subSpec = subcommands[subcommand];
+  if (!subSpec || !Array.isArray(subSpec.examples) || !subSpec.examples.length) return [];
+
+  const typedPrefix = ctx.text.slice(0, ctx.tokenEnd);
+  return _filterExampleAutocompleteItems(
+    _buildExampleAutocompleteItems(subSpec.examples, {
+      replaceStart: 0,
+      replaceEnd: ctx.tokenEnd,
+      completionPrefix: `${ctx.commandRoot} ${subcommand}`,
+    }),
+    typedPrefix,
+  );
+}
+
 function _buildContextAutocomplete(ctx) {
   const registry = _getAutocompleteRegistry();
-  const spec = ctx.commandRoot ? registry[ctx.commandRoot] : null;
+  const rootSpec = ctx.commandRoot ? registry[ctx.commandRoot] : null;
+  const contextSpec = rootSpec ? _autocompleteSpecForContext(ctx, rootSpec) : { spec: null, activeSubcommand: '', subcommandToken: null };
+  const spec = contextSpec.spec;
 
   if (!spec) {
     // Unknown command root — suggest matching command roots from the registry
@@ -199,15 +322,14 @@ function _buildContextAutocomplete(ctx) {
       // so the user sees full invocation patterns while still typing the root.
       if (matchingRoots.length === 1) {
         const matchedSpec = registry[matchingRoots[0]];
-        if (matchedSpec && matchedSpec.examples && matchedSpec.examples.length) {
+        const examples = _collectAutocompleteExamples(matchedSpec);
+        if (examples.length) {
           return _filterAutocompleteItems(
-            matchedSpec.examples.map(ex => Object.assign(_buildAutocompleteItem({
-              value: ex.value,
-              description: ex.description || '',
+            _buildExampleAutocompleteItems(examples, {
               replaceStart: ctx.tokenStart,
               replaceEnd: ctx.tokenEnd,
-              insertValue: ex.value,
-            }), { isExample: true, completionPrefix: matchingRoots[0] })),
+              completionPrefix: matchingRoots[0],
+            }),
             ctx.currentToken,
           );
         }
@@ -224,17 +346,39 @@ function _buildContextAutocomplete(ctx) {
 
   // Known command root being typed (no trailing space yet) — show examples so
   // users can discover full invocation patterns before they start adding flags.
-  if (spec.examples && spec.examples.length && ctx.tokens.length === 1 && !ctx.atWhitespace) {
+  if (ctx.tokens.length === 1 && !ctx.atWhitespace) {
+    const examples = _collectAutocompleteExamples(spec);
+    if (!examples.length) return [];
     return _filterAutocompleteItems(
-      spec.examples.map(ex => Object.assign(_buildAutocompleteItem({
-        value: ex.value,
-        description: ex.description || '',
+      _buildExampleAutocompleteItems(examples, {
         replaceStart: ctx.tokenStart,
         replaceEnd: ctx.tokenEnd,
-        insertValue: ex.value,
-      }), { isExample: true, completionPrefix: ctx.commandRoot })),
+        completionPrefix: ctx.commandRoot,
+      }),
       ctx.currentToken,
     );
+  }
+
+  const uniqueSubcommandExamples = _buildUniqueSubcommandExampleAutocomplete(ctx, rootSpec);
+  if (uniqueSubcommandExamples.length) return uniqueSubcommandExamples;
+
+  if (contextSpec.activeSubcommand && spec.examples && spec.examples.length) {
+    const prefixEnd = ctx.atWhitespace ? ctx.cursor : ctx.tokenEnd;
+    const typedPrefix = ctx.text.slice(0, prefixEnd);
+    const subcommandIsCurrentToken = contextSpec.subcommandToken
+      && ctx.tokenStart === contextSpec.subcommandToken.start
+      && ctx.tokenEnd === contextSpec.subcommandToken.end;
+    if (subcommandIsCurrentToken) {
+      const examples = _filterExampleAutocompleteItems(
+        _buildExampleAutocompleteItems(spec.examples, {
+          replaceStart: 0,
+          replaceEnd: prefixEnd,
+          completionPrefix: `${ctx.commandRoot} ${contextSpec.activeSubcommand}`,
+        }),
+        typedPrefix,
+      );
+      if (examples.length) return examples;
+    }
   }
 
   const currentIsFlag = ctx.currentToken.startsWith('-') || ctx.currentToken.startsWith('+');

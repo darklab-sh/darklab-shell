@@ -413,6 +413,15 @@ class TestDerivedCommandRegistry:
                       suggest:
                         - value: "4"
                           description: Four probes
+                  subcommands:
+                    stats:
+                      description: Show ping stats
+                      flags:
+                        - value: --json
+                          description: JSON output
+                      examples:
+                        - value: ping stats --json
+                          description: Export stats
                   examples:
                     - value: ping -c 4 darklab.sh
                       description: Send four probes
@@ -441,6 +450,10 @@ class TestDerivedCommandRegistry:
         assert ping["autocomplete"]["flags"][0] == {"value": "-c", "description": "Count"}
         assert ping["autocomplete"]["expects_value"] == ["-c"]
         assert ping["autocomplete"]["arg_hints"]["-c"][0]["value"] == "4"
+        assert ping["autocomplete"]["arg_hints"]["__positional__"][0]["value"] == "stats"
+        assert ping["autocomplete"]["subcommands"]["stats"]["description"] == "Show ping stats"
+        assert ping["autocomplete"]["subcommands"]["stats"]["flags"][0]["value"] == "--json"
+        assert ping["autocomplete"]["subcommands"]["stats"]["examples"][0]["value"] == "ping stats --json"
         assert ping["autocomplete"]["examples"][0]["value"] == "ping -c 4 darklab.sh"
         grep = registry["pipe_helpers"][0]
         assert grep["root"] == "grep"
@@ -492,6 +505,12 @@ class TestDerivedCommandRegistry:
                   examples:
                     - value: ping -c 4 darklab.sh
                       description: Send four probes
+                  subcommands:
+                    stats:
+                      description: Show ping stats
+                      flags:
+                        - value: --json
+                          description: JSON output
               - root: curl
                 category: Network Diagnostics
                 policy:
@@ -524,10 +543,70 @@ class TestDerivedCommandRegistry:
         ]
         assert by_root["ping"]["autocomplete"]["flags"][0]["value"] == "-c"
         assert by_root["ping"]["autocomplete"]["examples"][0]["value"] == "ping -c 4 darklab.sh"
+        assert by_root["ping"]["autocomplete"]["subcommands"]["stats"]["flags"][0]["value"] == "--json"
+        assert by_root["ping"]["autocomplete"]["arg_hints"]["__positional__"][0]["value"] == "stats"
         assert by_root["curl"]["policy"]["deny"] == ["curl -O"]
         grep = registry["pipe_helpers"][0]
         assert grep["autocomplete"]["pipe_command"] is True
         assert grep["autocomplete"]["flags"][0]["value"] == "-i"
+
+    def test_real_registry_amass_uses_subcommand_scoped_autocomplete(self):
+        context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
+        amass = context["amass"]
+
+        assert [item["value"] for item in amass["flags"]] == ["-h"]
+        assert [item["value"] for item in amass["arg_hints"]["__positional__"]] == [
+            "enum",
+            "subs",
+            "track",
+            "viz",
+        ]
+        assert "-names" in {item["value"] for item in amass["subcommands"]["subs"]["flags"]}
+        assert "-d3" not in {item["value"] for item in amass["subcommands"]["subs"]["flags"]}
+        assert "-d3" in {item["value"] for item in amass["subcommands"]["viz"]["flags"]}
+        assert "-names" not in {item["value"] for item in amass["subcommands"]["viz"]["flags"]}
+        assert "amass subs -d darklab.sh -show" in {
+            item["value"] for item in amass["subcommands"]["subs"]["examples"]
+        }
+
+    def test_real_registry_openssl_uses_subcommand_scoped_autocomplete(self):
+        context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
+        openssl = context["openssl"]
+
+        assert [item["value"] for item in openssl["arg_hints"]["__positional__"]] == [
+            "s_client",
+            "ciphers",
+        ]
+        s_client_flags = {item["value"] for item in openssl["subcommands"]["s_client"]["flags"]}
+        ciphers_flags = {item["value"] for item in openssl["subcommands"]["ciphers"]["flags"]}
+        assert "-connect" in s_client_flags
+        assert "-CAfile" in s_client_flags
+        assert "-stdname" not in s_client_flags
+        assert "-stdname" in ciphers_flags
+        assert "-connect" not in ciphers_flags
+
+    def test_real_registry_gobuster_uses_subcommand_scoped_autocomplete(self):
+        context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
+        gobuster = context["gobuster"]
+
+        assert [item["value"] for item in gobuster["arg_hints"]["__positional__"]] == [
+            "dir",
+            "dns",
+            "vhost",
+            "fuzz",
+            "s3",
+            "gcs",
+            "tftp",
+        ]
+        dir_flags = {item["value"] for item in gobuster["subcommands"]["dir"]["flags"]}
+        dns_flags = {item["value"] for item in gobuster["subcommands"]["dns"]["flags"]}
+        vhost_flags = {item["value"] for item in gobuster["subcommands"]["vhost"]["flags"]}
+        assert "-x" in dir_flags
+        assert "--append-domain" not in dir_flags
+        assert "-r" in dns_flags
+        assert "-x" not in dns_flags
+        assert "--append-domain" in vhost_flags
+        assert "-d" not in vhost_flags
 
     def test_autocomplete_context_can_be_derived_from_commands_registry(self):
         context = autocomplete_context_from_commands_registry({
@@ -654,6 +733,29 @@ class TestDerivedCommandRegistry:
                         "arg_hints": {
                             "-iL": [{"value": "targets.txt", "description": "Targets file"}],
                         },
+                        "subcommands": {
+                            "subs": {
+                                "flags": [
+                                    {"value": "-names", "description": "Print names"},
+                                    {
+                                        "value": "-o",
+                                        "description": "Write session file",
+                                        "feature_required": "workspace",
+                                    },
+                                ],
+                                "expects_value": ["-o"],
+                                "arg_hints": {
+                                    "-o": [{"value": "subs.txt", "description": "Output file"}],
+                                },
+                                "examples": [
+                                    {"value": "nmap subs -names"},
+                                    {
+                                        "value": "nmap subs -o subs.txt",
+                                        "feature_required": "workspace",
+                                    },
+                                ],
+                            },
+                        },
                     },
                 },
             ],
@@ -666,12 +768,18 @@ class TestDerivedCommandRegistry:
         assert [item["value"] for item in disabled["nmap"]["flags"]] == ["-sV"]
         assert "-iL" not in disabled["nmap"]["expects_value"]
         assert "-iL" not in disabled["nmap"]["arg_hints"]
+        assert [item["value"] for item in disabled["nmap"]["subcommands"]["subs"]["flags"]] == ["-names"]
+        assert "-o" not in disabled["nmap"]["subcommands"]["subs"]["expects_value"]
+        assert "-o" not in disabled["nmap"]["subcommands"]["subs"]["arg_hints"]
+        assert [item["value"] for item in disabled["nmap"]["subcommands"]["subs"]["examples"]] == ["nmap subs -names"]
         assert [item["value"] for item in enabled["nmap"]["examples"]] == [
             "nmap ip.darklab.sh",
             "nmap -iL targets.txt -oN nmap.txt",
         ]
         assert [item["value"] for item in enabled["nmap"]["flags"]] == ["-sV", "-iL"]
         assert enabled["nmap"]["arg_hints"]["-iL"][0]["value"] == "targets.txt"
+        assert [item["value"] for item in enabled["nmap"]["subcommands"]["subs"]["flags"]] == ["-names", "-o"]
+        assert enabled["nmap"]["subcommands"]["subs"]["arg_hints"]["-o"][0]["value"] == "subs.txt"
 
     def test_command_policy_can_be_derived_from_commands_registry(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -583,66 +583,105 @@ commands:
         format: text
     autocomplete:
       examples:
-        - value: openssl s_client -connect ip.darklab.sh:443 -quiet
-          description: Inspect TLS connection and certificate
-        - value: openssl s_client -connect ip.darklab.sh:443 -showcerts
-          description: Show full certificate chain
-        - value: openssl s_client -connect ip.darklab.sh:443 -servername ip.darklab.sh -CAfile ca.pem
-          description: Validate with a CA bundle from session files
-          feature_required: workspace
+        - value: openssl s_client -help
+          description: Show s_client help and usage
+        - value: openssl ciphers -help
+          description: Show ciphers help and usage
       flags:
-        - value: -connect
-          description: Host and port to connect to (host:port)
-          takes_value: true
-          suggest:
-            - value: <host>:443
-              description: HTTPS port
-            - value: <host>:465
-              description: SMTPS port
-            - value: <host>:993
-              description: IMAPS port
-        - value: -servername
-          description: SNI hostname (required for virtual-hosted TLS)
-          takes_value: true
-          value_hint:
-            placeholder: <hostname>
-            description: SNI hostname matching the certificate
-        - value: -showcerts
-          description: Display the full certificate chain
-        - value: -starttls
-          description: Use STARTTLS for the specified protocol (smtp, ftp, imap,
-            pop3)
-          takes_value: true
-          suggest:
-            - value: smtp
-              description: STARTTLS for SMTP (port 25 or 587)
-            - value: ftp
-              description: STARTTLS for FTP
-            - value: imap
-              description: STARTTLS for IMAP
-            - value: pop3
-              description: STARTTLS for POP3
-        - value: -verify
-          description: Set certificate verification depth
-          takes_value: true
-        - value: -tls1_2
-          description: Force TLS 1.2
-        - value: -tls1_3
-          description: Force TLS 1.3
-        - value: -quiet
-          description: Suppress session and certificate details
-        - value: -CAfile
-          description: Read a CA bundle from a session file
-          takes_value: true
-          feature_required: workspace
-          suggest:
-            - value: ca.pem
-              description: Session file containing trusted CA certificates
-      arguments:
-        - value: s_client -connect <host>:443
-          description: Inspect TLS certificate and connection
-        - value: ciphers -v
-          description: List all supported cipher suites verbosely
+        - value: -help
+          description: Show top-level help and usage
+          closes: true
+      subcommands:
+        s_client:
+          description: Connect to a TLS service for diagnostics
+          examples:
+            - value: openssl s_client -connect ip.darklab.sh:443 -quiet
+              description: Inspect TLS connection and certificate
+            - value: openssl s_client -connect ip.darklab.sh:443 -showcerts
+              description: Show full certificate chain
+            - value: openssl s_client -connect ip.darklab.sh:443 -servername ip.darklab.sh -CAfile ca.pem
+              description: Validate with a CA bundle from session files
+              feature_required: workspace
+          flags:
+            - value: -help
+              description: Show s_client help and usage
+              closes: true
+            - value: -connect
+              description: Host and port to connect to (host:port)
+              takes_value: true
+              suggest:
+                - value: <host>:443
+                  description: HTTPS port
+                - value: <host>:465
+                  description: SMTPS port
+                - value: <host>:993
+                  description: IMAPS port
+            - value: -servername
+              description: SNI hostname
+              takes_value: true
+              value_hint:
+                placeholder: <hostname>
+                description: SNI hostname matching the certificate
+            - value: -showcerts
+              description: Display the full certificate chain
+            - value: -starttls
+              description: Use STARTTLS for a plaintext protocol
+              takes_value: true
+              suggest:
+                - value: smtp
+                  description: STARTTLS for SMTP
+                - value: ftp
+                  description: STARTTLS for FTP
+                - value: imap
+                  description: STARTTLS for IMAP
+                - value: pop3
+                  description: STARTTLS for POP3
+            - value: -verify
+              description: Set certificate verification depth
+              takes_value: true
+            - value: -brief
+              description: Print a brief connection summary
+            - value: -tls1_2
+              description: Force TLS 1.2
+            - value: -tls1_3
+              description: Force TLS 1.3
+            - value: -quiet
+              description: Suppress session and certificate details
+            - value: -CAfile
+              description: Read a CA bundle from a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: ca.pem
+                  description: Session file containing trusted CA certificates
+        ciphers:
+          description: Display and filter OpenSSL cipher suites
+          examples:
+            - value: openssl ciphers -v
+              description: List all supported cipher suites verbosely
+            - value: openssl ciphers -s -v 'ALL:@SECLEVEL=2'
+              description: Show supported ciphers at security level 2
+          flags:
+            - value: -help
+              description: Show ciphers help and usage
+              closes: true
+            - value: -v
+              description: Verbose cipher listing
+            - value: -V
+              description: Include official cipher suite values in hex
+            - value: -stdname
+              description: Include standard cipher suite names
+            - value: -s
+              description: Only list ciphers supported by configured protocol/security settings
+            - value: -tls1_2
+              description: Limit supported-cipher filtering to TLS 1.2
+            - value: -tls1_3
+              description: Limit supported-cipher filtering to TLS 1.3
+            - value: -ciphersuites
+              description: Configure TLS 1.3 ciphersuites
+              takes_value: true
+              value_hint:
+                description: Colon-separated TLS 1.3 ciphersuite names
   - root: sslscan
     category: TLS / Certificates
     policy:
@@ -1022,132 +1061,202 @@ commands:
       examples:
         - value: amass -h
           description: Show help and usage
-        - value: amass enum -d darklab.sh
-          description: Enumerate a domain using the session-scoped Amass database
-        - value: amass enum -d darklab.sh
-          description: Enumerate using a session-scoped Amass database
-          feature_required: workspace
-        - value: amass subs -d darklab.sh -names
-          description: Print names from the session-scoped Amass database
-          feature_required: workspace
-        - value: amass subs -d darklab.sh -names -ip -summary
-          description: Show discovered names with IP and ASN summary data
-          feature_required: workspace
-        - value: amass subs -d darklab.sh -show
-          description: Display subdomains and related ASNs from the session database
-          feature_required: workspace
-        - value: amass subs -d darklab.sh -names -o amass-subdomains.txt
-          description: Save discovered names from the session-scoped database
-          feature_required: workspace
-        - value: amass viz -d darklab.sh -d3 -o amass-viz
-          description: Generate a D3 HTML graph visualization in a session directory
-          feature_required: workspace
-        - value: amass viz -d darklab.sh -dot -o amass-viz-dot
-          description: Export database information for the domain as a flat DOT text file
-          feature_required: workspace
       flags:
         - value: -h
           description: Show help and usage
           closes: true
-        - value: enum
+      subcommands:
+        enum:
           description: Enumerate attack surface assets
-        - value: subs
+          examples:
+            - value: amass enum -d darklab.sh
+              description: Enumerate a domain using the session-scoped Amass database
+            - value: amass enum -d darklab.sh
+              description: Enumerate using a session-scoped Amass database
+              feature_required: workspace
+          flags:
+            - value: -passive
+              description: Use passive data sources only (default in Amass v5)
+            - value: -d
+              description: Target domain
+              takes_value: true
+              value_hint:
+                placeholder: <domain>
+                description: Target domain to enumerate
+            - value: -timeout
+              description: Minutes to run without progress before terminating
+              takes_value: true
+              suggest:
+                - value: "10"
+                  description: Short bounded run for testing
+            - value: -v
+              description: Output status and troubleshooting information
+            - value: -nocolor
+              description: Disable colorized output
+            - value: -df
+              description: Read target domains from a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: domains.txt
+                  description: Session file containing one domain per line
+            - value: -config
+              description: Read Amass YAML configuration from a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: amass-config.yaml
+                  description: Session Amass config file
+            - value: -nf
+              description: Read known subdomain names from a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: known-subdomains.txt
+                  description: Session file containing known names
+            - value: -log
+              description: Write Amass errors to a session log file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: amass-errors.log
+                  description: Save Amass error log
+        subs:
           description: Read discovered subdomains from the Amass database
-        - value: track
+          examples:
+            - value: amass subs -d darklab.sh -names
+              description: Print names from the session-scoped Amass database
+              feature_required: workspace
+            - value: amass subs -d darklab.sh -names -ip -summary
+              description: Show discovered names with IP and ASN summary data
+              feature_required: workspace
+            - value: amass subs -d darklab.sh -show
+              description: Display subdomains and related ASNs from the session database
+              feature_required: workspace
+            - value: amass subs -d darklab.sh -names -o amass-subdomains.txt
+              description: Save discovered names from the session-scoped database
+              feature_required: workspace
+          flags:
+            - value: -d
+              description: Target domain
+              takes_value: true
+              value_hint:
+                placeholder: <domain>
+                description: Target domain to read from the database
+            - value: -names
+              description: Print names only when reading Amass database results
+            - value: -ip
+              description: Show IP addresses for discovered names; use with -names
+            - value: -ipv4
+              description: Show IPv4 addresses for discovered names; use with -names
+            - value: -ipv6
+              description: Show IPv6 addresses for discovered names; use with -names
+            - value: -summary
+              description: Print ASN summary data from discovered names
+            - value: -show
+              description: Print subdomains and related ASN data for matching domains
+            - value: -demo
+              description: Censor output for demonstrations
+            - value: -nocolor
+              description: Disable colorized output
+            - value: -config
+              description: Read Amass YAML configuration from a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: amass-config.yaml
+                  description: Session Amass config file
+            - value: -o
+              description: Write amass subs output to a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: amass-subdomains.txt
+                  description: Save amass subs text output
+        track:
           description: Show newly discovered assets over time from the database
-        - value: viz
+          examples:
+            - value: amass track -d darklab.sh
+              description: Show newly discovered assets from the session database
+              feature_required: workspace
+          flags:
+            - value: -d
+              description: Target domain
+              takes_value: true
+              value_hint:
+                placeholder: <domain>
+                description: Target domain to track
+            - value: -since
+              description: Limit track output to assets after a timestamp
+              takes_value: true
+              suggest:
+                - value: "04/26 00:00:00 2026 CDT"
+                  description: Amass timestamp format example
+            - value: -df
+              description: Read target domains from a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: domains.txt
+                  description: Session file containing one domain per line
+            - value: -config
+              description: Read Amass YAML configuration from a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: amass-config.yaml
+                  description: Session Amass config file
+        viz:
           description: Generate graph visualizations from the Amass database
-        - value: -passive
-          description: Use passive data sources only (default in Amass v5)
-        - value: -d
-          description: Target domain
-          takes_value: true
-          value_hint:
-            placeholder: <domain>
-            description: Target domain to enumerate
-        - value: -timeout
-          description: Minutes to run without progress before terminating
-          takes_value: true
-          suggest:
-            - value: "10"
-              description: Short bounded run for testing
-        - value: -v
-          description: Output status and troubleshooting information
-        - value: -nocolor
-          description: Disable colorized output
-        - value: -names
-          description: Print names only when reading Amass database results
-        - value: -ip
-          description: Show IP addresses for discovered names
-        - value: -ipv4
-          description: Show IPv4 addresses for discovered names
-        - value: -ipv6
-          description: Show IPv6 addresses for discovered names
-        - value: -summary
-          description: Print ASN summary data from discovered names
-        - value: -show
-          description: Print all available result data for matching domains
-        - value: -demo
-          description: Censor output for demonstrations
-        - value: -since
-          description: Limit track or viz output to assets after a timestamp
-          takes_value: true
-          suggest:
-            - value: "04/26 00:00:00 2026 CDT"
-              description: Amass timestamp format example
-        - value: -d3
-          description: Generate a D3 HTML graph with amass viz
-        - value: -dot
-          description: Generate Graphviz DOT output with amass viz
-        - value: -gexf
-          description: Generate Gephi GEXF output with amass viz
-        - value: -df
-          description: Read target domains from a session file
-          takes_value: true
-          feature_required: workspace
-          suggest:
-            - value: domains.txt
-              description: Session file containing one domain per line
-        - value: -config
-          description: Read Amass YAML configuration from a session file
-          takes_value: true
-          feature_required: workspace
-          suggest:
-            - value: amass-config.yaml
-              description: Session Amass config file
-        - value: -nf
-          description: Read known subdomain names from a session file
-          takes_value: true
-          feature_required: workspace
-          suggest:
-            - value: known-subdomains.txt
-              description: Session file containing known names
-        - value: -log
-          description: Write Amass errors to a session log file
-          takes_value: true
-          feature_required: workspace
-          suggest:
-            - value: amass-errors.log
-              description: Save Amass error log
-        - value: -o
-          description: Write amass subs output to a session file or amass viz output to a session directory
-          takes_value: true
-          feature_required: workspace
-          suggest:
-            - value: amass-subdomains.txt
-              description: Save amass subs text output
-            - value: amass-viz
-              description: Save amass viz artifacts in a session directory
-        - value: -dir
-          description: Use a session directory for Amass database/output files
-          takes_value: true
-          feature_required: workspace
-          suggest:
-            - value: amass
-              description: Session-scoped Amass database directory
-      arguments:
-        - placeholder: <domain>
-          description: Usually provided through enum -d
+          examples:
+            - value: amass viz -d darklab.sh -d3 -o amass-viz
+              description: Generate a D3 graph visualization in a session directory
+              feature_required: workspace
+            - value: amass viz -d darklab.sh -dot -o amass-viz-dot
+              description: Export database information for the domain as a flat DOT text file
+              feature_required: workspace
+          flags:
+            - value: -d
+              description: Target domain
+              takes_value: true
+              value_hint:
+                placeholder: <domain>
+                description: Target domain to visualize
+            - value: -d3
+              description: Generate a D3 HTML graph with amass viz
+            - value: -dot
+              description: Generate Graphviz DOT output with amass viz
+            - value: -gexf
+              description: Generate Gephi GEXF output with amass viz
+            - value: -since
+              description: Limit viz output to assets after a timestamp
+              takes_value: true
+              suggest:
+                - value: "04/26 00:00:00 2026 CDT"
+                  description: Amass timestamp format example
+            - value: -df
+              description: Read target domains from a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: domains.txt
+                  description: Session file containing one domain per line
+            - value: -config
+              description: Read Amass YAML configuration from a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: amass-config.yaml
+                  description: Session Amass config file
+            - value: -o
+              description: Write amass viz artifacts to a session directory
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: amass-viz
+                  description: Save amass viz artifacts in a session directory
+                - value: amass-viz-dot
+                  description: Save amass DOT artifacts in a session directory
   - root: dnsx
     category: Network Reconnaissance
     policy:
@@ -1427,53 +1536,267 @@ commands:
       examples:
         - value: gobuster -h
           description: Show help and usage
-        - value: gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
-          description: Directory brute force with common wordlist
-        - value: gobuster vhost -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
-          description: Virtual host brute force
-        - value: gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -o gobuster-dir.txt
-          description: Save directory brute-force results to a session file
-          feature_required: workspace
       flags:
         - value: -h
           description: Show help and usage
           closes: true
-        - value: dir
+      subcommands:
+        dir:
           description: Directory or file brute force mode
-        - value: vhost
+          examples:
+            - value: gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+              description: Directory brute force with common wordlist
+            - value: gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -x php,html,txt
+              description: Directory brute force with common file extensions
+            - value: gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -o gobuster-dir.txt
+              description: Save directory brute-force results to a session file
+              feature_required: workspace
+          flags:
+            - value: -u
+              description: Target URL
+              takes_value: true
+              value_hint:
+                placeholder: <url>
+                description: Target base URL
+              suggest:
+                - value: https://
+                  description: Target base URL
+            - value: -w
+              description: Wordlist path
+              takes_value: true
+              suggest:
+                - value: /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+                  description: Common web-content wordlist
+                - value: wordlist.txt
+                  description: Session wordlist file
+                  feature_required: workspace
+            - value: -x
+              description: File extensions to append
+              takes_value: true
+              suggest:
+                - value: php,html,txt
+                  description: Common extension list
+            - value: -s
+              description: Positive status-code filter
+              takes_value: true
+              suggest:
+                - value: 200,301,302,403
+                  description: Common interesting HTTP statuses
+            - value: -b
+              description: Negative status-code filter
+              takes_value: true
+            - value: -H
+              description: Add an HTTP header
+              takes_value: true
+              suggest:
+                - value: "Authorization: Bearer <token>"
+                  description: Bearer token header
+            - value: -c
+              description: Cookie header value
+              takes_value: true
+            - value: -k
+              description: Skip TLS certificate verification
+            - value: -l
+              description: Show response length
+            - value: -r
+              description: Follow redirects
+            - value: -o
+              description: Write results to a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: gobuster-dir.txt
+                  description: Save discovered paths to a session file
+        dns:
+          description: DNS subdomain brute force mode
+          examples:
+            - value: gobuster dns -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+              description: DNS subdomain brute force
+            - value: gobuster dns -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -r 8.8.8.8
+              description: DNS brute force with a custom resolver
+          flags:
+            - value: -d
+              description: Target domain
+              takes_value: true
+              value_hint:
+                placeholder: <domain>
+                description: Target root domain
+            - value: -w
+              description: Wordlist path
+              takes_value: true
+              suggest:
+                - value: /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+                  description: Common DNS wordlist
+                - value: subdomains.txt
+                  description: Session subdomain wordlist
+                  feature_required: workspace
+            - value: -r
+              description: DNS resolver to use
+              takes_value: true
+              suggest:
+                - value: 8.8.8.8
+                  description: Google Public DNS
+                - value: 1.1.1.1
+                  description: Cloudflare DNS
+            - value: -t
+              description: Number of concurrent threads
+              takes_value: true
+              suggest:
+                - value: "50"
+                  description: Faster scan
+            - value: --wildcard
+              description: Force scan even when wildcard DNS is detected
+            - value: -o
+              description: Write results to a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: gobuster-dns.txt
+                  description: Save discovered subdomains
+        vhost:
           description: Virtual host brute force mode
-        - value: -u
-          description: Target URL
-          takes_value: true
-          value_hint:
-            placeholder: <url>
-            description: Target base URL
-          suggest:
-            - value: https://
-              description: Target base URL
-        - value: -w
-          description: Wordlist path
-          takes_value: true
-          suggest:
-            - value: /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
-              description: Common web-content wordlist
-            - value: /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
-              description: Common virtual-host wordlist
-        - value: -x
-          description: File extensions to append
-          takes_value: true
-          suggest:
-            - value: php,html,txt
-              description: Common extension list
-        - value: -k
-          description: Skip TLS certificate verification
-        - value: -o
-          description: Write results to a session file
-          takes_value: true
-          feature_required: workspace
-          suggest:
-            - value: gobuster-dir.txt
-              description: Save discovered paths to a session file
+          examples:
+            - value: gobuster vhost -u https://ip.darklab.sh --append-domain -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+              description: Virtual host brute force
+            - value: gobuster vhost -u https://ip.darklab.sh --append-domain -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -o gobuster-vhost.txt
+              description: Save virtual-host brute-force results to a session file
+              feature_required: workspace
+          flags:
+            - value: -u
+              description: Target URL
+              takes_value: true
+              value_hint:
+                placeholder: <url>
+                description: Target base URL
+              suggest:
+                - value: https://
+                  description: Target base URL
+            - value: -w
+              description: Wordlist path
+              takes_value: true
+              suggest:
+                - value: /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+                  description: Common virtual-host wordlist
+                - value: vhosts.txt
+                  description: Session virtual-host wordlist
+                  feature_required: workspace
+            - value: --append-domain
+              description: Append the target domain to each wordlist entry
+            - value: -H
+              description: Add an HTTP header
+              takes_value: true
+            - value: -k
+              description: Skip TLS certificate verification
+            - value: -s
+              description: Positive status-code filter
+              takes_value: true
+              suggest:
+                - value: 200,301,302,403
+                  description: Common interesting HTTP statuses
+            - value: --exclude-length
+              description: Exclude responses with a specific body length
+              takes_value: true
+            - value: -o
+              description: Write results to a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: gobuster-vhost.txt
+                  description: Save discovered virtual hosts
+        fuzz:
+          description: Fuzz requests using the FUZZ keyword
+          examples:
+            - value: gobuster fuzz -u https://ip.darklab.sh?FUZZ=test -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+              description: Fuzz a URL parameter
+          flags:
+            - value: -u
+              description: Target URL containing FUZZ
+              takes_value: true
+              value_hint:
+                placeholder: <url-with-FUZZ>
+                description: URL, query, or path containing FUZZ
+            - value: -w
+              description: Wordlist path
+              takes_value: true
+              suggest:
+                - value: /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+                  description: Common web-content wordlist
+                - value: fuzz.txt
+                  description: Session fuzz wordlist
+                  feature_required: workspace
+            - value: -H
+              description: Add an HTTP header
+              takes_value: true
+              suggest:
+                - value: "X-Custom-Header: FUZZ"
+                  description: Fuzz a request header
+            - value: -d
+              description: HTTP POST body
+              takes_value: true
+              suggest:
+                - value: "username=admin&password=FUZZ"
+                  description: Fuzz a form value
+            - value: -k
+              description: Skip TLS certificate verification
+            - value: -o
+              description: Write results to a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: gobuster-fuzz.txt
+                  description: Save fuzz results
+        s3:
+          description: Amazon S3 bucket enumeration mode
+          examples:
+            - value: gobuster s3 -w bucket-names.txt
+              description: Enumerate S3 bucket names from a session wordlist
+              feature_required: workspace
+          flags:
+            - value: -w
+              description: Bucket-name wordlist path
+              takes_value: true
+              suggest:
+                - value: bucket-names.txt
+                  description: Session bucket-name wordlist
+                  feature_required: workspace
+            - value: --debug
+              description: Show debug output
+        gcs:
+          description: Google Cloud Storage bucket enumeration mode
+          examples:
+            - value: gobuster gcs -w bucket-names.txt
+              description: Enumerate GCS bucket names from a session wordlist
+              feature_required: workspace
+          flags:
+            - value: -w
+              description: Bucket-name wordlist path
+              takes_value: true
+              suggest:
+                - value: bucket-names.txt
+                  description: Session bucket-name wordlist
+                  feature_required: workspace
+            - value: --debug
+              description: Show debug output
+        tftp:
+          description: TFTP file brute force mode
+          examples:
+            - value: gobuster tftp -s 10.0.0.1 -w filenames.txt
+              description: Enumerate TFTP files from a session wordlist
+              feature_required: workspace
+          flags:
+            - value: -s
+              description: TFTP server address
+              takes_value: true
+              value_hint:
+                placeholder: <host>
+                description: TFTP server host or IP
+            - value: -w
+              description: File-name wordlist path
+              takes_value: true
+              suggest:
+                - value: filenames.txt
+                  description: Session file-name wordlist
+                  feature_required: workspace
   - root: ffuf
     category: Network Reconnaissance
     policy:
