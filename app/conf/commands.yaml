@@ -1011,13 +1011,13 @@ commands:
           description: Show help and usage
         - value: amass enum -d darklab.sh -timeout 10
           description: Enumerate a domain using the session-scoped Amass database
-        - value: amass enum -d darklab.sh -timeout 10 -dir amass-db
+        - value: amass enum -d darklab.sh -timeout 10 -dir amass
           description: Enumerate using a session-scoped Amass database
           feature_required: workspace
         - value: amass subs -d darklab.sh -names
           description: Print names from the session-scoped Amass database
           feature_required: workspace
-        - value: amass subs -d darklab.sh -names -dir amass-db
+        - value: amass subs -d darklab.sh -names -dir amass
           description: Print names from a session-scoped Amass database
           feature_required: workspace
       flags:
@@ -1081,7 +1081,7 @@ commands:
           takes_value: true
           feature_required: workspace
           suggest:
-            - value: amass-db
+            - value: amass
               description: Session-scoped Amass database directory
       arguments:
         - placeholder: <domain>

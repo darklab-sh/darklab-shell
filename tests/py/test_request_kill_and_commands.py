@@ -383,17 +383,17 @@ class TestIsCommandAllowedEdges:
                 (
                     "amass enum -df domains.txt -timeout 10",
                     ["domains.txt"],
-                    ["amass-db"],
+                    ["amass"],
                 ),
                 (
                     "amass subs -d darklab.sh -names",
                     [],
-                    ["amass-db"],
+                    ["amass"],
                 ),
                 (
-                    "amass subs -d darklab.sh -names -dir custom-amass-db",
+                    "amass subs -d darklab.sh -names -dir amass",
                     [],
-                    ["custom-amass-db"],
+                    ["amass"],
                 ),
             ]
 
@@ -407,6 +407,14 @@ class TestIsCommandAllowedEdges:
             assert result.workspace_reads == reads
             assert result.workspace_writes == writes
             assert str(tmp) in result.exec_command
+
+        denied = validate_command(
+            "amass subs -d darklab.sh -names -dir custom-amass-db",
+            session_id="session-1",
+            cfg=cfg,
+        )
+        assert not denied.allowed
+        assert "managed amass workspace directory" in denied.reason
 
 
 class TestFakeCommandResolution:

@@ -569,9 +569,9 @@ class TestDerivedCommandRegistry:
                     ["subdomains.txt"], ["dnsrecon.csv"],
                 ),
                 "subfinder -dL domains.txt -o subfinder.txt": (["domains.txt"], ["subfinder.txt"]),
-                "amass enum -df domains.txt -timeout 10": (["domains.txt"], ["amass-db"]),
-                "amass subs -d darklab.sh -names": ([], ["amass-db"]),
-                "amass subs -d darklab.sh -names -dir custom-amass-db": ([], ["custom-amass-db"]),
+                "amass enum -df domains.txt -timeout 10": (["domains.txt"], ["amass"]),
+                "amass subs -d darklab.sh -names": ([], ["amass"]),
+                "amass subs -d darklab.sh -names -dir amass": ([], ["amass"]),
                 "dnsx -l subdomains.txt -o dnsx.txt": (["subdomains.txt"], ["dnsx.txt"]),
                 "wafw00f -i urls.txt -o wafw00f.txt": (["urls.txt"], ["wafw00f.txt"]),
                 "masscan -iL targets.txt -oL masscan.txt -p 80": (["targets.txt"], ["masscan.txt"]),
@@ -590,10 +590,22 @@ class TestDerivedCommandRegistry:
                 assert result.workspace_writes == writes
                 exec_tokens = commands.split_command_argv(result.exec_command)
                 if command.startswith("amass "):
-                    assert exec_tokens[0] == "amass"
+                    assert exec_tokens[0] == "env"
+                    assert exec_tokens[1].startswith("XDG_CONFIG_HOME=")
+                    assert exec_tokens[2] == "amass"
                     assert "-dir" in exec_tokens
                 for original in reads + writes:
+                    if command.startswith("amass ") and original == commands.AMASS_DEFAULT_WORKSPACE_DIR:
+                        continue
                     assert original not in exec_tokens
+
+            result = commands.validate_command(
+                "amass subs -d darklab.sh -names -dir custom-amass-db",
+                session_id=session_id,
+                cfg=cfg,
+            )
+            assert not result.allowed
+            assert "managed amass workspace directory" in result.reason
 
     def test_autocomplete_context_filters_workspace_feature_hints(self):
         registry = {

@@ -144,8 +144,8 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 - **Session-scoped Amass database workspace**
   - Amass v5 is database-first for useful results: `amass enum ...` can populate the local Amass database, and `amass subs -d <domain> -names` reads results back from that database.
-  - Initial directory-aware workspace support is in place for `amass -dir amass-db`, and `amass enum` / `amass subs` auto-inject that default when the user does not provide `-dir`.
-  - Runtime validation should confirm Amass stores and reads its database from the rewritten session `-dir` path without creating `/tmp/.config/amass` and without nested `xdg-config` database copies.
+  - Initial directory-aware workspace support is in place for the managed `amass` directory, and `amass enum` / `amass subs` auto-inject that default when the user does not provide `-dir`.
+  - Runtime validation should confirm Amass stores and reads its database from the rewritten session `-dir` path while `XDG_CONFIG_HOME` points at the same session workspace parent, without creating `/tmp/.config/amass`.
   - Testing:
     - Add a container smoke or manual-QA fixture only if the command can be bounded enough to avoid long passive enumeration.
 

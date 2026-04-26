@@ -34,7 +34,7 @@ ASCII_FILE            = os.path.join(_CONF, "ascii.txt")
 ASCII_MOBILE_FILE     = os.path.join(_CONF, "ascii_mobile.txt")
 APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
 APP_HINTS_MOBILE_FILE = os.path.join(_CONF, "app_hints_mobile.txt")
-AMASS_DEFAULT_WORKSPACE_DIR = "amass-db"
+AMASS_DEFAULT_WORKSPACE_DIR = "amass"
 
 
 @dataclass(frozen=True)
@@ -1932,6 +1932,25 @@ def _rewrite_workspace_file_flags(
     )
     if is_amass_database_command and not has_amass_dir:
         tokens = tokens + ["-dir", AMASS_DEFAULT_WORKSPACE_DIR]
+    elif is_amass_database_command and has_amass_dir:
+        for index, token in enumerate(tokens):
+            matched_spec = next((spec for spec in amass_dir_specs if _workspace_flag_matches_token(token, spec)), None)
+            if not matched_spec:
+                continue
+            user_value, _, error = _workspace_flag_value(tokens, index, matched_spec)
+            if error:
+                return command, set(), [], [], [], error
+            normalized_value = (user_value or "").rstrip(os.sep)
+            if normalized_value and os.path.basename(normalized_value) != AMASS_DEFAULT_WORKSPACE_DIR:
+                return (
+                    command,
+                    set(),
+                    [],
+                    [],
+                    [],
+                    f"Amass database commands use the managed {AMASS_DEFAULT_WORKSPACE_DIR} workspace directory.",
+                )
+            break
 
     rewritten_tokens = list(tokens)
     exempt_flags: set[str] = set()
@@ -1990,6 +2009,26 @@ def _rewrite_workspace_file_flags(
         index = value_index + 1
 
     return shlex.join(rewritten_tokens), exempt_flags, reads, writes, exec_paths, ""
+
+
+def _apply_workspace_runtime_environment(command: str) -> str:
+    tokens = split_command_argv(command)
+    if not tokens or tokens[0].lower() != "amass":
+        return command
+
+    for index, token in enumerate(tokens[:-1]):
+        if token != "-dir":
+            continue
+        directory = tokens[index + 1].rstrip(os.sep)
+        if not os.path.isabs(directory) or os.path.basename(directory) != AMASS_DEFAULT_WORKSPACE_DIR:
+            return command
+
+        # Amass v5 auto-starts `amass engine`; point its default config dir at
+        # the same parent used by the rewritten `-dir` database path.
+        xdg_config_home = os.path.dirname(directory)
+        return f"env XDG_CONFIG_HOME={shlex.quote(xdg_config_home)} {command}"
+
+    return command
 
 
 def _is_denied(command: str, deny_entries: list[str], *, exempt_flags: set[str] | None = None) -> bool:
@@ -2117,6 +2156,8 @@ def validate_command(
             display_command=command,
             exec_command=command_to_validate,
         )
+
+    exec_command = _apply_workspace_runtime_environment(exec_command)
 
     return CommandValidationResult(
         True,

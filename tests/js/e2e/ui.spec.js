@@ -137,6 +137,7 @@ test.describe('workspace modal', () => {
     await page.locator('#workspace-path-input').fill('targets.txt')
     await page.locator('#workspace-text-input').fill('darklab.sh\n')
     await page.locator('#workspace-save-btn').click()
+    await expect(page.locator('#workspace-editor')).not.toBeVisible()
 
     const row = page.locator('.workspace-file-row').filter({ hasText: 'targets.txt' })
     await expect(row).toBeVisible()
@@ -151,6 +152,7 @@ test.describe('workspace modal', () => {
     await expect(page.locator('#workspace-editor')).toBeVisible()
     await page.locator('#workspace-text-input').fill('darklab.sh\nip.darklab.sh\n')
     await page.locator('#workspace-save-btn').click()
+    await expect(page.locator('#workspace-editor')).not.toBeVisible()
     await row.locator('[data-workspace-action="view"]').click()
     await expect(page.locator('#workspace-viewer-text')).toContainText('ip.darklab.sh')
 
