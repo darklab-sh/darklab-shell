@@ -37,7 +37,7 @@ At a high level, it works like this:
 - `Redis` provides the shared state that must work correctly across multiple Gunicorn workers: rate limiting and active run PID tracking for `/kill`.
 - `SQLite` persists completed run metadata, preview output, snapshots, and full-output artifact metadata so history, canonical run permalinks, and snapshot permalinks survive restarts.
 - The browser client stays build-step-free. Classic scripts share one global runtime, while browser cookies and storage cover local continuity and cache layers around session identity, session-scoped preferences, and reload restore.
-- The Docker runtime enforces a two-user model: Gunicorn runs as `appuser`, while user-submitted commands run as `scanner`. `scanner` is a supplementary member of the `appuser` group only so validated session workspace files can be shared with group-readable, non-world-readable permissions.
+- The Docker runtime enforces a two-user model: Gunicorn runs as `appuser`, while user-submitted commands run as `scanner` with the shared `appuser` run group. That explicit run group lets validated session workspace files stay group-readable or group-writable without becoming world-readable.
 
 The rest of this document is organized by concern rather than by historical file order: stable system structure first, then browser/backend composition, then the core runtime stories such as run lifecycle, state, observability, and security.
 
@@ -586,11 +586,11 @@ That split is what allows the app to keep the interactive shell fast while still
 
 ### Database
 
-`./data/history.db` — SQLite, WAL mode. Six persistent tables, one FTS5 virtual table, and file-backed run-output artifacts:
+`<data_dir>/history.db` — SQLite, WAL mode. Six persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable.
 
 - `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews store structured `{text, cls, tsC, tsE}` entries so run permalinks can preserve prompt echo and timestamp metadata. Also stores `output_search_text` (plain text extracted from the full artifact when available, otherwise the preview) for FTS indexing. Persists across restarts. Pruned by `permalink_retention_days`.
 - `runs_fts` — FTS5 virtual table (content table backed by `runs`, `content_rowid=rowid`) indexing the `command` and `output_search_text` columns. Uses the trigram tokenizer when available (SQLite ≥ 3.38), falling back to unicode61. Kept in sync with `runs` via INSERT/DELETE triggers. Enables history drawer full-text search across both command text and stored run output.
-- `run_output_artifacts` — metadata rows pointing at compressed full-output artifacts under `./data/run-output/`. This keeps the `runs` table lean while still allowing the canonical `/history/<id>` permalink to serve full output when it exists.
+- `run_output_artifacts` — metadata rows pointing at compressed full-output artifacts under `<data_dir>/run-output/`. This keeps the `runs` table lean while still allowing the canonical `/history/<id>` permalink to serve full output when it exists.
 - `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls, tsC, tsE}` objects with raw ANSI codes and timestamp data for accurate HTML export reproduction, and now feeds the `SNAPSHOT` rows in the shared history surfaces.
 - `session_tokens` — one row per issued named session token `(token TEXT PRIMARY KEY, created TEXT)`. Used to validate `tok_`-prefixed `X-Session-ID` headers and to support `session-token list` and `session-token revoke`.
 - `session_preferences` — one row per session ID `(session_id TEXT PRIMARY KEY, preferences TEXT, updated TEXT)`. Stores the normalized Options snapshot that follows a named session token across browsers while still allowing browser-local UUID sessions to keep independent defaults.
@@ -769,7 +769,7 @@ The container uses two unprivileged system users:
 
 - `appuser`
   - owns the Flask/Gunicorn web process
-  - owns `./data` and can read or write the SQLite database and artifact metadata
+  - owns the configured data directory and can read or write the SQLite database and artifact metadata
 - `scanner`
   - owns all user-submitted command processes
   - does not get write access to `./data`
@@ -777,7 +777,7 @@ The container uses two unprivileged system users:
 
 The container starts as root only long enough for `entrypoint.sh` to fix `/data` ownership after volume mount, normalize the optional workspace root, set `/tmp` to `1777`, pre-create `/tmp/.config` and `/tmp/.cache` for `scanner`, and then drop to `appuser` via `gosu`.
 
-For workspace-backed host bind mounts, the host path should already be owned by the numeric UID/GID for the image's `appuser` account. The current image creates `appuser` as `995:995` and `scanner` as `994:994`, with `scanner` also in the `appuser` group. The runtime still attempts to repair ownership and modes on startup, but pre-setting the bind mount keeps rootless Docker, NFS-like mounts, and stricter host policies from leaving the workspace root owned by `root:root`. The expected mode model is `0730` for the workspace root, `3730` for hashed session directories, `0640` for app-created files, and `0660` for command-created files that must remain writable by the `scanner` process through its supplementary `appuser` group.
+For workspace-backed host bind mounts, the host path should already be owned by the numeric UID/GID for the image's `appuser` account. The current image creates `appuser` as `995:995` and `scanner` as `994:994`, and launches scanner commands with the shared `appuser` run group when executing user commands. The runtime still attempts to repair ownership and modes on startup, but pre-setting the bind mount keeps rootless Docker, NFS-like mounts, and stricter host policies from leaving the workspace root owned by `root:root`. The expected mode model is `0730` for the workspace root, `3730` for hashed session directories, `0640` for app-created files, and `0660` for command-created files that must remain writable by the `scanner` process through the shared `appuser` run group.
 
 Workspace cleanup is request-driven rather than a separate daemon. Each worker checks periodically before handling a request, then calls the backend cleanup helper when workspace storage is enabled. Cleanup evaluates the hashed session directory mtime as the workspace activity marker and only deletes resolved `sess_*` roots under the configured workspace root.
 
@@ -823,10 +823,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 956
-- `vitest`: 795
+- `pytest`: 972
+- `vitest`: 805
 - `playwright`: 209
-- total: 1,960
+- total: 1,986
 
 ### Testing Architecture
 
@@ -844,7 +844,7 @@ The browser test harness mirrors production constraints rather than abstracting 
 - the frontend remains a no-build classic-script app, so `Vitest` uses extraction helpers instead of converting the runtime to ES modules
 - `Playwright` uses two configs: a simple single-project default config for VS Code/debugging and a parallel CLI config that balances the suite across 5 isolated projects
 - the standalone demo/capture Playwright configs share one visual-contract file so desktop/mobile viewport, density, touch, token, and seeded-history assumptions stay aligned across recording and screenshot flows
-- each parallel browser project gets its own Flask server port plus isolated `APP_DATA_DIR` state so SQLite history, run-output artifacts, and limiter/process state do not collide across workers
+- each parallel browser project gets its own Flask server port plus isolated internal `APP_DATA_DIR` state so SQLite history, run-output artifacts, and limiter/process state do not collide across workers
 - backend tests keep the app’s real relative-path assumptions by changing into `app/` before imports
 - the browser suite also carries focused regressions for the split welcome specs, pipe-stage autocomplete, and the responsive FAQ limits renderer because those are easiest to verify in the real UI
 

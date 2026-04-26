@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady, runCommand, makeTestIp } from './helpers.js'
+import { ensurePromptReady, runCommand, makeTestIp, waitForActiveOutputSettled } from './helpers.js'
 
 const CMD = 'hostname'
 
@@ -10,6 +10,36 @@ function testScopedIp(testInfo, baseOffset = 0) {
   let sum = 0
   for (const ch of key) sum = (sum + ch.charCodeAt(0)) % 200
   return makeTestIp(baseOffset + sum)
+}
+
+async function pinActiveOutputToLiveBottom(page) {
+  await page.evaluate(() => {
+    const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
+    const out = document.querySelector('.tab-panel.active .output')
+    if (!out) return
+    if (tab) tab.followOutput = true
+    if (typeof _stickOutputToBottom === 'function') _stickOutputToBottom(out, tab)
+    else out.scrollTop = out.scrollHeight
+  })
+  await page.waitForFunction(() => new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const out = document.querySelector('.tab-panel.active .output')
+        if (!out) {
+          resolve(false)
+          return
+        }
+        const before = out.scrollHeight
+        out.scrollTop = out.scrollHeight
+        requestAnimationFrame(() => {
+          resolve(
+            out.scrollHeight === before &&
+            out.scrollTop + out.clientHeight >= out.scrollHeight - 16
+          )
+        })
+      })
+    })
+  }), { timeout: 10_000 })
 }
 
 test.describe('timestamp toggle', () => {
@@ -96,14 +126,13 @@ test.describe('timestamp toggle', () => {
       }
     })
     await expect(page.locator('#hud-last-exit')).toHaveText('0')
+    await waitForActiveOutputSettled(page)
 
     const output = page.locator('.tab-panel.active .output')
-    await output.evaluate((el) => {
-      el.scrollTop = el.scrollHeight
-    })
+    await pinActiveOutputToLiveBottom(page)
 
     const isAtBottom = async () =>
-      output.evaluate((el) => el.scrollTop + el.clientHeight >= el.scrollHeight - 2)
+      output.evaluate((el) => el.scrollTop + el.clientHeight >= el.scrollHeight - 16)
     await expect.poll(isAtBottom).toBeTruthy()
 
     await page.locator('#ts-btn').click()

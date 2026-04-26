@@ -5,6 +5,10 @@
 let _workspaceFiles = [];
 let _workspaceLoaded = false;
 
+function isWorkspaceEnabled() {
+  return !!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true);
+}
+
 function _formatWorkspaceBytes(bytes) {
   const value = Number(bytes) || 0;
   if (value < 1024) return `${value} B`;
@@ -105,7 +109,7 @@ function renderWorkspaceFiles(payload = {}) {
   if (!_workspaceFiles.length) {
     const empty = document.createElement('div');
     empty.className = 'workspace-empty';
-    empty.textContent = 'No workspace files yet. Create a text file to use in future workspace-aware commands.';
+    empty.textContent = 'No session files yet. Create a text file or save command output to use with file-enabled commands.';
     workspaceFileList.appendChild(empty);
     return;
   }
@@ -161,6 +165,7 @@ function renderWorkspaceFiles(payload = {}) {
 }
 
 async function refreshWorkspaceFiles() {
+  if (!isWorkspaceEnabled()) throw new Error('Files are disabled on this instance');
   setWorkspaceMessage('');
   if (workspaceSummary) workspaceSummary.textContent = 'Loading…';
   const resp = await apiFetch('/workspace/files');
@@ -170,6 +175,7 @@ async function refreshWorkspaceFiles() {
 }
 
 async function refreshWorkspaceFileCache() {
+  if (!isWorkspaceEnabled()) return _workspaceFiles;
   try {
     const resp = await apiFetch('/workspace/files');
     const data = await _workspaceJson(resp);
@@ -188,7 +194,7 @@ function getWorkspaceAutocompleteFileHints() {
     const path = String(file.path || '').trim();
     return {
       value: path,
-      description: `workspace file · ${_formatWorkspaceBytes(file.size)}`,
+      description: `session file · ${_formatWorkspaceBytes(file.size)}`,
     };
   }).filter(item => item.value);
 }
@@ -240,6 +246,7 @@ async function downloadWorkspaceFile(path) {
 }
 
 async function openWorkspace() {
+  if (!isWorkspaceEnabled()) return;
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   showWorkspaceOverlay();
@@ -254,6 +261,24 @@ async function openWorkspace() {
     if (workspaceSummary) workspaceSummary.textContent = 'Unavailable';
     setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to load workspace'), 'error');
   }
+}
+
+async function openWorkspaceEditorFromCommand(action = 'add', path = '') {
+  if (!isWorkspaceEnabled()) return false;
+  await openWorkspace();
+  const fileName = String(path || '').trim();
+  if (String(action || '').toLowerCase() === 'edit' && fileName) {
+    try {
+      const data = await readWorkspaceFile(fileName);
+      showWorkspaceEditor(data.path || fileName, data.text || '');
+    } catch (err) {
+      showWorkspaceEditor(fileName, '');
+      setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to load session file'), 'error');
+    }
+    return true;
+  }
+  showWorkspaceEditor(fileName, '');
+  return true;
 }
 
 function closeWorkspace() {
@@ -300,7 +325,7 @@ workspaceEditor?.addEventListener('submit', async (event) => {
   try {
     await saveWorkspaceFile(workspacePathInput?.value || '', workspaceTextInput?.value || '');
   } catch (err) {
-    setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to save workspace file'), 'error');
+    setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to save session file'), 'error');
   }
 });
 workspaceFileList?.addEventListener('click', event => {
@@ -319,5 +344,6 @@ if (typeof window !== 'undefined') {
   window.refreshWorkspaceFileCache = refreshWorkspaceFileCache;
   window.getWorkspaceAutocompleteFileHints = getWorkspaceAutocompleteFileHints;
   window.renderWorkspaceFiles = renderWorkspaceFiles;
-  setTimeout(() => { refreshWorkspaceFileCache(); }, 0);
+  window.openWorkspaceEditorFromCommand = openWorkspaceEditorFromCommand;
+  if (isWorkspaceEnabled()) setTimeout(() => { refreshWorkspaceFileCache(); }, 0);
 }

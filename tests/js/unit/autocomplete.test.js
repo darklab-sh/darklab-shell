@@ -224,6 +224,36 @@ describe('autocomplete helpers', () => {
     expect(input.value).toBe('ping ')
   })
 
+  it('expands example suggestions to the command root before cycling examples', () => {
+    const { acExpandSharedPrefix } = loadAutocompleteFns()
+    const input = document.getElementById('cmd')
+    input.value = 'nsl'
+    input.setSelectionRange(3, 3)
+
+    const expanded = acExpandSharedPrefix([
+      {
+        value: 'nslookup darklab.sh',
+        insertValue: 'nslookup darklab.sh',
+        replaceStart: 0,
+        replaceEnd: 3,
+        isExample: true,
+        completionPrefix: 'nslookup',
+      },
+      {
+        value: 'nslookup -type=MX darklab.sh',
+        insertValue: 'nslookup -type=MX darklab.sh',
+        replaceStart: 0,
+        replaceEnd: 3,
+        isExample: true,
+        completionPrefix: 'nslookup',
+      },
+    ])
+
+    expect(expanded).toBe(true)
+    expect(input.value).toBe('nslookup')
+    expect(input.selectionStart).toBe('nslookup'.length)
+  })
+
   it('expands the shared prefix for contextual token suggestions in place', () => {
     const { acExpandSharedPrefix } = loadAutocompleteFns()
     const input = document.getElementById('cmd')

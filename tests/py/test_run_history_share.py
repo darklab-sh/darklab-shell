@@ -741,12 +741,12 @@ class TestRunStreaming:
             )
             list_resp = client.post(
                 "/run",
-                json={"command": "workspace list"},
+                json={"command": "file list"},
                 headers={"X-Session-ID": session},
             )
             show_resp = client.post(
                 "/run",
-                json={"command": "workspace show targets.txt"},
+                json={"command": "file show targets.txt"},
                 headers={"X-Session-ID": session},
             )
 
@@ -761,7 +761,7 @@ class TestRunStreaming:
 
         assert show_resp.status_code == 200
         show_body = show_resp.get_data(as_text=True)
-        assert "workspace: targets.txt\\n" in show_body
+        assert "file: targets.txt\\n" in show_body
         assert "darklab.sh\\n" in show_body
         assert "ip.darklab.sh\\n" in show_body
 
@@ -796,7 +796,7 @@ class TestRunStreaming:
             )
             help_resp = client.post(
                 "/run",
-                json={"command": "workspace help"},
+                json={"command": "file help"},
                 headers={"X-Session-ID": session},
             )
 
@@ -807,7 +807,7 @@ class TestRunStreaming:
 
         assert cat_resp.status_code == 200
         cat_body = cat_resp.get_data(as_text=True)
-        assert "workspace: urls.txt\\n" in cat_body
+        assert "file: urls.txt\\n" in cat_body
         assert "https://ip.darklab.sh\\n" in cat_body
 
         assert help_resp.status_code == 200

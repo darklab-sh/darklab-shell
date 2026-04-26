@@ -1066,18 +1066,18 @@ body #history-panel { background: var(--theme-history-panel-bg); }
   color: color-mix(in srgb, var(--muted) 55%, transparent);
 }
 .search-signal-chip {
-  appearance: none;
   background: transparent;
   border: 0;
   color: inherit;
   font: inherit;
+  min-height: 0;
   padding: 0;
-  cursor: pointer;
 }
 .search-signal-chip:hover,
 .search-signal-chip:focus-visible {
   color: var(--text);
-  outline: none;
+  background: transparent;
+  border-color: transparent;
 }
 .tabbar-chrome:hover .search-signal-summary,
 #search-toggle-btn:hover + .search-signal-summary,

@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 956
-- `vitest`: 795
+- `pytest`: 972
+- `vitest`: 805
 - `playwright`: 209
-- total: 1,960
+- total: 1,986
 
 This document is organized in two parts:
 
@@ -202,7 +202,7 @@ Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py
 
 ### Container Smoke Test
 
-`scripts/container_smoke_test.sh` builds a fresh container image, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. The shared corpus includes both `app/conf/commands.yaml` examples and workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. It catches drift between those surfaced commands and actual tool behavior — renamed flags, changed output, or missing tools. Not part of the default fast loop; run after Dockerfile, packaged-tool, base-image, command-registry example changes, or workflow command changes.
+`scripts/container_smoke_test.sh` builds a fresh container image, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. The shared corpus includes both `app/conf/commands.yaml` examples and workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. It also enables Files in the smoke container and runs focused workspace fixtures for command flags that read session files (`nmap -iL`) and write session files (`curl -o`). The fixture removes stale `darklab_shell-test-*` Compose containers/networks/volumes before startup and after teardown so interrupted local runs do not leave Redis or shell containers behind. It catches drift between those surfaced commands and actual tool behavior — renamed flags, changed output, missing tools, or broken workspace path rewriting. Not part of the default fast loop; run after Dockerfile, packaged-tool, base-image, command-registry example changes, workspace file-flag changes, or workflow command changes.
 
 ```bash
 ./scripts/container_smoke_test.sh                           # full run
@@ -327,6 +327,10 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadConfig.test_share_redaction_enabled_defaults_true` | Checks that share redaction defaults enabled when omitted from config. |
 | `TestLoadConfig.test_get_share_redaction_rules_includes_builtins_and_custom_rules_when_enabled` | Checks that effective share redaction rules include the built-in baseline plus operator rules when enabled. |
 | `TestLoadConfig.test_get_share_redaction_rules_returns_empty_when_disabled` | Checks that effective share redaction rules are empty when the feature is disabled. |
+| `TestLoadConfig.test_resolve_data_dir_prefers_app_data_dir_environment_override` | Verifies that the internal `APP_DATA_DIR` test/development override takes precedence over configured `data_dir`. |
+| `TestLoadConfig.test_resolve_data_dir_uses_configured_data_dir_when_environment_is_unset` | Verifies that operator-configured `data_dir` is used when the internal environment override is absent. |
+| `TestLoadConfig.test_resolve_data_dir_falls_back_to_tmp_when_data_is_not_writable` | Verifies that auto-detection falls back to `/tmp` when image-created `/data` is not writable. |
+| `TestLoadConfig.test_resolve_data_dir_rejects_unwritable_configured_data_dir` | Verifies that an explicit but unwritable `data_dir` fails loudly instead of silently falling back. |
 | `TestSessionWorkspace.test_disabled_workspace_rejects_operations` | Verifies that workspace helpers reject operations while the feature is disabled. |
 | `TestSessionWorkspace.test_session_workspace_uses_hashed_session_directory` | Verifies that session workspace directories use hashed session names instead of raw session identifiers. |
 | `TestSessionWorkspace.test_write_read_list_delete_text_file` | Verifies the backend workspace text-file lifecycle for write, read, list, usage, and delete operations. |
@@ -346,6 +350,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadFaq.test_markdown_style_markup_renders_to_answer_html` | Checks that markdown style markup renders to answer HTML. |
 | `TestLoadFaq.test_entries_missing_answer_filtered_out` | Checks that entries missing answer filtered out. |
 | `TestLoadFaq.test_local_overlay_appends_entries` | Checks that local overlay appends entries. |
+| `TestLoadFaq.test_workspace_feature_entry_hidden_when_workspace_disabled` | Verifies that FAQ entries tagged with `feature: workspace` are hidden when Files are disabled. |
+| `TestLoadFaq.test_workspace_feature_entry_visible_when_workspace_enabled` | Verifies that FAQ entries tagged with `feature: workspace` are visible when Files are enabled. |
 | `TestThemeRegistry.test_missing_label_falls_back_to_humanized_filename` | Checks that missing label falls back to humanized filename. |
 | `TestThemeRegistry.test_unknown_keys_are_ignored_but_valid_css_values_survive` | Checks that unknown keys are ignored but valid css values survive. |
 | `TestThemeRegistry.test_malformed_yaml_falls_back_to_defaults_without_crashing` | Checks that malformed YAML falls back to defaults without crashing. |
@@ -364,6 +370,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestThemeRegistry.test_load_all_faq_appends_custom_entries_after_builtin_items` | Checks that load all FAQ appends custom entries after builtin items. |
 | `TestThemeRegistry.test_load_all_faq_uses_project_readme_in_builtin_answer` | Checks that load all FAQ uses project readme in builtin answer. |
 | `TestThemeRegistry.test_load_all_faq_uses_config_project_readme_by_default` | Checks that load all FAQ uses the config project readme by default. |
+| `TestThemeRegistry.test_load_all_faq_promotes_workspace_builtin_entry_when_enabled` | Verifies that the built-in Files FAQ appears near the top of the FAQ when session Files are enabled. |
+| `TestThemeRegistry.test_load_all_faq_hides_workspace_builtin_entry_when_disabled` | Verifies that the built-in Files FAQ is hidden when session Files are disabled. |
 | `TestThemeRegistry.test_load_all_faq_clarifies_snapshot_vs_run_permalink` | Checks that the built-in FAQ explains the difference between share snapshots and run permalinks. |
 | `TestThemeRegistry.test_load_all_faq_describes_built_in_shell_features` | Checks that the built-in FAQ describes both built-in commands and the allowlisted pipe helpers. |
 | `TestPathBlockingEdgeCases.test_tmp_at_end_of_command` | Checks that /tmp at end of command. |
@@ -425,8 +433,10 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunOutputCapture.test_full_output_artifact_loads_legacy_plain_text_rows` | Checks that full output artifact loads legacy plain text rows. |
 | `TestRunOutputCapture.test_missing_hints_file_returns_empty_list` | Checks that missing hints file returns empty list. |
 | `TestRunOutputCapture.test_hints_loader_ignores_blank_lines_and_comments` | Checks that hints loader ignores blank lines and comments. |
+| `TestRunOutputCapture.test_hints_loader_skips_workspace_section_when_disabled` | Verifies that workspace-scoped welcome hints are hidden when Files are disabled and restored when Files are enabled. |
 | `TestMobileWelcomeHintLoading.test_missing_mobile_hints_file_returns_empty_list` | Checks that missing mobile hints file returns empty list. |
 | `TestMobileWelcomeHintLoading.test_mobile_hints_loader_ignores_blank_lines_and_comments` | Checks that mobile hints loader ignores blank lines and comments. |
+| `TestMobileWelcomeHintLoading.test_mobile_hints_loader_skips_workspace_section_when_disabled` | Verifies that workspace-scoped mobile welcome hints are hidden when Files are disabled and restored when Files are enabled. |
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_spread_sensitive_roots` | Verifies that the smoke-test command corpus spaces repeated `dig` and `whois` commands apart during smoke execution without changing the source-owned registry or workflow order. |
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_include_registry_examples_and_workflows` | Verifies that the shared container smoke corpus includes both registry examples and workflow commands while deduplicating overlaps in stable order. |
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_render_workflow_defaults` | Verifies that workflow-backed smoke commands render declared default input values instead of leaking raw `{{token}}` placeholders into the shared smoke corpus. |
@@ -476,11 +486,13 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | --- | --- |
 | `test_docker_reach_host` | Checks docker reach host handling. |
 | `test_parse_compose_port_output` | Checks that parse compose port output. |
+| `test_compose_projects_from_container_names_filters_smoke_projects` | Verifies that stale-container cleanup extracts only smoke-test Compose project names from Docker container names. |
 | `test_post_run_kills_early_when_stop_text_is_seen` | Checks that post run kills early when stop text is seen. |
 | `test_needs_nuclei_template_warmup` | Checks that the smoke suite warms nuclei templates only when scan-style nuclei commands are in the selected corpus. |
 | `test_container_smoke_test_startup` | Checks that container smoke test startup. |
 | `test_container_smoke_test_expectations_cover_all_user_facing_commands` | Checks that the smoke-test expectation fixture covers every command in the shared user-facing smoke corpus. |
 | `test_container_smoke_test_command_matches_expected_output` | Checks that each smoke command matches expected output, retrying transient failures with `RUN_CONTAINER_SMOKE_TEST_RETRIES` before failing. |
+| `test_container_smoke_test_workspace_file_flags` | Verifies that the built image can create workspace files through the API, run workspace-enabled input/output flags through `/run`, read generated files back, and clean up through the workspace API. |
 
 #### `test_logging.py`
 
@@ -667,6 +679,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIsCommandAllowedEdges.test_workspace_flags_cover_common_list_wordlist_and_output_tools` | Verifies workspace read/write flag rewrites for `pd-httpx`, `gobuster`, `naabu`, and `katana` using the real command registry metadata. |
 | `TestFakeCommandResolution.test_documented_fake_commands_are_backed_by_runtime_dispatch` | Checks that every entry in `_DOCUMENTED_FAKE_COMMANDS` has a corresponding runtime dispatch handler. |
 | `TestFakeCommandResolution.test_resolves_supported_fake_commands` | Checks that resolves supported fake commands. |
+| `TestFakeCommandResolution.test_workspace_fake_commands_are_hidden_when_disabled` | Verifies that file built-ins and aliases stop resolving when Files are disabled. |
 | `TestFakeCommandResolution.test_rejects_non_fake_commands` | Checks that rejects non fake commands. |
 
 #### `test_routes.py`
@@ -677,6 +690,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIndexRoute.test_returns_html` | Checks returns HTML handling. |
 | `TestIndexRoute.test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button` | Checks that desktop diagnostics link opens in new tab while mobile action stays button. |
 | `TestIndexRoute.test_bootstrapped_app_config_matches_config_route` | Verifies that the server-rendered APP_CONFIG bootstrap JSON matches the `/config` payload. |
+| `TestIndexRoute.test_workspace_menu_affordances_follow_config` | Verifies that desktop and mobile Files entry points are rendered only when workspace storage is enabled. |
 | `TestHealthRoute.test_returns_200_when_db_ok` | Returns 200 when database ok. |
 | `TestHealthRoute.test_response_is_json` | Checks response is JSON handling. |
 | `TestHealthRoute.test_db_true_when_sqlite_available` | Checks that database true when SQLite available. |
@@ -831,6 +845,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWelcomeRoute.test_returns_list` | Checks returns list handling. |
 | `TestWelcomeRoute.test_returns_cmd_and_out_fields_when_configured` | Returns command and out fields when configured. |
 | `TestWelcomeRoute.test_returns_empty_list_when_no_welcome_file` | Returns empty list when no welcome file. |
+| `TestAutocompleteWorkspaceRoute.test_workspace_roots_follow_workspace_config` | Verifies that file built-in roots are included in autocomplete only when Files are enabled. |
 | `TestAutocompleteRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestAutocompleteRoute.test_has_suggestions_key` | Checks has suggestions key handling. |
 | `TestAutocompleteRoute.test_returns_configured_context` | Checks that the autocomplete endpoint returns the configured context object. |
@@ -898,7 +913,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunStreaming.test_fake_commands_lists_built_in_and_external_catalogs` | Checks that fake `commands` prints built-in and allowed external sections while deduping external command variants down to roots. |
 | `TestRunStreaming.test_fake_commands_supports_built_in_only_filter` | Checks that `commands --built-in` prints only the built-in command section. |
 | `TestRunStreaming.test_fake_commands_supports_external_only_filter` | Checks that `commands --external` prints only the allowed external command section. |
-| `TestRunStreaming.test_fake_workspace_lists_shows_and_removes_session_files` | Verifies that the `workspace` built-in can list, show, and remove session-owned workspace files. |
+| `TestRunStreaming.test_fake_workspace_lists_shows_and_removes_session_files` | Verifies that the `file` built-in can list, show, and remove session-owned files. |
 | `TestRunStreaming.test_fake_workspace_aliases_list_and_show_session_files` | Verifies that `ls` lists session workspace files and `cat <file>` shows a session workspace file without exposing arbitrary filesystem access. |
 | `TestRunStreaming.test_fake_shortcuts_lists_current_shortcuts` | Checks that fake shortcuts lists current shortcuts. |
 | `TestRunStreaming.test_fake_shortcuts_renders_mac_keys_for_mac_user_agent` | Confirms a Macintosh User-Agent switches the built-in command's Tabs/UI rendering to `Option+*` chords. |
@@ -1182,7 +1197,8 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `keeps config command output pinned to the tail when the tab is already following` | Verifies that terminal-native `config set` output preserves tail-follow state after async preference application. |
 | `serves runtime autocomplete context for theme and config values` | Verifies that theme slugs, config keys, and config values are generated into the shared autocomplete context instead of duplicated static lists. |
 | `serves runtime autocomplete context for built-in command lookup helpers` | Verifies that runtime built-in context covers `session-token`, simple built-ins, and dynamic `man` / `which` / `type` lookup suggestions. |
-| `serves loaded workspace files as workspace command autocomplete values` | Verifies that loaded session workspace files are offered as autocomplete values for `workspace show`, `workspace rm`, and `cat`. |
+| `serves loaded workspace files as file command autocomplete values` | Verifies that loaded session files are offered as autocomplete values for `file show`, `file edit`, `file rm`, and `cat`. |
+| `hides workspace built-ins from runtime autocomplete when Files are disabled` | Verifies that file commands and aliases are removed from runtime autocomplete when the operator disables Files. |
 | `keeps code-owned built-ins out of commands.yaml` | Verifies that app-owned built-ins are not duplicated in the operator-facing command registry. |
 | `groups theme cards into labeled sections in the preview modal` | Verifies that groups theme cards into labeled sections in the preview modal. |
 | `falls back to the current/default theme when localStorage references a missing theme` | Verifies that falls back to the current/default theme when localStorage references a missing theme. |
@@ -1197,6 +1213,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `does not run command when Enter is pressed in cmd input during welcome playback` | Verifies that does not run command when Enter is pressed in cmd input during welcome playback. |
 | `renders the shell prompt line from composer state instead of the stale hidden input` | Verifies that renders the shell prompt line from composer state instead of the stale hidden input. |
 | `persists only non-running tabs for session restore` | Verifies that the browser session snapshot excludes active runs and only saves non-running tabs for reload restore. |
+| `persists output signal metadata for session restore` | Verifies that findings, warning, error, and summary metadata survives browser refresh state snapshots. |
 | `restores saved non-running tabs and active draft state from session storage` | Verifies that saved tab labels, drafts, and transcript previews rebuild from browser session storage after reload. |
 | `preserves a non-active tab draft even when createTab activation would overwrite it during restore` | Verifies that the restore flow reapplies saved drafts after tab creation so a non-active tab draft survives restore-time activation churn. |
 | `preserves the last created non-active tab draft when the final restored active tab is different` | Verifies that the final active-tab selection in session restore does not wipe the last created non-active tab's saved draft. |
@@ -1317,6 +1334,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `computes the shared prefix across multiple suggestions` | Verifies that computes the shared prefix across multiple suggestions. |
 | `expands the composer value to the longest shared prefix when one exists` | Verifies that expands the composer value to the longest shared prefix when one exists. |
 | `expands through the shared trailing space when suggestions only diverge after the command root` | Verifies that expands through the shared trailing space when suggestions only diverge after the command root. |
+| `expands example suggestions to the command root before cycling examples` | Verifies that Tab expands partial command-root text to the root before cycling full example suggestions. |
 | `expands the shared prefix for contextual token suggestions in place` | Verifies that contextual token suggestions can expand to a shared in-token prefix without disturbing the rest of the command. |
 | `returns root-aware contextual matches and suppresses already-used flags` | Verifies that contextual autocomplete stays root-aware and does not resuggest flags already present in the command. |
 | `prefers runtime autocomplete suggestions for client-side commands` | Verifies that client-side commands can provide dynamic autocomplete suggestions before falling back to the static autocomplete registry. |
@@ -1657,9 +1675,12 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `clears the token only after answering yes to the terminal confirmation` | Verifies that `session-token clear` removes the active token only after an explicit `yes` answer. |
 | `leaves the session token untouched when the user answers no` | Verifies that answering `no` leaves the active session token unchanged. |
 | `treats Ctrl+C as no and cancels the clear confirmation` | Verifies that `Ctrl+C` cancels the terminal clear-confirm prompt and leaves the token untouched. |
-| `opens a terminal yes/no confirmation before deleting a workspace file` | Verifies that `workspace rm <file>` opens a transcript-owned confirmation prompt instead of deleting immediately. |
+| `does not intercept workspace delete aliases when Files are disabled` | Verifies that the browser does not run the client-side workspace delete confirmation path when Files are disabled. |
+| `opens a terminal yes/no confirmation before deleting a workspace file` | Verifies that `file rm <file>` opens a transcript-owned confirmation prompt instead of deleting immediately. |
+| `does not prompt before deleting a missing workspace file` | Verifies that `file rm <file>` checks that the session file exists before opening the confirmation prompt. |
 | `deletes the workspace file only after answering yes` | Verifies that `rm <file>` deletes through the workspace route only after an explicit `yes` answer. |
 | `leaves the workspace file untouched when the user answers no` | Verifies that answering `no` cancels the workspace delete confirmation without calling the delete route. |
+| `opens the Files editor from file add and file edit commands` | Verifies that `file add <file>` and `file edit <file>` open the Files editor with the requested file name. |
 | `copies the active token to the clipboard from the terminal` | Verifies that `session-token copy` copies the active token and reports success without exposing the raw value. |
 | `shows an error when clipboard copy fails` | Verifies that `session-token copy` surfaces a terminal error when the clipboard write fails. |
 | `filters client-side session-token output through the built-in pipe helpers` | Verifies that terminal-native `session-token` output supports built-in pipe helpers before rendering. |
@@ -1692,13 +1713,14 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `disables summarize when there are no signals` | Verifies that summarize stays disabled until the current tab has at least one finding, warning, error, or summary line. |
 | `uses server-provided signal metadata for scoped counts and highlights` | Verifies that server-provided line signals drive scoped search counts and highlight navigation. |
 | `does not classify plain text without server-provided signal metadata` | Verifies that untagged transcript text is treated as signal-unavailable instead of being reclassified by browser heuristics. |
-| `prefers the findings scope when opening search for findings-heavy output` | Verifies that search opens directly in findings mode when the current transcript is findings-heavy. |
+| `opens normal search in text mode even when findings are available` | Verifies that the standard search button path preserves keyboard-first text search while still showing signal availability. |
 | `scopes to summary lines and ignores detail rows` | Verifies that summaries mode targets roll-up lines without re-matching the detailed output underneath them. |
 | `does not count user-killed runs as errors` | Verifies that `[killed by user ...]` lines stay out of the error count and error scope. |
 | `appends a synthetic signal summary without inflating scoped counts` | Verifies that the generated command-findings block does not feed back into the signal counters or scoped search matches. |
 | `summarizes each command block in a reused tab` | Verifies that summarize walks every command block in the current tab instead of recapping only the first or last command. |
 | `groups summary output by server-provided command and target metadata` | Verifies that summarize clusters repeated command runs under the same server-provided command and target while preserving their findings, warnings, and summary lines. |
 | `deduplicates repeated full commands in grouped summary output` | Verifies that grouped command-findings summaries collapse identical full commands and show a repeat count instead of listing duplicate command labels. |
+| `deduplicates repeated findings in grouped summary output` | Verifies that command-findings summaries collapse identical finding lines and show a repeat count instead of listing duplicate findings. |
 | `groups summary output by server-provided command metadata for opaque command text` | Verifies that command-findings summaries use backend-provided command root and target metadata even when the displayed command text is opaque. |
 | `groups nc summary output by host instead of positional ports` | Verifies that `nc` summaries group repeated port checks by host while ignoring positional port arguments. |
 | `falls back to command summaries when a target cannot be extracted` | Verifies that summarize keeps the per-command output shape when a command has signals but no reliable target extractor. |
@@ -1740,6 +1762,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `renders workspace files with usage summary and row actions` | Verifies that workspace payloads render usage totals, file rows, and edit/download/delete actions. |
 | `shows an empty state when the workspace has no files` | Verifies that the workspace modal explains the empty state before any files exist. |
 | `keeps the editor hidden until the user starts or closes an edit` | Verifies that the workspace editor stays collapsed until New File or edit mode opens it, and closes cleanly afterward. |
+| `opens the editor with a prefilled file name from terminal commands` | Verifies that terminal-native file add/edit flows can open the Files editor with a prefilled file name. |
 | `shows file contents in a read-only viewer and keeps edit mode separate` | Verifies that View opens a read-only file display without exposing the larger edit form. |
 | `formats obvious JSON files in the read-only viewer` | Verifies that JSON-looking workspace files render as pretty-printed JSON in the read-only viewer. |
 | `serves current workspace files as autocomplete hints after the file list is loaded` | Verifies that the workspace file cache exposes file names as autocomplete hints. |
@@ -2058,7 +2081,9 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `runWelcome falls back to the static hint when /welcome/hints fails` | Verifies that runWelcome falls back to the static hint when /welcome/hints fails. |
 | `runWelcome respects welcome_sample_count of 0` | Verifies that runWelcome respects welcome_sample_count of 0. |
 | `runWelcome treats welcome_hint_rotations of 0 as infinite and 1 as static` | Verifies that runWelcome treats welcome_hint_rotations of 0 as infinite and 1 as static. |
+| `runWelcome randomizes the settled final hint instead of always using the first hint` | Verifies that fast-forwarded or animation-disabled welcome intros still choose a random displayed app hint. |
 | `runWelcome renders the settled intro immediately when animation is disabled` | Verifies that the welcome intro can render in its final state immediately when the animation preference is disabled. |
+| `runWelcome keeps rotating idle hints after rendering the static welcome` | Verifies that the static welcome mode still rotates app hints while the prompt is idle. |
 | `runWelcome can remove the intro completely and mount the prompt immediately` | Verifies that the welcome intro can be skipped entirely while still mounting a usable prompt. |
 | `settleWelcome renders the remaining intro immediately` | Verifies that settleWelcome renders the remaining intro immediately. |
 | `requestWelcomeSettle fast-forwards the intro even before the welcome plan is built` | Verifies that requestWelcomeSettle fast-forwards the intro even before the welcome plan is built. |
@@ -2443,7 +2468,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 
 Detailed runtime behaviour, flag reference, and capture/sync workflow for the opt-in Container Smoke Test. See the [Container Smoke Test](#container-smoke-test) overview above for motivation and the common run commands.
 
-The underlying `tests/py/test_container_smoke_test.py` fixture reads `docker-compose.yml`, builds a unique base image with `docker build --pull`, commits a runtime image with the repo `app/` tree and a generated `config.local.yaml`, and writes a temporary compose file that runs the committed image with no bind mounts. It strips fixed `container_name` values so locally running stacks do not collide with the test services. The wrapper performs a startup gate first — build, compose startup, or health-check failures stop the run immediately. When scan-style nuclei commands are in the selected corpus, the fixture warms `/tmp/nuclei-templates` with `nuclei -update-templates` before running command cases. Each command case retries transient failures before failing so externally backed tools can prove their command syntax and runtime wiring without making the full smoke suite fail on a single dropped external response. All test cases run to completion and failures are reported together at the end.
+The underlying `tests/py/test_container_smoke_test.py` fixture reads `docker-compose.yml`, builds a unique base image with `docker build --pull`, commits a runtime image with the repo `app/` tree and a generated `config.local.yaml`, and writes a temporary compose file that runs the committed image with no bind mounts. It strips fixed `container_name` values so locally running stacks do not collide with the test services. The generated smoke config disables rate limiting, enables Files with a tmpfs-backed workspace root, and keeps the command timeout short enough to catch hangs. Before startup and after teardown, the fixture also removes stale Docker resources from prior smoke projects whose names match `darklab_shell-test-*`; this protects local machines from Redis/shell containers left behind by interrupted or killed runs. The wrapper performs a startup gate first — build, compose startup, or health-check failures stop the run immediately. When scan-style nuclei commands are in the selected corpus, the fixture warms `/tmp/nuclei-templates` with `nuclei -update-templates` before running command cases. Each command case retries transient failures before failing so externally backed tools can prove their command syntax and runtime wiring without making the full smoke suite fail on a single dropped external response. Workspace fixture cases separately create/read/delete files through `/workspace/files` and run commands that consume or write those files through `/run`. All test cases run to completion and failures are reported together at the end.
 
 **`scripts/container_smoke_test.sh` flags:**
 

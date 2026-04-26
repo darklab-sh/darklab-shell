@@ -56,6 +56,7 @@ async function loadAppFns({
   hasPendingTerminalConfirm: hasPendingTerminalConfirmOverride = vi.fn(() => false),
   cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride = vi.fn(() => false),
   getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride = vi.fn(() => []),
+  appConfig = { workspace_enabled: true },
   sessionId = 'session-old',
 } = {}) {
   document.body.className = ''
@@ -414,7 +415,7 @@ async function loadAppFns({
       localStorage: storage,
       sessionStorage: sessionStore,
       apiFetch,
-      APP_CONFIG: {},
+      APP_CONFIG: appConfig,
       AnsiUp: FakeAnsiUp,
       showConfirm: showConfirmOverride || vi.fn(() => Promise.resolve(null)),
       isConfirmOpen: vi.fn(() => false),
@@ -1225,9 +1226,11 @@ describe('app helpers', () => {
     expect(context.commands.flags.map(item => item.value)).toEqual(['--built-in', '--external'])
     expect(context['session-token'].arg_hints.__positional__.map(item => item.value)).toContain('set <token>')
     expect(context['session-token'].arg_hints.set[0].value).toBe('<token>')
-    expect(context.workspace.arg_hints.__positional__.map(item => item.value)).toEqual([
+    expect(context.file.arg_hints.__positional__.map(item => item.value)).toEqual([
       'list',
       'show <file>',
+      'add <file>',
+      'edit <file>',
       'rm <file>',
       'help',
     ])
@@ -1244,23 +1247,38 @@ describe('app helpers', () => {
     )
   })
 
-  it('serves loaded workspace files as workspace command autocomplete values', async () => {
+  it('serves loaded workspace files as file command autocomplete values', async () => {
     const { getRuntimeAutocompleteContext } = await loadAppFns({
       getWorkspaceAutocompleteFileHints: () => [
-        { value: 'targets.txt', description: 'workspace file · 11 B' },
-        { value: 'ffuf.json', description: 'workspace file · 2 KB' },
+        { value: 'targets.txt', description: 'session file · 11 B' },
+        { value: 'ffuf.json', description: 'session file · 2 KB' },
       ],
     })
 
     const context = getRuntimeAutocompleteContext({})
 
-    expect(context.workspace.arg_hints.show.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
-    expect(context.workspace.arg_hints.rm.map(item => item.description)).toEqual([
-      'workspace file · 11 B',
-      'workspace file · 2 KB',
+    expect(context.file.arg_hints.show.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
+    expect(context.file.arg_hints.edit.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
+    expect(context.file.arg_hints.rm.map(item => item.description)).toEqual([
+      'session file · 11 B',
+      'session file · 2 KB',
     ])
     expect(context.cat.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
     expect(context.rm.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
+  })
+
+  it('hides workspace built-ins from runtime autocomplete when Files are disabled', async () => {
+    const { getRuntimeAutocompleteContext } = await loadAppFns({
+      appConfig: { workspace_enabled: false },
+    })
+
+    const context = getRuntimeAutocompleteContext({ curl: {} })
+
+    expect(context.file).toBeUndefined()
+    expect(context.cat).toBeUndefined()
+    expect(context.ls).toBeUndefined()
+    expect(context.rm).toBeUndefined()
+    expect(context.man.arg_hints.__positional__.map(item => item.value)).not.toContain('file')
   })
 
   it('keeps code-owned built-ins out of commands.yaml', () => {
@@ -1270,9 +1288,9 @@ describe('app helpers', () => {
     )
     const runtimeRoots = [
       'banner', 'cat', 'clear', 'commands', 'config', 'date', 'df', 'env', 'faq', 'fortune', 'free',
-      'groups', 'help', 'history', 'hostname', 'id', 'ip', 'jobs', 'last', 'limits', 'ls', 'man',
+      'file', 'groups', 'help', 'history', 'hostname', 'id', 'ip', 'jobs', 'last', 'limits', 'ls', 'man',
       'ps', 'pwd', 'retention', 'rm', 'route', 'session-token', 'shortcuts', 'stats', 'status', 'theme',
-      'tty', 'type', 'uname', 'uptime', 'version', 'workspace', 'which', 'who', 'whoami',
+      'tty', 'type', 'uname', 'uptime', 'version', 'which', 'who', 'whoami',
     ]
 
     expect(runtimeRoots.filter(root => yamlRoots.has(root))).toEqual([])
@@ -1683,6 +1701,52 @@ describe('app helpers', () => {
     expect(saved.tabs).toHaveLength(1)
     expect(saved.tabs[0].label).toBe('tab 1')
     expect(saved.tabs[0].draftInput).toBe('')
+  })
+
+  it('persists output signal metadata for session restore', async () => {
+    const tabs = [
+      {
+        id: 'tab-1',
+        label: 'tab 1',
+        command: 'host darklab.sh',
+        renamed: false,
+        draftInput: '',
+        st: 'idle',
+        exitCode: 0,
+        historyRunId: 'run-1',
+        previewTruncated: false,
+        fullOutputAvailable: true,
+        fullOutputLoaded: true,
+        rawLines: [
+          {
+            text: 'darklab.sh has address 104.21.4.35',
+            cls: '',
+            tsC: '12:00:00',
+            tsE: '+0.1s',
+            signals: ['findings'],
+            line_index: 0,
+            command_root: 'host',
+            target: 'darklab.sh',
+          },
+        ],
+        closing: false,
+      },
+    ]
+    const { persistTabSessionStateNow, sessionStorage, _getTabSessionStateKey } = await loadAppFns({
+      tabs,
+      activeTabId: 'tab-1',
+    })
+
+    persistTabSessionStateNow()
+
+    const saved = JSON.parse(sessionStorage.getItem(_getTabSessionStateKey()))
+    expect(saved.tabs[0].rawLines[0]).toMatchObject({
+      text: 'darklab.sh has address 104.21.4.35',
+      signals: ['findings'],
+      line_index: 0,
+      command_root: 'host',
+      target: 'darklab.sh',
+    })
   })
 
   it('restores saved non-running tabs and active draft state from session storage', async () => {

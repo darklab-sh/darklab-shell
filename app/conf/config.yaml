@@ -44,6 +44,13 @@
 # Server default if unset: 50
 # recent_commands_limit: 50
 
+# Directory used for SQLite history and compressed full-output artifacts.
+# Leave unset for auto-detect: use /data when it is writable, otherwise fall
+# back to /tmp for local/dev runs. If set explicitly, startup requires the
+# directory to be writable.
+# Server default if unset: auto (/data if writable, otherwise /tmp)
+# data_dir: /data
+
 # Enable the built-in basic redaction model for snapshot permalinks and local
 # export actions (`save txt` / `save html`). When enabled, the app applies a
 # conservative built-in baseline before any operator-defined rules:
@@ -81,15 +88,15 @@
 
 # ── Per-session Workspace Storage ────────────────────────────────────────────
 #
-# Optional app-mediated file storage for future workspace-aware commands and UI
+# Optional app-mediated file storage for file-enabled commands and UI.
 # helpers. This does not enable shell navigation or redirection by itself.
 # Server default if unset: false
 # workspace_enabled: false
 #
 # Storage backend label. `tmpfs` is intended for short-lived in-memory storage;
-# `volume` is intended for a Docker-mounted path with longer-lived capacity.
+# `volume` is intended for a Docker-mounted bind mount or named volume.
 # The backend value documents operator intent; `workspace_root` controls the
-# actual filesystem location.
+# actual filesystem location and does not create a Docker mount by itself.
 # Server default if unset: tmpfs
 # workspace_backend: tmpfs
 #
@@ -97,9 +104,10 @@
 # Never point this at the app source tree, SQLite data directory, or host root.
 # Session directories are created sticky + setgid, and files are group-readable
 # for the app/scanner shared group without being world-readable.
-# The Docker entrypoint normalizes the default workspace root ownership and
-# permissions before dropping to appuser; if you use a different mounted path,
-# set WORKSPACE_ROOT to the same path or prepare it as appuser:appuser.
+# The Docker entrypoint normalizes WORKSPACE_ROOT ownership and permissions
+# before dropping to appuser. If you change this value, also update the matching
+# WORKSPACE_ROOT environment variable in docker-compose.yml, a Compose override,
+# or .env. .env is optional; it only supplies values consumed by Compose.
 # Server default if unset: /tmp/darklab_shell-workspaces
 # workspace_root: /tmp/darklab_shell-workspaces
 #

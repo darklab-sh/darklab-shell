@@ -227,10 +227,25 @@ class TestConfigRoute:
     def test_contains_expected_keys(self):
         client = get_client()
         data = json.loads(client.get("/config").data)
-        for key in ("app_name", "project_readme", "prompt_prefix", "default_theme", "max_tabs", "max_output_lines"):
+        for key in (
+            "app_name", "project_readme", "prompt_prefix", "default_theme",
+            "max_tabs", "max_output_lines", "workspace_enabled",
+        ):
             assert key in data
         assert "share_redaction_enabled" in data
         assert "share_redaction_rules" in data
+
+    def test_workspace_menu_affordances_follow_config(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {"workspace_enabled": False}):
+            disabled_body = client.get("/").get_data(as_text=True)
+        with mock.patch.dict("config.CFG", {"workspace_enabled": True}):
+            enabled_body = client.get("/").get_data(as_text=True)
+
+        assert 'data-action="workspace"' not in disabled_body
+        assert 'data-menu-action="workspace"' not in disabled_body
+        assert 'data-action="workspace"' in enabled_body
+        assert 'data-menu-action="workspace"' in enabled_body
 
     def test_max_tabs_is_int(self):
         client = get_client()
@@ -724,6 +739,20 @@ class TestAllowedCommandsRoute:
             data = json.loads(client.get("/allowed-commands").data)
         assert data["restricted"] is True
         assert data["groups"] == groups
+
+
+class TestAutocompleteWorkspaceRoute:
+    def test_workspace_roots_follow_workspace_config(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {"workspace_enabled": False}):
+            disabled = json.loads(client.get("/autocomplete").data)
+        with mock.patch.dict("config.CFG", {"workspace_enabled": True}):
+            enabled = json.loads(client.get("/autocomplete").data)
+
+        disabled_roots = set(disabled["builtin_command_roots"])
+        enabled_roots = set(enabled["builtin_command_roots"])
+        assert {"file", "cat", "ls", "rm"}.isdisjoint(disabled_roots)
+        assert {"file", "cat", "ls", "rm"}.issubset(enabled_roots)
 
 
 # ── /faq ──────────────────────────────────────────────────────────────────────

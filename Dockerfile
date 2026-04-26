@@ -79,9 +79,9 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # Create two unprivileged users:
 #   appuser — owns /data and runs Gunicorn (can write SQLite database)
 #   scanner — runs all user-submitted commands, no write access to /data
-# scanner is also a supplementary member of appuser so validated session
-# workspace files can use group-readable permissions instead of world-readable
-# permissions.
+# scanner is also launched with the shared appuser run group so validated
+# session workspace files can use group-readable permissions instead of
+# world-readable permissions.
 RUN groupadd -r appuser && useradd -r -g appuser appuser && \
     groupadd -r scanner && useradd -r -g scanner -G appuser -s /usr/sbin/nologin scanner
 
@@ -91,7 +91,8 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser && \
 RUN setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap && \
     setcap cap_net_raw,cap_net_admin+eip /usr/bin/masscan && \
     setcap cap_net_raw,cap_net_admin+eip /usr/local/bin/naabu && \
-    echo "appuser ALL=(scanner) NOPASSWD: ALL" >> /etc/sudoers
+    echo "appuser ALL=(scanner) NOPASSWD: ALL" >> /etc/sudoers && \
+    echo "appuser ALL=(scanner:appuser) NOPASSWD: ALL" >> /etc/sudoers
 
 # Pre-create /data owned by appuser with 700 permissions.
 # scanner user cannot write here. The entrypoint re-applies ownership

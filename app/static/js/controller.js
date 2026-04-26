@@ -836,6 +836,7 @@ function openSearchFromSignal(scope = null) {
     && searchScope === normalizedScope
   ) {
     navigateSearch(1);
+    refocusComposerAfterAction({ defer: true });
     return;
   }
   if (typeof prepareSearchBarForScope === 'function' && normalizedScope) {
@@ -845,6 +846,7 @@ function openSearchFromSignal(scope = null) {
   }
   showSearchBar();
   if (searchScope === 'text') focusElement(searchInput);
+  else refocusComposerAfterAction({ defer: true });
   runSearch();
 }
 
@@ -874,6 +876,7 @@ if (typeof searchScopeButtons !== 'undefined' && Array.isArray(searchScopeButton
     btn.addEventListener('click', () => {
       setSearchScope(btn.dataset.searchScope || 'text');
       if (searchScope === 'text') focusElement(searchInput);
+      else refocusComposerAfterAction({ defer: true });
     });
   });
 }
@@ -1496,8 +1499,7 @@ cmdInput.addEventListener('keydown', e => {
     e.preventDefault();
     if (acFiltered.length === 1) { acAccept(acFiltered[0]); }
     else if (acFiltered.length > 0) {
-      const _allExamples = acFiltered.every(item => item && item.isExample);
-      if (!_allExamples && typeof acExpandSharedPrefix === 'function' && acExpandSharedPrefix(acFiltered)) return;
+      if (typeof acExpandSharedPrefix === 'function' && acExpandSharedPrefix(acFiltered)) return;
       if (acIndex < 0 || !isAcDropdownOpen()) {
         acIndex = 0;
       } else if (e.shiftKey) {

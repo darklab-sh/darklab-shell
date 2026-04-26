@@ -1,5 +1,7 @@
 # Custom FAQ entries for this instance.
 # Each entry requires a 'question' and an 'answer' field.
+# Optional: add feature: workspace to show an entry only when Files/workspace
+# storage is enabled for the instance.
 # Use lightweight markup in 'answer' for formatting:
 #   **bold**  *italic*  __underline__  `inline code`
 #   [[cmd:ping]] or [[cmd:ping -c 1 127.0.0.1|ping chip]] for clickable command chips

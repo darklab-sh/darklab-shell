@@ -172,10 +172,6 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
   - Start narrow: nmap (open ports + service table), dig (records returned), curl (status code + redirect chain), openssl s_client (cert expiry + trust chain).
   - The structured output model (see Architecture) is the right long-term foundation; build this feature to be retro-fittable once that model is in place rather than requiring it up front.
 
-- **Capture pack review manifest**
-  - Generate a simple HTML or Markdown index alongside screenshot packs so designers, themers, and reviewers can browse labeled scenes quickly without opening dozens of PNGs by hand.
-  - Include theme, viewport, and scene labels in one place so capture packs are easier to share and audit.
-
 ### Later
 
 - **Saved command presets**
@@ -191,15 +187,6 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
   - Keep raw-shell usage intact while making common tasks easier.
   - Build these on top of a reusable command/workflow preset model rather than as a disconnected UI feature.
   - The autocomplete YAML already models command structure (`flags`, `expects_value`, `arg_hints`, `__positional__`). Forms should be a structured render of that same data — not a parallel model — so the two features stay consistent and share maintenance. Design against the structured command catalog (see Architecture) before building.
-
-- **Session dashboards**
-  - Add a compact session summary view. The lowest-complexity version of this is a `session` or `stats` built-in command rather than a dedicated page — it fits the shell-primary interaction model and reuses the existing fake-command layer.
-  - Built-in command output:
-    - command breakdown by tool root
-    - success/fail rates and average scan durations
-    - starred artifact count
-    - active session token status
-  - Natural fit with history, diagnostics, and session tokens.
 
 - **Run collections / case folders**
   - Let users group related runs and snapshots into named investigations or cases.
@@ -283,11 +270,6 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
     - multi-consumer fan-out instead of one transient SSE consumer
     - explicit lifecycle cleanup once runs complete
   - Best fit is a dedicated live-stream architecture pass rather than incremental UI polish.
-
-- **Structured command catalog**
-  - Move from plain-text allowlist-only metadata toward a richer command catalog model.
-  - This would unlock better autocomplete, command forms, grouped help, and policy hints.
-  - Design parameterized command forms (see Later) against this catalog model before building them — both features need the same structured command data and will diverge if built independently.
 
 - **Structured output model**
   - Preserve richer line/event metadata consistently for all runs.

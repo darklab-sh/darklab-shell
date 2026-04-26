@@ -516,7 +516,7 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
   - certificate and TLS verdict lines from `openssl s_client`, `sslscan`, `sslyze`, and `testssl`
 - Noise-heavy lines are intentionally excluded from findings when they behave like banners, progress meters, or startup chatter instead of actionable results.
 - User-killed runs are intentionally **not** counted as errors; the transcript still shows the kill line, but the signal counts stay focused on issues the operator may need to investigate.
-- The **summarize** button appends a synthetic **[command findings]** block to the active tab. The summary groups external command blocks by server-provided command and target metadata when present, merges repeated runs for the same command/target, collapses duplicate full-command labels with a repeat count, includes only command blocks that produced at least one finding/warning/error/summary line, and falls back to per-command sections when target metadata is unavailable.
+- The **summarize** button appends a synthetic **Command Findings:** block to the active tab. The summary groups external command blocks by server-provided command and target metadata when present, merges repeated runs for the same command/target, collapses duplicate full-command labels with a repeat count, includes only command blocks that produced at least one finding/warning/error/summary line, and falls back to per-command sections when target metadata is unavailable.
 - Built-in command output is intentionally excluded from findings, warnings, errors, summaries, and generated command-findings blocks so help/status/catalog text does not create review noise.
 - Summary blocks are helper UI output, not raw command output. They do not feed back into the signal counters or search matches.
 
@@ -684,7 +684,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - `help`, `commands`, `history`, `last`, `limits`, `retention`, `status`, `stats`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `fortune`, `jobs`, `shortcuts`, `clear`, `version`, and `whoami` are available in every session.
 - `status` prints a compact session summary: masked active session ID, session type, run count, snapshot count, starred-command count, whether saved Options exist for the session, active-job count, compact session file usage when Files are enabled, and the current instance-level save/retention limits.
 - `stats` prints session activity totals and external-tool command-root breakdowns: runs, snapshots, starred commands, active jobs, success rate, average duration, and the top non-built-in command roots by run count.
-- `workspace list`, `workspace show <file>`, `workspace rm <file>`, plus the convenience aliases `ls`, `cat <file>`, and `rm <file>`, expose keyboard-first access to the current session workspace when workspace storage is enabled. `workspace list` reports current file count, used quota, and remaining quota before listing files.
+- `file list`, `file show <file>`, `file add <file>`, `file edit <file>`, and confirmed `file rm <file>`, plus the convenience aliases `ls`, `cat <file>`, and confirmed `rm <file>`, expose keyboard-first access to the current session files when workspace storage is enabled. `file list` reports current file count, used quota, and remaining quota before listing files.
 - `theme` lists and applies runtime theme variants from the terminal. `config` lists, reads, and updates user options such as line numbers, timestamps, welcome behavior, share redaction defaults, run notifications, and HUD clock mode.
 - `ps` lists currently running processes for the session (PID, TTY, STAT, START, CMD columns), or shows a `no running processes` notice when idle.
 
@@ -722,16 +722,16 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Workspace access updates the hashed session directory activity timestamp. Periodic cleanup removes inactive `sess_*` directories after `workspace_inactivity_ttl_hours`; it does not delete individual files solely because their file timestamps are old.
 - File names are relative and display-friendly; absolute paths, traversal, backslashes, hidden names, symlinks, and paths outside the session root are rejected.
 - The Files panel can create, view, edit, download, and delete text files owned by the current session; obvious JSON files are pretty-printed in the read-only viewer.
-- The `workspace` built-in provides terminal access to the same file model through `workspace list`, `workspace show <file>`, and `workspace rm <file>`; `workspace list` reports file count, used quota, and remaining quota before listing files.
-- The `ls`, `cat <file>`, and `rm <file>` aliases map to workspace list/show/remove operations only; they do not expose arbitrary host/container filesystem access.
-- `workspace rm <file>` and `rm <file>` require the same transcript-owned yes/no confirmation model as other destructive terminal-native actions.
-- Loaded workspace file names feed autocomplete for `workspace show`, `workspace rm`, and `cat`.
+- The `file` built-in provides terminal access to the same file model through `file list`, `file show <file>`, `file add <file>`, `file edit <file>`, and confirmed `file rm <file>`; `file list` reports file count, used quota, and remaining quota before listing files.
+- The `ls`, `cat <file>`, and `rm <file>` aliases map to file list/show/remove operations only; they do not expose arbitrary host/container filesystem access.
+- `file rm <file>` and `rm <file>` first verify the file exists, then require the same transcript-owned yes/no confirmation model as other destructive terminal-native actions.
+- Loaded workspace file names feed autocomplete for `file show`, `file edit`, `file rm`, and `cat`.
 - Selected command flags declared in `commands.yaml` can consume or write session files. At execution time, user-facing names such as `targets.txt` are validated and rewritten to the session workspace path passed to the subprocess.
-- Shell navigation and redirection remain blocked; all file access must go through the Files panel, workspace routes, the `workspace` built-in, or explicitly declared command flags.
+- Shell navigation and redirection remain blocked; all file access must go through the Files panel, workspace routes, the `file` built-in, or explicitly declared command flags.
 
 **Configuration:** `workspace_enabled`, `workspace_backend`, `workspace_root`, `workspace_quota_mb`, `workspace_max_file_mb`, `workspace_max_files`, and `workspace_inactivity_ttl_hours` in `conf/config.yaml`; per-command `workspace_flags` in `conf/commands.yaml`.
 
-**Related files:** `app/workspace.py` (path, quota, permission, and cleanup helpers), `app/blueprints/workspace.py` (workspace file routes), `app/static/js/workspace.js` (Files panel), `app/fake_commands.py` (`workspace` built-in), `app/commands.py` (workspace flag validation and rewrite).
+**Related files:** `app/workspace.py` (path, quota, permission, and cleanup helpers), `app/blueprints/workspace.py` (workspace file routes), `app/static/js/workspace.js` (Files panel), `app/fake_commands.py` (`file` built-in), `app/commands.py` (workspace flag validation and rewrite).
 
 ---
 

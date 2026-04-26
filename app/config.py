@@ -68,6 +68,7 @@ def load_config(conf_dir=None):
         "default_theme":              "darklab_obsidian.yaml",
         "history_panel_limit":        50,
         "recent_commands_limit":      50,
+        "data_dir":                   "",
         "permalink_retention_days":   365,
         "log_level":                  "INFO",
         "log_format":                 "text",
@@ -136,6 +137,47 @@ def load_config(conf_dir=None):
 
 
 CFG = load_config()
+
+
+def _is_writable_directory(path):
+    try:
+        os.makedirs(path, exist_ok=True)
+        probe_path = os.path.join(path, f".darklab_write_probe_{os.getpid()}")
+        with open(probe_path, "w", encoding="utf-8") as f:
+            f.write("")
+        os.unlink(probe_path)
+        return True
+    except OSError:
+        return False
+
+
+def _configured_data_dir(value):
+    if value is None or isinstance(value, bool):
+        return ""
+    return str(value).strip()
+
+
+def _require_writable_data_dir(path, source):
+    resolved = os.path.expanduser(path)
+    if not _is_writable_directory(resolved):
+        raise RuntimeError(f"{source} is not writable: {resolved}")
+    return resolved
+
+
+def resolve_data_dir(cfg=None):
+    """Return the writable directory used for SQLite and run-output artifacts."""
+    env_data_dir = _configured_data_dir(os.environ.get("APP_DATA_DIR"))
+    if env_data_dir:
+        return _require_writable_data_dir(env_data_dir, "APP_DATA_DIR")
+
+    active_cfg = CFG if cfg is None else cfg
+    configured = _configured_data_dir(active_cfg.get("data_dir"))
+    if configured:
+        return _require_writable_data_dir(configured, "data_dir")
+
+    if _is_writable_directory("/data"):
+        return "/data"
+    return _require_writable_data_dir("/tmp", "fallback data_dir")  # nosec B108
 
 
 def get_share_redaction_rules(cfg=None):
@@ -751,16 +793,18 @@ def get_theme_entry(name, fallback="dark"):
         return THEME_REGISTRY_MAP[_theme_name_stem(fallback)]
     return _builtin_theme_entry("dark")
 
-# Scanner user wrapping — prepend sudo -u scanner to run commands as the
-# unprivileged scanner user. appuser (Gunicorn) is granted NOPASSWD sudo
-# rights to scanner in /etc/sudoers. Falls back to running directly if
-# sudo/scanner aren't available (local dev).
+# Scanner user wrapping — prepend sudo to run commands as the unprivileged
+# scanner user with the shared appuser group. The explicit run group keeps
+# validated workspace files readable/writable without making them world-accessible.
+# appuser (Gunicorn) is granted NOPASSWD sudo rights to that runas pair in
+# /etc/sudoers. Falls back to running directly if sudo/scanner aren't available
+# (local dev).
 SCANNER_PREFIX = []
 try:
     pwd.getpwnam("scanner")
     # Pass HOME=/tmp explicitly so nuclei (and other tools) use the tmpfs mount
     # for config/cache instead of /home/scanner which doesn't exist on the
     # read-only filesystem.
-    SCANNER_PREFIX = ["sudo", "-u", "scanner", "env", "HOME=/tmp"]
+    SCANNER_PREFIX = ["sudo", "-u", "scanner", "-g", "appuser", "env", "HOME=/tmp"]
 except KeyError:
     pass  # scanner user doesn't exist — local dev, run directly

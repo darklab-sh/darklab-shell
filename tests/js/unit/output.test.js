@@ -250,7 +250,7 @@ describe('appendLine', () => {
 
     _setLnMode('on')
     _setTsMode('elapsed')
-    appendLine('[command findings]', 'fake-signal-summary-header', 'tab-1')
+    appendLine('Command Findings:', 'fake-signal-summary-header', 'tab-1')
     appendLine('findings (2)', 'fake-signal-summary-section', 'tab-1')
     appendLine('- 443/tcp open https', 'fake-signal-summary-row', 'tab-1')
 

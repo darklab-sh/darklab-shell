@@ -22,10 +22,12 @@ import subprocess
 import tempfile
 import time
 import sys
+import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
 from collections.abc import Mapping, Sequence
+from urllib.error import HTTPError
 
 import pytest
 import yaml
@@ -47,6 +49,27 @@ SMOKE_COMMAND_RETRIES = int(
 SMOKE_COMMAND_RETRY_DELAY_SECONDS = float(
     os.environ.get("RUN_CONTAINER_SMOKE_TEST_RETRY_DELAY_SECONDS", "3")
 )
+SMOKE_PROJECT_PREFIX = "darklab_shell-test-"
+WORKSPACE_SMOKE_CASES: list[dict[str, object]] = [
+    {
+        "name": "nmap_reads_targets_file",
+        "setup_files": {
+            "targets.txt": "ip.darklab.sh\n",
+        },
+        "command": "nmap -iL targets.txt -p 80 --open",
+        "expected_text": ["80/tcp", "open"],
+        "cleanup_files": ["targets.txt"],
+    },
+    {
+        "name": "curl_writes_response_file",
+        "command": "curl -L -o response.html https://noc.darklab.sh",
+        "expected_text": [],
+        "assert_files": {
+            "response.html": ["<!DOCTYPE html", "darklab.sh - noc"],
+        },
+        "cleanup_files": ["response.html"],
+    },
+]
 
 UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
 TIME_RE = re.compile(r"\b\d{2}:\d{2}:\d{2}\b")
@@ -114,6 +137,89 @@ def _run_streaming(cmd: list[str], *, timeout: int) -> subprocess.CompletedProce
     return subprocess.CompletedProcess(cmd, proc.returncode, stdout, "")
 
 
+def _docker_names_matching(prefix: str) -> list[str]:
+    proc = _run(
+        [
+            "docker",
+            "ps",
+            "-a",
+            "--filter",
+            f"name={prefix}",
+            "--format",
+            "{{.Names}}",
+        ],
+        timeout=30,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return []
+    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+
+
+def _compose_projects_from_container_names(names: Sequence[str]) -> list[str]:
+    projects: list[str] = []
+    seen: set[str] = set()
+    pattern = re.compile(rf"^({re.escape(SMOKE_PROJECT_PREFIX)}[0-9a-f]{{8}})-")
+    for name in names:
+        match = pattern.match(name)
+        if not match:
+            continue
+        project = match.group(1)
+        if project not in seen:
+            seen.add(project)
+            projects.append(project)
+    return projects
+
+
+def _docker_rm(resource: str, ids: list[str]) -> None:
+    if not ids:
+        return
+    _run(["docker", resource, "rm", *ids], timeout=60, check=False)
+
+
+def _cleanup_compose_project_resources(project: str) -> None:
+    """Best-effort cleanup for smoke-test Compose resources.
+
+    The normal fixture uses `docker compose down`, but hard interrupts can
+    strand random-project resources after Python exits. Labels survive the
+    temp compose file, so use them to remove leftover containers, networks,
+    and volumes without needing the original YAML path.
+    """
+    label = f"com.docker.compose.project={project}"
+
+    containers = _run(
+        ["docker", "ps", "-a", "--filter", f"label={label}", "--format", "{{.ID}}"],
+        timeout=30,
+        check=False,
+    )
+    container_ids = [line.strip() for line in containers.stdout.splitlines() if line.strip()]
+    if container_ids:
+        _run(["docker", "rm", "-f", *container_ids], timeout=60, check=False)
+
+    networks = _run(
+        ["docker", "network", "ls", "--filter", f"label={label}", "--format", "{{.ID}}"],
+        timeout=30,
+        check=False,
+    )
+    _docker_rm("network", [line.strip() for line in networks.stdout.splitlines() if line.strip()])
+
+    volumes = _run(
+        ["docker", "volume", "ls", "--filter", f"label={label}", "--format", "{{.Name}}"],
+        timeout=30,
+        check=False,
+    )
+    _docker_rm("volume", [line.strip() for line in volumes.stdout.splitlines() if line.strip()])
+
+
+def _cleanup_stale_smoke_compose_projects(*, exclude: str | None = None) -> None:
+    projects = _compose_projects_from_container_names(_docker_names_matching(SMOKE_PROJECT_PREFIX))
+    for project in projects:
+        if project == exclude:
+            continue
+        print(f"[container-smoke-test] cleaning stale compose project: {project}", flush=True)
+        _cleanup_compose_project_resources(project)
+
+
 def _docker_reach_host() -> str:
     """Return the hostname used to reach ports published by Docker containers.
 
@@ -162,6 +268,20 @@ def test_docker_reach_host(monkeypatch: pytest.MonkeyPatch, docker_host: str | N
 )
 def test_parse_compose_port_output(output: str, expected: int | None) -> None:
     assert _parse_compose_port_output(output) == expected
+
+
+def test_compose_projects_from_container_names_filters_smoke_projects() -> None:
+    assert _compose_projects_from_container_names([
+        "darklab_shell-test-62d5b6a1-redis-1",
+        "darklab_shell-test-62d5b6a1-shell-1",
+        "darklab_shell-test-runtime-deadbeef",
+        "other-darklab_shell-test-12345678-redis-1",
+        "darklab_shell-test-nothex-redis-1",
+        "darklab_shell-test-aabbccdd-redis-1",
+    ]) == [
+        "darklab_shell-test-62d5b6a1",
+        "darklab_shell-test-aabbccdd",
+    ]
 
 
 def test_post_run_kills_early_when_stop_text_is_seen(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -408,6 +528,77 @@ def _case_outcomes(case: Mapping[str, object]) -> list[dict[str, object]]:
     return outcomes
 
 
+def _json_request(
+    url: str,
+    *,
+    session_id: str,
+    method: str = "GET",
+    payload: Mapping[str, object] | None = None,
+    timeout: int = 30,
+) -> tuple[int, dict[str, object]]:
+    data = None
+    headers = {"X-Session-ID": session_id}
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode("utf-8")
+            return resp.status, json.loads(body) if body else {}
+    except HTTPError as exc:
+        body = exc.read().decode("utf-8")
+        return exc.code, json.loads(body) if body else {}
+
+
+def _workspace_payload_or_skip(base_url: str, session_id: str) -> dict[str, object]:
+    status, payload = _json_request(
+        f"{base_url}/workspace/files",
+        session_id=session_id,
+    )
+    if status == 403:
+        pytest.skip("workspace storage is disabled for this container smoke run")
+    assert status == 200, f"workspace list failed with HTTP {status}: {payload}"
+    return payload
+
+
+def _workspace_write_file(base_url: str, session_id: str, path: str, text: str) -> None:
+    status, payload = _json_request(
+        f"{base_url}/workspace/files",
+        session_id=session_id,
+        method="POST",
+        payload={"path": path, "text": text},
+    )
+    assert status == 200, f"workspace write failed for {path!r}: HTTP {status}: {payload}"
+
+
+def _workspace_read_file(base_url: str, session_id: str, path: str) -> str:
+    status, payload = _json_request(
+        f"{base_url}/workspace/files/read?path={urllib.parse.quote(path)}",
+        session_id=session_id,
+    )
+    assert status == 200, f"workspace read failed for {path!r}: HTTP {status}: {payload}"
+    text = payload.get("text")
+    assert isinstance(text, str), f"workspace read returned non-string text for {path!r}: {payload}"
+    return text
+
+
+def _workspace_delete_file(base_url: str, session_id: str, path: str) -> None:
+    status, payload = _json_request(
+        f"{base_url}/workspace/files?path={urllib.parse.quote(path)}",
+        session_id=session_id,
+        method="DELETE",
+    )
+    assert status in {200, 404}, (
+        f"workspace delete failed for {path!r}: HTTP {status}: {payload}"
+    )
+
+
 def _post_kill(base_url: str, run_id: str) -> None:
     payload = json.dumps({"run_id": run_id}).encode("utf-8")
     req = urllib.request.Request(
@@ -578,8 +769,9 @@ def container_smoke_test():
 
     image_tag = f"darklab_shell-test:{uuid.uuid4().hex[:12]}"
     runtime_image_tag = f"darklab_shell-test-runtime:{uuid.uuid4().hex[:12]}"
-    project = f"darklab_shell-test-{uuid.uuid4().hex[:8]}"
+    project = f"{SMOKE_PROJECT_PREFIX}{uuid.uuid4().hex[:8]}"
     reach_host = _docker_reach_host()
+    _cleanup_stale_smoke_compose_projects()
 
     STANDALONE_COMPOSE = ROOT / "docker-compose.yml"
 
@@ -592,6 +784,13 @@ def container_smoke_test():
             "rate_limit_per_minute: 10000\n"
             "rate_limit_per_second: 10000\n"
             "command_timeout_seconds: 120\n"
+            "workspace_enabled: true\n"
+            "workspace_backend: tmpfs\n"
+            "workspace_root: /tmp/darklab_shell-workspaces\n"
+            "workspace_quota_mb: 50\n"
+            "workspace_max_file_mb: 5\n"
+            "workspace_max_files: 100\n"
+            "workspace_inactivity_ttl_hours: 1\n"
         )
 
         runtime_container_name = f"darklab_shell-test-runtime-{uuid.uuid4().hex[:12]}"
@@ -679,6 +878,8 @@ def container_smoke_test():
             subprocess.run(["docker", "rm", "-f", runtime_container_name], cwd=ROOT, capture_output=True, text=True)
             print(f"[container-smoke-test] stopping services: {project}", flush=True)
             subprocess.run(compose + ["down", "--rmi", "local", "--volumes"], cwd=ROOT, capture_output=True, text=True)
+            _cleanup_compose_project_resources(project)
+            _cleanup_stale_smoke_compose_projects()
 
 
 @pytest.fixture(scope="module")
@@ -687,13 +888,14 @@ def container_smoke_test_session_id() -> str:
 
 
 _SELECTED_COMMANDS = _selected_commands_from_env()
+_WORKSPACE_SMOKE_COMMANDS = {str(case["command"]) for case in WORKSPACE_SMOKE_CASES}
 SMOKE_TEST_CASES = _load_cases()
 if _SELECTED_COMMANDS:
     SMOKE_TEST_CASES = [
         case for case in SMOKE_TEST_CASES
         if str(case["command"]) in set(_SELECTED_COMMANDS)
     ]
-    if not SMOKE_TEST_CASES:
+    if not SMOKE_TEST_CASES and not any(command in _WORKSPACE_SMOKE_COMMANDS for command in _SELECTED_COMMANDS):
         raise RuntimeError(
             "RUN_CONTAINER_SMOKE_TEST_COMMANDS did not match any smoke-test commands: "
             + ", ".join(_SELECTED_COMMANDS)
@@ -826,6 +1028,87 @@ def _assert_smoke_case_matches(
     assert visible_lines, f"{command!r} produced no visible output; events={events[:10]}"
 
 
+def _mapping_string_values(value: object, label: str) -> dict[str, object]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise TypeError(f"Expected {label!r} to be a mapping, got {type(value).__name__}")
+    return {str(key): item for key, item in value.items()}
+
+
+def _assert_workspace_command_runs(
+    base_url: str,
+    session_id: str,
+    case: Mapping[str, object],
+) -> None:
+    command = str(case["command"])
+    expected_exit_code = _case_exit_code(case)
+    expected_text = _case_string_list(case, "expected_text")
+    expected_patterns = _case_string_list(case, "expected_patterns")
+
+    events, killed_early = _post_run(
+        base_url,
+        command,
+        session_id,
+        timeout=DEFAULT_RUN_TIMEOUT,
+        stop_text=None,
+        stop_patterns=None,
+    )
+
+    event_types = [str(event.get("type", "")) for event in events]
+    texts = [str(event.get("text", "")) for event in events if isinstance(event.get("text"), str)]
+
+    assert not killed_early, f"{command!r} was unexpectedly killed early; events={events[:10]}"
+    assert "error" not in event_types, f"{command!r} emitted an error event; events={events[:10]}"
+    assert "Command is not installed" not in "\n".join(texts), (
+        f"{command!r} referenced a missing runtime command; events={events[:10]}"
+    )
+
+    exit_events = [event for event in events if event.get("type") == "exit"]
+    assert exit_events, f"{command!r} never emitted an exit event; events={events[:5]}"
+    assert len(exit_events) == 1, f"{command!r} emitted multiple exit events; events={events[:5]}"
+    if expected_exit_code is not None:
+        assert exit_events[0].get("code") == expected_exit_code, (
+            f"{command!r} exited with the wrong status; events={events[:10]}"
+        )
+
+    visible_lines = _collect_visible_lines(events, command)
+    if expected_text:
+        _assert_contains(visible_lines, expected_text, command)
+    if expected_patterns:
+        _assert_patterns("\n".join(visible_lines), expected_patterns, command)
+
+
+def _assert_workspace_smoke_case_matches(
+    base_url: str,
+    session_id: str,
+    case: Mapping[str, object],
+) -> None:
+    _workspace_payload_or_skip(base_url, session_id)
+
+    for path, text in _mapping_string_values(case.get("setup_files"), "setup_files").items():
+        assert isinstance(text, str), f"setup file {path!r} must contain text"
+        _workspace_write_file(base_url, session_id, path, text)
+
+    try:
+        _assert_workspace_command_runs(base_url, session_id, case)
+
+        for path, snippets in _mapping_string_values(case.get("assert_files"), "assert_files").items():
+            expected_snippets = [str(item) for item in snippets] if isinstance(snippets, list) else [str(snippets)]
+            text = _workspace_read_file(base_url, session_id, path)
+            for snippet in expected_snippets:
+                assert snippet in text, (
+                    f"workspace file {path!r} did not contain {snippet!r}:\n"
+                    f"actual={text[:1000]!r}"
+                )
+    finally:
+        cleanup_paths = [str(item) for item in _case_list(case, "cleanup_files")]
+        cleanup_paths.extend(_mapping_string_values(case.get("setup_files"), "setup_files").keys())
+        cleanup_paths.extend(_mapping_string_values(case.get("assert_files"), "assert_files").keys())
+        for path in dict.fromkeys(cleanup_paths):
+            _workspace_delete_file(base_url, session_id, path)
+
+
 @pytest.mark.parametrize("case", SMOKE_TEST_CASES, ids=lambda case: str(case["command"]))
 def test_container_smoke_test_command_matches_expected_output(
     container_smoke_test,
@@ -855,6 +1138,35 @@ def test_container_smoke_test_command_matches_expected_output(
             print(
                 "[container-smoke-test] retrying after failure: "
                 f"{command}; attempt={attempt}/{max_attempts}; error={exc}",
+                flush=True,
+            )
+            time.sleep(SMOKE_COMMAND_RETRY_DELAY_SECONDS)
+            continue
+        return
+
+
+@pytest.mark.parametrize("case", WORKSPACE_SMOKE_CASES, ids=lambda case: str(case["name"]))
+def test_container_smoke_test_workspace_file_flags(container_smoke_test, case):
+    command = str(case["command"])
+    if _SELECTED_COMMANDS and command not in set(_SELECTED_COMMANDS):
+        pytest.skip("workspace smoke case was not selected by RUN_CONTAINER_SMOKE_TEST_COMMANDS")
+
+    max_attempts = max(1, SMOKE_COMMAND_RETRIES + 1)
+    for attempt in range(1, max_attempts + 1):
+        session_id = f"container-smoke-workspace-{uuid.uuid4().hex}"
+        print(
+            f"[container-smoke-test] running workspace case {case['name']}: {command}"
+            + (f" (attempt {attempt}/{max_attempts})" if max_attempts > 1 else ""),
+            flush=True,
+        )
+        try:
+            _assert_workspace_smoke_case_matches(container_smoke_test, session_id, case)
+        except Exception as exc:
+            if attempt >= max_attempts:
+                raise
+            print(
+                "[container-smoke-test] retrying workspace case after failure: "
+                f"{case['name']}; attempt={attempt}/{max_attempts}; error={exc}",
                 flush=True,
             )
             time.sleep(SMOKE_COMMAND_RETRY_DELAY_SECONDS)

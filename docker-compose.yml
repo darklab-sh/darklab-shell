@@ -35,6 +35,11 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379/0
       - APP_PORT=${APP_PORT:-8888}
+      # Must match app/conf/config.yaml workspace_root when customized.
+      # The entrypoint uses this path to normalize workspace permissions before
+      # dropping privileges; the app uses workspace_root for runtime access.
+      # Set WORKSPACE_ROOT directly here, in an override, or via .env.
+      - WORKSPACE_ROOT=${WORKSPACE_ROOT:-/tmp/darklab_shell-workspaces}
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -f http://localhost:${APP_PORT:-8888}/health"]
       interval: 30s

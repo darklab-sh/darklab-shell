@@ -149,6 +149,7 @@ class TestLoadConfig:
         assert cfg["full_output_max_bytes"] == 7 * 1024 * 1024
         assert cfg["rate_limit_per_minute"] == 99
         assert cfg["trusted_proxy_cidrs"] == ["127.0.0.1/32", "::1/128"]
+        assert cfg["data_dir"] == ""
         assert cfg["workspace_enabled"] is False
         assert cfg["workspace_backend"] == "tmpfs"
         assert cfg["workspace_quota_mb"] == 50
@@ -183,6 +184,33 @@ class TestLoadConfig:
             ],
         })
         assert rules == []
+
+    def test_resolve_data_dir_prefers_app_data_dir_environment_override(self):
+        with tempfile.TemporaryDirectory() as env_dir, tempfile.TemporaryDirectory() as cfg_dir:
+            with mock.patch.dict(os.environ, {"APP_DATA_DIR": env_dir}):
+                assert app_config.resolve_data_dir({"data_dir": cfg_dir}) == env_dir
+
+    def test_resolve_data_dir_uses_configured_data_dir_when_environment_is_unset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("APP_DATA_DIR", None)
+                assert app_config.resolve_data_dir({"data_dir": tmp}) == tmp
+
+    def test_resolve_data_dir_falls_back_to_tmp_when_data_is_not_writable(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("APP_DATA_DIR", None)
+            with mock.patch.object(app_config, "_is_writable_directory", side_effect=lambda path: path == "/tmp"):
+                assert app_config.resolve_data_dir({"data_dir": ""}) == "/tmp"
+
+    def test_resolve_data_dir_rejects_unwritable_configured_data_dir(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("APP_DATA_DIR", None)
+            with mock.patch.object(app_config, "_is_writable_directory", return_value=False):
+                try:
+                    app_config.resolve_data_dir({"data_dir": "/not-writable"})
+                    assert False, "expected unwritable configured data_dir to fail"
+                except RuntimeError as exc:
+                    assert "data_dir is not writable: /not-writable" in str(exc)
 
 
 class TestSessionWorkspace:
@@ -613,6 +641,48 @@ class TestLoadFaq:
                 result = load_faq()
         assert [item["question"] for item in result] == ["Base?", "Local?"]
 
+    def test_workspace_feature_entry_hidden_when_workspace_disabled(self):
+        yaml_content = textwrap.dedent(
+            """
+            - question: Always?
+              answer: Always answer.
+            - question: Files?
+              feature: workspace
+              answer: Files answer.
+            """
+        )
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_faq({"workspace_enabled": False})
+        finally:
+            os.unlink(path)
+
+        assert [item["question"] for item in result] == ["Always?"]
+
+    def test_workspace_feature_entry_visible_when_workspace_enabled(self):
+        yaml_content = textwrap.dedent(
+            """
+            - question: Always?
+              answer: Always answer.
+            - question: Files?
+              feature: workspace
+              answer: Files answer.
+            """
+        )
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_faq({"workspace_enabled": True})
+        finally:
+            os.unlink(path)
+
+        assert [item["question"] for item in result] == ["Always?", "Files?"]
+
 
 # ── load_theme_registry / load_theme ─────────────────────────────────────────
 
@@ -864,6 +934,39 @@ class TestThemeRegistry:
         assert "https://example.invalid/config-readme" in result[0]["answer"]
         assert "https://example.invalid/config-readme" in result[0]["answer_html"]
 
+    def test_load_all_faq_promotes_workspace_builtin_entry_when_enabled(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write("")
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_all_faq(
+                    "darklab_shell",
+                    "https://example.invalid/README.md",
+                    {"workspace_enabled": True},
+                )
+        finally:
+            os.unlink(path)
+        questions = [item["question"] for item in result]
+        assert questions.index("What are session Files?") == 2
+        assert questions.index("What are session Files?") < questions.index("How do I save or share my results?")
+
+    def test_load_all_faq_hides_workspace_builtin_entry_when_disabled(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write("")
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_all_faq(
+                    "darklab_shell",
+                    "https://example.invalid/README.md",
+                    {"workspace_enabled": False},
+                )
+        finally:
+            os.unlink(path)
+        questions = [item["question"] for item in result]
+        assert "What are session Files?" not in questions
+
     def test_load_all_faq_clarifies_snapshot_vs_run_permalink(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
             f.write("")
@@ -900,7 +1003,7 @@ class TestThemeRegistry:
         by_question = {item["question"]: item for item in result}
         built_in_html = by_question["What built-in shell features are supported?"]["answer_html"]
         assert "Built-in commands" in built_in_html
-        assert "help</code>" in built_in_html
+        assert "commands --built-in</code>" in built_in_html
         assert "history</code>" in built_in_html
         assert "command | grep pattern" in built_in_html
         assert "command | head -n 20" in built_in_html
@@ -1381,6 +1484,31 @@ class TestRunOutputCapture:
         finally:
             os.unlink(path)
 
+    def test_hints_loader_skips_workspace_section_when_disabled(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write(
+                "[general]\n"
+                "Use the history panel.\n"
+                "[workspace]\n"
+                "Use Files to create targets.txt.\n"
+                "[general]\n"
+                "Press Enter to run.\n"
+            )
+            path = f.name
+        try:
+            with mock.patch("commands.APP_HINTS_FILE", path):
+                assert load_welcome_hints({"workspace_enabled": False}) == [
+                    "Use the history panel.",
+                    "Press Enter to run.",
+                ]
+                assert load_welcome_hints({"workspace_enabled": True}) == [
+                    "Use the history panel.",
+                    "Use Files to create targets.txt.",
+                    "Press Enter to run.",
+                ]
+        finally:
+            os.unlink(path)
+
 
 class TestMobileWelcomeHintLoading:
     def test_missing_mobile_hints_file_returns_empty_list(self):
@@ -1394,6 +1522,30 @@ class TestMobileWelcomeHintLoading:
         try:
             with mock.patch("commands.APP_HINTS_MOBILE_FILE", path):
                 assert load_mobile_welcome_hints() == ["Tap the prompt.", "Use the mobile menu."]
+        finally:
+            os.unlink(path)
+
+    def test_mobile_hints_loader_skips_workspace_section_when_disabled(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write(
+                "Tap the prompt.\n"
+                "[workspace]\n"
+                "Use Files from the mobile menu.\n"
+                "[general]\n"
+                "Use the mobile menu.\n"
+            )
+            path = f.name
+        try:
+            with mock.patch("commands.APP_HINTS_MOBILE_FILE", path):
+                assert load_mobile_welcome_hints({"workspace_enabled": False}) == [
+                    "Tap the prompt.",
+                    "Use the mobile menu.",
+                ]
+                assert load_mobile_welcome_hints({"workspace_enabled": True}) == [
+                    "Tap the prompt.",
+                    "Use Files from the mobile menu.",
+                    "Use the mobile menu.",
+                ]
         finally:
             os.unlink(path)
 

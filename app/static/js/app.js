@@ -904,6 +904,12 @@ function _snapshotTabRawLines(rawLines) {
     cls: String(line && line.cls || ''),
     tsC: String(line && line.tsC || ''),
     tsE: String(line && line.tsE || ''),
+    signals: Array.isArray(line && line.signals)
+      ? line.signals.map(signal => String(signal || '')).filter(Boolean)
+      : [],
+    line_index: Number.isInteger(line && line.line_index) ? line.line_index : undefined,
+    command_root: String(line && line.command_root || ''),
+    target: String(line && line.target || ''),
   }));
 }
 
@@ -2145,7 +2151,7 @@ function _runtimeContextSpec({
 
 const _runtimeBuiltinCommandInfo = [
   ['banner', 'built-in: print the configured banner art'],
-  ['cat', 'built-in: show a session workspace file'],
+  ['cat', 'built-in: show a session file'],
   ['clear', 'built-in: clear the current terminal tab output'],
   ['commands', 'built-in: list built-in and allowed external commands'],
   ['config', 'built-in: show or update user options'],
@@ -2153,6 +2159,7 @@ const _runtimeBuiltinCommandInfo = [
   ['df', 'built-in: show a compact filesystem summary'],
   ['env', 'built-in: show core environment values for this shell'],
   ['faq', 'built-in: show configured FAQ entries'],
+  ['file', 'built-in: list, view, create, edit, or remove session files'],
   ['fortune', 'built-in: print a short operator-themed one-liner'],
   ['free', 'built-in: show a compact memory summary'],
   ['groups', 'built-in: show the shell group membership'],
@@ -2164,12 +2171,12 @@ const _runtimeBuiltinCommandInfo = [
   ['jobs', 'built-in: list active jobs for this session'],
   ['last', 'built-in: show recent completed runs with timestamps and exit codes'],
   ['limits', 'built-in: show configured runtime, history, and retention limits'],
-  ['ls', 'built-in: list session workspace files'],
+  ['ls', 'built-in: list session files'],
   ['man', 'built-in: show a real or built-in manual page'],
   ['ps', 'built-in: show the current shell process view'],
   ['pwd', 'built-in: show the web shell workspace path'],
   ['retention', 'built-in: show retention and persisted-output settings'],
-  ['rm', 'built-in: remove a session workspace file after confirmation'],
+  ['rm', 'built-in: remove a session file after confirmation'],
   ['route', 'built-in: show the shell routing table summary'],
   ['session-token', 'built-in: show or manage persistent session tokens'],
   ['shortcuts', 'built-in: show current keyboard shortcuts'],
@@ -2181,14 +2188,24 @@ const _runtimeBuiltinCommandInfo = [
   ['uname', 'built-in: show the shell platform string'],
   ['uptime', 'built-in: show app uptime since process start'],
   ['version', 'built-in: show shell, app, Flask, and Python version details'],
-  ['workspace', 'built-in: list, view, or remove session workspace files'],
   ['which', 'built-in: locate a built-in command or allowed runtime command'],
   ['who', 'built-in: show the current shell user and session'],
   ['whoami', 'built-in: describe this shell and link to the project README'],
 ];
 
+const _runtimeWorkspaceBuiltinNames = new Set(['cat', 'file', 'ls', 'rm']);
+
+function isWorkspaceFeatureEnabled() {
+  return !!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true);
+}
+
+function _runtimeActiveBuiltinCommandInfo() {
+  if (isWorkspaceFeatureEnabled()) return _runtimeBuiltinCommandInfo;
+  return _runtimeBuiltinCommandInfo.filter(([name]) => !_runtimeWorkspaceBuiltinNames.has(name));
+}
+
 function _runtimeBuiltinDescription(root) {
-  return _runtimeBuiltinCommandInfo.find(([name]) => name === root)?.[1] || 'built-in command';
+  return _runtimeActiveBuiltinCommandInfo().find(([name]) => name === root)?.[1] || 'built-in command';
 }
 
 function _runtimeAllowedCommandRoots() {
@@ -2204,7 +2221,7 @@ function _runtimeAllowedCommandRoots() {
 }
 
 function _runtimeCommandLookupHints(baseRegistry = {}, descriptionForExternal = 'manual page') {
-  const builtinNames = new Set(_runtimeBuiltinCommandInfo.map(([name]) => name));
+  const builtinNames = new Set(_runtimeActiveBuiltinCommandInfo().map(([name]) => name));
   const externalRoots = new Set(Object.keys(baseRegistry || {}));
   _runtimeAllowedCommandRoots().forEach(root => externalRoots.add(root));
   builtinNames.forEach(root => externalRoots.delete(root));
@@ -2223,7 +2240,7 @@ function _runtimeCommandLookupHints(baseRegistry = {}, descriptionForExternal = 
 function _runtimeStaticBuiltinContext() {
   const emptySpec = _runtimeContextSpec();
   const context = Object.fromEntries(
-    _runtimeBuiltinCommandInfo.map(([root]) => [root, emptySpec]),
+    _runtimeActiveBuiltinCommandInfo().map(([root]) => [root, emptySpec]),
   );
 
   context.ps = _runtimeContextSpec({
@@ -2244,15 +2261,17 @@ function _runtimeStaticBuiltinContext() {
       _runtimeHint('--external', 'Show only allowed external commands'),
     ],
   });
-  context.cat = _runtimeContextSpec({
-    argumentLimit: 1,
-    argHints: { __positional__: _runtimeWorkspaceFileHints() },
-  });
-  context.ls = _runtimeContextSpec({ argumentLimit: 0 });
-  context.rm = _runtimeContextSpec({
-    argumentLimit: 1,
-    argHints: { __positional__: _runtimeWorkspaceFileHints() },
-  });
+  if (isWorkspaceFeatureEnabled()) {
+    context.cat = _runtimeContextSpec({
+      argumentLimit: 1,
+      argHints: { __positional__: _runtimeWorkspaceFileHints() },
+    });
+    context.ls = _runtimeContextSpec({ argumentLimit: 0 });
+    context.rm = _runtimeContextSpec({
+      argumentLimit: 1,
+      argHints: { __positional__: _runtimeWorkspaceFileHints() },
+    });
+  }
   context['session-token'] = _runtimeContextSpec({
     expectsValue: ['set', 'revoke'],
     argHints: {
@@ -2285,20 +2304,24 @@ function _runtimeWorkspaceFileHints() {
 function _runtimeWorkspaceContext() {
   const fileHints = _runtimeWorkspaceFileHints();
   return _runtimeContextSpec({
-    expectsValue: ['show', 'cat', 'rm', 'delete'],
+    expectsValue: ['show', 'cat', 'add', 'edit', 'rm', 'delete'],
     argHints: {
       list: [],
       ls: [],
       help: [],
       show: fileHints,
       cat: fileHints,
+      add: [_runtimeHint('<file>', 'New session file name')],
+      edit: fileHints,
       rm: fileHints,
       delete: fileHints,
       __positional__: [
-        _runtimeHint('list', 'List current session workspace files'),
-        _runtimeHint('show <file>', 'Print a workspace file in the terminal', 'show '),
-        _runtimeHint('rm <file>', 'Remove a workspace file from this session', 'rm '),
-        _runtimeHint('help', 'Show workspace command usage'),
+        _runtimeHint('list', 'List current session files'),
+        _runtimeHint('show <file>', 'Print a session file in the terminal', 'show '),
+        _runtimeHint('add <file>', 'Open the Files editor for a new session file', 'add '),
+        _runtimeHint('edit <file>', 'Open the Files editor for an existing session file', 'edit '),
+        _runtimeHint('rm <file>', 'Remove a session file from this session', 'rm '),
+        _runtimeHint('help', 'Show file command usage'),
       ],
     },
   });
@@ -2347,7 +2370,7 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
   const lookupHints = _runtimeCommandLookupHints(baseRegistry);
   context.theme = _runtimeThemeContext();
   context.config = _runtimeConfigContext();
-  context.workspace = _runtimeWorkspaceContext();
+  if (isWorkspaceFeatureEnabled()) context.file = _runtimeWorkspaceContext();
   context.man = _runtimeContextSpec({
     argumentLimit: 1,
     argHints: { __positional__: lookupHints },

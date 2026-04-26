@@ -136,7 +136,7 @@ test.describe('output actions', () => {
     await page.locator('#search-summary-btn').click()
 
     const lines = page.locator('.tab-panel.active .output .line')
-    await expect(lines.filter({ hasText: '[command findings]' })).toHaveCount(1)
+    await expect(lines.filter({ hasText: 'Command Findings:' })).toHaveCount(1)
     await expect(lines.filter({ hasText: 'findings (1)' })).toHaveCount(1)
     await expect(lines.filter({ hasText: '- 443/tcp open https' })).toHaveCount(1)
     await expect(lines.filter({ hasText: 'warnings (1)' })).toHaveCount(1)
@@ -389,13 +389,18 @@ test.describe('output search scopes', () => {
     await expect(page.locator('#search-signal-summary')).toContainText('1S')
     await page.locator('#search-toggle-btn').click()
 
-    await expect(page.locator('[data-search-scope="findings"]')).toHaveAttribute('aria-pressed', 'true')
-    await expect(page.locator('#search-input')).toBeDisabled()
+    await expect(page.locator('[data-search-scope="text"]')).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.locator('#search-input')).toBeEnabled()
+    await expect(page.locator('#search-input')).toBeFocused()
+    await expect(page.locator('#search-count')).toHaveText('')
+    await page.locator('[data-search-scope="findings"]').click()
+    await expect(page.locator('#cmd')).toBeFocused()
     await expect(page.locator('#search-count')).toHaveText('1 / 2')
     await expect(page.locator('.tab-panel.active .line.search-signal-hl.current')).toContainText('443/tcp open https')
 
     await page.locator('[data-search-scope="warnings"]').click()
 
+    await expect(page.locator('#cmd')).toBeFocused()
     await expect(page.locator('#search-count')).toHaveText('1 / 2')
     await expect(page.locator('.tab-panel.active .line.search-signal-hl')).toHaveCount(2)
     await expect(page.locator('.tab-panel.active .line.search-signal-hl.current')).toContainText('warning:')
@@ -414,10 +419,12 @@ test.describe('output search scopes', () => {
     await page.keyboard.press('Escape')
     await page.locator('[data-search-signal-scope="warnings"]').click()
     await expect(page.locator('[data-search-scope="warnings"]')).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.locator('#cmd')).toBeFocused()
     await expect(page.locator('#search-count')).toHaveText('1 / 2')
     await expect(page.locator('.tab-panel.active .line.search-signal-hl.current')).toContainText('retry-after')
 
     await page.locator('[data-search-signal-scope="warnings"]').click()
+    await expect(page.locator('#cmd')).toBeFocused()
     await expect(page.locator('#search-count')).toHaveText('2 / 2')
     await expect(page.locator('.tab-panel.active .line.search-signal-hl.current')).toContainText('retrying with TCP probe')
 

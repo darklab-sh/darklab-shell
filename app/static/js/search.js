@@ -61,7 +61,7 @@ function _formatCompactSignalSummary(counts) {
   const add = (scope, short, count) => {
     if (count <= 0) return;
     parts.push(
-      `<button type="button" class="search-signal-chip" data-search-signal-scope="${scope}" ` +
+      `<button type="button" class="btn btn-ghost btn-compact search-signal-chip" data-search-signal-scope="${scope}" ` +
       `aria-label="${count} ${_searchScopeUnitLabel(scope, count)} available">${count}${short}</button>`,
     );
   };
@@ -207,9 +207,20 @@ function refreshSearchDiscoverabilityUi() {
     searchSignalSummary.setAttribute('aria-label', hasSignals ? _formatFindingSummary(counts) : '');
     if (hasSignals) {
       searchSignalSummary.querySelectorAll('[data-search-signal-scope]').forEach((btn) => {
-        btn.addEventListener('click', () => {
+        const activate = () => {
           if (typeof openSearchFromSignal === 'function') openSearchFromSignal(btn.dataset.searchSignalScope || 'text');
-        });
+        };
+        if (typeof bindPressable === 'function') {
+          bindPressable(btn, {
+            refocusComposer: true,
+            onActivate: (event) => {
+              event.preventDefault();
+              activate();
+            },
+          });
+        } else {
+          btn.addEventListener('click', activate);
+        }
       });
     }
   }
@@ -257,12 +268,8 @@ function scheduleSearchDiscoverabilityRefresh() {
 
 function prepareSearchBarForOpen() {
   _clearSearchDiscoverabilityPulse();
-  const counts = refreshSearchDiscoverabilityUi();
-  if (_shouldPreferFindingsScope(counts)) {
-    searchScope = 'findings';
-  } else {
-    searchScope = 'text';
-  }
+  refreshSearchDiscoverabilityUi();
+  searchScope = 'text';
   syncSearchScopeUi();
 }
 
@@ -485,21 +492,40 @@ function _summaryBuildItems(blocks, tab) {
 function _summaryAppendSections(sections) {
   sections.forEach(([scope, lines]) => {
     if (!lines.length) return;
+    const compactLines = _summaryCompactLines(lines);
     appendLine(
-      `${_SEARCH_SCOPE_LABELS[scope]} (${lines.length})`,
+      `${_SEARCH_SCOPE_LABELS[scope]} (${compactLines.length})`,
       'fake-signal-summary-section',
       activeTabId,
     );
-    lines.slice(0, _SEARCH_SUMMARY_LIMIT).forEach((line) => {
+    compactLines.slice(0, _SEARCH_SUMMARY_LIMIT).forEach((line) => {
       appendLine(`- ${line}`, 'fake-signal-summary-row', activeTabId);
     });
-    if (lines.length > _SEARCH_SUMMARY_LIMIT) {
+    if (compactLines.length > _SEARCH_SUMMARY_LIMIT) {
       appendLine(
-        `… ${lines.length - _SEARCH_SUMMARY_LIMIT} more ${_searchScopeUnitLabel(scope, lines.length - _SEARCH_SUMMARY_LIMIT)} not shown`,
+        `… ${compactLines.length - _SEARCH_SUMMARY_LIMIT} more ${_searchScopeUnitLabel(scope, compactLines.length - _SEARCH_SUMMARY_LIMIT)} not shown`,
         'fake-signal-summary-note',
         activeTabId,
       );
     }
+  });
+}
+
+function _summaryCompactLines(lines) {
+  const counts = new Map();
+  const ordered = [];
+  (Array.isArray(lines) ? lines : []).forEach((line) => {
+    const text = String(line || '').trim();
+    if (!text) return;
+    if (!counts.has(text)) {
+      ordered.push(text);
+      counts.set(text, 0);
+    }
+    counts.set(text, counts.get(text) + 1);
+  });
+  return ordered.map((line) => {
+    const count = counts.get(line) || 0;
+    return count > 1 ? `${line} (${count})` : line;
   });
 }
 
@@ -605,7 +631,7 @@ function summarizeCurrentOutputSignals() {
     });
   }
 
-  appendLine('[command findings]', 'fake-signal-summary-header', activeTabId);
+  appendLine('Command Findings:', 'fake-signal-summary-header', activeTabId);
 
   const items = _summaryBuildItems(blocks, tab);
   const groupedCount = _summaryRenderGroupedItems(items);

@@ -2,7 +2,8 @@
 Split run-output persistence helpers.
 
 Preview output stays in SQLite for fast history/permalink access.
-Optional full output is written to compressed artifact files under /data.
+Optional full output is written to compressed artifact files under the
+configured data directory.
 """
 
 from __future__ import annotations
@@ -13,8 +14,9 @@ import gzip
 import json
 import os
 
+from config import resolve_data_dir
 
-DATA_DIR = os.environ.get("APP_DATA_DIR") or ("/data" if os.path.isdir("/data") else "/tmp")  # nosec B108
+DATA_DIR = resolve_data_dir()
 RUN_OUTPUT_DIR = os.path.join(DATA_DIR, "run-output")
 
 

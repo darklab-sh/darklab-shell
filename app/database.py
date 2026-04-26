@@ -1,6 +1,7 @@
 """
 SQLite persistence — connection helper, schema initialisation, and retention pruning.
-Database lives in /data (writable volume mount). Falls back to /tmp for local dev.
+Database lives in the configured data directory. If unset, /data is used when
+writable and /tmp is the local-dev fallback.
 
 Tables: runs, run_output_artifacts, snapshots, session_tokens, session_preferences.
 FTS: runs_fts (FTS5 virtual table over runs.command + runs.output_search_text).
@@ -14,14 +15,13 @@ from contextlib import contextmanager
 
 import fcntl
 
-from config import CFG
+from config import CFG, resolve_data_dir
 from run_output_store import delete_artifact_file, ensure_run_output_dir, load_full_output_entries
 
 log = logging.getLogger("shell")
 
-# /tmp (tmpfs) is the intended fallback for local dev without the volume mount.
 # APP_DATA_DIR lets test workers and local tooling isolate their own databases.
-DATA_DIR = os.environ.get("APP_DATA_DIR") or ("/data" if os.path.isdir("/data") else "/tmp")  # nosec B108
+DATA_DIR = resolve_data_dir()
 DB_PATH  = os.path.join(DATA_DIR, "history.db")
 DB_INIT_LOCK_PATH = os.path.join(DATA_DIR, "history.db.init.lock")
 

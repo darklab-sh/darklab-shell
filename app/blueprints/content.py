@@ -102,6 +102,7 @@ def _frontend_config_payload():
         "history_panel_limit":      cfg["history_panel_limit"],
         "command_timeout_seconds":  cfg["command_timeout_seconds"],
         "permalink_retention_days": cfg["permalink_retention_days"],
+        "workspace_enabled":       bool(cfg.get("workspace_enabled", False)),
         "welcome_char_ms":          cfg["welcome_char_ms"],
         "welcome_jitter_ms":      cfg["welcome_jitter_ms"],
         "welcome_post_cmd_ms":    cfg["welcome_post_cmd_ms"],
@@ -143,6 +144,7 @@ def index():
         theme_registry={"current": current_theme, "themes": _config.THEME_REGISTRY},
         fallback_theme_css=_config.theme_runtime_css_vars(_config.DARK_THEME),
         frontend_config=_frontend_config_payload(),
+        workspace_enabled=bool(_config.CFG.get("workspace_enabled", False)),
     )
 
 

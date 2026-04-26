@@ -704,14 +704,32 @@ function _workspaceDeleteTarget(cmd) {
   const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
   const root = (parts[0] || '').toLowerCase();
   if (root === 'rm' && parts.length === 2) return parts[1];
-  if (root === 'workspace' && parts.length === 3 && ['rm', 'delete'].includes((parts[1] || '').toLowerCase())) {
+  if (root === 'file' && parts.length === 3 && ['rm', 'delete'].includes((parts[1] || '').toLowerCase())) {
     return parts[2];
   }
   return '';
 }
 
+function _workspaceEditorCommand(cmd) {
+  const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
+  const root = (parts[0] || '').toLowerCase();
+  const action = (parts[1] || '').toLowerCase();
+  if (root !== 'file' || !['add', 'edit'].includes(action)) return null;
+  return { action, target: parts.length === 3 ? parts[2] : '' };
+}
+
 function _isWorkspaceDeleteCommand(cmd) {
+  if (!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true)) {
+    return false;
+  }
   return !!_workspaceDeleteTarget(cmd);
+}
+
+function _isWorkspaceEditorCommand(cmd) {
+  if (!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true)) {
+    return false;
+  }
+  return !!_workspaceEditorCommand(cmd);
 }
 
 function _historySafeCommand(cmd) {
@@ -1307,11 +1325,23 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
   const target = _workspaceDeleteTarget(cmd);
   appendCommandEcho(cmd);
   if (!target) {
-    appendLine('Usage: workspace rm <file>', 'exit-fail', tabId);
+    appendLine('Usage: file rm <file>', 'exit-fail', tabId);
     setStatus('fail');
     return;
   }
-  appendLine(`delete workspace file '${target}'?`, '', tabId);
+  try {
+    const existsResp = await apiFetch(`/workspace/files/read?path=${encodeURIComponent(target)}`);
+    if (!existsResp.ok) {
+      const data = await existsResp.json().catch(() => ({}));
+      throw new Error(data && data.error ? data.error : `file was not found (${existsResp.status})`);
+    }
+  } catch (err) {
+    appendLine(`[error] ${err.message || 'file was not found'}`, 'exit-fail', tabId);
+    logClientError('file rm validate', err);
+    setStatus('fail');
+    return;
+  }
+  appendLine(`delete session file '${target}'?`, '', tabId);
   _setPendingTerminalConfirm({
     tabId,
     onYes: async () => {
@@ -1319,25 +1349,51 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
         const resp = await apiFetch(`/workspace/files?path=${encodeURIComponent(target)}`, { method: 'DELETE' });
         if (!resp.ok) {
           const data = await resp.json().catch(() => ({}));
-          throw new Error(data && data.error ? data.error : `workspace delete failed (${resp.status})`);
+          throw new Error(data && data.error ? data.error : `file delete failed (${resp.status})`);
         }
-        appendLine(`workspace: removed ${target}`, '', tabId);
+        appendLine(`file: removed ${target}`, '', tabId);
         if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache();
         _recordSuccessfulLocalCommand(cmd);
-        _persistClientSideRun(cmd, [{ text: `workspace: removed ${target}` }], 'ok');
+        _persistClientSideRun(cmd, [{ text: `file: removed ${target}` }], 'ok');
         setStatus('ok');
       } catch (err) {
         appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
-        logClientError('workspace rm', err);
+        logClientError('file rm', err);
         setStatus('fail');
       }
     },
     onNo: async () => {
-      appendLine('Workspace file delete canceled.', '', tabId);
+      appendLine('Session file delete canceled.', '', tabId);
       setStatus('idle');
     },
   });
   setStatus('idle');
+}
+
+async function _handleWorkspaceEditorCommand(cmd, tabId) {
+  const parsed = _workspaceEditorCommand(cmd);
+  appendCommandEcho(cmd);
+  if (!parsed || !parsed.target) {
+    appendLine(`Usage: file ${parsed?.action || 'add'} <file>`, 'exit-fail', tabId);
+    setStatus('fail');
+    return;
+  }
+  if (typeof openWorkspaceEditorFromCommand !== 'function') {
+    appendLine('[error] Files panel is not ready — reload the page and try again', 'exit-fail', tabId);
+    setStatus('fail');
+    return;
+  }
+  try {
+    await openWorkspaceEditorFromCommand(parsed.action, parsed.target);
+    appendLine(`file: opened ${parsed.target} in the Files panel`, '', tabId);
+    _recordSuccessfulLocalCommand(cmd);
+    _persistClientSideRun(cmd, [{ text: `file: opened ${parsed.target} in the Files panel` }], 'ok');
+    setStatus('ok');
+  } catch (err) {
+    appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
+    logClientError(`file ${parsed.action}`, err);
+    setStatus('fail');
+  }
 }
 
 async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand) {
@@ -1479,6 +1535,13 @@ function submitCommand(rawCmd) {
   if (_isWorkspaceDeleteCommand(cmd)) {
     void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
       _handleWorkspaceDeleteCommand(baseCommand, activeTabId)
+    ));
+    return true;
+  }
+
+  if (_isWorkspaceEditorCommand(cmd)) {
+    void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
+      _handleWorkspaceEditorCommand(baseCommand, activeTabId)
     ));
     return true;
   }

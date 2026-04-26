@@ -269,7 +269,7 @@ class TestIsCommandAllowedEdges:
             )
 
         assert not result.allowed
-        assert "Command not allowed" in result.reason
+        assert "Files are disabled" in result.reason
 
     def test_workspace_read_flags_rewrite_relative_files_but_keep_packaged_wordlists(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -426,9 +426,19 @@ class TestFakeCommandResolution:
         assert resolve_fake_command("who") == "who"
         assert resolve_fake_command("whoami") == "whoami"
         assert resolve_fake_command("ps aux") == "ps"
-        assert resolve_fake_command("ls") == "ls"
-        assert resolve_fake_command("cat targets.txt") == "cat"
-        assert resolve_fake_command("rm targets.txt") == "rm"
+        with mock.patch.dict("config.CFG", {"workspace_enabled": True}):
+            assert resolve_fake_command("file list") == "file"
+            assert resolve_fake_command("workspace list") is None
+            assert resolve_fake_command("ls") == "ls"
+            assert resolve_fake_command("cat targets.txt") == "cat"
+            assert resolve_fake_command("rm targets.txt") == "rm"
+
+    def test_workspace_fake_commands_are_hidden_when_disabled(self):
+        with mock.patch.dict("config.CFG", {"workspace_enabled": False}):
+            assert resolve_fake_command("file list") is None
+            assert resolve_fake_command("ls") is None
+            assert resolve_fake_command("cat targets.txt") is None
+            assert resolve_fake_command("rm targets.txt") is None
 
     def test_rejects_non_fake_commands(self):
         assert resolve_fake_command("ping darklab.sh") is None

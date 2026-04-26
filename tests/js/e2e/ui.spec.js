@@ -164,7 +164,7 @@ test.describe('workspace modal', () => {
     await expect(page.locator('#workspace-overlay')).not.toHaveClass(/open/)
 
     await runCommand(page, 'cat targets.txt')
-    await expect(page.locator('.tab-panel.active .output')).toContainText('workspace: targets.txt')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('file: targets.txt')
     await expect(page.locator('.tab-panel.active .output')).toContainText('ip.darklab.sh')
   })
 })

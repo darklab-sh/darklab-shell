@@ -72,9 +72,16 @@ def _resolve_db_path() -> str:
     the DB and writes (DROP/CREATE TRIGGER, possibly FTS rebuild). We want
     this script to be a pure data-only writer.
     """
-    data_dir = os.environ.get("APP_DATA_DIR") or (
-        "/data" if os.path.isdir("/data") else "/tmp"  # nosec B108
-    )
+    app_dir = ROOT / "app"
+    if app_dir.exists() and str(app_dir) not in sys.path:
+        sys.path.insert(0, str(app_dir))
+    try:
+        from config import resolve_data_dir  # noqa: PLC0415
+        data_dir = resolve_data_dir()
+    except Exception:  # noqa: BLE001
+        data_dir = os.environ.get("APP_DATA_DIR") or (
+            "/data" if os.path.isdir("/data") else "/tmp"  # nosec B108
+        )
     return os.path.join(data_dir, "history.db")
 
 

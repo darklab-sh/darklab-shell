@@ -388,6 +388,8 @@ describe('search helpers', () => {
     expect(document.getElementById('searchSignalSummary').textContent).toContain('1F')
     expect(document.getElementById('searchSignalSummary').textContent).toContain('1W')
     expect(document.getElementById('searchSignalSummary').textContent).toContain('1E')
+    expect(document.querySelector('[data-search-signal-scope="findings"]').className)
+      .toContain('btn btn-ghost btn-compact search-signal-chip')
   })
 
   it('signal chips are clickable and route to the matching scope', () => {
@@ -451,14 +453,15 @@ describe('search helpers', () => {
     expect(document.querySelectorAll('.search-signal-hl')).toHaveLength(0)
   })
 
-  it('prefers the findings scope when opening search for findings-heavy output', () => {
+  it('opens normal search in text mode even when findings are available', () => {
     const { prepareSearchBarForOpen } = loadSearchFns()
     document.getElementById('out').innerHTML = '<span class="line" data-signals="findings">443/tcp open https</span>'
 
     prepareSearchBarForOpen()
 
-    expect(document.querySelector('[data-search-scope="findings"]').getAttribute('aria-pressed')).toBe('true')
-    expect(document.getElementById('searchInput').disabled).toBe(true)
+    expect(document.querySelector('[data-search-scope="text"]').getAttribute('aria-pressed')).toBe('true')
+    expect(document.querySelector('[data-search-scope="findings"]').textContent).toBe('findings (1)')
+    expect(document.getElementById('searchInput').disabled).toBe(false)
   })
 
   it('scopes to summary lines and ignores detail rows', () => {
@@ -509,7 +512,7 @@ describe('search helpers', () => {
     summarizeCurrentOutputSignals()
 
     const lines = Array.from(document.querySelectorAll('#out .line')).map((line) => line.textContent)
-    expect(lines).toContain('[command findings]')
+    expect(lines).toContain('Command Findings:')
     expect(lines).not.toContain('')
     expect(lines).toContain('findings (1)')
     expect(lines).toContain('- 443/tcp open https')
@@ -611,6 +614,36 @@ describe('search helpers', () => {
     expect(lines).toContain('findings (3)')
   })
 
+  it('deduplicates repeated findings in grouped summary output', () => {
+    const { summarizeCurrentOutputSignals } = loadSearchFns({
+      tab: {
+        id: 'tab-1',
+        command: 'dig darklab.sh +short',
+      },
+    })
+    document.getElementById('out').innerHTML = [
+      '<span class="line prompt-echo">$ dig darklab.sh +short</span>',
+      '<span class="line" data-signals="findings" data-command-root="dig" data-signal-target="darklab.sh">104.21.4.35</span>',
+      '<span class="line" data-signals="findings" data-command-root="dig" data-signal-target="darklab.sh">172.67.131.156</span>',
+      '<span class="line prompt-echo">$ dig darklab.sh +short</span>',
+      '<span class="line" data-signals="findings" data-command-root="dig" data-signal-target="darklab.sh">104.21.4.35</span>',
+      '<span class="line" data-signals="findings" data-command-root="dig" data-signal-target="darklab.sh">172.67.131.156</span>',
+    ].join('')
+
+    summarizeCurrentOutputSignals()
+
+    const lines = Array.from(document.querySelectorAll('#out .line')).map((line) => line.textContent)
+    expect(lines).toContain('command             dig')
+    expect(lines).toContain('target              darklab.sh')
+    expect(lines).toContain('full commands (1)')
+    expect(lines).toContain('- dig darklab.sh +short (2)')
+    expect(lines).toContain('findings (2)')
+    expect(lines).toContain('- 104.21.4.35 (2)')
+    expect(lines).toContain('- 172.67.131.156 (2)')
+    expect(lines.filter((line) => line === '- 104.21.4.35')).toHaveLength(0)
+    expect(lines.filter((line) => line === '- 172.67.131.156')).toHaveLength(0)
+  })
+
   it('groups summary output by server-provided command metadata for opaque command text', () => {
     const { summarizeCurrentOutputSignals } = loadSearchFns({
       tab: {
@@ -656,7 +689,9 @@ describe('search helpers', () => {
     expect(lines).toContain('full commands (2)')
     expect(lines).toContain('- nc -zv ip.darklab.sh 80')
     expect(lines).toContain('- nc -zv ip.darklab.sh 443 80')
-    expect(lines).toContain('findings (3)')
+    expect(lines).toContain('findings (2)')
+    expect(lines).toContain('- ip.darklab.sh [107.178.109.44] 80 (http) open (2)')
+    expect(lines).toContain('- ip.darklab.sh [107.178.109.44] 443 (https) open')
     expect(lines).not.toContain('full command        nc -zv ip.darklab.sh 80')
     expect(lines).not.toContain('target              ip.darklab.sh, 80')
   })

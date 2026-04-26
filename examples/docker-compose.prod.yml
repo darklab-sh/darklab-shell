@@ -15,6 +15,7 @@ services:
       - WEB_THREADS=${WEB_THREADS:-4}
       - VIRTUAL_HOST=shell.darklab.sh
       - LETSENCRYPT_HOST=shell.darklab.sh
+      # Must match workspace_root in app/conf/config.yaml or config.local.yaml.
       - WORKSPACE_ROOT=/workspaces
     volumes:
       # Session workspace bind mount. Prepare the host folder before startup:
@@ -53,4 +54,4 @@ services:
 networks:
   default:
     external: true
-    name: darklab-net
+    name: darklab_shell

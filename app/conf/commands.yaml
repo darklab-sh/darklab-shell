@@ -853,7 +853,7 @@ commands:
           description: File with URLs to probe
           takes_value: true
         - value: -o
-          description: Write probe results to a workspace file
+          description: Write probe results to a session file
           takes_value: true
   - root: assetfinder
     category: Network Reconnaissance
@@ -1005,7 +1005,7 @@ commands:
         - value: -k
           description: Skip TLS certificate verification
         - value: -o
-          description: Write results to a workspace file
+          description: Write results to a session file
           takes_value: true
   - root: ffuf
     category: Network Reconnaissance
@@ -1148,7 +1148,7 @@ commands:
           description: File with hosts to scan
           takes_value: true
         - value: -o
-          description: Write results to a workspace file
+          description: Write results to a session file
           takes_value: true
         - value: -exclude-ports
           description: Ports to exclude from scan
@@ -1229,7 +1229,7 @@ commands:
           description: File with URLs to crawl
           takes_value: true
         - value: -o
-          description: Write crawl results to a workspace file
+          description: Write crawl results to a session file
           takes_value: true
       arguments:
         - placeholder: <target>

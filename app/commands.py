@@ -51,9 +51,9 @@ def _project_readme_url(project_readme=None):
     return project_readme or app_config.PROJECT_README
 
 
-def _builtin_faq(app_name="darklab_shell", project_readme=None):
+def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
     readme_url = _project_readme_url(project_readme)
-    return [
+    entries = [
         {
             "question": "What is this?",
             "answer": (
@@ -74,30 +74,25 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None):
         },
         {
             "question": "What commands are allowed?",
-            "answer": "Use the grouped allowlist shown in the FAQ modal or run ls in the web shell.",
+            "answer": "Use the grouped allowlist shown in the FAQ modal or run commands --external in the web shell.",
             "ui_kind": "allowed_commands",
         },
         {
-            "question": "What built-in shell features are supported?",
+            "question": "What are session Files?",
+            "feature": "workspace",
             "answer": (
-                "The shell supports built-in commands plus a narrow set of commands with built-in "
-                "pipe support like grep, head, tail, wc -l, sort, and uniq. For a full list of built-in commands, "
-                "run the command help in the web shell."
+                "Files are app-managed, session-scoped text files for commands that need small inputs "
+                "or outputs. Use the Files panel or run file help to create, view, edit, "
+                "download, or delete files."
             ),
             "answer_html": (
-                "This shell includes two kinds of built-in behavior:<br><br>"
-                "<strong>Built-in commands</strong> such as <code>status</code>, "
-                "<code>history</code>, <code>retention</code>, <code>shortcuts</code>, "
-                "<code>limits</code>, and <code>faq</code>. For a full list, run the command <code>help</code>."
-                " These are provided directly by the shell.<br><br>"
-                "<strong>Commands with built-in pipe support</strong> let you trim output with "
-                "supported pipe helpers, for example <code>command | grep pattern</code>, "
-                "<code>command | head -n 20</code>, <code>command | head -20</code>, "
-                "<code>command | tail -n 20</code>, <code>command | tail -20</code>, "
-                "<code>command | wc -l</code>, <code>command | sort -rn</code>, or "
-                "<code>command | uniq -c</code>. These helpers can also be chained together, "
-                "for example <code>command | grep pattern | wc -l</code>.<br><br>"
-                "General shell piping, arbitrary chaining, and redirection are still blocked."
+                "Files are app-managed, session-scoped text files for commands that need small "
+                "inputs or outputs. Use the <strong>Files</strong> panel or run "
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"file help\">file help</span> "
+                "to create, view, edit, download, or delete files.<br><br>"
+                "Commands can only read or write files through command flags explicitly enabled "
+                "in the command registry. Shell navigation and redirection are still blocked. "
+                "Files stay scoped to the current browser session or named session token."
             ),
         },
         {
@@ -140,6 +135,69 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None):
                 "<strong>share snapshot</strong> when you want a share/export view of the active tab; "
                 "use <strong>run permalink</strong> when you want the canonical link for one saved "
                 "command in history."
+            ),
+        },
+        {
+            "question": "Are my commands visible to other users?",
+            "answer": "No. History and saved data are scoped to your anonymous browser session.",
+            "answer_html": (
+                "No. Each browser session is assigned an anonymous ID stored in your browser's local "
+                "storage. Your run history, starred commands, and saved snapshots are only visible to "
+                "sessions sharing that ID — in practice, just your own browser tabs. Commands are not "
+                "broadcast or shared between users."
+            ),
+        },
+        {
+            "question": "How do session tokens work?",
+            "answer": (
+                "Without a session token, your history is tied to your current browser — switch browsers "
+                "or workstations and you start fresh. Set a token and any browser that uses the same "
+                "token shares your run history, starred commands, and saved user options."
+            ),
+            "answer_html": (
+                "Without a session token, your history is tied to your current browser. Switch to a "
+                "different browser or workstation and you start fresh.<br><br>"
+                "Set a <strong>session token</strong> and any browser that uses the same token shares "
+                "your run history, starred commands, and saved user options — useful if you work across "
+                "multiple machines or want to pick up where you left off after clearing your browser.<br><br>"
+                "Use these commands to manage your session token:<br><br>"
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token\">session-token</span>"
+                " — show whether a token is active.<br>"
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token generate\">session-token generate</span>"
+                " — create and activate a new random token.<br>"
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token set \">session-token set</span>"
+                " — activate a specific token you already have.<br>"
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token rotate\">session-token rotate</span>"
+                " — replace your current token with a new random one.<br>"
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token clear\">session-token clear</span>"
+                " — remove your token and return to a browser-local session.<br><br>"
+                "You can also use the <strong>Generate</strong>, <strong>Set</strong>, "
+                "<strong>Rotate</strong>, and <strong>Clear</strong> buttons in the "
+                "<strong>Options</strong> panel."
+            ),
+        },
+        {
+            "question": "What built-in shell features are supported?",
+            "answer": (
+                "The shell supports built-in commands plus a narrow set of commands with built-in "
+                "pipe support like grep, head, tail, wc -l, sort, and uniq. For a full list of built-in "
+                "commands, run commands --built-in in the web shell."
+            ),
+            "answer_html": (
+                "This shell includes two kinds of built-in behavior:<br><br>"
+                "<strong>Built-in commands</strong> such as <code>status</code>, "
+                "<code>history</code>, <code>retention</code>, <code>shortcuts</code>, "
+                "<code>limits</code>, and <code>faq</code>. For a full list, run "
+                "<code>commands --built-in</code>."
+                " These are provided directly by the shell.<br><br>"
+                "<strong>Commands with built-in pipe support</strong> let you trim output with "
+                "supported pipe helpers, for example <code>command | grep pattern</code>, "
+                "<code>command | head -n 20</code>, <code>command | head -20</code>, "
+                "<code>command | tail -n 20</code>, <code>command | tail -20</code>, "
+                "<code>command | wc -l</code>, <code>command | sort -rn</code>, or "
+                "<code>command | uniq -c</code>. These helpers can also be chained together, "
+                "for example <code>command | grep pattern | wc -l</code>.<br><br>"
+                "General shell piping, arbitrary chaining, and redirection are still blocked."
             ),
         },
         {
@@ -189,6 +247,11 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None):
             ),
         },
         {
+            "question": "What are the retention and limit settings for this instance?",
+            "answer": "See the live retention and limit table in the FAQ modal or run retention in the web shell.",
+            "ui_kind": "limits",
+        },
+        {
             "question": "What do the timestamp options do?",
             "answer": "They toggle off, elapsed, and clock timestamp display modes for output lines.",
             "answer_html": (
@@ -210,50 +273,6 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None):
                 "<br><strong>on</strong> — every output line is prefixed with a sequence number so "
                 "you can reference specific rows while reading long scans or copied output."
             ),
-        },
-        {
-            "question": "Are my commands visible to other users?",
-            "answer": "No. History and saved data are scoped to your anonymous browser session.",
-            "answer_html": (
-                "No. Each browser session is assigned an anonymous ID stored in your browser's local "
-                "storage. Your run history, starred commands, and saved snapshots are only visible to "
-                "sessions sharing that ID — in practice, just your own browser tabs. Commands are not "
-                "broadcast or shared between users."
-            ),
-        },
-        {
-            "question": "How do session tokens work?",
-            "answer": (
-                "Without a session token, your history is tied to your current browser — switch browsers "
-                "or workstations and you start fresh. Set a token and any browser that uses the same "
-                "token shares your run history, starred commands, and saved user options."
-            ),
-            "answer_html": (
-                "Without a session token, your history is tied to your current browser. Switch to a "
-                "different browser or workstation and you start fresh.<br><br>"
-                "Set a <strong>session token</strong> and any browser that uses the same token shares "
-                "your run history, starred commands, and saved user options — useful if you work across "
-                "multiple machines or want to pick up where you left off after clearing your browser.<br><br>"
-                "Use these commands to manage your session token:<br><br>"
-                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token\">session-token</span>"
-                " — show whether a token is active.<br>"
-                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token generate\">session-token generate</span>"
-                " — create and activate a new random token.<br>"
-                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token set \">session-token set</span>"
-                " — activate a specific token you already have.<br>"
-                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token rotate\">session-token rotate</span>"
-                " — replace your current token with a new random one.<br>"
-                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token clear\">session-token clear</span>"
-                " — remove your token and return to a browser-local session.<br><br>"
-                "You can also use the <strong>Generate</strong>, <strong>Set</strong>, "
-                "<strong>Rotate</strong>, and <strong>Clear</strong> buttons in the "
-                "<strong>Options</strong> panel."
-            ),
-        },
-        {
-            "question": "What are the retention and limit settings for this instance?",
-            "answer": "See the live retention and limit table in the FAQ modal or run retention in the web shell.",
-            "ui_kind": "limits",
         },
         {
             "question": "What wordlists are available?",
@@ -297,6 +316,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None):
             ),
         },
     ]
+    return [item for item in entries if _faq_entry_enabled(item, cfg)]
 
 _FAQ_CHIP_RE = re.compile(r'\[\[(?:cmd|chip):(.+?)\]\]')
 _FAQ_BOLD_RE = re.compile(r'\*\*(.+?)\*\*')
@@ -822,13 +842,34 @@ def load_autocomplete_context_from_commands_registry() -> dict:
     return autocomplete_context_from_commands_registry(load_commands_registry())
 
 
-def load_faq():
+def _feature_enabled(feature, cfg=None):
+    normalized = str(feature or "").strip().lower()
+    if not normalized:
+        return True
+    active_cfg = app_config.CFG if cfg is None else cfg
+    if normalized == "workspace":
+        return bool(active_cfg.get("workspace_enabled", False))
+    return True
+
+
+def _faq_entry_enabled(item, cfg=None):
+    feature = item.get("feature") or item.get("requires_feature")
+    if feature is None:
+        return True
+    if isinstance(feature, (list, tuple, set)):
+        return all(_feature_enabled(value, cfg) for value in feature)
+    return _feature_enabled(feature, cfg)
+
+
+def load_faq(cfg=None):
     """Read faq.yaml and return a list of {question, answer} dicts.
     Returns an empty list if the file doesn't exist or contains no valid entries."""
     data = _load_yaml_list_with_local(FAQ_FILE)
     result = []
     for item in data:
         if not isinstance(item, dict) or not item.get("question") or not item.get("answer"):
+            continue
+        if not _faq_entry_enabled(item, cfg):
             continue
         entry = {"question": str(item["question"]), "answer": str(item["answer"])}
         if item.get("answer_html"):
@@ -839,9 +880,9 @@ def load_faq():
     return result
 
 
-def load_all_faq(app_name="darklab_shell", project_readme=None):
+def load_all_faq(app_name="darklab_shell", project_readme=None, cfg=None):
     """Return the built-in FAQ entries followed by any custom faq.yaml entries."""
-    return [*(deepcopy(_builtin_faq(app_name, project_readme))), *load_faq()]
+    return [*(deepcopy(_builtin_faq(app_name, project_readme, cfg))), *load_faq(cfg)]
 
 
 def _builtin_workflows():
@@ -1250,28 +1291,45 @@ def load_ascii_mobile_art():
         return f.read().rstrip()
 
 
-def load_welcome_hints():
-    """Read app_hints.txt and return a list of app-usage hints."""
+def _hint_category_enabled(category, cfg=None):
+    active_cfg = app_config.CFG if cfg is None else cfg
+    normalized = str(category or "general").strip().lower()
+    if normalized in ("", "general"):
+        return True
+    if normalized == "workspace":
+        return bool(active_cfg.get("workspace_enabled", False))
+    return True
+
+
+def _load_scoped_hints(path, cfg=None):
     hints = []
     seen = set()
-    for raw_line in _load_text_lines(APP_HINTS_FILE):
-        line = raw_line.strip()
-        if line and not line.startswith("#") and line not in seen:
-            hints.append(line)
-            seen.add(line)
+    for candidate in (path, _local_overlay_path(path)):
+        if not os.path.exists(candidate):
+            continue
+        category = "general"
+        with open(candidate) as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("[") and line.endswith("]"):
+                    category = line[1:-1].strip().lower() or "general"
+                    continue
+                if _hint_category_enabled(category, cfg) and line not in seen:
+                    hints.append(line)
+                    seen.add(line)
     return hints
 
 
-def load_mobile_welcome_hints():
-    """Read app_hints_mobile.txt and return a list of mobile-specific hints."""
-    hints = []
-    seen = set()
-    for raw_line in _load_text_lines(APP_HINTS_MOBILE_FILE):
-        line = raw_line.strip()
-        if line and not line.startswith("#") and line not in seen:
-            hints.append(line)
-            seen.add(line)
-    return hints
+def load_welcome_hints(cfg=None):
+    """Read app_hints.txt and return enabled app-usage hints."""
+    return _load_scoped_hints(APP_HINTS_FILE, cfg)
+
+
+def load_mobile_welcome_hints(cfg=None):
+    """Read app_hints_mobile.txt and return enabled mobile-specific hints."""
+    return _load_scoped_hints(APP_HINTS_MOBILE_FILE, cfg)
 
 
 def _load_yaml_mapping(path):
@@ -1770,15 +1828,34 @@ def _rewrite_workspace_file_flags(
     cfg: dict | None = None,
 ) -> tuple[str, set[str], list[str], list[str], list[str], str]:
     cfg = cfg or app_config.CFG
-    if not cfg.get("workspace_enabled"):
-        return command, set(), [], [], [], ""
-
     tokens = split_command_argv(command)
     if not tokens:
         return command, set(), [], [], [], ""
 
     specs = _workspace_flag_specs_by_root().get(tokens[0].lower(), [])
     if not specs:
+        return command, set(), [], [], [], ""
+
+    if not cfg.get("workspace_enabled"):
+        index = 1
+        while index < len(tokens):
+            matched_spec = next((spec for spec in specs if _workspace_flag_matches_token(tokens[index], spec)), None)
+            if not matched_spec:
+                index += 1
+                continue
+            user_value, value_index, error = _workspace_flag_value(tokens, index, matched_spec)
+            if error:
+                return command, set(), [], [], [], error
+            if user_value and value_index is not None and not os.path.isabs(user_value):
+                return (
+                    command,
+                    set(),
+                    [],
+                    [],
+                    [],
+                    "Files are disabled on this instance; workspace file flags are not available.",
+                )
+            index = (value_index + 1) if value_index is not None else index + 1
         return command, set(), [], [], [], ""
 
     rewritten_tokens = list(tokens)

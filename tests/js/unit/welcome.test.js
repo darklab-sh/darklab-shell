@@ -18,6 +18,7 @@ function loadWelcomeFns({
   setTimeoutImpl = null,
   mobile = false,
   welcomeIntroPreference = 'animated',
+  randomValue = 0,
 } = {}) {
   document.body.innerHTML = '<div id="out"></div><input id="cmd" /><div class="prompt-wrap"></div>'
   const out = document.getElementById('out')
@@ -89,7 +90,7 @@ function loadWelcomeFns({
         getWelcomeIntroPreference: () => welcomeIntroPreference,
         requestAnimationFrame: (fn) => fn(),
         Math: Object.create(Math, {
-          random: { value: () => 0 },
+          random: { value: () => randomValue },
         }),
         setTimeout:
           setTimeoutImpl ||
@@ -234,6 +235,19 @@ describe('welcome helpers', () => {
     expect(staticScenario.out.querySelector('.welcome-hint')?.textContent).toContain('Hint one')
   })
 
+  it('runWelcome randomizes the settled final hint instead of always using the first hint', async () => {
+    const { runWelcome, out } = loadWelcomeFns({
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one', group: 'basics', featured: true }],
+      hintItems: ['Hint one', 'Hint two'],
+      welcomeIntroPreference: 'disable_animation',
+      randomValue: 0.75,
+    })
+
+    await runWelcome()
+
+    expect(out.querySelector('.welcome-hint')?.textContent).toContain('Hint two')
+  })
+
   it('runWelcome renders the settled intro immediately when animation is disabled', async () => {
     const { runWelcome, out, mountShellPrompt } = loadWelcomeFns({
       welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one', group: 'basics', featured: true }],
@@ -247,6 +261,25 @@ describe('welcome helpers', () => {
     expect(out.querySelectorAll('.welcome-status-loaded')).toHaveLength(5)
     expect(out.querySelector('.welcome-command')?.textContent).toContain('ping darklab.sh')
     expect(out.querySelector('.welcome-hint')?.textContent).toContain('Hint one')
+    expect(mountShellPrompt).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('runWelcome keeps rotating idle hints after rendering the static welcome', async () => {
+    const { runWelcome, out, mountShellPrompt } = loadWelcomeFns({
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one', group: 'basics', featured: true }],
+      hintItems: ['Hint one', 'Hint two'],
+      welcomeIntroPreference: 'disable_animation',
+      config: {
+        welcome_hint_interval_ms: 1,
+        welcome_hint_rotations: 2,
+      },
+    })
+
+    await runWelcome()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(out.querySelector('.welcome-hint')?.textContent).toContain('Hint two')
     expect(mountShellPrompt).toHaveBeenCalledWith('tab-1')
   })
 

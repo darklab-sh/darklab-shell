@@ -34,6 +34,7 @@ function setupWorkspace(apiFetch = vi.fn()) {
     window,
     URL,
     Blob,
+    APP_CONFIG: { workspace_enabled: true },
     apiFetch,
     showWorkspaceOverlay: vi.fn(),
     hideWorkspaceOverlay: vi.fn(),
@@ -76,6 +77,7 @@ function setupWorkspace(apiFetch = vi.fn()) {
       hideWorkspaceEditor,
       showWorkspaceViewer,
       hideWorkspaceViewer,
+      openWorkspaceEditorFromCommand,
       getWorkspaceAutocompleteFileHints,
       handleWorkspaceFileAction,
     };
@@ -113,7 +115,8 @@ describe('workspace UI helpers', () => {
 
     renderWorkspaceFiles({ files: [], usage: { bytes_used: 0, file_count: 0 }, limits: { max_files: 10 } })
 
-    expect(document.querySelector('.workspace-empty').textContent).toContain('No workspace files yet')
+    expect(document.querySelector('.workspace-empty').textContent)
+      .toBe('No session files yet. Create a text file or save command output to use with file-enabled commands.')
   })
 
   it('keeps the editor hidden until the user starts or closes an edit', () => {
@@ -135,6 +138,20 @@ describe('workspace UI helpers', () => {
     expect(editor.classList.contains('u-hidden')).toBe(false)
     expect(document.getElementById('workspace-path-input').value).toBe('targets.txt')
     expect(document.getElementById('workspace-text-input').value).toBe('darklab.sh\n')
+  })
+
+  it('opens the editor with a prefilled file name from terminal commands', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve(new Response(JSON.stringify({
+      files: [],
+      usage: { bytes_used: 0, file_count: 0 },
+      limits: { max_files: 10, quota_bytes: 1024 },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    const { openWorkspaceEditorFromCommand } = setupWorkspace(apiFetch)
+
+    await openWorkspaceEditorFromCommand('add', 'targets.txt')
+
+    expect(document.getElementById('workspace-editor').classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('workspace-path-input').value).toBe('targets.txt')
   })
 
   it('shows file contents in a read-only viewer and keeps edit mode separate', async () => {
@@ -186,8 +203,8 @@ describe('workspace UI helpers', () => {
     })
 
     expect(getWorkspaceAutocompleteFileHints()).toEqual([
-      { value: 'targets.txt', description: 'workspace file · 11 B' },
-      { value: 'ffuf.json', description: 'workspace file · 2 KB' },
+      { value: 'targets.txt', description: 'session file · 11 B' },
+      { value: 'ffuf.json', description: 'session file · 2 KB' },
     ])
   })
 

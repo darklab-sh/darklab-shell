@@ -207,7 +207,7 @@ function _buildContextAutocomplete(ctx) {
               replaceStart: ctx.tokenStart,
               replaceEnd: ctx.tokenEnd,
               insertValue: ex.value,
-            }), { isExample: true })),
+            }), { isExample: true, completionPrefix: matchingRoots[0] })),
             ctx.currentToken,
           );
         }
@@ -232,7 +232,7 @@ function _buildContextAutocomplete(ctx) {
         replaceStart: ctx.tokenStart,
         replaceEnd: ctx.tokenEnd,
         insertValue: ex.value,
-      }), { isExample: true })),
+      }), { isExample: true, completionPrefix: ctx.commandRoot })),
       ctx.currentToken,
     );
   }
@@ -566,6 +566,14 @@ function acHide() {
 
 function _getAutocompleteSharedPrefix(items) {
   if (!Array.isArray(items) || !items.length) return '';
+  const completionPrefix = items[0] && typeof items[0] === 'object'
+    ? String(items[0].completionPrefix || '').trim()
+    : '';
+  if (completionPrefix && items.every(item => (
+    item && typeof item === 'object' && String(item.completionPrefix || '').trim() === completionPrefix
+  ))) {
+    return completionPrefix;
+  }
   const first = _acItemInsertValue(items[0]);
   if (!first) return '';
   const lowerItems = items.map(item => _acItemInsertValue(item).toLowerCase());
