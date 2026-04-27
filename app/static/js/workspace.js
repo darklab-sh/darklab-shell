@@ -3,7 +3,10 @@
 // redirection, or arbitrary host paths.
 
 let _workspaceFiles = [];
+let _workspaceDirs = [];
 let _workspaceLoaded = false;
+let _workspaceCurrentDir = '';
+let _workspaceViewedPath = '';
 
 function isWorkspaceEnabled() {
   return !!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true);
@@ -54,6 +57,7 @@ function hideWorkspaceEditor() {
 
 function hideWorkspaceViewer() {
   if (workspaceViewer) workspaceViewer.classList.add('u-hidden');
+  _workspaceViewedPath = '';
 }
 
 function _workspaceViewerPayload(path = '', text = '') {
@@ -85,6 +89,7 @@ function showWorkspaceEditor(path = '', text = '') {
 
 function showWorkspaceViewer(path = '', text = '') {
   hideWorkspaceEditor();
+  _workspaceViewedPath = String(path || '').trim();
   const payload = _workspaceViewerPayload(path, text);
   if (workspaceViewerTitle) workspaceViewerTitle.textContent = path;
   if (workspaceViewerText) {
@@ -100,9 +105,228 @@ function showWorkspaceViewer(path = '', text = '') {
   }
 }
 
+function _normalizeWorkspaceDir(path = '') {
+  return String(path || '').split('/').map(part => part.trim()).filter(Boolean).join('/');
+}
+
+function _workspaceParentDir(path = '') {
+  const parts = _normalizeWorkspaceDir(path).split('/').filter(Boolean);
+  parts.pop();
+  return parts.join('/');
+}
+
+function _workspaceFileBasename(path = '') {
+  const parts = String(path || '').split('/').filter(Boolean);
+  return parts[parts.length - 1] || String(path || '');
+}
+
+function _activateWorkspaceFolderRow(path, event = null) {
+  if (event && event.target && event.target.closest && event.target.closest('[data-workspace-action]')) return;
+  handleWorkspaceFileAction('open-folder', path);
+}
+
+function _bindWorkspaceFolderRow(row, path, label) {
+  row.className = 'workspace-file-row workspace-folder-row';
+  row.dataset.kind = 'folder';
+  row.dataset.path = path;
+  row.tabIndex = 0;
+  row.setAttribute('role', 'button');
+  row.setAttribute('aria-label', label);
+  if (typeof bindPressable === 'function') {
+    bindPressable(row, {
+      onActivate: event => _activateWorkspaceFolderRow(path, event),
+      refocusComposer: false,
+      clearPressStyle: true,
+    });
+  } else {
+    row.addEventListener('click', event => _activateWorkspaceFolderRow(path, event));
+    row.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      _activateWorkspaceFolderRow(path, event);
+    });
+  }
+}
+
+function _workspacePathInCurrentDir(path = '') {
+  const raw = String(path || '').trim();
+  const current = _normalizeWorkspaceDir(_workspaceCurrentDir);
+  if (!raw) return current ? `${current}/` : '';
+  if (raw.includes('/')) return raw;
+  return current ? `${current}/${raw}` : raw;
+}
+
+function _workspaceDirectEntries(dir = '') {
+  const current = _normalizeWorkspaceDir(dir);
+  const folders = new Map();
+  const files = [];
+  for (const directory of _workspaceDirs) {
+    const path = String(directory.path || '').split('/').filter(Boolean).join('/');
+    if (!path) continue;
+    const prefix = current ? `${current}/` : '';
+    if (current && path !== current && !path.startsWith(prefix)) continue;
+    if (path === current) continue;
+    const relative = current ? path.slice(prefix.length) : path;
+    const parts = relative.split('/').filter(Boolean);
+    if (parts.length >= 1) {
+      const folderName = parts[0];
+      const folderPath = current ? `${current}/${folderName}` : folderName;
+      folders.set(folderPath, { name: folderName, path: folderPath });
+    }
+  }
+  for (const file of _workspaceFiles) {
+    const path = String(file.path || '').split('/').filter(Boolean).join('/');
+    if (!path) continue;
+    const prefix = current ? `${current}/` : '';
+    if (current && path !== current && !path.startsWith(prefix)) continue;
+    const relative = current ? path.slice(prefix.length) : path;
+    if (!relative || relative === path && current && !path.startsWith(prefix)) continue;
+    const parts = relative.split('/').filter(Boolean);
+    if (parts.length > 1) {
+      const folderName = parts[0];
+      const folderPath = current ? `${current}/${folderName}` : folderName;
+      folders.set(folderPath, { name: folderName, path: folderPath });
+    } else if (parts.length === 1) {
+      files.push({ ...file, path, name: parts[0] });
+    }
+  }
+  return {
+    folders: [...folders.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    files: files.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))),
+  };
+}
+
+function renderWorkspaceBreadcrumbs() {
+  if (!workspaceBreadcrumbs) return;
+  workspaceBreadcrumbs.textContent = '';
+  const root = document.createElement('button');
+  root.type = 'button';
+  root.className = 'btn btn-secondary btn-compact';
+  root.dataset.workspaceDir = '';
+  root.textContent = 'Files';
+  workspaceBreadcrumbs.appendChild(root);
+
+  const parts = _normalizeWorkspaceDir(_workspaceCurrentDir).split('/').filter(Boolean);
+  let acc = '';
+  parts.forEach(part => {
+    acc = acc ? `${acc}/${part}` : part;
+    const separator = document.createElement('span');
+    separator.className = 'workspace-breadcrumb-separator';
+    separator.textContent = '/';
+    const crumb = document.createElement('button');
+    crumb.type = 'button';
+    crumb.className = 'btn btn-secondary btn-compact';
+    crumb.dataset.workspaceDir = acc;
+    crumb.textContent = part;
+    workspaceBreadcrumbs.appendChild(separator);
+    workspaceBreadcrumbs.appendChild(crumb);
+  });
+}
+
+function renderWorkspaceBrowser() {
+  if (!workspaceFileList) return;
+  workspaceFileList.textContent = '';
+  renderWorkspaceBreadcrumbs();
+
+  const { folders, files } = _workspaceDirectEntries(_workspaceCurrentDir);
+  if (_workspaceCurrentDir) {
+    const parent = document.createElement('div');
+    const parentPath = _workspaceParentDir(_workspaceCurrentDir);
+    _bindWorkspaceFolderRow(parent, parentPath, 'Open parent folder');
+    parent.appendChild(_workspaceMetaNode('..', 'Parent folder', 'workspace-parent-icon', ''));
+    parent.appendChild(_workspaceActionsNode([{ action: 'open-folder', label: 'Up', tone: 'secondary' }]));
+    workspaceFileList.appendChild(parent);
+  }
+
+  for (const folder of folders) {
+    const row = document.createElement('div');
+    _bindWorkspaceFolderRow(row, folder.path, `Open folder ${folder.name}`);
+    row.appendChild(_workspaceMetaNode(folder.name, 'Folder', 'workspace-folder-icon', '>'));
+    row.appendChild(_workspaceActionsNode([{ action: 'open-folder', label: 'Open', tone: 'secondary' }]));
+    workspaceFileList.appendChild(row);
+  }
+
+  for (const file of files) {
+    const row = document.createElement('div');
+    row.className = 'workspace-file-row';
+    row.dataset.kind = 'file';
+    row.dataset.path = file.path;
+    row.appendChild(_workspaceMetaNode(
+      file.name || _workspaceFileBasename(file.path),
+      `${_formatWorkspaceBytes(file.size)}${file.mtime ? ` · ${file.mtime}` : ''}`,
+    ));
+    row.appendChild(_workspaceActionsNode([
+      { action: 'view', label: 'View', tone: 'secondary' },
+      { action: 'edit', label: 'Edit', tone: 'secondary' },
+      { action: 'download', label: 'Download', tone: 'secondary' },
+      { action: 'delete', label: 'Delete', tone: 'destructive' },
+    ]));
+    workspaceFileList.appendChild(row);
+  }
+
+  if (!folders.length && !files.length && !_workspaceCurrentDir) {
+    const empty = document.createElement('div');
+    empty.className = 'workspace-empty';
+    empty.textContent = 'No session files yet. Create a text file or save command output to use with file-enabled commands.';
+    workspaceFileList.appendChild(empty);
+  } else if (!folders.length && !files.length) {
+    const empty = document.createElement('div');
+    empty.className = 'workspace-empty';
+    empty.textContent = 'This folder is empty.';
+    workspaceFileList.appendChild(empty);
+  }
+}
+
+function _workspaceMetaNode(nameText, detailsText, iconClass = '', iconText = '') {
+  const meta = document.createElement('div');
+  meta.className = 'workspace-file-meta';
+  if (iconText) {
+    const icon = document.createElement('span');
+    icon.className = iconClass;
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = iconText;
+    meta.appendChild(icon);
+  }
+  const text = document.createElement('div');
+  text.className = 'workspace-file-meta-text';
+  const name = document.createElement('div');
+  name.className = 'workspace-file-name';
+  name.textContent = nameText;
+  const details = document.createElement('div');
+  details.className = 'workspace-file-details';
+  details.textContent = detailsText;
+  text.appendChild(name);
+  text.appendChild(details);
+  meta.appendChild(text);
+  return meta;
+}
+
+function _workspaceActionsNode(items = []) {
+  const actions = document.createElement('div');
+  actions.className = 'workspace-file-actions';
+  for (const item of items) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `btn btn-${item.tone === 'destructive' ? 'destructive' : 'secondary'} btn-compact`;
+    btn.dataset.workspaceAction = item.action;
+    btn.textContent = item.label;
+    actions.appendChild(btn);
+  }
+  return actions;
+}
+
 function renderWorkspaceFiles(payload = {}) {
   _workspaceLoaded = true;
+  _workspaceDirs = Array.isArray(payload.directories) ? payload.directories : [];
   _workspaceFiles = Array.isArray(payload.files) ? payload.files : [];
+  const currentHasEntries = !_workspaceCurrentDir || _workspaceFiles.some(file => {
+    const path = String(file.path || '').split('/').filter(Boolean).join('/');
+    return path === _workspaceCurrentDir || path.startsWith(`${_workspaceCurrentDir}/`);
+  }) || _workspaceDirs.some(directory => {
+    const path = String(directory.path || '').split('/').filter(Boolean).join('/');
+    return path === _workspaceCurrentDir || path.startsWith(`${_workspaceCurrentDir}/`);
+  });
+  if (!currentHasEntries) _workspaceCurrentDir = '';
   const usage = payload.usage || {};
   const limits = payload.limits || {};
   const fileCount = Number(usage.file_count) || 0;
@@ -114,64 +338,7 @@ function renderWorkspaceFiles(payload = {}) {
     workspaceSummary.textContent = `${fileCount}${maxFiles ? ` / ${maxFiles}` : ''} files · ${_formatWorkspaceBytes(bytesUsed)}${quotaBytes ? ` / ${_formatWorkspaceBytes(quotaBytes)}` : ''}`;
   }
   if (!workspaceFileList) return;
-  workspaceFileList.textContent = '';
-
-  if (!_workspaceFiles.length) {
-    const empty = document.createElement('div');
-    empty.className = 'workspace-empty';
-    empty.textContent = 'No session files yet. Create a text file or save command output to use with file-enabled commands.';
-    workspaceFileList.appendChild(empty);
-    return;
-  }
-
-  for (const file of _workspaceFiles) {
-    const path = String(file.path || '');
-    const row = document.createElement('div');
-    row.className = 'workspace-file-row';
-    row.dataset.path = path;
-
-    const meta = document.createElement('div');
-    meta.className = 'workspace-file-meta';
-    const name = document.createElement('div');
-    name.className = 'workspace-file-name';
-    name.textContent = path;
-    const details = document.createElement('div');
-    details.className = 'workspace-file-details';
-    details.textContent = `${_formatWorkspaceBytes(file.size)}${file.mtime ? ` · ${file.mtime}` : ''}`;
-    meta.appendChild(name);
-    meta.appendChild(details);
-
-    const actions = document.createElement('div');
-    actions.className = 'workspace-file-actions';
-    const view = document.createElement('button');
-    view.type = 'button';
-    view.className = 'btn btn-secondary btn-compact';
-    view.dataset.workspaceAction = 'view';
-    view.textContent = 'View';
-    const edit = document.createElement('button');
-    edit.type = 'button';
-    edit.className = 'btn btn-secondary btn-compact';
-    edit.dataset.workspaceAction = 'edit';
-    edit.textContent = 'Edit';
-    const download = document.createElement('button');
-    download.type = 'button';
-    download.className = 'btn btn-secondary btn-compact';
-    download.dataset.workspaceAction = 'download';
-    download.textContent = 'Download';
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'btn btn-destructive btn-compact';
-    del.dataset.workspaceAction = 'delete';
-    del.textContent = 'Delete';
-    actions.appendChild(view);
-    actions.appendChild(edit);
-    actions.appendChild(download);
-    actions.appendChild(del);
-
-    row.appendChild(meta);
-    row.appendChild(actions);
-    workspaceFileList.appendChild(row);
-  }
+  renderWorkspaceBrowser();
 }
 
 async function refreshWorkspaceFiles() {
@@ -190,6 +357,7 @@ async function refreshWorkspaceFileCache() {
     const resp = await apiFetch('/workspace/files');
     const data = await _workspaceJson(resp);
     _workspaceLoaded = true;
+    _workspaceDirs = Array.isArray(data.directories) ? data.directories : [];
     _workspaceFiles = Array.isArray(data.files) ? data.files : [];
     if (workspaceOverlay && workspaceOverlay.classList.contains('open')) renderWorkspaceFiles(data);
     return _workspaceFiles;
@@ -221,6 +389,40 @@ async function saveWorkspaceFile(path, text) {
   hideWorkspaceViewer();
   setWorkspaceMessage(`Saved ${data.file?.path || path}`);
   return data;
+}
+
+async function createWorkspaceDirectory(path) {
+  const normalized = _normalizeWorkspaceDir(path);
+  const resp = await apiFetch('/workspace/directories', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: normalized }),
+  });
+  const data = await _workspaceJson(resp);
+  _workspaceCurrentDir = data.directory?.path || normalized;
+  renderWorkspaceFiles(data.workspace || {});
+  hideWorkspaceEditor();
+  hideWorkspaceViewer();
+  setWorkspaceMessage(`Created folder ${data.directory?.path || normalized}`);
+  return data;
+}
+
+async function promptWorkspaceFolderName() {
+  const current = _normalizeWorkspaceDir(_workspaceCurrentDir);
+  const promptDefault = current ? `${current}/` : '';
+  const entered = typeof window !== 'undefined' && typeof window.prompt === 'function'
+    ? window.prompt('Folder name', promptDefault)
+    : '';
+  if (entered === null) return null;
+  const raw = String(entered || '').trim();
+  if (!raw) return null;
+  const path = current && !raw.includes('/') ? `${current}/${raw}` : raw;
+  try {
+    return await createWorkspaceDirectory(path);
+  } catch (err) {
+    _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to create folder'), 'error');
+    return null;
+  }
 }
 
 async function readWorkspaceFile(path) {
@@ -260,6 +462,7 @@ async function openWorkspace() {
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   showWorkspaceOverlay();
+  _workspaceCurrentDir = '';
   hideWorkspaceEditor();
   hideWorkspaceViewer();
   try {
@@ -301,7 +504,11 @@ function closeWorkspace() {
 async function handleWorkspaceFileAction(action, path) {
   try {
     setWorkspaceMessage('');
-    if (action === 'view') {
+    if (action === 'open-folder') {
+      _workspaceCurrentDir = _normalizeWorkspaceDir(path);
+      hideWorkspaceViewer();
+      renderWorkspaceBrowser();
+    } else if (action === 'view') {
       const data = await readWorkspaceFile(path);
       showWorkspaceViewer(data.path || path, data.text || '');
     } else if (action === 'edit') {
@@ -328,12 +535,25 @@ async function handleWorkspaceFileAction(action, path) {
 }
 
 workspaceNewBtn?.addEventListener('click', () => showWorkspaceEditor('', ''));
+workspaceNewFolderBtn?.addEventListener('click', () => { promptWorkspaceFolderName(); });
 workspaceCancelEditBtn?.addEventListener('click', () => hideWorkspaceEditor());
 workspaceCloseViewerBtn?.addEventListener('click', () => hideWorkspaceViewer());
+workspaceBreadcrumbs?.addEventListener('click', event => {
+  const btn = event.target && event.target.closest ? event.target.closest('[data-workspace-dir]') : null;
+  if (!btn) return;
+  _workspaceCurrentDir = _normalizeWorkspaceDir(btn.dataset.workspaceDir || '');
+  hideWorkspaceViewer();
+  renderWorkspaceBrowser();
+});
+workspaceViewer?.addEventListener('click', event => {
+  const btn = event.target && event.target.closest ? event.target.closest('[data-workspace-viewer-action]') : null;
+  if (!btn || !_workspaceViewedPath) return;
+  handleWorkspaceFileAction(btn.dataset.workspaceViewerAction, _workspaceViewedPath);
+});
 workspaceEditor?.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
-    await saveWorkspaceFile(workspacePathInput?.value || '', workspaceTextInput?.value || '');
+    await saveWorkspaceFile(_workspacePathInCurrentDir(workspacePathInput?.value || ''), workspaceTextInput?.value || '');
   } catch (err) {
     setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to save session file'), 'error');
   }
@@ -342,9 +562,11 @@ workspaceFileList?.addEventListener('click', event => {
   const btn = event.target && event.target.closest ? event.target.closest('[data-workspace-action]') : null;
   if (!btn) return;
   const row = btn.closest('.workspace-file-row');
+  if (!row || !workspaceFileList.contains(row)) return;
+  const action = btn.dataset.workspaceAction;
   const path = row?.dataset.path || '';
-  if (!path) return;
-  handleWorkspaceFileAction(btn.dataset.workspaceAction, path);
+  if (!path && action !== 'open-folder') return;
+  handleWorkspaceFileAction(action, path);
 });
 
 if (typeof window !== 'undefined') {
@@ -354,6 +576,8 @@ if (typeof window !== 'undefined') {
   window.refreshWorkspaceFileCache = refreshWorkspaceFileCache;
   window.getWorkspaceAutocompleteFileHints = getWorkspaceAutocompleteFileHints;
   window.renderWorkspaceFiles = renderWorkspaceFiles;
+  window.renderWorkspaceBrowser = renderWorkspaceBrowser;
+  window.createWorkspaceDirectory = createWorkspaceDirectory;
   window.openWorkspaceEditorFromCommand = openWorkspaceEditorFromCommand;
   if (isWorkspaceEnabled()) setTimeout(() => { refreshWorkspaceFileCache(); }, 0);
 }

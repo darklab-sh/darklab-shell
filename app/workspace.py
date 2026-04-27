@@ -320,6 +320,41 @@ def list_workspace_files(session_id: str, cfg: dict[str, Any] | None = None) -> 
     return sorted(items, key=lambda item: str(item["path"]))
 
 
+def list_workspace_directories(session_id: str, cfg: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    root = ensure_session_workspace(session_id, cfg).resolve(strict=True)
+    touch_session_workspace(session_id, cfg)
+    items: list[dict[str, Any]] = []
+    for path in root.rglob("*"):
+        if path.is_symlink():
+            raise InvalidWorkspacePath("session file symlinks are not allowed")
+        if not path.is_dir():
+            continue
+        stat = path.stat()
+        items.append({
+            "path": path.relative_to(root).as_posix(),
+            "mtime": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+        })
+    return sorted(items, key=lambda item: str(item["path"]))
+
+
+def create_workspace_directory(
+    session_id: str,
+    relative_path: str,
+    cfg: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    settings = workspace_settings(cfg)
+    _require_enabled(settings)
+    path = resolve_workspace_path(session_id, relative_path, cfg, ensure_parent=True)
+    if path.exists() and not path.is_dir():
+        raise InvalidWorkspacePath("session path is not a directory")
+    path.mkdir(mode=WORKSPACE_DIR_MODE, parents=True, exist_ok=True)
+    try:
+        os.chmod(path, WORKSPACE_DIR_MODE)
+    except OSError:
+        pass
+    return {"path": _validate_relative_path(relative_path).as_posix()}
+
+
 def _check_write_limits(
     session_id: str,
     destination: Path,

@@ -169,6 +169,60 @@ test.describe('workspace modal', () => {
     await expect(page.locator('.tab-panel.active .output')).toContainText('file: targets.txt')
     await expect(page.locator('.tab-panel.active .output')).toContainText('ip.darklab.sh')
   })
+
+  test('navigates nested file output folders and exposes viewer actions', async ({ page }) => {
+    await page.locator('.rail-nav [data-action="workspace"]').click()
+    await expect(page.locator('#workspace-overlay')).toHaveClass(/open/)
+
+    page.once('dialog', async dialog => {
+      expect(dialog.message()).toContain('Folder name')
+      await dialog.accept('reports')
+    })
+    await page.locator('#workspace-new-folder-btn').click()
+    await expect(page.locator('#workspace-breadcrumbs')).toContainText('Files/reports')
+    await expect(page.locator('.workspace-empty')).toHaveText('This folder is empty.')
+
+    await page.locator('#workspace-new-btn').click()
+    await expect(page.locator('#workspace-path-input')).toHaveValue('')
+    await page.locator('#workspace-cancel-edit-btn').click()
+
+    await page.locator('.workspace-folder-row').filter({ hasText: '..' }).locator('[data-workspace-action="open-folder"]').click()
+    await expect(page.locator('#workspace-breadcrumbs')).toHaveText('Files')
+    await expect(page.locator('.workspace-folder-row').filter({ hasText: 'reports' })).toBeVisible()
+
+    await page.locator('.workspace-folder-row').filter({ hasText: 'reports' }).locator('.workspace-file-name').click()
+    await expect(page.locator('#workspace-breadcrumbs')).toContainText('Files/reports')
+
+    await page.locator('#workspace-breadcrumbs [data-workspace-dir=""]').click()
+    await expect(page.locator('.workspace-folder-row').filter({ hasText: 'reports' })).toBeVisible()
+
+    await page.locator('#workspace-new-btn').click()
+    await page.locator('#workspace-path-input').fill('amass-viz/amass.html')
+    await page.locator('#workspace-text-input').fill('<html>amass viz</html>\n')
+    await page.locator('#workspace-save-btn').click()
+    await expect(page.locator('#workspace-editor')).not.toBeVisible()
+
+    const folder = page.locator('.workspace-folder-row').filter({ hasText: 'amass-viz' })
+    await expect(folder).toBeVisible()
+    await expect(page.locator('.workspace-file-row').filter({ hasText: 'amass.html' })).toHaveCount(0)
+
+    await folder.locator('.workspace-file-name').click()
+    await expect(page.locator('#workspace-breadcrumbs')).toContainText('Files/amass-viz')
+
+    const file = page.locator('.workspace-file-row').filter({ hasText: 'amass.html' })
+    await expect(file).toBeVisible()
+    await file.locator('[data-workspace-action="view"]').click()
+
+    await expect(page.locator('#workspace-viewer')).toBeVisible()
+    await expect(page.locator('#workspace-viewer-title')).toHaveText('amass-viz/amass.html')
+    await expect(page.locator('#workspace-viewer-text')).toContainText('amass viz')
+    await expect(page.locator('#workspace-viewer [data-workspace-viewer-action="edit"]')).toBeVisible()
+    await expect(page.locator('#workspace-viewer [data-workspace-viewer-action="download"]')).toBeVisible()
+    await expect(page.locator('#workspace-viewer [data-workspace-viewer-action="delete"]')).toBeVisible()
+
+    await page.locator('#workspace-breadcrumbs [data-workspace-dir=""]').click()
+    await expect(folder).toBeVisible()
+  })
 })
 
 test.describe('workflows modal', () => {

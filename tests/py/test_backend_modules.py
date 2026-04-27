@@ -45,9 +45,10 @@ from output_signals import OutputSignalClassifier, classify_line, command_root, 
 from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
 from workspace import (
     InvalidWorkspacePath, WorkspaceDisabled, WorkspaceQuotaExceeded,
-    cleanup_inactive_workspaces, delete_workspace_file, ensure_session_workspace,
-    list_workspace_files, prepare_workspace_file_for_command, read_workspace_text_file,
-    resolve_workspace_path, session_workspace_name, workspace_usage,
+    cleanup_inactive_workspaces, create_workspace_directory, delete_workspace_file,
+    ensure_session_workspace, list_workspace_directories, list_workspace_files,
+    prepare_workspace_file_for_command, read_workspace_text_file, resolve_workspace_path,
+    session_workspace_name, workspace_usage,
     touch_session_workspace, write_workspace_text_file, WORKSPACE_COMMAND_WRITE_FILE_MODE,
     WORKSPACE_DIR_MODE, WORKSPACE_FILE_MODE,
 )
@@ -275,6 +276,20 @@ class TestSessionWorkspace:
 
             assert (path.stat().st_mode & 0o777) == WORKSPACE_COMMAND_WRITE_FILE_MODE
             assert not path.stat().st_mode & 0o007
+
+    def test_create_and_list_empty_directories_without_file_usage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+
+            created = create_workspace_directory("session-1", "reports/empty", cfg)
+
+            assert created == {"path": "reports/empty"}
+            assert {item["path"] for item in list_workspace_directories("session-1", cfg)} == {
+                "reports",
+                "reports/empty",
+            }
+            assert list_workspace_files("session-1", cfg) == []
+            assert workspace_usage("session-1", cfg).file_count == 0
 
     def test_rejects_absolute_traversal_and_backslash_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -568,6 +583,9 @@ class TestDerivedCommandRegistry:
         assert "amass subs -d darklab.sh -show" in {
             item["value"] for item in amass["subcommands"]["subs"]["examples"]
         }
+        assert "-df" in amass["subcommands"]["enum"]["workspace_file_flags"]
+        assert "-config" in amass["subcommands"]["subs"]["workspace_file_flags"]
+        assert "-o" not in amass["subcommands"]["subs"].get("workspace_file_flags", [])
 
     def test_real_registry_openssl_uses_subcommand_scoped_autocomplete(self):
         context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
@@ -584,6 +602,7 @@ class TestDerivedCommandRegistry:
         assert "-stdname" not in s_client_flags
         assert "-stdname" in ciphers_flags
         assert "-connect" not in ciphers_flags
+        assert openssl["subcommands"]["s_client"]["workspace_file_flags"] == ["-CAfile"]
 
     def test_real_registry_gobuster_uses_subcommand_scoped_autocomplete(self):
         context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
@@ -607,6 +626,7 @@ class TestDerivedCommandRegistry:
         assert "-x" not in dns_flags
         assert "--append-domain" in vhost_flags
         assert "-d" not in vhost_flags
+        assert gobuster["subcommands"]["dir"]["workspace_file_flags"] == ["-w"]
 
     def test_autocomplete_context_can_be_derived_from_commands_registry(self):
         context = autocomplete_context_from_commands_registry({
@@ -1383,6 +1403,39 @@ class TestPidMap:
         process.pid_register("run-b", 222)
         assert process.pid_pop("run-a") == 111
         assert process.pid_pop("run-b") == 222
+
+
+class TestActiveRunMetadata:
+    def setup_method(self):
+        self._patcher = mock.patch.object(process, "redis_client", None)
+        self._patcher.start()
+        with process._pid_lock:
+            process._active_run_meta.clear()
+            process._session_run_ids.clear()
+
+    def teardown_method(self):
+        self._patcher.stop()
+        with process._pid_lock:
+            process._active_run_meta.clear()
+            process._session_run_ids.clear()
+
+    def test_active_runs_for_session_preserves_pid(self):
+        process.active_run_register(
+            "run-1",
+            12345,
+            "session-1",
+            "ping darklab.sh",
+            "2026-01-01T00:00:00Z",
+        )
+
+        assert process.active_runs_for_session("session-1") == [
+            {
+                "run_id": "run-1",
+                "pid": 12345,
+                "command": "ping darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+            }
+        ]
 
 
 # ── _format_retention ─────────────────────────────────────────────────────────

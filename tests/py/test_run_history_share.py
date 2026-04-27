@@ -256,6 +256,55 @@ class TestRunStreaming:
         assert '"type": "started"' in body
         assert '"type": "exit"' in body
 
+    def test_run_emits_heartbeat_when_readable_stdout_has_only_partial_line(self):
+        client = get_client()
+        read_fd, write_fd = os.pipe()
+        reader = os.fdopen(read_fd, "r", encoding="utf-8", newline="")
+        os.write(write_fd, b"partial progress")
+
+        class _PipeProc:
+            pid = 4321
+            returncode = 0
+            stdout = reader
+
+            def poll(self):
+                return self.returncode if write_fd is None else None
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+        ready_calls = 0
+
+        def ready_with_partial_then_eof(_stream, _timeout):
+            nonlocal ready_calls
+            nonlocal write_fd
+            ready_calls += 1
+            if ready_calls == 2 and write_fd is not None:
+                os.close(write_fd)
+                write_fd = None
+            return True
+
+        try:
+            with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+                 mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+                 mock.patch("blueprints.run.subprocess.Popen", return_value=_PipeProc()), \
+                 mock.patch("blueprints.run.pid_register"), \
+                 mock.patch("blueprints.run.pid_pop"), \
+                 mock.patch("blueprints.run._stdout_ready", side_effect=ready_with_partial_then_eof), \
+                 mock.patch.dict("config.CFG", {"heartbeat_interval_seconds": 0}):
+                resp = client.post("/run", json={"command": "progress-tool"})
+                body = resp.get_data(as_text=True)
+
+            assert resp.status_code == 200
+            assert ": heartbeat" in body
+            assert '"text": "partial progress"' in body
+            assert body.index(": heartbeat") < body.index('"text": "partial progress"')
+            assert '"type": "exit"' in body
+        finally:
+            if write_fd is not None:
+                os.close(write_fd)
+            reader.close()
+
     def test_run_persists_completed_run_to_history(self):
         client = get_client()
         fake_proc = _FakeProc(lines=["saved line\n", ""])

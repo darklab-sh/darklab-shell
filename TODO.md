@@ -22,35 +22,6 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Open TODOs
 
-- **PID-aware idle/stalled run UX**
-  - The current browser-side stalled-stream behavior fires when no client-visible stream chunk arrives for 45s. The backend does yield idle SSE heartbeat comments, and the runner resets its timer on raw `fetch().body` chunks, but real runs can still hit the warning consistently when those tiny heartbeat frames are buffered or otherwise not delivered to the browser.
-  - Treat "server yielded a heartbeat" and "browser observed stream activity" as separate facts. The current implementation assumes they are equivalent often enough to drive UX state, which is too optimistic for quiet long-running commands behind Docker, WSGI, or reverse-proxy buffering.
-  - Also treat "stdout is readable" and "the app emitted an SSE event" as separate facts. Progress-style tools can write partial/no-newline status bytes often enough to keep `_stdout_ready()` returning true, while `_read_available_stream_lines()` buffers the partial text and returns no complete lines; in that path the backend can skip both output events and idle heartbeats.
-  - This is not the same problem as quiet long-running commands. If client-visible heartbeats are flowing, the tab should remain active even when the tool emits no stdout for minutes. The risky case is when the browser stops receiving the stream while the backend process may still be alive.
-  - Improve this by checking server-side active-run state before changing the tab back to idle:
-    - if the PID/process group is still active, keep the tab in the running state
-    - show an honest warning such as "live stream activity paused, but the process is still running"
-    - keep kill/status affordances available while the process is alive
-    - only fall back to "check history" messaging when the live stream is genuinely detached or the process is no longer active
-  - Reuse or extend the existing active-run status path used by reload reconnects (`/history/active`) rather than inventing a parallel PID API if possible.
-  - Keep the first version intentionally narrow:
-    - do not attempt to replay missed live output
-    - do not turn this into full reconnectable live streaming
-    - keep history restore as the fallback once the process exits or the stream cannot be recovered
-  - The existing `ps` and `jobs` app commands already make active PIDs observable, so this should align tab state with information the user can independently confirm.
-  - Acceptance criteria:
-    - a command that emits no output but still delivers client-visible heartbeats never shows the stalled warning
-    - a command that emits partial/no-newline progress bytes still delivers a heartbeat or safe progress event often enough to keep the browser stream alive
-    - a command whose backend is still active but whose heartbeat frames are buffered does not get dumped back to a normal prompt
-    - a dropped SSE stream for a still-active PID keeps the tab running and keeps Kill available
-    - a dropped SSE stream for a no-longer-active PID moves to the existing history/final-result recovery path
-    - resumed stream activity clears the warning without duplicating prompt state
-  - Testing:
-    - Add backend coverage for active-run/PID status reporting during idle periods.
-    - Add backend coverage for readable stdout that produces no complete lines and verify it still emits a heartbeat.
-    - Add runner/unit coverage for "heartbeat/no output", "stream stalled/process alive", and "stream stalled/process gone".
-    - Add E2E coverage with a command that sleeps quietly and then resumes output in the same tab.
-
 - **App-native active run monitor**
   - Add a `runs` built-in for darklab_shell-specific active command metadata instead of overloading `ps` or `jobs`.
   - Keep `ps` process-shaped and `jobs` shell-job-shaped; use `runs` for richer app context such as run ID, tab, PID, elapsed time, stream state, and command.
@@ -65,12 +36,11 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
     - `runs --json` for debugging and automation
     - `runs --stalled` once PID-aware stalled-stream state exists
   - Backend notes:
-    - preserve `pid` in `active_runs_for_session()` responses instead of dropping it from the registered payload
     - extend `/run` start payload to include tab ID/title so active-run metadata can identify the originating tab
     - consider recording `last_output_at` and `last_stream_at` so `runs` can distinguish quiet, streaming, stalled, and detached states
   - Testing:
     - Add fake-command coverage for empty and populated `runs` output.
-    - Add active-run metadata coverage proving PID and tab fields survive through `/history/active`.
+    - Add active-run metadata coverage proving tab fields survive through `/history/active` once `/run` records them.
 
 - **Tab-local command history traversal**
   - Make Up/Down command recall behave more like separate shell tabs while a session is active.
@@ -161,29 +131,6 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
   - Testing:
     - Add route coverage for migrating with no source workspace, source-only workspace, destination-only workspace, and conflicting files.
     - Add E2E coverage proving Files contents remain visible after accepting a session-token migration.
-
-- **Files modal folder navigation and viewer actions**
-  - Replace the flat Files list for nested paths with a folder-aware browser.
-  - Current behavior lists nested artifacts as long paths such as `amass-viz/amass.html`, which becomes hard to navigate once tools create output directories.
-  - Desired folder navigation:
-    - show folders and files as separate rows in the current directory
-    - use breadcrumbs for the current path
-    - support entering folders and returning to parent/root
-    - keep file actions scoped to files and folder actions scoped to folders
-    - preserve existing session path safety rules; folder navigation must still be app-mediated, not shell navigation
-  - Consider adding a `New Folder` action as a manual organization helper, but keep command integrations responsible for preparing declared directory outputs such as `amass viz -o amass-viz`.
-  - Viewer action layout:
-    - when viewing a file, show `Edit`, `Download`, and `Delete` in the viewer header beside the filename and `Close View`
-    - avoid forcing the user to scroll back to the file list to act on the file they are already viewing
-    - keep destructive actions behind the existing confirmation path
-  - Backend/API considerations:
-    - decide whether `/workspace/files` should keep returning a flat list and let the browser build the tree, or add a directory-aware response shape
-    - decide whether directory rows count against `workspace_max_files`; current quota accounting counts files only
-    - add route support for creating/deleting empty directories only if the UI needs `New Folder` or folder deletion
-  - Testing:
-    - Add unit coverage for tree rendering, breadcrumbs, folder enter/back behavior, and viewer header actions.
-    - Add route coverage if directory create/delete endpoints are introduced.
-    - Add E2E coverage with a tool-created nested output such as `amass-viz/*.html`.
 
 ---
 

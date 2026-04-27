@@ -1403,6 +1403,45 @@ describe('autocomplete helpers', () => {
     expect(items[3].description).toBe('Count lines')
   })
 
+  it('uses live workspace file hints for workspace read flags instead of static examples', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'nmap -iL ',
+        acSuggestions: [],
+        acContextRegistry: {
+          nmap: {
+            flags: [{ value: '-iL', description: 'Read targets from a session file' }],
+            expects_value: ['-iL'],
+            workspace_file_flags: ['-iL'],
+            arg_hints: {
+              '-iL': [{ value: 'targets.txt', description: 'Static registry example' }],
+            },
+          },
+        },
+        getWorkspaceAutocompleteFileHints: () => [
+          { value: 'inputs.txt', description: 'session file · 42 B' },
+        ],
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    const items = getAutocompleteMatches('nmap -iL ', 10)
+
+    expect(items.map(item => item.value)).toEqual(['inputs.txt'])
+    expect(items[0].description).toBe('session file · 42 B')
+  })
+
   it('returns pipe-stage flag hints for grep', () => {
     const { getAutocompleteMatches } = fromDomScripts(
       ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],

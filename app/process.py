@@ -271,6 +271,7 @@ def active_runs_for_session(session_id: str) -> list[dict]:
             [
                 {
                     "run_id": str(item.get("run_id", "")),
+                    "pid": int(item.get("pid", 0) or 0),
                     "command": str(item.get("command", "")),
                     "started": str(item.get("started", "")),
                 }
@@ -290,6 +291,7 @@ def active_runs_for_session(session_id: str) -> list[dict]:
             items.append(
                 {
                     "run_id": str(item.get("run_id", "")),
+                    "pid": int(item.get("pid", 0) or 0),
                     "command": str(item.get("command", "")),
                     "started": str(item.get("started", "")),
                 }

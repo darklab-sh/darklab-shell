@@ -913,6 +913,14 @@ def run_command():
                     if not lines and eof:
                         # EOF — process has finished
                         break
+                    if not lines:
+                        # Data is readable but not line-complete yet (for example,
+                        # a progress renderer without a newline). Keep the browser
+                        # stall timer fed while preserving the buffered partial line.
+                        if proc.poll() is not None:
+                            break
+                        yield ": heartbeat\n\n"
+                        continue
                     for line in lines:
                         filtered_lines = postfilter.process_output_line(line)
                         for filtered_line in filtered_lines:

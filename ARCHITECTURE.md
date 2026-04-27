@@ -375,7 +375,7 @@ This section is the single home for the finalized cross-cutting UI rules that ap
 
 Every clickable surface in the shell uses one of a small, allowlisted set of primitive classes. The primary pressable primitive is `.btn`, composed with one role modifier and at most one tone modifier:
 
-- **Role modifiers** (mutually exclusive): `.btn-primary`, `.btn-secondary`, `.btn-ghost`. Role controls the visual weight of the button — primary is the main action in a group, secondary is the alternate, ghost is a low-weight inline action.
+- **Role modifiers** (mutually exclusive): `.btn-primary`, `.btn-secondary`, `.btn-ghost`, `.btn-destructive`. Role controls the visual weight of the button — primary is the main action in a group, secondary is the alternate, ghost is a low-weight inline action, and destructive is a labeled irreversible action.
 - **Tone modifiers** (mutually exclusive, optional): `.btn-danger`, `.btn-warning`. Tone overlays a semantic color from the theme contract. A tone without a role is not valid.
 
 Four non-`btn` pressable primitives exist for surfaces that are structurally not buttons but still need consistent pressable behavior: `.nav-item` (rail/tab navigation), `.close-btn` (modal and sheet close controls), `.toggle-btn` (on/off switches with no destructive semantics), and `.kb-key` (keyboard-key glyphs in help copy). New pressable surfaces must pick one of these primitives rather than introducing one-off classes.
@@ -528,7 +528,7 @@ Commands flow through `POST /run`, which validates and rewrites the request, res
 
 Fast output bursts are rendered in small batches instead of forcing a full DOM update per line. The batching keeps commands like `man curl` responsive enough for the browser to repaint while output is streaming, and the terminal stays pinned to the bottom only while the user has not scrolled away. If the user scrolls up, live following stops until they return to the tail.
 
-The `/run` generator keeps the transport alive with heartbeat comments during idle periods, and the subprocess stdout reader now uses a nonblocking buffered path rather than `select()` followed by `readline()`. That matters for tools that emit partial progress lines: partial output no longer wedges the generator waiting for a newline and starving the heartbeat stream. On the browser side, `runner.js` treats 45 seconds of silence as a stalled stream and surfaces a warning inline. If the same stream later resumes, the runner now prints an explicit recovery notice and restores the tab/HUD to `RUNNING` instead of leaving the UI in a failed-looking state while output silently continues.
+The `/run` generator keeps the transport alive with heartbeat comments during idle periods, and the subprocess stdout reader now uses a nonblocking buffered path rather than `select()` followed by `readline()`. That matters for tools that emit partial progress lines: partial output no longer wedges the generator waiting for a newline and starving the heartbeat stream. On the browser side, `runner.js` treats 45 seconds of browser-visible silence as a potentially stalled stream, then checks `/history/active` before changing tab state. If the run is still active, the tab stays `RUNNING`, Kill remains available, and the warning copy says the process is still alive; only inactive runs fall back to the history/final-result recovery path. If the same stream later resumes, the runner prints an explicit recovery notice and keeps the tab/HUD in the running state instead of leaving the UI failed-looking while output silently continues.
 
 ### Output Prefixes And Follow State
 
@@ -826,10 +826,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 988
-- `vitest`: 818
-- `playwright`: 211
-- total: 2,017
+- `pytest`: 992
+- `vitest`: 826
+- `playwright`: 214
+- total: 2,032
 
 ### Testing Architecture
 

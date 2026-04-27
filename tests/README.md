@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 988
-- `vitest`: 818
-- `playwright`: 211
-- total: 2,017
+- `pytest`: 992
+- `vitest`: 826
+- `playwright`: 214
+- total: 2,032
 
 This document is organized in two parts:
 
@@ -335,6 +335,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_session_workspace_uses_hashed_session_directory` | Verifies that session workspace directories use hashed session names instead of raw session identifiers. |
 | `TestSessionWorkspace.test_write_read_list_delete_text_file` | Verifies the backend workspace text-file lifecycle for write, read, list, usage, and delete operations. |
 | `TestSessionWorkspace.test_prepare_workspace_file_for_command_uses_limited_write_mode` | Verifies that command output targets get limited group-write permissions without becoming world-readable. |
+| `TestSessionWorkspace.test_create_and_list_empty_directories_without_file_usage` | Verifies that explicit empty session folders can be created and listed without counting against file usage. |
 | `TestSessionWorkspace.test_rejects_absolute_traversal_and_backslash_paths` | Verifies that unsafe workspace paths are rejected before touching the filesystem. |
 | `TestSessionWorkspace.test_allows_hidden_files_that_are_listed_by_workspace` | Verifies that hidden session file paths can be resolved so listed tool artifacts remain accessible. |
 | `TestSessionWorkspace.test_rejects_symlink_escape` | Verifies that symlinked workspace paths cannot escape the session directory. |
@@ -399,6 +400,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPidMap.test_pop_unknown_run_id_returns_none` | Checks that pop unknown run id returns none. |
 | `TestPidMap.test_double_pop_returns_none_second_time` | Checks that double pop returns none second time. |
 | `TestPidMap.test_multiple_runs_isolated` | Checks multiple runs isolated handling. |
+| `TestActiveRunMetadata.test_active_runs_for_session_preserves_pid` | Checks that active-run metadata exposes the PID through session-scoped active-run listings. |
 | `TestFormatRetention.test_zero_returns_unlimited` | Checks zero returns unlimited handling. |
 | `TestFormatRetention.test_365_returns_one_year` | Checks that 365 returns one year. |
 | `TestFormatRetention.test_730_returns_two_years` | Checks that 730 returns two years. |
@@ -795,6 +797,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWorkspaceRoutes.test_disabled_workspace_returns_403` | Verifies that workspace routes stay unavailable while workspace storage is disabled. |
 | `TestWorkspaceRoutes.test_write_list_read_delete_lifecycle` | Verifies the route-level workspace lifecycle for write, list, read, and delete operations. |
 | `TestWorkspaceRoutes.test_workspace_files_are_session_isolated` | Verifies that a file created under one session cannot be read from another session workspace. |
+| `TestWorkspaceRoutes.test_create_directory_lists_empty_folder` | Verifies that the Files API can create and list explicit empty session folders. |
 | `TestWorkspaceRoutes.test_rejects_unsafe_paths` | Verifies that route writes reject traversal, absolute, and backslash paths. |
 | `TestWorkspaceRoutes.test_rejects_unsafe_paths_on_read_delete_and_download` | Verifies that workspace read, delete, and download routes reject traversal, absolute, and backslash file names before touching disk. |
 | `TestWorkspaceRoutes.test_allows_hidden_workspace_paths_when_listed` | Verifies that listed hidden session files can be written, listed, and read through the Files API. |
@@ -902,6 +905,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunStreaming.test_history_restore_json_preserves_signal_metadata` | Verifies that history restore JSON preserves per-line signal metadata from persisted run output. |
 | `TestRunStreaming.test_run_returns_500_when_spawn_fails` | Checks that run returns 500 when spawn fails. |
 | `TestRunStreaming.test_run_emits_heartbeat_when_silent` | Checks that run emits heartbeat when silent. |
+| `TestRunStreaming.test_run_emits_heartbeat_when_readable_stdout_has_only_partial_line` | Verifies that readable partial stdout still emits a heartbeat before the buffered line is finalized. |
 | `TestRunStreaming.test_run_persists_completed_run_to_history` | Checks that run persists completed run to history. |
 | `TestRunStreaming.test_run_filters_output_through_synthetic_grep` | Checks that a synthetic grep run streams and persists only matching lines. |
 | `TestRunStreaming.test_run_supports_invert_match_synthetic_grep` | Checks that synthetic grep supports `-v` invert matching. |
@@ -1360,6 +1364,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `uses subcommand-scoped value hints` | Verifies that value hints for repeated flags such as `-o` come from the active subcommand context. |
 | `prefers runtime autocomplete suggestions for client-side commands` | Verifies that client-side commands can provide dynamic autocomplete suggestions before falling back to the static autocomplete registry. |
 | `merges runtime autocomplete context with the YAML-loaded context registry` | Verifies that runtime built-in context and YAML-loaded tool context feed the same autocomplete matching engine. |
+| `uses live workspace file hints for workspace read flags instead of static examples` | Verifies that workspace-aware input flags prefer current session file names over baked registry examples. |
 | `uses sequence-specific runtime value hints without leaking them to sibling subcommands` | Verifies that runtime context can offer values for sequences such as `config set line-numbers` without also suggesting those values after `config get line-numbers`. |
 | `keeps an exact single flag match visible so its description is still shown` | Verifies that typing a full flag token such as `curl -w` keeps the single matching flag row visible long enough to expose its description instead of collapsing the dropdown immediately. |
 | `still collapses an exact single non-flag match` | Verifies that the exact-match dropdown auto-hide rule still applies to normal non-flag suggestions such as a flat `ping` root match. |
@@ -1636,7 +1641,9 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `clears stale failed tab and HUD state after a successful client-side built-in` | Verifies that successful client-side built-ins reset stale failed tab indicators, tab exit codes, and HUD state. |
 | `setStatus shows RUNNING only while running and IDLE otherwise` | Verifies that setStatus shows RUNNING only while running and IDLE otherwise. |
 | `doKill sends /kill immediately when runId is already known` | Verifies that doKill sends /kill immediately when runId is already known. |
-| `restores the tab to running if stream activity resumes after a stall` | Verifies that stalled-run recovery returns the tab and HUD to the running state when the original stream resumes. |
+| `keeps a quiet stalled tab running when the backend still lists the run active` | Verifies that stalled-stream handling keeps the tab running when `/history/active` still contains the run. |
+| `clears the running state when a stalled stream is no longer active` | Verifies that stalled-stream handling falls back to history recovery when `/history/active` no longer contains the run. |
+| `restores the tab to running if stream activity resumes after a quiet warning` | Verifies that stalled-run recovery clears the quiet-stream warning and keeps the HUD running when output resumes. |
 | `restoreActiveRunsAfterReload marks restored tabs as running placeholders` | Verifies that reload continuity restores running placeholder tabs with preserved run IDs and command labels. |
 | `restoreActiveRunsAfterReload does not overwrite a restored non-running tab` | Verifies that active-run reconnect creates a separate tab instead of clobbering an already-restored idle tab. |
 | `pollActiveRunsAfterReload restores a completed reconnected run through history` | Verifies that a reconnected placeholder tab swaps into the saved history view when the active run disappears. |
@@ -1783,14 +1790,19 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | Test | Description |
 | --- | --- |
 | `renders workspace files with usage summary and row actions` | Verifies that workspace payloads render usage totals, file rows, and edit/download/delete actions. |
+| `renders nested workspace paths as navigable folders with breadcrumbs` | Verifies that nested workspace paths render as folders, support entering/leaving folders, and update breadcrumbs. |
+| `renders explicit empty directories from the workspace payload` | Verifies that explicit empty folders render and remain navigable even when they contain no files. |
 | `shows an empty state when the workspace has no files` | Verifies that the workspace modal explains the empty state before any files exist. |
+| `saves new files relative to the currently selected folder` | Verifies that New File keeps the name field clean while saving relative to the active folder. |
 | `keeps the editor hidden until the user starts or closes an edit` | Verifies that the workspace editor stays collapsed until New File or edit mode opens it, and closes cleanly afterward. |
 | `opens the editor with a prefilled file name from terminal commands` | Verifies that terminal-native file add/edit flows can open the Files editor with a prefilled file name. |
 | `shows file contents in a read-only viewer and keeps edit mode separate` | Verifies that View opens a read-only file display without exposing the larger edit form. |
+| `runs edit download and delete actions from the viewer header for the viewed file` | Verifies that viewer-header actions operate on the currently viewed workspace file. |
 | `formats obvious JSON files in the read-only viewer` | Verifies that JSON-looking workspace files render as pretty-printed JSON in the read-only viewer. |
 | `serves current workspace files as autocomplete hints after the file list is loaded` | Verifies that the workspace file cache exposes file names as autocomplete hints. |
 | `refreshes from the workspace route` | Verifies that the modal refresh path calls `/workspace/files` and renders the returned file list. |
 | `saves editor contents through the workspace route` | Verifies that saving posts the file name and text content to `/workspace/files` and refreshes the visible state. |
+| `creates folders through the workspace directory route` | Verifies that New Folder posts to the directory route, refreshes the browser, and enters the created folder. |
 
 #### `state.test.js`
 
@@ -2143,6 +2155,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `clicking outside the prompt hides autocomplete without changing the input` | Verifies that clicking outside the prompt hides autocomplete without changing the input. |
 | `context-aware autocomplete replaces only the active token for command flags` | Verifies that context-aware autocomplete replaces only the active token for command flags. |
 | `context-aware autocomplete shows positional hints alongside flags after a known command root` | Verifies that contextual autocomplete can surface positional guidance like `<target>` alongside command-specific flags after a known root such as `nmap `. |
+| `workspace input flags suggest live session files instead of static examples` | Verifies that workspace-aware input flags show current session files and do not leak static registry examples. |
 | `built-in pipe support suggests the supported pipe commands after a pipe` | Verifies that after a pipe character, the narrow built-in pipe commands appear in the autocomplete dropdown. |
 
 #### `boot-resilience.spec.js`
@@ -2293,7 +2306,8 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 
 | Test | Description |
 | --- | --- |
-| `a stalled SSE stream shows the recovery notice and clears the running state` | Verifies that a stalled SSE stream shows the warning copy, then restores the tab to running if stream activity resumes. |
+| `a quiet SSE stream keeps the tab running while the backend run is active` | Verifies that a quiet SSE stream checks active-run state before changing the tab out of the running state. |
+| `a real quiet command recovers in the same tab when output resumes` | Verifies that a real quiet command shows the active-run warning, resumes live output, and exits in the same tab. |
 
 #### `search.spec.js`
 
@@ -2411,6 +2425,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `clicking the overlay backdrop closes the FAQ modal` | Verifies that clicking the overlay backdrop closes the FAQ modal. |
 | `renders backend-driven FAQ content and allowlist chips` | Verifies that renders backend-driven FAQ content and allowlist chips. |
 | `creates, views, edits, downloads, and consumes session files` | Verifies that the workspace modal can create, view, edit, and download a session file, and that the terminal can consume it through `cat`. |
+| `navigates nested file output folders and exposes viewer actions` | Verifies that the workspace modal displays nested output paths as folders and exposes actions in the file viewer header. |
 | `input-driven workflows render prefilled form fields and runnable rendered steps` | Verifies that input-driven workflow cards render prefilled fields, runnable rendered steps, and a `Run all` control. |
 | `step layout is a two-row grid with chip on row 1 and note on row 2` | Verifies that the workflow step layout is a CSS grid with `.workflow-step-main` on row 1 and `.workflow-step-note` on row 2. |
 | `clearing a required workflow input disables step actions until the value is restored` | Verifies that required workflow inputs gate both per-step run buttons and the `Run all` action until the value is restored. |

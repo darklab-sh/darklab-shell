@@ -853,8 +853,58 @@ def autocomplete_context_from_commands_registry(registry: dict, cfg=None) -> dic
             root = str(entry.get("root") or "").strip().lower()
             autocomplete = entry.get("autocomplete")
             if root and isinstance(autocomplete, dict) and autocomplete:
-                context[root] = autocomplete
+                context[root] = _attach_workspace_autocomplete_flags(
+                    deepcopy(autocomplete),
+                    entry.get("workspace_flags") or [],
+                )
     return _filter_autocomplete_context_by_features(context, app_config.CFG if cfg is None else cfg)
+
+
+def _attach_workspace_autocomplete_flags(spec: dict, workspace_flags: list[dict[str, object]]) -> dict:
+    """Mark value-taking autocomplete flags that should use live session files."""
+    read_flags = [
+        str(item.get("flag") or "")
+        for item in workspace_flags
+        if isinstance(item, dict)
+        and item.get("mode") == "read"
+        and item.get("kind") != "directory"
+        and item.get("flag")
+    ]
+    if not read_flags:
+        return spec
+
+    def _relevant_flags(target_spec: dict, subcommand: str = "") -> list[str]:
+        expects = {str(token) for token in target_spec.get("expects_value", []) or []}
+        hints = {str(token) for token in (target_spec.get("arg_hints") or {})}
+        relevant = []
+        for item in workspace_flags:
+            if not isinstance(item, dict) or item.get("mode") != "read" or item.get("kind") == "directory":
+                continue
+            flag = str(item.get("flag") or "")
+            if not flag:
+                continue
+            raw_subcommands = item.get("subcommands")
+            subcommands = (
+                {str(value) for value in raw_subcommands}
+                if isinstance(raw_subcommands, (list, tuple, set))
+                else set()
+            )
+            if subcommand and subcommands and subcommand not in subcommands:
+                continue
+            if flag in expects or flag in hints:
+                relevant.append(flag)
+        return _dedupe_preserve_order(relevant)
+
+    root_flags = _relevant_flags(spec)
+    if root_flags:
+        spec["workspace_file_flags"] = root_flags
+    for subcommand, sub_spec in (spec.get("subcommands") or {}).items():
+        if not isinstance(sub_spec, dict):
+            continue
+        sub_flags = _relevant_flags(sub_spec, str(subcommand))
+        if sub_flags:
+            sub_spec["workspace_file_flags"] = sub_flags
+    return spec
 
 
 def load_autocomplete_context_from_commands_registry(cfg=None) -> dict:

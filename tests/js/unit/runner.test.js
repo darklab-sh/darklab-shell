@@ -54,12 +54,15 @@ describe('stall recovery notices', () => {
     vi.useRealTimers()
   })
 
-  it('restores the tab to running if stream activity resumes after a stall', () => {
+  it('keeps a quiet stalled tab running when the backend still lists the run active', async () => {
     vi.useFakeTimers()
     const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ runs: [{ run_id: 'run-1' }] }),
+    }))
     const {
       _resetStalledTimeout,
-      _recoverStalledRun,
       status,
       runBtn,
       tabs,
@@ -74,19 +77,103 @@ describe('stall recovery notices', () => {
         runStart: Date.now() - 5_000,
       }],
       appendLine,
+      apiFetch,
     })
 
     _resetStalledTimeout('tab-1')
-    vi.advanceTimersByTime(45_000)
+    await vi.advanceTimersByTimeAsync(45_000)
+
+    expect(appendLine).toHaveBeenCalledWith(
+      '[stream quiet — no output or heartbeat reached the browser for 45s]',
+      'notice',
+      'tab-1',
+    )
+    expect(appendLine).toHaveBeenCalledWith(
+      '[process is still running; Kill remains available and live output will continue here if the stream resumes]',
+      'notice',
+      'tab-1',
+    )
+    expect(apiFetch).toHaveBeenCalledWith('/history/active')
+    expect(status.textContent).toBe('RUNNING')
+    expect(tabs[0].st).toBe('running')
+    expect(runBtn.disabled).toBe(true)
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(false)
+  })
+
+  it('clears the running state when a stalled stream is no longer active', async () => {
+    vi.useFakeTimers()
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ runs: [] }),
+    }))
+    const {
+      _resetStalledTimeout,
+      status,
+      runBtn,
+      tabs,
+    } = loadRunnerFns({
+      tabs: [{
+        id: 'tab-1',
+        st: 'running',
+        runId: 'run-1',
+        historyRunId: 'run-1',
+        killed: false,
+        pendingKill: false,
+        runStart: Date.now() - 5_000,
+      }],
+      appendLine,
+      apiFetch,
+    })
+
+    _resetStalledTimeout('tab-1')
+    await vi.advanceTimersByTimeAsync(45_000)
 
     expect(appendLine).toHaveBeenCalledWith(
       '[connection stalled — no stream activity arrived from the server for 45s]',
       'denied',
       'tab-1',
     )
+    expect(appendLine).toHaveBeenCalledWith(
+      '[process is no longer listed as active; check the history panel for the final result]',
+      'denied',
+      'tab-1',
+    )
     expect(status.textContent).toBe('IDLE')
     expect(tabs[0].st).toBe('fail')
     expect(runBtn.disabled).toBe(false)
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(true)
+  })
+
+  it('restores the tab to running if stream activity resumes after a quiet warning', async () => {
+    vi.useFakeTimers()
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ runs: [{ run_id: 'run-1' }] }),
+    }))
+    const {
+      _resetStalledTimeout,
+      _recoverStalledRun,
+      runBtn,
+      status,
+      tabs,
+    } = loadRunnerFns({
+      tabs: [{
+        id: 'tab-1',
+        st: 'running',
+        runId: 'run-1',
+        historyRunId: 'run-1',
+        killed: false,
+        pendingKill: false,
+        runStart: Date.now() - 5_000,
+      }],
+      appendLine,
+      apiFetch,
+    })
+
+    _resetStalledTimeout('tab-1')
+    await vi.advanceTimersByTimeAsync(45_000)
 
     _recoverStalledRun('tab-1')
 

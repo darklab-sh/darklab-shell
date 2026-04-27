@@ -11,13 +11,21 @@ function responseJson(body, status = 200) {
   })
 }
 
+async function flushWorkspacePromises() {
+  for (let i = 0; i < 6; i += 1) await Promise.resolve()
+}
+
 function setupWorkspace(apiFetch = vi.fn()) {
   document.body.innerHTML = `
     <div id="workspace-summary"></div>
     <div id="workspace-message" class="u-hidden"></div>
+    <nav id="workspace-breadcrumbs"></nav>
     <div id="workspace-file-list"></div>
     <section id="workspace-viewer" class="u-hidden">
       <div id="workspace-viewer-title"></div>
+      <button type="button" data-workspace-viewer-action="edit"></button>
+      <button type="button" data-workspace-viewer-action="download"></button>
+      <button type="button" data-workspace-viewer-action="delete"></button>
       <pre id="workspace-viewer-text"></pre>
     </section>
     <form id="workspace-editor" class="u-hidden">
@@ -25,6 +33,7 @@ function setupWorkspace(apiFetch = vi.fn()) {
       <textarea id="workspace-text-input"></textarea>
       <button id="workspace-save-btn" type="submit"></button>
     </form>
+    <button id="workspace-new-folder-btn" type="button"></button>
     <button id="workspace-new-btn" type="button"></button>
     <button id="workspace-cancel-edit-btn" type="button"></button>
     <button id="workspace-close-viewer-btn" type="button"></button>
@@ -44,12 +53,24 @@ function setupWorkspace(apiFetch = vi.fn()) {
     refocusComposerAfterAction: vi.fn(),
     showConfirm: vi.fn(() => Promise.resolve('delete')),
     showToast: vi.fn(),
+    bindPressable: vi.fn((el, opts) => {
+      if (!el || !opts || typeof opts.onActivate !== 'function') return null
+      if (el.dataset) el.dataset.pressableBound = '1'
+      el.addEventListener('click', opts.onActivate)
+      el.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        opts.onActivate(event)
+      })
+      return { dispose: vi.fn() }
+    }),
     setTimeout: (fn) => {
       if (typeof fn === 'function') fn()
       return 0
     },
     workspaceSummary: document.getElementById('workspace-summary'),
     workspaceMessage: document.getElementById('workspace-message'),
+    workspaceBreadcrumbs: document.getElementById('workspace-breadcrumbs'),
     workspaceFileList: document.getElementById('workspace-file-list'),
     workspaceViewer: document.getElementById('workspace-viewer'),
     workspaceViewerTitle: document.getElementById('workspace-viewer-title'),
@@ -58,6 +79,7 @@ function setupWorkspace(apiFetch = vi.fn()) {
     workspacePathInput: document.getElementById('workspace-path-input'),
     workspaceTextInput: document.getElementById('workspace-text-input'),
     workspaceNewBtn: document.getElementById('workspace-new-btn'),
+    workspaceNewFolderBtn: document.getElementById('workspace-new-folder-btn'),
     workspaceCancelEditBtn: document.getElementById('workspace-cancel-edit-btn'),
     workspaceCloseViewerBtn: document.getElementById('workspace-close-viewer-btn'),
     workspaceSaveBtn: document.getElementById('workspace-save-btn'),
@@ -68,8 +90,10 @@ function setupWorkspace(apiFetch = vi.fn()) {
     return {
       _formatWorkspaceBytes,
       renderWorkspaceFiles,
+      renderWorkspaceBrowser,
       refreshWorkspaceFiles,
       saveWorkspaceFile,
+      createWorkspaceDirectory,
       readWorkspaceFile,
       deleteWorkspaceFile,
       openWorkspace,
@@ -111,6 +135,93 @@ describe('workspace UI helpers', () => {
     ])
   })
 
+  it('renders nested workspace paths as navigable folders with breadcrumbs', () => {
+    const { renderWorkspaceFiles } = setupWorkspace()
+
+    renderWorkspaceFiles({
+      files: [
+        { path: 'targets.txt', size: 11 },
+        { path: 'amass-viz/amass.html', size: 2048 },
+        { path: 'amass-viz/assets/app.js', size: 512 },
+      ],
+      usage: { bytes_used: 2571, file_count: 3 },
+      limits: { quota_bytes: 4096, max_files: 10 },
+    })
+
+    expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
+      'amass-viz',
+      'targets.txt',
+    ])
+    expect(document.querySelector('.workspace-folder-row [data-workspace-action="open-folder"]').textContent)
+      .toBe('Open')
+    expect(document.querySelector('.workspace-folder-row').dataset.pressableBound).toBe('1')
+
+    document.querySelector('.workspace-folder-row .workspace-file-name').click()
+
+    expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
+      '..',
+      'assets',
+      'amass.html',
+    ])
+    expect([...document.querySelectorAll('#workspace-breadcrumbs [data-workspace-dir]')]
+      .map(node => node.textContent)).toEqual(['Files', 'amass-viz'])
+
+    document.querySelector('.workspace-folder-row [data-workspace-action="open-folder"]').click()
+
+    expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
+      'amass-viz',
+      'targets.txt',
+    ])
+
+    document.querySelector('.workspace-folder-row .workspace-file-name').click()
+    document.querySelectorAll('.workspace-folder-row .workspace-file-name')[1].click()
+
+    expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
+      '..',
+      'app.js',
+    ])
+    expect([...document.querySelectorAll('#workspace-breadcrumbs [data-workspace-dir]')]
+      .map(node => node.textContent)).toEqual(['Files', 'amass-viz', 'assets'])
+
+    document.querySelector('#workspace-breadcrumbs [data-workspace-dir="amass-viz"]').click()
+
+    expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
+      '..',
+      'assets',
+      'amass.html',
+    ])
+
+    document.querySelector('#workspace-breadcrumbs [data-workspace-dir=""]').click()
+
+    expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
+      'amass-viz',
+      'targets.txt',
+    ])
+  })
+
+  it('renders explicit empty directories from the workspace payload', () => {
+    const { renderWorkspaceFiles } = setupWorkspace()
+
+    renderWorkspaceFiles({
+      directories: [{ path: 'reports' }, { path: 'reports/empty' }],
+      files: [{ path: 'targets.txt', size: 11 }],
+      usage: { bytes_used: 11, file_count: 1 },
+      limits: { quota_bytes: 4096, max_files: 10 },
+    })
+
+    expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
+      'reports',
+      'targets.txt',
+    ])
+
+    document.querySelector('.workspace-folder-row [data-workspace-action="open-folder"]').click()
+
+    expect([...document.querySelectorAll('.workspace-file-name')].map(node => node.textContent)).toEqual([
+      '..',
+      'empty',
+    ])
+  })
+
   it('shows an empty state when the workspace has no files', () => {
     const { renderWorkspaceFiles } = setupWorkspace()
 
@@ -118,6 +229,47 @@ describe('workspace UI helpers', () => {
 
     expect(document.querySelector('.workspace-empty').textContent)
       .toBe('No session files yet. Create a text file or save command output to use with file-enabled commands.')
+  })
+
+  it('saves new files relative to the currently selected folder', async () => {
+    const apiFetch = vi.fn((url, opts) => {
+      if (String(url) === '/workspace/files' && opts?.method === 'POST') {
+        return Promise.resolve(responseJson({
+          file: { path: 'reports/notes.txt', size: 14 },
+          workspace: {
+            directories: [{ path: 'reports' }],
+            files: [{ path: 'reports/notes.txt', size: 14 }],
+            usage: { bytes_used: 14, file_count: 1 },
+            limits: { quota_bytes: 4096, max_files: 10 },
+          },
+        }))
+      }
+      return Promise.resolve(responseJson({}))
+    })
+    const { renderWorkspaceFiles } = setupWorkspace(apiFetch)
+
+    renderWorkspaceFiles({
+      directories: [{ path: 'reports' }],
+      files: [],
+      usage: { bytes_used: 0, file_count: 0 },
+      limits: { quota_bytes: 4096, max_files: 10 },
+    })
+
+    document.querySelector('.workspace-folder-row .workspace-file-name').click()
+    document.getElementById('workspace-new-btn').click()
+
+    expect(document.getElementById('workspace-editor').classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('workspace-path-input').value).toBe('')
+
+    document.getElementById('workspace-path-input').value = 'notes.txt'
+    document.getElementById('workspace-text-input').value = 'folder note\n'
+    document.getElementById('workspace-editor').dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+    await flushWorkspacePromises()
+
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ path: 'reports/notes.txt', text: 'folder note\n' }),
+    }))
   })
 
   it('keeps the editor hidden until the user starts or closes an edit', () => {
@@ -190,6 +342,66 @@ describe('workspace UI helpers', () => {
     expect(globals.showToast).toHaveBeenCalledWith('file appears to be binary; download it instead', 'error')
   })
 
+  it('runs edit download and delete actions from the viewer header for the viewed file', async () => {
+    const apiFetch = vi.fn((url, opts) => {
+      if (String(url).startsWith('/workspace/files/read')) {
+        return Promise.resolve(responseJson({ path: 'amass-viz/amass.html', text: '<html></html>' }))
+      }
+      if (String(url).startsWith('/workspace/files/download')) {
+        return Promise.resolve(new Response(new Blob(['html']), { status: 200 }))
+      }
+      if (String(url).startsWith('/workspace/files?path=amass-viz%2Famass.html') && opts?.method === 'DELETE') {
+        return Promise.resolve(responseJson({
+          workspace: {
+            files: [],
+            usage: { bytes_used: 0, file_count: 0 },
+            limits: { quota_bytes: 1024, max_files: 10 },
+          },
+        }))
+      }
+      return Promise.resolve(responseJson({}))
+    })
+    const { showWorkspaceViewer, globals } = setupWorkspace(apiFetch)
+    const createdUrls = []
+    globals.URL.createObjectURL = vi.fn((blob) => {
+      createdUrls.push(blob)
+      return 'blob:workspace-test'
+    })
+    globals.URL.revokeObjectURL = vi.fn()
+    const clicked = vi.fn()
+    const originalCreateElement = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation((tagName, options) => {
+      const element = originalCreateElement(tagName, options)
+      if (String(tagName).toLowerCase() === 'a') element.click = clicked
+      return element
+    })
+
+    showWorkspaceViewer('amass-viz/amass.html', '<html></html>')
+    document.querySelector('[data-workspace-viewer-action="edit"]').click()
+    await flushWorkspacePromises()
+
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/read?path=amass-viz%2Famass.html')
+    expect(document.getElementById('workspace-editor').classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('workspace-path-input').value).toBe('amass-viz/amass.html')
+
+    showWorkspaceViewer('amass-viz/amass.html', '<html></html>')
+    document.querySelector('[data-workspace-viewer-action="download"]').click()
+    await flushWorkspacePromises()
+
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/download?path=amass-viz%2Famass.html')
+    expect(clicked).toHaveBeenCalled()
+
+    showWorkspaceViewer('amass-viz/amass.html', '<html></html>')
+    document.querySelector('[data-workspace-viewer-action="delete"]').click()
+    await flushWorkspacePromises()
+
+    expect(globals.showConfirm).toHaveBeenCalled()
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/workspace/files?path=amass-viz%2Famass.html',
+      { method: 'DELETE' },
+    )
+  })
+
   it('formats obvious JSON files in the read-only viewer', () => {
     const { showWorkspaceViewer } = setupWorkspace()
 
@@ -251,5 +463,28 @@ describe('workspace UI helpers', () => {
       body: JSON.stringify({ path: 'targets.txt', text: 'darklab.sh\n' }),
     }))
     expect(document.getElementById('workspace-message').textContent).toBe('Saved targets.txt')
+  })
+
+  it('creates folders through the workspace directory route', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve(responseJson({
+      directory: { path: 'reports' },
+      workspace: {
+        directories: [{ path: 'reports' }],
+        files: [],
+        usage: { bytes_used: 0, file_count: 0 },
+        limits: { quota_bytes: 1024, max_files: 10 },
+      },
+    })))
+    const { createWorkspaceDirectory } = setupWorkspace(apiFetch)
+
+    await createWorkspaceDirectory('reports')
+
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/directories', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ path: 'reports' }),
+    }))
+    expect(document.getElementById('workspace-message').textContent).toBe('Created folder reports')
+    expect(document.querySelector('#workspace-breadcrumbs').textContent).toContain('reports')
+    expect(document.querySelector('.workspace-empty').textContent).toBe('This folder is empty.')
   })
 })

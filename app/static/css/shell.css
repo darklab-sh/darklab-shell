@@ -729,6 +729,13 @@ body.mobile-terminal-mode .output-follow-btn {
   gap: 16px;
 }
 
+.workspace-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .workspace-heading {
   font-family: var(--font-display);
   color: var(--text);
@@ -765,6 +772,48 @@ body.mobile-terminal-mode .output-follow-btn {
   gap: 8px;
 }
 
+.workspace-breadcrumbs {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 28px;
+}
+
+.workspace-breadcrumb-separator {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.workspace-folder-row {
+  border-color: color-mix(in srgb, var(--muted) 30%, var(--border));
+  cursor: pointer;
+}
+
+.workspace-folder-row:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--muted) 75%, white);
+  outline-offset: 2px;
+}
+
+.workspace-folder-icon,
+.workspace-parent-icon {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 15px;
+}
+
+.workspace-file-meta {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+}
+
+.workspace-file-meta-text {
+  min-width: 0;
+}
+
 .workspace-empty,
 .workspace-file-row {
   border: 1px solid var(--border);
@@ -794,6 +843,13 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 .workspace-file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.workspace-viewer-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -882,6 +938,8 @@ body.mobile-terminal-mode .output-follow-btn {
   }
   .workspace-file-actions,
   .workspace-editor-actions,
+  .workspace-toolbar-actions,
+  .workspace-viewer-actions,
   .workspace-viewer-header {
     justify-content: flex-start;
   }

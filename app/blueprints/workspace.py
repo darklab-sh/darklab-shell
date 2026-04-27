@@ -15,7 +15,9 @@ from workspace import (
     WorkspaceBinaryFile,
     WorkspaceFileNotFound,
     WorkspaceQuotaExceeded,
+    create_workspace_directory,
     delete_workspace_file,
+    list_workspace_directories,
     list_workspace_files,
     read_workspace_text_file,
     resolve_workspace_path,
@@ -42,6 +44,7 @@ def _workspace_payload(session_id: str) -> dict[str, Any]:
     return {
         "enabled": True,
         "backend": settings.backend,
+        "directories": list_workspace_directories(session_id),
         "files": list_workspace_files(session_id),
         "usage": {
             "bytes_used": usage.bytes_used,
@@ -105,6 +108,27 @@ def workspace_files_write():
             "size": file_info["size"],
         })
         return jsonify({"ok": True, "file": file_info, "workspace": _workspace_payload(str(session_id))})
+    except Exception as exc:
+        return _workspace_error_response(exc)
+
+
+@workspace_bp.route("/workspace/directories", methods=["POST"])
+def workspace_directories_create():
+    session_id, error = _session_or_error()
+    if error:
+        return error
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    path = str(data.get("path") or "").strip()
+    try:
+        directory_info = create_workspace_directory(str(session_id), path)
+        log.info("WORKSPACE_DIRECTORY_CREATE", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "path": directory_info["path"],
+        })
+        return jsonify({"ok": True, "directory": directory_info, "workspace": _workspace_payload(str(session_id))})
     except Exception as exc:
         return _workspace_error_response(exc)
 

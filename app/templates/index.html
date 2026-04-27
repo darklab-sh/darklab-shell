@@ -509,9 +509,13 @@
           <div class="workspace-heading">Session files</div>
           <div class="workspace-subtitle" id="workspace-summary">Not loaded</div>
         </div>
-        <button type="button" class="btn btn-secondary btn-compact" id="workspace-new-btn">New file</button>
+        <div class="workspace-toolbar-actions">
+          <button type="button" class="btn btn-secondary btn-compact" id="workspace-new-folder-btn">New folder</button>
+          <button type="button" class="btn btn-secondary btn-compact" id="workspace-new-btn">New file</button>
+        </div>
       </div>
       <div id="workspace-message" class="workspace-message u-hidden"></div>
+      <nav id="workspace-breadcrumbs" class="workspace-breadcrumbs" aria-label="Files folder path"></nav>
       <div id="workspace-file-list" class="workspace-file-list" aria-live="polite"></div>
       <section id="workspace-viewer" class="workspace-viewer u-hidden" aria-live="polite">
         <div class="workspace-viewer-header">
@@ -519,7 +523,12 @@
             <div class="workspace-label">Viewing</div>
             <div id="workspace-viewer-title" class="workspace-file-name"></div>
           </div>
-          <button type="button" class="btn btn-secondary btn-compact" id="workspace-close-viewer-btn">Close view</button>
+          <div class="workspace-viewer-actions">
+            <button type="button" class="btn btn-secondary btn-compact" data-workspace-viewer-action="edit">Edit</button>
+            <button type="button" class="btn btn-secondary btn-compact" data-workspace-viewer-action="download">Download</button>
+            <button type="button" class="btn btn-destructive btn-compact" data-workspace-viewer-action="delete">Delete</button>
+            <button type="button" class="btn btn-secondary btn-compact" id="workspace-close-viewer-btn">Close view</button>
+          </div>
         </div>
         <pre id="workspace-viewer-text" class="workspace-viewer-text nice-scroll"></pre>
       </section>

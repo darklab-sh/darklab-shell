@@ -1071,6 +1071,27 @@ class TestWorkspaceRoutes:
             )
             assert other.status_code == 404
 
+    def test_create_directory_lists_empty_folder(self):
+        client = get_client()
+        session = "workspace-dir-" + uuid.uuid4().hex[:8]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            created = client.post(
+                "/workspace/directories",
+                headers={"X-Session-ID": session},
+                json={"path": "reports/empty"},
+            )
+            assert created.status_code == 200
+            created_data = created.get_json()
+            assert created_data["directory"] == {"path": "reports/empty"}
+            assert {"reports", "reports/empty"} <= {
+                item["path"] for item in created_data["workspace"]["directories"]
+            }
+            assert created_data["workspace"]["usage"]["file_count"] == 0
+
+            listed = client.get("/workspace/files", headers={"X-Session-ID": session})
+            assert listed.status_code == 200
+            assert "reports/empty" in {item["path"] for item in listed.get_json()["directories"]}
+
     def test_rejects_unsafe_paths(self):
         client = get_client()
         session = "workspace-paths-" + uuid.uuid4().hex[:8]
@@ -1082,6 +1103,12 @@ class TestWorkspaceRoutes:
                     json={"path": bad_path, "text": "x"},
                 )
                 assert resp.status_code == 400
+                directory = client.post(
+                    "/workspace/directories",
+                    headers={"X-Session-ID": session},
+                    json={"path": bad_path},
+                )
+                assert directory.status_code == 400
 
     def test_rejects_unsafe_paths_on_read_delete_and_download(self):
         client = get_client()

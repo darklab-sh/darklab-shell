@@ -1,8 +1,8 @@
 // ── Shared command execution + desktop input wrapper ──
 // If no chunk arrives from the SSE stream for 45 seconds (> 2× the 20s server heartbeat),
-// the connection has silently died. Surface a notice and reset the UI so the user isn't
-// left with a perpetually-spinning tab. The command may still be running server-side;
-// the result will appear in the history panel once it completes.
+// verify the backend's active-run registry before changing the tab state. Tiny heartbeat
+// frames can be buffered by browsers, WSGI, proxies, or Docker networking, so "quiet stream"
+// is not the same thing as "dead process".
 // Keyed by tabId so multiple concurrent tabs each have their own independent timer.
 const _stalledTimeouts = new Map();
 const _stalledRuns = new Set();
@@ -19,13 +19,16 @@ function _resetStalledTimeout(tabId) {
   _stalledTimeouts.set(tabId, setTimeout(() => {
     const t = getTab(tabId);
     if (!t || t.killed) return;  // already handled
-    _stalledRuns.add(tabId);
-    appendLine('[connection stalled — no stream activity arrived from the server for 45s]', 'denied', tabId);
-    appendLine('[the command may still be running; if the stream resumes, live output will continue here]', 'denied', tabId);
-    appendLine('[otherwise check the history panel for the final result once it completes]', 'denied', tabId);
-    if (tabId === activeTabId) setStatus('fail');
-    setTabStatus(tabId, 'fail');
-    stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
+    _isTabRunStillActive(tabId).then(active => {
+      const latest = getTab(tabId);
+      if (!latest || latest.killed) return;
+      if (active) {
+        _markStalledButRunning(tabId);
+        _resetStalledTimeout(tabId);
+        return;
+      }
+      _markStalledAndInactive(tabId);
+    });
   }, 45000));
 }
 
@@ -48,6 +51,77 @@ function _recoverStalledRun(tabId) {
   setTabStatus(tabId, 'running');
   _setRunButtonDisabled(true);
   showTabKillBtn(tabId);
+}
+
+function _activeRunIdsFromPayload(data) {
+  return new Set((Array.isArray(data && data.runs) ? data.runs : [])
+    .map(run => run && run.run_id)
+    .filter(Boolean));
+}
+
+function _isTabRunStillActive(tabId) {
+  const t = getTab(tabId);
+  const runId = t && (t.runId || t.historyRunId);
+  if (!runId || typeof apiFetch !== 'function') return Promise.resolve(false);
+  return apiFetch('/history/active')
+    .then(r => (r && r.ok !== false && typeof r.json === 'function') ? r.json() : null)
+    .then(data => _activeRunIdsFromPayload(data).has(runId))
+    .catch(err => {
+      _logRunnerError('active run stall check failed', err);
+      return false;
+    });
+}
+
+function _markStalledButRunning(tabId) {
+  const firstNotice = !_stalledRuns.has(tabId);
+  _stalledRuns.add(tabId);
+  if (firstNotice) {
+    appendLine('[stream quiet — no output or heartbeat reached the browser for 45s]', 'notice', tabId);
+    appendLine('[process is still running; Kill remains available and live output will continue here if the stream resumes]', 'notice', tabId);
+  }
+  if (tabId === activeTabId) {
+    setStatus('running');
+    syncActiveRunTimer(tabId);
+  }
+  setTabStatus(tabId, 'running');
+  _setRunButtonDisabled(true);
+  showTabKillBtn(tabId);
+}
+
+function _markStalledAndInactive(tabId) {
+  const firstNotice = !_stalledRuns.has(tabId);
+  _stalledRuns.add(tabId);
+  if (firstNotice) {
+    appendLine('[connection stalled — no stream activity arrived from the server for 45s]', 'denied', tabId);
+  }
+  appendLine('[process is no longer listed as active; check the history panel for the final result]', 'denied', tabId);
+  if (tabId === activeTabId) setStatus('fail');
+  setTabStatus(tabId, 'fail');
+  stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
+}
+
+function _handleStreamEndedWithoutExit(tabId) {
+  _clearStalledTimeout(tabId);
+  return _isTabRunStillActive(tabId).then(active => {
+    const t = getTab(tabId);
+    if (!t || t.killed) return;
+    if (active) {
+      appendLine('[live stream detached — process is still running]', 'notice', tabId);
+      appendLine('[this tab will restore the saved result automatically when the run completes]', 'notice', tabId);
+      t.reconnectedRun = true;
+      t.historyRunId = t.historyRunId || t.runId;
+      setTabStatus(tabId, 'running');
+      if (tabId === activeTabId) {
+        setStatus('running');
+        syncActiveRunTimer(tabId);
+      }
+      _setRunButtonDisabled(true);
+      showTabKillBtn(tabId);
+      startPollingActiveRunsAfterReload();
+      return;
+    }
+    stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
+  });
 }
 
 function _shouldSuppressStreamOutputLine(tab, line) {
@@ -1637,7 +1711,7 @@ function submitCommand(rawCmd) {
 
     function read() {
       reader.read().then(({ done, value }) => {
-        if (done) { _clearStalledTimeout(tabId); stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId); return; }
+        if (done) { _handleStreamEndedWithoutExit(tabId); return; }
         _recoverStalledRun(tabId);
         _resetStalledTimeout(tabId);
         buffer += decoder.decode(value, { stream: true });

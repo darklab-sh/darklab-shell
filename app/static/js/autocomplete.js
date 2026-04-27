@@ -150,6 +150,15 @@ function _mergeAutocompleteRegistry(base, overlay) {
   return Object.assign({}, base || {}, overlay || {});
 }
 
+function _workspaceAutocompleteHintsForFlag(spec, trigger) {
+  const flags = Array.isArray(spec && spec.workspace_file_flags) ? spec.workspace_file_flags : [];
+  const normalizedTrigger = String(trigger || '');
+  if (!flags.some(flag => String(flag || '') === normalizedTrigger)) return null;
+  if (typeof getWorkspaceAutocompleteFileHints !== 'function') return [];
+  const hints = getWorkspaceAutocompleteFileHints();
+  return Array.isArray(hints) ? hints : [];
+}
+
 function _getAutocompleteRegistry() {
   const yamlRegistry = (typeof acContextRegistry !== 'undefined' && acContextRegistry) || {};
   const runtimeRegistry = typeof getRuntimeAutocompleteContext === 'function'
@@ -416,8 +425,10 @@ function _buildContextAutocomplete(ctx) {
     );
   }
   if (directHints !== null) {
+    const workspaceHints = _workspaceAutocompleteHintsForFlag(spec, ctx.previousToken || '');
+    const hints = workspaceHints !== null ? workspaceHints : directHints;
     return _filterAutocompleteItems(
-      directHints.map(item => _buildAutocompleteItem({
+      hints.map(item => _buildAutocompleteItem({
         value: item.value,
         description: item.description || '',
         replaceStart: ctx.tokenStart,
