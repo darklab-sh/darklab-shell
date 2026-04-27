@@ -10,12 +10,16 @@ All notable changes to darklab_shell are documented here.
 
 - **The Run Monitor adds app-native active-run visibility** — `runs` reports active run IDs, PIDs, elapsed time, and command text, and `jobs` now aliases the same app-run view.
   - **Why:** the browser shell needed a first-class view of app-managed active commands instead of a separate shell-job-shaped approximation.
-  - **What:** `runs`/`jobs` print the active-run table in the terminal and open the Run Monitor only when active runs exist. The desktop `STATUS`, `LAST EXIT`, and `TABS` HUD pills open the same monitor; if no commands are active, HUD clicks show a green `No active runs` toast instead of opening an empty drawer. The monitor anchors to the rail edge, shows active commands with live elapsed timers, and clicking a run switches to its tab and closes the monitor.
-  - **Tests:** added backend command coverage in `tests/py/test_run_history_share.py` plus browser smoke verification for HUD empty-state, drawer placement, close behavior, live elapsed timers, and click-to-tab behavior.
+  - **What:** `runs`/`jobs` print the active-run table in the terminal. `runs -v` prints full IDs, started timestamps, elapsed time, and active-run metadata source; `runs --json` returns the active-run snapshot as JSON. The desktop `STATUS`, `LAST EXIT`, and `TABS` HUD pills open the same monitor, and `Option+R` / `Alt+R` opens it from the keyboard; if no commands are active, HUD/shortcut attempts show a green `No active runs` toast instead of opening an empty drawer. The monitor anchors to the rail edge, shows active commands with live elapsed timers, and clicking a run switches to its tab and closes the monitor.
+  - **Tests:** added backend command coverage in `tests/py/test_run_history_share.py` for normal, verbose, and JSON output, plus browser smoke verification for HUD empty-state, drawer placement, close behavior, live elapsed timers, click-to-tab behavior, and the keyboard shortcut.
 - **Workspace folders can now be deleted from the Files modal and terminal** — folder rows include a Delete action next to Open, and `file rm <folder>` / `rm <folder>` use the same confirmation flow as file deletes.
   - **Why:** workspace-aware tools often create output directories, and users needed a way to clean those folders up without deleting each file manually.
   - **What:** the workspace API now reports path info for files/folders and recursively deletes validated session folders. The Files modal shows a normal confirmation for empty folders and warns when the folder contains files. Terminal-native delete prompts use the same count-aware warning before deleting a folder.
   - **Tests:** added backend route/helper coverage in `tests/py/test_backend_modules.py` and `tests/py/test_routes.py`, plus browser helper coverage in `tests/js/unit/workspace.test.js` and terminal confirmation coverage in `tests/js/unit/runner.test.js`.
+- **Session files can be downloaded from the terminal** — `file download <file>` starts the same browser download flow exposed by the Files modal.
+  - **Why:** generated binary or report files are often easier to retrieve directly from the prompt where they were created.
+  - **What:** the runner intercepts `file download <file>`, calls the Files download helper, records the local command on success, and keeps `file show` / `cat` focused on text output. Runtime autocomplete now suggests loaded workspace files for the `download` subcommand.
+  - **Tests:** added Vitest coverage in `tests/js/unit/runner.test.js` for download success and usage handling, plus autocomplete coverage in `tests/js/unit/app.test.js`.
 - **The Files modal now has a manual refresh control** — users can update the visible file list, sizes, and quota summary while commands are still writing session files.
   - **Why:** command-generated files can change while the modal is open, and closing/reopening the panel was a clumsy way to check current sizes or newly written files.
   - **What:** the Files toolbar now includes a bordered compact refresh button that reuses the existing `/workspace/files` load path, disables while the request is in flight, and reports refresh failures through the modal message area.
@@ -27,6 +31,18 @@ All notable changes to darklab_shell are documented here.
 
 ### Changed
 
+- **Built-in terminal output now uses ANSI polish consistently** — app-authored command summaries are easier to scan without changing external tool output.
+  - **Before:** built-ins mixed plain tables, one-off underline escapes, and lingering `active jobs` labels, so status-style output felt flatter than scanner output rendered through `ansi_up`.
+  - **After:** shared ANSI helpers centralize cyan labels, underlined headers, muted metadata, green online/active/success states, amber disabled states, and red failures. `runs` / `jobs`, `last`, `status`, `stats`, `limits`, `retention`, `file list`, `ps`, `route`, `df -h`, and `free -h` now use that styling while keeping commands and values copyable.
+  - **Tests:** updated fake-command backend coverage in `tests/py/test_run_history_share.py` for representative ANSI output across file listing, active runs, completed runs, status/stats, and shell-shaped summaries.
+- **`session-token revoke` now requires transcript confirmation** — revoking a token no longer deletes the server-side token immediately after command submission.
+  - **Before:** `session-token revoke <token>` called `/session/token/revoke` directly, so a pasted or mistyped command could permanently invalidate a token without a final warning.
+  - **After:** the command asks for `[yes/no]` confirmation, warns that the token's history and workspace files will not be recoverable from the app after revocation, treats `no` and `Ctrl+C` as cancellation, and only calls the revoke API after explicit `yes`.
+  - **Tests:** added Vitest coverage for yes/no/Ctrl+C revoke confirmation paths in `tests/js/unit/runner.test.js`.
+- **Session identity migration now carries workspace files forward** — accepting a session-token migration no longer strands Files content under the old anonymous workspace hash.
+  - **Before:** `/session/migrate` moved database-backed runs, snapshots, starred commands, and saved preferences, but the hashed filesystem workspace stayed attached to the old session ID.
+  - **After:** migration safely merges non-conflicting source workspace files and empty folders into the destination workspace without overwriting destination paths. Conflicting or quota-blocked files are skipped and counted, migration prompts mention history and files, `/session/run-count` reports workspace-file count for prompt decisions, and migration output includes migrated/skipped workspace file/folder counts.
+  - **Tests:** added route coverage for no-source, source-only, destination-only, and conflicting workspace migrations in `tests/py/test_session_routes.py`, plus terminal prompt coverage for workspace-file-only migration in `tests/js/unit/runner.test.js`.
 - **Up/Down command recall now prefers the active tab** — each tab recalls its own commands first, then continues into deduped session-wide recent commands, while the history drawer and recent-command chips remain session-wide.
   - **Before:** pressing Up in one tab could recall a newer command that had been run in another tab because keyboard traversal used the global recent-command list.
   - **After:** submitted commands are stored in the active tab's local recall stack as well as the global recents list. New tabs still start with empty input, but Up can reach session history. Tabs with local commands traverse those first, switching tabs resets the traversal cursor, Down returns to the tab's draft, and tab-local recall survives the existing sessionStorage tab restore path.
@@ -64,8 +80,8 @@ All notable changes to darklab_shell are documented here.
   - **After:** `app/conf/commands.yaml` owns each external command root, category, `policy.allow`, `policy.deny`, autocomplete metadata, pipe helpers, and user-facing examples. `commands.local.yaml` is the matching deployment overlay. The old `allowed_commands.txt` and `autocomplete.yaml` files are gone, the command catalog and `/run` gate derive from the registry, the smoke corpus reads registry examples plus workflows, seeded history uses registry examples, `amass` has been removed, and `assetfinder` now has `-h`, `-subs-only`, and `assetfinder -subs-only darklab.sh` coverage.
   - **Tests:** `tests/py/test_backend_modules.py` covers registry loading, local overlay merging, policy derivation, autocomplete derivation, seeded-history command pools, and smoke-corpus generation; `tests/py/test_routes.py` and `tests/js/unit/app.test.js` cover registry-backed route/frontend expectations; `tests/py/test_container_smoke_test.py` verifies expectation coverage for registry examples plus workflow commands.
 - **The new `stats` built-in summarizes current-session activity** — session analytics now have their own terminal-native command instead of bloating the quick health-oriented `status` output.
-  - **Before:** `status` covered identity, counts, saved options, active jobs, and backend health, but there was no shell-native view of command-root activity, success rate, or average run duration for the current session.
-  - **After:** `stats` reports masked session identity, run/snapshot/star/job totals, success rate, average duration, and the top non-built-in command roots by run count with per-root success and duration summaries.
+  - **Before:** `status` covered identity, counts, saved options, active-run count, and backend health, but there was no shell-native view of command-root activity, success rate, or average run duration for the current session.
+  - **After:** `stats` reports masked session identity, run/snapshot/star/active-run totals, success rate, average duration, and the top non-built-in command roots by run count with per-root success and duration summaries.
   - **Tests:** backend coverage in `tests/py/test_backend_modules.py`.
 
 - **Stalled live streams now stay aligned with backend active-run state** — quiet or buffered streams no longer dump a still-running command back to an idle-looking prompt.
@@ -208,8 +224,8 @@ All notable changes to darklab_shell are documented here.
   - **Tests:** new backend coverage in `tests/py/test_session_routes.py` for `session_preferences` read/write and migration behavior, plus new browser coverage in `tests/js/unit/app.test.js` and `tests/js/unit/session.test.js` for startup hydration and session-switch preference reloads.
 
 - **`status` now reports a fuller session summary** — the terminal status helper previously stopped at app name, session ID, run count, and a few instance limits.
-  - **Why:** the shell now treats snapshots, starred commands, saved user options, and active jobs as first-class session state, so `status` needed to reflect that current session shape instead of only showing runs.
-  - **What:** `status` now adds `session type`, `snapshots`, `starred commands`, `saved options`, and `active jobs` ahead of the existing instance-level settings, while keeping the output compact and summary-oriented.
+  - **Why:** the shell now treats snapshots, starred commands, saved user options, and active runs as first-class session state, so `status` needed to reflect that current session shape instead of only showing runs.
+  - **What:** `status` now adds `session type`, `snapshots`, `starred commands`, `saved options`, and `active runs` ahead of the existing instance-level settings, while keeping the output compact and summary-oriented.
   - **Tests:** new backend coverage in `tests/py/test_backend_modules.py` pins the expanded `status` output against a seeded session.
 
 - **`theme` and `config` terminal commands now mirror the modal controls** — theme selection and user options can be inspected or changed without leaving the prompt.

@@ -377,7 +377,17 @@ async function refreshWorkspaceFilesFromButton() {
   workspaceRefreshBtn.setAttribute('aria-label', 'Refreshing files');
   workspaceRefreshBtn.title = 'Refreshing files';
   try {
+    const viewedPath = _workspaceViewedPath;
     await refreshWorkspaceFiles();
+    if (viewedPath) {
+      try {
+        const data = await readWorkspaceFile(viewedPath);
+        showWorkspaceViewer(data.path || viewedPath, data.text || '');
+      } catch (err) {
+        hideWorkspaceViewer();
+        _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to refresh viewed file'), 'error');
+      }
+    }
   } catch (err) {
     _workspaceLoaded = false;
     _workspaceFiles = [];
@@ -642,6 +652,7 @@ if (typeof window !== 'undefined') {
   window.renderWorkspaceBrowser = renderWorkspaceBrowser;
   window.createWorkspaceDirectory = createWorkspaceDirectory;
   window.deleteWorkspacePath = deleteWorkspacePath;
+  window.downloadWorkspaceFile = downloadWorkspaceFile;
   window.openWorkspaceEditorFromCommand = openWorkspaceEditorFromCommand;
   if (isWorkspaceEnabled()) setTimeout(() => { refreshWorkspaceFileCache(); }, 0);
 }

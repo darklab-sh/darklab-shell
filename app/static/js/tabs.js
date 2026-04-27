@@ -32,9 +32,18 @@ function _getTabLabelEl(id) {
   return _getTabEl(id)?.querySelector('.tab-label') || null;
 }
 
+function _nextDefaultTabNumber() {
+  const numbers = (Array.isArray(tabs) ? tabs : [])
+    .map(tab => String(tab && tab.label || '').trim().match(/^shell\s+(\d+)$/i))
+    .filter(Boolean)
+    .map(match => Number(match[1]))
+    .filter(Number.isFinite);
+  return numbers.length ? Math.max(...numbers) + 1 : 1;
+}
+
 function createDefaultTabLabel(index = null) {
   const explicitIndex = index !== null && index !== undefined && index !== '';
-  const next = explicitIndex && Number.isFinite(Number(index)) ? Number(index) : _tabSeq + 1;
+  const next = explicitIndex && Number.isFinite(Number(index)) ? Number(index) : _nextDefaultTabNumber();
   return `shell ${Math.max(1, next)}`;
 }
 
@@ -607,9 +616,8 @@ function createTab(label) {
     showToast(`Tab limit reached (max ${APP_CONFIG.max_tabs})`);
     return null;
   }
-  const nextSeq = _tabSeq + 1;
   const id = 'tab-' + (++_tabSeq);
-  const stableLabel = String(label || createDefaultTabLabel(nextSeq));
+  const stableLabel = String(label || createDefaultTabLabel());
 
   const { tab, labelEl } = _createTabHeader(id, stableLabel);
   tab.addEventListener('click', e => {

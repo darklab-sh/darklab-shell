@@ -379,6 +379,8 @@ Shipped app-safe shortcuts:
 | `Enter` / `Escape` in kill confirmation | Confirm / cancel kill | Mirrors modal button intent |
 | `Option+P` (`Alt+P`) | Create share snapshot for active tab | |
 | `Option+Shift+C` (`Alt+Shift+C`) | Copy active tab output | Kept distinct from terminal `Ctrl+C` |
+| `Option+R` (`Alt+R`) | Open the Run Monitor | Shows active commands in the drawer/sheet when any are running |
+| `Option+Shift+F` (`Alt+Shift+F`) | Open Files | Leaves `Option+F` / `Alt+F` available for terminal word-forward |
 | `Ctrl+L` | Clear current tab output | Shell-style convenience |
 | `Ctrl+A` | Move cursor to start of line | Readline-style editing |
 | `Ctrl+E` | Move cursor to end of line | Readline-style editing |
@@ -732,10 +734,10 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 **Utility commands**
 
 - `help`, `commands`, `history`, `last`, `limits`, `retention`, `status`, `runs`, `jobs`, `stats`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `fortune`, `shortcuts`, `clear`, `version`, and `whoami` are available in every session.
-- `status` prints a compact session summary: masked active session ID, session type, run count, snapshot count, starred-command count, whether saved Options exist for the session, active-job count, compact session file usage when Files are enabled, and the current instance-level save/retention limits.
-- `runs` prints app-native active-run metadata for the current session and opens the Run Monitor when active commands exist; `jobs` is a compatibility alias for the same view. On desktop, the `STATUS`, `LAST EXIT`, and `TABS` HUD pills open the same monitor when runs are active.
-- `stats` prints session activity totals and external-tool command-root breakdowns: runs, snapshots, starred commands, active jobs, success rate, average duration, and the top non-built-in command roots by run count.
-- `file list`, `file show <file>`, `file add [file]`, `file edit <file>`, and confirmed `file rm <file>`, plus the convenience aliases `ls`, `cat <file>`, and confirmed `rm <file>`, expose keyboard-first access to the current session files when workspace storage is enabled. `file add` opens a blank file editor, while `file add <file>` opens the same editor with the file name prefilled. `file list` reports current file count, used quota, and remaining quota before listing files.
+- `status` prints a compact session summary: masked active session ID, session type, run count, snapshot count, starred-command count, whether saved Options exist for the session, active-run count, compact session file usage when Files are enabled, and the current instance-level save/retention limits.
+- `runs` prints app-native active-run metadata for the current session; `jobs` is a compatibility alias for the same terminal output. `runs -v` prints full run IDs, started timestamps, elapsed time, and active-run metadata source, while `runs --json` prints the same active-run snapshot in JSON for debugging or automation. On desktop, the `STATUS`, `LAST EXIT`, and `TABS` HUD pills open the Run Monitor when runs are active.
+- `stats` prints session activity totals and external-tool command-root breakdowns: runs, snapshots, starred commands, active runs, success rate, average duration, and the top non-built-in command roots by run count.
+- `file list`, `file show <file>`, `file add [file]`, `file edit <file>`, `file download <file>`, and confirmed `file rm <file>`, plus the convenience aliases `ls`, `cat <file>`, and confirmed `rm <file>`, expose keyboard-first access to the current session files when workspace storage is enabled. `file add` opens a blank file editor, `file add <file>` opens the same editor with the file name prefilled, and `file download <file>` starts a browser download. `file list` reports current file count, used quota, and remaining quota before listing files.
 - `theme` lists and applies runtime theme variants from the terminal. `config` lists, reads, and updates user options such as line numbers, timestamps, welcome behavior, share redaction defaults, run notifications, and HUD clock mode.
 - `ps` lists currently running processes for the session (PID, TTY, STAT, START, CMD columns), or shows a `no running processes` notice when idle.
 
@@ -773,10 +775,10 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Workspace access updates the hashed session directory activity timestamp. Periodic cleanup removes inactive `sess_*` directories after `workspace_inactivity_ttl_hours`; it does not delete individual files solely because their file timestamps are old.
 - File names are relative and display-friendly; absolute paths, traversal, backslashes, hidden names, symlinks, and paths outside the session root are rejected.
 - The Files panel can create, view, edit, download, and delete text files owned by the current session; obvious JSON files are pretty-printed in the read-only viewer.
-- The `file` built-in provides terminal access to the same file model through `file list`, `file show <file>`, `file add [file]`, `file edit <file>`, and confirmed `file rm <file>`; `file add` opens a blank file editor unless a filename is provided, and `file list` reports file count, used quota, and remaining quota before listing files.
+- The `file` built-in provides terminal access to the same file model through `file list`, `file show <file>`, `file add [file]`, `file edit <file>`, `file download <file>`, and confirmed `file rm <file>`; `file add` opens a blank file editor unless a filename is provided, `file download <file>` starts the same browser download path as the Files panel, and `file list` reports file count, used quota, and remaining quota before listing files.
 - The `ls`, `cat <file>`, and `rm <file>` aliases map to file list/show/remove operations only; they do not expose arbitrary host/container filesystem access.
 - `file rm <file>` and `rm <file>` first verify the file exists, then require the same transcript-owned yes/no confirmation model as other destructive terminal-native actions.
-- Loaded workspace file names feed autocomplete for `file show`, `file edit`, `file rm`, and `cat`.
+- Loaded workspace file names feed autocomplete for `file show`, `file edit`, `file download`, `file rm`, and `cat`.
 - Workspace-only external-tool examples and flags in `commands.yaml` are hidden from autocomplete unless Files are enabled, so operators can add discoverable file workflows without exposing unusable suggestions on instances that keep Files disabled.
 - Selected command flags declared in `commands.yaml` can consume or write session files. At execution time, user-facing names such as `targets.txt` are validated and rewritten to the session workspace path passed to the subprocess.
 - Shell navigation and redirection remain blocked; all file access must go through the Files panel, workspace routes, the `file` built-in, or explicitly declared command flags.
@@ -1055,13 +1057,13 @@ sqlite3 data/history.db "DELETE FROM snapshots;"
 **Terminal commands:**
 
 - `session-token` (no subcommand) — prints current status: active token in masked form or "anonymous session".
-- `session-token generate` — requests a new token and offers to migrate the current session's runs, snapshots, starred commands, and saved user options when the destination token has no saved preferences yet. The token becomes active only after a successful migration; declining migration activates it as a fresh named session; migration failure leaves the old session active.
-- `session-token set <token>` — adopts an existing token. UUIDs are always accepted; `tok_...` values must already exist on this server. The migration prompt is offered if the current session has history; answering `no` skips migration and still applies the token, while `Ctrl+C` cancels the whole set flow.
+- `session-token generate` — requests a new token and offers to migrate the current session's runs, snapshots, starred commands, saved user options, and workspace files when the current session has history or Files content. The token becomes active only after a successful migration; declining migration activates it as a fresh named session; migration failure leaves the old session active.
+- `session-token set <token>` — adopts an existing token. UUIDs are always accepted; `tok_...` values must already exist on this server. The migration prompt is offered if the current session has history or workspace files; answering `no` skips migration and still applies the token, while `Ctrl+C` cancels the whole set flow.
 - `session-token copy` — copies the active token to the clipboard without printing the raw token in the terminal.
 - `session-token clear` — opens a terminal-owned yes/no confirmation, removes `session_token` from `localStorage` only after explicit confirmation, and reverts to the anonymous UUID session. `Ctrl+C` cancels the clear flow. Server-side session data remains and can be reclaimed with `session-token set`.
-- `session-token rotate` — generates a new token, migrates all runs, snapshots, starred commands, and saved user options (when the destination has no saved preferences yet), then switches. The switch is **atomic** — migration failure aborts the rotation and keeps the old token active. Old token is retired on success.
+- `session-token rotate` — generates a new token, migrates all runs, snapshots, starred commands, workspace files, and saved user options (when the destination has no saved preferences yet), then switches. The switch is **atomic** — migration failure aborts the rotation and keeps the old token active. Old token is retired on success.
 - `session-token list` — calls `GET /session/token/info` and shows the active token in masked form with its creation date (or "anonymous session").
-- `session-token revoke <token>` — permanently deletes the given token via `POST /session/token/revoke`. If the revoked token is the active one, the client clears `localStorage` and falls back to the anonymous UUID session. Runs, snapshots, starred rows, and saved preference rows for the revoked token are not deleted but become unreachable.
+- `session-token revoke <token>` — opens a transcript-owned yes/no confirmation, warns that the token's history and workspace files will not be recoverable from the app after revocation, then permanently deletes the given token via `POST /session/token/revoke` only after an explicit `yes`. If the revoked token is the active one, the client clears `localStorage` and falls back to the anonymous UUID session. Runs, snapshots, starred rows, saved preferences, and workspace files for the revoked token are not deleted but become unreachable.
 
 **Options panel buttons:**
 
@@ -1073,11 +1075,11 @@ sqlite3 data/history.db "DELETE FROM snapshots;"
 | **Rotate** | Token active | Generates a new token, migrates session data, copies the new token |
 | **Clear** | Token active | Opens a destructive confirm, optionally copies the token, then reverts to the anonymous session |
 
-If a session has run history, the terminal flows (`generate`, `set`, `clear`) use transcript-owned yes/no prompts; the Options panel uses the shared modal confirm primitive for its own set/clear actions. `list` and `revoke` remain terminal-only.
+If a session has run history or workspace files, the terminal `generate` and `set` flows use transcript-owned yes/no migration prompts; `clear` and `revoke` use transcript-owned destructive confirmations. The Options panel uses the shared modal confirm primitive for its own set/clear actions. `list` and `revoke` remain terminal-only.
 
 **Limits:** there is no user-facing authentication — possession of the token is sufficient access. `POST /session/migrate` requires the `from_session_id` body field to match the caller's `X-Session-ID` header (mismatch returns 403), so a migration call can only move the caller's own data.
 
-**Configuration:** no config keys — token issuance is always enabled. Token scope currently covers runs, snapshots, starred commands, and saved user options.
+**Configuration:** no config keys — token issuance is always enabled. Token scope covers runs, snapshots, starred commands, saved user options, and app-mediated workspace files when Files are enabled.
 
 **Related files:** `app/static/js/session.js` (client-side token flow + cross-tab `storage` sync), `app/blueprints/session.py` (`/session/token/*`, `/session/preferences`, and `/session/migrate` routes), `app/database.py` (`session_tokens`, `session_preferences`, and `starred_commands` tables).
 

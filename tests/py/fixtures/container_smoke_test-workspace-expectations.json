@@ -233,7 +233,7 @@
     },
     {
       "name": "amass_subs_summary_uses_managed_database",
-      "command": "amass subs -d darklab.sh -names -ip -summary",
+      "command": "amass subs -d darklab.sh -show -ip -summary",
       "exit_code": null,
       "expected_text": [
         "[workspace] writing amass"

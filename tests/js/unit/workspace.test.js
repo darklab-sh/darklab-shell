@@ -393,6 +393,34 @@ describe('workspace UI helpers', () => {
     expect(globals.showToast).toHaveBeenCalledWith('file appears to be binary; download it instead', 'error')
   })
 
+  it('refreshes the currently viewed file when the files list is refreshed', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (String(url) === '/workspace/files') {
+        return Promise.resolve(responseJson({
+          files: [{ path: 'targets.txt', size: 18 }],
+          usage: { bytes_used: 18, file_count: 1 },
+          limits: { quota_bytes: 1024, max_files: 10 },
+        }))
+      }
+      if (String(url).startsWith('/workspace/files/read')) {
+        return Promise.resolve(responseJson({ path: 'targets.txt', text: 'updated target\n' }))
+      }
+      return Promise.resolve(responseJson({}))
+    })
+    const { showWorkspaceViewer } = setupWorkspace(apiFetch)
+
+    showWorkspaceViewer('targets.txt', 'old target\n')
+    document.getElementById('workspace-refresh-btn').click()
+    await flushWorkspacePromises()
+    await flushWorkspacePromises()
+
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files')
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/read?path=targets.txt')
+    expect(document.getElementById('workspace-viewer-title').textContent).toBe('targets.txt')
+    expect(document.getElementById('workspace-viewer-text').textContent).toBe('updated target\n')
+    expect(document.getElementById('workspace-summary').textContent).toBe('1 / 10 files · 18 B / 1 KB')
+  })
+
   it('runs edit download and delete actions from the viewer header for the viewed file', async () => {
     const apiFetch = vi.fn((url, opts) => {
       if (String(url).startsWith('/workspace/files/read')) {

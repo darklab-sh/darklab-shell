@@ -697,6 +697,33 @@ describe('tabs helpers', () => {
     expect(_getTabs()[1].label).toBe('shell 2')
   })
 
+  it('numbers new default tabs from the highest currently open shell label', () => {
+    const { createTab, closeTab, _getTabs } = loadTabsFns({ maxTabs: 5 })
+
+    const firstId = createTab()
+    createTab()
+    const thirdId = createTab()
+
+    closeTab(firstId)
+    closeTab(thirdId)
+    createTab()
+
+    expect(_getTabs().map(tab => tab.label)).toEqual(['shell 2', 'shell 3'])
+    expect([...document.querySelectorAll('.tab-label')].map(el => el.textContent)).toEqual([
+      'shell 2',
+      'shell 3',
+    ])
+  })
+
+  it('avoids duplicate default labels after restoring a non-first shell tab', () => {
+    const { createTab, _getTabs } = loadTabsFns({ maxTabs: 5 })
+
+    createTab('shell 2')
+    createTab()
+
+    expect(_getTabs().map(tab => tab.label)).toEqual(['shell 2', 'shell 3'])
+  })
+
   it('shows commands temporarily while preserving the stable default label', () => {
     vi.restoreAllMocks()
     vi.useFakeTimers()

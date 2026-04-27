@@ -444,6 +444,29 @@ async function _waitForMigrateChoice(msg) {
   });
 }
 
+function _optionsMigrationCountLabel(runCount = 0, workspaceFileCount = 0) {
+  const parts = [];
+  if (runCount > 0) parts.push(`${runCount} run(s)`);
+  if (workspaceFileCount > 0) parts.push(`${workspaceFileCount} workspace file(s)`);
+  if (!parts.length) return 'no runs or workspace files';
+  if (parts.length === 1) return parts[0];
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
+
+function _optionsMigrationResultText(data = {}) {
+  const workspaceFiles = Number(data.migrated_workspace_files || 0);
+  const skippedWorkspaceFiles = Number(data.skipped_workspace_files || 0);
+  const workspaceDirs = Number(data.migrated_workspace_directories || 0);
+  const skippedWorkspaceDirs = Number(data.skipped_workspace_directories || 0);
+  const workspaceParts = [`${workspaceFiles} workspace file(s)`];
+  if (workspaceDirs > 0) workspaceParts.push(`${workspaceDirs} folder(s)`);
+  if (skippedWorkspaceFiles > 0) workspaceParts.push(`${skippedWorkspaceFiles} workspace file(s) skipped`);
+  if (skippedWorkspaceDirs > 0) workspaceParts.push(`${skippedWorkspaceDirs} folder(s) skipped`);
+  return `Migrated ${data.migrated_runs} run(s), ${data.migrated_snapshots} snapshot(s), `
+    + `${data.migrated_stars ?? 0} starred command(s), ${workspaceParts.join(', ')}, `
+    + 'and saved user options when the destination had none.';
+}
+
 async function _clearActiveSessionToken() {
   localStorage.removeItem('session_token');
   const uuid = localStorage.getItem('session_id') || SESSION_ID;
@@ -514,18 +537,23 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
     }
     const { session_token: newToken } = await resp.json();
 
-    // Count runs on OLD session before switching identity.
+    // Count runs/files on OLD session before switching identity.
     let runCount = 0;
+    let workspaceFileCount = 0;
     try {
       const countResp = await apiFetch('/session/run-count');
-      if (countResp.ok) runCount = (await countResp.json()).count || 0;
+      if (countResp.ok) {
+        const countData = await countResp.json();
+        runCount = countData.count || 0;
+        workspaceFileCount = countData.workspace_files || 0;
+      }
     } catch (_) {}
 
     // Migrate BEFORE switching identity so a failed /session/migrate does not
     // leave the user on the new token with their runs still on the old session.
-    if (runCount > 0) {
+    if (runCount > 0 || workspaceFileCount > 0) {
       const migrateChoice = await _waitForMigrateChoice(
-        `You have ${runCount} run(s) in your previous session. Migrate history to the new token?`
+        `You have ${_optionsMigrationCountLabel(runCount, workspaceFileCount)} in your previous session. Migrate history and files to the new token?`
       );
       if (migrateChoice !== 'skip' && migrateChoice !== 'yes') return;
       if (migrateChoice === 'yes') {
@@ -539,6 +567,8 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
           _optionsTokenShowMsg(`Migration failed — ${d.error || 'network error'}. Token not activated.`, true);
           return;
         }
+        const migrateData = await migrateResp.json().catch(() => ({}));
+        _optionsTokenShowMsg(_optionsMigrationResultText(migrateData));
       }
     }
 
@@ -547,6 +577,7 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
     if (typeof _seedLocalStorageStarsToServer === 'function') await _seedLocalStorageStarsToServer();
     if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
     _updateOptionsSessionTokenStatus();
+    if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
     copyTextToClipboard(newToken)
       .then(() => showToast('New token copied to clipboard'))
       .catch(() => {});
@@ -657,16 +688,21 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
   _optionsTokenShowMsg('');
   try {
     let runCount = 0;
+    let workspaceFileCount = 0;
     try {
       const countResp = await apiFetch('/session/run-count');
-      if (countResp.ok) runCount = (await countResp.json()).count || 0;
+      if (countResp.ok) {
+        const countData = await countResp.json();
+        runCount = countData.count || 0;
+        workspaceFileCount = countData.workspace_files || 0;
+      }
     } catch (_) {}
 
     // Migrate BEFORE switching identity so a failed /session/migrate does not
     // leave the user on the new token with their runs still on the old session.
-    if (runCount > 0) {
+    if (runCount > 0 || workspaceFileCount > 0) {
       const migrateChoice = await _waitForMigrateChoice(
-        `You have ${runCount} run(s) in your current session. Migrate history to this token?`
+        `You have ${_optionsMigrationCountLabel(runCount, workspaceFileCount)} in your current session. Migrate history and files to this token?`
       );
       if (migrateChoice !== 'skip' && migrateChoice !== 'yes') return;
       if (migrateChoice === 'yes') {
@@ -680,6 +716,8 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
           _optionsTokenShowMsg(`Migration failed — ${d.error || 'network error'}. Token not activated.`, true);
           return;
         }
+        const migrateData = await migrateResp.json().catch(() => ({}));
+        _optionsTokenShowMsg(_optionsMigrationResultText(migrateData));
       }
     }
 
@@ -688,6 +726,7 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
     if (typeof _seedLocalStorageStarsToServer === 'function') await _seedLocalStorageStarsToServer();
     if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
     _updateOptionsSessionTokenStatus();
+    if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
     showToast('Session token applied');
   } catch (err) {
     _optionsTokenShowMsg(`Error: ${err.message || 'network error'}`, true);
@@ -720,12 +759,14 @@ document.getElementById('options-session-token-rotate-btn')?.addEventListener('c
       _optionsTokenShowMsg(`Migration failed — token not rotated: ${migrateData.error || migrateResp.status}`, true);
       return;
     }
+    _optionsTokenShowMsg(_optionsMigrationResultText(migrateData));
 
     localStorage.setItem('session_token', newToken);
     updateSessionId(newToken);
     if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
 
     _updateOptionsSessionTokenStatus();
+    if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
     copyTextToClipboard(newToken)
       .then(() => showToast('New token copied to clipboard'))
       .catch(() => showToast('Token rotated'));

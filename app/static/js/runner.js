@@ -792,11 +792,6 @@ function _isClientSideUiCommand(cmd) {
   return root === 'theme' || root === 'config';
 }
 
-function _isRunMonitorCommand(cmd) {
-  const root = String(cmd || '').trim().split(/\s+/, 1)[0].toLowerCase();
-  return root === 'runs' || root === 'jobs';
-}
-
 function _workspaceDeleteTarget(cmd) {
   const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
   const root = (parts[0] || '').toLowerCase();
@@ -815,6 +810,14 @@ function _workspaceEditorCommand(cmd) {
   return { action, target: parts.length === 3 ? parts[2] : '', invalid: parts.length > 3 };
 }
 
+function _workspaceDownloadTarget(cmd) {
+  const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
+  const root = (parts[0] || '').toLowerCase();
+  const action = (parts[1] || '').toLowerCase();
+  if (root === 'file' && action === 'download' && parts.length === 3) return parts[2];
+  return '';
+}
+
 function _isWorkspaceDeleteCommand(cmd) {
   if (!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true)) {
     return false;
@@ -827,6 +830,14 @@ function _isWorkspaceEditorCommand(cmd) {
     return false;
   }
   return !!_workspaceEditorCommand(cmd);
+}
+
+function _isWorkspaceDownloadCommand(cmd) {
+  if (!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true)) {
+    return false;
+  }
+  const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
+  return (parts[0] || '').toLowerCase() === 'file' && (parts[1] || '').toLowerCase() === 'download';
 }
 
 function _historySafeCommand(cmd) {
@@ -890,6 +901,31 @@ function _persistSessionTokenRun(command, lineItems, statusValue = 'ok') {
   _persistClientSideRun(command, lineItems, statusValue);
 }
 
+function _sessionMigrationCountLabel(runCount = 0, workspaceFileCount = 0) {
+  const parts = [];
+  if (runCount > 0) parts.push(`${runCount} run(s)`);
+  if (workspaceFileCount > 0) parts.push(`${workspaceFileCount} workspace file(s)`);
+  if (!parts.length) return 'no runs or workspace files';
+  if (parts.length === 1) return parts[0];
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
+
+function _sessionMigrationResultText(data = {}) {
+  const workspaceFiles = Number(data.migrated_workspace_files || 0);
+  const skippedWorkspaceFiles = Number(data.skipped_workspace_files || 0);
+  const workspaceDirs = Number(data.migrated_workspace_directories || 0);
+  const skippedWorkspaceDirs = Number(data.skipped_workspace_directories || 0);
+  const workspaceParts = [
+    `${workspaceFiles} workspace file(s)`,
+  ];
+  if (workspaceDirs > 0) workspaceParts.push(`${workspaceDirs} folder(s)`);
+  if (skippedWorkspaceFiles > 0) workspaceParts.push(`${skippedWorkspaceFiles} workspace file(s) skipped`);
+  if (skippedWorkspaceDirs > 0) workspaceParts.push(`${skippedWorkspaceDirs} folder(s) skipped`);
+  return `migrated — ${data.migrated_runs} run(s), ${data.migrated_snapshots} snapshot(s), `
+    + `${data.migrated_stars ?? 0} starred command(s), ${workspaceParts.join(', ')}, `
+    + 'and saved user options when the destination had none';
+}
+
 async function _doSessionMigration(fromId, toId, tabId) {
   // Use an explicit fetch (not apiFetch) so X-Session-ID is the OLD session ID
   // regardless of what SESSION_ID has been updated to.
@@ -907,10 +943,7 @@ async function _doSessionMigration(fromId, toId, tabId) {
     });
     const data = await resp.json().catch(() => ({}));
     if (resp.ok && data.ok) {
-      appendLine(
-        `migrated — ${data.migrated_runs} run(s), ${data.migrated_snapshots} snapshot(s), ${data.migrated_stars ?? 0} starred command(s), and saved user options when the destination had none`,
-        '', tabId
-      );
+      appendLine(_sessionMigrationResultText(data), '', tabId);
       succeeded = true;
     } else {
       appendLine(`[migration failed] ${data.error || resp.status}`, 'exit-fail', tabId);
@@ -1012,6 +1045,8 @@ async function _activateSessionTokenIdentity(token) {
   updateSessionId(token);
   await _seedLocalStorageStarsToServer();
   if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+  if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
+  else if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache().catch(() => {});
 }
 
 async function _sessionTokenGenerate(tabId) {
@@ -1027,11 +1062,16 @@ async function _sessionTokenGenerate(tabId) {
     const data = await resp.json();
     const newToken = data.session_token;
 
-    // Check run count on old session before switching identity.
+    // Check run/workspace counts on old session before switching identity.
     let runCount = 0;
+    let workspaceFileCount = 0;
     try {
       const countResp = await apiFetch('/session/run-count');
-      if (countResp.ok) runCount = (await countResp.json()).count || 0;
+      if (countResp.ok) {
+        const countData = await countResp.json();
+        runCount = countData.count || 0;
+        workspaceFileCount = countData.workspace_files || 0;
+      }
     } catch (_) {}
 
     appendLine(`session token generated:  ${maskSessionToken(newToken)}`, '', tabId);
@@ -1039,11 +1079,15 @@ async function _sessionTokenGenerate(tabId) {
     appendLine('use session-token set <value> on another device to continue your session', '', tabId);
     appendLine('warning: your session token grants full access to your session history — treat it like a password', 'notice', tabId);
 
-    if (runCount > 0) {
+    if (runCount > 0 || workspaceFileCount > 0) {
       // Defer identity switch until the user answers the migration prompt so a
       // failed /session/migrate does not strand runs on the old session while
       // the active identity is already the new token.
-      appendLine(`you have ${runCount} run(s) in your previous session. migrate history to your new session token?`, '', tabId);
+      appendLine(
+        `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount)} in your previous session. migrate history and files to your new session token?`,
+        '',
+        tabId
+      );
       _setPendingTerminalConfirm({
         tabId,
         onYes: async () => {
@@ -1056,7 +1100,7 @@ async function _sessionTokenGenerate(tabId) {
             _recordSuccessfulLocalCommand('session-token generate');
             _persistSessionTokenRun('session-token generate', [
               { text: `session token generated:  ${maskSessionToken(newToken)}` },
-              { text: 'history migrated to the new session token' },
+              { text: 'history and files migrated to the new session token' },
             ]);
           }
           setStatus('idle');
@@ -1067,10 +1111,10 @@ async function _sessionTokenGenerate(tabId) {
           await _seedLocalStorageStarsToServer();
           if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
           _recordSuccessfulLocalCommand('session-token generate');
-          appendLine('History migration skipped.', '', tabId);
+          appendLine('History and file migration skipped.', '', tabId);
           _persistSessionTokenRun('session-token generate', [
             { text: `session token generated:  ${maskSessionToken(newToken)}` },
-            { text: 'History migration skipped.' },
+            { text: 'History and file migration skipped.' },
           ]);
           setStatus('idle');
         },
@@ -1139,18 +1183,27 @@ async function _sessionTokenSet(value, tabId) {
 
   const oldSessionId = SESSION_ID;
 
-  // Check current session's run count before switching identity.
+  // Check current session's run/workspace counts before switching identity.
   let runCount = 0;
+  let workspaceFileCount = 0;
   try {
     const countResp = await apiFetch('/session/run-count');
-    if (countResp.ok) runCount = (await countResp.json()).count || 0;
+    if (countResp.ok) {
+      const countData = await countResp.json();
+      runCount = countData.count || 0;
+      workspaceFileCount = countData.workspace_files || 0;
+    }
   } catch (_) {}
 
-  if (runCount > 0) {
+  if (runCount > 0 || workspaceFileCount > 0) {
     // Defer identity switch until the user answers the migration prompt so a
     // failed /session/migrate does not strand runs on the old session while
     // the active identity is already the new token.
-    appendLine(`you have ${runCount} run(s) in your current session. migrate history to this session token?`, '', tabId);
+    appendLine(
+      `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount)} in your current session. migrate history and files to this session token?`,
+      '',
+      tabId
+    );
     _setPendingTerminalConfirm({
       tabId,
       onYes: async () => {
@@ -1170,11 +1223,11 @@ async function _sessionTokenSet(value, tabId) {
         await _activateSessionTokenIdentity(value);
         _appendSessionTokenSetLines(value, tabId);
         _recordSuccessfulLocalCommand(`session-token set ${value}`);
-        appendLine('History migration skipped.', '', tabId);
+        appendLine('History and file migration skipped.', '', tabId);
         _persistSessionTokenRun(`session-token set ${value}`, [
           { text: `session token set: ${maskSessionToken(value)}` },
           { text: 'reload other tabs to apply the new session token' },
-          { text: 'History migration skipped.' },
+          { text: 'History and file migration skipped.' },
         ]);
         setStatus('idle');
       },
@@ -1286,20 +1339,16 @@ async function _sessionTokenRotate(tabId) {
     localStorage.setItem('session_token', newToken);
     updateSessionId(newToken);
     if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
+    if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
+    else if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache().catch(() => {});
 
     appendLine(`session token rotated: ${maskSessionToken(newToken)}`, '', tabId);
-    appendLine(
-      `migrated — ${migrateData.migrated_runs} run(s), ${migrateData.migrated_snapshots} snapshot(s), ${migrateData.migrated_stars ?? 0} starred command(s), and saved user options when the destination had none`,
-      '', tabId
-    );
+    appendLine(_sessionMigrationResultText(migrateData), '', tabId);
     appendLine('old session token is now inactive — reload other tabs to use the new token', '', tabId);
     _recordSuccessfulLocalCommand('session-token rotate');
     _persistSessionTokenRun('session-token rotate', [
       { text: `session token rotated: ${maskSessionToken(newToken)}` },
-      {
-        text: `migrated — ${migrateData.migrated_runs} run(s), ${migrateData.migrated_snapshots} snapshot(s), `
-          + `${migrateData.migrated_stars ?? 0} starred command(s), and saved user options when the destination had none`,
-      },
+      { text: _sessionMigrationResultText(migrateData) },
       { text: 'old session token is now inactive — reload other tabs to use the new token' },
     ]);
     setStatus('ok');
@@ -1355,6 +1404,30 @@ async function _sessionTokenRevoke(token, tabId) {
     setStatus('fail');
     return;
   }
+  appendLine(`revoke session token ${maskSessionToken(token)}?`, '', tabId);
+  appendLine(
+    "warning: this token's history and workspace files will not be recoverable from the app after revocation.",
+    'warning',
+    tabId
+  );
+  _setPendingTerminalConfirm({
+    tabId,
+    onYes: async () => {
+      await _sessionTokenRevokeConfirmed(token, tabId);
+    },
+    onNo: async () => {
+      appendLine('Session token revoke canceled.', '', tabId);
+      setStatus('idle');
+    },
+    onCancel: async () => {
+      appendLine('Session token revoke canceled.', '', tabId);
+      setStatus('idle');
+    },
+  });
+  setStatus('idle');
+}
+
+async function _sessionTokenRevokeConfirmed(token, tabId) {
   try {
     const resp = await apiFetch('/session/token/revoke', {
       method: 'POST',
@@ -1504,6 +1577,34 @@ async function _handleWorkspaceEditorCommand(cmd, tabId) {
   }
 }
 
+async function _handleWorkspaceDownloadCommand(cmd, tabId) {
+  const target = _workspaceDownloadTarget(cmd);
+  appendCommandEcho(cmd);
+  if (!target) {
+    appendLine('Usage: file download <file>', 'exit-fail', tabId);
+    setStatus('fail');
+    return;
+  }
+  if (typeof downloadWorkspaceFile !== 'function') {
+    appendLine('[error] Files download is not ready — reload the page and try again', 'exit-fail', tabId);
+    setStatus('fail');
+    return;
+  }
+  try {
+    const downloaded = await downloadWorkspaceFile(target);
+    if (!downloaded) throw new Error('file download failed');
+    const text = `file: downloading ${target}`;
+    appendLine(text, '', tabId);
+    _recordSuccessfulLocalCommand(cmd);
+    _persistClientSideRun(cmd, [{ text }], 'ok');
+    setStatus('ok');
+  } catch (err) {
+    appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
+    logClientError('file download', err);
+    setStatus('fail');
+  }
+}
+
 async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand) {
   const spec = _parseSyntheticPostFilterCommand(cmd);
   const baseCommand = spec ? (spec.baseCommand || cmd) : cmd;
@@ -1631,10 +1732,6 @@ function submitCommand(rawCmd) {
 
   addToHistory(_historySafeCommand(cmd));
 
-  if (_isRunMonitorCommand(cmd) && typeof openRunMonitor === 'function') {
-    void openRunMonitor({ source: 'command', toastOnEmpty: false });
-  }
-
   // Session-token subcommands (generate / set / clear / rotate) run entirely
   // client-side.  The bare 'session-token' status command goes to the server.
   if (_isSessionTokenSubcommand(cmd)) {
@@ -1654,6 +1751,13 @@ function submitCommand(rawCmd) {
   if (_isWorkspaceEditorCommand(cmd)) {
     void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
       _handleWorkspaceEditorCommand(baseCommand, activeTabId)
+    ));
+    return true;
+  }
+
+  if (_isWorkspaceDownloadCommand(cmd)) {
+    void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
+      _handleWorkspaceDownloadCommand(baseCommand, activeTabId)
     ));
     return true;
   }

@@ -133,13 +133,13 @@ The iptables rule is added by `entrypoint.sh` as root before the `gosu` drop. It
 
 **1. `/session/migrate` requires `from_session_id == X-Session-ID`**
 
-The migrate endpoint accepts `from_session_id` and `to_session_id` in the POST body. Without the header check, any client that knew another user's session ID could call `/session/migrate` with `from_session_id=<victim>` and redirect the victim's entire run history to their own token. The `X-Session-ID` header is the requester's current identity — enforcing that it matches `from_session_id` means you can only migrate *your own* session.
+The migrate endpoint accepts `from_session_id` and `to_session_id` in the POST body. Without the header check, any client that knew another user's session ID could call `/session/migrate` with `from_session_id=<victim>` and redirect the victim's run history and workspace files to their own token. The `X-Session-ID` header is the requester's current identity — enforcing that it matches `from_session_id` means you can only migrate *your own* session.
 
 **2. `SESSION_ID` must not be updated until after `/session/migrate` completes during rotate, and the switch is gated on migration success**
 
 `session-token rotate` must call `/session/migrate` with `X-Session-ID: <old id>` before calling `updateSessionId(<new token>)`. If `SESSION_ID` were updated first, the migrate request would carry the new token as `X-Session-ID`, which would fail the `from_session_id == X-Session-ID` check (since `from_session_id` is the old ID). The `_doSessionMigration` helper therefore calls `fetch()` directly with an explicit `X-Session-ID` override rather than going through `apiFetch()`, which always uses the current `SESSION_ID`.
 
-Critically, the identity switch (`localStorage.setItem` + `updateSessionId`) only happens if migration succeeds. A failed migration aborts rotate and leaves the old token active — otherwise a transient network failure would strand the user on a fresh token with their history still on the old session.
+Critically, the identity switch (`localStorage.setItem` + `updateSessionId`) only happens if migration succeeds. A failed migration aborts rotate and leaves the old token active — otherwise a transient network failure would strand the user on a fresh token with their history or Files workspace still on the old session.
 
 **3. Other open tabs are kept in sync via the `storage` event**
 

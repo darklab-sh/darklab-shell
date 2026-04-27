@@ -1479,6 +1479,7 @@ class TestActiveRunMetadata:
                     "pid": 12345,
                     "command": "ping darklab.sh",
                     "started": "2026-01-01T00:00:00Z",
+                    "source": "memory",
                 }
             ]
 
@@ -2675,7 +2676,7 @@ class TestFakeStatus:
         assert re.search(r"snapshots\s+1", text)
         assert re.search(r"starred commands\s+1", text)
         assert re.search(r"saved options\s+yes", text)
-        assert re.search(r"active jobs\s+1", text)
+        assert re.search(r"active runs\s+1", text)
 
 
 class TestFakeStats:
@@ -2770,7 +2771,7 @@ class TestFakeStats:
         assert re.search(r"runs\s+6", text)
         assert re.search(r"snapshots\s+1", text)
         assert re.search(r"starred commands\s+1", text)
-        assert re.search(r"active jobs\s+1", text)
+        assert re.search(r"active runs\s+1", text)
         assert re.search(r"success rate\s+80% \(4 ok / 1 failed\)", text)
         assert re.search(r"average duration\s+23\.[12]s", text)
         assert "  command      runs         ok       avg" in text

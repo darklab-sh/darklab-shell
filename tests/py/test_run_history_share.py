@@ -9,7 +9,6 @@ the lighter smoke tests in test_routes.py.
 import gzip
 import json
 import os
-import re
 import uuid
 import unittest.mock as mock
 from collections.abc import Callable, Iterator, Sequence
@@ -22,6 +21,7 @@ import pytest
 import app as shell_app
 import blueprints.run as run_routes
 import database as shell_db
+import workspace as shell_workspace
 from config import PROJECT_README
 from database import db_connect
 from run_output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
@@ -824,8 +824,8 @@ class TestRunStreaming:
         assert "usage" in list_body
         assert "62 B / 1.0 MB\\n" in list_body
         assert "remaining" in list_body
-        assert "\\u001b[4mpath" in list_body
-        assert "\\u001b[4msize" in list_body
+        assert "\\u001b[4mpath\\u001b[0m  " in list_body
+        assert "\\u001b[4msize\\u001b[0m    " in list_body
         assert "\\u001b[4mmodified\\u001b[0m" in list_body
         assert "targets.txt" in list_body
         assert "empty-folder/" in list_body
@@ -890,9 +890,54 @@ class TestRunStreaming:
         assert help_resp.status_code == 200
         help_body = help_resp.get_data(as_text=True)
         assert "Session file commands:\\n" in help_body
+        assert "file download <file>\\n" in help_body
         assert "Aliases:\\n" in help_body
         assert "Create targets.txt from the Files panel.\\n" in help_body
         assert "curl -o response.html https://ip.darklab.sh\\n" in help_body
+
+    def test_fake_workspace_show_reports_binary_files(self, tmp_path):
+        client = get_client()
+        session = "sess-workspace-binary"
+        workspace_cfg = {
+            "workspace_enabled": True,
+            "workspace_backend": "tmpfs",
+            "workspace_root": str(tmp_path / "workspaces"),
+            "workspace_quota_mb": 1,
+            "workspace_max_file_mb": 1,
+            "workspace_max_files": 10,
+            "workspace_inactivity_ttl_hours": 1,
+        }
+
+        with mock.patch.dict(shell_app.CFG, workspace_cfg):
+            binary_path = shell_workspace.resolve_workspace_path(
+                session,
+                "amass/asset.db",
+                shell_app.CFG,
+                ensure_parent=True,
+            )
+            binary_path.write_bytes(b"SQLite format 3\x00binary")
+            show_resp = client.post(
+                "/run",
+                json={"command": "file show amass/asset.db"},
+                headers={"X-Session-ID": session},
+            )
+            cat_resp = client.post(
+                "/run",
+                json={"command": "cat amass/asset.db"},
+                headers={"X-Session-ID": session},
+            )
+
+        assert show_resp.status_code == 200
+        show_body = show_resp.get_data(as_text=True)
+        assert "file: file appears to be binary; download it instead\\n" in show_body
+        assert "[server error]" not in show_body
+        assert '"type": "exit"' in show_body
+        assert '"code": 0' in show_body
+
+        assert cat_resp.status_code == 200
+        cat_body = cat_resp.get_data(as_text=True)
+        assert "file: file appears to be binary; download it instead\\n" in cat_body
+        assert "[server error]" not in cat_body
 
     def test_fake_shortcuts_lists_current_shortcuts(self):
         client = get_client()
@@ -955,6 +1000,34 @@ class TestRunStreaming:
 
     def test_fake_limits_and_status_show_configuration(self, tmp_path):
         client = get_client()
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "run-stats-ok",
+                    "sess-limits",
+                    "nmap ip.darklab.sh",
+                    "2026-01-01T00:00:00+00:00",
+                    "2026-01-01T00:00:03+00:00",
+                    0,
+                    "[]",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "run-stats-fail",
+                    "sess-limits",
+                    "curl https://ip.darklab.sh",
+                    "2026-01-01T00:00:05+00:00",
+                    "2026-01-01T00:00:07+00:00",
+                    1,
+                    "[]",
+                ),
+            )
+            conn.commit()
 
         with mock.patch.dict(shell_app.CFG, {
             "max_tabs": 4,
@@ -970,12 +1043,14 @@ class TestRunStreaming:
             limits_body = limits_resp.get_data(as_text=True)
             status_resp = client.post("/run", json={"command": "status"}, headers={"X-Session-ID": "sess-limits"})
             status_body = status_resp.get_data(as_text=True)
+            stats_resp = client.post("/run", json={"command": "stats"}, headers={"X-Session-ID": "sess-limits"})
+            stats_body = stats_resp.get_data(as_text=True)
 
         assert limits_resp.status_code == 200
         assert "live preview lines" in limits_body
         assert f"{shell_app.CFG['max_output_lines']}\\n" in limits_body
         assert "files enabled" in limits_body
-        assert "yes\\n" in limits_body
+        assert "\\u001b[32myes\\u001b[0m\\n" in limits_body
         assert "files quota" in limits_body
         assert "50 MB\\n" in limits_body
         assert "files cleanup" in limits_body
@@ -988,8 +1063,20 @@ class TestRunStreaming:
         assert "4\\n" in status_body
         assert "retention" in status_body
         assert "365\\n" in status_body
+        assert "active runs" in status_body
+        assert "active jobs" not in status_body
+        assert "\\u001b[32monline\\u001b[0m" in status_body
         assert "files" in status_body
         assert "0/100 files, 0 B / 50.0 MB\\n" in status_body
+        assert stats_resp.status_code == 200
+        assert "Session stats:\\n" in stats_body
+        assert "active runs" in stats_body
+        assert "active jobs" not in stats_body
+        assert "success rate" in stats_body
+        assert "\\u001b[32m" in stats_body
+        assert "\\u001b[31m" in stats_body
+        assert "\\u001b[4mcommand\\u001b[0m" in stats_body
+        assert "\\u001b[4mruns\\u001b[0m" in stats_body
 
     def test_fake_last_lists_recent_completed_runs(self):
         client = get_client()
@@ -1014,8 +1101,14 @@ class TestRunStreaming:
 
         assert resp.status_code == 200
         assert "Recent runs:\\n" in body
-        assert f"{self._local_dt_text('2026-01-01T00:00:05+00:00')}  [1]  dig darklab.sh A\\n" in body
-        assert f"{self._local_dt_text('2026-01-01T00:00:00+00:00')}  [0]  ping darklab.sh\\n" in body
+        assert (
+            f"{self._local_dt_text('2026-01-01T00:00:05+00:00')}  "
+            "[\\u001b[31m1\\u001b[0m]  dig darklab.sh A\\n"
+        ) in body
+        assert (
+            f"{self._local_dt_text('2026-01-01T00:00:00+00:00')}  "
+            "[\\u001b[32m0\\u001b[0m]  ping darklab.sh\\n"
+        ) in body
 
     def test_fake_who_tty_groups_and_version_render_shell_identity(self):
         client = get_client()
@@ -1071,14 +1164,14 @@ class TestRunStreaming:
             "full_output_max_mb": 5,
         }):
             resp = client.post("/run", json={"command": "retention"})
-            body = re.sub(r"\x1b\[[0-9;]*m", "", resp.get_data(as_text=True))
+            body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
         assert "Retention policy:\\n" in body
         assert "run preview retention " in body
         assert "365 days\\n" in body
         assert "full output save" in body
-        assert "yes\\n" in body
+        assert "\\u001b[32myes\\u001b[0m\\n" in body
         assert "full output max" in body
         assert "5 MB\\n" in body
 
@@ -1243,12 +1336,15 @@ class TestRunStreaming:
         assert "2: eth0:" in ip_body
         assert route_resp.status_code == 200
         assert "Kernel IP routing table\\n" in route_body
+        assert "\\u001b[4mDestination\\u001b[0m" in route_body
         assert "0.0.0.0" in route_body
         assert df_resp.status_code == 200
-        assert "Filesystem      Size  Used Avail Use% Mounted on\\n" in df_body
+        assert "\\u001b[4mFilesystem\\u001b[0m" in df_body
+        assert "\\u001b[4mMounted on\\u001b[0m\\n" in df_body
         assert "overlay" in df_body
         assert free_resp.status_code == 200
-        assert "total        used        free" in free_body
+        assert "\\u001b[4mtotal\\u001b[0m" in free_body
+        assert "\\u001b[4mfree\\u001b[0m" in free_body
         assert "Mem:" in free_body
 
     def test_fake_jobs_aliases_runs_metadata(self):
@@ -1298,29 +1394,43 @@ class TestRunStreaming:
                 "pid": 4242,
                 "command": "ping darklab.sh",
                 "started": "2026-01-01T00:00:00+00:00",
+                "source": "redis",
             },
             {
                 "run_id": "run-fedcba987654",
                 "pid": 0,
                 "command": "ffuf -u https://darklab.sh/FUZZ -w words.txt",
                 "started": "2026-01-01T00:00:05+00:00",
+                "source": "memory",
             },
         ]):
             resp = client.post("/run", json={"command": "runs"}, headers={"X-Session-ID": "sess-runs"})
             body = resp.get_data(as_text=True)
+            verbose_resp = client.post("/run", json={"command": "runs -v"}, headers={"X-Session-ID": "sess-runs"})
+            verbose_body = verbose_resp.get_data(as_text=True)
+            json_resp = client.post("/run", json={"command": "runs --json"}, headers={"X-Session-ID": "sess-runs"})
+            json_body = json_resp.get_data(as_text=True)
 
         assert resp.status_code == 200
         assert "Active runs:\\n" in body
         assert "run" in body
         assert "pid" in body
         assert "elapsed" in body
-        assert "command\\n" in body
-        assert "run-abcd" in body
-        assert "4242" in body
+        assert "\\u001b[4mcommand\\u001b[0m\\n" in body
+        assert "\\u001b[36mrun-abcd\\u001b[0m" in body
+        assert "\\u001b[2m4242\\u001b[0m" in body
         assert "ping darklab.sh\\n" in body
-        assert "run-fedc" in body
-        assert "  -  " in body
+        assert "\\u001b[36mrun-fedc\\u001b[0m" in body
+        assert "\\u001b[2m-\\u001b[0m" in body
         assert "ffuf -u https://darklab.sh/FUZZ -w words.txt\\n" in body
+        assert verbose_resp.status_code == 200
+        assert "\\u001b[36mrun-abcdef123456\\u001b[0m" in verbose_body
+        assert "\\u001b[4mstarted\\u001b[0m" in verbose_body
+        assert "\\u001b[36mredis\\u001b[0m" in verbose_body
+        assert json_resp.status_code == 200
+        assert '\\"run_id\\": \\"run-abcdef123456\\"' in json_body
+        assert '\\"source\\": \\"redis\\"' in json_body
+        assert '\\"elapsed\\":' in json_body
 
     def test_fake_runs_reports_when_no_active_runs_exist(self):
         client = get_client()
@@ -1559,7 +1669,8 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "PID TTY      STAT START    CMD\\n" in body
+        assert "\\u001b[4mPID\\u001b[0m" in body
+        assert "\\u001b[4mCMD\\u001b[0m\\n" in body
         assert " 9000 pts/0    R    -        ps aux\\n" in body
         assert '"type": "exit"' in body
 

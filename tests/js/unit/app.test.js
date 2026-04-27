@@ -34,6 +34,8 @@ async function loadAppFns({
   cancelWelcome: cancelWelcomeOverride = vi.fn(),
   navigateCmdHistory: navigateCmdHistoryOverride = vi.fn(() => false),
   enterHistSearch: enterHistSearchOverride = vi.fn(),
+  openWorkspace: openWorkspaceOverride = vi.fn(),
+  openRunMonitor: openRunMonitorOverride = vi.fn(() => Promise.resolve(false)),
   activeTabId = 'tab-1',
   acFiltered: acFilteredOverride = [],
   acSuggestions: acSuggestionsOverride = [],
@@ -487,6 +489,8 @@ async function loadAppFns({
       clearTab: clearTabOverride,
       cancelWelcome: cancelWelcomeOverride,
       enterHistSearch: enterHistSearchOverride,
+      openWorkspace: openWorkspaceOverride,
+      openRunMonitor: openRunMonitorOverride,
       interruptPromptLine: interruptPromptLineOverride,
       _welcomeActive: welcomeActive,
       welcomeOwnsTab: welcomeOwnsTabOverride,
@@ -1225,6 +1229,8 @@ describe('app helpers', () => {
     const context = getRuntimeAutocompleteContext({ curl: {}, nmap: {} })
 
     expect(context.commands.flags.map(item => item.value)).toEqual(['--built-in', '--external'])
+    expect(context.runs.flags.map(item => item.value)).toEqual(['-v', '--verbose', '--json'])
+    expect(context.jobs.flags.map(item => item.value)).toEqual(['-v', '--verbose', '--json'])
     expect(context['session-token'].arg_hints.__positional__.map(item => item.value)).toContain('set <token>')
     expect(context['session-token'].arg_hints.set[0].value).toBe('<token>')
     expect(context.file.arg_hints.__positional__.map(item => item.value)).toEqual([
@@ -1232,6 +1238,7 @@ describe('app helpers', () => {
       'show <file>',
       'add <file>',
       'edit <file>',
+      'download <file>',
       'rm <file>',
       'help',
     ])
@@ -1260,6 +1267,7 @@ describe('app helpers', () => {
 
     expect(context.file.arg_hints.show.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
     expect(context.file.arg_hints.edit.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
+    expect(context.file.arg_hints.download.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
     expect(context.file.arg_hints.rm.map(item => item.description)).toEqual([
       'session file · 11 B',
       'session file · 2 KB',
@@ -3472,6 +3480,38 @@ describe('app helpers', () => {
     )
 
     expect(copyTab).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('supports Alt+R to open the run monitor from the terminal prompt', async () => {
+    const openRunMonitor = vi.fn(() => Promise.resolve(true))
+    const { cmdInput } = await loadAppFns({
+      openRunMonitor,
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', altKey: true, bubbles: true }))
+
+    expect(openRunMonitor).toHaveBeenCalledWith({ source: 'shortcut' })
+  })
+
+  it('supports Alt+Shift+F to open the Files modal from the terminal prompt', async () => {
+    const openWorkspace = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      openWorkspace,
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'F',
+        code: 'KeyF',
+        altKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    )
+
+    expect(openWorkspace).toHaveBeenCalled()
   })
 
   it('supports Ctrl+L to clear the active tab without dropping a running command', async () => {

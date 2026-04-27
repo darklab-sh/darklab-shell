@@ -7,12 +7,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version as package_version
+import json
 import os
 import random
 import re
 import subprocess  # nosec B404
 import sys
-from typing import TypedDict, cast
+from typing import Callable, TypedDict, cast
 
 from commands import (
     command_root,
@@ -30,6 +31,7 @@ from database import db_connect
 from process import active_runs_for_session, redis_client
 from workspace import (
     InvalidWorkspacePath,
+    WorkspaceBinaryFile,
     WorkspaceDisabled,
     WorkspaceFileNotFound,
     WorkspaceQuotaExceeded,
@@ -83,8 +85,10 @@ _CURRENT_SHORTCUTS = [
     ]),
     ("UI", [
         ({"mac": "Option+\\", "other": "Alt+\\"}, "toggle the desktop sidebar (rail) open / collapsed"),
+        ({"mac": "Option+R", "other": "Alt+R"}, "open the Run Monitor for active commands"),
         ({"mac": "Option+S", "other": "Alt+S"}, "toggle the transcript search bar"),
         ({"mac": "Option+H", "other": "Alt+H"}, "toggle the history drawer"),
+        ({"mac": "Option+Shift+F", "other": "Alt+Shift+F"}, "open the Files modal"),
         ({"mac": "Option+,", "other": "Alt+,"}, "open the options panel"),
         ({"mac": "Option+Shift+T", "other": "Alt+Shift+T"}, "open the theme selector"),
         ({"mac": "Option+G", "other": "Alt+G"}, "open the guided workflows panel"),
@@ -200,7 +204,7 @@ _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "retention", "description": "Show retention and persisted-output settings.", "root": "retention"},
     {"name": "rm <file>", "description": "Remove a session file after confirmation.", "root": "rm"},
     {"name": "route", "description": "Show the shell routing table summary.", "root": "route"},
-    {"name": "runs", "description": "Show app-native active run metadata for this session.", "root": "runs"},
+    {"name": "runs [-v|--json]", "description": "Show app-native active run metadata for this session.", "root": "runs"},
     {"name": "session-token", "description": "Show session token status.", "root": "session-token"},
     {"name": "shortcuts", "description": "Show current keyboard shortcuts.", "root": "shortcuts"},
     {"name": "stats", "description": "Show session activity totals and command-root breakdowns.", "root": "stats"},
@@ -211,7 +215,7 @@ _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "uname [-a]", "description": "Show the shell platform string.", "root": "uname"},
     {"name": "uptime", "description": "Show app uptime since process start.", "root": "uptime"},
     {"name": "version", "description": "Show shell, app, Flask, and Python version details.", "root": "version"},
-    {"name": "file", "description": "List, view, create, edit, or remove session files.", "root": "file"},
+    {"name": "file", "description": "List, view, create, edit, download, or remove session files.", "root": "file"},
     {"name": "which <cmd>", "description": "Locate a built-in command or allowed runtime command.", "root": "which"},
     {"name": "who", "description": "Show the current shell user and session.", "root": "who"},
     {"name": "whoami", "description": "Describe this shell and link to the project README.", "root": "whoami"},
@@ -335,7 +339,7 @@ _FAKE_COMMAND_DISPATCH = {
     "hostname":  lambda cmd, sid: _run_fake_hostname(),
     "id":        lambda cmd, sid: _run_fake_id(),
     "ip_addr":   lambda cmd, sid: _run_fake_ip_addr(),
-    "jobs":      lambda cmd, sid: _run_fake_runs(sid),
+    "jobs":      lambda cmd, sid: _run_fake_runs(cmd, sid),
     "last":      lambda cmd, sid: _run_fake_last(sid),
     "limits":    lambda cmd, sid: _run_fake_limits(),
     "ls":        lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
@@ -348,7 +352,7 @@ _FAKE_COMMAND_DISPATCH = {
     "rm":        lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
     "rm_root":   lambda cmd, sid: _run_fake_rm_root(),
     "route":     lambda cmd, sid: _run_fake_route(),
-    "runs":      lambda cmd, sid: _run_fake_runs(sid),
+    "runs":      lambda cmd, sid: _run_fake_runs(cmd, sid),
     "session-token": lambda cmd, sid: _run_fake_session_token(cmd, sid),
     "shortcuts": lambda cmd, sid: _run_fake_shortcuts(),
     "stats":     lambda cmd, sid: _run_fake_stats(sid),
@@ -534,6 +538,82 @@ def _format_terminal_link(url: str, label: str) -> str:
     return f"\x1b]8;;{safe_url}\x07{safe_label}\x1b]8;;\x07"
 
 
+ANSI_RESET = "\x1b[0m"
+ANSI_BOLD = "\x1b[1m"
+ANSI_DIM = "\x1b[2m"
+ANSI_UNDERLINE = "\x1b[4m"
+ANSI_CYAN = "\x1b[36m"
+ANSI_GREEN = "\x1b[32m"
+ANSI_RED = "\x1b[31m"
+ANSI_AMBER = "\x1b[33m"
+
+
+def _ansi_wrap(text: object, code: str) -> str:
+    return f"{code}{text}{ANSI_RESET}"
+
+
+def _ansi_bold(text: object) -> str:
+    return _ansi_wrap(text, ANSI_BOLD)
+
+
+def _ansi_dim(text: object) -> str:
+    return _ansi_wrap(text, ANSI_DIM)
+
+
+def _ansi_underline(text: object) -> str:
+    return _ansi_wrap(text, ANSI_UNDERLINE)
+
+
+def _ansi_cyan(text: object) -> str:
+    return _ansi_wrap(text, ANSI_CYAN)
+
+
+def _ansi_green(text: object) -> str:
+    return _ansi_wrap(text, ANSI_GREEN)
+
+
+def _ansi_red(text: object) -> str:
+    return _ansi_wrap(text, ANSI_RED)
+
+
+def _ansi_amber(text: object) -> str:
+    return _ansi_wrap(text, ANSI_AMBER)
+
+
+def _ansi_cell(text: str, width: int, align: str = "<", color: Callable[[str], str] | None = None) -> str:
+    visible = str(text)
+    styled = color(visible) if color else visible
+    padding = " " * max(0, width - len(visible))
+    if align == ">":
+        return f"{padding}{styled}"
+    return f"{styled}{padding}"
+
+
+def _ansi_status_label(value: str) -> str:
+    normalized = str(value).strip().lower()
+    if normalized == "online":
+        return _ansi_green(value)
+    if normalized in {"offline", "unavailable"}:
+        return _ansi_red(value)
+    if normalized in {"n/a", "anonymous", "anonymous (no session token set)"}:
+        return _ansi_dim(value)
+    return value
+
+
+def _ansi_yes_no(value: bool) -> str:
+    return _ansi_green("yes") if value else _ansi_amber("no")
+
+
+def _ansi_exit_code(value: object) -> str:
+    if value is None:
+        return _ansi_dim("?")
+    try:
+        code = int(str(value))
+    except (TypeError, ValueError):
+        return _ansi_amber(value)
+    return _ansi_green(code) if code == 0 else _ansi_red(code)
+
+
 def _text_lines(lines: list[str]) -> list[dict[str, str]]:
     return [{"type": "output", "text": line} for line in lines]
 
@@ -543,7 +623,7 @@ def _output_line(text: str, cls: str = "") -> dict[str, str]:
 
 
 def _format_native_record(label: str, value: str, width: int) -> str:
-    return f"\x1b[36m{label:<{width}}\x1b[0m  {value}"
+    return f"{_ansi_cyan(f'{label:<{width}}')}  {value}"
 
 
 def _run_fake_help() -> list[dict[str, str]]:
@@ -668,12 +748,12 @@ def _run_fake_session_token(cmd: str, session_id: str) -> list[dict[str, str]]:
     if session_id.startswith("tok_"):
         return [
             _output_line(_format_native_record("session token", masked, width), "fake-kv"),
-            _output_line(_format_native_record("status", "active", width), "fake-kv"),
+            _output_line(_format_native_record("status", _ansi_green("active"), width), "fake-kv"),
             _output_line(_format_native_record("storage", "localStorage (session_token)", width), "fake-kv"),
         ]
     return [
         _output_line(_format_native_record("session", masked, width), "fake-kv"),
-        _output_line(_format_native_record("status", "anonymous (no session token set)", width), "fake-kv"),
+        _output_line(_format_native_record("status", _ansi_dim("anonymous (no session token set)"), width), "fake-kv"),
         _output_line(_format_native_record("tip", "run 'session-token generate' to create a persistent token", width), "fake-kv"),
     ]
 
@@ -998,10 +1078,91 @@ def _run_elapsed(started: str) -> str:
     return _format_duration(int((datetime.now(timezone.utc) - start.astimezone(timezone.utc)).total_seconds()))
 
 
-def _run_fake_runs(session_id: str) -> list[dict[str, str]]:
+def _format_run_started(started: str) -> str:
+    try:
+        start = _parse_dt(started)
+    except (TypeError, ValueError):
+        return "-"
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    return start.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _active_run_json_rows(runs: list[dict]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for run in runs:
+        rows.append({
+            "run_id": str(run.get("run_id", "")),
+            "pid": int(run.get("pid", 0) or 0),
+            "started": str(run.get("started", "")),
+            "elapsed": _run_elapsed(str(run.get("started", ""))),
+            "source": str(run.get("source", "")) or "unknown",
+            "command": str(run.get("command", "")).strip(),
+        })
+    return rows
+
+
+def _run_fake_runs(command: str, session_id: str) -> list[dict[str, str]]:
+    parts = _split_command(command)
+    flags = set(parts[1:])
+    valid_flags = {"-v", "--verbose", "--json"}
+    invalid_flags = sorted(flags - valid_flags)
+    if invalid_flags:
+        return [_output_line("Usage: runs [-v|--verbose|--json]")]
+
     runs = active_runs_for_session(session_id)
     if not runs:
         return [_output_line("No active runs.", "fake-note")]
+
+    if "--json" in flags:
+        return [_output_line(json.dumps({"runs": _active_run_json_rows(runs)}, sort_keys=True), "fake-plain")]
+
+    if "-v" in flags or "--verbose" in flags:
+        run_labels = [str(run.get("run_id", "")) or "-" for run in runs]
+        pid_labels = [str(run.get("pid") or "-") for run in runs]
+        elapsed_labels = [_run_elapsed(str(run.get("started", ""))) for run in runs]
+        started_labels = [_format_run_started(str(run.get("started", ""))) for run in runs]
+        source_labels = [str(run.get("source", "")) or "unknown" for run in runs]
+
+        run_width = max(3, *(len(label) for label in run_labels))
+        pid_width = max(3, *(len(label) for label in pid_labels))
+        elapsed_width = max(7, *(len(label) for label in elapsed_labels))
+        started_width = max(7, *(len(label) for label in started_labels))
+        source_width = max(6, *(len(label) for label in source_labels))
+        lines = [
+            _output_line("Active runs:", "fake-section"),
+            _output_line(
+                "  "
+                f"{_ansi_cell('run', run_width, '<', _ansi_underline)}  "
+                f"{_ansi_cell('pid', pid_width, '>', _ansi_underline)}  "
+                f"{_ansi_cell('elapsed', elapsed_width, '>', _ansi_underline)}  "
+                f"{_ansi_cell('started', started_width, '<', _ansi_underline)}  "
+                f"{_ansi_cell('source', source_width, '<', _ansi_underline)}  "
+                f"{_ansi_underline('command')}",
+                "fake-help-row",
+            ),
+        ]
+        for run, run_label, pid_label, elapsed_label, started_label, source_label in zip(
+            runs,
+            run_labels,
+            pid_labels,
+            elapsed_labels,
+            started_labels,
+            source_labels,
+            strict=False,
+        ):
+            command_text = str(run.get("command", "")).strip()
+            lines.append(_output_line(
+                "  "
+                f"{_ansi_cell(run_label, run_width, '<', _ansi_cyan)}  "
+                f"{_ansi_cell(pid_label, pid_width, '>', _ansi_dim)}  "
+                f"{_ansi_cell(elapsed_label, elapsed_width, '>', _ansi_green)}  "
+                f"{_ansi_cell(started_label, started_width, '<', _ansi_dim)}  "
+                f"{_ansi_cell(source_label, source_width, '<', _ansi_cyan)}  "
+                f"{command_text}",
+                "fake-plain",
+            ))
+        return lines
 
     run_labels = [str(run.get("run_id", ""))[:8] or "-" for run in runs]
     pid_labels = [str(run.get("pid") or "-") for run in runs]
@@ -1013,14 +1174,22 @@ def _run_fake_runs(session_id: str) -> list[dict[str, str]]:
     lines = [
         _output_line("Active runs:", "fake-section"),
         _output_line(
-            f"  {'run':<{run_width}}  {'pid':>{pid_width}}  {'elapsed':>{elapsed_width}}  command",
+            "  "
+            f"{_ansi_cell('run', run_width, '<', _ansi_underline)}  "
+            f"{_ansi_cell('pid', pid_width, '>', _ansi_underline)}  "
+            f"{_ansi_cell('elapsed', elapsed_width, '>', _ansi_underline)}  "
+            f"{_ansi_underline('command')}",
             "fake-help-row",
         ),
     ]
     for run, run_label, pid_label, elapsed_label in zip(runs, run_labels, pid_labels, elapsed_labels, strict=False):
         command = str(run.get("command", "")).strip()
         lines.append(_output_line(
-            f"  {run_label:<{run_width}}  {pid_label:>{pid_width}}  {elapsed_label:>{elapsed_width}}  {command}",
+            "  "
+            f"{_ansi_cell(run_label, run_width, '<', _ansi_cyan)}  "
+            f"{_ansi_cell(pid_label, pid_width, '>', _ansi_dim)}  "
+            f"{_ansi_cell(elapsed_label, elapsed_width, '>', _ansi_green)}  "
+            f"{command}",
             "fake-plain",
         ))
     return lines
@@ -1035,7 +1204,7 @@ def _run_fake_last(session_id: str) -> list[dict[str, str]]:
     for row in rows:
         started = _parse_dt(row["started"]).astimezone().strftime("%Y-%m-%d %H:%M:%S")
         exit_code = row["exit_code"]
-        exit_label = "?" if exit_code is None else str(exit_code)
+        exit_label = _ansi_exit_code(exit_code)
         cls = "fake-last-row"
         if exit_code == 0:
             cls += " fake-last-ok"
@@ -1062,7 +1231,7 @@ def _run_fake_limits() -> list[dict[str, str]]:
         _output_line(
             _format_native_record(
                 "full output save",
-                _format_yes_no(bool(CFG.get('persist_full_run_output', False))),
+                _ansi_yes_no(bool(CFG.get('persist_full_run_output', False))),
                 width,
             ),
             "fake-kv",
@@ -1095,7 +1264,7 @@ def _run_fake_limits() -> list[dict[str, str]]:
             "fake-kv",
         ),
         _output_line(
-            _format_native_record("files enabled", _format_yes_no(workspace_enabled), width),
+            _format_native_record("files enabled", _ansi_yes_no(workspace_enabled), width),
             "fake-kv",
         ),
         _output_line(
@@ -1113,7 +1282,11 @@ def _run_fake_limits() -> list[dict[str, str]]:
         _output_line(
             _format_native_record(
                 "files cleanup",
-                f"{CFG.get('workspace_inactivity_ttl_hours', 0)}h (0 = disabled)",
+                (
+                    f"{CFG.get('workspace_inactivity_ttl_hours', 0)}h (0 = disabled)"
+                    if int(CFG.get('workspace_inactivity_ttl_hours', 0) or 0) > 0
+                    else _ansi_amber("disabled")
+                ),
                 width,
             ),
             "fake-kv",
@@ -1136,7 +1309,7 @@ def _run_fake_retention() -> list[dict[str, str]]:
         _output_line(
             _format_native_record(
                 "full output save",
-                _format_yes_no(bool(CFG.get('persist_full_run_output', False))),
+                _ansi_yes_no(bool(CFG.get('persist_full_run_output', False))),
                 width,
             ),
             "fake-kv",
@@ -1157,7 +1330,15 @@ def _run_fake_ps(session_id: str, command: str) -> list[dict[str, str]]:
     current = command.strip() or "ps"
     lines = [
         _output_line("Process view:", "fake-section"),
-        _output_line("  PID TTY      STAT START    CMD", "fake-ps-header"),
+        _output_line(
+            "  "
+            f"{_ansi_underline('PID')} "
+            f"{_ansi_underline('TTY')}      "
+            f"{_ansi_underline('STAT')} "
+            f"{_ansi_underline('START')}    "
+            f"{_ansi_underline('CMD')}",
+            "fake-ps-header",
+        ),
         _output_line(f"{9000:5d} pts/0    R    -        {current}", "fake-ps-row"),
     ]
     for job in active:
@@ -1180,6 +1361,8 @@ def _workspace_command_error(exc: Exception) -> list[dict[str, str]]:
         return [_output_line("file: session file storage is disabled on this instance")]
     if isinstance(exc, WorkspaceFileNotFound):
         return [_output_line("file: file was not found")]
+    if isinstance(exc, WorkspaceBinaryFile):
+        return [_output_line(f"file: {exc}")]
     if isinstance(exc, (InvalidWorkspacePath, WorkspaceQuotaExceeded)):
         return [_output_line(f"file: {exc}")]
     raise exc
@@ -1253,7 +1436,7 @@ def _workspace_item_size(item: dict[str, object]) -> int:
 
 
 def _underline_text(text: str) -> str:
-    return f"\x1b[4m{text}\x1b[0m"
+    return _ansi_underline(text)
 
 
 def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
@@ -1267,6 +1450,7 @@ def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
             _output_line("  file show <file>", "fake-help-row"),
             _output_line("  file add [file]", "fake-help-row"),
             _output_line("  file edit <file>", "fake-help-row"),
+            _output_line("  file download <file>", "fake-help-row"),
             _output_line("  file rm <file-or-folder>", "fake-help-row"),
             _output_line("", "fake-spacer"),
             _output_line("Aliases:", "fake-section"),
@@ -1309,8 +1493,8 @@ def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
             return lines
 
         width = max((len(str(item.get("display") or item["path"])) for item in rows), default=4)
-        path_header = _underline_text(f"{'path':<{width}}")
-        size_header = _underline_text(f"{'size':<8}")
+        path_header = f"{_underline_text('path')}{' ' * max(0, width - len('path'))}"
+        size_header = f"{_underline_text('size')}{' ' * (8 - len('size'))}"
         modified_header = _underline_text("modified")
         lines.append(_output_line(f"  {path_header}  {size_header}  {modified_header}", "fake-help-row"))
         for row in rows:
@@ -1334,15 +1518,26 @@ def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
         file_lines = text.splitlines() or [""]
         return [_output_line(f"file: {parts[2]}", "fake-section")] + _text_lines(file_lines)
 
-    if subcommand in {"add", "edit"}:
-        expected = "file add [file]" if subcommand == "add" else "file edit <file>"
-        if (subcommand == "add" and len(parts) > 3) or (subcommand == "edit" and len(parts) != 3):
+    if subcommand in {"add", "edit", "download"}:
+        expected = (
+            "file add [file]"
+            if subcommand == "add"
+            else f"file {subcommand} <file>"
+        )
+        if (
+            (subcommand == "add" and len(parts) > 3)
+            or (subcommand in {"edit", "download"} and len(parts) != 3)
+        ):
             return [_output_line(f"Usage: {expected}")]
         if subcommand == "add":
             return [_output_line("file add requires the browser Files panel — reload the page and try again.")]
         if len(parts) != 3:
             return [_output_line(f"Usage: file {subcommand} <file>")]
-        return [_output_line(f"file {subcommand} requires the browser Files panel — reload the page and try again.")]
+        if subcommand == "download":
+            return [_output_line("file download requires the browser Files panel — reload the page and try again.")]
+        return [_output_line(
+            f"file {subcommand} requires the browser Files panel — reload the page and try again."
+        )]
 
     if subcommand in {"rm", "delete"}:
         if len(parts) != 3:
@@ -1351,7 +1546,10 @@ def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
 
     return [
         _output_line(f"file: unknown subcommand '{subcommand}'"),
-        _output_line("Usage: file [list | show <file> | add <file> | edit <file> | rm <file-or-folder> | help]"),
+        _output_line(
+            "Usage: file [list | show <file> | add <file> | edit <file> | "
+            "download <file> | rm <file-or-folder> | help]"
+        ),
     ]
 
 
@@ -1370,7 +1568,10 @@ def _run_fake_workspace_alias(command: str, session_id: str) -> list[dict[str, s
         if len(parts) != 2:
             return [_output_line("Usage: rm <file-or-folder>")]
         return _run_fake_workspace(f"file rm {parts[1]}", session_id)
-    return [_output_line("Usage: file [list | show <file> | add <file> | edit <file> | rm <file-or-folder> | help]")]
+    return [_output_line(
+        "Usage: file [list | show <file> | add <file> | edit <file> | "
+        "download <file> | rm <file-or-folder> | help]"
+    )]
 
 
 def _run_fake_poweroff() -> list[dict[str, str]]:
@@ -1388,7 +1589,16 @@ def _run_fake_rm_root() -> list[dict[str, str]]:
 def _run_fake_route() -> list[dict[str, str]]:
     return _text_lines([
         "Kernel IP routing table",
-        "Destination     Gateway         Genmask         Flags Metric Ref    Use Iface",
+        (
+            f"{_ansi_underline('Destination')}     "
+            f"{_ansi_underline('Gateway')}         "
+            f"{_ansi_underline('Genmask')}         "
+            f"{_ansi_underline('Flags')} "
+            f"{_ansi_underline('Metric')} "
+            f"{_ansi_underline('Ref')}    "
+            f"{_ansi_underline('Use')} "
+            f"{_ansi_underline('Iface')}"
+        ),
         "0.0.0.0         172.18.0.1      0.0.0.0         UG    0      0        0 eth0",
         "172.18.0.0      0.0.0.0         255.255.0.0     U     0      0        0 eth0",
     ])
@@ -1400,10 +1610,13 @@ def _run_fake_status(session_id: str) -> list[dict[str, str]]:
     lines = [
         _output_line("Shell status:", "fake-section"),
         _output_line(_format_native_record("app", CFG['app_name'], width), "fake-kv"),
-        _output_line(_format_native_record("session", session_label, width), "fake-kv"),
-        _output_line(_format_native_record("session type", _session_type_label(session_id), width), "fake-kv"),
-        _output_line(_format_native_record("database", _status_db_label(), width), "fake-kv"),
-        _output_line(_format_native_record("redis", _status_redis_label(), width), "fake-kv"),
+        _output_line(_format_native_record("session", _ansi_dim(session_label), width), "fake-kv"),
+        _output_line(
+            _format_native_record("session type", _ansi_status_label(_session_type_label(session_id)), width),
+            "fake-kv",
+        ),
+        _output_line(_format_native_record("database", _ansi_status_label(_status_db_label()), width), "fake-kv"),
+        _output_line(_format_native_record("redis", _ansi_status_label(_status_redis_label()), width), "fake-kv"),
         _output_line(_format_native_record("runs in session", str(_session_run_count(session_id)), width), "fake-kv"),
         _output_line(_format_native_record("snapshots", str(_session_snapshot_count(session_id)), width), "fake-kv"),
         _output_line(
@@ -1417,14 +1630,14 @@ def _run_fake_status(session_id: str) -> list[dict[str, str]]:
         _output_line(
             _format_native_record(
                 "saved options",
-                _format_yes_no(_session_has_saved_preferences(session_id)),
+                _ansi_yes_no(_session_has_saved_preferences(session_id)),
                 width,
             ),
             "fake-kv",
         ),
         _output_line(
             _format_native_record(
-                "active jobs",
+                "active runs",
                 str(len(active_runs_for_session(session_id))),
                 width,
             ),
@@ -1433,7 +1646,7 @@ def _run_fake_status(session_id: str) -> list[dict[str, str]]:
         _output_line(
             _format_native_record(
                 "full output save",
-                _format_yes_no(bool(CFG.get('persist_full_run_output', False))),
+                _ansi_yes_no(bool(CFG.get('persist_full_run_output', False))),
                 width,
             ),
             "fake-kv",
@@ -1527,20 +1740,23 @@ def _run_fake_stats(session_id: str) -> list[dict[str, str]]:
     width = 18
     session_label = _mask_session_token(session_id) if session_id else "anonymous"
     success_rate = (
-        f"{_format_percent(success_total, completed)} "
-        f"({success_total} ok / {failed_total} failed)"
+        f"{_ansi_green(_format_percent(success_total, completed))} "
+        f"({_ansi_green(f'{success_total} ok')} / {_ansi_red(f'{failed_total} failed')})"
     )
     lines = [
         _output_line("Session stats:", "fake-section"),
-        _output_line(_format_native_record("session", session_label, width), "fake-kv"),
-        _output_line(_format_native_record("session type", _session_type_label(session_id), width), "fake-kv"),
+        _output_line(_format_native_record("session", _ansi_dim(session_label), width), "fake-kv"),
+        _output_line(
+            _format_native_record("session type", _ansi_status_label(_session_type_label(session_id)), width),
+            "fake-kv",
+        ),
         _output_line(_format_native_record("runs", str(run_total), width), "fake-kv"),
         _output_line(_format_native_record("snapshots", str(_session_snapshot_count(session_id)), width), "fake-kv"),
         _output_line(
             _format_native_record("starred commands", str(_session_starred_command_count(session_id)), width),
             "fake-kv",
         ),
-        _output_line(_format_native_record("active jobs", str(len(active_runs_for_session(session_id))), width), "fake-kv"),
+        _output_line(_format_native_record("active runs", str(len(active_runs_for_session(session_id))), width), "fake-kv"),
         _output_line(
             _format_native_record(
                 "success rate",
@@ -1589,10 +1805,10 @@ def _run_fake_stats(session_id: str) -> list[dict[str, str]]:
     ok_width = max(len("ok"), *(len(row["ok"]) for row in top_rows))
     avg_width = max(len("avg"), *(len(row["avg"]) for row in top_rows))
     header = column_gap.join((
-        f"{'command':<{root_width}}",
-        f"{'runs':>{runs_width}}",
-        f"{'ok':>{ok_width}}",
-        f"{'avg':>{avg_width}}",
+        _ansi_cell("command", root_width, "<", _ansi_underline),
+        _ansi_cell("runs", runs_width, ">", _ansi_underline),
+        _ansi_cell("ok", ok_width, ">", _ansi_underline),
+        _ansi_cell("avg", avg_width, ">", _ansi_underline),
     ))
     lines.append(_output_line(f"  {header}", "fake-help-row"))
     for row in top_rows:
@@ -1675,7 +1891,14 @@ def _run_fake_fork_bomb() -> list[dict[str, str]]:
 
 def _run_fake_df(command: str) -> list[dict[str, str]]:
     return _text_lines([
-        "Filesystem      Size  Used Avail Use% Mounted on",
+        (
+            f"{_ansi_underline('Filesystem')}      "
+            f"{_ansi_underline('Size')}  "
+            f"{_ansi_underline('Used')} "
+            f"{_ansi_underline('Avail')} "
+            f"{_ansi_underline('Use%')} "
+            f"{_ansi_underline('Mounted on')}"
+        ),
         "overlay          16G  1.2G   15G   8% /",
         "tmpfs            64M     0   64M   0% /dev",
         "tmpfs           256M     0  256M   0% /tmp",
@@ -1684,7 +1907,15 @@ def _run_fake_df(command: str) -> list[dict[str, str]]:
 
 def _run_fake_free(command: str) -> list[dict[str, str]]:
     return _text_lines([
-        "               total        used        free      shared  buff/cache   available",
+        (
+            "               "
+            f"{_ansi_underline('total')}        "
+            f"{_ansi_underline('used')}        "
+            f"{_ansi_underline('free')}      "
+            f"{_ansi_underline('shared')}  "
+            f"{_ansi_underline('buff/cache')}   "
+            f"{_ansi_underline('available')}"
+        ),
         "Mem:           512Mi       124Mi       188Mi       4.0Mi       200Mi       362Mi",
         "Swap:             0B          0B          0B",
     ])

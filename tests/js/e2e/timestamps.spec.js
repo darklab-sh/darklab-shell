@@ -91,6 +91,8 @@ test.describe('timestamp toggle', () => {
   test('line numbers work with timestamps and typing continues after toggling display modes', async ({
     page,
   }) => {
+    await ensurePromptReady(page)
+
     await page.locator('#ln-btn').click()
     await expect(page.locator('body')).toHaveClass(/ln-on/)
 
@@ -102,6 +104,7 @@ test.describe('timestamp toggle', () => {
     await page.locator('#cmd').press('Enter')
 
     await expect(page.locator('#hud-last-exit')).toHaveText('0')
+    await waitForActiveOutputSettled(page)
 
     const prefixedLine = page.locator('.tab-panel.active .output .line[data-prefix]').first()
     await expect(prefixedLine).toHaveAttribute('data-prefix', /^\+\d+\.\ds$/)

@@ -386,10 +386,8 @@ test.describe('mobile menu', () => {
 
   test('mobile tabs bar can overflow and scroll horizontally', async ({ page }) => {
     await ensurePromptReady(page)
-    const overflowCmds = ['hostname', 'date', 'uptime', 'whoami', 'version', 'fortune']
     for (let i = 0; i < 6; i++) {
       await page.locator('#new-tab-btn').click()
-      await runCommandMobile(page, overflowCmds[i])
     }
 
     const tabsBar = page.locator('.terminal-bar .tabs-bar')

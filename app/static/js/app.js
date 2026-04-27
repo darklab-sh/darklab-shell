@@ -1166,12 +1166,13 @@ function handleActionShortcut(e) {
   return false;
 }
 
-// Desktop chrome shortcuts (rail, search, history, options, theme, workflows).
+// Desktop chrome shortcuts (rail, search, history, options, theme, workflows,
+// Files, and Run Monitor).
 // The composer is allowed to pass through so prompt-focused users can still
 // trigger chrome toggles — each branch calls preventDefault so Option-glyphs
-// (`«`, `˙`, `©`, `≤`, `ˇ`, `ß`) never leak into the prompt on macOS. Other
-// editable targets (modal inputs, search field, options textarea) remain
-// gated so typing isn't hijacked.
+// (`«`, `˙`, `®`, `©`, `≤`, `ˇ`, `ß`) never leak into the prompt on macOS.
+// Other editable targets (modal inputs, search field, options textarea)
+// remain gated so typing isn't hijacked.
 //
 // Search is bound to Alt+S (not Alt+F) because the composer owns Alt+F as
 // readline word-forward; binding search to Alt+F would either hijack that
@@ -1192,8 +1193,18 @@ function handleChromeShortcut(e) {
     e.preventDefault();
     return true;
   }
+  if (e.shiftKey && eventMatchesLetter(e, 'f')) {
+    if (typeof openWorkspace === 'function') openWorkspace();
+    e.preventDefault();
+    return true;
+  }
   // All remaining chrome chords are shift-free.
   if (e.shiftKey) return false;
+  if (eventMatchesLetter(e, 'r')) {
+    if (typeof openRunMonitor === 'function') void openRunMonitor({ source: 'shortcut' });
+    e.preventDefault();
+    return true;
+  }
   if (eventMatchesLetter(e, 'h')) {
     if (typeof isHistoryPanelOpen === 'function' && isHistoryPanelOpen()) {
       hideHistoryPanel();
@@ -2215,7 +2226,7 @@ const _runtimeBuiltinCommandInfo = [
   ['df', 'built-in: show a compact filesystem summary'],
   ['env', 'built-in: show core environment values for this shell'],
   ['faq', 'built-in: show configured FAQ entries'],
-  ['file', 'built-in: list, view, create, edit, or remove session files'],
+  ['file', 'built-in: list, view, create, edit, download, or remove session files'],
   ['fortune', 'built-in: print a short operator-themed one-liner'],
   ['free', 'built-in: show a compact memory summary'],
   ['groups', 'built-in: show the shell group membership'],
@@ -2224,7 +2235,7 @@ const _runtimeBuiltinCommandInfo = [
   ['hostname', 'built-in: show the configured shell instance name'],
   ['id', 'built-in: show the shell identity'],
   ['ip', 'built-in: show a minimal shell network interface view'],
-  ['jobs', 'built-in: list active jobs for this session'],
+  ['jobs', 'built-in: alias for runs'],
   ['last', 'built-in: show recent completed runs with timestamps and exit codes'],
   ['limits', 'built-in: show configured runtime, history, and retention limits'],
   ['ls', 'built-in: list session files'],
@@ -2234,6 +2245,7 @@ const _runtimeBuiltinCommandInfo = [
   ['retention', 'built-in: show retention and persisted-output settings'],
   ['rm', 'built-in: remove a session file after confirmation'],
   ['route', 'built-in: show the shell routing table summary'],
+  ['runs', 'built-in: show active runs; use -v for details or --json for automation'],
   ['session-token', 'built-in: show or manage persistent session tokens'],
   ['shortcuts', 'built-in: show current keyboard shortcuts'],
   ['stats', 'built-in: show session activity totals and command breakdowns'],
@@ -2317,6 +2329,13 @@ function _runtimeStaticBuiltinContext() {
       _runtimeHint('--external', 'Show only allowed external commands'),
     ],
   });
+  const activeRunFlags = [
+    _runtimeHint('-v', 'Show full IDs, started timestamps, and metadata source'),
+    _runtimeHint('--verbose', 'Show full IDs, started timestamps, and metadata source'),
+    _runtimeHint('--json', 'Print active-run metadata as JSON'),
+  ];
+  context.runs = _runtimeContextSpec({ flags: activeRunFlags });
+  context.jobs = _runtimeContextSpec({ flags: activeRunFlags });
   if (isWorkspaceFeatureEnabled()) {
     context.cat = _runtimeContextSpec({
       argumentLimit: 1,
@@ -2360,7 +2379,7 @@ function _runtimeWorkspaceFileHints() {
 function _runtimeWorkspaceContext() {
   const fileHints = _runtimeWorkspaceFileHints();
   return _runtimeContextSpec({
-    expectsValue: ['show', 'cat', 'add', 'edit', 'rm', 'delete'],
+    expectsValue: ['show', 'cat', 'add', 'edit', 'download', 'rm', 'delete'],
     argHints: {
       list: [],
       ls: [],
@@ -2369,6 +2388,7 @@ function _runtimeWorkspaceContext() {
       cat: fileHints,
       add: [_runtimeHint('<file>', 'New session file name')],
       edit: fileHints,
+      download: fileHints,
       rm: fileHints,
       delete: fileHints,
       __positional__: [
@@ -2376,6 +2396,7 @@ function _runtimeWorkspaceContext() {
         _runtimeHint('show <file>', 'Print a session file in the terminal', 'show '),
         _runtimeHint('add <file>', 'Open the Files editor for a new session file', 'add '),
         _runtimeHint('edit <file>', 'Open the Files editor for an existing session file', 'edit '),
+        _runtimeHint('download <file>', 'Download a session file through the browser', 'download '),
         _runtimeHint('rm <file>', 'Remove a session file from this session', 'rm '),
         _runtimeHint('help', 'Show file command usage'),
       ],

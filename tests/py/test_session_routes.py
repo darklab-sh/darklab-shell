@@ -6,6 +6,7 @@ import sqlite3
 
 import app as shell_app
 from database import DB_PATH
+import workspace
 
 
 def get_client():
@@ -131,6 +132,21 @@ class TestSessionMigrate:
                 (session_id, json.dumps(preferences, sort_keys=True)),
             )
             conn.commit()
+
+    def _enable_workspace(self, monkeypatch, tmp_path, **overrides):
+        cfg = {
+            "workspace_enabled": True,
+            "workspace_backend": "tmpfs",
+            "workspace_root": str(tmp_path / "workspaces"),
+            "workspace_quota_mb": 1,
+            "workspace_max_file_mb": 1,
+            "workspace_max_files": 10,
+            "workspace_inactivity_ttl_hours": 1,
+        }
+        cfg.update(overrides)
+        for key, value in cfg.items():
+            monkeypatch.setitem(workspace.CFG, key, value)
+        return cfg
 
     def test_returns_200_with_valid_request(self):
         client = get_client()
@@ -390,6 +406,88 @@ class TestSessionMigrate:
                 (to_id,),
             ).fetchone()
         assert json.loads(dst[0]) == dst_prefs
+
+    def test_migrate_workspace_returns_zero_without_source_workspace(self, tmp_path, monkeypatch):
+        client = get_client()
+        self._enable_workspace(monkeypatch, tmp_path)
+        from_id = "migrate-ws-none-" + __import__("uuid").uuid4().hex[:8]
+        to_id = str(__import__("uuid").uuid4())
+
+        resp = client.post(
+            "/session/migrate",
+            json={"from_session_id": from_id, "to_session_id": to_id},
+            headers={"X-Session-ID": from_id},
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["migrated_workspace_files"] == 0
+        assert data["skipped_workspace_files"] == 0
+
+    def test_migrates_source_workspace_files_to_destination(self, tmp_path, monkeypatch):
+        client = get_client()
+        cfg = self._enable_workspace(monkeypatch, tmp_path)
+        from_id = "migrate-ws-src-" + __import__("uuid").uuid4().hex[:8]
+        to_id = str(__import__("uuid").uuid4())
+        workspace.write_workspace_text_file(from_id, "targets.txt", "darklab.sh\n", cfg)
+        workspace.create_workspace_directory(from_id, "reports/empty", cfg)
+
+        resp = client.post(
+            "/session/migrate",
+            json={"from_session_id": from_id, "to_session_id": to_id},
+            headers={"X-Session-ID": from_id},
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["migrated_workspace_files"] == 1
+        assert data["skipped_workspace_files"] == 0
+        assert data["migrated_workspace_directories"] >= 2
+        assert workspace.read_workspace_text_file(to_id, "targets.txt", cfg) == "darklab.sh\n"
+        assert workspace.list_workspace_files(from_id, cfg) == []
+        assert any(item["path"] == "reports/empty" for item in workspace.list_workspace_directories(to_id, cfg))
+
+    def test_migrate_workspace_keeps_destination_only_files(self, tmp_path, monkeypatch):
+        client = get_client()
+        cfg = self._enable_workspace(monkeypatch, tmp_path)
+        from_id = "migrate-ws-dst-" + __import__("uuid").uuid4().hex[:8]
+        to_id = str(__import__("uuid").uuid4())
+        workspace.write_workspace_text_file(to_id, "existing.txt", "keep\n", cfg)
+
+        resp = client.post(
+            "/session/migrate",
+            json={"from_session_id": from_id, "to_session_id": to_id},
+            headers={"X-Session-ID": from_id},
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["migrated_workspace_files"] == 0
+        assert data["skipped_workspace_files"] == 0
+        assert workspace.read_workspace_text_file(to_id, "existing.txt", cfg) == "keep\n"
+
+    def test_migrate_workspace_skips_conflicting_files_without_overwrite(self, tmp_path, monkeypatch):
+        client = get_client()
+        cfg = self._enable_workspace(monkeypatch, tmp_path)
+        from_id = "migrate-ws-conflict-" + __import__("uuid").uuid4().hex[:8]
+        to_id = str(__import__("uuid").uuid4())
+        workspace.write_workspace_text_file(from_id, "shared.txt", "source\n", cfg)
+        workspace.write_workspace_text_file(from_id, "from-only.txt", "move\n", cfg)
+        workspace.write_workspace_text_file(to_id, "shared.txt", "dest\n", cfg)
+
+        resp = client.post(
+            "/session/migrate",
+            json={"from_session_id": from_id, "to_session_id": to_id},
+            headers={"X-Session-ID": from_id},
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["migrated_workspace_files"] == 1
+        assert data["skipped_workspace_files"] == 1
+        assert workspace.read_workspace_text_file(to_id, "shared.txt", cfg) == "dest\n"
+        assert workspace.read_workspace_text_file(to_id, "from-only.txt", cfg) == "move\n"
+        assert workspace.read_workspace_text_file(from_id, "shared.txt", cfg) == "source\n"
 
 
 # ── /session/run-count ────────────────────────────────────────────────────────

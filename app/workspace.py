@@ -80,6 +80,14 @@ class WorkspaceDeleteResult:
     file_count: int
 
 
+@dataclass(frozen=True)
+class WorkspaceMigrationResult:
+    migrated_files: int = 0
+    skipped_files: int = 0
+    migrated_directories: int = 0
+    skipped_directories: int = 0
+
+
 def _coerce_int(value: Any, default: int, *, minimum: int = 0) -> int:
     try:
         parsed = int(value)
@@ -536,6 +544,138 @@ def delete_workspace_path(
         path=str(info["path"]),
         kind=str(info["kind"]),
         file_count=int(info["file_count"]),
+    )
+
+
+def _chmod_workspace_dir(path: Path) -> None:
+    try:
+        os.chmod(path, WORKSPACE_DIR_MODE)
+    except OSError:
+        pass
+
+
+def _target_parent_has_file(root: Path, target: Path) -> bool:
+    try:
+        relative_parts = target.relative_to(root).parts
+    except ValueError:
+        return True
+    cursor = root
+    for part in relative_parts[:-1]:
+        cursor = cursor / part
+        if cursor.exists() and not cursor.is_dir():
+            return True
+    return False
+
+
+def _cleanup_empty_workspace_dirs(root: Path) -> None:
+    if not root.exists() or not root.is_dir():
+        return
+    for path in sorted((p for p in root.rglob("*") if p.is_dir()), key=lambda item: len(item.parts), reverse=True):
+        try:
+            path.rmdir()
+        except OSError:
+            pass
+    try:
+        root.rmdir()
+    except OSError:
+        pass
+
+
+def migrate_session_workspace(
+    from_session_id: str,
+    to_session_id: str,
+    cfg: dict[str, Any] | None = None,
+) -> WorkspaceMigrationResult:
+    """Merge one session workspace into another without overwriting files."""
+    settings = workspace_settings(cfg)
+    if not settings.enabled or from_session_id == to_session_id:
+        return WorkspaceMigrationResult()
+
+    root = workspace_root(settings)
+    source = root / session_workspace_name(from_session_id)
+    destination = root / session_workspace_name(to_session_id)
+    if not source.exists():
+        return WorkspaceMigrationResult()
+    if source.is_symlink() or not source.is_dir():
+        raise InvalidWorkspacePath("source session workspace is invalid")
+    if destination.exists() and (destination.is_symlink() or not destination.is_dir()):
+        raise InvalidWorkspacePath("destination session workspace is invalid")
+
+    _reject_symlinks_under(source)
+    if destination.exists():
+        _reject_symlinks_under(destination)
+
+    destination.mkdir(mode=WORKSPACE_DIR_MODE, parents=True, exist_ok=True)
+    _chmod_workspace_dir(destination)
+
+    usage = workspace_usage(to_session_id, cfg)
+    bytes_used = usage.bytes_used
+    file_count = usage.file_count
+    migrated_files = 0
+    skipped_files = 0
+    migrated_directories = 0
+    skipped_directories = 0
+
+    directories = sorted(
+        (path for path in source.rglob("*") if path.is_dir()),
+        key=lambda item: len(item.relative_to(source).parts),
+    )
+    for source_dir in directories:
+        rel = source_dir.relative_to(source)
+        target_dir = destination / rel
+        if target_dir.exists():
+            if target_dir.is_dir():
+                continue
+            skipped_directories += 1
+            continue
+        if _target_parent_has_file(destination, target_dir):
+            skipped_directories += 1
+            continue
+        try:
+            target_dir.mkdir(mode=WORKSPACE_DIR_MODE, parents=True, exist_ok=True)
+            _chmod_workspace_dir(target_dir)
+            migrated_directories += 1
+        except OSError:
+            skipped_directories += 1
+
+    files = sorted(
+        (path for path in source.rglob("*") if path.is_file()),
+        key=lambda item: item.relative_to(source).as_posix(),
+    )
+    for source_file in files:
+        rel = source_file.relative_to(source)
+        target_file = destination / rel
+        try:
+            size = source_file.stat().st_size
+        except OSError:
+            skipped_files += 1
+            continue
+        if (
+            target_file.exists()
+            or _target_parent_has_file(destination, target_file)
+            or size > settings.max_file_bytes
+            or file_count + 1 > settings.max_files
+            or bytes_used + size > settings.quota_bytes
+        ):
+            skipped_files += 1
+            continue
+        try:
+            target_file.parent.mkdir(mode=WORKSPACE_DIR_MODE, parents=True, exist_ok=True)
+            _chmod_workspace_dir(target_file.parent)
+            shutil.move(str(source_file), str(target_file))
+            migrated_files += 1
+            file_count += 1
+            bytes_used += size
+        except (OSError, shutil.Error):
+            skipped_files += 1
+
+    _cleanup_empty_workspace_dirs(source)
+    touch_session_workspace(to_session_id, cfg)
+    return WorkspaceMigrationResult(
+        migrated_files=migrated_files,
+        skipped_files=skipped_files,
+        migrated_directories=migrated_directories,
+        skipped_directories=skipped_directories,
     )
 
 

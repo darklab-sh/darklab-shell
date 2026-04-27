@@ -26,8 +26,31 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
    - `pip3`
    - Node.js `22` (the repo pins this in [`.nvmrc`](.nvmrc))
    - `npm`
-   - `shellcheck`, `hadolint`, `yamllint` (via Homebrew on macOS: `brew install shellcheck hadolint yamllint`)
    - CSS linting uses the npm-managed `stylelint` dependency; no separate system package is needed
+
+   Platform-specific lint tools:
+
+   macOS:
+
+   ```bash
+   brew install shellcheck hadolint
+   ```
+
+   Linux:
+
+   ```bash
+   # Shell script linting
+   sudo apt-get update
+   sudo apt-get install -y shellcheck
+
+   # Dockerfile linting
+   curl -fsSL -o /tmp/hadolint \
+     https://github.com/hadolint/hadolint/releases/latest/download/hadolint-Linux-x86_64
+   chmod +x /tmp/hadolint
+   sudo mv /tmp/hadolint /usr/local/bin/hadolint
+   ```
+
+   YAML linting is installed with the Python dev dependencies below through [requirements-dev.txt](requirements-dev.txt), so `yamllint` resolves from the active virtual environment on both macOS and Linux.
 
 2. Create and activate a local virtual environment from the repo root:
 
@@ -47,6 +70,8 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
 
    ```bash
    npm install
+   npx playwright install-deps
+   npx playwright install
    ```
 
 5. Activate the pre-commit hook:
@@ -134,7 +159,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1036 pytest + 838 Vitest + 217 Playwright = 2,091 tests**.
+Current totals: **1041 pytest + 849 Vitest + 219 Playwright = 2,109 tests**.
 
 Playwright notes:
 

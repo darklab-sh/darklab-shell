@@ -329,6 +329,7 @@ def active_runs_for_session(session_id: str) -> list[dict]:
                     "pid": int(item.get("pid", 0) or 0),
                     "command": str(item.get("command", "")),
                     "started": str(item.get("started", "")),
+                    "source": "redis",
                 }
                 for item in items
                 if item.get("run_id") and item.get("command") and item.get("started")
@@ -354,6 +355,7 @@ def active_runs_for_session(session_id: str) -> list[dict]:
                     "pid": int(item.get("pid", 0) or 0),
                     "command": str(item.get("command", "")),
                     "started": str(item.get("started", "")),
+                    "source": "memory",
                 }
             )
         for run_id in stale:

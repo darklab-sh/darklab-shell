@@ -1130,7 +1130,7 @@ commands:
             - value: amass subs -d darklab.sh -names
               description: Print names from the session-scoped Amass database
               feature_required: workspace
-            - value: amass subs -d darklab.sh -names -ip -summary
+            - value: amass subs -d darklab.sh -show -ip -summary
               description: Show discovered names with IP and ASN summary data
               feature_required: workspace
             - value: amass subs -d darklab.sh -show

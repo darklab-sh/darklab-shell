@@ -583,6 +583,32 @@ test.describe('desktop chrome keyboard shortcuts', () => {
     await expect(page.locator('#search-bar')).not.toBeVisible()
   })
 
+  test('Alt+R opens the Run Monitor from the composer', async ({ page }) => {
+    await page.route('**/history/active', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        runs: [{
+          run_id: 'run-shortcut-1',
+          pid: 4242,
+          started: new Date().toISOString(),
+          command: 'sleep 60',
+        }],
+      }),
+    }))
+
+    await dispatchMacOptionKey(page, '#cmd', { key: '®', code: 'KeyR', altKey: true })
+    await expect(page.locator('#run-monitor')).toBeVisible()
+    await expect(page.locator('#run-monitor')).toContainText('sleep 60')
+    await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
+  test('Alt+Shift+F opens the Files modal from the composer', async ({ page }) => {
+    await dispatchMacOptionKey(page, '#cmd', { key: 'Ï', code: 'KeyF', altKey: true, shiftKey: true })
+    await expect(page.locator('#workspace-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
   test('Alt+\\ toggles the rail collapsed state from the composer', async ({ page }) => {
     const rail = page.locator('#rail')
     const startsCollapsed = await rail.evaluate(el => el.classList.contains('rail-collapsed'))

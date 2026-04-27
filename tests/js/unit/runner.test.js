@@ -451,6 +451,7 @@ function loadRunnerFns({
   handleConfigCommand: handleConfigCommandOverride = undefined,
   refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride = undefined,
   openWorkspaceEditorFromCommand: openWorkspaceEditorFromCommandOverride = undefined,
+  downloadWorkspaceFile: downloadWorkspaceFileOverride = undefined,
   runnerInitCode = '',
 } = {}) {
   const normalizedTabs = tabs.map((tab) => ({
@@ -599,6 +600,9 @@ function loadRunnerFns({
       ...(refreshWorkspaceFileCacheOverride ? { refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride } : {}),
       ...(openWorkspaceEditorFromCommandOverride
         ? { openWorkspaceEditorFromCommand: openWorkspaceEditorFromCommandOverride }
+        : {}),
+      ...(downloadWorkspaceFileOverride
+        ? { downloadWorkspaceFile: downloadWorkspaceFileOverride }
         : {}),
       ...(NotificationOverride !== undefined ? { Notification: NotificationOverride } : {}),
     },
@@ -1875,7 +1879,7 @@ describe('_sessionTokenSet verify failure behavior', () => {
     await _sessionTokenSet('tok_abcd1234efgh5678ijkl9012mnop3456', 'tab-1')
 
     expect(appendLine).toHaveBeenCalledWith(
-      'you have 1 run(s) in your current session. migrate history to this session token?',
+      'you have 1 run(s) in your current session. migrate history and files to this session token?',
       '',
       'tab-1',
     )
@@ -2300,6 +2304,38 @@ describe('workspace file delete confirmation', () => {
     expect(appendLine).toHaveBeenCalledWith('Usage: file edit <file>', 'exit-fail', 'tab-1')
     expect(status.className).toBe('status-pill fail')
   })
+
+  it('downloads workspace files from file download commands', async () => {
+    const appendLine = vi.fn()
+    const downloadWorkspaceFile = vi.fn(() => Promise.resolve(true))
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      downloadWorkspaceFile,
+    })
+
+    await submitCommand('file download reports/output.json')
+
+    await vi.waitFor(() => expect(downloadWorkspaceFile).toHaveBeenCalledWith('reports/output.json'))
+    expect(appendLine).toHaveBeenCalledWith('file: downloading reports/output.json', '', 'tab-1')
+    expect(status.className).toBe('status-pill ok')
+  })
+
+  it('keeps file download usage strict when no filename is provided', async () => {
+    const appendLine = vi.fn()
+    const downloadWorkspaceFile = vi.fn(() => Promise.resolve(true))
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      downloadWorkspaceFile,
+    })
+
+    await submitCommand('file download')
+
+    expect(downloadWorkspaceFile).not.toHaveBeenCalled()
+    expect(appendLine).toHaveBeenCalledWith('Usage: file download <file>', 'exit-fail', 'tab-1')
+    expect(status.className).toBe('status-pill fail')
+  })
 })
 
 describe('session-token copy', () => {
@@ -2419,7 +2455,7 @@ describe('session-token set pending prompt', () => {
     await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 1 run(s) in your current session. migrate history to this session token?',
+        'you have 1 run(s) in your current session. migrate history and files to this session token?',
         '',
         'tab-1',
       ),
@@ -2433,7 +2469,7 @@ describe('session-token set pending prompt', () => {
     )
     expect(appendLine).toHaveBeenNthCalledWith(
       2,
-      'you have 1 run(s) in your current session. migrate history to this session token?',
+      'you have 1 run(s) in your current session. migrate history and files to this session token?',
       '',
       'tab-1',
     )
@@ -2466,7 +2502,7 @@ describe('session-token set pending prompt', () => {
       '',
       'tab-1',
     )
-    expect(appendLine).toHaveBeenCalledWith('History migration skipped.', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('History and file migration skipped.', '', 'tab-1')
     expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
   })
 
@@ -2494,7 +2530,7 @@ describe('session-token set pending prompt', () => {
     await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 1 run(s) in your current session. migrate history to this session token?',
+        'you have 1 run(s) in your current session. migrate history and files to this session token?',
         '',
         'tab-1',
       ),
@@ -2538,7 +2574,7 @@ describe('session-token set pending prompt', () => {
     await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 1 run(s) in your current session. migrate history to this session token?',
+        'you have 1 run(s) in your current session. migrate history and files to this session token?',
         '',
         'tab-1',
       ),
@@ -2576,11 +2612,118 @@ describe('session-token set pending prompt', () => {
 
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 73 run(s) in your current session. migrate history to this session token?',
+        'you have 73 run(s) in your current session. migrate history and files to this session token?',
         '',
         'tab-1',
       ),
     )
+  })
+
+  it('prompts for migration when the current session only has workspace files', async () => {
+    const appendLine = vi.fn()
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      localStorageEntries: { session_id: 'uuid-base-session' },
+      apiFetch: vi.fn((url) => {
+        if (url === '/session/token/verify') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ exists: true }) })
+        }
+        if (url === '/session/run-count') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ count: 0, workspace_files: 2 }) })
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+      }),
+    })
+
+    await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
+
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith(
+        'you have 2 workspace file(s) in your current session. migrate history and files to this session token?',
+        '',
+        'tab-1',
+      ),
+    )
+  })
+})
+
+describe('session-token revoke confirmation', () => {
+  it('requires yes before revoking a session token', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/session/token/revoke') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      apiFetch,
+    })
+
+    await submitCommand('session-token revoke tok_abcd1234efgh5678ijkl9012mnop3456')
+
+    expect(appendLine).toHaveBeenCalledWith('revoke session token tok_abcd••••?', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith(
+      "warning: this token's history and workspace files will not be recoverable from the app after revocation.",
+      'warning',
+      'tab-1',
+    )
+    expect(apiFetch).not.toHaveBeenCalledWith(
+      '/session/token/revoke',
+      expect.anything(),
+    )
+
+    await submitCommand('yes')
+
+    await vi.waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        '/session/token/revoke',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ token: 'tok_abcd1234efgh5678ijkl9012mnop3456' }),
+        }),
+      ),
+    )
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith('session token revoked: tok_abcd••••', '', 'tab-1'),
+    )
+  })
+
+  it('cancels session-token revoke on no without calling the API', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) }))
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      apiFetch,
+    })
+
+    await submitCommand('session-token revoke tok_abcd1234efgh5678ijkl9012mnop3456')
+    await submitCommand('no')
+
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(appendLine).toHaveBeenCalledWith('Session token revoke canceled.', '', 'tab-1')
+  })
+
+  it('treats Ctrl+C as cancel for session-token revoke', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) }))
+    const { submitCommand, cancelPendingTerminalConfirm } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      apiFetch,
+    })
+
+    await submitCommand('session-token revoke tok_abcd1234efgh5678ijkl9012mnop3456')
+
+    expect(cancelPendingTerminalConfirm()).toBe(true)
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith('Session token revoke canceled.', '', 'tab-1'),
+    )
+    expect(apiFetch).not.toHaveBeenCalled()
   })
 })
 

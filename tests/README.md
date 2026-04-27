@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 1036
-- `vitest`: 838
-- `playwright`: 217
-- total: 2,091
+- `pytest`: 1041
+- `vitest`: 849
+- `playwright`: 219
+- total: 2,109
 
 This document is organized in two parts:
 
@@ -936,6 +936,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunStreaming.test_fake_commands_supports_external_only_filter` | Checks that `commands --external` prints only the allowed external command section. |
 | `TestRunStreaming.test_fake_workspace_lists_shows_and_removes_session_files` | Verifies that the `file` built-in can list, show, and remove session-owned files. |
 | `TestRunStreaming.test_fake_workspace_aliases_list_and_show_session_files` | Verifies that `ls` lists session workspace files and `cat <file>` shows a session workspace file without exposing arbitrary filesystem access. |
+| `TestRunStreaming.test_fake_workspace_show_reports_binary_files` | Verifies that `file show` and `cat` report binary session files cleanly instead of surfacing a server error. |
 | `TestRunStreaming.test_fake_shortcuts_lists_current_shortcuts` | Checks that fake shortcuts lists current shortcuts. |
 | `TestRunStreaming.test_fake_shortcuts_renders_mac_keys_for_mac_user_agent` | Confirms a Macintosh User-Agent switches the built-in command's Tabs/UI rendering to `Option+*` chords. |
 | `TestRunStreaming.test_fake_banner_renders_ascii_art` | Checks that fake banner renders ascii art. |
@@ -956,7 +957,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunStreaming.test_fake_ip_route_df_and_free_render_shell_style_summaries` | Checks that `ip a`, `route`, `df -h`, and `free -h` render shell-style summary output. |
 | `TestRunStreaming.test_fake_jobs_aliases_runs_metadata` | Checks that `jobs` aliases the app-native `runs` metadata output. |
 | `TestRunStreaming.test_fake_jobs_alias_reports_when_no_active_runs_exist` | Checks that the `jobs` alias reports cleanly when the current session has no active runs. |
-| `TestRunStreaming.test_fake_runs_lists_active_run_metadata` | Checks that `runs` lists app-native active-run IDs, PIDs, elapsed time, and commands. |
+| `TestRunStreaming.test_fake_runs_lists_active_run_metadata` | Checks that `runs` lists app-native active-run IDs, PIDs, elapsed time, commands, verbose metadata, and JSON output. |
 | `TestRunStreaming.test_fake_runs_reports_when_no_active_runs_exist` | Checks that `runs` reports cleanly when the current session has no active runs. |
 | `TestRunStreaming.test_fake_man_renders_real_page_for_allowed_topic` | Checks that fake man renders real page for allowed topic. |
 | `TestRunStreaming.test_fake_man_does_not_clip_to_max_output_lines` | Checks that fake man does not clip to max output lines. |
@@ -1014,7 +1015,11 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionMigrate.test_migrate_returns_only_newly_inserted_star_count` | Checks that `migrated_stars` reflects INSERT rowcount (newly written rows) rather than DELETE rowcount — so overlapping stars in the destination do not inflate the reported count. |
 | `TestSessionMigrate.test_migrates_session_preferences_when_destination_has_none` | Checks that a source session's saved preference snapshot moves to the destination session when the destination has no saved preferences yet. |
 | `TestSessionMigrate.test_migrate_keeps_existing_destination_session_preferences` | Checks that migration does not overwrite a destination session's existing saved preference snapshot. |
-| `TestSessionRunCount.test_returns_zero_for_empty_session` | Checks that `/session/run-count` returns `{"count": 0}` for a session with no runs. |
+| `TestSessionMigrate.test_migrate_workspace_returns_zero_without_source_workspace` | Checks that workspace migration reports zero file movement when the source session has no workspace directory. |
+| `TestSessionMigrate.test_migrates_source_workspace_files_to_destination` | Checks that source workspace files and empty folders move to the destination session during migration. |
+| `TestSessionMigrate.test_migrate_workspace_keeps_destination_only_files` | Checks that destination-only workspace files remain available when the source has no workspace files. |
+| `TestSessionMigrate.test_migrate_workspace_skips_conflicting_files_without_overwrite` | Checks that conflicting workspace files are skipped without overwriting destination contents while non-conflicting files still move. |
+| `TestSessionRunCount.test_returns_zero_for_empty_session` | Checks that `/session/run-count` reports zero runs for a session with no run history. |
 | `TestSessionRunCount.test_returns_true_count` | Checks that the endpoint returns the exact number of seeded run rows for the session. |
 | `TestSessionRunCount.test_is_uncapped_beyond_history_panel_limit` | Checks that 75 seeded runs are all counted — confirming the endpoint is not capped by `history_panel_limit` (50). |
 | `TestSessionRunCount.test_is_scoped_to_session` | Checks that the count only includes runs belonging to the requesting `X-Session-ID`. |
@@ -1220,7 +1225,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `keeps config command output pinned to the tail when the tab is already following` | Verifies that terminal-native `config set` output preserves tail-follow state after async preference application. |
 | `serves runtime autocomplete context for theme and config values` | Verifies that theme slugs, config keys, and config values are generated into the shared autocomplete context instead of duplicated static lists. |
 | `serves runtime autocomplete context for built-in command lookup helpers` | Verifies that runtime built-in context covers `session-token`, simple built-ins, and dynamic `man` / `which` / `type` lookup suggestions. |
-| `serves loaded workspace files as file command autocomplete values` | Verifies that loaded session files are offered as autocomplete values for `file show`, `file edit`, `file rm`, and `cat`. |
+| `serves loaded workspace files as file command autocomplete values` | Verifies that loaded session files are offered as autocomplete values for `file show`, `file edit`, `file download`, `file rm`, and `cat`. |
 | `hides workspace built-ins from runtime autocomplete when Files are disabled` | Verifies that file commands and aliases are removed from runtime autocomplete when the operator disables Files. |
 | `keeps code-owned built-ins out of commands.yaml` | Verifies that app-owned built-ins are not duplicated in the operator-facing command registry. |
 | `groups theme cards into labeled sections in the preview modal` | Verifies that groups theme cards into labeled sections in the preview modal. |
@@ -1304,6 +1309,8 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `supports macOS Option+P to create a permalink via physical key code` | Verifies that supports macOS Option+P to create a permalink via physical key code. |
 | `supports Alt+Shift+C to copy output for the active tab` | Verifies that supports Alt+Shift+C to copy output for the active tab. |
 | `supports macOS Option+Shift+C to copy output via physical key code` | Verifies that supports macOS Option+Shift+C to copy output via physical key code. |
+| `supports Alt+R to open the run monitor from the terminal prompt` | Verifies that Alt+R routes to the Run Monitor shortcut entry point. |
+| `supports Alt+Shift+F to open the Files modal from the terminal prompt` | Verifies that Alt+Shift+F opens Files while preserving Alt+F for word-forward. |
 | `supports Ctrl+L to clear the active tab without dropping a running command` | Verifies that supports Ctrl+L to clear the active tab without dropping a running command. |
 | `does not apply Alt-based tab shortcuts while typing in non-terminal inputs` | Verifies that does not apply Alt-based tab shortcuts while typing in non-terminal inputs. |
 | `does not apply action shortcuts while typing in non-terminal inputs` | Verifies that does not apply action shortcuts while typing in non-terminal inputs. |
@@ -1727,6 +1734,8 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `leaves the workspace file untouched when the user answers no` | Verifies that answering `no` cancels the workspace delete confirmation without calling the delete route. |
 | `opens the Files editor from file add and file edit commands` | Verifies that `file add`, `file add <file>`, and `file edit <file>` open the Files editor with blank or prefilled file names as appropriate. |
 | `keeps file edit usage strict when no filename is provided` | Verifies that `file edit` still requires a filename while `file add` can open a blank editor. |
+| `downloads workspace files from file download commands` | Verifies that `file download <file>` starts the Files download helper and reports success in the terminal. |
+| `keeps file download usage strict when no filename is provided` | Verifies that `file download` requires a filename before invoking the download helper. |
 | `copies the active token to the clipboard from the terminal` | Verifies that `session-token copy` copies the active token and reports success without exposing the raw value. |
 | `shows an error when clipboard copy fails` | Verifies that `session-token copy` surfaces a terminal error when the clipboard write fails. |
 | `filters client-side session-token output through the built-in pipe helpers` | Verifies that terminal-native `session-token` output supports built-in pipe helpers before rendering. |
@@ -1734,6 +1743,10 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `keeps the pending prompt open on invalid answers` | Verifies that invalid terminal-confirm answers re-prompt on a new line instead of silently defaulting to yes or no. |
 | `treats Ctrl+C as cancel and aborts the session-token set flow` | Verifies that `Ctrl+C` during the `session-token set` migration prompt cancels the whole flow instead of applying the token with migration skipped. |
 | `uses the uncapped session run-count endpoint for migration prompts` | Verifies that session-token migration prompts use the uncapped `/session/run-count` value instead of the paginated `/history` slice. |
+| `prompts for migration when the current session only has workspace files` | Verifies that workspace files alone are enough to trigger the session-token migration prompt. |
+| `requires yes before revoking a session token` | Verifies that `session-token revoke <token>` warns and waits for an explicit `yes` before calling the revoke API. |
+| `cancels session-token revoke on no without calling the API` | Verifies that answering `no` cancels token revocation without contacting the revoke route. |
+| `treats Ctrl+C as cancel for session-token revoke` | Verifies that `Ctrl+C` cancels token revocation without contacting the revoke route. |
 
 #### `search.test.js`
 
@@ -1823,6 +1836,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `keeps the editor hidden until the user starts or closes an edit` | Verifies that the workspace editor stays collapsed until New File or edit mode opens it, and closes cleanly afterward. |
 | `opens the editor with a prefilled file name from terminal commands` | Verifies that terminal-native file add/edit flows can open the Files editor with a prefilled file name. |
 | `shows file contents in a read-only viewer and keeps edit mode separate` | Verifies that View opens a read-only file display at the top of the file without exposing the larger edit form. |
+| `refreshes the currently viewed file when the files list is refreshed` | Verifies that Refresh updates both the file browser and the currently open read-only viewer. |
 | `runs edit download and delete actions from the viewer header for the viewed file` | Verifies that viewer-header actions operate on the currently viewed workspace file. |
 | `formats obvious JSON files in the read-only viewer` | Verifies that JSON-looking workspace files render as pretty-printed JSON in the read-only viewer. |
 | `serves current workspace files as autocomplete hints after the file list is loaded` | Verifies that the workspace file cache exposes file names as autocomplete hints. |
@@ -1868,6 +1882,8 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `keeps currentRunStartIndex aligned when old raw lines are pruned from the front` | Verifies that keeps currentRunStartIndex aligned when old raw lines are pruned from the front. |
 | `setTabLabel truncates the rendered label but preserves the full label in state` | Verifies that setTabLabel truncates the rendered label but preserves the full label in state. |
 | `uses shell-number defaults for new tabs` | Verifies that new tabs default to shell-number labels. |
+| `numbers new default tabs from the highest currently open shell label` | Verifies that new default tab labels use the highest currently open `shell N` label plus one. |
+| `avoids duplicate default labels after restoring a non-first shell tab` | Verifies that restored tab state with only `shell 2` creates the next default tab as `shell 3`. |
 | `shows commands temporarily while preserving the stable default label` | Verifies that running commands appear as temporary display labels without overwriting the stable default tab label. |
 | `does not flash the command label when a run finishes before the delay` | Verifies that fast commands finish without briefly replacing the stable tab label. |
 | `shows the running command temporarily without overwriting a user rename` | Verifies that user-renamed tabs show the active command only while it is running. |
@@ -2398,6 +2414,8 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `Alt+Shift+T opens the theme selector from the composer` | Pressing Alt+Shift+T with the composer focused opens the theme selector without leaking `ˇ`. |
 | `Alt+G opens the workflows overlay from the composer` | Pressing Alt+G with the composer focused opens the guided workflows overlay without leaking `©`. |
 | `Alt+S toggles the transcript search bar from the composer` | Alt+S is the canonical search chord — works from the prompt because `S` has no readline conflict (unlike `F`, which the composer owns as word-forward). |
+| `Alt+R opens the Run Monitor from the composer` | Alt+R opens the active-run monitor drawer without leaking `®` into the prompt. |
+| `Alt+Shift+F opens the Files modal from the composer` | Alt+Shift+F opens Files without stealing the terminal's Alt+F word-forward chord. |
 | `Alt+\ toggles the rail collapsed state from the composer` | Pressing Alt+\ with the composer focused toggles the desktop left rail between collapsed and expanded without leaking `«`. |
 | `Alt+/ toggles the FAQ overlay from the composer` | Alt+/ opens the FAQ overlay from the prompt and closes it on a second press without leaking `÷`. |
 

@@ -11,6 +11,7 @@ from flask import Blueprint, jsonify, request
 
 from database import db_connect
 from helpers import get_client_ip, get_log_session_id, get_session_id
+from workspace import InvalidWorkspacePath, migrate_session_workspace, workspace_usage
 
 log = logging.getLogger("shell")
 
@@ -225,6 +226,18 @@ def session_migrate():
             })
             return jsonify({"error": "destination token is not a known issued token"}), 400
 
+    try:
+        workspace_migration = migrate_session_workspace(from_session_id, to_session_id)
+    except InvalidWorkspacePath as exc:
+        log.warning("SESSION_MIGRATE_WORKSPACE_DENIED", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(current_session_id),
+            "reason": str(exc),
+            "from_session_kind": _session_kind(from_session_id),
+            "to_session_kind": _session_kind(to_session_id),
+        })
+        return jsonify({"error": str(exc)}), 400
+
     with db_connect() as conn:
         runs_result = conn.execute(
             "UPDATE runs SET session_id = ? WHERE session_id = ?",
@@ -271,12 +284,20 @@ def session_migrate():
         "migrated_snapshots": migrated_snapshots,
         "migrated_stars": migrated_stars,
         "migrated_preferences": migrated_preferences,
+        "migrated_workspace_files": workspace_migration.migrated_files,
+        "skipped_workspace_files": workspace_migration.skipped_files,
+        "migrated_workspace_directories": workspace_migration.migrated_directories,
+        "skipped_workspace_directories": workspace_migration.skipped_directories,
     })
     return jsonify({
         "ok": True,
         "migrated_runs": migrated_runs,
         "migrated_snapshots": migrated_snapshots,
         "migrated_stars": migrated_stars,
+        "migrated_workspace_files": workspace_migration.migrated_files,
+        "skipped_workspace_files": workspace_migration.skipped_files,
+        "migrated_workspace_directories": workspace_migration.migrated_directories,
+        "skipped_workspace_directories": workspace_migration.skipped_directories,
     })
 
 
@@ -342,13 +363,19 @@ def session_run_count():
             (session_id,),
         ).fetchone()
     count = int(row["n"] if row else 0)
+    workspace_files = 0
+    try:
+        workspace_files = workspace_usage(session_id).file_count
+    except Exception:
+        workspace_files = 0
     log.debug("SESSION_RUN_COUNT_VIEWED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
         "session_kind": _session_kind(session_id),
         "count": count,
+        "workspace_files": workspace_files,
     })
-    return jsonify({"count": count})
+    return jsonify({"count": count, "workspace_files": workspace_files})
 
 
 @session_bp.route("/session/starred")
