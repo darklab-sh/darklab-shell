@@ -129,12 +129,12 @@ Commit messages should describe the intent of the change, not just what files we
 Run the three suites directly:
 
 ```bash
-python3 -m pytest tests/py/ -v
+npm run test:pytest
 npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **992 pytest + 826 Vitest + 214 Playwright = 2,032 tests**.
+Current totals: **992 pytest + 827 Vitest + 214 Playwright = 2,033 tests**.
 
 Playwright notes:
 
@@ -164,7 +164,7 @@ The checks and their scope:
 |---|---|---|---|
 | Python style | `flake8` | `app/`, `tests/py/` | `python -m flake8 app/ tests/py/` |
 | Python security | `bandit` | `app/` | `python -m bandit -r app/ -ll -q` |
-| Python tests | `pytest` | `tests/py/` | `npm run test:unit` |
+| Python tests | `pytest` | `tests/py/` | `npm run test:pytest` |
 | Python dep CVEs | `pip-audit` | `app/requirements.txt`, `requirements-dev.txt` | `python -m pip_audit -r app/requirements.txt -r requirements-dev.txt` |
 | JS unit tests | `vitest` | `tests/js/unit/` | `npm run test:unit` |
 | JS style | `eslint` | `tests/js/`, `config/`, `scripts/` | `npm run lint:js` |

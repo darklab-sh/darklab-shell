@@ -351,6 +351,26 @@ async function refreshWorkspaceFiles() {
   return data;
 }
 
+async function refreshWorkspaceFilesFromButton() {
+  if (!workspaceRefreshBtn) return;
+  workspaceRefreshBtn.disabled = true;
+  workspaceRefreshBtn.setAttribute('aria-label', 'Refreshing files');
+  workspaceRefreshBtn.title = 'Refreshing files';
+  try {
+    await refreshWorkspaceFiles();
+  } catch (err) {
+    _workspaceLoaded = false;
+    _workspaceFiles = [];
+    if (workspaceFileList) workspaceFileList.textContent = '';
+    if (workspaceSummary) workspaceSummary.textContent = 'Unavailable';
+    setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to refresh files'), 'error');
+  } finally {
+    workspaceRefreshBtn.disabled = false;
+    workspaceRefreshBtn.setAttribute('aria-label', 'Refresh files');
+    workspaceRefreshBtn.title = 'Refresh files';
+  }
+}
+
 async function refreshWorkspaceFileCache() {
   if (!isWorkspaceEnabled()) return _workspaceFiles;
   try {
@@ -534,6 +554,7 @@ async function handleWorkspaceFileAction(action, path) {
   }
 }
 
+workspaceRefreshBtn?.addEventListener('click', () => { refreshWorkspaceFilesFromButton(); });
 workspaceNewBtn?.addEventListener('click', () => showWorkspaceEditor('', ''));
 workspaceNewFolderBtn?.addEventListener('click', () => { promptWorkspaceFolderName(); });
 workspaceCancelEditBtn?.addEventListener('click', () => hideWorkspaceEditor());

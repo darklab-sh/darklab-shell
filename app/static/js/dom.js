@@ -70,6 +70,7 @@ const workspaceViewerText = document.getElementById('workspace-viewer-text');
 const workspaceEditor = document.getElementById('workspace-editor');
 const workspacePathInput = document.getElementById('workspace-path-input');
 const workspaceTextInput = document.getElementById('workspace-text-input');
+const workspaceRefreshBtn = document.getElementById('workspace-refresh-btn');
 const workspaceNewBtn = document.getElementById('workspace-new-btn');
 const workspaceNewFolderBtn = document.getElementById('workspace-new-folder-btn');
 const workspaceCancelEditBtn = document.getElementById('workspace-cancel-edit-btn');

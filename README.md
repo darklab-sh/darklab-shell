@@ -562,6 +562,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── stylelint.config.mjs    # stylelint config — CSS syntax and safety lint rules
 │   ├── hadolint.yaml           # hadolint config — ignores intentional Dockerfile patterns
 │   ├── yamllint.yml            # yamllint config — relaxed line length, no document-start requirement
+│   ├── pytest.ini              # pytest config — keeps collection scoped away from bind-mounted data and dependency directories
 │   ├── vitest.config.js        # Vitest unit test config (jsdom environment)
 │   ├── playwright.config.js    # Playwright single-project config for VS Code and focused local debugging
 │   ├── playwright.parallel.config.js # Playwright parallel CLI config with isolated per-project Flask/state environments

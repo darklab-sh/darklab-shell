@@ -392,6 +392,23 @@ describe('search helpers', () => {
       .toContain('btn btn-ghost btn-compact search-signal-chip')
   })
 
+  it('clears the discoverability pulse when the active output has no findings', () => {
+    const { refreshSearchDiscoverabilityUi } = loadSearchFns()
+    const searchBtn = document.getElementById('searchToggleBtn')
+    document.getElementById('out').innerHTML =
+      '<span class="line" data-signals="findings">443/tcp open https</span>'
+
+    refreshSearchDiscoverabilityUi()
+
+    expect(searchBtn.classList.contains('search-discover-pulse')).toBe(true)
+
+    document.getElementById('out').innerHTML = '<span class="line">plain output</span>'
+    refreshSearchDiscoverabilityUi()
+
+    expect(searchBtn.classList.contains('search-discover-pulse')).toBe(false)
+    expect(searchBtn.textContent).toBe('⌕ search')
+  })
+
   it('signal chips are clickable and route to the matching scope', () => {
     const { refreshSearchDiscoverabilityUi } = loadSearchFns()
     document.getElementById('out').innerHTML = [

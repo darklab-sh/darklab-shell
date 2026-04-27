@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Active process tracking and Redis setup.
 

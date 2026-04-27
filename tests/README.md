@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 992
-- `vitest`: 826
+- `vitest`: 827
 - `playwright`: 214
-- total: 2,032
+- total: 2,033
 
 This document is organized in two parts:
 
@@ -100,7 +100,7 @@ Notes:
 Run the full sets:
 
 ```bash
-python3 -m pytest tests/py/ -v
+npm run test:pytest
 npm run test:unit
 npm run test:e2e
 ```
@@ -108,7 +108,7 @@ npm run test:e2e
 Run focused slices while iterating:
 
 ```bash
-python3 -m pytest tests/py/test_routes.py -v
+pytest -c config/pytest.ini --rootdir=. tests/py/test_routes.py -v
 npm run test:unit -- tests/js/unit/history.test.js tests/js/unit/runner.test.js
 npm run test:e2e -- tests/js/e2e/failure-paths.spec.js
 ```
@@ -1738,6 +1738,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `treats nslookup answer rows as findings when the server marks them` | Verifies that server-tagged `nslookup` answer sections count as findings while the untagged resolver header does not. |
 | `clearSearch resets scoped search back to text mode` | Verifies that closing search clears any active findings/warnings/errors/summaries scope and returns to plain text mode. |
 | `updates the search button and scope labels with scoped counts` | Verifies that the tabbar search affordance and scoped buttons expose live signal counts. |
+| `clears the discoverability pulse when the active output has no findings` | Verifies that a stale findings pulse is removed when the active tab changes to output with no findings. |
 | `signal chips are clickable and route to the matching scope` | Verifies that F/W/E/S chips open search in the matching scope. |
 | `disables summarize when there are no signals` | Verifies that summarize stays disabled until the current tab has at least one finding, warning, error, or summary line. |
 | `uses server-provided signal metadata for scoped counts and highlights` | Verifies that server-provided line signals drive scoped search counts and highlight navigation. |

@@ -196,6 +196,8 @@ function refreshSearchDiscoverabilityUi() {
       _searchTogglePulseTimer = setTimeout(() => {
         _clearSearchDiscoverabilityPulse();
       }, 8000);
+    } else if (counts.findings <= 0 || (typeof isSearchBarOpen === 'function' && isSearchBarOpen())) {
+      _clearSearchDiscoverabilityPulse();
     }
   }
   if (typeof searchSignalSummary !== 'undefined' && searchSignalSummary) {

@@ -4,7 +4,7 @@ import { ensurePromptReady, runCommand } from './helpers.js'
 test.describe('theme selector', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
   })
 
   test('clicking the theme button opens the theme selector', async ({ page }) => {
@@ -129,6 +129,7 @@ test.describe('workspace modal', () => {
     await expect(page.locator('#workspace-overlay')).toHaveClass(/open/)
     await expect(page.locator('#workspace-modal .faq-title')).toHaveText('FILES')
     await expect(page.locator('#workspace-summary')).toContainText('0 / 100 files')
+    await expect(page.locator('#workspace-refresh-btn')).toHaveAttribute('aria-label', 'Refresh files')
     await expect(page.locator('#workspace-editor')).not.toBeVisible()
     await expect(page.locator('label[for="workspace-path-input"]')).toHaveText('File Name')
 

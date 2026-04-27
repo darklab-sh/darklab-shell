@@ -33,6 +33,7 @@ function setupWorkspace(apiFetch = vi.fn()) {
       <textarea id="workspace-text-input"></textarea>
       <button id="workspace-save-btn" type="submit"></button>
     </form>
+    <button id="workspace-refresh-btn" type="button"></button>
     <button id="workspace-new-folder-btn" type="button"></button>
     <button id="workspace-new-btn" type="button"></button>
     <button id="workspace-cancel-edit-btn" type="button"></button>
@@ -78,6 +79,7 @@ function setupWorkspace(apiFetch = vi.fn()) {
     workspaceEditor: document.getElementById('workspace-editor'),
     workspacePathInput: document.getElementById('workspace-path-input'),
     workspaceTextInput: document.getElementById('workspace-text-input'),
+    workspaceRefreshBtn: document.getElementById('workspace-refresh-btn'),
     workspaceNewBtn: document.getElementById('workspace-new-btn'),
     workspaceNewFolderBtn: document.getElementById('workspace-new-folder-btn'),
     workspaceCancelEditBtn: document.getElementById('workspace-cancel-edit-btn'),
@@ -443,6 +445,14 @@ describe('workspace UI helpers', () => {
 
     expect(apiFetch).toHaveBeenCalledWith('/workspace/files')
     expect(document.querySelector('.workspace-file-name').textContent).toBe('urls.txt')
+
+    apiFetch.mockClear()
+    document.getElementById('workspace-refresh-btn').click()
+    await flushWorkspacePromises()
+
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files')
+    expect(document.getElementById('workspace-refresh-btn').disabled).toBe(false)
+    expect(document.getElementById('workspace-refresh-btn').getAttribute('aria-label')).toBe('Refresh files')
   })
 
   it('saves editor contents through the workspace route', async () => {
