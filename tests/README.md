@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 992
-- `vitest`: 827
-- `playwright`: 214
-- total: 2,033
+- `pytest`: 1036
+- `vitest`: 838
+- `playwright`: 217
+- total: 2,091
 
 This document is organized in two parts:
 
@@ -202,7 +202,7 @@ Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py
 
 ### Container Smoke Test
 
-`scripts/container_smoke_test.sh` builds a fresh container image, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. The shared corpus includes both `app/conf/commands.yaml` examples and workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. It also enables Files in the smoke container and runs focused workspace fixtures for command flags that read session files (`nmap -iL`) and write session files (`curl -o`). The fixture removes stale `darklab_shell-test-*` Compose containers/networks/volumes before startup and after teardown so interrupted local runs do not leave Redis or shell containers behind. It catches drift between those surfaced commands and actual tool behavior — renamed flags, changed output, missing tools, or broken workspace path rewriting. Not part of the default fast loop; run after Dockerfile, packaged-tool, base-image, command-registry example changes, workspace file-flag changes, or workflow command changes.
+`scripts/container_smoke_test.sh` builds a fresh container image, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. The shared corpus includes both `app/conf/commands.yaml` examples and workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. It also enables Files in the smoke container and runs the workspace-required command examples from `app/conf/commands.yaml` against `tests/py/fixtures/container_smoke_test-workspace-expectations.json`, covering session-file reads, writes, managed Amass database directories, and generated output files. The fixture removes stale `darklab_shell-test-*` Compose containers/networks/volumes before startup and after teardown so interrupted local runs do not leave Redis or shell containers behind. It catches drift between those surfaced commands and actual tool behavior — renamed flags, changed output, missing tools, or broken workspace path rewriting. Not part of the default fast loop; run after Dockerfile, packaged-tool, base-image, command-registry example changes, workspace file-flag changes, or workflow command changes.
 
 ```bash
 ./scripts/container_smoke_test.sh                           # full run
@@ -335,6 +335,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_session_workspace_uses_hashed_session_directory` | Verifies that session workspace directories use hashed session names instead of raw session identifiers. |
 | `TestSessionWorkspace.test_write_read_list_delete_text_file` | Verifies the backend workspace text-file lifecycle for write, read, list, usage, and delete operations. |
 | `TestSessionWorkspace.test_prepare_workspace_file_for_command_uses_limited_write_mode` | Verifies that command output targets get limited group-write permissions without becoming world-readable. |
+| `TestSessionWorkspace.test_delete_workspace_file_falls_back_to_scanner_owner_for_nested_command_files` | Verifies that deleting scanner-owned nested workspace files falls back through the validated scanner sudo path when sticky directory permissions block direct unlink. |
+| `TestSessionWorkspace.test_workspace_path_info_and_delete_remove_folders_recursively` | Verifies that workspace path info counts files under folders and recursive folder delete removes nested files and directories. |
 | `TestSessionWorkspace.test_create_and_list_empty_directories_without_file_usage` | Verifies that explicit empty session folders can be created and listed without counting against file usage. |
 | `TestSessionWorkspace.test_rejects_absolute_traversal_and_backslash_paths` | Verifies that unsafe workspace paths are rejected before touching the filesystem. |
 | `TestSessionWorkspace.test_allows_hidden_files_that_are_listed_by_workspace` | Verifies that hidden session file paths can be resolved so listed tool artifacts remain accessible. |
@@ -401,6 +403,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPidMap.test_double_pop_returns_none_second_time` | Checks that double pop returns none second time. |
 | `TestPidMap.test_multiple_runs_isolated` | Checks multiple runs isolated handling. |
 | `TestActiveRunMetadata.test_active_runs_for_session_preserves_pid` | Checks that active-run metadata exposes the PID through session-scoped active-run listings. |
+| `TestActiveRunMetadata.test_active_runs_for_session_prunes_dead_pid` | Checks that active-run metadata is pruned when the stored process no longer exists. |
+| `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_pid_reuse` | Checks that Redis-backed active-run metadata is pruned when a PID has been reused by a different process. |
+| `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_legacy_metadata_on_linux` | Checks that legacy Redis metadata without PID start-time tracking is pruned on Linux instead of trusting a reused PID. |
 | `TestFormatRetention.test_zero_returns_unlimited` | Checks zero returns unlimited handling. |
 | `TestFormatRetention.test_365_returns_one_year` | Checks that 365 returns one year. |
 | `TestFormatRetention.test_730_returns_two_years` | Checks that 730 returns two years. |
@@ -432,6 +437,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestOutputSignals.test_command_root_and_target_extraction` | Verifies that backend output-signal classification extracts command roots and useful targets from common surfaced commands. |
 | `TestOutputSignals.test_classifies_common_findings` | Verifies that backend output-signal classification marks common scanner, DNS, and service rows as findings. |
 | `TestOutputSignals.test_classifies_warning_error_and_summary_lines` | Verifies that backend output-signal classification separates warning, error, and summary-style lines. |
+| `TestOutputSignals.test_workspace_notices_are_not_output_signals` | Verifies that app-owned workspace read/write notices do not count as findings, warnings, errors, or summaries. |
 | `TestOutputSignals.test_nmap_input_file_sections_update_signal_target` | Verifies that nmap input-file scans update output metadata targets as each `Nmap scan report for ...` section starts. |
 | `TestOutputSignals.test_user_killed_process_is_not_an_error` | Verifies that user-killed process notices are not classified as errors. |
 | `TestOutputSignals.test_builtin_classifier_keeps_metadata_but_omits_signals` | Verifies that built-in command output keeps line metadata while omitting findings, warnings, errors, and summaries. |
@@ -798,6 +804,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWorkspaceRoutes.test_write_list_read_delete_lifecycle` | Verifies the route-level workspace lifecycle for write, list, read, and delete operations. |
 | `TestWorkspaceRoutes.test_workspace_files_are_session_isolated` | Verifies that a file created under one session cannot be read from another session workspace. |
 | `TestWorkspaceRoutes.test_create_directory_lists_empty_folder` | Verifies that the Files API can create and list explicit empty session folders. |
+| `TestWorkspaceRoutes.test_info_and_delete_folder_recursively` | Verifies that the Files API reports folder file counts and deletes nested folder contents through the same validated delete endpoint. |
 | `TestWorkspaceRoutes.test_rejects_unsafe_paths` | Verifies that route writes reject traversal, absolute, and backslash paths. |
 | `TestWorkspaceRoutes.test_rejects_unsafe_paths_on_read_delete_and_download` | Verifies that workspace read, delete, and download routes reject traversal, absolute, and backslash file names before touching disk. |
 | `TestWorkspaceRoutes.test_allows_hidden_workspace_paths_when_listed` | Verifies that listed hidden session files can be written, listed, and read through the Files API. |
@@ -947,8 +954,10 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunStreaming.test_fake_rm_root_refuses_exact_root_delete_pattern` | Checks that fake rm root refuses exact root delete pattern. |
 | `TestRunStreaming.test_fake_date_hostname_and_uptime_render_shell_style_information` | Checks that fake date hostname and uptime render shell style information. |
 | `TestRunStreaming.test_fake_ip_route_df_and_free_render_shell_style_summaries` | Checks that `ip a`, `route`, `df -h`, and `free -h` render shell-style summary output. |
-| `TestRunStreaming.test_fake_jobs_lists_active_session_runs` | Checks that `jobs` lists active runs for the current session. |
-| `TestRunStreaming.test_fake_jobs_reports_when_no_active_jobs_exist` | Checks that `jobs` reports cleanly when the current session has no active jobs. |
+| `TestRunStreaming.test_fake_jobs_aliases_runs_metadata` | Checks that `jobs` aliases the app-native `runs` metadata output. |
+| `TestRunStreaming.test_fake_jobs_alias_reports_when_no_active_runs_exist` | Checks that the `jobs` alias reports cleanly when the current session has no active runs. |
+| `TestRunStreaming.test_fake_runs_lists_active_run_metadata` | Checks that `runs` lists app-native active-run IDs, PIDs, elapsed time, and commands. |
+| `TestRunStreaming.test_fake_runs_reports_when_no_active_runs_exist` | Checks that `runs` reports cleanly when the current session has no active runs. |
 | `TestRunStreaming.test_fake_man_renders_real_page_for_allowed_topic` | Checks that fake man renders real page for allowed topic. |
 | `TestRunStreaming.test_fake_man_does_not_clip_to_max_output_lines` | Checks that fake man does not clip to max output lines. |
 | `TestRunStreaming.test_fake_man_reports_when_helper_binary_is_unavailable` | Checks that fake man reports when helper binary is unavailable. |
@@ -1232,6 +1241,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `preserves a non-active tab draft even when createTab activation would overwrite it during restore` | Verifies that the restore flow reapplies saved drafts after tab creation so a non-active tab draft survives restore-time activation churn. |
 | `preserves the last created non-active tab draft when the final restored active tab is different` | Verifies that the final active-tab selection in session restore does not wipe the last created non-active tab's saved draft. |
 | `manually inserts printable desktop keydown input once` | Verifies that manually inserts printable desktop keydown input once. |
+| `ignores command history and autocomplete while a terminal confirmation is pending` | Verifies that autocomplete and up/down history navigation stay inactive while the composer is answering a transcript-owned yes/no prompt. |
 | `replays { key: 'ArrowDown', keydown: { key: 'ArrowDown' }, expectAction: [Function expectAction] } after desktop output text is selected` | Verifies that replays { key: 'ArrowDown', keydown: { key: 'ArrowDown' }, expectAction: [Function expectAction] } after desktop output text is selected. |
 | `replays { key: 'Enter', keydown: { key: 'Enter' }, expectAction: [Function expectAction] } after desktop output text is selected` | Verifies that replays { key: 'Enter', keydown: { key: 'Enter' }, expectAction: [Function expectAction] } after desktop output text is selected. |
 | `replays { key: 'Ctrl+R', keydown: { key: 'r', ctrlKey: true }, expectAction: [Function expectAction] } after desktop output text is selected` | Verifies that replays { key: 'Ctrl+R', keydown: { key: 'r', ctrlKey: true }, expectAction: [Function expectAction] } after desktop output text is selected. |
@@ -1464,7 +1474,9 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `leaves cache unchanged when server returns a non-ok response` | Verifies that loadStarredFromServer does not overwrite the cache on a server error. |
 | `does not throw when the fetch rejects` | Verifies that loadStarredFromServer swallows network errors silently. |
 | `after load, _getStarred returns server data and localStorage is ignored` | Verifies that loadStarredFromServer populates the cache and that any leftover localStorage value is not surfaced. |
-| `hydrates unique recent commands from server history and enables navigation` | Verifies that hydrates unique recent commands from server history and enables navigation. |
+| `hydrates unique recent commands from server history as fallback recall` | Verifies that server-backed recent commands populate session-wide recents and remain available as fallback Up/Down recall when the active tab has no local commands. |
+| `adds commands to both global recents and active tab recall` | Verifies that submitted commands update both the global recent-command list and the active tab's local keyboard recall stack. |
+| `prefers active tab recall before falling back to global recents` | Verifies that Up/Down traverses the active tab's local commands first, then continues into deduped session-wide recent commands. |
 | `reloads command history from the distinct-command endpoint` | Verifies that session reloads hydrate prompt history and recents from `/history/commands` rather than a raw history page. |
 | `restores the typed draft after navigating through hydrated history` | Verifies that restores the typed draft after navigating through hydrated history. |
 | `emits a history-rendered event when hydrated history becomes empty` | Verifies that clearing the hydrated history still emits the rail-refresh event so empty-state recents surfaces repaint instead of keeping stale commands. |
@@ -1565,6 +1577,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `combines line numbers and timestamps into a compact shared prefix` | Verifies that combines line numbers and timestamps into a compact shared prefix. |
 | `shows +0.0s for the active prompt in elapsed mode` | Verifies that the active prompt surfaces `+0.0s` when elapsed timestamps are enabled. |
 | `does nothing when there is no output container for the target tab` | Verifies that does nothing when there is no output container for the target tab. |
+| `re-sticks restored output to the tail after delayed layout growth` | Verifies that restored transcripts keep the prompt tail visible after delayed layout growth. |
 | `batches large bursts of output and finishes rendering on the next tick` | Verifies that batches large bursts of output and finishes rendering on the next tick. |
 
 #### `permalink.test.js`
@@ -1647,6 +1660,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `restoreActiveRunsAfterReload marks restored tabs as running placeholders` | Verifies that reload continuity restores running placeholder tabs with preserved run IDs and command labels. |
 | `restoreActiveRunsAfterReload does not overwrite a restored non-running tab` | Verifies that active-run reconnect creates a separate tab instead of clobbering an already-restored idle tab. |
 | `pollActiveRunsAfterReload restores a completed reconnected run through history` | Verifies that a reconnected placeholder tab swaps into the saved history view when the active run disappears. |
+| `pollActiveRunsAfterReload fails a missing reconnected run with no saved history` | Verifies that reconnect placeholders fail visibly instead of waiting forever when a run disappears after an app restart. |
 | `doKill marks pendingKill when runId is not yet available` | Verifies that doKill marks pendingKill when runId is not yet available. |
 | `runCommand blocks shell operators client-side before calling the API` | Verifies that runCommand blocks shell operators client-side before calling the API. |
 | `runCommand allows the narrow synthetic grep form through to the API` | Verifies that runCommand allows the narrow synthetic grep form through to the API. |
@@ -1706,10 +1720,13 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `treats Ctrl+C as no and cancels the clear confirmation` | Verifies that `Ctrl+C` cancels the terminal clear-confirm prompt and leaves the token untouched. |
 | `does not intercept workspace delete aliases when Files are disabled` | Verifies that the browser does not run the client-side workspace delete confirmation path when Files are disabled. |
 | `opens a terminal yes/no confirmation before deleting a workspace file` | Verifies that `file rm <file>` opens a transcript-owned confirmation prompt instead of deleting immediately. |
-| `does not prompt before deleting a missing workspace file` | Verifies that `file rm <file>` checks that the session file exists before opening the confirmation prompt. |
+| `opens a warning terminal confirmation before deleting a workspace folder with files` | Verifies that `file rm <folder>` warns with a file count before recursively deleting a non-empty session folder. |
+| `does not prompt before deleting a missing workspace file or folder` | Verifies that `file rm <path>` checks that the session file or folder exists before opening the confirmation prompt. |
 | `deletes the workspace file only after answering yes` | Verifies that `rm <file>` deletes through the workspace route only after an explicit `yes` answer. |
+| `deletes the workspace folder only after answering yes` | Verifies that `file rm <folder>` deletes through the workspace route only after an explicit `yes` answer. |
 | `leaves the workspace file untouched when the user answers no` | Verifies that answering `no` cancels the workspace delete confirmation without calling the delete route. |
-| `opens the Files editor from file add and file edit commands` | Verifies that `file add <file>` and `file edit <file>` open the Files editor with the requested file name. |
+| `opens the Files editor from file add and file edit commands` | Verifies that `file add`, `file add <file>`, and `file edit <file>` open the Files editor with blank or prefilled file names as appropriate. |
+| `keeps file edit usage strict when no filename is provided` | Verifies that `file edit` still requires a filename while `file add` can open a blank editor. |
 | `copies the active token to the clipboard from the terminal` | Verifies that `session-token copy` copies the active token and reports success without exposing the raw value. |
 | `shows an error when clipboard copy fails` | Verifies that `session-token copy` surfaces a terminal error when the clipboard write fails. |
 | `filters client-side session-token output through the built-in pipe helpers` | Verifies that terminal-native `session-token` output supports built-in pipe helpers before rendering. |
@@ -1786,6 +1803,13 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `storage event calls loadSessionPreferences when available` | Verifies that passive-tab `session_token` changes trigger `loadSessionPreferences()` so session-scoped options refresh without a reload. |
 | `storage event does not throw when reloadSessionHistory, loadSessionPreferences, and _updateOptionsSessionTokenStatus are absent` | Verifies that the passive-tab session-sync path stays safe even when the optional history, preference, and token-status refresh helpers are not present. |
 
+#### `shell_chrome.test.js`
+
+| Test | Description |
+| --- | --- |
+| `marks Redis offline when the status poll cannot reach the server` | Verifies that a failed HUD status poll clears a previously online Redis pill instead of leaving stale state visible. |
+| `keeps Redis as N/A on a failed poll when Redis was not configured` | Verifies that an unreachable server does not turn an already unconfigured Redis pill into a false configured-offline state. |
+
 #### `workspace.test.js`
 
 | Test | Description |
@@ -1793,11 +1817,12 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `renders workspace files with usage summary and row actions` | Verifies that workspace payloads render usage totals, file rows, and edit/download/delete actions. |
 | `renders nested workspace paths as navigable folders with breadcrumbs` | Verifies that nested workspace paths render as folders, support entering/leaving folders, and update breadcrumbs. |
 | `renders explicit empty directories from the workspace payload` | Verifies that explicit empty folders render and remain navigable even when they contain no files. |
+| `confirms folder deletion with file counts before deleting from the browser` | Verifies that folder delete actions show count-aware confirmation copy before recursively deleting through the workspace route. |
 | `shows an empty state when the workspace has no files` | Verifies that the workspace modal explains the empty state before any files exist. |
 | `saves new files relative to the currently selected folder` | Verifies that New File keeps the name field clean while saving relative to the active folder. |
 | `keeps the editor hidden until the user starts or closes an edit` | Verifies that the workspace editor stays collapsed until New File or edit mode opens it, and closes cleanly afterward. |
 | `opens the editor with a prefilled file name from terminal commands` | Verifies that terminal-native file add/edit flows can open the Files editor with a prefilled file name. |
-| `shows file contents in a read-only viewer and keeps edit mode separate` | Verifies that View opens a read-only file display without exposing the larger edit form. |
+| `shows file contents in a read-only viewer and keeps edit mode separate` | Verifies that View opens a read-only file display at the top of the file without exposing the larger edit form. |
 | `runs edit download and delete actions from the viewer header for the viewed file` | Verifies that viewer-header actions operate on the currently viewed workspace file. |
 | `formats obvious JSON files in the read-only viewer` | Verifies that JSON-looking workspace files render as pretty-printed JSON in the read-only viewer. |
 | `serves current workspace files as autocomplete hints after the file list is loaded` | Verifies that the workspace file cache exposes file names as autocomplete hints. |
@@ -2387,10 +2412,13 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `default labels restore after a command finishes running` | Verifies that a default tab label shows the active command only while it runs, then returns to its stable shell label. |
 | `input is empty on the initial tab` | Verifies that input is empty on the initial tab. |
 | `switching to a tab does not restore prior commands into input` | Verifies that switching to a tab does not restore prior commands into input. |
+| `up/down recall stays local to the active tab` | Verifies that a new tab does not recall commands from another tab and that switching back restores only that tab's own command recall stack. |
 | `running a command in one tab does not block another tab from running` | Verifies that running a command in one tab does not block another tab from running. |
 | `a freshly created tab starts with an empty input` | Verifies that a freshly created tab starts with an empty input. |
 | `reload restores non-running tabs, transcript preview, and the active draft` | Verifies that reload restores idle-tab transcript state and the selected tab's saved draft within the same browser session. |
 | `reload restores a completed tab with a visible prompt and preserved prompt formatting` | Verifies that a restored completed tab remounts a usable prompt immediately and keeps the styled prompt prefix in restored transcript output. |
+| `reload restores a large completed tab at the prompt tail` | Verifies that a large restored transcript is scrolled to the live prompt tail after reload. |
+| `switching to a restored inactive large tab pins it to the prompt tail` | Verifies that activating a long restored tab after reload scrolls that previously hidden transcript to the live prompt tail. |
 | `reload restores idle tabs and drafts alongside an active-run reconnect tab` | Verifies that same-session reload restores idle tabs/drafts from browser session state while also rebuilding an active-run reconnect tab from `/history/active`. |
 | `pressing Enter on a blank prompt appends a fresh prompt line` | Verifies that pressing Enter on a blank prompt appends a fresh prompt line. |
 | `closing the only tab resets it instead of removing it` | Verifies that closing the only tab resets it instead of removing it. |
@@ -2509,7 +2537,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 
 Detailed runtime behaviour, flag reference, and capture/sync workflow for the opt-in Container Smoke Test. See the [Container Smoke Test](#container-smoke-test) overview above for motivation and the common run commands.
 
-The underlying `tests/py/test_container_smoke_test.py` fixture reads `docker-compose.yml`, builds a unique base image with `docker build --pull`, commits a runtime image with the repo `app/` tree and a generated `config.local.yaml`, and writes a temporary compose file that runs the committed image with no bind mounts. It strips fixed `container_name` values so locally running stacks do not collide with the test services. The generated smoke config disables rate limiting, enables Files with a tmpfs-backed workspace root, and keeps the command timeout short enough to catch hangs. Before startup and after teardown, the fixture also removes stale Docker resources from prior smoke projects whose names match `darklab_shell-test-*`; this protects local machines from Redis/shell containers left behind by interrupted or killed runs. The wrapper performs a startup gate first — build, compose startup, or health-check failures stop the run immediately. When scan-style nuclei commands are in the selected corpus, the fixture warms `/tmp/nuclei-templates` with `nuclei -update-templates` before running command cases. Each command case retries transient failures before failing so externally backed tools can prove their command syntax and runtime wiring without making the full smoke suite fail on a single dropped external response. Workspace fixture cases separately create/read/delete files through `/workspace/files` and run commands that consume or write those files through `/run`. All test cases run to completion and failures are reported together at the end.
+The underlying `tests/py/test_container_smoke_test.py` fixture reads `docker-compose.yml`, builds a unique base image with `docker build`, commits a runtime image with the repo `app/` tree and a generated `config.local.yaml`, and writes a temporary compose file that runs the committed image with no bind mounts. It strips fixed `container_name` values so locally running stacks do not collide with the test services. The generated smoke config disables rate limiting, enables Files with a tmpfs-backed workspace root, and keeps the command timeout short enough to catch hangs. Before startup and after teardown, the fixture also removes stale Docker resources from prior smoke projects whose names match `darklab_shell-test-*`; this protects local machines from Redis/shell containers left behind by interrupted or killed runs. The wrapper performs a startup gate first — build, compose startup, or health-check failures stop the run immediately. When scan-style nuclei commands are in the selected corpus, the fixture warms `/tmp/nuclei-templates` with `nuclei -update-templates` before running command cases. Each command case retries transient failures before failing so externally backed tools can prove their command syntax and runtime wiring without making the full smoke suite fail on a single dropped external response. Workspace fixture cases separately create/read/delete files through `/workspace/files` and run commands that consume or write those files through `/run`. All test cases run to completion and failures are reported together at the end.
 
 **`scripts/container_smoke_test.sh` flags:**
 

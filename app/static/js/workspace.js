@@ -95,10 +95,12 @@ function showWorkspaceViewer(path = '', text = '') {
   if (workspaceViewerText) {
     workspaceViewerText.textContent = payload.text;
     workspaceViewerText.classList.toggle('workspace-viewer-json', payload.format === 'json');
+    workspaceViewerText.scrollTop = 0;
   }
   if (workspaceViewer) {
     workspaceViewer.dataset.format = payload.format;
     workspaceViewer.classList.remove('u-hidden');
+    workspaceViewer.scrollTop = 0;
     if (typeof workspaceViewer.scrollIntoView === 'function') {
       workspaceViewer.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -196,6 +198,15 @@ function _workspaceDirectEntries(dir = '') {
   };
 }
 
+function _workspaceFolderFileCount(path = '') {
+  const normalized = _normalizeWorkspaceDir(path);
+  if (!normalized) return 0;
+  return _workspaceFiles.filter(file => {
+    const filePath = String(file.path || '').split('/').filter(Boolean).join('/');
+    return filePath.startsWith(`${normalized}/`);
+  }).length;
+}
+
 function renderWorkspaceBreadcrumbs() {
   if (!workspaceBreadcrumbs) return;
   workspaceBreadcrumbs.textContent = '';
@@ -241,8 +252,17 @@ function renderWorkspaceBrowser() {
   for (const folder of folders) {
     const row = document.createElement('div');
     _bindWorkspaceFolderRow(row, folder.path, `Open folder ${folder.name}`);
-    row.appendChild(_workspaceMetaNode(folder.name, 'Folder', 'workspace-folder-icon', '>'));
-    row.appendChild(_workspaceActionsNode([{ action: 'open-folder', label: 'Open', tone: 'secondary' }]));
+    const count = _workspaceFolderFileCount(folder.path);
+    row.appendChild(_workspaceMetaNode(
+      folder.name,
+      count ? `Folder · ${count} ${count === 1 ? 'file' : 'files'}` : 'Empty folder',
+      'workspace-folder-icon',
+      '>',
+    ));
+    row.appendChild(_workspaceActionsNode([
+      { action: 'open-folder', label: 'Open', tone: 'secondary' },
+      { action: 'delete-folder', label: 'Delete', tone: 'destructive' },
+    ]));
     workspaceFileList.appendChild(row);
   }
 
@@ -450,13 +470,19 @@ async function readWorkspaceFile(path) {
   return _workspaceJson(resp);
 }
 
-async function deleteWorkspaceFile(path) {
+async function deleteWorkspacePath(path) {
   const resp = await apiFetch(`/workspace/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
   const data = await _workspaceJson(resp);
   renderWorkspaceFiles(data.workspace || {});
   hideWorkspaceViewer();
-  setWorkspaceMessage(`Deleted ${path}`);
+  const deleted = data.deleted || {};
+  const kind = deleted.kind === 'directory' ? 'folder' : 'file';
+  setWorkspaceMessage(`Deleted ${kind} ${path}`);
   return data;
+}
+
+async function deleteWorkspaceFile(path) {
+  return deleteWorkspacePath(path);
 }
 
 async function downloadWorkspaceFile(path) {
@@ -547,7 +573,23 @@ async function handleWorkspaceFileAction(action, path) {
             ],
           })
         : 'delete';
-      if (confirmed === 'delete') await deleteWorkspaceFile(path);
+      if (confirmed === 'delete') await deleteWorkspacePath(path);
+    } else if (action === 'delete-folder') {
+      const count = _workspaceFolderFileCount(path);
+      const note = count
+        ? `This will also delete ${count} ${count === 1 ? 'file' : 'files'} in this folder.`
+        : 'This only removes the empty session folder.';
+      const confirmed = typeof showConfirm === 'function'
+        ? await showConfirm({
+            body: { text: `Delete folder ${path}?`, note },
+            tone: 'danger',
+            actions: [
+              { id: 'cancel', label: 'Cancel', role: 'cancel' },
+              { id: 'delete', label: 'Delete', role: 'primary', tone: 'danger' },
+            ],
+          })
+        : 'delete';
+      if (confirmed === 'delete') await deleteWorkspacePath(path);
     }
   } catch (err) {
     _showWorkspaceToast(_workspaceErrorMessage(err), 'error');
@@ -599,6 +641,7 @@ if (typeof window !== 'undefined') {
   window.renderWorkspaceFiles = renderWorkspaceFiles;
   window.renderWorkspaceBrowser = renderWorkspaceBrowser;
   window.createWorkspaceDirectory = createWorkspaceDirectory;
+  window.deleteWorkspacePath = deleteWorkspacePath;
   window.openWorkspaceEditorFromCommand = openWorkspaceEditorFromCommand;
   if (isWorkspaceEnabled()) setTimeout(() => { refreshWorkspaceFileCache(); }, 0);
 }

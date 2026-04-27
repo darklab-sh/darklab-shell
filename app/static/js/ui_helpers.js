@@ -399,6 +399,12 @@
       if (typeof acHide === 'function') acHide();
       return;
     }
+    if (typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm()) {
+      acIndex = -1;
+      acFiltered = [];
+      if (typeof acHide === 'function') acHide();
+      return;
+    }
     acIndex = -1;
     if (!value.trim()) {
       if (typeof acHide === 'function') acHide();

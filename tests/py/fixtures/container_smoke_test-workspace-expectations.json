@@ -108,6 +108,352 @@
       ]
     },
     {
+      "name": "wget_writes_response_file",
+      "command": "wget -q -O response.html https://noc.darklab.sh",
+      "assert_files": {
+        "response.html": [
+          "<!DOCTYPE html",
+          "darklab.sh - noc"
+        ]
+      },
+      "cleanup_files": [
+        "response.html"
+      ]
+    },
+    {
+      "name": "openssl_reads_ca_file",
+      "setup_files": {
+        "ca.pem": "not a certificate\n"
+      },
+      "command": "openssl s_client -connect ip.darklab.sh:443 -servername ip.darklab.sh -CAfile ca.pem",
+      "exit_code": null,
+      "expected_text": [
+        "[workspace] reading ca.pem"
+      ],
+      "cleanup_files": [
+        "ca.pem"
+      ]
+    },
+    {
+      "name": "sslscan_writes_xml",
+      "command": "sslscan --xml=sslscan.xml ip.darklab.sh",
+      "exit_code": null,
+      "assert_files": {
+        "sslscan.xml": []
+      },
+      "cleanup_files": [
+        "sslscan.xml"
+      ]
+    },
+    {
+      "name": "sslyze_reads_targets_and_writes_json",
+      "setup_files": {
+        "tls-targets.txt": "ip.darklab.sh:443\n"
+      },
+      "command": "sslyze --targets_in tls-targets.txt --json_out sslyze-results.json",
+      "exit_code": null,
+      "assert_files": {
+        "sslyze-results.json": [
+          "server_scan_results"
+        ]
+      },
+      "cleanup_files": [
+        "tls-targets.txt",
+        "sslyze-results.json"
+      ]
+    },
+    {
+      "name": "dnsrecon_writes_csv",
+      "command": "dnsrecon -d darklab.sh -t std -c dnsrecon-results.csv",
+      "exit_code": null,
+      "assert_files": {
+        "dnsrecon-results.csv": [
+          "darklab.sh"
+        ]
+      },
+      "cleanup_files": [
+        "dnsrecon-results.csv"
+      ]
+    },
+    {
+      "name": "subfinder_reads_domains_and_writes_results",
+      "setup_files": {
+        "domains.txt": "darklab.sh\n"
+      },
+      "command": "subfinder -dL domains.txt -silent -o subfinder-results.txt",
+      "exit_code": null,
+      "assert_files": {
+        "subfinder-results.txt": []
+      },
+      "cleanup_files": [
+        "domains.txt",
+        "subfinder-results.txt"
+      ]
+    },
+    {
+      "name": "amass_enum_active_uses_managed_database",
+      "command": "amass enum -active -d darklab.sh",
+      "exit_code": null,
+      "stop_text": [
+        "[workspace] writing amass"
+      ],
+      "expected_text": [
+        "[workspace] writing amass"
+      ],
+      "allow_killed_early": true,
+      "cleanup_files": [
+        "amass"
+      ]
+    },
+    {
+      "name": "amass_enum_uses_managed_database",
+      "command": "amass enum -d darklab.sh",
+      "exit_code": null,
+      "stop_text": [
+        "[workspace] writing amass"
+      ],
+      "expected_text": [
+        "[workspace] writing amass"
+      ],
+      "allow_killed_early": true,
+      "cleanup_files": [
+        "amass"
+      ]
+    },
+    {
+      "name": "amass_subs_names_uses_managed_database",
+      "command": "amass subs -d darklab.sh -names",
+      "exit_code": null,
+      "expected_text": [
+        "[workspace] writing amass"
+      ],
+      "cleanup_files": [
+        "amass"
+      ]
+    },
+    {
+      "name": "amass_subs_summary_uses_managed_database",
+      "command": "amass subs -d darklab.sh -names -ip -summary",
+      "exit_code": null,
+      "expected_text": [
+        "[workspace] writing amass"
+      ],
+      "cleanup_files": [
+        "amass"
+      ]
+    },
+    {
+      "name": "amass_subs_show_uses_managed_database",
+      "command": "amass subs -d darklab.sh -show",
+      "exit_code": null,
+      "expected_text": [
+        "[workspace] writing amass"
+      ],
+      "cleanup_files": [
+        "amass"
+      ]
+    },
+    {
+      "name": "amass_subs_writes_results",
+      "command": "amass subs -d darklab.sh -names -o amass-subdomains.txt",
+      "exit_code": null,
+      "assert_files": {
+        "amass-subdomains.txt": []
+      },
+      "cleanup_files": [
+        "amass",
+        "amass-subdomains.txt"
+      ]
+    },
+    {
+      "name": "amass_track_uses_managed_database",
+      "command": "amass track -d darklab.sh",
+      "exit_code": null,
+      "expected_text": [
+        "[workspace] writing amass"
+      ],
+      "cleanup_files": [
+        "amass"
+      ]
+    },
+    {
+      "name": "amass_viz_d3_writes_directory",
+      "command": "amass viz -d darklab.sh -d3 -o amass-viz",
+      "exit_code": null,
+      "expected_text": [
+        "[workspace] writing amass-viz"
+      ],
+      "cleanup_files": [
+        "amass",
+        "amass-viz"
+      ]
+    },
+    {
+      "name": "amass_viz_dot_writes_directory",
+      "command": "amass viz -d darklab.sh -dot -o amass-viz-dot",
+      "exit_code": null,
+      "expected_text": [
+        "[workspace] writing amass-viz-dot"
+      ],
+      "cleanup_files": [
+        "amass",
+        "amass-viz-dot"
+      ]
+    },
+    {
+      "name": "dnsx_reads_subdomains_and_writes_results",
+      "setup_files": {
+        "subdomains.txt": "ip.darklab.sh\n"
+      },
+      "command": "dnsx -l subdomains.txt -resp -o dnsx-results.txt",
+      "exit_code": null,
+      "assert_files": {
+        "dnsx-results.txt": [
+          "ip.darklab.sh"
+        ]
+      },
+      "cleanup_files": [
+        "subdomains.txt",
+        "dnsx-results.txt"
+      ]
+    },
+    {
+      "name": "gobuster_vhost_writes_results",
+      "command": "gobuster vhost -u https://ip.darklab.sh --append-domain -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -o gobuster-vhost.txt",
+      "exit_code": null,
+      "assert_files": {
+        "gobuster-vhost.txt": []
+      },
+      "cleanup_files": [
+        "gobuster-vhost.txt"
+      ]
+    },
+    {
+      "name": "gobuster_s3_reads_bucket_names",
+      "setup_files": {
+        "bucket-names.txt": "darklab-smoke-test-bucket\n"
+      },
+      "command": "gobuster s3 -w bucket-names.txt",
+      "exit_code": null,
+      "expected_text": [
+        "[workspace] reading bucket-names.txt"
+      ],
+      "cleanup_files": [
+        "bucket-names.txt"
+      ]
+    },
+    {
+      "name": "gobuster_gcs_reads_bucket_names",
+      "setup_files": {
+        "bucket-names.txt": "darklab-smoke-test-bucket\n"
+      },
+      "command": "gobuster gcs -w bucket-names.txt",
+      "exit_code": null,
+      "expected_text": [
+        "[workspace] reading bucket-names.txt"
+      ],
+      "cleanup_files": [
+        "bucket-names.txt"
+      ]
+    },
+    {
+      "name": "gobuster_tftp_reads_filenames",
+      "setup_files": {
+        "filenames.txt": "config.txt\n"
+      },
+      "command": "gobuster tftp -s 10.0.0.1 -w filenames.txt",
+      "exit_code": null,
+      "expected_text": [
+        "[workspace] reading filenames.txt"
+      ],
+      "cleanup_files": [
+        "filenames.txt"
+      ]
+    },
+    {
+      "name": "wafw00f_reads_urls_and_writes_results",
+      "setup_files": {
+        "urls.txt": "https://ip.darklab.sh\n"
+      },
+      "command": "wafw00f -i urls.txt -o wafw00f-results.txt",
+      "exit_code": null,
+      "assert_files": {
+        "wafw00f-results.txt": []
+      },
+      "cleanup_files": [
+        "urls.txt",
+        "wafw00f-results.txt"
+      ]
+    },
+    {
+      "name": "masscan_reads_targets_and_writes_results",
+      "setup_files": {
+        "masscan_targets.txt": "107.178.109.44\n"
+      },
+      "command": "masscan -p 80,443 -iL masscan_targets.txt -oL masscan-results.txt",
+      "exit_code": null,
+      "assert_files": {
+        "masscan-results.txt": []
+      },
+      "cleanup_files": [
+        "masscan_targets.txt",
+        "masscan-results.txt"
+      ]
+    },
+    {
+      "name": "nmap_reads_script_args_file",
+      "setup_files": {
+        "nmap-script-args.txt": "http.useragent=darklab-smoke-test\n"
+      },
+      "command": "nmap --script http-headers --script-args-file nmap-script-args.txt ip.darklab.sh",
+      "exit_code": null,
+      "expected_text": [
+        "Starting Nmap"
+      ],
+      "cleanup_files": [
+        "nmap-script-args.txt"
+      ]
+    },
+    {
+      "name": "testssl_writes_json",
+      "command": "testssl --fast --jsonfile testssl-results.json https://ip.darklab.sh",
+      "exit_code": null,
+      "assert_files": {
+        "testssl-results.json": [
+          "id"
+        ]
+      },
+      "cleanup_files": [
+        "testssl-results.json"
+      ]
+    },
+    {
+      "name": "nikto_writes_results",
+      "command": "nikto -h ip.darklab.sh -p 443 -ssl -o nikto-results.txt",
+      "exit_code": null,
+      "assert_files": {
+        "nikto-results.txt": [
+          "Nikto"
+        ]
+      },
+      "cleanup_files": [
+        "nikto-results.txt"
+      ]
+    },
+    {
+      "name": "wpscan_writes_results",
+      "command": "wpscan --url https://ip.darklab.sh --enumerate vp -o wpscan-results.txt",
+      "exit_code": null,
+      "assert_files": {
+        "wpscan-results.txt": [
+          "WPScan"
+        ]
+      },
+      "cleanup_files": [
+        "wpscan-results.txt"
+      ]
+    },
+    {
       "name": "nuclei_reads_urls_and_writes_findings",
       "setup_files": {
         "urls.txt": "https://ip.darklab.sh\n"

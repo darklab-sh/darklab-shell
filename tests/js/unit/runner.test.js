@@ -792,6 +792,50 @@ describe('runner helpers', () => {
     expect(tabs[0].reconnectedRun).toBe(false)
   })
 
+  it('pollActiveRunsAfterReload fails a missing reconnected run with no saved history', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/history/active') {
+        return Promise.resolve({ json: () => Promise.resolve({ runs: [] }) })
+      }
+      if (url === '/history/run-123?json&preview=1') {
+        return Promise.resolve({ ok: false })
+      }
+      return Promise.reject(new Error(`unexpected ${url}`))
+    })
+    const { pollActiveRunsAfterReload, tabs, status, runBtn } = loadRunnerFns({
+      tabs: [
+        {
+          id: 'tab-1',
+          st: 'running',
+          runId: 'run-123',
+          historyRunId: 'run-123',
+          reconnectedRun: true,
+          rawLines: [],
+          pendingKill: false,
+          killed: false,
+        },
+      ],
+      appendLine,
+      apiFetch,
+    })
+
+    await pollActiveRunsAfterReload()
+
+    expect(appendLine).toHaveBeenCalledWith('[reconnected run is no longer active]', 'denied', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith(
+      '[no saved result is available; the app may have restarted while the command was running]',
+      'denied',
+      'tab-1',
+    )
+    expect(tabs[0].st).toBe('fail')
+    expect(tabs[0].reconnectedRun).toBe(false)
+    expect(tabs[0].runId).toBeNull()
+    expect(status.className).toBe('status-pill fail')
+    expect(runBtn.disabled).toBe(false)
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(true)
+  })
+
   it('doKill marks pendingKill when runId is not yet available', () => {
     const apiFetch = vi.fn(() => Promise.resolve())
     const { doKill, tabs } = loadRunnerFns({
@@ -1997,8 +2041,8 @@ describe('workspace file delete confirmation', () => {
     const appendLine = vi.fn()
     const setComposerPromptMode = vi.fn()
     const apiFetch = vi.fn((url) => {
-      if (String(url).startsWith('/workspace/files/read?path=targets.txt')) {
-        return Promise.resolve(new Response(JSON.stringify({ path: 'targets.txt', text: 'darklab.sh\n' }), {
+      if (String(url).startsWith('/workspace/files/info?path=targets.txt')) {
+        return Promise.resolve(new Response(JSON.stringify({ path: 'targets.txt', kind: 'file', file_count: 1 }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }))
@@ -2019,16 +2063,49 @@ describe('workspace file delete confirmation', () => {
       expect(appendLine).toHaveBeenNthCalledWith(2, "delete session file 'targets.txt'?", '', 'tab-1'),
     )
     expect(setComposerPromptMode).toHaveBeenCalledWith('confirm')
-    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/read?path=targets.txt')
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/info?path=targets.txt')
     expect(status.className).toBe('status-pill idle')
   })
 
-  it('does not prompt before deleting a missing workspace file', async () => {
+  it('opens a warning terminal confirmation before deleting a workspace folder with files', async () => {
     const appendLine = vi.fn()
     const setComposerPromptMode = vi.fn()
     const apiFetch = vi.fn((url) => {
-      if (String(url).startsWith('/workspace/files/read?path=missing.txt')) {
-        return Promise.resolve(new Response(JSON.stringify({ error: 'file was not found' }), {
+      if (String(url).startsWith('/workspace/files/info?path=reports')) {
+        return Promise.resolve(new Response(JSON.stringify({ path: 'reports', kind: 'directory', file_count: 2 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      return Promise.resolve(new Response('{}', { status: 404 }))
+    })
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      setComposerPromptMode,
+      apiFetch,
+    })
+
+    await submitCommand('file rm reports')
+
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith("delete session folder 'reports'?", '', 'tab-1'),
+    )
+    expect(appendLine).toHaveBeenCalledWith(
+      'warning: this will also delete 2 files in this folder.',
+      'warning',
+      'tab-1',
+    )
+    expect(setComposerPromptMode).toHaveBeenCalledWith('confirm')
+    expect(status.className).toBe('status-pill idle')
+  })
+
+  it('does not prompt before deleting a missing workspace file or folder', async () => {
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/workspace/files/info?path=missing.txt')) {
+        return Promise.resolve(new Response(JSON.stringify({ error: 'session file or folder was not found' }), {
           status: 404,
           headers: { 'Content-Type': 'application/json' },
         }))
@@ -2045,7 +2122,7 @@ describe('workspace file delete confirmation', () => {
     await submitCommand('file rm missing.txt')
 
     await vi.waitFor(() =>
-      expect(appendLine).toHaveBeenCalledWith('[error] file was not found', 'exit-fail', 'tab-1'),
+      expect(appendLine).toHaveBeenCalledWith('[error] session file or folder was not found', 'exit-fail', 'tab-1'),
     )
     expect(appendLine).not.toHaveBeenCalledWith("delete session file 'missing.txt'?", '', 'tab-1')
     expect(setComposerPromptMode).not.toHaveBeenCalledWith('confirm')
@@ -2057,8 +2134,8 @@ describe('workspace file delete confirmation', () => {
     const setComposerPromptMode = vi.fn()
     const refreshWorkspaceFileCache = vi.fn()
     const apiFetch = vi.fn((url, opts) => {
-      if (String(url).startsWith('/workspace/files/read?path=targets.txt')) {
-        return Promise.resolve(new Response(JSON.stringify({ path: 'targets.txt', text: 'darklab.sh\n' }), {
+      if (String(url).startsWith('/workspace/files/info?path=targets.txt')) {
+        return Promise.resolve(new Response(JSON.stringify({ path: 'targets.txt', kind: 'file', file_count: 1 }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }))
@@ -2086,6 +2163,7 @@ describe('workspace file delete confirmation', () => {
     })
 
     await submitCommand('rm targets.txt')
+    await vi.waitFor(() => expect(setComposerPromptMode).toHaveBeenCalledWith('confirm'))
     await submitCommand('yes')
     await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith(
       '/workspace/files?path=targets.txt',
@@ -2099,12 +2177,62 @@ describe('workspace file delete confirmation', () => {
     expect(status.className).toBe('status-pill ok')
   })
 
+  it('deletes the workspace folder only after answering yes', async () => {
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn()
+    const apiFetch = vi.fn((url, opts) => {
+      if (String(url).startsWith('/workspace/files/info?path=reports')) {
+        return Promise.resolve(new Response(JSON.stringify({ path: 'reports', kind: 'directory', file_count: 0 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      if (String(url).startsWith('/workspace/files?path=reports') && opts?.method === 'DELETE') {
+        return Promise.resolve(new Response(JSON.stringify({
+          ok: true,
+          deleted: { path: 'reports', kind: 'directory', file_count: 0 },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      if (url === '/run/client') {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      return Promise.resolve(new Response('{}', { status: 404 }))
+    })
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      setComposerPromptMode,
+      apiFetch,
+      refreshWorkspaceFileCache,
+    })
+
+    await submitCommand('file rm reports')
+    await vi.waitFor(() => expect(setComposerPromptMode).toHaveBeenCalledWith('confirm'))
+    await submitCommand('yes')
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith(
+      '/workspace/files?path=reports',
+      { method: 'DELETE' },
+    ))
+
+    expect(appendLine).toHaveBeenCalledWith('file: removed folder reports', '', 'tab-1')
+    expect(refreshWorkspaceFileCache).toHaveBeenCalled()
+    expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
+    expect(status.className).toBe('status-pill ok')
+  })
+
   it('leaves the workspace file untouched when the user answers no', async () => {
     const appendLine = vi.fn()
     const setComposerPromptMode = vi.fn()
     const apiFetch = vi.fn((url) => {
-      if (String(url).startsWith('/workspace/files/read?path=targets.txt')) {
-        return Promise.resolve(new Response(JSON.stringify({ path: 'targets.txt', text: 'darklab.sh\n' }), {
+      if (String(url).startsWith('/workspace/files/info?path=targets.txt')) {
+        return Promise.resolve(new Response(JSON.stringify({ path: 'targets.txt', kind: 'file', file_count: 1 }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         }))
@@ -2119,12 +2247,13 @@ describe('workspace file delete confirmation', () => {
     })
 
     await submitCommand('file rm targets.txt')
+    await vi.waitFor(() => expect(setComposerPromptMode).toHaveBeenCalledWith('confirm'))
     await submitCommand('no')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith('Session file delete canceled.', '', 'tab-1'),
     )
 
-    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/read?path=targets.txt')
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/info?path=targets.txt')
     expect(apiFetch).not.toHaveBeenCalledWith(
       '/workspace/files?path=targets.txt',
       { method: 'DELETE' },
@@ -2142,14 +2271,34 @@ describe('workspace file delete confirmation', () => {
       openWorkspaceEditorFromCommand,
     })
 
+    await submitCommand('file add')
+    await vi.waitFor(() => expect(openWorkspaceEditorFromCommand).toHaveBeenCalledWith('add', ''))
     await submitCommand('file add targets.txt')
+    await vi.waitFor(() => expect(openWorkspaceEditorFromCommand).toHaveBeenCalledWith('add', 'targets.txt'))
     await submitCommand('file edit response.html')
 
-    await vi.waitFor(() => expect(openWorkspaceEditorFromCommand).toHaveBeenCalledWith('add', 'targets.txt'))
-    expect(openWorkspaceEditorFromCommand).toHaveBeenCalledWith('edit', 'response.html')
+    expect(openWorkspaceEditorFromCommand).toHaveBeenCalledWith('add', 'targets.txt')
+    await vi.waitFor(() => expect(openWorkspaceEditorFromCommand).toHaveBeenCalledWith('edit', 'response.html'))
+    expect(appendLine).toHaveBeenCalledWith('file: opened in the Files panel', '', 'tab-1')
     expect(appendLine).toHaveBeenCalledWith('file: opened targets.txt in the Files panel', '', 'tab-1')
-    expect(appendLine).toHaveBeenCalledWith('file: opened response.html in the Files panel', '', 'tab-1')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('file: opened response.html in the Files panel', '', 'tab-1'))
     expect(status.className).toBe('status-pill ok')
+  })
+
+  it('keeps file edit usage strict when no filename is provided', async () => {
+    const appendLine = vi.fn()
+    const openWorkspaceEditorFromCommand = vi.fn(() => Promise.resolve(true))
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      openWorkspaceEditorFromCommand,
+    })
+
+    await submitCommand('file edit')
+
+    expect(openWorkspaceEditorFromCommand).not.toHaveBeenCalled()
+    expect(appendLine).toHaveBeenCalledWith('Usage: file edit <file>', 'exit-fail', 'tab-1')
+    expect(status.className).toBe('status-pill fail')
   })
 })
 

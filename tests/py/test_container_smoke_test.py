@@ -767,7 +767,7 @@ def container_smoke_test():
         pytest.skip("set RUN_CONTAINER_SMOKE_TEST=1 to run the container smoke suite")
     _require_docker()
 
-    image_tag = f"darklab_shell-test:{uuid.uuid4().hex[:12]}"
+    image_tag = "darklab_shell-test:cache"
     runtime_image_tag = f"darklab_shell-test-runtime:{uuid.uuid4().hex[:12]}"
     project = f"{SMOKE_PROJECT_PREFIX}{uuid.uuid4().hex[:8]}"
     reach_host = _docker_reach_host()
@@ -796,7 +796,8 @@ def container_smoke_test():
         runtime_container_name = f"darklab_shell-test-runtime-{uuid.uuid4().hex[:12]}"
 
         # Load the base compose file and apply test-specific overrides:
-        # - unique image tag so the build doesn't overwrite the dev image
+        # - stable smoke build tag so expensive Dockerfile layers stay reachable
+        #   for local/runner cache reuse without overwriting the dev image
         # - remove runtime bind mounts that rely on the daemon sharing the
         #   client's filesystem (DinD does not); instead we stream the app tree
         #   and smoke-test config into a committed runtime image
@@ -837,7 +838,6 @@ def container_smoke_test():
                     [
                         "docker",
                         "build",
-                        "--pull",
                         "-t",
                         image_tag,
                         "-f",

@@ -702,7 +702,7 @@ commands:
           description: Full TLS scan of a host
         - value: sslscan --no-failed ip.darklab.sh
           description: Scan but suppress failed cipher output
-        - value: sslscan --xml sslscan.xml ip.darklab.sh
+        - value: sslscan --xml=sslscan.xml ip.darklab.sh
           description: Save TLS scan XML to a session file
           feature_required: workspace
       flags:
@@ -1069,14 +1069,17 @@ commands:
         enum:
           description: Enumerate attack surface assets
           examples:
-            - value: amass enum -d darklab.sh
-              description: Enumerate a domain using the session-scoped Amass database
+            - value: amass enum -active -d darklab.sh
+              description: Enumerate a domain with active scanning using the session-scoped Amass database
+              feature_required: workspace
             - value: amass enum -d darklab.sh
               description: Enumerate using a session-scoped Amass database
               feature_required: workspace
           flags:
             - value: -passive
               description: Use passive data sources only (default in Amass v5)
+            - value: -active
+              description: Use active scanning which scans the target directly
             - value: -d
               description: Target domain
               takes_value: true
@@ -1610,12 +1613,12 @@ commands:
         dns:
           description: DNS subdomain brute force mode
           examples:
-            - value: gobuster dns -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+            - value: gobuster dns --domain darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
               description: DNS subdomain brute force
-            - value: gobuster dns -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -r 8.8.8.8
+            - value: gobuster dns --domain darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt --resolver 8.8.8.8
               description: DNS brute force with a custom resolver
           flags:
-            - value: -d
+            - value: --domain
               description: Target domain
               takes_value: true
               value_hint:

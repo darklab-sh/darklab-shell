@@ -1166,6 +1166,78 @@
       "expected_text": [
         "Tracing"
       ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "openssl s_client -help",
+      "expected_text": [
+        "Usage: s_client"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "openssl ciphers -help",
+      "expected_text": [
+        "Usage: ciphers"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "openssl ciphers -v",
+      "expected_text": [
+        "TLS_"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "openssl ciphers -s -v 'ALL:@SECLEVEL=2'",
+      "expected_text": [
+        "TLS_"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -x php,html,txt",
+      "expected_text": [
+        "Starting gobuster"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "gobuster dns --domain darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
+      "expected_text": [
+        "Starting gobuster"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "gobuster dns --domain darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt --resolver 8.8.8.8",
+      "expected_text": [
+        "Starting gobuster"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "gobuster vhost -u https://ip.darklab.sh --append-domain -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
+      "expected_text": [
+        "Starting gobuster"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "gobuster fuzz -u https://ip.darklab.sh?FUZZ=test -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
+      "expected_text": [
+        "Starting gobuster"
+      ]
     }
   ]
 }

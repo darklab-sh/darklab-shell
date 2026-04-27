@@ -97,6 +97,7 @@ function setupWorkspace(apiFetch = vi.fn()) {
       saveWorkspaceFile,
       createWorkspaceDirectory,
       readWorkspaceFile,
+      deleteWorkspacePath,
       deleteWorkspaceFile,
       openWorkspace,
       setWorkspaceMessage,
@@ -156,6 +157,8 @@ describe('workspace UI helpers', () => {
     ])
     expect(document.querySelector('.workspace-folder-row [data-workspace-action="open-folder"]').textContent)
       .toBe('Open')
+    expect([...document.querySelectorAll('.workspace-folder-row [data-workspace-action]')].map(btn => btn.textContent))
+      .toEqual(['Open', 'Delete'])
     expect(document.querySelector('.workspace-folder-row').dataset.pressableBound).toBe('1')
 
     document.querySelector('.workspace-folder-row .workspace-file-name').click()
@@ -222,6 +225,47 @@ describe('workspace UI helpers', () => {
       '..',
       'empty',
     ])
+  })
+
+  it('confirms folder deletion with file counts before deleting from the browser', async () => {
+    const apiFetch = vi.fn((url, opts) => {
+      if (String(url).startsWith('/workspace/files?path=reports') && opts?.method === 'DELETE') {
+        return Promise.resolve(responseJson({
+          deleted: { path: 'reports', kind: 'directory', file_count: 2 },
+          workspace: {
+            directories: [],
+            files: [{ path: 'targets.txt', size: 11 }],
+            usage: { bytes_used: 11, file_count: 1 },
+            limits: { quota_bytes: 4096, max_files: 10 },
+          },
+        }))
+      }
+      return Promise.resolve(responseJson({}))
+    })
+    const { renderWorkspaceFiles, globals } = setupWorkspace(apiFetch)
+
+    renderWorkspaceFiles({
+      directories: [{ path: 'reports' }],
+      files: [
+        { path: 'reports/one.txt', size: 1 },
+        { path: 'reports/nested/two.txt', size: 1 },
+        { path: 'targets.txt', size: 11 },
+      ],
+      usage: { bytes_used: 13, file_count: 3 },
+      limits: { quota_bytes: 4096, max_files: 10 },
+    })
+
+    document.querySelector('.workspace-folder-row [data-workspace-action="delete-folder"]').click()
+    await flushWorkspacePromises()
+
+    expect(globals.showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: {
+        text: 'Delete folder reports?',
+        note: 'This will also delete 2 files in this folder.',
+      },
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files?path=reports', { method: 'DELETE' })
+    expect(document.getElementById('workspace-message').textContent).toBe('Deleted folder reports')
   })
 
   it('shows an empty state when the workspace has no files', () => {
@@ -318,7 +362,10 @@ describe('workspace UI helpers', () => {
     })
     const { handleWorkspaceFileAction, showWorkspaceEditor, hideWorkspaceViewer, globals } = setupWorkspace(apiFetch)
     const viewer = document.getElementById('workspace-viewer')
+    const viewerText = document.getElementById('workspace-viewer-text')
     viewer.scrollIntoView = vi.fn()
+    viewer.scrollTop = 80
+    viewerText.scrollTop = 120
     const editor = document.getElementById('workspace-editor')
 
     showWorkspaceEditor('response.html', '<html></html>')
@@ -329,7 +376,9 @@ describe('workspace UI helpers', () => {
     expect(viewer.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
     expect(editor.classList.contains('u-hidden')).toBe(true)
     expect(document.getElementById('workspace-viewer-title').textContent).toBe('response.html')
-    expect(document.getElementById('workspace-viewer-text').textContent).toBe('<html></html>')
+    expect(viewerText.textContent).toBe('<html></html>')
+    expect(viewer.scrollTop).toBe(0)
+    expect(viewerText.scrollTop).toBe(0)
 
     hideWorkspaceViewer()
 

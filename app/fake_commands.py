@@ -12,7 +12,7 @@ import random
 import re
 import subprocess  # nosec B404
 import sys
-from typing import TypedDict
+from typing import TypedDict, cast
 
 from commands import (
     command_root,
@@ -33,6 +33,7 @@ from workspace import (
     WorkspaceDisabled,
     WorkspaceFileNotFound,
     WorkspaceQuotaExceeded,
+    list_workspace_directories,
     list_workspace_files,
     read_workspace_text_file,
     workspace_settings,
@@ -189,7 +190,7 @@ _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "hostname", "description": "Show the configured shell instance name.", "root": "hostname"},
     {"name": "id", "description": "Show the shell identity.", "root": "id"},
     {"name": "ip a", "description": "Show a minimal shell network interface view.", "exact": "ip a"},
-    {"name": "jobs", "description": "List active jobs for this session.", "root": "jobs"},
+    {"name": "jobs", "description": "Alias for `runs`.", "root": "jobs"},
     {"name": "last", "description": "Show recent completed runs with timestamps and exit codes.", "root": "last"},
     {"name": "limits", "description": "Show configured runtime, history, and retention limits.", "root": "limits"},
     {"name": "ls", "description": "List session files.", "root": "ls"},
@@ -199,6 +200,7 @@ _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "retention", "description": "Show retention and persisted-output settings.", "root": "retention"},
     {"name": "rm <file>", "description": "Remove a session file after confirmation.", "root": "rm"},
     {"name": "route", "description": "Show the shell routing table summary.", "root": "route"},
+    {"name": "runs", "description": "Show app-native active run metadata for this session.", "root": "runs"},
     {"name": "session-token", "description": "Show session token status.", "root": "session-token"},
     {"name": "shortcuts", "description": "Show current keyboard shortcuts.", "root": "shortcuts"},
     {"name": "stats", "description": "Show session activity totals and command-root breakdowns.", "root": "stats"},
@@ -333,7 +335,7 @@ _FAKE_COMMAND_DISPATCH = {
     "hostname":  lambda cmd, sid: _run_fake_hostname(),
     "id":        lambda cmd, sid: _run_fake_id(),
     "ip_addr":   lambda cmd, sid: _run_fake_ip_addr(),
-    "jobs":      lambda cmd, sid: _run_fake_jobs(sid),
+    "jobs":      lambda cmd, sid: _run_fake_runs(sid),
     "last":      lambda cmd, sid: _run_fake_last(sid),
     "limits":    lambda cmd, sid: _run_fake_limits(),
     "ls":        lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
@@ -346,6 +348,7 @@ _FAKE_COMMAND_DISPATCH = {
     "rm":        lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
     "rm_root":   lambda cmd, sid: _run_fake_rm_root(),
     "route":     lambda cmd, sid: _run_fake_route(),
+    "runs":      lambda cmd, sid: _run_fake_runs(sid),
     "session-token": lambda cmd, sid: _run_fake_session_token(cmd, sid),
     "shortcuts": lambda cmd, sid: _run_fake_shortcuts(),
     "stats":     lambda cmd, sid: _run_fake_stats(sid),
@@ -985,17 +988,41 @@ def _run_fake_ip_addr() -> list[dict[str, str]]:
     ])
 
 
-def _run_fake_jobs(session_id: str) -> list[dict[str, str]]:
-    jobs = active_runs_for_session(session_id)
-    if not jobs:
-        return [{"type": "output", "text": "No current jobs."}]
+def _run_elapsed(started: str) -> str:
+    try:
+        start = _parse_dt(started)
+    except (TypeError, ValueError):
+        return "-"
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    return _format_duration(int((datetime.now(timezone.utc) - start.astimezone(timezone.utc)).total_seconds()))
 
-    lines = []
-    total = len(jobs)
-    for index, job in enumerate(jobs, start=1):
-        marker = "+" if index == total else "-"
-        command = str(job.get("command", "")).strip()
-        lines.append(_output_line(f"[{index}]{marker}  Running                 {command}", "fake-plain"))
+
+def _run_fake_runs(session_id: str) -> list[dict[str, str]]:
+    runs = active_runs_for_session(session_id)
+    if not runs:
+        return [_output_line("No active runs.", "fake-note")]
+
+    run_labels = [str(run.get("run_id", ""))[:8] or "-" for run in runs]
+    pid_labels = [str(run.get("pid") or "-") for run in runs]
+    elapsed_labels = [_run_elapsed(str(run.get("started", ""))) for run in runs]
+
+    run_width = max(3, *(len(label) for label in run_labels))
+    pid_width = max(3, *(len(label) for label in pid_labels))
+    elapsed_width = max(7, *(len(label) for label in elapsed_labels))
+    lines = [
+        _output_line("Active runs:", "fake-section"),
+        _output_line(
+            f"  {'run':<{run_width}}  {'pid':>{pid_width}}  {'elapsed':>{elapsed_width}}  command",
+            "fake-help-row",
+        ),
+    ]
+    for run, run_label, pid_label, elapsed_label in zip(runs, run_labels, pid_labels, elapsed_labels, strict=False):
+        command = str(run.get("command", "")).strip()
+        lines.append(_output_line(
+            f"  {run_label:<{run_width}}  {pid_label:>{pid_width}}  {elapsed_label:>{elapsed_width}}  {command}",
+            "fake-plain",
+        ))
     return lines
 
 
@@ -1158,6 +1185,77 @@ def _workspace_command_error(exc: Exception) -> list[dict[str, str]]:
     raise exc
 
 
+def _workspace_list_rows(
+    files: list[dict[str, object]],
+    directories: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    by_parent: dict[str, list[dict[str, object]]] = {}
+    directory_paths = {str(item["path"]) for item in directories}
+    root_files: list[dict[str, object]] = []
+
+    for item in files:
+        path = str(item["path"])
+        parent = path.rpartition("/")[0]
+        if parent:
+            by_parent.setdefault(parent, []).append(item)
+        else:
+            root_files.append(item)
+
+        while parent:
+            directory_paths.add(parent)
+            parent = parent.rpartition("/")[0]
+
+    rows: list[dict[str, object]] = []
+    for item in sorted(root_files, key=lambda candidate: str(candidate["path"])):
+        rows.append({"kind": "file", "path": str(item["path"]), "item": item})
+
+    def add_directory(path: str) -> None:
+        depth = path.count("/")
+        rows.append({
+            "kind": "directory",
+            "path": path,
+            "display": f"{'  ' * depth}{path}/",
+        })
+
+        for item in sorted(by_parent.get(path, []), key=lambda candidate: str(candidate["path"])):
+            name = str(item["path"]).rsplit("/", 1)[-1]
+            rows.append({
+                "kind": "file",
+                "path": str(item["path"]),
+                "display": f"{'  ' * (depth + 1)}{name}",
+                "item": item,
+            })
+
+        child_prefix = f"{path}/"
+        child_directories = sorted(
+            candidate for candidate in directory_paths
+            if candidate.startswith(child_prefix) and "/" not in candidate[len(child_prefix):]
+        )
+        for child in child_directories:
+            add_directory(child)
+
+    for directory in sorted(path for path in directory_paths if "/" not in path):
+        add_directory(directory)
+
+    return rows
+
+
+def _workspace_item_size(item: dict[str, object]) -> int:
+    value = item.get("size")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return 0
+    return 0
+
+
+def _underline_text(text: str) -> str:
+    return f"\x1b[4m{text}\x1b[0m"
+
+
 def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
     parts = _split_command(command)
     subcommand = parts[1].lower() if len(parts) > 1 else "help"
@@ -1167,14 +1265,14 @@ def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
             _output_line("Session file commands:", "fake-section"),
             _output_line("  file list", "fake-help-row"),
             _output_line("  file show <file>", "fake-help-row"),
-            _output_line("  file add <file>", "fake-help-row"),
+            _output_line("  file add [file]", "fake-help-row"),
             _output_line("  file edit <file>", "fake-help-row"),
-            _output_line("  file rm <file>", "fake-help-row"),
+            _output_line("  file rm <file-or-folder>", "fake-help-row"),
             _output_line("", "fake-spacer"),
             _output_line("Aliases:", "fake-section"),
             _output_line("  ls          -> file list", "fake-help-row"),
             _output_line("  cat <file>  -> file show <file>", "fake-help-row"),
-            _output_line("  rm <file>   -> file rm <file>", "fake-help-row"),
+            _output_line("  rm <file-or-folder>   -> file rm <file-or-folder>", "fake-help-row"),
             _output_line("", "fake-spacer"),
             _output_line("Example flow:", "fake-section"),
             _output_line("  Create targets.txt from the Files panel.", "fake-note"),
@@ -1186,6 +1284,7 @@ def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
         try:
             settings = workspace_settings(CFG)
             files = list_workspace_files(session_id, CFG)
+            directories = list_workspace_directories(session_id, CFG)
             usage = workspace_usage(session_id, CFG)
         except Exception as exc:
             return _workspace_command_error(exc)
@@ -1204,15 +1303,23 @@ def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
             ),
             _output_line(_format_native_record("remaining", _format_bytes(remaining_bytes), 11), "fake-kv"),
         ]
-        if not files:
+        rows = _workspace_list_rows(files, directories)
+        if not rows:
             lines.append(_output_line("  No session files yet.", "fake-note"))
             return lines
 
-        width = max((len(str(item["path"])) for item in files), default=4)
-        lines.append(_output_line(f"  {'file':<{width}}  size      modified", "fake-help-row"))
-        for item in files:
-            path = str(item["path"])
-            size = _format_bytes(int(item.get("size") or 0))
+        width = max((len(str(item.get("display") or item["path"])) for item in rows), default=4)
+        path_header = _underline_text(f"{'path':<{width}}")
+        size_header = _underline_text(f"{'size':<8}")
+        modified_header = _underline_text("modified")
+        lines.append(_output_line(f"  {path_header}  {size_header}  {modified_header}", "fake-help-row"))
+        for row in rows:
+            path = str(row.get("display") or row["path"])
+            if row["kind"] == "directory":
+                lines.append(_output_line(f"  {path:<{width}}  folder", "fake-help-row"))
+                continue
+            item = cast(dict[str, object], row["item"])
+            size = _format_bytes(_workspace_item_size(item))
             mtime = _format_clock(str(item.get("mtime") or ""))
             lines.append(_output_line(f"  {path:<{width}}  {size:<8}  {mtime}", "fake-help-row"))
         return lines
@@ -1228,18 +1335,23 @@ def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
         return [_output_line(f"file: {parts[2]}", "fake-section")] + _text_lines(file_lines)
 
     if subcommand in {"add", "edit"}:
+        expected = "file add [file]" if subcommand == "add" else "file edit <file>"
+        if (subcommand == "add" and len(parts) > 3) or (subcommand == "edit" and len(parts) != 3):
+            return [_output_line(f"Usage: {expected}")]
+        if subcommand == "add":
+            return [_output_line("file add requires the browser Files panel — reload the page and try again.")]
         if len(parts) != 3:
             return [_output_line(f"Usage: file {subcommand} <file>")]
         return [_output_line(f"file {subcommand} requires the browser Files panel — reload the page and try again.")]
 
     if subcommand in {"rm", "delete"}:
         if len(parts) != 3:
-            return [_output_line("Usage: file rm <file>")]
+            return [_output_line("Usage: file rm <file-or-folder>")]
         return [_output_line("file rm requires browser confirmation — reload the page and try again.")]
 
     return [
         _output_line(f"file: unknown subcommand '{subcommand}'"),
-        _output_line("Usage: file [list | show <file> | add <file> | edit <file> | rm <file> | help]"),
+        _output_line("Usage: file [list | show <file> | add <file> | edit <file> | rm <file-or-folder> | help]"),
     ]
 
 
@@ -1256,9 +1368,9 @@ def _run_fake_workspace_alias(command: str, session_id: str) -> list[dict[str, s
         return _run_fake_workspace(f"file show {parts[1]}", session_id)
     if root == "rm":
         if len(parts) != 2:
-            return [_output_line("Usage: rm <file>")]
+            return [_output_line("Usage: rm <file-or-folder>")]
         return _run_fake_workspace(f"file rm {parts[1]}", session_id)
-    return [_output_line("Usage: file [list | show <file> | add <file> | edit <file> | rm <file> | help]")]
+    return [_output_line("Usage: file [list | show <file> | add <file> | edit <file> | rm <file-or-folder> | help]")]
 
 
 def _run_fake_poweroff() -> list[dict[str, str]]:

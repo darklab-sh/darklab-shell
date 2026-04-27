@@ -48,6 +48,10 @@ class WorkspaceFileNotFound(WorkspaceError):
     """Raised when a validated workspace path does not point at a file."""
 
 
+class WorkspacePathNotFound(WorkspaceError):
+    """Raised when a validated workspace path does not exist."""
+
+
 class WorkspaceBinaryFile(WorkspaceError):
     """Raised when a workspace file is not safe to display as text."""
 
@@ -66,6 +70,13 @@ class WorkspaceSettings:
 @dataclass(frozen=True)
 class WorkspaceUsage:
     bytes_used: int
+    file_count: int
+
+
+@dataclass(frozen=True)
+class WorkspaceDeleteResult:
+    path: str
+    kind: str
     file_count: int
 
 
@@ -175,6 +186,16 @@ def _reject_symlink_components(root: Path, candidate: Path) -> None:
     for part in candidate.relative_to(root).parts:
         cursor = cursor / part
         if cursor.exists() and cursor.is_symlink():
+            raise InvalidWorkspacePath("session file symlinks are not allowed")
+
+
+def _reject_symlinks_under(path: Path) -> None:
+    if path.is_symlink():
+        raise InvalidWorkspacePath("session file symlinks are not allowed")
+    if not path.is_dir():
+        return
+    for child in path.rglob("*"):
+        if child.is_symlink():
             raise InvalidWorkspacePath("session file symlinks are not allowed")
 
 
@@ -432,7 +453,90 @@ def delete_workspace_file(
     path = resolve_workspace_path(session_id, relative_path, cfg)
     if not path.is_file():
         raise WorkspaceFileNotFound("session file was not found")
-    path.unlink()
+    try:
+        path.unlink()
+        return
+    except PermissionError:
+        sudo_bin = shutil.which("sudo")
+        if not sudo_bin:
+            raise
+        try:
+            pwd.getpwnam("scanner")
+        except KeyError:
+            raise
+        subprocess.run(
+            [sudo_bin, "-u", "scanner", "-g", "appuser", "rm", "--", str(path)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )  # nosec B603
+
+
+def _workspace_directory_file_count(path: Path) -> int:
+    _reject_symlinks_under(path)
+    return sum(1 for child in path.rglob("*") if child.is_file())
+
+
+def _remove_workspace_directory(path: Path) -> None:
+    try:
+        shutil.rmtree(path)
+        return
+    except PermissionError:
+        sudo_bin = shutil.which("sudo")
+        if not sudo_bin:
+            raise
+        try:
+            pwd.getpwnam("scanner")
+        except KeyError:
+            raise
+        subprocess.run(
+            [sudo_bin, "-u", "scanner", "-g", "appuser", "rm", "-rf", "--", str(path)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )  # nosec B603
+
+
+def workspace_path_info(
+    session_id: str,
+    relative_path: str,
+    cfg: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    settings = workspace_settings(cfg)
+    _require_enabled(settings)
+    path = resolve_workspace_path(session_id, relative_path, cfg)
+    normalized = _validate_relative_path(relative_path).as_posix()
+    if path.is_file():
+        return {"path": normalized, "kind": "file", "file_count": 1}
+    if path.is_dir():
+        return {
+            "path": normalized,
+            "kind": "directory",
+            "file_count": _workspace_directory_file_count(path),
+        }
+    raise WorkspacePathNotFound("session file or folder was not found")
+
+
+def delete_workspace_path(
+    session_id: str,
+    relative_path: str,
+    cfg: dict[str, Any] | None = None,
+) -> WorkspaceDeleteResult:
+    info = workspace_path_info(session_id, relative_path, cfg)
+    path = resolve_workspace_path(session_id, relative_path, cfg)
+    if info["kind"] == "file":
+        delete_workspace_file(session_id, relative_path, cfg)
+    elif info["kind"] == "directory":
+        _remove_workspace_directory(path)
+    else:
+        raise WorkspacePathNotFound("session file or folder was not found")
+    return WorkspaceDeleteResult(
+        path=str(info["path"]),
+        kind=str(info["kind"]),
+        file_count=int(info["file_count"]),
+    )
 
 
 def cleanup_inactive_workspaces(cfg: dict[str, Any] | None = None, *, now: float | None = None) -> int:

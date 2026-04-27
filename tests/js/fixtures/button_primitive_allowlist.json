@@ -23,6 +23,7 @@
     { "selector": ".tabs-scroll-btn",     "note": "Tab bar scroll arrows — surface-specific class family" },
     { "selector": ".chrome-btn",          "note": "Terminal bar chrome toggles (search / ln / ts) — surface-specific class family" },
     { "selector": ".history-action-btn",  "note": "History panel action buttons — surface-specific class family" },
+    { "selector": ".hud-cell-clickable",  "note": "Desktop HUD summary cells open the Run Monitor while retaining HUD cell layout" },
     { "selector": ".sheet-clear-btn",     "note": "Mobile recents sheet 'delete all' button — surface-specific class family" },
     { "selector": ".sheet-filter-row",    "note": "Mobile recents filter rows (toggle / dropdown / check / clear) — surface-specific class family" },
     { "selector": ".menu-item",           "note": "Mobile hamburger menu items — surface-specific class family" },

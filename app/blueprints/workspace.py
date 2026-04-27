@@ -14,13 +14,15 @@ from workspace import (
     WorkspaceDisabled,
     WorkspaceBinaryFile,
     WorkspaceFileNotFound,
+    WorkspacePathNotFound,
     WorkspaceQuotaExceeded,
     create_workspace_directory,
-    delete_workspace_file,
+    delete_workspace_path,
     list_workspace_directories,
     list_workspace_files,
     read_workspace_text_file,
     resolve_workspace_path,
+    workspace_path_info,
     workspace_settings,
     workspace_usage,
     write_workspace_text_file,
@@ -63,7 +65,7 @@ def _workspace_error_response(exc: Exception) -> tuple[Response, int]:
         return jsonify({"error": "Files are disabled on this instance"}), 403
     if isinstance(exc, WorkspaceQuotaExceeded):
         return jsonify({"error": str(exc)}), 413
-    if isinstance(exc, WorkspaceFileNotFound):
+    if isinstance(exc, (WorkspaceFileNotFound, WorkspacePathNotFound)):
         return jsonify({"error": str(exc)}), 404
     if isinstance(exc, WorkspaceBinaryFile):
         return jsonify({"error": str(exc)}), 415
@@ -146,6 +148,18 @@ def workspace_files_read():
         return _workspace_error_response(exc)
 
 
+@workspace_bp.route("/workspace/files/info", methods=["GET"])
+def workspace_files_info():
+    session_id, error = _session_or_error()
+    if error:
+        return error
+    path = _path_from_request()
+    try:
+        return jsonify(workspace_path_info(str(session_id), path))
+    except Exception as exc:
+        return _workspace_error_response(exc)
+
+
 @workspace_bp.route("/workspace/files", methods=["DELETE"])
 def workspace_files_delete():
     session_id, error = _session_or_error()
@@ -153,13 +167,23 @@ def workspace_files_delete():
         return error
     path = _path_from_request()
     try:
-        delete_workspace_file(str(session_id), path)
+        deleted = delete_workspace_path(str(session_id), path)
         log.info("WORKSPACE_FILE_DELETE", extra={
             "ip": get_client_ip(),
             "session": get_log_session_id(session_id),
             "path": path,
+            "kind": deleted.kind,
+            "file_count": deleted.file_count,
         })
-        return jsonify({"ok": True, "workspace": _workspace_payload(str(session_id))})
+        return jsonify({
+            "ok": True,
+            "deleted": {
+                "path": deleted.path,
+                "kind": deleted.kind,
+                "file_count": deleted.file_count,
+            },
+            "workspace": _workspace_payload(str(session_id)),
+        })
     except Exception as exc:
         return _workspace_error_response(exc)
 

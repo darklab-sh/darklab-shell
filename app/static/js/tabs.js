@@ -730,6 +730,9 @@ function createTab(label) {
     st: 'idle',
     renamed: false,
     draftInput: '',
+    commandHistory: [],
+    historyNavIndex: -1,
+    historyNavDraft: '',
   });
   updateOutputFollowButton(id);
   activateTab(id);
@@ -765,6 +768,14 @@ function activateTab(id, { focusComposer = true } = {}) {
   mountShellPrompt(id);
   const t = getTab(id);
   setStatus(t ? (t.st || 'idle') : 'idle');
+  if (t && t.followOutput !== false) {
+    const out = getOutput(id);
+    if (out && typeof _restoreOutputTailAfterLayout === 'function') {
+      _restoreOutputTailAfterLayout(out, t);
+    } else if (out && typeof _stickOutputToBottom === 'function') {
+      _stickOutputToBottom(out, t);
+    }
+  }
   ensureActiveTabVisible(id);
   updateTabScrollButtons();
   clearSearch();

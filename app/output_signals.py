@@ -91,6 +91,10 @@ _FINDINGS_EXCLUDES = [
     re.compile(r"^projectdiscovery\.io$", re.I),
 ]
 
+_APP_SIGNAL_EXCLUDES = [
+    re.compile(r"^\[workspace\]\s+(?:reading|writing)\s+\S", re.I),
+]
+
 _DNS_SIGNAL_ROOTS = {"dig", "host", "nslookup"}
 _DNS_BARE_IP_RE = re.compile(
     r"^(?:(?:\d{1,3}\.){3}\d{1,3}|[0-9a-f:]*[0-9a-f]+:[0-9a-f:]*[0-9a-f]+)$",
@@ -326,6 +330,8 @@ def classify_line(
         return []
     stripped = str(text or "").strip()
     if not stripped:
+        return []
+    if any(pattern.search(stripped) for pattern in _APP_SIGNAL_EXCLUDES):
         return []
     scopes: list[str] = []
     root = root if root is not None else command_root(command)

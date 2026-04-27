@@ -290,6 +290,24 @@ function _restoreCompletedReconnectedRun(tab, run) {
     });
 }
 
+function _markReconnectedRunUnavailable(tab) {
+  if (!tab) return;
+  appendLine('[reconnected run is no longer active]', 'denied', tab.id);
+  appendLine('[no saved result is available; the app may have restarted while the command was running]', 'denied', tab.id);
+  setTabStatus(tab.id, 'fail');
+  const refreshed = getTab(tab.id);
+  if (refreshed) {
+    refreshed.reconnectedRun = false;
+    refreshed.runId = null;
+  }
+  if (tab.id === activeTabId) {
+    setStatus('fail');
+    stopTimer();
+  }
+  _setRunButtonDisabled(false);
+  hideTabKillBtn(tab.id);
+}
+
 function pollActiveRunsAfterReload() {
   const reconnectTabs = _activeReconnectTabs();
   if (!reconnectTabs.length) {
@@ -306,7 +324,7 @@ function pollActiveRunsAfterReload() {
         return apiFetch(`/history/${tab.historyRunId}?json&preview=1`)
           .then(r => r.ok ? r.json() : Promise.reject(new Error('run not ready')))
           .then(run => _restoreCompletedReconnectedRun(tab, run))
-          .catch(() => Promise.resolve());
+          .catch(() => _markReconnectedRunUnavailable(tab));
       }));
     })
     .finally(() => {
@@ -774,6 +792,11 @@ function _isClientSideUiCommand(cmd) {
   return root === 'theme' || root === 'config';
 }
 
+function _isRunMonitorCommand(cmd) {
+  const root = String(cmd || '').trim().split(/\s+/, 1)[0].toLowerCase();
+  return root === 'runs' || root === 'jobs';
+}
+
 function _workspaceDeleteTarget(cmd) {
   const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
   const root = (parts[0] || '').toLowerCase();
@@ -789,7 +812,7 @@ function _workspaceEditorCommand(cmd) {
   const root = (parts[0] || '').toLowerCase();
   const action = (parts[1] || '').toLowerCase();
   if (root !== 'file' || !['add', 'edit'].includes(action)) return null;
-  return { action, target: parts.length === 3 ? parts[2] : '' };
+  return { action, target: parts.length === 3 ? parts[2] : '', invalid: parts.length > 3 };
 }
 
 function _isWorkspaceDeleteCommand(cmd) {
@@ -1399,23 +1422,30 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
   const target = _workspaceDeleteTarget(cmd);
   appendCommandEcho(cmd);
   if (!target) {
-    appendLine('Usage: file rm <file>', 'exit-fail', tabId);
+    appendLine('Usage: file rm <file-or-folder>', 'exit-fail', tabId);
     setStatus('fail');
     return;
   }
+  let targetInfo = null;
   try {
-    const existsResp = await apiFetch(`/workspace/files/read?path=${encodeURIComponent(target)}`);
+    const existsResp = await apiFetch(`/workspace/files/info?path=${encodeURIComponent(target)}`);
     if (!existsResp.ok) {
       const data = await existsResp.json().catch(() => ({}));
-      throw new Error(data && data.error ? data.error : `file was not found (${existsResp.status})`);
+      throw new Error(data && data.error ? data.error : `file or folder was not found (${existsResp.status})`);
     }
+    targetInfo = await existsResp.json().catch(() => ({}));
   } catch (err) {
-    appendLine(`[error] ${err.message || 'file was not found'}`, 'exit-fail', tabId);
+    appendLine(`[error] ${err.message || 'file or folder was not found'}`, 'exit-fail', tabId);
     logClientError('file rm validate', err);
     setStatus('fail');
     return;
   }
-  appendLine(`delete session file '${target}'?`, '', tabId);
+  const isDirectory = targetInfo && targetInfo.kind === 'directory';
+  const fileCount = Number(targetInfo && targetInfo.file_count) || 0;
+  appendLine(`delete session ${isDirectory ? 'folder' : 'file'} '${target}'?`, '', tabId);
+  if (isDirectory && fileCount > 0) {
+    appendLine(`warning: this will also delete ${fileCount} ${fileCount === 1 ? 'file' : 'files'} in this folder.`, 'warning', tabId);
+  }
   _setPendingTerminalConfirm({
     tabId,
     onYes: async () => {
@@ -1425,10 +1455,11 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
           const data = await resp.json().catch(() => ({}));
           throw new Error(data && data.error ? data.error : `file delete failed (${resp.status})`);
         }
-        appendLine(`file: removed ${target}`, '', tabId);
+        const removedText = isDirectory ? `file: removed folder ${target}` : `file: removed ${target}`;
+        appendLine(removedText, '', tabId);
         if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache();
         _recordSuccessfulLocalCommand(cmd);
-        _persistClientSideRun(cmd, [{ text: `file: removed ${target}` }], 'ok');
+        _persistClientSideRun(cmd, [{ text: removedText }], 'ok');
         setStatus('ok');
       } catch (err) {
         appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
@@ -1437,7 +1468,7 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
       }
     },
     onNo: async () => {
-      appendLine('Session file delete canceled.', '', tabId);
+      appendLine(`Session ${isDirectory ? 'folder' : 'file'} delete canceled.`, '', tabId);
       setStatus('idle');
     },
   });
@@ -1447,8 +1478,10 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
 async function _handleWorkspaceEditorCommand(cmd, tabId) {
   const parsed = _workspaceEditorCommand(cmd);
   appendCommandEcho(cmd);
-  if (!parsed || !parsed.target) {
-    appendLine(`Usage: file ${parsed?.action || 'add'} <file>`, 'exit-fail', tabId);
+  if (!parsed || parsed.invalid || (parsed.action === 'edit' && !parsed.target)) {
+    const action = parsed?.action || 'add';
+    const operand = action === 'add' ? '[file]' : '<file>';
+    appendLine(`Usage: file ${action} ${operand}`, 'exit-fail', tabId);
     setStatus('fail');
     return;
   }
@@ -1459,9 +1492,10 @@ async function _handleWorkspaceEditorCommand(cmd, tabId) {
   }
   try {
     await openWorkspaceEditorFromCommand(parsed.action, parsed.target);
-    appendLine(`file: opened ${parsed.target} in the Files panel`, '', tabId);
+    const targetLabel = parsed.target ? ` ${parsed.target}` : '';
+    appendLine(`file: opened${targetLabel} in the Files panel`, '', tabId);
     _recordSuccessfulLocalCommand(cmd);
-    _persistClientSideRun(cmd, [{ text: `file: opened ${parsed.target} in the Files panel` }], 'ok');
+    _persistClientSideRun(cmd, [{ text: `file: opened${targetLabel} in the Files panel` }], 'ok');
     setStatus('ok');
   } catch (err) {
     appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
@@ -1596,6 +1630,10 @@ function submitCommand(rawCmd) {
   }
 
   addToHistory(_historySafeCommand(cmd));
+
+  if (_isRunMonitorCommand(cmd) && typeof openRunMonitor === 'function') {
+    void openRunMonitor({ source: 'command', toastOnEmpty: false });
+  }
 
   // Session-token subcommands (generate / set / clear / rotate) run entirely
   // client-side.  The bare 'session-token' status command goes to the server.

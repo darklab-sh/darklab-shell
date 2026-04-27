@@ -45,11 +45,11 @@ from output_signals import OutputSignalClassifier, classify_line, command_root, 
 from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
 from workspace import (
     InvalidWorkspacePath, WorkspaceDisabled, WorkspaceQuotaExceeded,
-    cleanup_inactive_workspaces, create_workspace_directory, delete_workspace_file,
+    cleanup_inactive_workspaces, create_workspace_directory, delete_workspace_file, delete_workspace_path,
     ensure_session_workspace, list_workspace_directories, list_workspace_files,
     prepare_workspace_file_for_command, read_workspace_text_file, resolve_workspace_path,
     session_workspace_name, workspace_usage,
-    touch_session_workspace, write_workspace_text_file, WORKSPACE_COMMAND_WRITE_FILE_MODE,
+    touch_session_workspace, workspace_path_info, write_workspace_text_file, WORKSPACE_COMMAND_WRITE_FILE_MODE,
     WORKSPACE_DIR_MODE, WORKSPACE_FILE_MODE,
 )
 
@@ -276,6 +276,47 @@ class TestSessionWorkspace:
 
             assert (path.stat().st_mode & 0o777) == WORKSPACE_COMMAND_WRITE_FILE_MODE
             assert not path.stat().st_mode & 0o007
+
+    def test_delete_workspace_file_falls_back_to_scanner_owner_for_nested_command_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            write_workspace_text_file("session-1", "nmap-dot/amass.dot", "digraph {}\n", cfg)
+            path = resolve_workspace_path("session-1", "nmap-dot/amass.dot", cfg)
+
+            with mock.patch("workspace.Path.unlink", side_effect=PermissionError), \
+                    mock.patch("workspace.shutil.which", return_value="/usr/bin/sudo"), \
+                    mock.patch("workspace.pwd.getpwnam", return_value=object()), \
+                    mock.patch("workspace.subprocess.run") as run:
+                delete_workspace_file("session-1", "nmap-dot/amass.dot", cfg)
+
+            run.assert_called_once_with(
+                ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "rm", "--", str(path)],
+                check=True,
+                stdout=mock.ANY,
+                stderr=mock.ANY,
+                timeout=5,
+            )
+
+    def test_workspace_path_info_and_delete_remove_folders_recursively(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            create_workspace_directory("session-1", "reports/empty", cfg)
+            write_workspace_text_file("session-1", "reports/one.txt", "1", cfg)
+            write_workspace_text_file("session-1", "reports/nested/two.txt", "2", cfg)
+
+            assert workspace_path_info("session-1", "reports", cfg) == {
+                "path": "reports",
+                "kind": "directory",
+                "file_count": 2,
+            }
+
+            result = delete_workspace_path("session-1", "reports", cfg)
+
+            assert result.kind == "directory"
+            assert result.file_count == 2
+            assert result.path == "reports"
+            assert list_workspace_files("session-1", cfg) == []
+            assert list_workspace_directories("session-1", cfg) == []
 
     def test_create_and_list_empty_directories_without_file_usage(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1420,22 +1461,86 @@ class TestActiveRunMetadata:
             process._session_run_ids.clear()
 
     def test_active_runs_for_session_preserves_pid(self):
-        process.active_run_register(
-            "run-1",
-            12345,
-            "session-1",
-            "ping darklab.sh",
-            "2026-01-01T00:00:00Z",
-        )
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process, "_pid_start_time", return_value=None),
+        ):
+            process.active_run_register(
+                "run-1",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+            )
 
-        assert process.active_runs_for_session("session-1") == [
-            {
-                "run_id": "run-1",
-                "pid": 12345,
-                "command": "ping darklab.sh",
-                "started": "2026-01-01T00:00:00Z",
-            }
-        ]
+            assert process.active_runs_for_session("session-1") == [
+                {
+                    "run_id": "run-1",
+                    "pid": 12345,
+                    "command": "ping darklab.sh",
+                    "started": "2026-01-01T00:00:00Z",
+                }
+            ]
+
+    def test_active_runs_for_session_prunes_dead_pid(self):
+        with mock.patch.object(process, "_pid_start_time", return_value=None):
+            process.active_run_register(
+                "run-dead",
+                23456,
+                "session-1",
+                "amass enum -active -d darklab.sh",
+                "2026-01-01T00:00:00Z",
+            )
+
+        with mock.patch.object(process, "_pid_is_alive", return_value=False):
+            assert process.active_runs_for_session("session-1") == []
+
+        assert process._active_run_meta == {}
+        assert process._session_run_ids == {}
+
+    def test_active_runs_for_session_prunes_redis_pid_reuse(self):
+        fake_redis = process._FakeRedisClient()
+        with mock.patch.object(process, "redis_client", fake_redis):
+            with mock.patch.object(process, "_pid_start_time", return_value="101"):
+                process.active_run_register(
+                    "run-reused",
+                    34567,
+                    "session-1",
+                    "amass enum -active -d darklab.sh",
+                    "2026-01-01T00:00:00Z",
+                )
+            process.pid_register("run-reused", 34567)
+
+            with (
+                mock.patch.object(process, "_pid_is_alive", return_value=True),
+                mock.patch.object(process, "_pid_start_time", return_value="202"),
+            ):
+                assert process.active_runs_for_session("session-1") == []
+
+            assert fake_redis.get("procmeta:run-reused") is None
+            assert fake_redis.get("proc:run-reused") is None
+            assert fake_redis.smembers("sessionprocs:session-1") == set()
+
+    def test_active_runs_for_session_prunes_redis_legacy_metadata_on_linux(self):
+        fake_redis = process._FakeRedisClient()
+        payload = {
+            "run_id": "run-legacy",
+            "pid": 45678,
+            "session_id": "session-1",
+            "command": "amass enum -active -d darklab.sh",
+            "started": "2026-01-01T00:00:00Z",
+        }
+        with mock.patch.object(process, "redis_client", fake_redis):
+            fake_redis.set("procmeta:run-legacy", process.json.dumps(payload))
+            fake_redis.sadd("sessionprocs:session-1", "run-legacy")
+
+            with (
+                mock.patch.object(process, "_pid_is_alive", return_value=True),
+                mock.patch.object(process, "_pid_start_time", return_value="303"),
+            ):
+                assert process.active_runs_for_session("session-1") == []
+
+            assert fake_redis.get("procmeta:run-legacy") is None
 
 
 # ── _format_retention ─────────────────────────────────────────────────────────
@@ -1671,6 +1776,25 @@ class TestOutputSignals:
             "Nmap done: 1 IP address (1 host up) scanned in 1.23 seconds",
             command="nmap ip.darklab.sh",
         ) == ["summaries"]
+
+    def test_workspace_notices_are_not_output_signals(self):
+        assert classify_line(
+            "[workspace] reading nmap/nmap_input.txt",
+            cls="notice",
+            command="nmap -iL nmap/nmap_input.txt",
+        ) == []
+        assert classify_line(
+            "[workspace] writing nmap/nmap_results.xml",
+            cls="notice",
+            command="nmap -oX nmap/nmap_results.xml",
+        ) == []
+
+        classifier = OutputSignalClassifier("nmap -iL nmap/nmap_input.txt -oX nmap/nmap_results.xml")
+        metadata = classifier.classify_line("[workspace] writing nmap/nmap_results.xml", cls="notice")
+
+        assert metadata["line_index"] == 0
+        assert metadata["command_root"] == "nmap"
+        assert "signals" not in metadata
 
     def test_nmap_input_file_sections_update_signal_target(self):
         classifier = OutputSignalClassifier("nmap -iL darklab_inputs.txt -sT")

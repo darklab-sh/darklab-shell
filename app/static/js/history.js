@@ -469,43 +469,88 @@ function toggleHistoryMobileFilters(force = null) {
 
 // ── Command history chips ──
 
+function _activeTabCommandHistoryState() {
+  const tab = typeof getActiveTab === 'function' ? getActiveTab() : null;
+  if (!tab) return null;
+  if (!Array.isArray(tab.commandHistory)) tab.commandHistory = [];
+  if (!Number.isInteger(tab.historyNavIndex)) tab.historyNavIndex = -1;
+  if (typeof tab.historyNavDraft !== 'string') tab.historyNavDraft = '';
+  return tab;
+}
+
+function _historyLimit() {
+  return Math.max(1, Number(APP_CONFIG.recent_commands_limit) || 50);
+}
+
+function _commandRecallHistory(tab) {
+  const limit = _historyLimit();
+  const seen = new Set();
+  const local = tab && Array.isArray(tab.commandHistory) ? tab.commandHistory : [];
+  return [...local, ...cmdHistory]
+    .map(cmd => String(cmd || ''))
+    .filter(cmd => {
+      if (!cmd || seen.has(cmd)) return false;
+      seen.add(cmd);
+      return true;
+    })
+    .slice(0, limit);
+}
+
 function resetCmdHistoryNav() {
-  _cmdHistoryNavIndex = -1;
-  _cmdHistoryNavDraft = '';
+  const tab = _activeTabCommandHistoryState();
+  if (tab) {
+    tab.historyNavIndex = -1;
+    tab.historyNavDraft = '';
+  } else {
+    _cmdHistoryNavIndex = -1;
+    _cmdHistoryNavDraft = '';
+  }
   if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
     exitHistSearch(false);
   }
 }
 
 function navigateCmdHistory(delta) {
-  if (!cmdHistory.length) return false;
+  const tab = _activeTabCommandHistoryState();
+  const history = tab ? _commandRecallHistory(tab) : cmdHistory;
+  if (!history.length) return false;
 
   if (delta > 0) {
-    if (_cmdHistoryNavIndex === -1) {
-      _cmdHistoryNavDraft = (typeof getComposerValue === 'function')
+    const currentIndex = tab ? tab.historyNavIndex : _cmdHistoryNavIndex;
+    if (currentIndex === -1) {
+      const draft = (typeof getComposerValue === 'function')
         ? getComposerValue()
         : (cmdInput ? cmdInput.value : '');
-      _cmdHistoryNavIndex = 0;
-    } else if (_cmdHistoryNavIndex < cmdHistory.length - 1) {
-      _cmdHistoryNavIndex++;
+      if (tab) {
+        tab.historyNavDraft = draft;
+        tab.historyNavIndex = 0;
+      } else {
+        _cmdHistoryNavDraft = draft;
+        _cmdHistoryNavIndex = 0;
+      }
+    } else if (currentIndex < history.length - 1) {
+      if (tab) tab.historyNavIndex++;
+      else _cmdHistoryNavIndex++;
     } else {
       return true;
     }
     _suspendCmdHistoryNavReset = true;
-    setComposerValue(cmdHistory[_cmdHistoryNavIndex]);
+    setComposerValue(history[tab ? tab.historyNavIndex : _cmdHistoryNavIndex]);
     return true;
   }
 
   if (delta < 0) {
-    if (_cmdHistoryNavIndex === -1) return false;
-    if (_cmdHistoryNavIndex > 0) {
-      _cmdHistoryNavIndex--;
+    const currentIndex = tab ? tab.historyNavIndex : _cmdHistoryNavIndex;
+    if (currentIndex === -1) return false;
+    if (currentIndex > 0) {
+      if (tab) tab.historyNavIndex--;
+      else _cmdHistoryNavIndex--;
       _suspendCmdHistoryNavReset = true;
-      setComposerValue(cmdHistory[_cmdHistoryNavIndex]);
+      setComposerValue(history[tab ? tab.historyNavIndex : _cmdHistoryNavIndex]);
       return true;
     }
     _suspendCmdHistoryNavReset = true;
-    setComposerValue(_cmdHistoryNavDraft);
+    setComposerValue(tab ? tab.historyNavDraft : _cmdHistoryNavDraft);
     resetCmdHistoryNav();
     return true;
   }
@@ -514,7 +559,12 @@ function navigateCmdHistory(delta) {
 }
 
 function addToHistory(cmd) {
-  cmdHistory = [cmd, ...cmdHistory.filter(c => c !== cmd)].slice(0, APP_CONFIG.recent_commands_limit);
+  const limit = _historyLimit();
+  cmdHistory = [cmd, ...cmdHistory.filter(c => c !== cmd)].slice(0, limit);
+  const tab = _activeTabCommandHistoryState();
+  if (tab) {
+    tab.commandHistory = [cmd, ...tab.commandHistory.filter(c => c !== cmd)].slice(0, limit);
+  }
   resetCmdHistoryNav();
   renderHistory();
 }

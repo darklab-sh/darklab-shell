@@ -36,6 +36,7 @@ let lnMode = 'off';
 
 const _OUTPUT_SYNC_BURST_LIMIT = 60;
 const _OUTPUT_BATCH_SIZE = 300;
+const _OUTPUT_RESTORE_TAIL_DELAYS = [0, 16, 64, 160, 320];
 const _pendingOutputBatches = new Map();
 
 function _outputPromptPrefix() {
@@ -285,6 +286,39 @@ function _stickOutputToBottom(out, tab) {
   }
 }
 
+function _restoreOutputTailAfterLayout(out, tab) {
+  if (!out) return;
+  const token = tab ? (tab._outputFollowToken || 0) + 1 : 0;
+  if (tab) {
+    tab._outputFollowToken = token;
+    tab.followOutput = true;
+    tab.suppressOutputScrollTracking = true;
+  }
+
+  const stick = (final = false) => {
+    const live = tab ? getTab(tab.id) : null;
+    if (tab && (!live || live._outputFollowToken !== token)) return;
+    if (live && Date.now() <= Number(live.outputUserScrollUntil || 0)) {
+      live.followOutput = false;
+      live.suppressOutputScrollTracking = false;
+      if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(live.id);
+      return;
+    }
+    if (!live || live.followOutput !== false) {
+      out.scrollTop = out.scrollHeight;
+    }
+    if (final && live) {
+      live.suppressOutputScrollTracking = false;
+      if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(live.id);
+    }
+  };
+
+  stick(false);
+  _OUTPUT_RESTORE_TAIL_DELAYS.forEach((delay, index) => {
+    setTimeout(() => stick(index === _OUTPUT_RESTORE_TAIL_DELAYS.length - 1), delay);
+  });
+}
+
 function _syncTabRawLines(tab, rawLine) {
   if (!tab || !rawLine) return;
   tab.rawLines.push(rawLine);
@@ -359,9 +393,10 @@ function renderRestoredTabOutput(tabId, rawLines) {
     && document.body.classList
     && document.body.classList.contains('mobile-terminal-mode')
   );
-  if (mobileMode && lines.length) {
+  if (lines.length) {
     tab.followOutput = true;
-    _stickOutputToBottom(out, tab);
+    if (mobileMode) _stickOutputToBottom(out, tab);
+    else _restoreOutputTailAfterLayout(out, tab);
   }
   if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(tabId);
   if (tabId === activeTabId && typeof refreshSearchDiscoverabilityUi === 'function') {

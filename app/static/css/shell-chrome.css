@@ -507,7 +507,18 @@
     flex: 0 0 auto;
     white-space: nowrap;
   }
-  .hud-cell.hud-status { cursor: pointer; }
+  .hud-cell.hud-status,
+  .hud-cell.hud-cell-clickable {
+    cursor: pointer;
+  }
+  .hud-cell.hud-cell-clickable:hover,
+  .hud-cell.hud-cell-clickable:focus-visible {
+    background: color-mix(in srgb, var(--text) 5%, transparent);
+    outline: none;
+  }
+  .hud-cell.hud-cell-clickable:focus-visible {
+    box-shadow: inset 0 0 0 1px var(--border-bright);
+  }
   .hud.hud-running [data-hud-chip="transport"],
   .hud.hud-running [data-hud-chip="mode"] {
     display: none;
@@ -660,6 +671,133 @@
     color: var(--text);
     background: color-mix(in srgb, var(--text) 6%, transparent);
   }
+
+  .run-monitor {
+    position: fixed;
+    left: var(--run-monitor-left, 214px);
+    bottom: 46px;
+    width: min(360px, calc(100vw - var(--run-monitor-left, 214px) - 24px));
+    max-height: min(440px, calc(100vh - 88px));
+    z-index: 75;
+    display: flex;
+    flex-direction: column;
+    background: var(--theme-panel-bg);
+    border: 1px solid var(--border-bright);
+    border-left: none;
+    box-shadow: 0 14px 32px color-mix(in srgb, var(--bg) 72%, transparent);
+    font-family: var(--font-mono);
+  }
+}
+
+.run-monitor-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 74;
+  background: transparent;
+}
+
+.run-monitor.u-hidden,
+.run-monitor-scrim.u-hidden {
+  display: none !important;
+}
+
+.run-monitor-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.run-monitor-title {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.run-monitor-summary {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.run-monitor-close {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.run-monitor-close:hover,
+.run-monitor-close:focus-visible {
+  color: var(--text);
+  border-color: var(--border-bright);
+  outline: none;
+}
+
+.run-monitor-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+    overflow: auto;
+}
+
+.run-monitor-item {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 9px 10px;
+  background: var(--theme-panel-alt-bg);
+  border-left-color: var(--green);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--green) 72%, transparent);
+}
+
+.run-monitor-item-clickable {
+  cursor: pointer;
+}
+
+.run-monitor-item-clickable:hover,
+.run-monitor-item-clickable:focus-visible {
+  border-color: var(--border-bright);
+  background: color-mix(in srgb, var(--green) 7%, var(--theme-panel-alt-bg));
+  outline: none;
+}
+
+.run-monitor-command {
+  color: var(--green);
+  text-shadow: 0 0 8px color-mix(in srgb, var(--green) 20%, transparent);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.run-monitor-meta {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.run-monitor-elapsed {
+  color: var(--green);
+  font-weight: 700;
+}
+
+.run-monitor-empty {
+  padding: 14px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.run-monitor-error {
+  color: var(--red);
 }
 
 /* ============================================================
@@ -679,3 +817,28 @@ body.mobile-terminal-mode .tabbar-chrome { display: none !important; }
 body.mobile-terminal-mode .shell-root,
 body.mobile-terminal-mode .main-col,
 body.mobile-terminal-mode .tabbar-scroll { display: contents; }
+
+@media (max-width: 600px) {
+  .run-monitor {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    max-height: min(68vh, 520px);
+    z-index: 120;
+    display: flex;
+    flex-direction: column;
+    background: var(--theme-panel-bg);
+    border: 1px solid var(--border-bright);
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    box-shadow: 0 -14px 28px color-mix(in srgb, var(--bg) 72%, transparent);
+    font-family: var(--font-mono);
+  }
+
+  .run-monitor-scrim {
+    z-index: 119;
+    background: color-mix(in srgb, var(--bg) 45%, transparent);
+  }
+}

@@ -940,6 +940,10 @@ histClearAllBtn.addEventListener('click', () => {
 // browser's native button activation. Escape is routed through the
 // dismissible dispatcher below.
 // Browser-native combos like Ctrl/Cmd+T or Ctrl/Cmd+W remain environment-dependent.
+function hasActiveTerminalConfirm() {
+  return typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm();
+}
+
 document.addEventListener('keydown', e => {
   // Unified Escape dispatch: closes the topmost open dismissible
   // (modal > sheet > panel) via the registry populated by
@@ -999,7 +1003,7 @@ document.addEventListener('keydown', e => {
     const activeTab = getActiveTab();
     if (activeTab && activeTab.st === 'running') {
       confirmKill(activeTabId);
-    } else if (typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm()) {
+    } else if (hasActiveTerminalConfirm()) {
       cancelPendingTerminalConfirm(activeTabId);
     } else {
       interruptPromptLine(activeTabId);
@@ -1083,6 +1087,10 @@ function _replayPromptShortcutAfterSelection(e) {
     return true;
   }
   if (e.key === 'ArrowDown') {
+    if (hasActiveTerminalConfirm()) {
+      if (typeof acHide === 'function') acHide();
+      return true;
+    }
     if (isAcDropdownOpen() && acFiltered.length) {
       acIndex = (acIndex + 1) % acFiltered.length;
       if (typeof acShow === 'function') acShow(acFiltered);
@@ -1092,6 +1100,10 @@ function _replayPromptShortcutAfterSelection(e) {
     return true;
   }
   if (e.key === 'ArrowUp') {
+    if (hasActiveTerminalConfirm()) {
+      if (typeof acHide === 'function') acHide();
+      return true;
+    }
     if (isAcDropdownOpen() && acFiltered.length) {
       acIndex = acIndex <= 0 ? acFiltered.length - 1 : acIndex - 1;
       if (typeof acShow === 'function') acShow(acFiltered);
@@ -1411,7 +1423,7 @@ cmdInput.addEventListener('keydown', e => {
       confirmKill(activeTabId);
       return;
     }
-    if (typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm()) {
+    if (hasActiveTerminalConfirm()) {
       cancelPendingTerminalConfirm(activeTabId);
       return;
     }
@@ -1511,7 +1523,7 @@ cmdInput.addEventListener('keydown', e => {
       refocusComposerAfterAction({ defer: true });
       return;
     }
-    if (acIndex >= 0 && acFiltered[acIndex]) {
+    if (!hasActiveTerminalConfirm() && acIndex >= 0 && acFiltered[acIndex]) {
       e.preventDefault();
       acAccept(acFiltered[acIndex]);
     } else {
@@ -1527,6 +1539,10 @@ cmdInput.addEventListener('keydown', e => {
   }
   if (e.key === 'Tab' && !e.altKey && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
+    if (hasActiveTerminalConfirm()) {
+      acHide();
+      return;
+    }
     if (acFiltered.length === 1) { acAccept(acFiltered[0]); }
     else if (acFiltered.length > 0) {
       if (typeof acExpandSharedPrefix === 'function' && acExpandSharedPrefix(acFiltered)) return;
@@ -1543,6 +1559,10 @@ cmdInput.addEventListener('keydown', e => {
   }
   if (e.key === 'ArrowDown') {
     e.preventDefault();
+    if (hasActiveTerminalConfirm()) {
+      acHide();
+      return;
+    }
     const acOpen = isAcDropdownOpen();
     if (acOpen && acFiltered.length) {
       acIndex = (acIndex + 1) % acFiltered.length;
@@ -1554,6 +1574,10 @@ cmdInput.addEventListener('keydown', e => {
   }
   if (e.key === 'ArrowUp') {
     e.preventDefault();
+    if (hasActiveTerminalConfirm()) {
+      acHide();
+      return;
+    }
     const acOpen = isAcDropdownOpen();
     if (acOpen && acFiltered.length) {
       acIndex = acIndex <= 0 ? acFiltered.length - 1 : acIndex - 1;

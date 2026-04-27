@@ -731,10 +731,11 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Utility commands**
 
-- `help`, `commands`, `history`, `last`, `limits`, `retention`, `status`, `stats`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `fortune`, `jobs`, `shortcuts`, `clear`, `version`, and `whoami` are available in every session.
+- `help`, `commands`, `history`, `last`, `limits`, `retention`, `status`, `runs`, `jobs`, `stats`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `fortune`, `shortcuts`, `clear`, `version`, and `whoami` are available in every session.
 - `status` prints a compact session summary: masked active session ID, session type, run count, snapshot count, starred-command count, whether saved Options exist for the session, active-job count, compact session file usage when Files are enabled, and the current instance-level save/retention limits.
+- `runs` prints app-native active-run metadata for the current session and opens the Run Monitor when active commands exist; `jobs` is a compatibility alias for the same view. On desktop, the `STATUS`, `LAST EXIT`, and `TABS` HUD pills open the same monitor when runs are active.
 - `stats` prints session activity totals and external-tool command-root breakdowns: runs, snapshots, starred commands, active jobs, success rate, average duration, and the top non-built-in command roots by run count.
-- `file list`, `file show <file>`, `file add <file>`, `file edit <file>`, and confirmed `file rm <file>`, plus the convenience aliases `ls`, `cat <file>`, and confirmed `rm <file>`, expose keyboard-first access to the current session files when workspace storage is enabled. `file list` reports current file count, used quota, and remaining quota before listing files.
+- `file list`, `file show <file>`, `file add [file]`, `file edit <file>`, and confirmed `file rm <file>`, plus the convenience aliases `ls`, `cat <file>`, and confirmed `rm <file>`, expose keyboard-first access to the current session files when workspace storage is enabled. `file add` opens a blank file editor, while `file add <file>` opens the same editor with the file name prefilled. `file list` reports current file count, used quota, and remaining quota before listing files.
 - `theme` lists and applies runtime theme variants from the terminal. `config` lists, reads, and updates user options such as line numbers, timestamps, welcome behavior, share redaction defaults, run notifications, and HUD clock mode.
 - `ps` lists currently running processes for the session (PID, TTY, STAT, START, CMD columns), or shows a `no running processes` notice when idle.
 
@@ -772,7 +773,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Workspace access updates the hashed session directory activity timestamp. Periodic cleanup removes inactive `sess_*` directories after `workspace_inactivity_ttl_hours`; it does not delete individual files solely because their file timestamps are old.
 - File names are relative and display-friendly; absolute paths, traversal, backslashes, hidden names, symlinks, and paths outside the session root are rejected.
 - The Files panel can create, view, edit, download, and delete text files owned by the current session; obvious JSON files are pretty-printed in the read-only viewer.
-- The `file` built-in provides terminal access to the same file model through `file list`, `file show <file>`, `file add <file>`, `file edit <file>`, and confirmed `file rm <file>`; `file list` reports file count, used quota, and remaining quota before listing files.
+- The `file` built-in provides terminal access to the same file model through `file list`, `file show <file>`, `file add [file]`, `file edit <file>`, and confirmed `file rm <file>`; `file add` opens a blank file editor unless a filename is provided, and `file list` reports file count, used quota, and remaining quota before listing files.
 - The `ls`, `cat <file>`, and `rm <file>` aliases map to file list/show/remove operations only; they do not expose arbitrary host/container filesystem access.
 - `file rm <file>` and `rm <file>` first verify the file exists, then require the same transcript-owned yes/no confirmation model as other destructive terminal-native actions.
 - Loaded workspace file names feed autocomplete for `file show`, `file edit`, `file rm`, and `cat`.

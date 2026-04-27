@@ -25,6 +25,7 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {} } = {}) {
     },
     `{
     appendLine,
+    _restoreOutputTailAfterLayout,
     _setTsMode,
     _setLnMode,
     _getTabs: () => tabs,
@@ -290,6 +291,50 @@ describe('appendLine', () => {
 
     expect(document.querySelector('.line')).toBeNull()
     expect(_getTabs()[0].rawLines).toHaveLength(0)
+  })
+
+  it('re-sticks restored output to the tail after delayed layout growth', () => {
+    const timers = []
+    const { _restoreOutputTailAfterLayout, _getTabs } = loadOutputFns({
+      appConfig: { max_output_lines: 100 },
+      extraGlobals: {
+        setTimeout: (fn, delay) => {
+          timers.push({ fn, delay })
+          return timers.length
+        },
+      },
+    })
+    timers.length = 0
+    const out = document.getElementById('out')
+    const tab = _getTabs()[0]
+    let scrollTop = 0
+    let scrollHeight = 900
+
+    Object.defineProperty(out, 'clientHeight', { configurable: true, get: () => 300 })
+    Object.defineProperty(out, 'scrollHeight', { configurable: true, get: () => scrollHeight })
+    Object.defineProperty(out, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value) => {
+        scrollTop = value
+      },
+    })
+
+    _restoreOutputTailAfterLayout(out, tab)
+
+    expect(timers.map(timer => timer.delay)).toEqual([0, 16, 64, 160, 320])
+    expect(scrollTop).toBe(900)
+    expect(tab.followOutput).toBe(true)
+    expect(tab.suppressOutputScrollTracking).toBe(true)
+
+    scrollHeight = 1400
+    timers.filter(timer => timer.delay <= 64).forEach(timer => timer.fn())
+    expect(scrollTop).toBe(1400)
+
+    scrollHeight = 1800
+    timers.filter(timer => timer.delay > 64).forEach(timer => timer.fn())
+    expect(scrollTop).toBe(1800)
+    expect(tab.suppressOutputScrollTracking).toBe(false)
   })
 
   it('batches large bursts of output and finishes rendering on the next tick', async () => {

@@ -701,6 +701,7 @@
     } catch (_) {
       hudState.latencyMs = null;
       hudState.db = 'down';
+      if (hudState.redis !== 'none') hudState.redis = 'down';
     }
     _renderLatency();
     _renderUptime();

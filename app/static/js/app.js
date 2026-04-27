@@ -940,6 +940,9 @@ function _tabSessionSnapshot() {
       command: String(tab.command || ''),
       renamed: !!tab.renamed,
       draftInput: String(tab.draftInput || ''),
+      commandHistory: Array.isArray(tab.commandHistory)
+        ? tab.commandHistory.map(cmd => String(cmd || '')).filter(Boolean)
+        : [],
       st: String(tab.st || 'idle'),
       exitCode: tab.exitCode == null ? null : Number(tab.exitCode),
       historyRunId: String(tab.historyRunId || ''),
@@ -1031,6 +1034,11 @@ function restoreTabSessionState() {
       tab.command = String(item && item.command || '');
       tab.renamed = !!(item && item.renamed);
       tab.draftInput = String(item && item.draftInput || '');
+      tab.commandHistory = Array.isArray(item && item.commandHistory)
+        ? item.commandHistory.map(cmd => String(cmd || '')).filter(Boolean)
+        : [];
+      tab.historyNavIndex = -1;
+      tab.historyNavDraft = '';
       tab.exitCode = item && item.exitCode == null ? null : Number(item.exitCode);
       tab.historyRunId = String(item && item.historyRunId || '');
       tab.previewTruncated = !!(item && item.previewTruncated);
@@ -1054,6 +1062,11 @@ function restoreTabSessionState() {
       tab.command = String(item && item.command || '');
       tab.renamed = !!(item && item.renamed);
       tab.draftInput = String(item && item.draftInput || '');
+      tab.commandHistory = Array.isArray(item && item.commandHistory)
+        ? item.commandHistory.map(cmd => String(cmd || '')).filter(Boolean)
+        : [];
+      tab.historyNavIndex = -1;
+      tab.historyNavDraft = '';
       tab.exitCode = item && item.exitCode == null ? null : Number(item.exitCode);
       tab.historyRunId = String(item && item.historyRunId || '');
       tab.previewTruncated = !!(item && item.previewTruncated);
@@ -1065,6 +1078,13 @@ function restoreTabSessionState() {
     const activeIndex = Math.max(0, Math.min(Number(parsed.activeIndex) || 0, restoredIds.length - 1));
     if (typeof activateTab === 'function') activateTab(restoredIds[activeIndex], { focusComposer: false });
     if (typeof mountShellPrompt === 'function') mountShellPrompt(restoredIds[activeIndex], true);
+    if (typeof _restoreOutputTailAfterLayout === 'function'
+      && typeof getOutput === 'function'
+      && typeof getTab === 'function') {
+      const activeTab = getTab(restoredIds[activeIndex]);
+      const activeOutput = getOutput(restoredIds[activeIndex]);
+      _restoreOutputTailAfterLayout(activeOutput, activeTab);
+    }
     return true;
   } finally {
     _tabSessionRestoreInProgress = false;

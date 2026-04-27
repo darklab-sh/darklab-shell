@@ -7,6 +7,10 @@ function _acItemText(item) {
   return String(item || '').trim();
 }
 
+function _isAutocompleteBlockedByTerminalConfirm() {
+  return typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm();
+}
+
 function _acItemInsertValue(item) {
   if (item && typeof item === 'object') {
     return String(item.insertValue || item.value || item.label || '').trim();
@@ -685,6 +689,10 @@ function _scrollAutocompleteActiveItem() {
 }
 
 function acShow(items) {
+  if (_isAutocompleteBlockedByTerminalConfirm()) {
+    acHide();
+    return;
+  }
   acDropdown.innerHTML = '';
   if (!items.length) { hideAcDropdown(); return; }
   _positionAutocomplete(items.length);
@@ -803,6 +811,11 @@ function acExpandSharedPrefix(items) {
 }
 
 function acAccept(s) {
+  if (_isAutocompleteBlockedByTerminalConfirm()) {
+    acHide();
+    refocusComposerAfterAction({ preventScroll: true });
+    return;
+  }
   if (s && typeof s === 'object') {
     // Placeholder-only hints (e.g. "<token>") are display-only: Tab should hide
     // the dropdown, not insert the literal placeholder text into the prompt.

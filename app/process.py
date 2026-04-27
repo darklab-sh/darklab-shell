@@ -168,6 +168,54 @@ def _load_active_run_payload(raw: object) -> dict[str, Any] | None:
     return cast(dict[str, Any], payload) if isinstance(payload, dict) else None
 
 
+def _pid_is_alive(pid: int) -> bool:
+    """Return whether a process id exists in this process namespace."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _pid_start_time(pid: int) -> str | None:
+    """Read Linux /proc start time for a PID so reused PIDs are not trusted."""
+    if pid <= 0:
+        return None
+    try:
+        with open(f"/proc/{pid}/stat", encoding="utf-8") as stat_file:
+            raw = stat_file.read()
+    except OSError:
+        return None
+    end = raw.rfind(")")
+    if end < 0:
+        return None
+    fields = raw[end + 2:].split()
+    if len(fields) <= 19:
+        return None
+    return fields[19]
+
+
+def _active_run_is_alive(payload: dict[str, Any]) -> bool:
+    """Verify stored active-run metadata still points at the original process."""
+    try:
+        pid = int(payload.get("pid", 0) or 0)
+    except (TypeError, ValueError):
+        return False
+    if not _pid_is_alive(pid):
+        return False
+    expected_start = payload.get("pid_start_time")
+    current_start = _pid_start_time(pid)
+    if expected_start is None:
+        return current_start is None
+    return current_start is None or str(current_start) == str(expected_start)
+
+
 def _redis_smembers_strings(key: str) -> list[str]:
     """Return a normalized list of Redis set members as strings."""
     if not redis_client:
@@ -206,6 +254,7 @@ def active_run_register(run_id: str, pid: int, session_id: str, command: str, st
     payload = {
         "run_id": run_id,
         "pid": pid,
+        "pid_start_time": _pid_start_time(pid),
         "session_id": session_id,
         "command": command,
         "started": started,
@@ -266,6 +315,10 @@ def active_runs_for_session(session_id: str) -> list[dict]:
             if str(payload.get("session_id", "")) != session_id:
                 stale.append(run_id)
                 continue
+            if not _active_run_is_alive(payload):
+                stale.append(run_id)
+                redis_client.delete(f"procmeta:{run_id}", f"proc:{run_id}")
+                continue
             items.append(payload)
         if stale:
             redis_client.srem(session_key, *stale)
@@ -286,9 +339,14 @@ def active_runs_for_session(session_id: str) -> list[dict]:
     with _pid_lock:
         run_ids = list(_session_run_ids.get(session_id, set()))
         items = []
+        stale = []
         for run_id in run_ids:
             item = _active_run_meta.get(run_id)
             if not item:
+                stale.append(run_id)
+                continue
+            if not _active_run_is_alive(item):
+                stale.append(run_id)
                 continue
             items.append(
                 {
@@ -298,6 +356,12 @@ def active_runs_for_session(session_id: str) -> list[dict]:
                     "started": str(item.get("started", "")),
                 }
             )
+        for run_id in stale:
+            _active_run_meta.pop(run_id, None)
+            if session_id in _session_run_ids:
+                _session_run_ids[session_id].discard(run_id)
+        if session_id in _session_run_ids and not _session_run_ids[session_id]:
+            _session_run_ids.pop(session_id, None)
         return sorted(
             [item for item in items if item["run_id"] and item["command"] and item["started"]],
             key=lambda item: item["started"],

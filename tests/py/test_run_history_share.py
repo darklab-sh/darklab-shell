@@ -788,6 +788,21 @@ class TestRunStreaming:
                 json={"path": "targets.txt", "text": "darklab.sh\nip.darklab.sh\n"},
                 headers={"X-Session-ID": session},
             )
+            created_report = client.post(
+                "/workspace/files",
+                json={"path": "reports/amass.txt", "text": "one.darklab.sh\n"},
+                headers={"X-Session-ID": session},
+            )
+            created_nested_report = client.post(
+                "/workspace/files",
+                json={"path": "reports/nested/httpx.txt", "text": "https://ip.darklab.sh\n"},
+                headers={"X-Session-ID": session},
+            )
+            created_empty_folder = client.post(
+                "/workspace/directories",
+                json={"path": "empty-folder"},
+                headers={"X-Session-ID": session},
+            )
             list_resp = client.post(
                 "/run",
                 json={"command": "file list"},
@@ -800,13 +815,26 @@ class TestRunStreaming:
             )
 
         assert created.status_code == 200
+        assert created_report.status_code == 200
+        assert created_nested_report.status_code == 200
+        assert created_empty_folder.status_code == 200
         assert list_resp.status_code == 200
         list_body = list_resp.get_data(as_text=True)
         assert "Session files:\\n" in list_body
         assert "usage" in list_body
-        assert "25 B / 1.0 MB\\n" in list_body
+        assert "62 B / 1.0 MB\\n" in list_body
         assert "remaining" in list_body
+        assert "\\u001b[4mpath" in list_body
+        assert "\\u001b[4msize" in list_body
+        assert "\\u001b[4mmodified\\u001b[0m" in list_body
         assert "targets.txt" in list_body
+        assert "empty-folder/" in list_body
+        assert "reports/" in list_body
+        assert "  amass.txt" in list_body
+        assert "  reports/nested/" in list_body
+        assert "    httpx.txt" in list_body
+        assert list_body.index("reports/") < list_body.index("  amass.txt")
+        assert list_body.index("  reports/nested/") < list_body.index("    httpx.txt")
 
         assert show_resp.status_code == 200
         show_body = show_resp.get_data(as_text=True)
@@ -1223,13 +1251,19 @@ class TestRunStreaming:
         assert "total        used        free" in free_body
         assert "Mem:" in free_body
 
-    def test_fake_jobs_lists_active_session_runs(self):
+    def test_fake_jobs_aliases_runs_metadata(self):
         client = get_client()
 
         with mock.patch("fake_commands.active_runs_for_session", return_value=[
-            {"run_id": "run-1", "command": "ping darklab.sh", "started": "2026-01-01T00:00:00+00:00"},
             {
-                "run_id": "run-2",
+                "run_id": "run-abcdef123456",
+                "pid": 4242,
+                "command": "ping darklab.sh",
+                "started": "2026-01-01T00:00:00+00:00",
+            },
+            {
+                "run_id": "run-fedcba987654",
+                "pid": 0,
                 "command": "ffuf -u https://darklab.sh/FUZZ -w words.txt",
                 "started": "2026-01-01T00:00:05+00:00",
             },
@@ -1238,10 +1272,14 @@ class TestRunStreaming:
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "[1]-  Running                 ping darklab.sh\\n" in body
-        assert "[2]+  Running                 ffuf -u https://darklab.sh/FUZZ -w words.txt\\n" in body
+        assert "Active runs:\\n" in body
+        assert "run-abcd" in body
+        assert "4242" in body
+        assert "ping darklab.sh\\n" in body
+        assert "run-fedc" in body
+        assert "ffuf -u https://darklab.sh/FUZZ -w words.txt\\n" in body
 
-    def test_fake_jobs_reports_when_no_active_jobs_exist(self):
+    def test_fake_jobs_alias_reports_when_no_active_runs_exist(self):
         client = get_client()
 
         with mock.patch("fake_commands.active_runs_for_session", return_value=[]):
@@ -1249,7 +1287,50 @@ class TestRunStreaming:
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "No current jobs.\\n" in body
+        assert "No active runs.\\n" in body
+
+    def test_fake_runs_lists_active_run_metadata(self):
+        client = get_client()
+
+        with mock.patch("fake_commands.active_runs_for_session", return_value=[
+            {
+                "run_id": "run-abcdef123456",
+                "pid": 4242,
+                "command": "ping darklab.sh",
+                "started": "2026-01-01T00:00:00+00:00",
+            },
+            {
+                "run_id": "run-fedcba987654",
+                "pid": 0,
+                "command": "ffuf -u https://darklab.sh/FUZZ -w words.txt",
+                "started": "2026-01-01T00:00:05+00:00",
+            },
+        ]):
+            resp = client.post("/run", json={"command": "runs"}, headers={"X-Session-ID": "sess-runs"})
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "Active runs:\\n" in body
+        assert "run" in body
+        assert "pid" in body
+        assert "elapsed" in body
+        assert "command\\n" in body
+        assert "run-abcd" in body
+        assert "4242" in body
+        assert "ping darklab.sh\\n" in body
+        assert "run-fedc" in body
+        assert "  -  " in body
+        assert "ffuf -u https://darklab.sh/FUZZ -w words.txt\\n" in body
+
+    def test_fake_runs_reports_when_no_active_runs_exist(self):
+        client = get_client()
+
+        with mock.patch("fake_commands.active_runs_for_session", return_value=[]):
+            resp = client.post("/run", json={"command": "runs"}, headers={"X-Session-ID": "sess-runs"})
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "No active runs.\\n" in body
 
     def test_fake_man_renders_real_page_for_allowed_topic(self):
         client = get_client()

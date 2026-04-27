@@ -1092,6 +1092,38 @@ class TestWorkspaceRoutes:
             assert listed.status_code == 200
             assert "reports/empty" in {item["path"] for item in listed.get_json()["directories"]}
 
+    def test_info_and_delete_folder_recursively(self):
+        client = get_client()
+        session = "workspace-delete-dir-" + uuid.uuid4().hex[:8]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": "reports/one.txt", "text": "one\n"},
+            )
+            client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": "reports/nested/two.txt", "text": "two\n"},
+            )
+
+            info = client.get(
+                "/workspace/files/info?path=reports",
+                headers={"X-Session-ID": session},
+            )
+            assert info.status_code == 200
+            assert info.get_json() == {"path": "reports", "kind": "directory", "file_count": 2}
+
+            deleted = client.delete(
+                "/workspace/files?path=reports",
+                headers={"X-Session-ID": session},
+            )
+            assert deleted.status_code == 200
+            data = deleted.get_json()
+            assert data["deleted"] == {"path": "reports", "kind": "directory", "file_count": 2}
+            assert data["workspace"]["files"] == []
+            assert data["workspace"]["directories"] == []
+
     def test_rejects_unsafe_paths(self):
         client = get_client()
         session = "workspace-paths-" + uuid.uuid4().hex[:8]

@@ -191,6 +191,11 @@ describe('command history hydration', () => {
     const histRow = document.getElementById('history-row')
     const cmdInput = document.getElementById('cmd')
     const historyPanel = document.getElementById('history-panel')
+    const activeTab = {
+      commandHistory: [],
+      historyNavIndex: -1,
+      historyNavDraft: '',
+    }
 
     return fromDomScripts(
       ['app/static/js/history.js'],
@@ -204,6 +209,7 @@ describe('command history hydration', () => {
         historyPanel,
         refreshHistoryPanel: vi.fn(),
         useMobileTerminalViewportMode: () => false,
+        getActiveTab: () => activeTab,
         emitUiEvent,
         setComposerState: (next) => {
           if (Object.prototype.hasOwnProperty.call(next, 'value'))
@@ -222,17 +228,19 @@ describe('command history hydration', () => {
       `{
       reloadSessionHistory,
       hydrateCmdHistory,
+      addToHistory,
       navigateCmdHistory,
       resetCmdHistoryNav,
       renderHistory,
       getCmdHistory: () => cmdHistory.slice(),
+      getTabCommandHistory: () => getActiveTab().commandHistory.slice(),
       getRecentPreviewHistory: () => recentPreviewHistory.slice(),
       emitUiEvent,
     }`,
     )
   }
 
-  it('hydrates unique recent commands from server history and enables navigation', () => {
+  it('hydrates unique recent commands from server history as fallback recall', () => {
     const { hydrateCmdHistory, navigateCmdHistory, getCmdHistory, getRecentPreviewHistory } = loadHistoryHelpers()
     const cmdInput = document.getElementById('cmd')
 
@@ -256,8 +264,42 @@ describe('command history hydration', () => {
 
     expect(navigateCmdHistory(1)).toBe(true)
     expect(cmdInput.value).toBe('dig darklab.sh A')
+    expect(navigateCmdHistory(1)).toBe(true)
+    expect(cmdInput.value).toBe('curl -I https://darklab.sh')
+  })
+
+  it('adds commands to both global recents and active tab recall', () => {
+    const { addToHistory, navigateCmdHistory, getCmdHistory, getTabCommandHistory } = loadHistoryHelpers()
+    const cmdInput = document.getElementById('cmd')
+
+    addToHistory('dig darklab.sh A')
+    addToHistory('curl -I https://darklab.sh')
+
+    expect(getCmdHistory()).toEqual(['curl -I https://darklab.sh', 'dig darklab.sh A'])
+    expect(getTabCommandHistory()).toEqual(['curl -I https://darklab.sh', 'dig darklab.sh A'])
+
+    expect(navigateCmdHistory(1)).toBe(true)
+    expect(cmdInput.value).toBe('curl -I https://darklab.sh')
+  })
+
+  it('prefers active tab recall before falling back to global recents', () => {
+    const { hydrateCmdHistory, addToHistory, navigateCmdHistory } = loadHistoryHelpers()
+    const cmdInput = document.getElementById('cmd')
+
+    hydrateCmdHistory([
+      { command: 'whoami' },
+      { command: 'status' },
+    ])
+    addToHistory('dig darklab.sh A')
+
+    expect(navigateCmdHistory(1)).toBe(true)
+    expect(cmdInput.value).toBe('dig darklab.sh A')
+    expect(navigateCmdHistory(1)).toBe(true)
+    expect(cmdInput.value).toBe('whoami')
+    expect(navigateCmdHistory(1)).toBe(true)
+    expect(cmdInput.value).toBe('status')
     expect(navigateCmdHistory(-1)).toBe(true)
-    expect(cmdInput.value).toBe('')
+    expect(cmdInput.value).toBe('whoami')
   })
 
   it('reloads command history from the distinct-command endpoint', async () => {
@@ -285,10 +327,11 @@ describe('command history hydration', () => {
   })
 
   it('restores the typed draft after navigating through hydrated history', () => {
-    const { hydrateCmdHistory, navigateCmdHistory } = loadHistoryHelpers()
+    const { addToHistory, navigateCmdHistory } = loadHistoryHelpers()
     const cmdInput = document.getElementById('cmd')
 
-    hydrateCmdHistory([{ command: 'dig darklab.sh A' }, { command: 'curl -I https://darklab.sh' }])
+    addToHistory('curl -I https://darklab.sh')
+    addToHistory('dig darklab.sh A')
 
     cmdInput.value = 'pin'
     setComposerState({ value: 'pin', selectionStart: 3, selectionEnd: 3, activeInput: 'desktop' })
@@ -318,10 +361,11 @@ describe('command history hydration', () => {
   })
 
   it('resetCmdHistoryNav clears navigation state after the user types', () => {
-    const { hydrateCmdHistory, navigateCmdHistory, resetCmdHistoryNav } = loadHistoryHelpers()
+    const { addToHistory, navigateCmdHistory, resetCmdHistoryNav } = loadHistoryHelpers()
     const cmdInput = document.getElementById('cmd')
 
-    hydrateCmdHistory([{ command: 'dig darklab.sh A' }, { command: 'curl -I https://darklab.sh' }])
+    addToHistory('curl -I https://darklab.sh')
+    addToHistory('dig darklab.sh A')
 
     expect(navigateCmdHistory(1)).toBe(true)
     expect(cmdInput.value).toBe('dig darklab.sh A')

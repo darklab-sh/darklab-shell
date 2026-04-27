@@ -401,7 +401,19 @@ test.describe('options modal', () => {
     await expect(page.locator('#options-overlay')).toHaveClass(/open/)
     await page.locator('#options-ts-select').selectOption('elapsed')
     await page.locator('#options-ln-toggle').check()
-    await page.locator('#options-hud-clock-select').selectOption('local')
+    await Promise.all([
+      page.waitForResponse((response) => {
+        if (!response.url().endsWith('/session/preferences')) return false
+        if (response.request().method() !== 'POST') return false
+        try {
+          const payload = JSON.parse(response.request().postData() || '{}')
+          return payload?.preferences?.pref_hud_clock === 'local'
+        } catch {
+          return false
+        }
+      }),
+      page.locator('#options-hud-clock-select').selectOption('local'),
+    ])
     await page.locator('.options-close').click()
 
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'apricot_sand')

@@ -22,46 +22,63 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Open TODOs
 
-- **App-native active run monitor**
-  - Add a `runs` built-in for darklab_shell-specific active command metadata instead of overloading `ps` or `jobs`.
-  - Keep `ps` process-shaped and `jobs` shell-job-shaped; use `runs` for richer app context such as run ID, tab, PID, elapsed time, stream state, and command.
-  - Start with `runs` showing active runs for the current session:
-    - short run ID
-    - PID/process group when available
-    - elapsed duration
-    - command text
-    - tab ID/title once the frontend sends that metadata on `/run`
-  - Add useful follow-ups after the basic view:
+- **Run Monitor follow-ups**
+  - The base Run Monitor is implemented: `runs` prints app-native active-run metadata, `jobs` aliases it, desktop HUD pills open the monitor when active runs exist, mobile command use opens the monitor as a sheet, and empty HUD clicks stay as a green toast instead of opening an empty panel.
+  - Keep the remaining work scoped to richer metadata and debug/operator views:
     - `runs -v` for full IDs, started timestamps, and active-run storage source
     - `runs --json` for debugging and automation
     - `runs --stalled` once PID-aware stalled-stream state exists
-  - Backend notes:
+    - highlight/filter the monitor by tab when opened from the `TABS` pill
+    - expose stale/detached state and a clear-stale action once the backend lifecycle is explicit enough
+  - Backend follow-ups:
     - extend `/run` start payload to include tab ID/title so active-run metadata can identify the originating tab
     - consider recording `last_output_at` and `last_stream_at` so `runs` can distinguish quiet, streaming, stalled, and detached states
-  - Testing:
-    - Add fake-command coverage for empty and populated `runs` output.
-    - Add active-run metadata coverage proving tab fields survive through `/history/active` once `/run` records them.
+  - Testing follow-ups:
+    - add active-run metadata coverage proving tab fields survive through `/history/active` once `/run` records them
 
-- **Tab-local command history traversal**
-  - Make Up/Down command recall behave more like separate shell tabs while a session is active.
-  - Current behavior appears to use the latest session/global command history, so pressing Up in one tab can recall a command that was entered in another tab.
-  - Desired behavior:
-    - each tab should prefer its own in-tab command history for Up/Down traversal
-    - commands from other tabs should not appear in that tab's immediate Up/Down stack while the app session is active
-    - global/session history can still exist for the history drawer, search, saved runs, and persisted history after commands complete
-  - Shell-inspired model:
-    - maintain a tab-local "live history" buffer for interactive recall
-    - commit commands to global persisted history separately
-    - decide whether tab-local buffers survive reload/reconnect or are intentionally ephemeral
-  - UX details to resolve:
-    - whether a new tab starts with an empty recall stack or inherits the current session's global history
-    - whether switching tabs should restore any partially typed input draft along with that tab's recall cursor
-    - how Down behaves after editing a recalled command in one tab
-    - whether there should be an explicit shortcut or command palette action for searching global history when tab-local recall is too narrow
+- **ANSI-enhanced built-in output polish**
+  - Review and improve app-authored terminal output so built-ins feel more intentional and readable when rendered through `ansi_up`.
+  - Current rendering boundary:
+    - normal output classes already flow through `ansi_up`, including most `fake-*` built-in command output
+    - `prompt-echo`, `notice`, `denied`, `exit-ok`, and `exit-fail` intentionally render with `textContent` plus CSS classes
+    - keep that safety boundary unless there is a specific reason to change it; system messages, command echoes, warnings, denials, and process-exit summaries should remain CSS-styled/plain text rather than ANSI-converted
+    - external command output should be preserved as emitted by the tool; do not inject additional app ANSI styling into scanner/tool output
+  - Add shared ANSI helpers in `app/fake_commands.py`:
+    - centralize reset, bold, dim, underline, cyan, green, red, and amber/yellow helpers
+    - replace one-off escape helpers such as the current file-list underline helper with the shared helpers
+    - keep padding inside the styled text for fixed-width table headers so ANSI escapes do not break alignment
+  - Apply consistent table-header styling:
+    - keep `file list` headers underlined
+    - underline headers for `runs` / `jobs` output: `run`, `pid`, `elapsed`, `command`
+    - underline headers for `stats` top-command output: `command`, `runs`, `ok`, `avg`
+    - underline headers for shell-shaped summaries such as `ps`, `df -h`, `free -h`, and `route`
+  - Add semantic color to key/value built-ins:
+    - `status`: database/redis online in green, offline/unavailable in red, anonymous/session metadata muted or cyan where helpful
+    - `status` and `stats`: rename lingering `active jobs` labels to `active runs`
+    - `limits` and `retention`: enabled/yes values in green, disabled/no values muted or amber depending meaning
+    - `session-token list`: active token status in green, anonymous/no-token state muted, security guidance left as normal notice text
+  - Improve active-run CLI output:
+    - color active elapsed duration green
+    - render PID/process-group metadata in dim or cyan
+    - render short run IDs in cyan
+    - leave command text plain so it remains easy to copy
+    - keep empty `runs` / `jobs` output simple: `No active runs.`
+  - Improve completed-run and stats output:
+    - in `last`, color only the exit-code token: `0` green, non-zero red, unknown/incomplete muted or amber
+    - in `stats`, color success-rate summaries lightly while keeping table rows copyable and aligned
+    - avoid making whole rows red/green when only one field carries the semantic state
+  - Client-side built-in output:
+    - consider small ANSI enhancements for normal-class lines emitted by client-side helpers such as `theme`, `config`, and `session-token`
+    - do not ANSI-style client-side `notice`, `denied`, `exit-ok`, or `exit-fail` lines unless the renderer contract changes deliberately
+  - Export/share considerations:
+    - confirm ANSI enhancements survive live output, restored history, permalink/share views, HTML export, and PDF export
+    - plain-text export should continue stripping ANSI escape codes cleanly
+    - search and command-finding summaries should continue operating on raw text without ANSI spans interfering
   - Testing:
-    - Add unit coverage for independent recall stacks across two tabs.
-    - Add E2E coverage proving Up in tab A recalls tab A's previous command even after tab B runs a newer command.
-    - Add coverage for tab switching with a partially typed draft.
+    - add fake-command tests for representative ANSI output in `runs`, `last`, `status`, `stats`, and `file list`
+    - add/update JS output tests proving normal classes use `ansi_up` while plain/system classes still do not
+    - add export/permalink coverage if new ANSI patterns expose gaps in saved/shared rendering
+    - keep assertions focused on stable escape sequences and visible text so future color choices can evolve without brittle tests
 
 - **Session command variables**
   - Explore app-mediated variable substitution for repeated command sets without exposing real shell environment mutation.
@@ -143,6 +160,88 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 ---
 
 ## Technical Debt
+
+- **v1.6 branch review hardening backlog**
+  - Track the verified findings from the v1.6 branch review. These are not release-blocking by default, but they are real enough to schedule deliberately instead of letting them disappear into review notes.
+  - Priority 1 — command execution and lifecycle hardening:
+    - Quote workspace-rewritten command tokens before reassembling command strings.
+      - Context: `rewrite_command()` can inject app-derived workspace paths such as managed Amass `-dir <session-workspace>/amass` into a string that is later parsed by `sh -c`.
+      - Risk: user-created workspace paths can contain shell metacharacters that are valid relative file names. This is self-injection rather than privilege escalation because the user already controls the submitted command, but app rewrites should not unexpectedly change shell parsing.
+      - Plan: use `shlex.quote()` when reassembling rewritten argv tokens, or carry argv through to the subprocess boundary in a larger refactor that avoids `sh -c`.
+      - Also decide whether fake-command handling should receive the same rewrite path or explicitly document why fake commands do not need workspace substitution.
+      - Tests: add rewrite tests with spaces, semicolons, `$`, backticks, and `&` in workspace path components; add an Amass managed-dir regression case.
+    - Add a hard ceiling for detached run drain threads.
+      - Context: `_continue_run_detached()` keeps draining output after the SSE client disconnects so orphaned processes can still be logged.
+      - Risk: a process that never exits or never closes stdout can leak one background thread and pin active-run state until the worker recycles.
+      - Plan: bound detached drain lifetime to `command_timeout_seconds + grace`, kill/cleanup if the ceiling is exceeded, and make sure `pid_pop` plus active-run removal always execute in `finally`.
+      - Tests: simulate a detached run with a non-closing reader/process and assert cleanup occurs after the ceiling.
+    - Guard stalled-session recovery state application with a run-generation token.
+      - Context: the 45-second quiet-stream recovery path checks `/history/active` asynchronously before changing tab state.
+      - Risk: rapid tab switches, kills, or overlapping timeout checks can race between “still active?” resolution and UI state application.
+      - Plan: capture tab ID plus run ID/generation before awaiting, then re-check the same generation immediately before applying status, notices, or kill-button changes.
+      - Tests: add runner unit coverage for stale timeout promises resolving after a kill, tab switch, and newer run start.
+  - Priority 2 — workspace filesystem correctness:
+    - Repair top-level session-file ownership in `entrypoint.sh`.
+      - Context: the current workspace permission repair starts at `-mindepth 2`, which skips files directly under each session directory.
+      - Risk: scanner-created top-level output files can keep ownership/mode that later blocks app-side reads or deletes depending on prior volume state.
+      - Plan: include top-level session files while preserving session-directory ownership/modes, or split the repair into explicit directory and file passes.
+      - Tests: add shellcheck-friendly fixture or integration coverage for a scanner-owned file directly under `sess_<hash>/`.
+    - Warn when `WORKSPACE_ROOT` env and `workspace_root` config diverge.
+      - Context: Compose files, `entrypoint.sh`, and `app/conf/config.yaml` can point at different workspace roots.
+      - Risk: commands can write files in one location while the app lists another, surfacing as empty file lists or missing artifacts.
+      - Plan: during startup, if `WORKSPACE_ROOT` is set and differs from `CFG["workspace_root"]`, log a clear warning with both paths.
+      - Tests: config/startup unit coverage for matching, missing, and mismatched values.
+    - Close the theoretical symlink TOCTOU gap in workspace file opens.
+      - Context: `_reject_symlink_components()` rejects existing symlinks before the later open/read/write operation.
+      - Risk: a same-principal actor could swap a symlink into the final path between validation and open. Current session-directory permissions make this low practical risk, but deterministic hardening is better.
+      - Plan: use `os.open(..., O_NOFOLLOW)` for final-component opens where supported, keep parent validation, and retain current path checks for portability.
+      - Tests: add symlink-final-component tests for read/write/delete paths where the platform supports `O_NOFOLLOW`.
+    - Log chmod failures in workspace setup instead of swallowing all `OSError`.
+      - Context: `workspace.py` intentionally tolerates permission repair failures today.
+      - Risk: real volume misconfiguration, especially on NFS or unusual bind mounts, can fail silently.
+      - Plan: log warning-level details with path and operation while keeping best-effort behavior where appropriate.
+      - Tests: monkeypatch `os.chmod` failure and assert a warning log without breaking workspace creation.
+  - Priority 3 — frontend robustness:
+    - Replace fragile `searchSignalSummary.innerHTML = compact` assignment with DOM construction or a sanitizing chokepoint.
+      - Context: `_formatCompactSignalSummary()` currently emits only hardcoded scope names and numeric counts, so it is safe today.
+      - Risk: future edits could accidentally interpolate unsanitized strings into the DOM.
+      - Plan: build the compact summary with `createElement`/`textContent`, or route generated markup through a very small allowlisted sanitizer helper used only for signal-summary UI.
+      - Tests: unit-test that weird scope/count inputs render as text, not markup.
+    - Confirm whether repeated `bindPressable()` calls on search signal-scope buttons accumulate listeners.
+      - Context: workspace modal listeners are module-load only, so that flagged leak is not valid. The more plausible issue is `refreshSearchDiscoverabilityUi()` rebinding `[data-search-signal-scope]` buttons on repeated refreshes.
+      - Plan: inspect `bindPressable()` idempotency. If it does not dedupe, make the helper idempotent per element or move binding to one-time setup.
+      - Tests: add unit coverage that repeated search refreshes trigger one activation per click.
+    - Re-evaluate mobile prompt-mount mode on resize.
+      - Context: tab activation captures mobile mode once for prompt-mount decisions.
+      - Risk: mostly polish, but viewport changes around mobile/desktop breakpoints can leave prompt placement stale.
+      - Plan: add a resize/layout-mode listener that re-runs the prompt mount decision for the active tab only when the mode changes.
+      - Tests: frontend unit coverage for mode flip without losing draft input.
+  - Priority 4 — documentation and operational clarity:
+    - Add an inline Dockerfile comment explaining why both sudoers lines for `appuser -> scanner` are present.
+      - Context: `appuser ALL=(scanner) NOPASSWD: ALL` and `appuser ALL=(scanner:appuser) NOPASSWD: ALL` look redundant but cover different runas-user/runas-group forms.
+      - Plan: comment the distinction near the sudoers lines so future cleanup does not remove one.
+    - Re-check README theme-count references before tagging v1.6.
+      - Context: the branch now ships 18 themes; any stale “all 17 themes” language should be corrected.
+      - Plan: run the docs drift tests and grep for stale theme counts/names after the final theme set lands.
+    - Re-confirm checked-in and external release docs test totals before tagging.
+      - Context: repo docs are checked by `tests/py/test_docs.py`; external `~/git_docs/v1.6-*` files are not.
+      - Plan: update `tests/README.md`, `CONTRIBUTING.md`, `ARCHITECTURE.md`, and the external v1.6 merge/release notes after the final test count stabilizes.
+    - Document deny precedence near a representative `commands.yaml` entry.
+      - Context: the loader gives deny rules precedence when both `policy.allow` and `policy.deny` exist, but readers have to inspect code to know that.
+      - Plan: add one concise YAML comment near a command with both allow and deny policy.
+  - Priority 5 — validation and benchmarks:
+    - Add a synthetic-output benchmark for `output_signals.py`.
+      - Context: the current regex set looks bounded and safe, but it has grown large enough that a baseline would be useful.
+      - Plan: run classifier patterns against a 10 MB synthetic transcript with mixed scanner-like lines, hostname/IP noise, and long non-matching lines.
+      - Tests/benchmark: add a non-default benchmark script or pytest marked benchmark that records baseline runtime without making normal CI flaky.
+    - Log non-blocking stream setup failures in `run.py`.
+      - Context: if `os.set_blocking()` fails, the reader can fall back to blocking `readline()`.
+      - Risk: a process emitting partial lines without newlines can stall the SSE generator.
+      - Plan: warning-log the fallback path with fd/process context and consider a safer partial-read fallback for platforms where non-blocking setup fails.
+      - Tests: monkeypatch `os.set_blocking` failure and assert the warning path.
+    - Eyeball visual-capture assets after demo fixture star-ratio changes.
+      - Context: `seed_history.py` changed the visual fixture star ratio. Binary diffs suggest capture assets were regenerated, but visual review should confirm the intended density.
+      - Plan: inspect one desktop and one mobile captured PNG plus the demo video before release notes are finalized.
 
 - **Mobile E2E setup can trip app rate limiting**
   - The mobile tabs overflow coverage rapidly runs several built-in commands to create output-bearing tabs. It currently passes, but it can emit a backend rate-limit warning during full mobile-file runs.

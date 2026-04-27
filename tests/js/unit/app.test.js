@@ -1290,7 +1290,7 @@ describe('app helpers', () => {
     const runtimeRoots = [
       'banner', 'cat', 'clear', 'commands', 'config', 'date', 'df', 'env', 'faq', 'fortune', 'free',
       'file', 'groups', 'help', 'history', 'hostname', 'id', 'ip', 'jobs', 'last', 'limits', 'ls', 'man',
-      'ps', 'pwd', 'retention', 'rm', 'route', 'session-token', 'shortcuts', 'stats', 'status', 'theme',
+      'ps', 'pwd', 'retention', 'rm', 'route', 'runs', 'session-token', 'shortcuts', 'stats', 'status', 'theme',
       'tty', 'type', 'uname', 'uptime', 'version', 'which', 'who', 'whoami',
     ]
 
@@ -2006,6 +2006,70 @@ describe('app helpers', () => {
     expect(cmdInput.value).toBe('abc')
     expect(cmdInput.selectionStart).toBe(3)
     expect(cmdInput.selectionEnd).toBe(3)
+  })
+
+  it('ignores command history and autocomplete while a terminal confirmation is pending', async () => {
+    const navigateCmdHistory = vi.fn(() => true)
+    const acHide = vi.fn()
+    const acShow = vi.fn()
+    const hasPendingTerminalConfirm = vi.fn(() => true)
+    const { cmdInput, _getAcIndex, _replayPromptShortcutAfterSelection } = await loadAppFns({
+      navigateCmdHistory,
+      acHide,
+      acShow,
+      acSuggestions: ['curl http://localhost:5001/health'],
+      acFiltered: ['curl http://localhost:5001/health'],
+      hasPendingTerminalConfirm,
+    })
+
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => cmdInput,
+    })
+
+    cmdInput.value = 'cur'
+    cmdInput.setSelectionRange(3, 3)
+    cmdInput.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(acShow).not.toHaveBeenCalled()
+    expect(_getAcIndex()).toBe(-1)
+
+    const tabEv = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+    cmdInput.dispatchEvent(tabEv)
+    expect(tabEv.defaultPrevented).toBe(true)
+    expect(cmdInput.value).toBe('cur')
+    expect(_getAcIndex()).toBe(-1)
+
+    for (const key of ['ArrowUp', 'ArrowDown']) {
+      const ev = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+      cmdInput.dispatchEvent(ev)
+      expect(ev.defaultPrevented).toBe(true)
+    }
+
+    const originalGetSelection = window.getSelection
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => document.body,
+    })
+    Object.defineProperty(window, 'getSelection', {
+      configurable: true,
+      value: () => ({ toString: () => 'selected output' }),
+    })
+
+    try {
+      const replayEv = new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })
+      expect(_replayPromptShortcutAfterSelection(replayEv)).toBe(true)
+      expect(replayEv.defaultPrevented).toBe(true)
+    } finally {
+      Object.defineProperty(window, 'getSelection', {
+        configurable: true,
+        value: originalGetSelection,
+      })
+    }
+
+    expect(hasPendingTerminalConfirm).toHaveBeenCalled()
+    expect(acHide).toHaveBeenCalled()
+    expect(acShow).not.toHaveBeenCalled()
+    expect(navigateCmdHistory).not.toHaveBeenCalled()
   })
 
   it.each([
