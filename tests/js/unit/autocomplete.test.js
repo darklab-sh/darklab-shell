@@ -887,6 +887,67 @@ describe('autocomplete helpers', () => {
     expect(getAutocompleteMatches('config get line-numbers ', 24)).toEqual([])
   })
 
+  it('stops suggesting var subcommands after a complete var command shape', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => '',
+        acSuggestions: [],
+        acContextRegistry: {},
+        getRuntimeAutocompleteContext: () => ({
+          var: {
+            flags: [],
+            expects_value: ['set', 'unset'],
+            arg_hints: {
+              list: [],
+              set: [
+                { value: 'HOST', description: 'Common target host' },
+                { value: 'PORT', description: 'Common target port' },
+              ],
+              unset: [
+                { value: 'HOST', description: 'Current value: ip.darklab.sh' },
+              ],
+              __positional__: [
+                { value: 'list', insertValue: 'list', description: 'Show session variables' },
+                { value: 'set', insertValue: 'set ', description: 'Set a session variable' },
+                { value: 'unset', insertValue: 'unset ', description: 'Remove a session variable' },
+              ],
+            },
+            sequence_arg_hints: {
+              'set host': [{ value: '<value>', description: 'Value for HOST' }],
+              'unset host': [],
+            },
+            close_after: { list: 0, set: 2, unset: 1 },
+            argument_limit: null,
+            pipe_command: false,
+            pipe_insert_value: '',
+            pipe_label: '',
+            pipe_description: '',
+            examples: [],
+          },
+        }),
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('var ', 4).map(item => item.value)).toEqual(['list', 'set', 'unset'])
+    expect(getAutocompleteMatches('var set ', 8).map(item => item.value)).toEqual(['HOST', 'PORT'])
+    expect(getAutocompleteMatches('var set HOST ', 13).map(item => item.value)).toEqual(['<value>'])
+    expect(getAutocompleteMatches('var set HOST ip.darklab.sh ', 27)).toEqual([])
+    expect(getAutocompleteMatches('var list ', 9)).toEqual([])
+    expect(getAutocompleteMatches('var unset HOST ', 15)).toEqual([])
+  })
+
   it('keeps an exact single flag match visible so its description is still shown', () => {
     const { getAutocompleteMatches } = fromDomScripts(
       ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],

@@ -3,7 +3,8 @@ SQLite persistence — connection helper, schema initialisation, and retention p
 Database lives in the configured data directory. If unset, /data is used when
 writable and /tmp is the local-dev fallback.
 
-Tables: runs, run_output_artifacts, snapshots, session_tokens, session_preferences.
+Tables: runs, run_output_artifacts, snapshots, session_tokens, session_preferences,
+session_variables.
 FTS: runs_fts (FTS5 virtual table over runs.command + runs.output_search_text).
 """
 
@@ -106,6 +107,15 @@ def _create_schema(conn):
             PRIMARY KEY (session_id, command)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS session_variables (
+            session_id TEXT NOT NULL,
+            name       TEXT NOT NULL,
+            value      TEXT NOT NULL,
+            updated    TEXT NOT NULL,
+            PRIMARY KEY (session_id, name)
+        )
+    """)
 
 
 def _create_indexes(conn):
@@ -114,6 +124,7 @@ def _create_indexes(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_run_output_artifacts_created ON run_output_artifacts (created)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots (session_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_starred_commands_session ON starred_commands (session_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_session_variables_session ON session_variables (session_id)")
 
 
 def _extract_search_text_from_preview_json(raw_preview):
@@ -260,6 +271,19 @@ def _migrate_schema(conn):
                 session_id TEXT NOT NULL,
                 command    TEXT NOT NULL,
                 PRIMARY KEY (session_id, command)
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS session_variables (
+                session_id TEXT NOT NULL,
+                name       TEXT NOT NULL,
+                value      TEXT NOT NULL,
+                updated    TEXT NOT NULL,
+                PRIMARY KEY (session_id, name)
             )
         """)
     except sqlite3.OperationalError:

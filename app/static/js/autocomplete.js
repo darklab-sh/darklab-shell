@@ -198,6 +198,24 @@ function _countCompletedPositionalArgs(ctx, spec) {
   return count;
 }
 
+function _contextClosedByTokenArity(ctx, spec) {
+  const closeAfter = spec && spec.close_after && typeof spec.close_after === 'object'
+    ? spec.close_after
+    : {};
+  const entries = Object.entries(closeAfter);
+  if (!entries.length || !ctx.atWhitespace) return false;
+  const completedTokens = ctx.tokens.filter(token => token.end <= ctx.tokenStart);
+  for (let index = 1; index < completedTokens.length; index += 1) {
+    const token = String(completedTokens[index].value || '').toLowerCase();
+    if (!Object.prototype.hasOwnProperty.call(closeAfter, token)) continue;
+    const rawLimit = Number(closeAfter[token]);
+    const limit = Number.isFinite(rawLimit) && rawLimit >= 0 ? rawLimit : 0;
+    const following = completedTokens.slice(index + 1).filter(item => String(item.value || '').trim());
+    if (following.length >= limit) return true;
+  }
+  return false;
+}
+
 function _mergeAutocompleteSpecForSubcommand(baseSpec, subSpec) {
   const merged = Object.assign({}, baseSpec || {}, subSpec || {});
   const flags = [];
@@ -375,6 +393,8 @@ function _buildContextAutocomplete(ctx) {
   const uniqueSubcommandExamples = _buildUniqueSubcommandExampleAutocomplete(ctx, rootSpec);
   if (uniqueSubcommandExamples.length) return uniqueSubcommandExamples;
 
+  if (_contextClosedByTokenArity(ctx, spec)) return [];
+
   if (contextSpec.activeSubcommand && spec.examples && spec.examples.length) {
     const prefixEnd = ctx.atWhitespace ? ctx.cursor : ctx.tokenEnd;
     const typedPrefix = ctx.text.slice(0, prefixEnd);
@@ -442,20 +462,22 @@ function _buildContextAutocomplete(ctx) {
     );
   }
 
-  const concreteCommandTokens = (spec.flags || [])
-    .filter(flag => {
-      const value = String(flag.value || '');
-      return value && !value.startsWith('-') && !value.startsWith('+');
-    })
-    .map(flag => _buildAutocompleteItem({
-      value: flag.value,
-      description: flag.description || '',
-      replaceStart: ctx.tokenStart,
-      replaceEnd: ctx.tokenEnd,
-      insertValue: flag.value,
-    }));
-  const matchingCommandTokens = _filterAutocompleteItems(concreteCommandTokens, ctx.currentToken);
-  if (matchingCommandTokens.length) return matchingCommandTokens;
+  if (allowPositionalHints) {
+    const concreteCommandTokens = (spec.flags || [])
+      .filter(flag => {
+        const value = String(flag.value || '');
+        return value && !value.startsWith('-') && !value.startsWith('+');
+      })
+      .map(flag => _buildAutocompleteItem({
+        value: flag.value,
+        description: flag.description || '',
+        replaceStart: ctx.tokenStart,
+        replaceEnd: ctx.tokenEnd,
+        insertValue: flag.value,
+      }));
+    const matchingCommandTokens = _filterAutocompleteItems(concreteCommandTokens, ctx.currentToken);
+    if (matchingCommandTokens.length) return matchingCommandTokens;
+  }
 
   const positionalHints = Object.prototype.hasOwnProperty.call(argHints, '__positional__')
     ? argHints.__positional__

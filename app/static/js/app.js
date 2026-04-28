@@ -2201,6 +2201,7 @@ function _runtimeContextSpec({
   pipeLabel = '',
   pipeDescription = '',
   examples = [],
+  closeAfter = {},
 } = {}) {
   return {
     flags,
@@ -2213,6 +2214,7 @@ function _runtimeContextSpec({
     pipe_label: pipeLabel,
     pipe_description: pipeDescription,
     examples,
+    close_after: closeAfter,
   };
 }
 
@@ -2255,6 +2257,7 @@ const _runtimeBuiltinCommandInfo = [
   ['type', 'built-in: describe whether a command is built-in, installed, or missing'],
   ['uname', 'built-in: show the shell platform string'],
   ['uptime', 'built-in: show app uptime since process start'],
+  ['var', 'built-in: set, list, or unset session command variables'],
   ['version', 'built-in: show shell, app, Flask, and Python version details'],
   ['which', 'built-in: locate a built-in command or allowed runtime command'],
   ['who', 'built-in: show the current shell user and session'],
@@ -2442,11 +2445,54 @@ function _runtimeConfigContext() {
   return _runtimeContextSpec({ expectsValue: ['get', 'set'], argHints, sequenceArgHints });
 }
 
+function _runtimeVariableHints(description = 'Session variable') {
+  const variables = Array.isArray(sessionVariables) ? sessionVariables : [];
+  return variables.map(variable => {
+    const name = String(variable && variable.name || '').trim();
+    const value = String(variable && variable.value || '').trim();
+    return _runtimeHint(name, value ? `${description}: ${value}` : description);
+  }).filter(item => item.value);
+}
+
+function _runtimeVarContext() {
+  const variableHints = _runtimeVariableHints('Current value');
+  const starterNames = ['HOST', 'PORT', 'IP_ADDR'];
+  const sequenceArgHints = {};
+  variableHints.concat(starterNames.map(name => _runtimeHint(name))).forEach(item => {
+    const name = String(item && item.value || '').trim();
+    if (name) {
+      sequenceArgHints[`set ${name.toLowerCase()}`] = [_runtimeHint('<value>', `Value for ${name}`)];
+      sequenceArgHints[`unset ${name.toLowerCase()}`] = [];
+    }
+  });
+  const argHints = {
+    list: [],
+    set: variableHints.concat(starterNames.map(name => _runtimeHint(name, `Common ${name.toLowerCase()} value`))),
+    unset: variableHints,
+    __positional__: [
+      _runtimeHint('list', 'Show session variables'),
+      _runtimeHint('set', 'Set a session variable', 'set '),
+      _runtimeHint('unset', 'Remove a session variable', 'unset '),
+    ],
+  };
+  return _runtimeContextSpec({
+    expectsValue: ['set', 'unset'],
+    argHints,
+    sequenceArgHints,
+    closeAfter: {
+      list: 0,
+      set: 2,
+      unset: 1,
+    },
+  });
+}
+
 function getRuntimeAutocompleteContext(baseRegistry = {}) {
   const context = _runtimeStaticBuiltinContext();
   const lookupHints = _runtimeCommandLookupHints(baseRegistry);
   context.theme = _runtimeThemeContext();
   context.config = _runtimeConfigContext();
+  context.var = _runtimeVarContext();
   if (isWorkspaceFeatureEnabled()) context.file = _runtimeWorkspaceContext();
   context.man = _runtimeContextSpec({
     argumentLimit: 1,
@@ -2463,8 +2509,42 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
   return context;
 }
 
-function getRuntimeAutocompleteItems() {
-  return [];
+function getRuntimeAutocompleteItems(ctx, buildItem, filterItems) {
+  const token = String(ctx && ctx.currentToken || '');
+  const dollarIndex = token.lastIndexOf('$');
+  if (dollarIndex < 0 || !buildItem || !filterItems) return [];
+  const afterDollar = token.slice(dollarIndex + 1);
+  const braced = afterDollar.startsWith('{');
+  const query = braced ? afterDollar.slice(1) : afterDollar;
+  if (!/^\{?[A-Za-z_][A-Za-z0-9_]*$/.test(afterDollar) && afterDollar !== '{') return [];
+  const variables = Array.isArray(sessionVariables) ? sessionVariables : [];
+  const items = variables.map(variable => {
+    const name = String(variable && variable.name || '').trim();
+    if (!name) return null;
+    const label = braced ? '${' + name + '}' : '$' + name;
+    return buildItem({
+      value: label,
+      label,
+      description: String(variable && variable.value || ''),
+      replaceStart: ctx.tokenStart + dollarIndex,
+      replaceEnd: ctx.tokenEnd,
+      insertValue: label,
+    });
+  }).filter(Boolean);
+  return filterItems(items, braced ? '${' + query : '$' + query);
+}
+
+async function loadSessionVariables() {
+  try {
+    const resp = await apiFetch('/session/variables');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    sessionVariables = Array.isArray(data.variables) ? data.variables : [];
+  } catch (err) {
+    logClientError('failed to load /session/variables', err);
+    sessionVariables = [];
+  }
+  return sessionVariables;
 }
 
 let allowedCommandsFaqData = null;

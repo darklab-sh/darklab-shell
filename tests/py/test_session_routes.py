@@ -133,6 +133,15 @@ class TestSessionMigrate:
             )
             conn.commit()
 
+    def _seed_variable(self, session_id, name, value):
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO session_variables (session_id, name, value, updated) "
+                "VALUES (?, ?, ?, datetime('now'))",
+                (session_id, name, value),
+            )
+            conn.commit()
+
     def _enable_workspace(self, monkeypatch, tmp_path, **overrides):
         cfg = {
             "workspace_enabled": True,
@@ -384,6 +393,26 @@ class TestSessionMigrate:
             ).fetchone()
         assert src is None
         assert json.loads(dst[0]) == prefs
+
+    def test_migrates_session_variables(self):
+        client = get_client()
+        from_id = "migrate-vars-from-" + __import__("uuid").uuid4().hex[:8]
+        to_id = str(__import__("uuid").uuid4())
+        self._seed_variable(from_id, "HOST", "ip.darklab.sh")
+
+        resp = client.post(
+            "/session/migrate",
+            json={"from_session_id": from_id, "to_session_id": to_id},
+            headers={"X-Session-ID": from_id},
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["migrated_variables"] == 1
+        assert self._count_rows("session_variables", from_id) == 0
+        vars_resp = client.get("/session/variables", headers={"X-Session-ID": to_id})
+        vars_data = json.loads(vars_resp.data)
+        assert vars_data["variables"] == [{"name": "HOST", "value": "ip.darklab.sh"}]
 
     def test_migrate_keeps_existing_destination_session_preferences(self):
         client = get_client()

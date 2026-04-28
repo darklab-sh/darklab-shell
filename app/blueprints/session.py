@@ -11,6 +11,7 @@ from flask import Blueprint, jsonify, request
 
 from database import db_connect
 from helpers import get_client_ip, get_log_session_id, get_session_id
+from session_variables import list_session_variables
 from workspace import InvalidWorkspacePath, migrate_session_workspace, workspace_usage
 
 log = logging.getLogger("shell")
@@ -257,12 +258,21 @@ def session_migrate():
             "SELECT ?, preferences, updated FROM session_preferences WHERE session_id = ?",
             (to_session_id, from_session_id),
         )
+        vars_insert = conn.execute(
+            "INSERT OR IGNORE INTO session_variables (session_id, name, value, updated) "
+            "SELECT ?, name, value, updated FROM session_variables WHERE session_id = ?",
+            (to_session_id, from_session_id),
+        )
         conn.execute(
             "DELETE FROM starred_commands WHERE session_id = ?",
             (from_session_id,),
         )
         conn.execute(
             "DELETE FROM session_preferences WHERE session_id = ?",
+            (from_session_id,),
+        )
+        conn.execute(
+            "DELETE FROM session_variables WHERE session_id = ?",
             (from_session_id,),
         )
         conn.commit()
@@ -274,6 +284,7 @@ def session_migrate():
     # that were skipped because the destination already had the same command.
     migrated_stars = stars_insert.rowcount
     migrated_preferences = prefs_insert.rowcount
+    migrated_variables = vars_insert.rowcount
 
     log.info("SESSION_MIGRATED", extra={
         "ip": get_client_ip(),
@@ -284,6 +295,7 @@ def session_migrate():
         "migrated_snapshots": migrated_snapshots,
         "migrated_stars": migrated_stars,
         "migrated_preferences": migrated_preferences,
+        "migrated_variables": migrated_variables,
         "migrated_workspace_files": workspace_migration.migrated_files,
         "skipped_workspace_files": workspace_migration.skipped_files,
         "migrated_workspace_directories": workspace_migration.migrated_directories,
@@ -294,6 +306,8 @@ def session_migrate():
         "migrated_runs": migrated_runs,
         "migrated_snapshots": migrated_snapshots,
         "migrated_stars": migrated_stars,
+        "migrated_preferences": migrated_preferences,
+        "migrated_variables": migrated_variables,
         "migrated_workspace_files": workspace_migration.migrated_files,
         "skipped_workspace_files": workspace_migration.skipped_files,
         "migrated_workspace_directories": workspace_migration.migrated_directories,
@@ -345,6 +359,25 @@ def session_preferences_save():
         "key_count": len(prefs),
     })
     return jsonify({"ok": True, "preferences": prefs, "updated": updated})
+
+
+@session_bp.route("/session/variables")
+def session_variables_list():
+    """Return command-variable names and values for the current session."""
+    session_id = get_session_id()
+    variables = list_session_variables(session_id)
+    log.debug("SESSION_VARIABLES_VIEWED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "session_kind": _session_kind(session_id),
+        "count": len(variables),
+    })
+    return jsonify({
+        "variables": [
+            {"name": name, "value": value}
+            for name, value in variables.items()
+        ],
+    })
 
 
 @session_bp.route("/session/run-count")

@@ -23,10 +23,7 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
 
 1. Install the base tools:
    - `python3`
-   - `pip3`
-   - Node.js `22` (the repo pins this in [`.nvmrc`](.nvmrc))
-   - `npm`
-   - CSS linting uses the npm-managed `stylelint` dependency; no separate system package is needed
+   - `npm` (Node.js 24 LTS or newer is recommended.)
 
    Platform-specific lint tools:
 
@@ -49,8 +46,6 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
    chmod +x /tmp/hadolint
    sudo mv /tmp/hadolint /usr/local/bin/hadolint
    ```
-
-   YAML linting is installed with the Python dev dependencies below through [requirements-dev.txt](requirements-dev.txt), so `yamllint` resolves from the active virtual environment on both macOS and Linux.
 
 2. Create and activate a local virtual environment from the repo root:
 
@@ -83,9 +78,8 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
 Use the virtual environment for all local Python work:
 
 - app runs
-- `pytest`
-- `flake8`
-- `bandit`
+- `npm run test` which runs pytest
+- `npm run lint` which runs flake8
 - ad hoc backend debugging
 
 ### VS Code Setup
@@ -161,7 +155,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1055 pytest + 852 Vitest + 219 Playwright = 2,126 tests**.
+Current totals: **1061 pytest + 853 Vitest + 219 Playwright = 2,133 tests**.
 
 Playwright notes:
 

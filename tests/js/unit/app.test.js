@@ -1221,6 +1221,10 @@ describe('app helpers', () => {
       .toContain('(current)')
     expect(context.config.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'get', 'set'])
     expect(context.config.sequence_arg_hints['set line-numbers'].map(item => item.value)).toEqual(['on', 'off'])
+    expect(context.var.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'set', 'unset'])
+    expect(context.var.sequence_arg_hints['set host'].map(item => item.value)).toEqual(['<value>'])
+    expect(context.var.sequence_arg_hints['unset host']).toEqual([])
+    expect(context.var.close_after).toEqual({ list: 0, set: 2, unset: 1 })
   })
 
   it('serves runtime autocomplete context for built-in command lookup helpers', async () => {

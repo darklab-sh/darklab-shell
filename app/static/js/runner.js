@@ -1952,6 +1952,9 @@ function submitCommand(rawCmd) {
                 if (typeof addToRecentPreview === 'function' && t && t.command && !t.unknownCommand) {
                   addToRecentPreview(t.command);
                 }
+                if (t && /^var(?:\s|$)/i.test(String(t.command || '')) && typeof loadSessionVariables === 'function') {
+                  loadSessionVariables().catch(() => {});
+                }
                 if (t) t.syntheticClear = false;
                 _maybeNotify(t ? t.command : '', msg.code, msg.elapsed ? msg.elapsed + 's' : null);
                 if (typeof emitUiEvent === 'function') emitUiEvent('app:last-exit-changed', { value: msg.code });

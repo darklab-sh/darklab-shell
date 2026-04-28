@@ -29,6 +29,14 @@ from commands import (
 from config import APP_VERSION, CFG, PROJECT_README
 from database import db_connect
 from process import active_runs_for_session, redis_client
+from session_variables import (
+    InvalidSessionVariableName,
+    InvalidSessionVariableValue,
+    list_session_variables,
+    normalize_variable_name,
+    set_session_variable,
+    unset_session_variable,
+)
 from workspace import (
     InvalidWorkspacePath,
     WorkspaceBinaryFile,
@@ -214,6 +222,7 @@ _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "type <cmd>", "description": "Describe whether a command is built in, installed, or missing.", "root": "type"},
     {"name": "uname [-a]", "description": "Show the shell platform string.", "root": "uname"},
     {"name": "uptime", "description": "Show app uptime since process start.", "root": "uptime"},
+    {"name": "var", "description": "Set, list, or unset session command variables.", "root": "var"},
     {"name": "version", "description": "Show shell, app, Flask, and Python version details.", "root": "version"},
     {"name": "file", "description": "List, view, create, edit, download, or remove session files.", "root": "file"},
     {"name": "which <cmd>", "description": "Locate a built-in command or allowed runtime command.", "root": "which"},
@@ -364,6 +373,7 @@ _FAKE_COMMAND_DISPATCH = {
     "type":      lambda cmd, sid: _run_fake_type(cmd),
     "uname":     lambda cmd, sid: _run_fake_uname(cmd),
     "uptime":    lambda cmd, sid: _run_fake_uptime(),
+    "var":       lambda cmd, sid: _run_fake_var(cmd, sid),
     "version":   lambda cmd, sid: _run_fake_version(),
     "file":      lambda cmd, sid: _run_fake_workspace(cmd, sid),
     "which":     lambda cmd, sid: _run_fake_which(cmd),
@@ -450,6 +460,10 @@ def _session_has_saved_preferences(session_id: str) -> bool:
             (session_id,),
         ).fetchone()
     return bool(row)
+
+
+def _session_variable_count(session_id: str) -> int:
+    return len(list_session_variables(session_id))
 
 
 def _session_type_label(session_id: str) -> str:
@@ -755,6 +769,62 @@ def _run_fake_session_token(cmd: str, session_id: str) -> list[dict[str, str]]:
         _output_line(_format_native_record("session", masked, width), "fake-kv"),
         _output_line(_format_native_record("status", _ansi_dim("anonymous (no session token set)"), width), "fake-kv"),
         _output_line(_format_native_record("tip", "run 'session-token generate' to create a persistent token", width), "fake-kv"),
+    ]
+
+
+def _run_fake_var(cmd: str, session_id: str) -> list[dict[str, str]]:
+    parts = _split_command(cmd)
+    subcommand = parts[1].lower() if len(parts) > 1 else "list"
+    width = 12
+
+    if subcommand in {"help", "-h", "--help"}:
+        return [
+            _output_line("Session command variables:", "fake-section"),
+            _output_line("  var set NAME value", "fake-plain"),
+            _output_line("  var list", "fake-plain"),
+            _output_line("  var unset NAME", "fake-plain"),
+            _output_line("Reference variables as $NAME or ${NAME}. Values expand before command validation.", "fake-note"),
+            _output_line("Names must match [A-Z][A-Z0-9_]{0,31}. Do not store secrets here.", "fake-note"),
+        ]
+
+    if subcommand == "list":
+        variables = list_session_variables(session_id)
+        if not variables:
+            return [_output_line("No session variables set.", "fake-note")]
+        lines = [_output_line("Session variables:", "fake-section")]
+        for name, value in variables.items():
+            lines.append(_output_line(_format_native_record(name, value, width), "fake-kv"))
+        return lines
+
+    if subcommand == "set":
+        if len(parts) < 4:
+            return [
+                _output_line("Usage: var set NAME value"),
+                _output_line("Example: var set HOST ip.darklab.sh"),
+            ]
+        name = parts[2]
+        value = " ".join(parts[3:])
+        try:
+            normalized_name = normalize_variable_name(name)
+            set_session_variable(session_id, normalized_name, value)
+        except (InvalidSessionVariableName, InvalidSessionVariableValue) as exc:
+            return [_output_line(f"var: {exc}")]
+        return [_output_line(f"Set ${normalized_name} = {value}", "fake-success")]
+
+    if subcommand in {"unset", "delete", "rm"}:
+        if len(parts) != 3:
+            return [_output_line("Usage: var unset NAME")]
+        try:
+            normalized_name = normalize_variable_name(parts[2])
+            removed = unset_session_variable(session_id, normalized_name)
+        except InvalidSessionVariableName as exc:
+            return [_output_line(f"var: {exc}")]
+        status = "removed" if removed else "was not set"
+        return [_output_line(f"${normalized_name} {status}.", "fake-success" if removed else "fake-note")]
+
+    return [
+        _output_line(f"var: unknown subcommand '{subcommand}'"),
+        _output_line("Usage: var [list] | var set NAME value | var unset NAME"),
     ]
 
 
@@ -1635,6 +1705,7 @@ def _run_fake_status(session_id: str) -> list[dict[str, str]]:
             ),
             "fake-kv",
         ),
+        _output_line(_format_native_record("variables", str(_session_variable_count(session_id)), width), "fake-kv"),
         _output_line(
             _format_native_record(
                 "active runs",
@@ -1756,6 +1827,7 @@ def _run_fake_stats(session_id: str) -> list[dict[str, str]]:
             _format_native_record("starred commands", str(_session_starred_command_count(session_id)), width),
             "fake-kv",
         ),
+        _output_line(_format_native_record("variables", str(_session_variable_count(session_id)), width), "fake-kv"),
         _output_line(_format_native_record("active runs", str(len(active_runs_for_session(session_id))), width), "fake-kv"),
         _output_line(
             _format_native_record(

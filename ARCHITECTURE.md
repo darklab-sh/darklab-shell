@@ -193,7 +193,8 @@ This route list belongs in the architecture document because it describes the ap
 | `POST` | `/session/token/revoke` | Revokes a named token so future `tok_...` headers are treated as anonymous |
 | `GET` | `/session/preferences` | Returns the current session's normalized saved Options snapshot |
 | `POST` | `/session/preferences` | Persists the current session's normalized saved Options snapshot |
-| `POST` | `/session/migrate` | Migrates runs, snapshots, starred commands, session preferences, and non-conflicting workspace files from one session ID to another |
+| `GET` | `/session/variables` | Returns the current session's command-variable names and values for autocomplete/runtime refresh |
+| `POST` | `/session/migrate` | Migrates runs, snapshots, starred commands, session preferences, session command variables, and non-conflicting workspace files from one session ID to another |
 | `GET` | `/session/starred` | Returns the current session's starred command list |
 | `POST` | `/session/starred` | Adds one command to the current session's starred list |
 | `DELETE` | `/session/starred` | Removes one command, or clears the whole starred list, for the current session |
@@ -518,6 +519,8 @@ These rewrites happen in `rewrite_command()` silently (no user-visible notice un
 | `wapiti` | Adds `-f txt -o /dev/stdout` | wapiti writes reports to file by default; this streams to terminal. Silent. |
 | `naabu` | Adds `-scan-type c` | Uses TCP connect scanning instead of raw SYN mode for container reliability. Silent. |
 
+Session command variables are expanded inside the app before command policy validation and execution. `app/session_variables.py` owns the `[A-Z][A-Z0-9_]{0,31}` name rules, SQLite storage, and `$NAME` / `${NAME}` replacement. `/run` keeps `var` itself unexpanded so `var set HOST ...` is data management, expands other commands before synthetic post-filter parsing, validates the expanded command, and still persists the typed command in history while emitting a transcript notice with the expanded form.
+
 Workspace-aware validation also rewrites declared file and directory flags from `app/conf/commands.yaml` into the active session workspace. Rewritten token lists are reassembled with shell-safe quoting before they cross the existing `sh -c` subprocess boundary, so app-injected workspace paths cannot accidentally change shell parsing when a valid session file or folder name contains spaces or shell metacharacters. Amass uses an additional runtime environment override: database-backed subcommands such as `amass enum`, `amass subs`, `amass track`, and `amass viz` get a managed `-dir amass` workspace directory and `XDG_CONFIG_HOME` is pointed at the session workspace so `amass engine` and the CLI share the same per-session database path. See [External Command Integrations](docs/external-command-integrations.md) for the command-specific integration contracts.
 
 Synthetic post-filters also sit on this run-lifecycle boundary rather than on the shell-parser path. `parse_synthetic_postfilter()` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the `/run` stream applies the selected helper before lines are emitted or persisted.
@@ -589,7 +592,7 @@ That split is what allows the app to keep the interactive shell fast while still
 
 ### Database
 
-`<data_dir>/history.db` — SQLite, WAL mode. Six persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable.
+`<data_dir>/history.db` — SQLite, WAL mode. Seven persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable.
 
 - `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews store structured `{text, cls, tsC, tsE}` entries so run permalinks can preserve prompt echo and timestamp metadata. Also stores `output_search_text` (plain text extracted from the full artifact when available, otherwise the preview) for FTS indexing. Persists across restarts. Pruned by `permalink_retention_days`.
 - `runs_fts` — FTS5 virtual table (content table backed by `runs`, `content_rowid=rowid`) indexing the `command` and `output_search_text` columns. Uses the trigram tokenizer when available (SQLite ≥ 3.38), falling back to unicode61. Kept in sync with `runs` via INSERT/DELETE triggers. Enables history drawer full-text search across both command text and stored run output.
@@ -598,6 +601,7 @@ That split is what allows the app to keep the interactive shell fast while still
 - `session_tokens` — one row per issued named session token `(token TEXT PRIMARY KEY, created TEXT)`. Used to validate `tok_`-prefixed `X-Session-ID` headers and to support `session-token list` and `session-token revoke`.
 - `session_preferences` — one row per session ID `(session_id TEXT PRIMARY KEY, preferences TEXT, updated TEXT)`. Stores the normalized Options snapshot that follows a named session token across browsers while still allowing browser-local UUID sessions to keep independent defaults.
 - `starred_commands` — one row per starred command per session `(session_id, command)`. Backs the `/session/starred` endpoints and follows session tokens across devices via the migration path.
+- `session_variables` — one row per session command variable `(session_id, name, value, updated)`. Backs the `var` built-in, `/session/variables`, and app-mediated command expansion before validation.
 - Redis-backed active-run metadata plus browser `sessionStorage` form a second persistence layer for reload continuity:
   - `/history/active` covers in-flight runs owned by the server/session
   - browser `sessionStorage` covers non-running tabs, transcript previews, status, draft input, and active-tab selection
@@ -826,10 +830,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 1055
-- `vitest`: 852
+- `pytest`: 1061
+- `vitest`: 853
 - `playwright`: 219
-- total: 2,126
+- total: 2,133
 
 ### Testing Architecture
 

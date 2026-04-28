@@ -34,6 +34,9 @@ function updateSessionId(newId) {
   if (typeof loadSessionPreferences === 'function') {
     loadSessionPreferences().catch(() => {});
   }
+  if (typeof loadSessionVariables === 'function') {
+    loadSessionVariables().catch(() => {});
+  }
 }
 
 // Keep SESSION_ID current in other open tabs when session_token changes in
@@ -46,6 +49,7 @@ window.addEventListener('storage', (e) => {
     SESSION_ID = e.newValue || _sessionUuid;
     if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
     if (typeof loadSessionPreferences === 'function') loadSessionPreferences().catch(() => {});
+    if (typeof loadSessionVariables === 'function') loadSessionVariables().catch(() => {});
     if (typeof _updateOptionsSessionTokenStatus === 'function') _updateOptionsSessionTokenStatus();
   }
 });

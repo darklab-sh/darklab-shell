@@ -1380,6 +1380,7 @@ apiFetch('/autocomplete').then(r => r.json()).then(data => {
   acContextRegistry = data.context || {};
   acSpecialCommands = data.special_commands || [];
   acBuiltinCommandRoots = data.builtin_command_roots || [];
+  if (typeof loadSessionVariables === 'function') loadSessionVariables().catch(() => {});
   if (typeof scheduleSearchDiscoverabilityRefresh === 'function') scheduleSearchDiscoverabilityRefresh();
   else if (typeof refreshSearchDiscoverabilityUi === 'function') refreshSearchDiscoverabilityUi();
 }).catch(err => {

@@ -24,6 +24,7 @@ from flask import Blueprint, Response, jsonify, request
 
 from commands import (
     CommandValidationResult,
+    command_root,
     is_command_allowed,
     parse_synthetic_postfilter,
     rewrite_command,
@@ -43,6 +44,7 @@ from helpers import get_client_ip, get_log_session_id, get_session_id
 from process import active_run_register, active_run_remove, pid_pop, pid_register
 from run_output_store import RunOutputCapture, load_full_output_entries
 from output_signals import OutputSignalClassifier
+from session_variables import SessionVariableError, expand_session_variables
 
 log = logging.getLogger("shell")
 
@@ -78,6 +80,11 @@ SUDO_BIN  = shutil.which("sudo") or "/usr/bin/sudo"
 KILL_BIN  = shutil.which("kill") or "/bin/kill"
 
 CLIENT_SIDE_RUN_ROOTS = {"theme", "config", "session-token"}
+
+
+def _variable_notice_line(expanded_command: str, used_names: tuple[str, ...]) -> str:
+    variables = ", ".join(f"${name}" for name in used_names)
+    return f"[vars] expanded {variables}: {expanded_command}"
 RUN_SUBPROCESS_UMASK = 0o027
 DETACHED_DRAIN_GRACE_SECONDS = 30
 DETACHED_DRAIN_FALLBACK_TIMEOUT_SECONDS = 3600
@@ -667,14 +674,29 @@ def run_command():
         return jsonify({"error": "No command provided"}), 400
     if resolves_exact_special_fake_command(original_command):
         return _fake_run_response(original_command, session_id, client_ip)
-    postfilter_spec, postfilter_error = parse_synthetic_postfilter(original_command)
+    expanded_command = original_command
+    variable_notice = ""
+    if command_root(original_command) != "var":
+        try:
+            expansion = expand_session_variables(original_command, session_id)
+            expanded_command = expansion.command
+            if expanded_command != original_command:
+                variable_notice = _variable_notice_line(expanded_command, expansion.used_names)
+        except SessionVariableError as exc:
+            log.warning("CMD_DENIED", extra={
+                "ip": client_ip, "session": get_log_session_id(session_id),
+                "cmd": original_command, "reason": str(exc),
+            })
+            return jsonify({"error": str(exc)}), 403
+
+    postfilter_spec, postfilter_error = parse_synthetic_postfilter(expanded_command)
     if postfilter_error:
         log.warning("CMD_DENIED", extra={
             "ip": client_ip, "session": get_log_session_id(session_id),
             "cmd": original_command, "reason": postfilter_error,
         })
         return jsonify({"error": postfilter_error}), 403
-    execution_command = postfilter_spec["base_command"] if postfilter_spec else original_command
+    execution_command = postfilter_spec["base_command"] if postfilter_spec else expanded_command
     if postfilter_spec:
         stage_kinds = [stage.get("kind") for stage in postfilter_spec.get("stages", []) if stage.get("kind")]
         log.debug("CMD_PIPE", extra={
@@ -689,6 +711,8 @@ def run_command():
 
     if resolve_fake_command(execution_command):
         events, exit_code = execute_fake_command(execution_command, session_id)
+        if variable_notice:
+            events = [{"type": "output", "text": variable_notice, "cls": "notice"}] + events
         filtered_events = []
         for event in events:
             if event.get("type") != "output":
@@ -703,7 +727,7 @@ def run_command():
         events = filtered_events
         return _synthetic_run_response(original_command, session_id, client_ip, events, exit_code)
 
-    validation = _validate_command_for_run(original_command, session_id)
+    validation = _validate_command_for_run(execution_command, session_id)
     if not validation.allowed:
         log.warning("CMD_DENIED", extra={
             "ip": client_ip, "session": get_log_session_id(session_id),
@@ -736,7 +760,7 @@ def run_command():
     run_id      = str(uuid.uuid4())
     run_started = datetime.now(timezone.utc).isoformat()
     capture = _run_output_capture(run_id)
-    signal_classifier = OutputSignalClassifier(original_command, cmd_type="real")
+    signal_classifier = OutputSignalClassifier(execution_command, cmd_type="real")
 
     # Start the process immediately — before the generator runs — so the PID
     # is registered before any kill request could arrive
@@ -880,6 +904,18 @@ def run_command():
             # Send the run_id first so the client can call /kill
             yield f"data: {json.dumps({'type': 'started', 'run_id': run_id})}\n\n"
             run_started_dt = datetime.fromisoformat(run_started)
+
+            if variable_notice:
+                notice_dt = datetime.now(timezone.utc)
+                metadata = _capture_add_line_with_signals(
+                    capture,
+                    signal_classifier,
+                    variable_notice,
+                    cls="notice",
+                    ts_clock=notice_dt.strftime("%H:%M:%S"),
+                    ts_elapsed=f"+{(notice_dt - run_started_dt).total_seconds():.1f}s",
+                )
+                yield _sse_output_event("notice", variable_notice, metadata=metadata)
 
             # If the command was rewritten, surface a notice to the user
             if notice:

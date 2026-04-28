@@ -22,31 +22,6 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Open TODOs
 
-- **Session command variables**
-  - Explore app-mediated variable substitution for repeated command sets without exposing real shell environment mutation.
-  - Use cases:
-    - define `HOST=ip.darklab.sh`, `PORT=443`, `IP_ADDR=107.178.109.44`
-    - run a sequence of commands that reference `$HOST`, `$PORT`, or `$IP_ADDR`
-    - update the variables and re-run the same commands or workflow against a different target
-  - Possible user-facing model:
-    - `var set HOST ip.darklab.sh`
-    - `var list`
-    - `var unset HOST`
-    - command input can reference `$HOST`, `${HOST}`, `$PORT`, `${PORT}` before policy validation and execution
-  - Security and correctness constraints:
-    - Treat variables as app-owned text substitution, not process environment variables.
-    - Apply substitution before command allow/deny checks so expanded commands still go through the existing command policy.
-    - Restrict variable names to a small safe pattern such as `[A-Z][A-Z0-9_]{0,31}`.
-    - Preserve command history in a way that makes both the typed command and expanded command understandable.
-    - Redact or discourage sensitive values; this should be for targets/ports/paths, not secrets.
-  - UX integration:
-    - Add autocomplete for defined variable names.
-    - Show current variables in `status` or a small Variables modal if the feature grows beyond a few CLI helpers.
-    - Let workflow inputs optionally map to session variables so users can update one target value and replay a saved sequence.
-  - Testing:
-    - Unit-test substitution order, quoting behavior, undefined variables, and policy validation after expansion.
-    - E2E-test a variable-driven command sequence and history/share display.
-
 - **Workspace-native chained recon workflows**
   - Add guided workflows that demonstrate the Files feature as an app-mediated pipeline: one recon tool writes a session file, and a later tool reads that generated file through declared workspace-aware flags.
   - Keep these workflows small and reviewable. They should show why Files exists without turning `Run all` into a huge scanner blast.
@@ -82,6 +57,22 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 ---
 
 ## Technical Debt
+
+- **Move built-in autocomplete grammar into the command registry**
+  - Current state:
+    - External command autocomplete is declarative in `app/conf/commands.yaml`.
+    - Several built-in commands (`var`, `file`, `runs`, `session-token`, `config`, `theme`, `man`, `which`, `type`) rebuild similar autocomplete structures in `app/static/js/app.js`.
+    - This duplicates registry concepts such as subcommands, flags, `closes: true`, value expectations, examples, and argument hints.
+  - Target shape:
+    - Add a built-in autocomplete section to the registry, likely separate from external `commands:` entries so app-owned command grammar does not look like external execution policy.
+    - Keep static grammar in YAML: roots, subcommands, flags, examples, descriptions, `closes`, `takes_value`, argument placeholders, and sequence/value expectations.
+    - Keep dynamic suggestion providers in code behind named hooks, such as workspace files, session variables, theme names, config option values, and command lookup candidates for `man` / `which` / `type`.
+    - Have `/autocomplete` merge external command context and built-in command context into the same frontend shape the matcher already understands.
+    - Remove duplicated built-in autocomplete object construction from `app/static/js/app.js` after parity tests are in place.
+  - Testing:
+    - Add loader tests proving built-in registry metadata maps to the same frontend context shape as external command metadata.
+    - Add autocomplete tests for `closes: true`, subcommand value expectations, runtime hook fallback, and dynamic suggestions layered onto declarative built-in grammar.
+    - Keep workspace/theme/config/session-variable autocomplete regression tests during the migration.
 
 ---
 

@@ -1835,6 +1835,81 @@ class TestRunStreaming:
         data = json.loads(hist.data)
         assert data["runs"][0]["command"] == "nmap -iL targets.txt -oN scan.txt"
 
+    def test_session_variables_expand_before_validation_and_preserve_typed_history(self):
+        client = get_client()
+        session_id = "sess-vars-run"
+        set_resp = client.post(
+            "/run",
+            json={"command": "var set HOST ip.darklab.sh"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert set_resp.status_code == 200
+
+        fake_proc = _FakeProc(lines=["scan complete\n", ""])
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.rewrite_command", side_effect=lambda command: (command, None)), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = client.post(
+                "/run",
+                json={"command": "nmap -sV $HOST"},
+                headers={"X-Session-ID": session_id},
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "[vars] expanded $HOST: nmap -sV ip.darklab.sh" in body
+        assert popen.call_args.args[0][-1] == "nmap -sV ip.darklab.sh"
+        hist = client.get("/history", headers={"X-Session-ID": session_id})
+        data = json.loads(hist.data)
+        assert data["runs"][0]["command"] == "nmap -sV $HOST"
+
+    def test_session_variables_reject_undefined_reference_before_spawn(self):
+        client = get_client()
+        with mock.patch("blueprints.run.subprocess.Popen") as popen:
+            resp = client.post(
+                "/run",
+                json={"command": "nmap -sV $HOST"},
+                headers={"X-Session-ID": "sess-undefined-var"},
+            )
+
+        assert resp.status_code == 403
+        assert resp.get_json()["error"] == "undefined session variable: $HOST"
+        popen.assert_not_called()
+
+    def test_session_variables_validate_policy_after_expansion(self):
+        client = get_client()
+        session_id = "sess-vars-policy"
+        client.post(
+            "/run",
+            json={"command": "var set HOST blocked.darklab.sh"},
+            headers={"X-Session-ID": session_id},
+        )
+
+        def _deny_expanded(command, session_id=None, cfg=None):  # noqa: ARG001
+            assert command == "curl https://blocked.darklab.sh"
+            return run_routes.CommandValidationResult(
+                False,
+                "blocked after expansion",
+                display_command=command,
+                exec_command=command,
+            )
+
+        with mock.patch("blueprints.run.validate_command", side_effect=_deny_expanded), \
+             mock.patch("blueprints.run.subprocess.Popen") as popen:
+            resp = client.post(
+                "/run",
+                json={"command": "curl https://$HOST"},
+                headers={"X-Session-ID": session_id},
+            )
+
+        assert resp.status_code == 403
+        assert resp.get_json()["error"] == "blocked after expansion"
+        popen.assert_not_called()
+
 
 class TestRunOutputArtifacts:
     def _insert_run_with_artifact(self, run_id, session_id="sess-artifact"):

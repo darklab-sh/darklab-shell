@@ -24,6 +24,7 @@ Full per-feature reference for darklab_shell. See the [README](README.md) for th
 - [Share Redaction](#share-redaction)
 - [Mobile Shell](#mobile-shell)
 - [Built-In Commands](#built-in-commands)
+- [Session Command Variables](#session-command-variables)
 - [Session Files](#session-files)
 - [Command Allowlist](#command-allowlist)
 - [Wordlists](#wordlists)
@@ -734,7 +735,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 **Utility commands**
 
 - `help`, `commands`, `history`, `last`, `limits`, `retention`, `status`, `runs`, `jobs`, `stats`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `fortune`, `shortcuts`, `clear`, `version`, and `whoami` are available in every session.
-- `status` prints a compact session summary: masked active session ID, session type, run count, snapshot count, starred-command count, whether saved Options exist for the session, active-run count, compact session file usage when Files are enabled, and the current instance-level save/retention limits.
+- `status` prints a compact session summary: masked active session ID, session type, run count, snapshot count, starred-command count, whether saved Options exist for the session, session-variable count, active-run count, compact session file usage when Files are enabled, and the current instance-level save/retention limits.
 - `runs` prints app-native active-run metadata for the current session; `jobs` is a compatibility alias for the same terminal output. `runs -v` prints full run IDs, started timestamps, elapsed time, and active-run metadata source, while `runs --json` prints the same active-run snapshot in JSON for debugging or automation. On desktop, the `STATUS`, `LAST EXIT`, and `TABS` HUD pills open the Run Monitor when runs are active.
 - `stats` prints session activity totals and external-tool command-root breakdowns: runs, snapshots, starred commands, active runs, success rate, average duration, and the top non-built-in command roots by run count.
 - `file list`, `file show <file>`, `file add [file]`, `file edit <file>`, `file download <file>`, and confirmed `file rm <file>`, plus the convenience aliases `ls`, `cat <file>`, and confirmed `rm <file>`, expose keyboard-first access to the current session files when workspace storage is enabled. `file add` opens a blank file editor, `file add <file>` opens the same editor with the file name prefilled, and `file download <file>` starts a browser download. `file list` reports current file count, used quota, and remaining quota before listing files.
@@ -759,6 +760,26 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 **Configuration:** none. The built-in command surface is defined in application code, not in operator config.
 
 **Related files:** `app/fake_commands.py` (built-in command registry + output rendering), `app/commands.py` (dispatch + man routing), `app/static/js/app.js` (built-in autocomplete context, client-side command flows, and Options/theme command handling), `app/static/js/runner.js` (client-side command interception).
+
+---
+
+## Session Command Variables
+
+**Purpose:** reuse common target values across commands without mutating the subprocess environment.
+
+**Behavior:**
+
+- `var set NAME value` stores a value for the current session. Names must match `[A-Z][A-Z0-9_]{0,31}`.
+- `var list` prints the current session variables, and `var unset NAME` removes one.
+- Commands can reference variables as `$NAME` or `${NAME}`. The app expands those references before fake-command dispatch, built-in pipe handling, command policy validation, workspace rewrites, and subprocess launch.
+- Undefined variables or unsupported `$...` syntax are denied before a process is spawned.
+- Run history keeps the typed command, while the transcript emits a `[vars] expanded ...` notice so the expanded command remains visible.
+- Autocomplete suggests defined variable names when typing `$...` and suggests existing names plus common `HOST`, `PORT`, and `IP_ADDR` starters for `var set`.
+- Variables are session-scoped and migrate with session-token identity changes.
+
+**Limits:** variables are intended for targets, ports, and paths, not secrets. Values are not redacted and are visible in `var list`, autocomplete descriptions, and the expansion notice.
+
+**Related files:** `app/session_variables.py`, `app/fake_commands.py`, `app/blueprints/run.py`, `app/static/js/app.js`.
 
 ---
 
@@ -1043,11 +1064,11 @@ sqlite3 data/history.db "DELETE FROM snapshots;"
 
 ## Session Tokens
 
-**Purpose:** optional persistent named identity (`tok_<32 hex>`) so run history, snapshots, starred commands, and saved user options follow an operator across browsers and workstations without introducing a login layer.
+**Purpose:** optional persistent named identity (`tok_<32 hex>`) so run history, snapshots, starred commands, session variables, and saved user options follow an operator across browsers and workstations without introducing a login layer.
 
 **Behavior:**
 
-- By default each browser gets an anonymous UUID stored in `localStorage` under `session_id`. A session token replaces that identity with a persistent `tok_<32 hex>` so run history, snapshots, starred commands, theme choice, and other saved Options settings follow the operator across browsers and workstations.
+- By default each browser gets an anonymous UUID stored in `localStorage` under `session_id`. A session token replaces that identity with a persistent `tok_<32 hex>` so run history, snapshots, starred commands, session variables, theme choice, and other saved Options settings follow the operator across browsers and workstations.
 - Tokens are generated server-side as `tok_` + 32 lowercase hex characters (36 chars total, cryptographically random) and recorded in the `session_tokens` table.
 - The active token is stored in `localStorage` under `session_token`; the original UUID is always preserved under `session_id` so `session-token clear` has a stable fallback.
 - The browser sends the active identity as `X-Session-ID` on every request; possession of the token string is the only authorization check (matching the existing anonymous session model).
@@ -1057,11 +1078,11 @@ sqlite3 data/history.db "DELETE FROM snapshots;"
 **Terminal commands:**
 
 - `session-token` (no subcommand) — prints current status: active token in masked form or "anonymous session".
-- `session-token generate` — requests a new token and offers to migrate the current session's runs, snapshots, starred commands, saved user options, and workspace files when the current session has history or Files content. The token becomes active only after a successful migration; declining migration activates it as a fresh named session; migration failure leaves the old session active.
+- `session-token generate` — requests a new token and offers to migrate the current session's runs, snapshots, starred commands, saved user options, session variables, and workspace files when the current session has history or Files content. The token becomes active only after a successful migration; declining migration activates it as a fresh named session; migration failure leaves the old session active.
 - `session-token set <token>` — adopts an existing token. UUIDs are always accepted; `tok_...` values must already exist on this server. The migration prompt is offered if the current session has history or workspace files; answering `no` skips migration and still applies the token, while `Ctrl+C` cancels the whole set flow.
 - `session-token copy` — copies the active token to the clipboard without printing the raw token in the terminal.
 - `session-token clear` — opens a terminal-owned yes/no confirmation, removes `session_token` from `localStorage` only after explicit confirmation, and reverts to the anonymous UUID session. `Ctrl+C` cancels the clear flow. Server-side session data remains and can be reclaimed with `session-token set`.
-- `session-token rotate` — generates a new token, migrates all runs, snapshots, starred commands, workspace files, and saved user options (when the destination has no saved preferences yet), then switches. The switch is **atomic** — migration failure aborts the rotation and keeps the old token active. Old token is retired on success.
+- `session-token rotate` — generates a new token, migrates all runs, snapshots, starred commands, session variables, workspace files, and saved user options (when the destination has no saved preferences yet), then switches. The switch is **atomic** — migration failure aborts the rotation and keeps the old token active. Old token is retired on success.
 - `session-token list` — calls `GET /session/token/info` and shows the active token in masked form with its creation date (or "anonymous session").
 - `session-token revoke <token>` — opens a transcript-owned yes/no confirmation, warns that the token's history and workspace files will not be recoverable from the app after revocation, then permanently deletes the given token via `POST /session/token/revoke` only after an explicit `yes`. If the revoked token is the active one, the client clears `localStorage` and falls back to the anonymous UUID session. Runs, snapshots, starred rows, saved preferences, and workspace files for the revoked token are not deleted but become unreachable.
 
@@ -1079,7 +1100,7 @@ If a session has run history or workspace files, the terminal `generate` and `se
 
 **Limits:** there is no user-facing authentication — possession of the token is sufficient access. `POST /session/migrate` requires the `from_session_id` body field to match the caller's `X-Session-ID` header (mismatch returns 403), so a migration call can only move the caller's own data.
 
-**Configuration:** no config keys — token issuance is always enabled. Token scope covers runs, snapshots, starred commands, saved user options, and app-mediated workspace files when Files are enabled.
+**Configuration:** no config keys — token issuance is always enabled. Token scope covers runs, snapshots, starred commands, session variables, saved user options, and app-mediated workspace files when Files are enabled.
 
 **Related files:** `app/static/js/session.js` (client-side token flow + cross-tab `storage` sync), `app/blueprints/session.py` (`/session/token/*`, `/session/preferences`, and `/session/migrate` routes), `app/database.py` (`session_tokens`, `session_preferences`, and `starred_commands` tables).
 
