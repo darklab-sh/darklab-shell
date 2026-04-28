@@ -713,6 +713,12 @@ function syncOptionsControls() {
   if (optionsShareRedactionSelect) optionsShareRedactionSelect.value = getShareRedactionDefaultPreference();
   if (optionsNotifyToggle) optionsNotifyToggle.checked = getRunNotifyPreference() === 'on';
   if (optionsHudClockSelect) optionsHudClockSelect.value = getHudClockPreference();
+  if (typeof syncAppSelect === 'function') {
+    syncAppSelect(optionsTsSelect);
+    syncAppSelect(optionsWelcomeSelect);
+    syncAppSelect(optionsShareRedactionSelect);
+    syncAppSelect(optionsHudClockSelect);
+  }
 }
 
 function applyThemePreference(theme, persist = true) {
@@ -1747,11 +1753,6 @@ function _buildThemePreviewCard(theme) {
 
   const bar = document.createElement('span');
   bar.className = 'theme-card-preview-bar';
-  ['dot-r', 'dot-y', 'dot-g'].forEach(dotClass => {
-    const dot = document.createElement('span');
-    dot.className = `dot ${dotClass}`;
-    bar.appendChild(dot);
-  });
   const pill = document.createElement('span');
   pill.className = 'theme-card-preview-pill';
   bar.appendChild(pill);

@@ -523,6 +523,7 @@ To prevent commands from writing to either path directly, the app blocks any com
 - [DECISIONS.md](DECISIONS.md) - Architectural rationale, tradeoffs, and implementation-history notes
 - [tests/README.md](tests/README.md) - Detailed suite appendix, smoke-test coverage, and focused test commands
 - [THEME.md](THEME.md) - Theme registry, selector metadata, and override behavior
+- [docs/theme-inventory.md](docs/theme-inventory.md) - Working inventory for shared modal, drawer, sheet, row, and control theme-token cleanup
 - [FEATURES.md](FEATURES.md) - Full per-feature reference: autocomplete, pipe support, keyboard shortcuts, allowlist, welcome animation, history, permalinks, themes, and more
 
 ---
@@ -670,9 +671,9 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── docker-compose.yml
 ├── docs/
 │   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
-│   └── release-drafts/       # Temporary release-branch merge-request and release-note drafts; remove before merging to main unless intentionally preserving them
-│       ├── v1.6-merge-request.md # Draft GitLab merge request notes for the v1.6 branch
-│       └── v1.6-release-notes.md # Draft user/operator release notes for v1.6
+│   ├── release-drafts/       # Temporary release-branch merge-request and release-note drafts; remove before merging to main unless intentionally preserving them
+│   │   ├── v1.6-merge-request.md # Draft GitLab merge request notes for the v1.6 branch
+│   │   └── v1.6-release-notes.md # Draft user/operator release notes for v1.6
 ├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser
 ├── examples/
 │   ├── docker-compose.prod.yml  # Optional production Docker Compose override (GELF, proxy env, external network)

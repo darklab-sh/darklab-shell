@@ -93,7 +93,7 @@
     position: sticky;
     top: 0;
     z-index: 70;
-    background: var(--bg);
+    background: var(--theme-chrome-bg);
     padding-top: max(0px, env(safe-area-inset-top));
     padding-bottom: 0px;
     min-height: 60px;
@@ -153,7 +153,7 @@
     margin-top: auto;
     z-index: 40;
     padding: 8px 12px env(safe-area-inset-bottom);
-    background: var(--theme-mobile-composer-host-bg);
+    background: var(--surface);
   }
   body.mobile-terminal-mode #mobile-composer-host {
     padding: 0;
@@ -194,8 +194,9 @@
     padding: 6px 10px 0;
     align-items: flex-end;
     gap: 0;
+    background: var(--theme-chrome-bg);
+    border-bottom-color: var(--theme-chrome-divider-color);
   }
-  body.mobile-terminal-mode .terminal-bar .dot,
   body.mobile-terminal-mode .terminal-bar .tabs-scroll-btn {
     display: none;
   }
@@ -207,8 +208,8 @@
      Rounded-top pill tabs with drag grip, active-only close, and inset green
      glow on active. */
   body.mobile-terminal-mode .tabs-bar {
-    background: var(--theme-panel-alt-bg);
-    border-bottom: 1px solid var(--border-bright);
+    background: var(--theme-chrome-bg);
+    border-bottom: 1px solid var(--theme-chrome-divider-color);
     gap: 6px;
     padding: 6px 10px 0;
   }
@@ -241,10 +242,10 @@
   }
   body.mobile-terminal-mode .terminal-bar .tab.active {
     color: var(--green);
-    background: var(--surface);
+    background: var(--theme-tab-active-bg);
     border: 1px solid var(--border-bright);
     border-top: 2px solid color-mix(in srgb, var(--green) 55%, transparent);
-    border-bottom-color: var(--surface);
+    border-bottom-color: var(--theme-tab-active-bg);
     box-shadow: none;
   }
   /* Inactive tabs collapse idle/ok/fail/killed to border-bright so only the
@@ -316,7 +317,7 @@
     z-index: 90;
     padding-left: 10px;
     padding-right: 10px;
-    background: var(--bg);
+    background: var(--theme-chrome-bg);
   }
   body.mobile-terminal-mode #mobile-header-actions {
     display: flex;
@@ -437,7 +438,7 @@
     margin: 0 10px 6px 4px;
     padding: 0 9px 0 8px;
     border-radius: 11px;
-    background: color-mix(in srgb, var(--amber) 12%, var(--theme-panel-alt-bg));
+    background: color-mix(in srgb, var(--amber) 12%, var(--theme-chrome-bg));
     border: 1px solid color-mix(in srgb, var(--amber) 55%, transparent);
     color: var(--amber);
     font-family: var(--font-mono);
@@ -446,7 +447,7 @@
     letter-spacing: 0.3px;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
-    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 1px 6px color-mix(in srgb, var(--theme-panel-shadow) 70%, transparent);
   }
   body.mobile-terminal-mode .mobile-running-chip.u-hidden {
     display: none;
@@ -634,7 +635,7 @@
     border-left: none;
     border-right: none;
     border-bottom: none;
-    box-shadow: 0 -4px 32px var(--theme-mobile-menu-shadow);
+    box-shadow: 0 -4px 32px var(--theme-chrome-shadow);
     z-index: 310;
   }
   body.mobile-terminal-mode #history-panel::before {
@@ -694,6 +695,8 @@
   }
   body.mobile-terminal-mode .history-panel-filters input,
   body.mobile-terminal-mode .history-panel-filters select,
+  body.mobile-terminal-mode .history-panel-filters .app-select,
+  body.mobile-terminal-mode .history-panel-filters .app-select-trigger,
   body.mobile-terminal-mode .history-filter-toggle,
   body.mobile-terminal-mode .history-filter-clear-btn {
     min-height: 40px;
@@ -708,6 +711,14 @@
   body.mobile-terminal-mode .history-filter-toggle,
   body.mobile-terminal-mode .history-filter-clear-btn {
     flex: 1 1 100%;
+  }
+  body.mobile-terminal-mode .options-body .app-select,
+  body.mobile-terminal-mode .options-body .app-select-trigger {
+    width: 100%;
+    font-size: 16px;
+  }
+  body.mobile-terminal-mode .options-body .app-select-trigger {
+    min-height: 44px;
   }
   body.mobile-terminal-mode .history-root-dropdown {
     border-radius: 6px;
@@ -735,7 +746,7 @@
     position: sticky;
     top: 0;
     z-index: 2;
-    background: var(--surface);
+    background: var(--theme-modal-bg);
   }
   body.mobile-terminal-mode .form-check {
     min-height: 44px;

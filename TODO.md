@@ -22,6 +22,18 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Open TODOs
 
+- **Refresh theme preview cards for the current desktop shell**
+  - The Theme selector preview cards still approximate the pre-v1.6 terminal-window layout instead of the current desktop shell with rail, tabbar, content pane, HUD, and drawer-style chrome.
+  - Remove stale visual affordances from the preview cards as they are discovered; the legacy traffic-light dots have already been removed and the old `window_btn_*` theme keys were retired.
+  - Redesign the preview thumbnail to show the canonical v1.6 surfaces:
+    - left rail / chrome strip using `chrome_bg`
+    - top tabbar with an active tab using `tab_active_bg`
+    - terminal/content panel using `panel_bg`
+    - bottom HUD/chrome row using `chrome_bg` / `chrome_row_bg`
+    - representative accent/status elements using the semantic green, amber, red, blue, and muted palette
+  - Keep the preview compact and schematic; it should communicate theme contrast and surface relationships, not reproduce the entire UI.
+  - Add/update unit coverage around the theme-card DOM structure so obsolete preview-only tokens do not creep back into the theme key set.
+
 - **Run Monitor CPU and memory usage**
   - Add lightweight resource telemetry to the Run Monitor so long-running commands show whether they are actively consuming CPU or memory instead of only showing elapsed time.
   - MVP:
@@ -76,19 +88,94 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Technical Debt
 
+- **Promote object-specific frontend styling into shared primitives**
+  - Problem:
+    - The surface-token pass aligned major theme values, but several frontend objects still carry their own structural and visual CSS even when they represent the same UI role.
+    - This makes later theme work harder because repeated objects such as dropdown menus, chrome rows, filter chips, file rows, history rows, and mobile sheet controls can drift independently even when they should share behavior and appearance.
+    - The existing button primitive allowlist is useful, but it also highlights remaining one-off pressable families that deserve review before the `color-mix()` / derived-token cleanup begins.
+  - Goal:
+    - Introduce a small set of shared structural primitives before centralizing local color transforms.
+    - Keep component / ID selectors for layout, sizing, positioning, and true product-specific behavior.
+    - Move repeated role styling into primitives so the later derived-token pass can target stable roles instead of many surface-specific selectors.
+  - First-pass primitive candidates:
+    - **Dropdown/menu primitive**
+      - Shared by `.save-menu`, `.app-select-menu`, `.ac-dropdown`, `.hist-search-dropdown`, and mobile recents `.sheet-filter-menu`.
+      - Candidate classes: `.dropdown-surface`, `.dropdown-item`, `.dropdown-item-active`, optional `.dropdown-up`.
+      - Preserve autocomplete-specific layout such as match highlighting, descriptions, and mobile keyboard positioning as local modifiers.
+    - **Chrome/list row primitive**
+      - Shared by `.history-entry`, `.run-monitor-item`, mobile recents `.sheet-item`, `.workspace-file-row`, and potentially `.rail-item`.
+      - Candidate classes: `.chrome-row`, `.chrome-row-clickable`, `.chrome-row-accent`, `.chrome-row-dense`.
+      - Keep row content layout local when the information hierarchy differs, but centralize background, divider, hover, focus, and accent-stripe behavior.
+    - **Form/control primitive**
+      - Shared by `.form-input`, `.workspace-textarea`, `.search-bar input`, `.history-panel-filters input`, mobile recents filter inputs, and `#mobile-cmd`.
+      - Candidate classes: `.form-control`, `.form-control-compact`, `.control-row`.
+      - Preserve mobile composer keyboard anchoring and iOS font-size behavior as explicit local exceptions.
+    - **Chip/badge primitive**
+      - Shared by `.hist-chip`, `.history-active-filter-chip`, mobile `.filter-chip`, `.search-signal-chip`, `.history-entry-kind`, and mobile `.sheet-item-kind`.
+      - Candidate classes: `.chip`, `.chip-action`, `.chip-removable`, `.chip-tone-*`, `.badge`.
+      - Keep semantic tone decisions (`green`, `amber`, `red`) explicit and avoid making all chips look clickable when they are informational badges.
+    - **Drawer/sheet structure primitive**
+      - Shared by History drawer, Run Monitor drawer, mobile recents sheet, mobile menu sheet, and modal bottom-sheet mode.
+      - Candidate classes: `.chrome-drawer`, `.bottom-sheet`, `.surface-header`, `.surface-body`, `.surface-footer`.
+      - Keep placement and animation local where geometry differs, but centralize header/body/footer bands, borders, and sheet/drawer shell treatment.
+  - Pressable exceptions to review:
+    - `.sheet-clear-btn`
+    - `.sheet-filter-row`
+    - `.menu-item`
+    - `.menu-subitem`
+    - `.history-action-btn`
+    - `.chrome-btn`
+    - `#mobile-run-btn`, `#mobile-kill-btn`
+    - `#search-prev`, `#search-next`
+    - Decide whether each should move onto `.btn`, `.nav-item`, `.toggle-btn`, `.close-btn`, `.kb-key`, or a new row/control primitive. Keep exceptions only when the surface has a documented structural reason.
+  - Lower-priority / likely-specific surfaces:
+    - Tabs, status pills, Run Monitor CPU/MEM meters, theme-card previews, and welcome output have enough bespoke behavior that they should not be forced into broad structural primitives in the first pass.
+    - These surfaces can still participate in the later derived-token cleanup if they reuse common color roles.
+  - Implementation order:
+    - Start with the dropdown/menu primitive because it has the clearest duplication and should reduce inconsistencies across save menus, app-native selects, autocomplete, and mobile filter dropdowns.
+    - Follow with row and chip primitives because they cover the most repeated chrome/list objects.
+    - Then revisit form controls and drawer/sheet structure, where mobile-specific behavior needs more careful regression testing.
+    - After each primitive pass, update `ARCHITECTURE.md` Frontend Design System docs and tighten `tests/js/fixtures/button_primitive_allowlist.json` or add runtime primitive tests where JS renders the surface.
+  - Guardrails:
+    - Avoid introducing primitives that are only aliases for one selector.
+    - Avoid making component markup harder to read solely to reduce CSS line count.
+    - Keep visual review small but representative: desktop History, Run Monitor, Files, Options, autocomplete, mobile recents, and mobile menu.
+    - Run focused unit tests for helper/rendering changes and at least one browser smoke path for any primitive that changes a mobile sheet or keyboard-adjacent surface.
+
+- **Centralize local color transforms into derived theme tokens**
+  - Problem:
+    - The surface-token pass removed the major one-off surface roles, but the component CSS still contains many local `color-mix()` formulas for washes, soft borders, text blends, glows, shadows, dropdown outlines, search affordances, mobile running indicators, Run Monitor meters, and welcome-screen decorative states.
+    - Some local transforms are legitimate state math, but leaving formulas scattered across `app/static/css/*.css` makes it easy for similar states to drift and harder for theme authors to tune the app consistently.
+  - Direction:
+    - Add a small derived-token layer rather than one token per selector. Candidate roles include soft/medium green washes, amber/red washes, muted text blends, soft borders, dropdown outlines, chrome meter rings, mobile running indicators, search highlight fills, and scrollbar track/thumb colors.
+    - Keep semantic transforms in theme/config values when they are true theme roles, and keep one-off animation-only math local when it is purely transient geometry/opacity.
+    - Replace repeated local formulas with shared variables only when the visual role is reused or theme authors would reasonably want to tune it.
+  - Audit starting points:
+    - Prompt selection/caret/dropdown outlines in `app/static/css/base.css`.
+    - Search bar, signal chips, toggle buttons, and button primitives in `app/static/css/components.css`.
+    - Mobile running chip/edge glows in `app/static/css/mobile.css`.
+    - Run Monitor meter accents and HUD affordance details in `app/static/css/shell-chrome.css`.
+    - Welcome decorative tints in `app/static/css/welcome.css`.
+    - Terminal/export scrollbar styling shared between `app/static/css/shell.css` and `app/static/css/terminal_export.css`.
+  - Guardrails:
+    - Do not reintroduce surface-specific tokens for modals, chrome, or rows unless a genuinely new role appears.
+    - Keep the first pass small enough for visual review across `darklab_obsidian`, a light theme, and one non-green dark theme.
+    - Update `THEME.md` only for stable derived roles that theme authors should know about.
+
 - **Normalize theme tokens across shared surfaces**
   - Problem:
     - The theme system has enough surface-specific tokens that visually similar objects can drift apart. For example, Options and Keyboard Shortcuts can render with different modal backgrounds, Files and Shortcuts do not have the same explicit theme sections as older modals, and newer drawer surfaces can end up choosing colors by local CSS instead of shared semantic roles.
-    - Several tokens appear to encode the same role (`faq_modal_bg`, `options_modal_bg`, `confirm_modal_bg`, workspace/workflows/shortcuts modal backgrounds, `mobile_menu_bg`, sheet backgrounds, row backgrounds) while other surfaces rely directly on `surface`, `panel_bg`, `panel_alt_bg`, or `status_bar_bg`.
+    - Several tokens appeared to encode the same role (`faq_modal_bg`, `options_modal_bg`, older confirm modal backgrounds, workspace/workflows/shortcuts modal backgrounds, older mobile menu backgrounds, sheet backgrounds, row backgrounds) while other surfaces relied directly on `surface`, `panel_bg`, or older status-bar roles.
   - Inventory pass:
+    - Started in `docs/theme-inventory.md`.
     - Build a table of shared UI objects and their current background/border/text tokens: Options, FAQ, Keyboard Shortcuts, Workflows, Files, Theme selector, Confirm dialogs, History drawer, Run Monitor drawer, mobile sheets, dropdowns, toasts, file/history/run rows, modal sections, form controls, chips, and inline code blocks.
     - For each object, record whether it is a modal, sheet, drawer, row, section, control, or semantic state. The goal is to classify by role before touching colors.
     - Include at least the default dark theme, one light theme, and one non-green dark theme in the first visual comparison so consolidation does not accidentally optimize only for Darklab Obsidian.
   - Target token model:
     - Keep the base palette small: `bg`, `surface`, `border`, `border_bright`, `text`, `muted`, `green`, `amber`, `red`, `blue`.
-    - Add or standardize semantic shared tokens such as `modal_bg`, `modal_header_bg`, `modal_section_bg`, `sheet_bg`, `drawer_bg`, `drawer_row_bg`, `drawer_row_hover_bg`, `control_bg`, and `inline_surface_bg`.
-    - Preserve intentional component identities for surfaces that should differ: `status_bar_bg`, `history_panel_bg`, `terminal_bar_bg`, tab styling, and theme-selector presentation if it needs special treatment.
-    - Prefer old per-surface tokens becoming aliases/fallbacks to canonical tokens before removing them, e.g. `--theme-faq-modal-bg: var(--theme-modal-bg)`, so themes can migrate incrementally.
+    - Standardized semantic shared tokens include `modal_bg`, `chrome_bg`, `chrome_header_bg`, `chrome_row_bg`, `chrome_row_hover_bg`, `chrome_control_bg`, `chrome_control_border`, `chrome_divider_color`, `chrome_shadow`, and `inline_surface_bg`.
+    - Preserve intentional component identities for surfaces that should differ: `terminal_bar_bg`, tab styling, and theme-selector presentation if it needs special treatment.
+    - Retired old per-surface tokens after migrating CSS consumers and regenerated shipped theme examples, rather than keeping a long-term alias layer.
   - CSS refactor direction:
     - Introduce shared structural classes for color decisions: `.modal-surface`, `.sheet-surface`, `.drawer-surface`, `.surface-row`, `.surface-section`, and `.control-surface`.
     - Keep ID selectors for sizing, positioning, and surface-specific layout only. Avoid new ID-level color decisions unless there is a documented exception.

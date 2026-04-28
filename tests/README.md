@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 1062
-- `vitest`: 858
+- `vitest`: 862
 - `playwright`: 219
-- total: 2,139
+- total: 2,143
 
 This document is organized in two parts:
 
@@ -2063,6 +2063,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `returns false when activeElement is null` | Verifies blurActiveElement guards against null activeElement. |
 | `returns false when the active element has no blur method` | Verifies blurActiveElement guards against non-blurrable targets. |
 | `blurs the focused element and returns true` | Verifies blurActiveElement blurs the currently-focused element. |
+| `keeps the native select as state while rendering a themed trigger` | Verifies app-native select enhancement keeps the original select as the state owner. |
+| `dispatches normal change events when choosing an app-native option` | Verifies app-native select option clicks emit regular select change events. |
 
 #### `ui_focus_trap.test.js`
 
@@ -2216,6 +2218,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `refreshes from the workspace route` | Verifies that the modal refresh path calls `/workspace/files` and renders the returned file list. |
 | `saves editor contents through the workspace route` | Verifies that saving posts the file name and text content to `/workspace/files` and refreshes the visible state. |
 | `creates folders through the workspace directory route` | Verifies that New Folder posts to the directory route, refreshes the browser, and enters the created folder. |
+| `opens an app-native folder prompt instead of the browser prompt` | Verifies that New Folder uses the shared themed dialog instead of `window.prompt`. |
+| `keeps the folder prompt open when validation fails` | Verifies that empty folder names show inline validation and do not call the directory route. |
 
 ### Playwright
 
@@ -2493,7 +2497,7 @@ Desktop demo recording spec. Drives a tightened README-first interaction sequenc
 
 | Test | Description |
 | --- | --- |
-| `audit mobile surfaces across every installed theme` | Reusable theme audit tool — iterates every theme in `app/conf/themes/`, force-opens each mobile sheet, reads computed styles, and asserts WCAG contrast ratios with alpha compositing on ten representative pairs (`--text` / `--muted` / `--green` / `--amber` / `--red` / `--border-bright` over `--surface` and `--theme-panel-alt-bg`, plus the menu scrim and sub-menu radio states). Prints a per-theme contrast table and hard-fails only on pairs below 1.20. |
+| `audit mobile surfaces across every installed theme` | Reusable theme audit tool — iterates every theme in `app/conf/themes/`, force-opens each mobile sheet, reads computed styles, and asserts WCAG contrast ratios with alpha compositing on ten representative pairs (`--text` / `--muted` / `--green` / `--amber` / `--red` / `--border-bright` over `--surface` and `--theme-chrome-bg`, plus the menu scrim and sub-menu radio states). Prints a per-theme contrast table and hard-fails only on pairs below 1.20. |
 | `semantic color contract: four semantic tokens stay perceptually distinct within each theme` | Walks every theme and asserts the four semantic tokens from THEME.md § Semantic Color Contract (`--amber` / `--red` / `--green` / `--muted`) stay perceptually distinct — pairwise CIELAB deltaE76 is computed for all 6 pairs, with a per-theme table printed and a hard gate at deltaE 10 (below that, two colors read as the same at a glance and the contract is broken). |
 
 #### `timestamps.spec.js`

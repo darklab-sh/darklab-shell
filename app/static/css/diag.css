@@ -62,7 +62,7 @@ body.diag-page::before { display: none; }
   flex-direction: row;
   align-items: center;
   gap: 32px;
-  border-bottom: 1px solid var(--theme-terminal-bar-border, var(--border));
+  border-bottom: 1px solid var(--theme-terminal-bar-bg, var(--border));
   background: var(--theme-terminal-bar-bg, var(--bg));
 }
 /* Defeat `.export-header { border-bottom }` and its background — the divider
@@ -155,7 +155,7 @@ body.diag-page::before { display: none; }
   text-transform: uppercase;
   color: var(--muted);
   padding: 10px 14px 8px;
-  border-bottom: 1px solid var(--theme-terminal-bar-border);
+  border-bottom: 1px solid var(--theme-terminal-bar-bg);
   background: var(--theme-terminal-bar-bg);
   display: flex;
   align-items: baseline;

@@ -103,6 +103,11 @@ function _syncHistoryFilterControls() {
   if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.disabled = !runOnlyEnabled;
   if (typeof historyExitFilter !== 'undefined' && historyExitFilter) historyExitFilter.disabled = !runOnlyEnabled;
   if (typeof historyStarredToggle !== 'undefined' && historyStarredToggle) historyStarredToggle.disabled = !runOnlyEnabled;
+  if (typeof syncAppSelect === 'function') {
+    if (typeof historyTypeFilter !== 'undefined') syncAppSelect(historyTypeFilter);
+    if (typeof historyExitFilter !== 'undefined') syncAppSelect(historyExitFilter);
+    if (typeof historyDateFilter !== 'undefined') syncAppSelect(historyDateFilter);
+  }
   if (typeof histClearAllBtn !== 'undefined' && histClearAllBtn) {
     histClearAllBtn.classList.toggle('u-hidden', _historyFilters.type === 'snapshots');
   }

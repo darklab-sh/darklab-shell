@@ -51,7 +51,6 @@ These uses of yellow do not match the strict semantic meaning above, but are ret
 
 - **Starred items.** A yellow star icon on favorited / starred entries (history rows, chips, sheet items) — matches the universal star-is-yellow convention (GitHub, Gmail, etc.).
 - **Search-hit highlights.** `mark.search-hl` tints matches yellow — matches browser and IDE find-in-page convention.
-- **macOS-style minimize button.** `window_btn_minimize` in every theme renders the amber traffic-light dot — decorative chrome that mirrors the macOS window-control convention, not a semantic signal.
 
 ---
 
@@ -236,13 +235,13 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
-| `bg` | `#0d0d0d` | `#b8c4d0` | Page background behind the terminal shell |
+| `bg` | `#000000` | `#b8c4d0` | Page background behind the terminal shell |
 | `surface` | `#141414` | `#eef2f6` | Core panel, modal, and dropdown surface color |
-| `border` | `#1f1f1f` | `rgba(0,0,0,0.15)` | Subtle separators and low-emphasis borders |
-| `border_bright` | `#2e2e2e` | `rgba(0,0,0,0.28)` | Stronger borders, focus outlines, and modal chrome |
+| `border` | `#2a2a2a` | `rgba(0,0,0,0.15)` | Subtle separators and low-emphasis borders |
+| `border_bright` | `#3c3c3c` | `rgba(0,0,0,0.28)` | Stronger borders, focus outlines, and modal chrome |
 | `border_soft` | `rgba(255, 255, 255, 0.08)` | `rgba(0,0,0,0.12)` | Soft dividers where a full border would read too heavy |
 | `text` | `#e0e0e0` | `#101820` | Primary body text |
-| `muted` | `#7a7a7a` | `#5a6878` | Secondary labels, hints, and timestamps |
+| `muted` | `#9a9a9a` | `#5a6878` | Secondary labels, hints, and timestamps |
 | `green` | `#39ff14` | `#2a5d18` | Prompt, success states, and primary active accent |
 | `green_dim` | `#1a7a08` | `#355f24` | Dimmed green accent for borders and low-key highlights |
 | `green_glow` | `rgba(57,255,20,0.12)` | `rgba(42,93,24,0.08)` | Glow, focus rings, and accent tints |
@@ -258,63 +257,47 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 | `terminal_line_height` | `1.65` | `1.65` | Line spacing for terminal output |
 | `prompt_line_text` | `#e8e8e8` | `#1c201a` | Text color for the live prompt line above the hidden input |
 
-### Terminal Panes and Panels
+### Terminal Panes, Panels, and Shell Chrome
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
 | `panel_bg` | `#141414` | `#d4e0ec` | Main panel background |
-| `panel_alt_bg` | `#101010` | `#e8eef6` | Alternate panel background |
-| `panel_border` | `#2e2e2e` | `rgba(0,0,0,0.28)` | Panel borders |
-| `panel_shadow` | `rgba(0,0,0,0.7)` | `rgba(0,0,0,0.22)` | Panel drop shadow |
-| `terminal_bar_bg` | `#0d0d0d` | `#b8c4d0` | Top terminal bar background |
-| `terminal_bar_border` | `#1f1f1f` | `#8898b0` | Top terminal bar border |
-| `terminal_actions_bg` | `transparent` | `rgba(0,0,0,0.025)` | Actions strip behind top controls |
-| `terminal_wrap_border` | `#2e2e2e` | `rgba(0,0,0,0.42)` | Outer terminal wrapper border |
-| `terminal_wrap_shadow` | `rgba(0,0,0,0.7)` | `rgba(0,0,0,0.22)` | Outer terminal wrapper shadow |
-| `window_btn_close` | `#ff6b5f` | `#c25b4d` | Close button color in the terminal bar |
-| `window_btn_minimize` | `#ffbe3b` | `#b77f22` | Minimize button color in the terminal bar |
-| `window_btn_maximize` | `#32d74b` | `#2f7a43` | Maximize button color in the terminal bar |
-| `status_bar_bg` | `#0c0c0c` | `#b8c4d0` | Desktop HUD / status strip background |
-| `status_bar_border` | `#2a2a2a` | `#8898b0` | Desktop HUD / status strip top border |
-| `status_bar_text` | `#9a9a9a` | `#5a6878` | Neutral text inside the desktop HUD / status strip |
+| `panel_border` | `#3c3c3c` | `rgba(0,0,0,0.28)` | Panel borders |
+| `panel_shadow` | `rgba(170,170,170,0.12)` | `rgba(0,0,0,0.22)` | Panel drop shadow |
+| `terminal_bar_bg` | `#000000` | `#b8c4d0` | Top terminal bar background |
+| `chrome_bg` | `#0c0c0c` | `#b8c4d0` | Shared shell chrome background for the rail, HUD, History drawer, Run Monitor, mobile recents, and mobile menu |
+| `chrome_header_bg` | `#0c0c0c` | `#b8c4d0` | Header bands inside shell chrome surfaces |
+| `chrome_row_bg` | `#0c0c0c` | `#b8c4d0` | Rows inside shell chrome surfaces |
+| `chrome_row_hover_bg` | `rgba(57,255,20,0.12)` | `rgba(26,90,170,0.06)` | Hover/focus rows inside shell chrome surfaces |
+| `chrome_control_bg` | `color-mix(in srgb, var(--surface) 92%, transparent)` | `color-mix(in srgb, var(--surface) 92%, transparent)` | Inputs and compact controls inside shell chrome surfaces |
+| `chrome_control_border` | `var(--border-bright)` | `var(--border-bright)` | Inputs and compact control borders inside shell chrome surfaces |
+| `chrome_divider_color` | `#2a2a2a` | `rgba(0,0,0,0.15)` | Divider lines inside shell chrome surfaces |
+| `chrome_shadow` | `rgba(0,0,0,0.6)` | `rgba(0,0,0,0.6)` | Shared shadow for chrome drawers and sheets |
 
 ### Toolbar Buttons and Chips
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
 | `toolbar_button_bg` | `transparent` | `#c8d4e0` | Chrome button (rail, HUD, toolbar) backgrounds |
-| `toolbar_button_border` | `#2e2e2e` | `#8898b0` | Chrome button (rail, HUD, toolbar) borders |
-| `toolbar_button_text` | `#7a7a7a` | `#202838` | Chrome button (rail, HUD, toolbar) text |
+| `toolbar_button_border` | `#3c3c3c` | `#8898b0` | Chrome button (rail, HUD, toolbar) borders |
+| `toolbar_button_text` | `#9a9a9a` | `#202838` | Chrome button (rail, HUD, toolbar) text |
 | `toolbar_button_hover_bg` | `transparent` | `#b8c8d8` | Hover background for chrome buttons |
 | `toolbar_button_hover_border` | `#1a7a08` | `#6880a0` | Hover border for chrome buttons |
 | `toolbar_button_hover_text` | `#39ff14` | `#101820` | Hover text for chrome buttons |
 | `toolbar_button_active_bg` | `rgba(57,255,20,0.06)` | `#a0b4c8` | Active chrome button background |
 | `toolbar_button_active_border` | `#1a7a08` | `#6880a0` | Active chrome button border |
 | `toolbar_button_active_text` | `#39ff14` | `#101820` | Active chrome button text |
-| `chip_bg` | `transparent` | `#c8d4e0` | History chips and starred chips |
-| `chip_border` | `#2e2e2e` | `#8898b0` | Chip borders |
-| `chip_text` | `#7a7a7a` | `#202838` | Default chip text |
-| `chip_hover_bg` | `rgba(57,255,20,0.12)` | `#b8c8d8` | Chip hover background |
-| `chip_hover_border` | `#1a7a08` | `#6880a0` | Chip hover border |
-| `chip_hover_text` | `#e0e0e0` | `#101820` | Chip hover text |
-| `chip_overflow_text` | `#39ff14` | `#274f17` | "More" / overflow chip text |
 
 ### Tabs and Tab Controls
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
 | `tabs_bar_scrollbar_track` | `rgba(255,255,255,0.06)` | `rgba(0,0,0,0.08)` | Tabs bar scrollbar track |
-| `tabs_bar_scrollbar_thumb` | `#555555` | `#7890a8` | Tabs bar scrollbar thumb |
-| `tabs_bar_scrollbar_thumb_hover` | `#777777` | `#5a6878` | Hover thumb color |
-| `tabs_scroll_btn_bg` | `transparent` | `#c4d0dc` | Tab-scroll button background |
-| `tabs_scroll_btn_border` | `#1f1f1f` | `#8898b0` | Tab-scroll button border |
-| `tabs_scroll_btn_text` | `#7a7a7a` | `#202838` | Tab-scroll button text |
-| `tabs_scroll_btn_hover_bg` | `transparent` | `#b4c4d4` | Tab-scroll button hover background |
-| `tabs_scroll_btn_hover_border` | `#2e2e2e` | `#6880a0` | Tab-scroll button hover border |
-| `tabs_scroll_btn_hover_text` | `#e0e0e0` | `#101010` | Tab-scroll button hover text |
+| `tabs_bar_scrollbar_thumb` | `#6d6d6d` | `#7890a8` | Tabs bar scrollbar thumb |
+| `tabs_bar_scrollbar_thumb_hover` | `#8a8a8a` | `#5a6878` | Hover thumb color |
 | `tab_bg` | `linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))` | `linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))` | Inactive tab background |
-| `tab_border` | `#2e2e2e` | `rgba(0,0,0,0.15)` | Inactive tab border |
-| `tab_text` | `#7a7a7a` | `#5a6878` | Inactive tab text |
+| `tab_border` | `#3c3c3c` | `rgba(0,0,0,0.15)` | Inactive tab border |
+| `tab_text` | `#9a9a9a` | `#5a6878` | Inactive tab text |
 | `tab_hover_text` | `#e0e0e0` | `#101820` | Hovered tab text |
 | `tab_active_bg` | `rgba(57,255,20,0.04)` | `#c0cedd` | Active tab background |
 | `tab_active_border` | `color-mix(in srgb, var(--green) 42%, transparent)` | `#8898b0` | Active tab border |
@@ -322,8 +305,8 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 | `tab_active_shadow` | `none` | `inset 0 0 0 1px rgba(255,255,255,0.22)` | Active tab depth styling |
 | `tab_close_bg` | `rgba(255,255,255,0.02)` | `rgba(255,255,255,0.02)` | Close-button background inside a tab |
 | `tab_close_border` | `rgba(255,255,255,0.06)` | `rgba(255,255,255,0.06)` | Close-button border inside a tab |
-| `tab_close_hover_bg` | `color-mix(in srgb, var(--red) 18%, transparent)` | `color-mix(in srgb, var(--red) 18%, transparent)` | Close-button hover background |
-| `tab_close_hover_border` | `color-mix(in srgb, var(--red) 30%, transparent)` | `color-mix(in srgb, var(--red) 30%, transparent)` | Close-button hover border |
+| `tab_close_hover_bg` | `color-mix(in srgb, var(--green-dim) 18%, transparent)` | `color-mix(in srgb, var(--red) 18%, transparent)` | Close-button hover background |
+| `tab_close_hover_border` | `color-mix(in srgb, var(--green-dim) 30%, transparent)` | `color-mix(in srgb, var(--red) 30%, transparent)` | Close-button hover border |
 | `tab_close_hover_text` | `inherit` | `inherit` | Close-button hover text color |
 | `tab_touch_drag_text_shadow` | `0 0 10px color-mix(in srgb, var(--green) 14%, transparent)` | `0 0 10px rgba(42,93,24,0.08)` | Drag feedback on touch devices |
 | `tab_drop_shadow` | `0 0 10px color-mix(in srgb, var(--green) 45%, transparent)` | `0 0 10px rgba(42,93,24,0.18)` | Drag/drop emphasis for reordered tabs |
@@ -332,59 +315,40 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
-| `history_panel_bg` | `#0d0d0d` | `#c8d8e8` | History drawer background |
-| `history_panel_shadow` | `rgba(0,0,0,0.50)` | `rgba(34,58,88,0.20)` | Side shadow for the history drawer |
-| `history_entry_hover_bg` | `rgba(57,255,20,0.12)` | `rgba(26,90,170,0.06)` | Hover background for history entries |
 | `history_load_overlay_bg` | `rgba(0,0,0,0.76)` | `rgba(0,0,0,0.76)` | Overlay shown while restoring a history entry |
-| `history_load_modal_bg` | `color-mix(in srgb, var(--surface) 88%, #000)` | `#e8eef6` | Restore modal background |
-| `history_load_modal_border` | `#3c3c3c` | `rgba(0,0,0,0.28)` | Restore modal border |
-| `history_load_modal_shadow` | `rgba(0,0,0,0.35)` | `rgba(0,0,0,0.35)` | Restore modal shadow |
 
-### Modals and Dropdowns
+### Modals, Dropdowns, and Inline Surfaces
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
-| `faq_modal_bg` | `#141414` | `#e8eef6` | FAQ modal background |
-| `options_modal_bg` | `#141414` | `#e8eef6` | Options modal background |
-| `confirm_modal_bg` | `#141414` | `#d4e0ec` | Confirmation modal background (shared for all `showConfirm` dialogs) |
-| `dropdown_bg` | `color-mix(in srgb, var(--surface) 96%, transparent)` | `#d4e0ec` | Main autocomplete dropdown background |
-| `dropdown_border` | `color-mix(in srgb, var(--green) 18%, transparent)` | `rgba(26,90,170,0.25)` | Main autocomplete border |
-| `dropdown_shadow` | `rgba(0,0,0,0.35)` | `rgba(0,0,0,0.14)` | Main autocomplete shadow |
-| `dropdown_up_bg` | `color-mix(in srgb, var(--surface) 98%, transparent)` | `#d4e0ec` | Upward-opening autocomplete background |
-| `dropdown_up_border` | `color-mix(in srgb, var(--green) 28%, transparent)` | `rgba(26,90,170,0.35)` | Upward-opening autocomplete border |
-| `dropdown_up_shadow` | `rgba(0,0,0,0.45)` | `rgba(0,0,0,0.14)` | Upward-opening autocomplete shadow |
-| `dropdown_item_text` | `#7a7a7a` | `#4a5868` | Text for autocomplete items |
-| `overlay_backdrop_bg` | `rgba(0,0,0,0.75)` | `rgba(34,58,88,0.22)` | Shared backdrop behind modals and overlays |
-| `faq_code_bg` | `#141414` | `#dce6f0` | Code-styled FAQ tokens and examples |
-| `allowed_chip_bg` | `#141414` | `#dce6f0` | Allowed-command chips in the FAQ |
-| `form_control_bg` | `#141414` | `#e0e8f4` | Background for themed `<select>` form controls (`.form-select`) |
+| `modal_bg` | `#141414` | `#e8eef6` | Shared background for standard modal surfaces and the Theme selector |
+| `dropdown_bg` | `color-mix(in srgb, var(--surface) 96%, transparent)` | `#d4e0ec` | Shared dropdown background for autocomplete, save menus, and app-native select menus |
+| `dropdown_border` | `color-mix(in srgb, var(--green) 18%, transparent)` | `rgba(26,90,170,0.25)` | Shared dropdown border for autocomplete, save menus, and app-native select menus |
+| `dropdown_shadow` | `rgba(0,0,0,0.35)` | `rgba(0,0,0,0.14)` | Shared dropdown shadow for autocomplete, save menus, and app-native select menus |
+| `dropdown_item_text` | `#9a9a9a` | `#4a5868` | Text for autocomplete and menu items |
+| `overlay_backdrop_bg` | `rgba(0,0,0,0.76)` | `rgba(34,58,88,0.22)` | Shared backdrop behind modals and overlays |
+| `inline_surface_bg` | `#141414` | `#dce6f0` | Inline code, allowed-command chips, and compact embedded surfaces |
 
-### Status and Toasts
+### Action and Selection Text
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
-| `tab_status_ok_bg` | `#39ff14` | `#22a040` | Success dot / OK status on tabs |
+| `on_accent_text` | `#000` | `#000` | Text on bright accent fills such as the caret block and run button |
+| `selection_text` | `#f7fff2` | `#f7fff2` | Prompt selection text color |
+| `selection_line_text` | `#eef7ee` | `#eef7ee` | Prompt line text while a selection is active |
+| `modal_danger_btn_text` | `#fff` | `#fff` | Text for danger-tone modal buttons |
+| `modal_warning_btn_text` | `#000` | `#000` | Text for warning-tone modal buttons |
+
+### Toasts
+
+| Key | Dark default | Light default | Used for |
+|-----|--------------|---------------|----------|
 | `toast_bg` | `#141414` | `#e4eef8` | Normal toast background |
 | `toast_text` | `#39ff14` | `#2a5d18` | Normal toast text |
 | `toast_border` | `#1a7a08` | `rgba(0,0,0,0.28)` | Normal toast border |
 | `toast_error_bg` | `color-mix(in srgb, var(--red) 8%, var(--bg))` | `#e4eef8` | Error toast background |
 | `toast_error_text` | `#ff3c3c` | `#cc2200` | Error toast text |
 | `toast_error_border` | `color-mix(in srgb, var(--red) 45%, transparent)` | `rgba(204,34,0,0.38)` | Error toast border |
-
-### Mobile Shell and Menu
-
-| Key | Dark default | Light default | Used for |
-|-----|--------------|---------------|----------|
-| `mobile_composer_host_bg` | `linear-gradient(180deg, rgba(20,20,20,0.92), rgba(20,20,20,0.98))` | `linear-gradient(180deg, rgba(20,20,20,0.92), rgba(20,20,20,0.98))` | Mobile composer host background for the default shell variant |
-| `mobile_composer_host_light_bg` | `linear-gradient(180deg, rgba(238,242,246,0.94), rgba(238,242,246,0.99))` | `linear-gradient(180deg, rgba(238,242,246,0.94), rgba(238,242,246,0.99))` | Mobile composer host background for the lighter shell variants |
-| `mobile_menu_bg` | `#141414` | `#eef2f6` | Mobile overflow/menu panel background |
-| `mobile_menu_border` | `#2e2e2e` | `rgba(0,0,0,0.28)` | Mobile menu border |
-| `mobile_menu_shadow` | `rgba(0,0,0,0.6)` | `rgba(0,0,0,0.6)` | Mobile menu shadow |
-| `mobile_menu_button_border` | `#1f1f1f` | `#dce6f0` | Mobile menu button border |
-| `mobile_menu_button_hover_bg` | `var(--green-glow)` | `var(--bg)` | Mobile menu button hover background |
-| `mobile_menu_button_hover_text` | `#39ff14` | `#101820` | Mobile menu button hover text |
-
-Theme authors should also know that not every mobile overlay uses the same geometry. Options / FAQ / workflows / shortcuts now share the generic mobile sheet contract, but the theme selector intentionally keeps its dedicated full-screen mobile treatment so the grouped preview cards have enough space. Theme tokens still flow into both categories through the same surface variables; only the layout contract differs.
 
 ### Welcome and Onboarding
 

@@ -648,4 +648,118 @@
     if (!el || !el.style) return;
     el.style.display = visible ? display : 'none';
   };
+  const _appSelects = new Map();
+  function _closeAppSelects(exceptWrap = null) {
+    _appSelects.forEach(({ wrap, trigger }) => {
+      if (wrap === exceptWrap) return;
+      wrap.classList.remove('open');
+      trigger.setAttribute('aria-expanded', 'false');
+    });
+  }
+  function _syncAppSelect(select) {
+    const state = _appSelects.get(select);
+    if (!state) return;
+    const selected = select.options[select.selectedIndex] || select.options[0] || null;
+    state.valueEl.textContent = selected ? selected.textContent : '';
+    state.trigger.disabled = !!select.disabled;
+    state.wrap.classList.toggle('disabled', !!select.disabled);
+    state.options.forEach((btn) => {
+      const active = btn.dataset.value === select.value;
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      btn.classList.toggle('active', active);
+    });
+  }
+  function _enhanceAppSelect(select) {
+    if (!select || _appSelects.has(select) || select.dataset.appSelectEnhanced === 'true') return;
+    const wrap = document.createElement('div');
+    wrap.className = 'app-select';
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'app-select-trigger';
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-expanded', 'false');
+    const label = select.getAttribute('aria-label');
+    if (label) trigger.setAttribute('aria-label', label);
+    const valueEl = document.createElement('span');
+    valueEl.className = 'app-select-value';
+    const caret = document.createElement('span');
+    caret.className = 'app-select-caret';
+    caret.setAttribute('aria-hidden', 'true');
+    caret.textContent = '▾';
+    trigger.append(valueEl, caret);
+    const menu = document.createElement('div');
+    menu.className = 'app-select-menu';
+    menu.setAttribute('role', 'listbox');
+    if (label) menu.setAttribute('aria-label', label);
+    const options = Array.from(select.options).map((option) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('role', 'option');
+      btn.dataset.value = option.value;
+      btn.textContent = option.textContent;
+      btn.disabled = option.disabled;
+      btn.addEventListener('click', () => {
+        if (select.value !== option.value) {
+          select.value = option.value;
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        _closeAppSelects();
+        _syncAppSelect(select);
+      });
+      menu.appendChild(btn);
+      return btn;
+    });
+    wrap.append(trigger, menu);
+    select.insertAdjacentElement('afterend', wrap);
+    select.classList.add('app-select-native');
+    select.dataset.appSelectEnhanced = 'true';
+    _appSelects.set(select, { wrap, trigger, valueEl, menu, options });
+    trigger.addEventListener('click', () => {
+      if (select.disabled) return;
+      const open = wrap.classList.contains('open');
+      _closeAppSelects(open ? null : wrap);
+      wrap.classList.toggle('open', !open);
+      trigger.setAttribute('aria-expanded', !open ? 'true' : 'false');
+    });
+    trigger.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        _closeAppSelects();
+        return;
+      }
+      if (!['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(event.key)) return;
+      event.preventDefault();
+      const enabledOptions = options.filter((btn) => !btn.disabled);
+      if (!enabledOptions.length) return;
+      const currentIndex = Math.max(0, enabledOptions.findIndex((btn) => btn.dataset.value === select.value));
+      const delta = event.key === 'ArrowUp' ? -1 : 1;
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        const next = enabledOptions[(currentIndex + delta + enabledOptions.length) % enabledOptions.length];
+        select.value = next.dataset.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        _syncAppSelect(select);
+        return;
+      }
+      wrap.classList.add('open');
+      trigger.setAttribute('aria-expanded', 'true');
+    });
+    select.addEventListener('change', () => _syncAppSelect(select));
+    _syncAppSelect(select);
+  }
+  global.enhanceAppSelects = (root = document) => {
+    if (!root || typeof root.querySelectorAll !== 'function') return;
+    root.querySelectorAll('select.form-select, .history-panel-filters select').forEach(_enhanceAppSelect);
+  };
+  global.syncAppSelect = (select) => _syncAppSelect(select);
+  global.syncAppSelects = () => _appSelects.forEach((_, select) => _syncAppSelect(select));
+  global.enhanceAppSelects();
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('click', (event) => {
+      const target = event.target;
+      if (target && typeof target.closest === 'function' && target.closest('.app-select')) return;
+      _closeAppSelects();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') _closeAppSelects();
+    });
+  }
 })(globalThis);

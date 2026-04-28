@@ -12,7 +12,7 @@
   align-items: baseline;
   gap: 14px;
   padding: 16px 20px;
-  border-bottom: 1px solid var(--theme-terminal-bar-border, var(--border));
+  border-bottom: 1px solid var(--theme-terminal-bar-bg, var(--border));
   background: var(--theme-terminal-bar-bg, var(--bg));
   flex-wrap: wrap;
 }

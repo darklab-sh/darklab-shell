@@ -15,7 +15,7 @@ async function flushWorkspacePromises() {
   for (let i = 0; i < 6; i += 1) await Promise.resolve()
 }
 
-function setupWorkspace(apiFetch = vi.fn()) {
+function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
   document.body.innerHTML = `
     <div id="workspace-summary"></div>
     <div id="workspace-message" class="u-hidden"></div>
@@ -86,6 +86,7 @@ function setupWorkspace(apiFetch = vi.fn()) {
     workspaceCloseViewerBtn: document.getElementById('workspace-close-viewer-btn'),
     workspaceSaveBtn: document.getElementById('workspace-save-btn'),
   }
+  Object.assign(globals, overrides)
   const names = Object.keys(globals)
   const values = Object.values(globals)
   const returnExpr = `
@@ -108,6 +109,7 @@ function setupWorkspace(apiFetch = vi.fn()) {
       openWorkspaceEditorFromCommand,
       getWorkspaceAutocompleteFileHints,
       handleWorkspaceFileAction,
+      promptWorkspaceFolderName,
     };
   `
   const fns = new Function(...names, `${SRC}\n${returnExpr}`)(...values)
@@ -573,5 +575,59 @@ describe('workspace UI helpers', () => {
     expect(document.getElementById('workspace-message').textContent).toBe('Created folder reports')
     expect(document.querySelector('#workspace-breadcrumbs').textContent).toContain('reports')
     expect(document.querySelector('.workspace-empty').textContent).toBe('This folder is empty.')
+  })
+
+  it('opens an app-native folder prompt instead of the browser prompt', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve(responseJson({
+      directory: { path: 'reports' },
+      workspace: {
+        directories: [{ path: 'reports' }],
+        files: [],
+        usage: { bytes_used: 0, file_count: 0 },
+        limits: { quota_bytes: 1024, max_files: 10 },
+      },
+    })))
+    const nativePrompt = vi.fn()
+    const showConfirm = vi.fn(async (opts) => {
+      const input = opts.content.querySelector('input')
+      input.value = 'reports'
+      expect(opts.defaultFocus).toBe(input)
+      expect(opts.body.text).toBe('Create a session folder?')
+      return (await opts.actions.find(action => action.id === 'create').onActivate()) ? 'create' : null
+    })
+    const originalPrompt = window.prompt
+    window.prompt = nativePrompt
+    const { promptWorkspaceFolderName } = setupWorkspace(apiFetch, { showConfirm })
+
+    try {
+      await promptWorkspaceFolderName()
+    } finally {
+      window.prompt = originalPrompt
+    }
+
+    expect(nativePrompt).not.toHaveBeenCalled()
+    expect(showConfirm).toHaveBeenCalledTimes(1)
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/directories', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ path: 'reports' }),
+    }))
+  })
+
+  it('keeps the folder prompt open when validation fails', async () => {
+    const apiFetch = vi.fn()
+    const showConfirm = vi.fn(async (opts) => {
+      const input = opts.content.querySelector('input')
+      input.value = '   '
+      const result = await opts.actions.find(action => action.id === 'create').onActivate()
+      expect(opts.content.querySelector('.workspace-folder-error').textContent).toBe('Enter a folder name.')
+      return result ? 'create' : null
+    })
+    const { promptWorkspaceFolderName } = setupWorkspace(apiFetch, { showConfirm })
+    apiFetch.mockClear()
+
+    const result = await promptWorkspaceFolderName()
+
+    expect(result).toBeNull()
+    expect(apiFetch).not.toHaveBeenCalled()
   })
 })

@@ -29,7 +29,6 @@
     '--theme-panel-border',
     '--theme-panel-shadow',
     '--theme-terminal-bar-bg',
-    '--theme-terminal-bar-border',
     '--terminal-font-size',
     '--terminal-line-height',
   ];

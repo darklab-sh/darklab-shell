@@ -175,11 +175,9 @@ test.describe('workspace modal', () => {
     await page.locator('.rail-nav [data-action="workspace"]').click()
     await expect(page.locator('#workspace-overlay')).toHaveClass(/open/)
 
-    page.once('dialog', async dialog => {
-      expect(dialog.message()).toContain('Folder name')
-      await dialog.accept('reports')
-    })
     await page.locator('#workspace-new-folder-btn').click()
+    await page.locator('#confirm-host .form-input').fill('reports')
+    await page.locator('#confirm-host [data-confirm-action-id="create"]').click()
     await expect(page.locator('#workspace-breadcrumbs')).toContainText('Files/reports')
     await expect(page.locator('.workspace-empty')).toHaveText('This folder is empty.')
 

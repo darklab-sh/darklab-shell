@@ -460,19 +460,73 @@ async function createWorkspaceDirectory(path) {
 async function promptWorkspaceFolderName() {
   const current = _normalizeWorkspaceDir(_workspaceCurrentDir);
   const promptDefault = current ? `${current}/` : '';
-  const entered = typeof window !== 'undefined' && typeof window.prompt === 'function'
-    ? window.prompt('Folder name', promptDefault)
-    : '';
-  if (entered === null) return null;
-  const raw = String(entered || '').trim();
-  if (!raw) return null;
-  const path = current && !raw.includes('/') ? `${current}/${raw}` : raw;
-  try {
-    return await createWorkspaceDirectory(path);
-  } catch (err) {
-    _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to create folder'), 'error');
+  if (typeof showConfirm !== 'function') {
+    setWorkspaceMessage('Unable to open folder prompt', 'error');
     return null;
   }
+
+  const field = document.createElement('div');
+  field.className = 'workspace-folder-form';
+  const id = `workspace-folder-input-${Date.now()}`;
+  const label = document.createElement('label');
+  label.className = 'workspace-label';
+  label.setAttribute('for', id);
+  label.textContent = 'Folder Name';
+  const input = document.createElement('input');
+  input.id = id;
+  input.className = 'form-input';
+  input.type = 'text';
+  input.placeholder = current ? `${current}/reports` : 'reports';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.value = promptDefault;
+  const error = document.createElement('div');
+  error.className = 'workspace-folder-error u-hidden';
+  field.append(label, input, error);
+
+  const setError = (message = '') => {
+    error.textContent = message;
+    error.classList.toggle('u-hidden', !message);
+  };
+  let created = null;
+  const createFromInput = async () => {
+    setError('');
+    const raw = String(input.value || '').trim();
+    if (!raw) {
+      setError('Enter a folder name.');
+      input.focus();
+      return false;
+    }
+    const path = current && !raw.includes('/') ? `${current}/${raw}` : raw;
+    try {
+      created = await createWorkspaceDirectory(path);
+      return true;
+    } catch (err) {
+      setError(_workspaceErrorMessage(err, 'Unable to create folder'));
+      input.focus();
+      return false;
+    }
+  };
+  input.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const createBtn = document.querySelector('#confirm-host [data-confirm-action-id="create"]');
+    if (createBtn && typeof createBtn.click === 'function') createBtn.click();
+  });
+
+  const choice = await showConfirm({
+    body: {
+      text: 'Create a session folder?',
+      note: current ? `Current folder: ${current}` : 'Create it at the Files root or include a path.',
+    },
+    content: field,
+    defaultFocus: input,
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'create', label: 'Create folder', role: 'primary', onActivate: createFromInput },
+    ],
+  });
+  return choice === 'create' ? created : null;
 }
 
 async function readWorkspaceFile(path) {

@@ -128,9 +128,6 @@ async function loadAppFns({
         <span class="history-label">Recent:</span>
       </div>
       <div class="terminal-bar">
-        <span class="dot dot-r"></span>
-        <span class="dot dot-y"></span>
-        <span class="dot dot-g"></span>
         <button id="tabs-scroll-left"></button>
         <div class="tabs-bar" id="tabs-bar"></div>
         <button id="tabs-scroll-right"></button>
@@ -2740,7 +2737,7 @@ describe('app helpers', () => {
     )
 
     expect(shellMatch).not.toBeNull()
-    expect(shellMatch[1]).toMatch(/background:\s*var\(--theme-mobile-composer-host-bg\)/)
+    expect(shellMatch[1]).toMatch(/background:\s*var\(--surface\)/)
     expect(shellMatch[1]).not.toMatch(/rgba\(13,13,13/)
 
     expect(composerMatch).not.toBeNull()

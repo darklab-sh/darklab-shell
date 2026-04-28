@@ -110,7 +110,7 @@ body.mobile-terminal-mode {
     gap: 10px;
     padding: 9px 14px;
     border-top: 1px solid var(--border);
-    background: var(--theme-panel-alt-bg);
+    background: var(--theme-chrome-bg);
     position: relative;
     cursor: pointer;
     user-select: none;
@@ -127,7 +127,7 @@ body.mobile-terminal-mode {
   .recent-peek:hover::before { opacity: 0.6; }
   .recent-peek:active::before { opacity: 1; }
   .recent-peek:active {
-    background: color-mix(in srgb, var(--green) 2%, var(--theme-panel-alt-bg));
+    background: var(--theme-chrome-row-hover-bg);
   }
   .recent-peek .recent-peek-handle {
     width: 32px;
@@ -184,7 +184,7 @@ body.mobile-terminal-mode {
   .recents-sheet {
     position: fixed; left: 0; right: 0; bottom: 0;
     z-index: 101;
-    background: var(--surface);
+    background: var(--theme-chrome-row-bg);
     border-top: 1px solid var(--border-bright);
     border-radius: 14px 14px 0 0;
     max-height: 86dvh;
@@ -223,9 +223,9 @@ body.mobile-terminal-mode {
   }
   .recents-sheet .sheet-clear-btn:hover,
   .recents-sheet .sheet-clear-btn:active {
-    background: color-mix(in srgb, var(--red, #ff6b6b) 14%, transparent);
-    border-color: color-mix(in srgb, var(--red, #ff6b6b) 55%, transparent);
-    color: var(--red, #ff6b6b);
+    background: color-mix(in srgb, var(--red) 14%, transparent);
+    border-color: color-mix(in srgb, var(--red) 55%, transparent);
+    color: var(--red);
   }
   .recents-sheet .sheet-filters {
     padding: 0 14px 10px;
@@ -237,8 +237,8 @@ body.mobile-terminal-mode {
   .recents-sheet .sheet-filter-row {
     appearance: none;
     -webkit-appearance: none;
-    background: var(--bg);
-    border: 1px solid var(--border-bright);
+    background: var(--theme-chrome-control-bg);
+    border: 1px solid var(--theme-chrome-control-border);
     border-radius: 6px;
     padding: 9px 12px;
     font-size: 12px;
@@ -454,12 +454,10 @@ body.mobile-terminal-mode {
   .recents-sheet .sheet-item {
     padding: 12px 16px 13px;
     border-bottom: 1px solid var(--border);
+    background: var(--theme-chrome-row-bg);
     display: flex;
     flex-direction: column;
     gap: 7px;
-  }
-  .recents-sheet #mobile-recents-list .sheet-item:nth-of-type(even) {
-    background-color: color-mix(in srgb, var(--surface) 96%, var(--text) 4%);
   }
   .recents-sheet .sheet-item-head {
     display: flex;
@@ -553,7 +551,7 @@ body.mobile-terminal-mode {
   .menu-sheet {
     position: fixed; left: 0; right: 0; bottom: 0;
     z-index: 101;
-    background: var(--surface);
+    background: var(--theme-chrome-bg);
     border-top: 1px solid var(--border-bright);
     border-radius: 14px 14px 0 0;
     display: flex;
@@ -580,19 +578,15 @@ body.mobile-terminal-mode {
     flex-direction: column;
   }
   .menu-sheet .menu-group-divider {
-    /* Clear section break without fragmenting the sheet: a --surface band
-       with padded air above/below and a quiet hairline centered inside it,
-       so the divider reads as separation rather than competing with the
-       per-item borders. */
     padding: 22px 0;
-    background: var(--surface);
+    background: var(--theme-chrome-row-bg);
   }
   .menu-sheet .menu-group-divider::before {
     content: '';
     display: block;
     height: 1px;
     margin: 0 16px;
-    background: var(--border);
+    background: var(--theme-chrome-divider-color);
   }
   .menu-sheet .menu-item {
     display: flex;
@@ -659,7 +653,7 @@ body.mobile-terminal-mode {
   .menu-sheet .menu-submenu {
     display: flex;
     flex-direction: column;
-    background: var(--theme-panel-alt-bg);
+    background: var(--theme-chrome-row-bg);
     border-bottom: 1px solid var(--border);
   }
   .menu-sheet .menu-subitem {
@@ -780,7 +774,7 @@ body.mobile-terminal-mode {
     display: flex;
     align-items: center;
     gap: 2px;
-    background: var(--theme-panel-alt-bg);
+    background: var(--theme-chrome-bg);
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
