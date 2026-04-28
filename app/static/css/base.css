@@ -325,22 +325,69 @@ header .version {
   text-overflow: clip;
 }
 
+/* ── Dropdown/menu primitives ── */
+.dropdown-surface {
+  background: var(--theme-dropdown-bg);
+  border: 1px solid var(--theme-dropdown-border);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent),
+    0 10px 24px var(--theme-dropdown-shadow);
+  color: var(--theme-dropdown-item-text);
+  font-family: var(--font-mono);
+  overflow: hidden;
+}
+
+.dropdown-surface.dropdown-up {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent),
+    0 -10px 24px var(--theme-dropdown-shadow);
+}
+
+.dropdown-item {
+  background: transparent;
+  border: none;
+  color: var(--theme-dropdown-item-text);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  letter-spacing: 0.3px;
+  text-align: left;
+}
+
+.dropdown-item:hover,
+.dropdown-item:focus-visible,
+.dropdown-item.dropdown-item-active,
+.dropdown-item[aria-selected="true"] {
+  background: var(--theme-dropdown-hover-bg, var(--bg3));
+  color: var(--green);
+  outline: none;
+}
+
+.dropdown-item-compact {
+  font-size: 10px;
+  padding: 6px 12px;
+}
+
+.dropdown-item-dense {
+  font-size: 12px;
+  padding: 2px 0;
+}
+
+.dropdown-item-touch {
+  font-size: 11px;
+  padding: 9px 14px;
+}
+
 /* ── Autocomplete dropdown ── */
 .ac-dropdown {
   position: fixed;
   top: 0;
   left: 0;
   right: auto;
-  background: var(--theme-dropdown-bg);
-  border: 1px solid var(--theme-dropdown-border);
   border-radius: 0;
   z-index: 150;
   max-height: 220px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent),
-    0 10px 24px var(--theme-dropdown-shadow);
   padding: 2px 0;
 }
 
@@ -375,15 +422,10 @@ header .version {
 }
 
 .ac-dropdown.ac-up {
-  background: var(--theme-dropdown-bg);
   border-color: var(--theme-dropdown-border);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent),
-    0 -10px 24px var(--theme-dropdown-shadow);
 }
 
 body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
-  background: var(--theme-dropdown-bg);
   border-color: color-mix(in srgb, var(--theme-dropdown-border) 78%, transparent);
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--theme-dropdown-shadow) 36%, transparent),
@@ -391,11 +433,6 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
 }
 
 .ac-item {
-  padding: 2px 0;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--theme-dropdown-item-text);
-  cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -425,7 +462,8 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
   white-space: pre;
 }
 
-.ac-item:hover, .ac-item.ac-active {
+.ac-item:hover,
+.ac-item.ac-active {
   color: var(--green);
 }
 
@@ -458,10 +496,7 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
   z-index: 60;
   min-width: 200px;
   max-width: 640px;
-  background: var(--theme-dropdown-bg, var(--bg2));
-  border: 1px solid var(--theme-dropdown-border, var(--border));
   border-radius: 3px;
-  font-family: var(--font-mono);
   font-size: 13px;
   overflow: hidden;
 }
@@ -478,17 +513,15 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
 .hist-search-query { color: var(--fg); }
 
 .hist-search-item {
-  padding: 3px 10px;
-  cursor: pointer;
   color: var(--fg);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding: 3px 10px;
 }
 
 .hist-search-item:hover,
 .hist-search-item.active {
-  background: var(--theme-dropdown-hover-bg, var(--bg3));
   color: var(--green);
 }
 

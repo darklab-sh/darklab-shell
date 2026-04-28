@@ -24,7 +24,7 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 - **Refresh theme preview cards for the current desktop shell**
   - The Theme selector preview cards still approximate the pre-v1.6 terminal-window layout instead of the current desktop shell with rail, tabbar, content pane, HUD, and drawer-style chrome.
-  - Remove stale visual affordances from the preview cards as they are discovered; the legacy traffic-light dots have already been removed and the old `window_btn_*` theme keys were retired.
+  - Remove any remaining stale visual affordances from the preview cards as they are discovered.
   - Redesign the preview thumbnail to show the canonical v1.6 surfaces:
     - left rail / chrome strip using `chrome_bg`
     - top tabbar with an active tab using `tab_active_bg`
@@ -34,23 +34,12 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
   - Keep the preview compact and schematic; it should communicate theme contrast and surface relationships, not reproduce the entire UI.
   - Add/update unit coverage around the theme-card DOM structure so obsolete preview-only tokens do not creep back into the theme key set.
 
-- **Run Monitor CPU and memory usage**
-  - Add lightweight resource telemetry to the Run Monitor so long-running commands show whether they are actively consuming CPU or memory instead of only showing elapsed time.
-  - MVP:
-    - Use the existing active-run PID/metadata tracking as the source of truth.
-    - Add best-effort backend resource usage to `/history/active` for each active run.
-    - Prefer `psutil` so the implementation works consistently in Linux containers and local macOS/Linux development.
-    - Aggregate at least the tracked process plus recursive children so scanners that spawn workers are represented more accurately than parent-PID-only stats.
-    - Report memory as RSS bytes and cumulative process-tree CPU seconds from the backend; calculate the live CPU percentage in the Run Monitor from adjacent poll samples so multi-worker deployments do not need a shared telemetry cache.
-    - Keep the API fail-soft: if stats are unavailable, omit the telemetry or mark it unavailable without breaking active-run listing.
-    - Render CPU and memory as stacked circular meters in the Run Monitor drawer/sheet and keep the existing polling cadence modest. Treat 1 GB RSS as 100% fill for the memory meter while still labeling the actual memory value.
-    - Add unit coverage for backend resource aggregation and frontend formatting/rendering.
-  - Future:
-    - Add tiny per-run CPU sparklines using the same polling samples.
-    - Track peak memory and maybe peak CPU while the drawer is open.
-    - Add an "idle" indicator when CPU stays near zero for a sustained window.
-    - Consider container-level CPU/memory totals in the status surface if operators need app/container health, separate from per-run command health.
-    - Consider configured warning thresholds for runaway memory or sustained high CPU.
+- **Run Monitor telemetry polish**
+  - Build on the existing CPU and memory meters only where it adds clear operator value:
+    - tiny per-run CPU sparklines using the existing polling samples
+    - peak CPU / peak memory while the drawer is open
+    - an "idle" indicator when CPU stays near zero for a sustained window
+    - optional configured warning thresholds for runaway memory or sustained high CPU
 
 - **Workspace-native chained recon workflows**
   - Add guided workflows that demonstrate the Files feature as an app-mediated pipeline: one recon tool writes a session file, and a later tool reads that generated file through declared workspace-aware flags.
@@ -88,60 +77,6 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Technical Debt
 
-- **Promote object-specific frontend styling into shared primitives**
-  - Problem:
-    - The surface-token pass aligned major theme values, but several frontend objects still carry their own structural and visual CSS even when they represent the same UI role.
-    - This makes later theme work harder because repeated objects such as dropdown menus, chrome rows, filter chips, file rows, history rows, and mobile sheet controls can drift independently even when they should share behavior and appearance.
-    - The existing button primitive allowlist is useful, but it also highlights remaining one-off pressable families that deserve review before the `color-mix()` / derived-token cleanup begins.
-  - Goal:
-    - Introduce a small set of shared structural primitives before centralizing local color transforms.
-    - Keep component / ID selectors for layout, sizing, positioning, and true product-specific behavior.
-    - Move repeated role styling into primitives so the later derived-token pass can target stable roles instead of many surface-specific selectors.
-  - First-pass primitive candidates:
-    - **Dropdown/menu primitive**
-      - Shared by `.save-menu`, `.app-select-menu`, `.ac-dropdown`, `.hist-search-dropdown`, and mobile recents `.sheet-filter-menu`.
-      - Candidate classes: `.dropdown-surface`, `.dropdown-item`, `.dropdown-item-active`, optional `.dropdown-up`.
-      - Preserve autocomplete-specific layout such as match highlighting, descriptions, and mobile keyboard positioning as local modifiers.
-    - **Chrome/list row primitive**
-      - Shared by `.history-entry`, `.run-monitor-item`, mobile recents `.sheet-item`, `.workspace-file-row`, and potentially `.rail-item`.
-      - Candidate classes: `.chrome-row`, `.chrome-row-clickable`, `.chrome-row-accent`, `.chrome-row-dense`.
-      - Keep row content layout local when the information hierarchy differs, but centralize background, divider, hover, focus, and accent-stripe behavior.
-    - **Form/control primitive**
-      - Shared by `.form-input`, `.workspace-textarea`, `.search-bar input`, `.history-panel-filters input`, mobile recents filter inputs, and `#mobile-cmd`.
-      - Candidate classes: `.form-control`, `.form-control-compact`, `.control-row`.
-      - Preserve mobile composer keyboard anchoring and iOS font-size behavior as explicit local exceptions.
-    - **Chip/badge primitive**
-      - Shared by `.hist-chip`, `.history-active-filter-chip`, mobile `.filter-chip`, `.search-signal-chip`, `.history-entry-kind`, and mobile `.sheet-item-kind`.
-      - Candidate classes: `.chip`, `.chip-action`, `.chip-removable`, `.chip-tone-*`, `.badge`.
-      - Keep semantic tone decisions (`green`, `amber`, `red`) explicit and avoid making all chips look clickable when they are informational badges.
-    - **Drawer/sheet structure primitive**
-      - Shared by History drawer, Run Monitor drawer, mobile recents sheet, mobile menu sheet, and modal bottom-sheet mode.
-      - Candidate classes: `.chrome-drawer`, `.bottom-sheet`, `.surface-header`, `.surface-body`, `.surface-footer`.
-      - Keep placement and animation local where geometry differs, but centralize header/body/footer bands, borders, and sheet/drawer shell treatment.
-  - Pressable exceptions to review:
-    - `.sheet-clear-btn`
-    - `.sheet-filter-row`
-    - `.menu-item`
-    - `.menu-subitem`
-    - `.history-action-btn`
-    - `.chrome-btn`
-    - `#mobile-run-btn`, `#mobile-kill-btn`
-    - `#search-prev`, `#search-next`
-    - Decide whether each should move onto `.btn`, `.nav-item`, `.toggle-btn`, `.close-btn`, `.kb-key`, or a new row/control primitive. Keep exceptions only when the surface has a documented structural reason.
-  - Lower-priority / likely-specific surfaces:
-    - Tabs, status pills, Run Monitor CPU/MEM meters, theme-card previews, and welcome output have enough bespoke behavior that they should not be forced into broad structural primitives in the first pass.
-    - These surfaces can still participate in the later derived-token cleanup if they reuse common color roles.
-  - Implementation order:
-    - Start with the dropdown/menu primitive because it has the clearest duplication and should reduce inconsistencies across save menus, app-native selects, autocomplete, and mobile filter dropdowns.
-    - Follow with row and chip primitives because they cover the most repeated chrome/list objects.
-    - Then revisit form controls and drawer/sheet structure, where mobile-specific behavior needs more careful regression testing.
-    - After each primitive pass, update `ARCHITECTURE.md` Frontend Design System docs and tighten `tests/js/fixtures/button_primitive_allowlist.json` or add runtime primitive tests where JS renders the surface.
-  - Guardrails:
-    - Avoid introducing primitives that are only aliases for one selector.
-    - Avoid making component markup harder to read solely to reduce CSS line count.
-    - Keep visual review small but representative: desktop History, Run Monitor, Files, Options, autocomplete, mobile recents, and mobile menu.
-    - Run focused unit tests for helper/rendering changes and at least one browser smoke path for any primitive that changes a mobile sheet or keyboard-adjacent surface.
-
 - **Centralize local color transforms into derived theme tokens**
   - Problem:
     - The surface-token pass removed the major one-off surface roles, but the component CSS still contains many local `color-mix()` formulas for washes, soft borders, text blends, glows, shadows, dropdown outlines, search affordances, mobile running indicators, Run Monitor meters, and welcome-screen decorative states.
@@ -162,33 +97,11 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
     - Keep the first pass small enough for visual review across `darklab_obsidian`, a light theme, and one non-green dark theme.
     - Update `THEME.md` only for stable derived roles that theme authors should know about.
 
-- **Normalize theme tokens across shared surfaces**
-  - Problem:
-    - The theme system has enough surface-specific tokens that visually similar objects can drift apart. For example, Options and Keyboard Shortcuts can render with different modal backgrounds, Files and Shortcuts do not have the same explicit theme sections as older modals, and newer drawer surfaces can end up choosing colors by local CSS instead of shared semantic roles.
-    - Several tokens appeared to encode the same role (`faq_modal_bg`, `options_modal_bg`, older confirm modal backgrounds, workspace/workflows/shortcuts modal backgrounds, older mobile menu backgrounds, sheet backgrounds, row backgrounds) while other surfaces relied directly on `surface`, `panel_bg`, or older status-bar roles.
-  - Inventory pass:
-    - Started in `docs/theme-inventory.md`.
-    - Build a table of shared UI objects and their current background/border/text tokens: Options, FAQ, Keyboard Shortcuts, Workflows, Files, Theme selector, Confirm dialogs, History drawer, Run Monitor drawer, mobile sheets, dropdowns, toasts, file/history/run rows, modal sections, form controls, chips, and inline code blocks.
-    - For each object, record whether it is a modal, sheet, drawer, row, section, control, or semantic state. The goal is to classify by role before touching colors.
-    - Include at least the default dark theme, one light theme, and one non-green dark theme in the first visual comparison so consolidation does not accidentally optimize only for Darklab Obsidian.
-  - Target token model:
-    - Keep the base palette small: `bg`, `surface`, `border`, `border_bright`, `text`, `muted`, `green`, `amber`, `red`, `blue`.
-    - Standardized semantic shared tokens include `modal_bg`, `chrome_bg`, `chrome_header_bg`, `chrome_row_bg`, `chrome_row_hover_bg`, `chrome_control_bg`, `chrome_control_border`, `chrome_divider_color`, `chrome_shadow`, and `inline_surface_bg`.
-    - Preserve intentional component identities for surfaces that should differ: `terminal_bar_bg`, tab styling, and theme-selector presentation if it needs special treatment.
-    - Retired old per-surface tokens after migrating CSS consumers and regenerated shipped theme examples, rather than keeping a long-term alias layer.
-  - CSS refactor direction:
-    - Introduce shared structural classes for color decisions: `.modal-surface`, `.sheet-surface`, `.drawer-surface`, `.surface-row`, `.surface-section`, and `.control-surface`.
-    - Keep ID selectors for sizing, positioning, and surface-specific layout only. Avoid new ID-level color decisions unless there is a documented exception.
-    - Start with modal/sheet background consolidation because it is the most visible inconsistency: Options, FAQ, Keyboard Shortcuts, Workflows, Files, Theme selector, and Confirm dialogs.
-    - Then consolidate drawer/row backgrounds for History and Run Monitor.
-  - Theme cleanup:
-    - Audit all `app/conf/themes/*.yaml` files for identical or near-identical surface tokens that can be removed or changed to canonical values.
-    - Mark tokens that are intentionally different per theme versus tokens that only differ because the theme files drifted.
-    - Update `THEME.md` with the canonical surface-token roles and examples of when a component-specific override is acceptable.
-  - Guardrails:
-    - Add tests that every shipped theme defines the required canonical tokens or inherits documented defaults.
-    - Add a CSS/theme drift check that flags new hardcoded modal/drawer background colors and new per-surface background tokens unless allowlisted.
-    - Add visual capture coverage for Options, FAQ, Keyboard Shortcuts, Workflows, Files, History drawer, Run Monitor, and mobile sheets in default dark plus one light theme.
+- **Theme visual drift guardrails**
+  - Add lightweight checks that prevent shared surface-token drift from returning:
+    - flag new hardcoded modal/drawer/sheet background colors unless explicitly allowlisted
+    - flag new per-surface background tokens when an existing canonical token should be used
+    - add visual capture coverage for Options, FAQ, Keyboard Shortcuts, Workflows, Files, History drawer, Run Monitor, and mobile sheets in default dark plus one light theme
 
 - **Move built-in autocomplete grammar into the command registry**
   - Current state:
@@ -233,7 +146,6 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
 | Share package | H | M | Unified design reduces total work vs building annotations, notes, and lifecycle separately |
 | Mobile share ergonomics | M | L–M | Basic native share-sheet done (v1.5); remaining work is one-handed save/share UX and clearer affordances |
 | Tool-specific guidance + onboarding hints | M | L | Primarily content work |
-| Session dashboards (`stats` command) | M | L | Fake command + queries that already exist for the diagnostics page |
 
 **Tier 3 — Foundational ⬡ (unlock multiple later features)**
 

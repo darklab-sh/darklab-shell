@@ -128,7 +128,7 @@ function _activateWorkspaceFolderRow(path, event = null) {
 }
 
 function _bindWorkspaceFolderRow(row, path, label) {
-  row.className = 'workspace-file-row workspace-folder-row';
+  row.className = 'workspace-file-row workspace-folder-row panel-row panel-row-clickable';
   row.dataset.kind = 'folder';
   row.dataset.path = path;
   row.tabIndex = 0;
@@ -261,14 +261,14 @@ function renderWorkspaceBrowser() {
     ));
     row.appendChild(_workspaceActionsNode([
       { action: 'open-folder', label: 'Open', tone: 'secondary' },
-      { action: 'delete-folder', label: 'Delete', tone: 'destructive' },
+      { action: 'delete-folder', label: 'Delete', tone: 'secondary' },
     ]));
     workspaceFileList.appendChild(row);
   }
 
   for (const file of files) {
     const row = document.createElement('div');
-    row.className = 'workspace-file-row';
+    row.className = 'workspace-file-row panel-row';
     row.dataset.kind = 'file';
     row.dataset.path = file.path;
     row.appendChild(_workspaceMetaNode(
@@ -279,19 +279,19 @@ function renderWorkspaceBrowser() {
       { action: 'view', label: 'View', tone: 'secondary' },
       { action: 'edit', label: 'Edit', tone: 'secondary' },
       { action: 'download', label: 'Download', tone: 'secondary' },
-      { action: 'delete', label: 'Delete', tone: 'destructive' },
+      { action: 'delete', label: 'Delete', tone: 'secondary' },
     ]));
     workspaceFileList.appendChild(row);
   }
 
   if (!folders.length && !files.length && !_workspaceCurrentDir) {
     const empty = document.createElement('div');
-    empty.className = 'workspace-empty';
+    empty.className = 'workspace-empty panel-row';
     empty.textContent = 'No session files yet. Create a text file or save command output to use with file-enabled commands.';
     workspaceFileList.appendChild(empty);
   } else if (!folders.length && !files.length) {
     const empty = document.createElement('div');
-    empty.className = 'workspace-empty';
+    empty.className = 'workspace-empty panel-row';
     empty.textContent = 'This folder is empty.';
     workspaceFileList.appendChild(empty);
   }
@@ -474,7 +474,7 @@ async function promptWorkspaceFolderName() {
   label.textContent = 'Folder Name';
   const input = document.createElement('input');
   input.id = id;
-  input.className = 'form-input';
+  input.className = 'form-input form-control';
   input.type = 'text';
   input.placeholder = current ? `${current}/reports` : 'reports';
   input.autocomplete = 'off';
@@ -633,7 +633,7 @@ async function handleWorkspaceFileAction(action, path) {
             tone: 'danger',
             actions: [
               { id: 'cancel', label: 'Cancel', role: 'cancel' },
-              { id: 'delete', label: 'Delete', role: 'primary', tone: 'danger' },
+              { id: 'delete', label: 'Delete', role: 'destructive' },
             ],
           })
         : 'delete';
@@ -649,7 +649,7 @@ async function handleWorkspaceFileAction(action, path) {
             tone: 'danger',
             actions: [
               { id: 'cancel', label: 'Cancel', role: 'cancel' },
-              { id: 'delete', label: 'Delete', role: 'primary', tone: 'danger' },
+              { id: 'delete', label: 'Delete', role: 'destructive' },
             ],
           })
         : 'delete';

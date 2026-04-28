@@ -507,7 +507,7 @@ async function confirmClearSessionToken() {
         },
       },
       { id: 'cancel', label: 'Cancel', role: 'cancel' },
-      { id: 'clear', label: 'Clear token', role: 'primary', tone: 'danger' },
+      { id: 'clear', label: 'Clear token', role: 'destructive' },
     ],
   });
 

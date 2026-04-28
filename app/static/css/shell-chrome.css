@@ -426,15 +426,46 @@
     overflow-y: hidden;
   }
 
+  .terminal-bar.tabbar .tabs-scroll-btn {
+    position: relative;
+    align-self: stretch;
+    min-width: 34px;
+    min-height: 0;
+    padding: 0 8px;
+    border-radius: 0;
+    background: var(--theme-chrome-bg);
+    z-index: 1;
+  }
+
+  .terminal-bar.tabbar .tabs-scroll-btn:hover:not(:disabled) {
+    background: var(--theme-chrome-bg);
+    border-color: transparent;
+  }
+
+  .terminal-bar.tabbar .tabs-scroll-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 18px;
+    pointer-events: none;
+    opacity: 0.96;
+  }
+
+  .terminal-bar.tabbar #tabs-scroll-left::before {
+    right: -18px;
+    background: linear-gradient(to right, var(--theme-chrome-bg), transparent);
+  }
+
+  .terminal-bar.tabbar #tabs-scroll-right::before {
+    left: -18px;
+    background: linear-gradient(to left, var(--theme-chrome-bg), transparent);
+  }
+
   .terminal-bar.tabbar .tabs-bar {
     padding: 4px 0 0;
     flex: 1 1 auto;
     background: transparent;
-  }
-
-  .terminal-bar.tabbar #tabs-scroll-left,
-  .terminal-bar.tabbar #tabs-scroll-right {
-    align-self: center;
   }
 
   .tabbar-chrome {
@@ -510,15 +541,15 @@
     top: 0;
   }
   .hud-cell.hud-status,
-  .hud-cell.hud-cell-clickable {
+  .hud-cell.hud-action-cell {
     cursor: pointer;
   }
-  .hud-cell.hud-cell-clickable:hover,
-  .hud-cell.hud-cell-clickable:focus-visible {
+  .hud-cell.hud-action-cell:hover,
+  .hud-cell.hud-action-cell:focus-visible {
     background: color-mix(in srgb, var(--text) 5%, transparent);
     outline: none;
   }
-  .hud-cell.hud-cell-clickable:focus-visible {
+  .hud-cell.hud-action-cell:focus-visible {
     box-shadow: inset 0 0 0 1px var(--border-bright);
   }
   .hud-cell.hud-status-expandable {
@@ -709,29 +740,19 @@
     right: 0;
     display: none;
     flex-direction: column;
-    background: var(--theme-chrome-bg);
-    border: 1px solid var(--border-bright);
     border-radius: 3px 3px 0 0;
     padding: 4px;
     min-width: 160px;
     z-index: 20;
-    box-shadow: 0 6px 18px color-mix(in srgb, var(--bg) 60%, transparent);
   }
   .hud-save-wrap.open .save-menu { display: flex; }
   .hud-save-wrap .save-menu button {
-    background: transparent;
-    border: none;
-    color: var(--muted);
     font-family: inherit;
-    font-size: 10px;
     padding: 5px 10px;
-    text-align: left;
-    cursor: pointer;
     border-radius: 2px;
   }
   .hud-save-wrap .save-menu button:hover {
     color: var(--text);
-    background: color-mix(in srgb, var(--text) 6%, transparent);
   }
 
   .run-monitor {
@@ -741,9 +762,6 @@
     width: min(560px, calc(100vw - var(--run-monitor-left, 214px) - 16px));
     max-height: min(520px, calc(100vh - var(--shell-top-chrome-height) - var(--run-monitor-bottom, 46px) - 24px));
     z-index: 75;
-    display: flex;
-    flex-direction: column;
-    background: var(--theme-chrome-bg);
     border: 1px solid var(--border-bright);
     border-left: none;
     border-bottom: none;
@@ -751,7 +769,6 @@
       18px 0 34px var(--theme-chrome-shadow),
       0 7px 14px color-mix(in srgb, var(--theme-chrome-shadow) 86%, transparent),
       inset 1px 0 0 color-mix(in srgb, var(--green) 22%, transparent);
-    font-family: var(--font-mono);
     transform-origin: bottom left;
     animation: run-monitor-hud-rise 180ms ease-out both;
   }
@@ -781,13 +798,9 @@
 }
 
 .run-monitor-header {
-  display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--theme-chrome-header-bg);
 }
 
 .run-monitor-title {
@@ -834,7 +847,6 @@
   display: flex;
   flex-direction: column;
   padding: 0;
-  overflow: auto;
 }
 
 .run-monitor-item {
@@ -843,20 +855,6 @@
   justify-content: space-between;
   gap: 12px;
   padding: 12px 14px 12px 18px;
-  border-bottom: 1px solid var(--border);
-  background: var(--theme-chrome-row-bg);
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--green) 72%, transparent);
-  transition: background-color 120ms ease;
-}
-
-.run-monitor-item-clickable {
-  cursor: pointer;
-}
-
-.run-monitor-item-clickable:hover,
-.run-monitor-item-clickable:focus-visible {
-  background: var(--theme-chrome-row-hover-bg);
-  outline: none;
 }
 
 .run-monitor-details {

@@ -4149,8 +4149,7 @@ describe('app helpers', () => {
     expect(confirmOpts.actions.map((action) => action.id)).toEqual(['copy', 'cancel', 'clear'])
     expect(confirmOpts.actions.find((action) => action.id === 'cancel')).toMatchObject({ role: 'cancel' })
     expect(confirmOpts.actions.find((action) => action.id === 'clear')).toMatchObject({
-      role: 'primary',
-      tone: 'danger',
+      role: 'destructive',
       label: 'Clear token',
     })
   })

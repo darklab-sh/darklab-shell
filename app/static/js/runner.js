@@ -481,7 +481,7 @@ function confirmKill(tabId) {
     tone: 'danger',
     actions: [
       { id: 'cancel',  label: 'Cancel', role: 'cancel' },
-      { id: 'confirm', label: '■ Kill', role: 'primary', tone: 'danger' },
+      { id: 'confirm', label: '■ Kill', role: 'destructive' },
     ],
   }).then((result) => {
     const targetId = pendingKillTabId;

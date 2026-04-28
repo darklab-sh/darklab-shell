@@ -173,44 +173,92 @@ That split is reflected directly in the blueprint structure.
 ## HTTP Route Inventory
 
 This route list belongs in the architecture document because it describes the application surface that contributors maintain, not the operator workflow.
+Methods below list the routes declared by the app; Flask may add automatic `HEAD` and `OPTIONS` handling for those routes.
+The `/static/<path:filename>` row is included even though Flask registers it automatically rather than through a blueprint decorator.
+
+### Content And Bootstrap Routes
 
 | Method | Endpoint | Description |
 | -------- | ---------- | ------------- |
-| `GET` | `/` | Serves the Flask-rendered shell UI and theme bootstrap |
-| `GET` | `/favicon.ico` | Serves the site favicon |
-| `GET` | `/config` | Returns browser-facing runtime config as JSON |
-| `GET` | `/allowed-commands` | Returns the current allowlist as JSON |
-| `GET` | `/autocomplete` | Returns structured command-context autocomplete data as JSON |
-| `GET` | `/faq` | Returns the canonical FAQ dataset as JSON: built-in entries plus any custom `faq.yaml` items |
-| `GET` | `/welcome` | Returns welcome command samples from `welcome.yaml` as JSON |
-| `GET` | `/welcome/ascii` | Returns the desktop welcome ASCII banner from `ascii.txt` as plain text |
-| `GET` | `/welcome/ascii-mobile` | Returns the mobile welcome banner from `ascii_mobile.txt` as plain text |
-| `GET` | `/welcome/hints` | Returns rotating desktop welcome footer hints from `app_hints.txt` as JSON |
-| `GET` | `/welcome/hints-mobile` | Returns rotating mobile welcome footer hints from `app_hints_mobile.txt` as JSON |
-| `GET` | `/session/token/generate` | Generates a new persistent `tok_...` session token |
-| `GET` | `/session/token/info` | Returns the current named token plus creation timestamp, or `null` fields for anonymous sessions |
-| `POST` | `/session/token/verify` | Checks whether a supplied `tok_...` token was issued by this server |
-| `POST` | `/session/token/revoke` | Revokes a named token so future `tok_...` headers are treated as anonymous |
-| `GET` | `/session/preferences` | Returns the current session's normalized saved Options snapshot |
-| `POST` | `/session/preferences` | Persists the current session's normalized saved Options snapshot |
-| `GET` | `/session/variables` | Returns the current session's command-variable names and values for autocomplete/runtime refresh |
-| `POST` | `/session/migrate` | Migrates runs, snapshots, starred commands, session preferences, session command variables, and non-conflicting workspace files from one session ID to another |
-| `GET` | `/session/starred` | Returns the current session's starred command list |
-| `POST` | `/session/starred` | Adds one command to the current session's starred list |
-| `DELETE` | `/session/starred` | Removes one command, or clears the whole starred list, for the current session |
-| `GET` | `/history` | Returns paginated history items for the current session as JSON, with support for `type=all\|runs\|snapshots` and a backward-compatible `runs` subset for run-only consumers |
-| `GET` | `/history/commands` | Returns the newest distinct command strings for compact command recall surfaces such as prompt Up/Down history, desktop rail recents, and the mobile recent peek |
-| `GET` | `/history/active` | Returns active-run metadata for the current session so reload can rebuild in-flight tabs |
-| `GET` | `/history/<run_id>` | Styled HTML permalink page for a single run; serves full output when a persisted artifact exists (`?json` for raw JSON) |
-| `GET` | `/history/<run_id>/full` | Backward-compatible alias for `/history/<run_id>` (`?json` for raw JSON) |
-| `GET` | `/share/<share_id>` | Styled HTML permalink page for a full tab snapshot (`?json` for raw JSON) |
-| `POST` | `/run` | Validates, rewrites, executes, and streams a command over SSE |
-| `POST` | `/run/client` | Persists allowlisted browser-owned built-in output (`theme`, `config`, `session-token`) as normal run history |
-| `POST` | `/kill` | Kills a running process by `run_id` |
-| `POST` | `/share` | Saves a tab snapshot and returns a permalink URL |
-| `GET` | `/health` | Returns `{"status": "ok", "db": true, "redis": true\|false\|null}`; `redis` is `null` when Redis is not configured |
-| `GET` | `/status` | Returns `{uptime, db, redis, server_time}` for the desktop HUD pill row; always responds 200 even when a component is degraded so HUD polling never flaps the UI |
-| `GET` | `/diag` | IP-gated operator diagnostics page or JSON summary; 404 unless the resolved client IP is in `diagnostics_allowed_cidrs` |
+| `GET` | `/` | Serves the Flask-rendered shell UI, frontend bootstrap config, active theme CSS variables, and initial rail state. |
+| `GET` | `/config` | Returns browser-facing runtime config derived from `config.yaml` and `config.local.yaml`. |
+| `GET` | `/themes` | Returns the active theme plus the complete theme registry used by the Options modal. |
+| `GET` | `/allowed-commands` | Returns the allowed command prefixes grouped from `commands.yaml` for command reference surfaces. |
+| `GET` | `/faq` | Returns built-in FAQ entries plus custom `faq.yaml` entries. |
+| `GET` | `/workflows` | Returns built-in workflow entries plus custom `workflows.yaml` entries. |
+| `GET` | `/shortcuts` | Returns the keyboard shortcut reference used by the `shortcuts` built-in and the browser overlay. |
+| `GET` | `/autocomplete` | Returns command-registry autocomplete context, built-in command roots, and special command keys. |
+| `GET` | `/welcome` | Returns welcome command samples from `welcome.yaml`. |
+| `GET` | `/welcome/ascii` | Returns the desktop welcome ASCII banner from `ascii.txt` as plain text. |
+| `GET` | `/welcome/ascii-mobile` | Returns the mobile welcome ASCII banner from `ascii_mobile.txt` as plain text. |
+| `GET` | `/welcome/hints` | Returns rotating desktop welcome footer hints from `app_hints.txt`. |
+| `GET` | `/welcome/hints-mobile` | Returns rotating mobile welcome footer hints from `app_hints_mobile.txt`. |
+
+### Run Lifecycle Routes
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| `POST` | `/run` | Validates, expands session variables, rewrites, executes, captures, and streams a command over SSE. |
+| `POST` | `/run/client` | Persists allowlisted browser-owned built-in output, such as client-side theme/session commands, as normal run history. |
+| `POST` | `/kill` | Kills an active process group by `run_id` and clears active-run tracking. |
+
+### History And Share Routes
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| `GET` | `/history` | Returns paginated current-session history items with run/snapshot filters, command/output search, starred-only filtering, and command-root summaries. |
+| `DELETE` | `/history` | Deletes all run history for the current session and removes matching full-output artifacts. |
+| `GET` | `/history/commands` | Returns newest distinct command strings for prompt history, desktop recents, and mobile recents. |
+| `GET` | `/history/active` | Returns active-run metadata and telemetry for reload recovery and the Run Monitor drawer. |
+| `GET` | `/history/<run_id>` | Serves a styled run permalink, or raw JSON with `?json`; uses full-output artifacts when available unless `?preview=1` is set. |
+| `DELETE` | `/history/<run_id>` | Deletes one current-session run and its matching full-output artifact. |
+| `GET` | `/history/<run_id>/full` | Backward-compatible alias for `/history/<run_id>`. |
+| `POST` | `/share` | Saves a tab snapshot, optionally applies share redaction, and returns a snapshot permalink URL. |
+| `GET` | `/share/<share_id>` | Serves a styled snapshot permalink, or raw JSON with `?json`. |
+| `DELETE` | `/share/<share_id>` | Deletes one current-session snapshot permalink. |
+
+### Session Routes
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| `GET` | `/session/token/generate` | Generates and stores a new persistent `tok_...` session token. |
+| `GET` | `/session/token/info` | Returns the active named token and creation timestamp, or null fields for anonymous sessions. |
+| `POST` | `/session/token/revoke` | Revokes a named token so future requests with that token fall back to anonymous session handling. |
+| `POST` | `/session/token/verify` | Checks whether a supplied `tok_...` token was issued by this server. |
+| `POST` | `/session/migrate` | Migrates runs, snapshots, starred commands, preferences, command variables, and non-conflicting workspace paths between session IDs. |
+| `GET` | `/session/preferences` | Returns the current session's normalized saved Options snapshot. |
+| `POST` | `/session/preferences` | Persists the current session's normalized saved Options snapshot. |
+| `GET` | `/session/variables` | Returns current session command-variable names and values for autocomplete and runtime refresh. |
+| `GET` | `/session/run-count` | Returns uncapped run count plus workspace file count for migration confirmation. |
+| `GET` | `/session/starred` | Returns the current session's starred command list. |
+| `POST` | `/session/starred` | Adds one command to the current session's starred list. |
+| `DELETE` | `/session/starred` | Removes one command, or clears the whole starred list, for the current session. |
+
+### Workspace Routes
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| `GET` | `/workspace/files` | Returns current-session workspace directories, files, usage, and quota limits. |
+| `POST` | `/workspace/files` | Writes a text file into the current session workspace and returns the refreshed workspace payload. |
+| `DELETE` | `/workspace/files` | Deletes a file or folder from the current session workspace and returns the refreshed workspace payload. |
+| `POST` | `/workspace/directories` | Creates a current-session workspace directory and returns the refreshed workspace payload. |
+| `GET` | `/workspace/files/read` | Reads a workspace text file for the UI viewer/editor; binary files return an explicit unsupported-media response. |
+| `GET` | `/workspace/files/info` | Returns metadata for a workspace path, including directory file counts used by delete confirmations. |
+| `GET` | `/workspace/files/download` | Streams one workspace file as an attachment. |
+
+### Asset And Operator Routes
+
+| Method | Endpoint | Description |
+| -------- | ---------- | ------------- |
+| `POST` | `/log` | Receives client-side error reports and emits them through server logging. |
+| `GET` | `/static/<path:filename>` | Flask's built-in static-file route for committed frontend assets under `app/static/`. |
+| `GET` | `/vendor/ansi_up.js` | Serves the vendored `ansi_up` script. |
+| `GET` | `/vendor/jspdf.umd.min.js` | Serves the vendored `jsPDF` script used by export flows. |
+| `GET` | `/vendor/fonts/<path:filename>` | Serves only committed font files from the vendored font manifest. |
+| `GET` | `/favicon.ico` | Serves the site favicon. |
+| `GET` | `/health` | Returns Docker/load-balancer health with DB and optional Redis checks; degraded dependencies return 503. |
+| `GET` | `/status` | Returns lightweight HUD status data for uptime, DB, Redis, and server time; always responds 200. |
+| `GET` | `/diag` | Serves IP-gated operator diagnostics as HTML or JSON; returns 404 outside `diagnostics_allowed_cidrs`. |
 
 ---
 
@@ -385,9 +433,41 @@ Every clickable surface in the shell uses one of a small, allowlisted set of pri
 - **Role modifiers** (mutually exclusive): `.btn-primary`, `.btn-secondary`, `.btn-ghost`, `.btn-destructive`. Role controls the visual weight of the button — primary is the main action in a group, secondary is the alternate, ghost is a low-weight inline action, and destructive is a labeled irreversible action.
 - **Tone modifiers** (mutually exclusive, optional): `.btn-danger`, `.btn-warning`. Tone overlays a semantic color from the theme contract. A tone without a role is not valid.
 
-Four non-`btn` pressable primitives exist for surfaces that are structurally not buttons but still need consistent pressable behavior: `.nav-item` (rail/tab navigation), `.close-btn` (modal and sheet close controls), `.toggle-btn` (on/off switches with no destructive semantics), and `.kb-key` (keyboard-key glyphs in help copy). New pressable surfaces must pick one of these primitives rather than introducing one-off classes.
+Eight non-`btn` pressable primitives exist for surfaces that are structurally not buttons but still need consistent pressable behavior: `.nav-item` (rail/tab navigation), `.close-btn` (modal and sheet close controls), `.toggle-btn` (on/off switches with no destructive semantics), `.kb-key` (keyboard-key glyphs in help copy), `.dropdown-item` (menu/listbox choices inside app-owned dropdowns), `.control-row` (row-shaped filter/select controls), `.hud-action-cell` (clickable HUD summary cells), and `.gesture-handle` (mobile sheet drag/tap handles). New pressable surfaces must pick one of these primitives rather than introducing one-off classes.
 
 All pressable primitives route through `bindPressable` in `app/static/js/ui_pressable.js` so click + Enter/Space activation, press-style timing, and composer-refocus behavior stay consistent. A jsdom contract test (`tests/js/unit/button_primitives_allowlist.test.js`) enumerates every `<button>` / `[role="button"]` in the rendered shell and fails CI on any element that does not carry one of the allowed class families; exceptions are listed in `tests/js/fixtures/button_primitive_allowlist.json` with a short reason per entry.
+
+### Dropdown/Menu Primitive Family
+
+App-owned dropdowns share the `.dropdown-surface` / `.dropdown-item` primitive family. The primitive owns common themed menu treatment: `dropdown_*` background, border, shadow, font family, default item text, hover/focus state, selected state, and upward-shadow direction via `.dropdown-up`. Surface selectors keep placement, width, z-index, max-height, and any behavior-specific layout.
+
+Density is explicit rather than global. `.dropdown-item-compact` is used for small command menus such as Save, `.dropdown-item-touch` for app-native select and mobile sheet menus, and `.dropdown-item-dense` for terminal autocomplete rows. Autocomplete remains a specialized dropdown consumer: it shares the surface and active-row styling, but keeps its terminal prefix marker, descriptions, match highlighting, fixed positioning, and mobile keyboard positioning local.
+
+Current consumers are terminal/permalink/HUD Save menus, app-native selects, command autocomplete, History root autocomplete, Ctrl+R history search, and mobile recents filter menus. New app-owned menu surfaces should compose these primitives before adding local selectors.
+
+### Row Primitive Family
+
+Repeated list rows use shared row primitives instead of rebuilding background, divider, hover, and accent behavior per surface. `.chrome-row` is for shell-chrome lists such as History drawer rows, Run Monitor rows, and mobile recents rows. `.chrome-row-clickable` adds the shared hover/focus state for rows that activate on click or keyboard. Accent classes such as `.row-accent-green` and `.row-accent-amber` are visual only; each component still decides when a run is active or a history row is starred.
+
+Modal and panel content uses `.panel-row` instead of `.chrome-row`. The Files modal composes `.panel-row` for file, folder, and empty-state rows so it gets consistent border/radius/focus treatment without visually becoming a History/Run Monitor drawer row. Rail navigation stays under the `.nav-item` primitive because selected navigation state and rail density are different from content-list row behavior.
+
+### Chip And Badge Primitive Family
+
+Pill-shaped UI uses two separate primitives so visual affordance matches behavior. `.chip` is for clickable or removable pill actions such as prompt history chips, active History filters, mobile recents filter chips, FAQ command chips, and workflow command chips. `.chip-action` keeps command-loading chips toolbar-like, while `.chip-removable` is used for active filters that clear state.
+
+`.badge` is for passive metadata labels that should not look clickable. History and mobile recents use badges for `RUN` / `SNAPSHOT` labels, with tone classes such as `.badge-tone-green` and `.badge-tone-muted` carrying the semantic color. Search signal chips intentionally remain text-like buttons even though they compose the chip primitive, because the search summary reads as inline metadata rather than a filter-chip row.
+
+### Form And Control Primitive Family
+
+Text fields and compact filter controls compose `.form-control` and `.control-row` instead of rebuilding input chrome per surface. `.form-control` owns the shared `chrome_control_*` background/border, mono font, radius, padding, and focus border. `.form-control-compact` is used for dense History/search controls, while `.form-control-quiet` keeps the search input visually light inside the search strip.
+
+`.control-row` is for row-shaped controls that are not plain text inputs, such as app-native select triggers and mobile recents filter rows. It is also part of the pressable primitive allowlist because several control rows are rendered as `<button>` dropdown/toggle triggers. `.control-row-touch` keeps mobile sheet controls large enough for touch without changing desktop filter density. The mobile command composer (`#mobile-cmd`) intentionally remains a local exception because its keyboard anchoring, caret behavior, and viewport sizing are more fragile than normal form controls.
+
+### Drawer And Sheet Primitive Family
+
+Drawer-like chrome surfaces compose `.chrome-drawer`, `.surface-header`, and `.surface-body` so shared background, header band, scroll containment, and mono typography stay consistent. History and Run Monitor use this family, while each keeps its own placement, width, shadow direction, animation, and active-row semantics local.
+
+Mobile bottom sheets compose `.bottom-sheet`, `.bottom-sheet-header`, `.bottom-sheet-body`, `.bottom-sheet-footer`, and `.gesture-handle`. These primitives own the shared sheet background, top border, top radius, shadow, grab-handle affordance, and basic header/body/footer structure. Scrims, keyboard-aware modal sizing, and sheet-specific controls remain local because those details are tied to mobile interaction behavior rather than general visual treatment.
 
 ### Disclosure Affordance Rules
 
@@ -838,10 +918,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 1062
-- `vitest`: 862
+- `pytest`: 1063
+- `vitest`: 863
 - `playwright`: 219
-- total: 2,143
+- total: 2,145
 
 ### Testing Architecture
 

@@ -24,7 +24,7 @@
 
 .tabs-scroll-btn {
   background: var(--theme-toolbar-button-bg);
-  border: 1px solid var(--theme-toolbar-button-border);
+  border: 1px solid transparent;
   color: var(--theme-toolbar-button-text);
   font-family: var(--font-mono);
   font-size: 11px;
@@ -43,7 +43,7 @@
 }
 .tabs-scroll-btn:hover:not(:disabled) {
   color: var(--theme-toolbar-button-hover-text);
-  border-color: var(--theme-toolbar-button-hover-border);
+  border-color: transparent;
   background: var(--theme-toolbar-button-hover-bg);
 }
 .tabs-scroll-btn:disabled {
@@ -55,6 +55,12 @@
 
 .tabs-scroll-btn.u-hidden {
   display: none;
+}
+.tabs-scroll-btn.btn {
+  border-color: transparent;
+}
+.tabs-scroll-btn.btn:hover:not(:disabled) {
+  border-color: transparent;
 }
 
 .tab {
@@ -223,16 +229,6 @@ body #ln-btn.active {
   border-color: var(--theme-toolbar-button-active-border);
   background: var(--theme-toolbar-button-active-bg);
 }
-body .history-action-btn {
-  background: var(--theme-toolbar-button-bg);
-  border-color: var(--theme-toolbar-button-border);
-  color: var(--theme-toolbar-button-text);
-}
-body .history-action-btn:hover {
-  background: var(--theme-toolbar-button-hover-bg);
-  border-color: var(--theme-toolbar-button-hover-border);
-  color: var(--theme-toolbar-button-hover-text);
-}
 .tab .tab-close {
   opacity: 0;
   width: 22px;
@@ -375,17 +371,213 @@ body #search-toggle-btn.search-discover-pulse {
     background: color-mix(in srgb, var(--amber) 10%, transparent);
   }
 }
+
+/* ── Row primitives ───────────────────────────────────────────────────────── */
+.chrome-row {
+  background: var(--theme-chrome-row-bg);
+  border-bottom: 1px solid var(--border);
+  transition: background-color 0.15s;
+}
+
+.chrome-row-clickable {
+  cursor: pointer;
+}
+
+.chrome-row-clickable:hover,
+.chrome-row-clickable:focus-visible {
+  background: var(--theme-chrome-row-hover-bg);
+  outline: none;
+}
+
+.row-accent-green {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--green) 72%, transparent);
+}
+
+.row-accent-amber {
+  border-left: 2px solid var(--amber);
+}
+
+.panel-row {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.panel-row-clickable {
+  cursor: pointer;
+}
+
+.panel-row-clickable:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--muted) 75%, white);
+  outline-offset: 2px;
+}
+
+/* ── Chip and badge primitives ───────────────────────────────────────────── */
+.chip,
+.badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+}
+
+.chip {
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--green-dim) 54%, var(--border-bright));
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+  color: color-mix(in srgb, var(--text) 90%, var(--muted));
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s, transform 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.chip-action {
+  background: color-mix(in srgb, var(--theme-toolbar-button-bg) 74%, color-mix(in srgb, var(--surface) 88%, transparent));
+  border-color: var(--border-bright);
+  color: var(--muted);
+}
+
+.chip-removable {
+  color: var(--green);
+}
+
+.chip:hover,
+.chip:focus-visible {
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  border-color: color-mix(in srgb, var(--green) 60%, transparent);
+  color: var(--text);
+}
+
+.chip:focus-visible {
+  outline: 1px solid var(--green-dim);
+  outline-offset: 1px;
+}
+
+.chip:active {
+  border-color: var(--green-dim);
+  color: var(--text);
+  opacity: 0.7;
+}
+
+.badge {
+  justify-content: center;
+  min-height: 16px;
+  padding: 0 6px;
+  border: 1px solid var(--border-bright);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+
+.badge-tone-green {
+  color: var(--green);
+  border-color: var(--green-dim);
+}
+
+.badge-tone-muted {
+  color: color-mix(in srgb, var(--text) 72%, var(--muted));
+}
+
+/* ── Form/control primitives ─────────────────────────────────────────────── */
+.form-control,
+.control-row {
+  box-sizing: border-box;
+  background: var(--theme-chrome-control-bg);
+  border: 1px solid var(--theme-chrome-control-border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  outline: none;
+}
+
+.form-control {
+  font-size: 13px;
+  padding: 10px 12px;
+}
+
+.form-control-compact {
+  font-size: 11px;
+  padding: 7px 9px;
+  border-radius: 4px;
+}
+
+.form-control-quiet {
+  background: transparent;
+  border-color: var(--border-bright);
+  border-radius: 3px;
+}
+
+.form-control:focus,
+.form-control:focus-visible,
+.control-row:focus-visible {
+  border-color: var(--green-dim);
+}
+
+.control-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.control-row-touch {
+  min-height: 40px;
+  padding: 9px 12px;
+  font-size: 12px;
+}
+
+/* ── Drawer and sheet primitives ─────────────────────────────────────────── */
+.chrome-drawer {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--theme-chrome-bg);
+  font-family: var(--font-mono);
+}
+
+.surface-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--theme-chrome-header-bg);
+}
+
+.surface-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.bottom-sheet {
+  display: flex;
+  flex-direction: column;
+  background: var(--theme-chrome-bg);
+  border-top: 1px solid var(--border-bright);
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 -20px 50px var(--theme-panel-shadow, rgba(0,0,0,0.55));
+}
+
+.bottom-sheet-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 14px 10px;
+}
+
+.bottom-sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.bottom-sheet-footer {
+  border-top: 1px solid var(--border);
+}
+
 .search-bar input {
   flex: 1;
   min-width: 0;
-  background: transparent;
-  border: 1px solid var(--border-bright);
-  border-radius: 3px;
-  color: var(--text);
-  font-family: var(--font-mono);
   font-size: 12px;
   padding: 4px 8px;
-  outline: none;
   transition: border-color 0.2s;
 }
 .search-bar input:focus { border-color: var(--green-dim); }
@@ -400,18 +592,20 @@ body #search-toggle-btn.search-discover-pulse {
   gap: 4px;
   flex: 0 0 auto;
 }
-.search-nav button {
-  background: transparent;
-  border: 1px solid var(--border-bright);
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
+.search-nav .btn {
+  min-height: 22px;
   padding: 3px 8px;
+  background: transparent;
+  border-color: color-mix(in srgb, var(--border-bright) 72%, transparent);
   border-radius: 3px;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1;
 }
-.search-nav button:hover { color: var(--text); border-color: var(--text); }
+.search-nav .btn:hover:not([aria-disabled="true"]):not(:disabled) {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--text) 40%, transparent);
+}
 .search-close-btn {
   display: none;
   flex: 0 0 auto;
@@ -586,27 +780,14 @@ body.permalink-page .permalink-error-state {
   top: 0; right: 0; bottom: 0;
   width: min(380px, 92vw);
   max-height: none;
-  overflow: hidden;
-  background: var(--theme-chrome-bg);
   border-left: 1px solid var(--border-bright);
   border-radius: 0;
   z-index: 250;
-  flex-direction: column;
   box-shadow: -8px 0 32px var(--theme-chrome-shadow);
 }
 body #history-panel { background: var(--theme-chrome-bg); }
 #history-panel.open { display: flex; }
-.history-panel-header {
-  display: flex;
-  align-items: center;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
-  gap: 10px;
-  background: var(--theme-chrome-header-bg);
-}
 .history-panel-body {
-  flex: 1 1 auto;
-  min-height: 0;
   overflow-y: auto;
 }
 .history-panel-filters {
@@ -626,13 +807,6 @@ body #history-panel { background: var(--theme-chrome-bg); }
 .history-panel-filters input,
 .history-panel-filters select {
   min-width: 0;
-  border: 1px solid var(--theme-chrome-control-border);
-  background: var(--theme-chrome-control-bg);
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 7px 9px;
-  border-radius: 4px;
 }
 .history-panel-filters .app-select {
   flex: 1 1 118px;
@@ -704,16 +878,9 @@ body #history-panel { background: var(--theme-chrome-bg); }
   display: none;
 }
 .history-active-filter-chip {
-  display: inline-flex;
-  align-items: center;
   gap: 8px;
   min-height: 28px;
   padding: 0 8px 0 10px;
-  border: 1px solid color-mix(in srgb, var(--green-dim) 54%, var(--border-bright));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--green) 8%, transparent);
-  color: color-mix(in srgb, var(--text) 90%, var(--muted));
-  font-family: var(--font-mono);
   font-size: 10px;
 }
 .history-active-filter-remove {
@@ -848,14 +1015,6 @@ body #history-panel { background: var(--theme-chrome-bg); }
 }
 .history-entry {
   padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-  background: var(--theme-chrome-row-bg);
-  cursor: pointer;
-  transition: background-color 0.15s;
-}
-.history-entry:hover,
-.history-entry:focus-visible {
-  background-color: var(--theme-chrome-row-hover-bg);
 }
 .history-entry:hover .history-entry-cmd::after {
   content: ' ↗';
@@ -917,24 +1076,6 @@ body #history-panel { background: var(--theme-chrome-bg); }
   flex-wrap: wrap;
   gap: 10px;
 }
-.history-entry-kind {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 16px;
-  padding: 0 6px;
-  border: 1px solid var(--border-bright);
-  border-radius: 999px;
-  font-size: 9px;
-  letter-spacing: 0.06em;
-}
-.history-entry-kind-run {
-  color: var(--green);
-  border-color: var(--green-dim);
-}
-.history-entry-kind-snapshot {
-  color: color-mix(in srgb, var(--text) 72%, var(--muted));
-}
 .history-entry-date {
   color: color-mix(in srgb, var(--muted) 82%, var(--text));
 }
@@ -956,6 +1097,9 @@ body #history-panel { background: var(--theme-chrome-bg); }
   gap: 6px;
   margin-top: 5px;
 }
+.history-action-btn.btn:hover:not([aria-disabled="true"]):not(:disabled) {
+  transform: none;
+}
 /* ── Starred chip styles ── */
 .chip-star {
   color: var(--muted);
@@ -967,30 +1111,8 @@ body #history-panel { background: var(--theme-chrome-bg); }
 }
 .hist-chip.starred .chip-star { color: var(--amber); }
 .hist-chip.starred { border-color: color-mix(in srgb, var(--amber) 40%, transparent); }
-.hist-chip.starred:active { border-color: var(--green-dim); color: var(--text); opacity: 0.7; }
 
-.history-entry.starred { border-left: 2px solid var(--amber); padding-left: 14px; }
-
-.history-action-btn {
-  background: transparent;
-  border: 1px solid var(--border-bright);
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  padding: 2px 8px;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
-}
-.history-action-btn:focus:not(:focus-visible),
-.history-action-btn:focus-visible {
-  outline: none;
-  box-shadow: none;
-  background: transparent;
-  color: var(--muted);
-  border-color: var(--border-bright);
-}
-.history-action-btn:hover { color: var(--green); border-color: var(--green-dim); }
+.history-entry.starred { padding-left: 14px; }
 
 #search-toggle-btn, #search-summary-btn, #ts-btn, #ln-btn {
   background: color-mix(in srgb, var(--theme-toolbar-button-bg) 72%, color-mix(in srgb, var(--surface) 92%, transparent));
@@ -1159,7 +1281,7 @@ body #history-panel { background: var(--theme-chrome-bg); }
   #hamburger-btn:hover { color: var(--green); border-color: var(--green-dim); }
 }
 
-/* .mobile-sheet-handle was retired in favour of a single .sheet-grab class
+/* .mobile-sheet-handle was retired in favour of the .gesture-handle primitive
    shared by every mobile bottom-sheet — see mobile-chrome.css and
    app/static/js/mobile_sheet.js::bindMobileSheet. */
 
@@ -1214,8 +1336,9 @@ body #history-panel { background: var(--theme-chrome-bg); }
 }
 
 /* ── Button primitives ─────────────────────────────────────────────────────
-   Closed five-primitive set every clickable control in the app must map to.
-   No surface-scoped button classes; one-offs are defects.
+   Closed primitive set every clickable control in the app must map to.
+   No surface-scoped button classes for button-like actions; one-offs are
+   defects unless documented in the allowlist fixture.
 
    Primitives:
      .btn        — role × tone × size × state composable CTA
@@ -1223,6 +1346,10 @@ body #history-panel { background: var(--theme-chrome-bg); }
      .close-btn  — icon-only X button
      .toggle-btn — aria-pressed mode toggle
      .kb-key     — mobile on-screen keyboard key (see mobile-chrome.css)
+     .dropdown-item — app-owned menu/listbox option
+     .control-row   — row-shaped filter/select trigger
+     .hud-action-cell — clickable HUD summary cell
+     .gesture-handle — mobile bottom-sheet drag/tap handle
 
    Composition rules for .btn:
      role  — pick exactly one: btn-primary | btn-secondary | btn-ghost | btn-destructive
@@ -1381,7 +1508,7 @@ body #history-panel { background: var(--theme-chrome-bg); }
 /* Role: ghost — transparent, low emphasis; icon-only permitted */
 .btn-ghost {
   background: transparent;
-  border: 1px solid transparent;
+  border: 1px solid color-mix(in srgb, var(--border-bright) 58%, transparent);
   color: color-mix(in srgb, var(--muted) 86%, var(--text));
 }
 .btn-ghost.btn-warning,
@@ -1391,6 +1518,7 @@ body #history-panel { background: var(--theme-chrome-bg); }
 }
 .btn-ghost:hover:not([aria-disabled="true"]):not(:disabled) {
   background: color-mix(in srgb, var(--_tone) 10%, transparent);
+  border-color: color-mix(in srgb, var(--_tone-dim) 62%, var(--border-bright));
   color: var(--text);
 }
 .btn-ghost.btn-warning:hover:not([aria-disabled="true"]):not(:disabled),
@@ -1407,11 +1535,11 @@ body #history-panel { background: var(--theme-chrome-bg); }
 .btn-destructive {
   background: color-mix(in srgb, var(--_tone) 8%, transparent);
   border: 1px solid var(--_tone-dim);
-  color: var(--_tone);
+  color: color-mix(in srgb, var(--muted) 86%, var(--text));
 }
 .btn-destructive:hover:not([aria-disabled="true"]):not(:disabled) {
   background: color-mix(in srgb, var(--_tone) 16%, transparent);
-  color: var(--_tone);
+  color: var(--text);
   transform: translateY(-1px);
 }
 

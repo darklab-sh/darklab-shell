@@ -14,7 +14,7 @@
 //     tone: 'danger',
 //     actions: [
 //       { id: 'cancel',  label: 'Cancel', role: 'cancel' },
-//       { id: 'confirm', label: '■ Kill', role: 'primary', tone: 'danger' },
+//       { id: 'confirm', label: '■ Kill', role: 'destructive' },
 //     ],
 //   });
 //
@@ -78,11 +78,12 @@
     const role = action.role || 'secondary';
     const tone = action.tone || null;
     let cls = 'btn';
-    if (role === 'primary')       cls += ' btn-primary';
-    else if (role === 'ghost')    cls += ' btn-ghost';
-    else                          cls += ' btn-secondary'; // cancel, secondary, default
-    if (tone === 'danger')        cls += ' btn-danger';
-    else if (tone === 'warning')  cls += ' btn-warning';
+    if (role === 'primary')          cls += ' btn-primary';
+    else if (role === 'ghost')       cls += ' btn-ghost';
+    else if (role === 'destructive') cls += ' btn-destructive';
+    else                             cls += ' btn-secondary'; // cancel, secondary, default
+    if (role !== 'destructive' && tone === 'danger') cls += ' btn-danger';
+    else if (tone === 'warning')                    cls += ' btn-warning';
     return cls;
   }
 

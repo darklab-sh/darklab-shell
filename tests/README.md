@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 1062
-- `vitest`: 862
+- `pytest`: 1063
+- `vitest`: 863
 - `playwright`: 219
-- total: 2,143
+- total: 2,145
 
 This document is organized in two parts:
 
@@ -547,6 +547,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `TestProjectStructureCoverage.test_opaque_dirs_appear_in_structure` | Checks that every directory declared opaque in `_PROJECT_STRUCTURE_OPAQUE_DIRS` still appears as a parent entry in the README tree, so contributors are pointed at the directory even when its individual files aren't enumerated. |
 | `TestProjectStructureCoverage.test_listed_paths_exist_in_git` | Checks that every leaf path written into the README project-structure tree corresponds to a real tracked or untracked-but-not-gitignored path on disk, catching typos and stale entries left behind after deletions. |
 | `TestProjectStructureCoverage.test_structure_order_matches_git_file_listing` | Checks that the README.md `## Project Structure` tree follows `git ls-files --cached` order with parent directories inserted before children. |
+| `TestArchitectureRouteInventory.test_route_inventory_matches_flask_url_map` | Checks that ARCHITECTURE.md `## HTTP Route Inventory` lists the same method/route pairs registered in Flask's URL map, without enforcing documentation order. |
 | `TestReleaseDraftDocs.test_release_draft_convention_is_documented_when_drafts_exist` | Checks that release-draft branch docs are documented when `docs/release-drafts/` exists. |
 | `TestReleaseDraftDocs.test_release_drafts_are_paired_by_version` | Checks that each release draft version has both merge-request and release-notes files. |
 
@@ -1960,7 +1961,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `applies modal-card-warning when tone: warning` | Verifies tone:'warning' adds modal-card-warning to the card. |
 | `applies neither tone class when tone is omitted` | Verifies the card has no tone class when tone is not set. |
 | `clears stale tone class between opens` | Verifies the previous tone class is cleared before a new open applies its own. |
-| `maps role:primary + tone:danger to btn-primary btn-danger` | Verifies the role+tone class mapping for the kill-style primary-danger button. |
+| `maps role:destructive to btn-destructive` | Verifies destructive confirmation actions render with the shared destructive button primitive. |
+| `keeps role:primary + tone:danger available for high-emphasis danger actions` | Verifies role+tone mapping remains available for explicit primary danger actions. |
 | `maps role:cancel to btn-secondary` | Verifies role:'cancel' renders as btn-secondary and sets data-confirm-role. |
 | `maps role:secondary + tone:warning to btn-secondary btn-warning` | Verifies role+tone mapping for a non-primary warning action. |
 | `focuses the role:cancel button by default` | Verifies default focus lands on the cancel action so Enter routes to cancel. |

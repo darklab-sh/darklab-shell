@@ -532,10 +532,10 @@
 
     recentsPagination.classList.remove('u-hidden');
   }
-  function _recentsMakeAction(label, handler) {
+  function _recentsMakeAction(label, handler, role = 'secondary') {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'sheet-item-action';
+    btn.className = `sheet-item-action btn btn-${role} btn-compact`;
     btn.textContent = label;
     bindPressable(btn, {
       onActivate: (e) => {
@@ -547,7 +547,8 @@
   }
   function _recentsMakeKindBadge(kind, label = kind.toUpperCase()) {
     const badge = document.createElement('span');
-    badge.className = `sheet-item-kind sheet-item-kind-${kind}`;
+    const tone = kind === 'run' ? 'badge-tone-green' : 'badge-tone-muted';
+    badge.className = `sheet-item-kind sheet-item-kind-${kind} badge ${tone}`;
     badge.textContent = label;
     return badge;
   }
@@ -564,7 +565,7 @@
     const starred = _recentsStarred();
     if (!_recentsItems.length) {
       const empty = document.createElement('div');
-      empty.className = 'sheet-item';
+      empty.className = 'sheet-item chrome-row';
       empty.style.color = 'var(--muted)';
       empty.style.opacity = '0.7';
       empty.style.justifyContent = 'center';
@@ -587,7 +588,7 @@
       const cmd = run?.command || '';
       const isStarred = isRun && starred.has(cmd);
       const item = document.createElement('div');
-      item.className = 'sheet-item';
+      item.className = 'sheet-item chrome-row';
       if (cmd) item.dataset.cmd = cmd;
 
       const head = document.createElement('div');
@@ -848,7 +849,7 @@
     const push = (key, text) => {
       const chip = document.createElement('button');
       chip.type = 'button';
-      chip.className = 'filter-chip';
+      chip.className = 'filter-chip chip chip-removable';
       chip.dataset.chipKey = key;
       chip.setAttribute('aria-label', `Clear filter ${text}`);
       const label = document.createElement('span');
@@ -894,7 +895,9 @@
       wrap.classList.toggle('active', val !== 'all');
       if (trigger) trigger.disabled = !runOnlyEnabled && key === 'exit';
       wrap.querySelectorAll('[data-dropdown-value]').forEach(opt => {
-        opt.setAttribute('aria-selected', opt.dataset.dropdownValue === val ? 'true' : 'false');
+        const active = opt.dataset.dropdownValue === val;
+        opt.setAttribute('aria-selected', active ? 'true' : 'false');
+        opt.classList.toggle('dropdown-item-active', active);
       });
     });
     if (recentsFilterStarred) {

@@ -667,6 +667,7 @@
       const active = btn.dataset.value === select.value;
       btn.setAttribute('aria-selected', active ? 'true' : 'false');
       btn.classList.toggle('active', active);
+      btn.classList.toggle('dropdown-item-active', active);
     });
   }
   function _enhanceAppSelect(select) {
@@ -675,7 +676,7 @@
     wrap.className = 'app-select';
     const trigger = document.createElement('button');
     trigger.type = 'button';
-    trigger.className = 'app-select-trigger';
+    trigger.className = 'app-select-trigger control-row form-control-compact';
     trigger.setAttribute('aria-haspopup', 'listbox');
     trigger.setAttribute('aria-expanded', 'false');
     const label = select.getAttribute('aria-label');
@@ -688,12 +689,13 @@
     caret.textContent = '▾';
     trigger.append(valueEl, caret);
     const menu = document.createElement('div');
-    menu.className = 'app-select-menu';
+    menu.className = 'app-select-menu dropdown-surface';
     menu.setAttribute('role', 'listbox');
     if (label) menu.setAttribute('aria-label', label);
     const options = Array.from(select.options).map((option) => {
       const btn = document.createElement('button');
       btn.type = 'button';
+      btn.className = 'dropdown-item dropdown-item-touch';
       btn.setAttribute('role', 'option');
       btn.dataset.value = option.value;
       btn.textContent = option.textContent;

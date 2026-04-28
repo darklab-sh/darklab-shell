@@ -51,21 +51,13 @@
 }
 
 #mobile-run-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   background: transparent;
   color: var(--green);
   border: 1px solid var(--green-dim);
-  border-radius: 4px;
-  font-family: var(--font-mono);
   font-size: 12px;
   padding: 0 14px;
-  cursor: pointer;
   flex-shrink: 0;
   min-height: 34px;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
 }
 
 #mobile-run-btn:active {
@@ -484,9 +476,7 @@
       transparent);
   }
   body.mobile-terminal-mode .terminal-actions .btn:focus,
-  body.mobile-terminal-mode .terminal-actions .btn:focus-visible,
-  body.mobile-terminal-mode .history-action-btn:focus,
-  body.mobile-terminal-mode .history-action-btn:focus-visible {
+  body.mobile-terminal-mode .terminal-actions .btn:focus-visible {
     outline: none;
     box-shadow: none;
     color: var(--muted);
@@ -494,9 +484,7 @@
     background: transparent;
   }
   body.mobile-terminal-mode .terminal-actions .btn:hover,
-  body.mobile-terminal-mode .terminal-actions .btn:active,
-  body.mobile-terminal-mode .history-action-btn:hover,
-  body.mobile-terminal-mode .history-action-btn:active {
+  body.mobile-terminal-mode .terminal-actions .btn:active {
     color: var(--muted);
     border-color: var(--border-bright);
     background: transparent;

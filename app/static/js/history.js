@@ -247,7 +247,8 @@ function _renderHistoryRootDropdown(items, query) {
   historyRootDropdown.classList.toggle('ac-mobile', mobileMode);
   items.forEach((root, index) => {
     const item = document.createElement('div');
-    item.className = 'ac-item' + (index === _historyRootIndex ? ' ac-active' : '');
+    item.className = 'ac-item dropdown-item dropdown-item-dense'
+      + (index === _historyRootIndex ? ' ac-active dropdown-item-active' : '');
     const matchIndex = normalizedQuery ? root.toLowerCase().indexOf(normalizedQuery) : -1;
     if (matchIndex >= 0 && normalizedQuery) {
       item.innerHTML = escapeHtml(root.slice(0, matchIndex))
@@ -353,7 +354,7 @@ function _renderHistoryActiveFilters() {
   historyActiveFilters.classList.toggle('u-hidden', !items.length);
   items.forEach(item => {
     const chip = document.createElement('div');
-    chip.className = 'history-active-filter-chip';
+    chip.className = 'history-active-filter-chip chip chip-removable';
     chip.dataset.filterKey = item.key;
     const label = document.createElement('span');
     label.textContent = item.label;
@@ -606,7 +607,7 @@ function hydrateCmdHistory(runs) {
 
 function _makeOverflowChip(_count) {
   const chip = document.createElement('button');
-  chip.className = 'hist-chip hist-chip-overflow';
+  chip.className = 'hist-chip hist-chip-overflow chip chip-action';
   chip.textContent = '+ more';
   chip.title = 'Open history panel';
   chip.addEventListener('click', () => {
@@ -684,7 +685,7 @@ function renderHistory() {
   visible.forEach(cmd => {
     const isStarred = starred.has(cmd);
     const chip = document.createElement('button');
-    chip.className = 'hist-chip' + (isStarred ? ' starred' : '');
+    chip.className = 'hist-chip chip chip-action' + (isStarred ? ' starred' : '');
     chip.title = cmd;
 
     const textEl = document.createElement('span');
@@ -744,14 +745,15 @@ function _historyRelativeTime(startedAt, now = new Date()) {
 
 function _historyMetaKindBadge(kind, label = kind.toUpperCase()) {
   const badge = document.createElement('span');
-  badge.className = `history-entry-kind history-entry-kind-${kind}`;
+  const tone = kind === 'run' ? 'badge-tone-green' : 'badge-tone-muted';
+  badge.className = `history-entry-kind history-entry-kind-${kind} badge ${tone}`;
   badge.textContent = label;
   return badge;
 }
 
 function _createHistoryEntry(run, isStarred) {
   const entry = document.createElement('div');
-  entry.className = 'history-entry' + (isStarred ? ' starred' : '');
+  entry.className = 'history-entry chrome-row chrome-row-clickable' + (isStarred ? ' starred row-accent-amber' : '');
   const exitCls = run.exit_code === 0 ? 'exit-ok' : 'exit-fail';
   const startedAt = new Date(run.started);
   const now = new Date();
@@ -806,19 +808,22 @@ function _createHistoryEntry(run, isStarred) {
   actions.className = 'history-actions';
 
   const restoreBtn = document.createElement('button');
-  restoreBtn.className = 'history-action-btn';
+  restoreBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+  restoreBtn.type = 'button';
   restoreBtn.dataset.action = 'restore';
   restoreBtn.textContent = 'restore';
   actions.appendChild(restoreBtn);
 
   const permalinkBtn = document.createElement('button');
-  permalinkBtn.className = 'history-action-btn';
+  permalinkBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+  permalinkBtn.type = 'button';
   permalinkBtn.dataset.action = 'permalink';
   permalinkBtn.textContent = 'permalink';
   actions.appendChild(permalinkBtn);
 
   const deleteBtn = document.createElement('button');
-  deleteBtn.className = 'history-action-btn';
+  deleteBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+  deleteBtn.type = 'button';
   deleteBtn.dataset.action = 'delete';
   deleteBtn.textContent = 'delete';
   actions.appendChild(deleteBtn);
@@ -829,7 +834,7 @@ function _createHistoryEntry(run, isStarred) {
 
 function _createSnapshotHistoryEntry(snapshot) {
   const entry = document.createElement('div');
-  entry.className = 'history-entry history-entry-snapshot';
+  entry.className = 'history-entry history-entry-snapshot chrome-row chrome-row-clickable';
 
   const header = document.createElement('div');
   header.className = 'history-entry-header';
@@ -856,19 +861,22 @@ function _createSnapshotHistoryEntry(snapshot) {
   actions.className = 'history-actions';
 
   const openBtn = document.createElement('button');
-  openBtn.className = 'history-action-btn';
+  openBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+  openBtn.type = 'button';
   openBtn.dataset.action = 'open';
   openBtn.textContent = 'open';
   actions.appendChild(openBtn);
 
   const linkBtn = document.createElement('button');
-  linkBtn.className = 'history-action-btn';
+  linkBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+  linkBtn.type = 'button';
   linkBtn.dataset.action = 'link';
   linkBtn.textContent = 'copy link';
   actions.appendChild(linkBtn);
 
   const deleteBtn = document.createElement('button');
-  deleteBtn.className = 'history-action-btn';
+  deleteBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+  deleteBtn.type = 'button';
   deleteBtn.dataset.action = 'delete';
   deleteBtn.textContent = 'delete';
   actions.appendChild(deleteBtn);
@@ -912,11 +920,11 @@ function confirmHistAction(type, id, command, itemType = 'run') {
     ? [
         { id: 'cancel', label: 'Cancel', role: 'cancel' },
         { id: 'nonfav', label: 'Delete Non-Favorites', role: 'secondary', tone: 'warning' },
-        { id: 'all',    label: 'Delete all', role: 'primary', tone: 'warning' },
+        { id: 'all',    label: 'Delete all', role: 'destructive', tone: 'warning' },
       ]
     : [
         { id: 'cancel', label: 'Cancel', role: 'cancel' },
-        { id: 'one',    label: 'Delete', role: 'primary', tone: 'warning' },
+        { id: 'one',    label: 'Delete', role: 'destructive', tone: 'warning' },
       ];
   showConfirm({ body, tone: 'warning', actions }).then((choice) => {
     if (!choice || choice === 'cancel') {
@@ -1364,7 +1372,8 @@ function _renderHistSearch() {
   } else {
     matches.forEach((cmd, i) => {
       const item = document.createElement('div');
-      item.className = 'hist-search-item' + (i === _histSearchIndex ? ' active' : '');
+      item.className = 'hist-search-item dropdown-item dropdown-item-compact'
+        + (i === _histSearchIndex ? ' active dropdown-item-active' : '');
       if (_histSearchQuery) {
         const lower = cmd.toLowerCase();
         const qi = lower.indexOf(_histSearchQuery.toLowerCase());

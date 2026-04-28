@@ -12,10 +12,9 @@ const FIXTURE_PATH = join(REPO_ROOT, 'tests/js/fixtures/button_primitive_allowli
 // Positive counterpart to button_primitives.test.js. That suite blocks a
 // hand-maintained list of retired class names; this one asserts the
 // *opposite* contract: every button-like element in the HTML templates must
-// either carry one of the allowed primitive classes (btn / nav-item /
-// close-btn / toggle-btn / kb-key) OR match a selector in the allowlist
-// fixture. The fixture documents surfaces that deliberately use a
-// surface-specific class family instead of the primitives.
+// either carry one of the allowed primitive classes OR match a selector in
+// the allowlist fixture. The fixture should normally have no exceptions; any
+// selector listed there documents a deliberate primitive opt-out.
 //
 // Scope is deliberately HTML-only plus `<a role="button">`:
 //  - <button> elements in app/templates/**.html

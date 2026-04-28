@@ -25,7 +25,13 @@ Part 3 — README.md project structure tree drift:
   also stay in the same order as `git ls-files --cached`, with parent
   directories inserted before their children.
 
-Part 4 — release-draft docs:
+Part 4 — ARCHITECTURE.md HTTP route inventory:
+  The "## HTTP Route Inventory" tables in ARCHITECTURE.md must list the same
+  method/route pairs that Flask has registered. The docs are intentionally
+  grouped by feature rather than app registration order, so this check enforces
+  coverage only, not ordering.
+
+Part 5 — release-draft docs:
   Temporary release-branch merge-request and release-note drafts live under
   docs/release-drafts/ while a version branch is active. If that directory
   exists, the docs must carry the convention and the draft set must be paired.
@@ -781,6 +787,36 @@ def _expected_project_structure_order(tracked: list[str]) -> list[str]:
     return expected
 
 
+def _documented_architecture_routes() -> set[tuple[str, str]]:
+    """Return documented (method, route) pairs from the route inventory."""
+    routes: set[tuple[str, str]] = set()
+    in_section = False
+    for line in _ARCHITECTURE.read_text().splitlines():
+        if line == "## HTTP Route Inventory":
+            in_section = True
+            continue
+        if in_section and line.startswith("## "):
+            break
+        if not in_section:
+            continue
+        match = re.match(r"^\|\s+`([A-Z]+)`\s+\|\s+`([^`]+)`\s+\|", line)
+        if match:
+            routes.add((match.group(1), match.group(2)))
+    return routes
+
+
+def _registered_flask_routes() -> set[tuple[str, str]]:
+    """Return registered Flask (method, route) pairs, excluding automatic methods."""
+    from app import app as flask_app
+
+    routes: set[tuple[str, str]] = set()
+    for rule in flask_app.url_map.iter_rules():
+        methods = rule.methods or set()
+        for method in sorted(methods - {"HEAD", "OPTIONS"}):
+            routes.add((method, rule.rule))
+    return routes
+
+
 class TestProjectStructureCoverage:
     """The README's project-structure tree must list every git-tracked file
     so contributors land on a complete navigation map."""
@@ -865,7 +901,29 @@ class TestProjectStructureCoverage:
         )
 
 
-# ── Part 4: release-draft docs ───────────────────────────────────────────────
+# ── Part 4: ARCHITECTURE.md HTTP route inventory ─────────────────────────────
+
+class TestArchitectureRouteInventory:
+    """The architecture route inventory must cover every registered route."""
+
+    def test_route_inventory_matches_flask_url_map(self):
+        documented = _documented_architecture_routes()
+        actual = _registered_flask_routes()
+        missing = sorted(actual - documented)
+        extra = sorted(documented - actual)
+        assert not missing and not extra, (
+            "ARCHITECTURE.md '## HTTP Route Inventory' drift:\n"
+            f"  documented={len(documented)}, actual={len(actual)}\n"
+            + "\n".join(
+                [
+                    *(f"  missing: {method} {route}" for method, route in missing),
+                    *(f"  extra: {method} {route}" for method, route in extra),
+                ]
+            )
+        )
+
+
+# ── Part 5: release-draft docs ───────────────────────────────────────────────
 
 class TestReleaseDraftDocs:
     """Release branches keep temporary MR/release-note drafts in-repo so

@@ -29,14 +29,14 @@
 <header>
   <h1><span id="header-title">{{ app_name }}</span></h1>
   <div id="mobile-header-actions">
-    <button id="hamburger-btn" title="Open menu" aria-label="Menu">☰</button>
+    <button id="hamburger-btn" class="btn btn-ghost btn-icon-only btn-compact" title="Open menu" aria-label="Menu">☰</button>
   </div>
 </header>
 
 <div id="mobile-shell" aria-hidden="true">
   <div id="mobile-shell-chrome"></div>
   <div id="mobile-shell-transcript"></div>
-  <div id="mobile-recent-peek" class="recent-peek u-hidden" role="button" tabindex="0" aria-label="Show recent commands">
+  <div id="mobile-recent-peek" class="recent-peek nav-item u-hidden" role="button" tabindex="0" aria-label="Show recent commands">
     <span class="recent-peek-handle" aria-hidden="true"></span>
     <span class="recent-peek-label">Recent</span>
     <span class="recent-peek-count" id="mobile-recent-peek-count">0</span>
@@ -46,24 +46,24 @@
     <div id="mobile-composer-host" aria-hidden="true">
       <div id="mobile-composer">
         <div id="mobile-edit-bar" aria-label="Mobile edit controls">
-          <button type="button" data-mobile-edit="home" data-edit-action="home" aria-label="Move to start">Home</button>
-          <button type="button" data-mobile-edit="word-left" data-edit-action="word-left" aria-label="Move left by word">Word ←</button>
-          <button type="button" data-mobile-edit="left" data-edit-action="left" aria-label="Move left">←</button>
-          <button type="button" data-mobile-edit="delete-word" data-edit-action="delete-word" aria-label="Delete word">Del Word</button>
-          <button type="button" data-mobile-edit="end" data-edit-action="end" aria-label="Move to end">End</button>
-          <button type="button" data-mobile-edit="word-right" data-edit-action="word-right" aria-label="Move right by word">Word →</button>
-          <button type="button" data-mobile-edit="right" data-edit-action="right" aria-label="Move right">→</button>
-          <button type="button" data-mobile-edit="delete-line" data-edit-action="delete-line" aria-label="Delete line">Del Line</button>
+          <button type="button" class="kb-key" data-mobile-edit="home" data-edit-action="home" aria-label="Move to start">Home</button>
+          <button type="button" class="kb-key" data-mobile-edit="word-left" data-edit-action="word-left" aria-label="Move left by word">Word ←</button>
+          <button type="button" class="kb-key" data-mobile-edit="left" data-edit-action="left" aria-label="Move left">←</button>
+          <button type="button" class="kb-key" data-mobile-edit="delete-word" data-edit-action="delete-word" aria-label="Delete word">Del Word</button>
+          <button type="button" class="kb-key" data-mobile-edit="end" data-edit-action="end" aria-label="Move to end">End</button>
+          <button type="button" class="kb-key" data-mobile-edit="word-right" data-edit-action="word-right" aria-label="Move right by word">Word →</button>
+          <button type="button" class="kb-key" data-mobile-edit="right" data-edit-action="right" aria-label="Move right">→</button>
+          <button type="button" class="kb-key" data-mobile-edit="delete-line" data-edit-action="delete-line" aria-label="Delete line">Del Line</button>
         </div>
         <div id="mobile-kb-helper" class="kb-helper u-hidden" aria-label="Edit helper" role="toolbar">
-          <button type="button" class="kb-key" data-kb-action="word-left" aria-label="Word left">⇤</button>
+          <button type="button" class="kb-key" data-kb-action="word-left" aria-label="Word left">‹‹</button>
           <button type="button" class="kb-key" data-kb-action="left" aria-label="Left">
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 3 L5 8 L10 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
           <button type="button" class="kb-key" data-kb-action="right" aria-label="Right">
             <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3 L11 8 L6 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
-          <button type="button" class="kb-key" data-kb-action="word-right" aria-label="Word right">⇥</button>
+          <button type="button" class="kb-key" data-kb-action="word-right" aria-label="Word right">››</button>
           <span class="kb-helper-sep" aria-hidden="true"></span>
           <button type="button" class="kb-key kb-key-text" data-kb-action="home" aria-label="Start of line">Home</button>
           <button type="button" class="kb-key kb-key-text" data-kb-action="end" aria-label="End of line">End</button>
@@ -77,70 +77,70 @@
                  autocomplete="off" autocapitalize="none" autocorrect="off"
                  spellcheck="false" inputmode="text" enterkeyhint="go"
                  placeholder="Type a command" aria-label="Command">
-          <button id="mobile-run-btn" type="button" title="Run command">Run</button>
-          <button id="mobile-kill-btn" type="button" title="Kill current run" aria-label="Kill current run">■ Kill</button>
+          <button id="mobile-run-btn" class="btn btn-secondary btn-compact" type="button" title="Run command">Run</button>
+          <button id="mobile-kill-btn" class="btn btn-destructive btn-compact" type="button" title="Kill current run" aria-label="Kill current run">■ Kill</button>
         </div>
       </div>
     </div>
   </div>
   <div id="mobile-shell-overlays">
     <div id="mobile-recents-sheet-scrim" class="recents-sheet-scrim u-hidden" aria-hidden="true"></div>
-    <div id="mobile-recents-sheet" class="recents-sheet u-hidden" role="dialog" aria-label="History" aria-modal="true">
-      <div class="sheet-grab" role="button" tabindex="0" aria-label="Close recents"></div>
-      <div class="sheet-title">
+    <div id="mobile-recents-sheet" class="recents-sheet bottom-sheet u-hidden" role="dialog" aria-label="History" aria-modal="true">
+      <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close recents"></div>
+      <div class="sheet-title bottom-sheet-header">
         <span class="sheet-title-label">History</span>
         <span class="sheet-title-spacer"></span>
-        <button type="button" class="sheet-clear-btn" id="mobile-recents-clear" aria-label="Delete all history">delete all</button>
+        <button type="button" class="sheet-clear-btn btn btn-secondary btn-compact" id="mobile-recents-clear" aria-label="Delete all history">delete all</button>
       </div>
       <div class="sheet-filters">
-        <input id="mobile-recents-search" class="sheet-filter-row" type="text" placeholder="search history" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search history">
-        <button type="button" class="sheet-filter-row sheet-filter-toggle" id="mobile-recents-filters-toggle" aria-expanded="false"><span class="sheet-filter-toggle-label">filters</span><span class="disclosure-chev" aria-hidden="true">▸</span></button>
+        <input id="mobile-recents-search" class="sheet-filter-row form-control control-row-touch" type="text" placeholder="search history" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search history">
+        <button type="button" class="sheet-filter-row sheet-filter-toggle control-row control-row-touch" id="mobile-recents-filters-toggle" aria-expanded="false"><span class="sheet-filter-toggle-label">filters</span><span class="disclosure-chev" aria-hidden="true">▸</span></button>
         <div class="sheet-filter-expanded u-hidden" id="mobile-recents-filters-expanded">
           <div class="sheet-filter-dropdown-wrap" data-recents-dropdown="type">
-            <button type="button" class="sheet-filter-row sheet-filter-dropdown" aria-haspopup="listbox" aria-expanded="false">
+            <button type="button" class="sheet-filter-row sheet-filter-dropdown control-row control-row-touch" aria-haspopup="listbox" aria-expanded="false">
               <span class="sheet-filter-label">type:</span>
               <span class="sheet-filter-value" data-dropdown-label>all</span>
               <span class="sheet-filter-caret" aria-hidden="true">▾</span>
             </button>
-            <div class="sheet-filter-menu" role="listbox">
-              <button type="button" role="option" data-dropdown-value="all">all</button>
-              <button type="button" role="option" data-dropdown-value="runs">runs</button>
-              <button type="button" role="option" data-dropdown-value="snapshots">snapshots</button>
+            <div class="sheet-filter-menu dropdown-surface" role="listbox">
+              <button type="button" class="dropdown-item dropdown-item-touch" role="option" data-dropdown-value="all">all</button>
+              <button type="button" class="dropdown-item dropdown-item-touch" role="option" data-dropdown-value="runs">runs</button>
+              <button type="button" class="dropdown-item dropdown-item-touch" role="option" data-dropdown-value="snapshots">snapshots</button>
             </div>
           </div>
-          <label class="sheet-filter-row sheet-filter-input">
+          <label class="sheet-filter-row sheet-filter-input control-row control-row-touch">
             <span class="sheet-filter-label">command:</span>
             <input type="text" id="mobile-recents-filter-root" placeholder="command name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Filter by command name">
           </label>
           <div class="sheet-filter-dropdown-wrap" data-recents-dropdown="exit">
-            <button type="button" class="sheet-filter-row sheet-filter-dropdown" aria-haspopup="listbox" aria-expanded="false">
+            <button type="button" class="sheet-filter-row sheet-filter-dropdown control-row control-row-touch" aria-haspopup="listbox" aria-expanded="false">
               <span class="sheet-filter-label">exit:</span>
               <span class="sheet-filter-value" data-dropdown-label>all</span>
               <span class="sheet-filter-caret" aria-hidden="true">▾</span>
             </button>
-            <div class="sheet-filter-menu" role="listbox">
-              <button type="button" role="option" data-dropdown-value="all">all</button>
-              <button type="button" role="option" data-dropdown-value="success">success (0)</button>
-              <button type="button" role="option" data-dropdown-value="failed">failed (non-zero)</button>
+            <div class="sheet-filter-menu dropdown-surface" role="listbox">
+              <button type="button" class="dropdown-item dropdown-item-touch" role="option" data-dropdown-value="all">all</button>
+              <button type="button" class="dropdown-item dropdown-item-touch" role="option" data-dropdown-value="success">success (0)</button>
+              <button type="button" class="dropdown-item dropdown-item-touch" role="option" data-dropdown-value="failed">failed (non-zero)</button>
             </div>
           </div>
           <div class="sheet-filter-dropdown-wrap" data-recents-dropdown="date">
-            <button type="button" class="sheet-filter-row sheet-filter-dropdown" aria-haspopup="listbox" aria-expanded="false">
+            <button type="button" class="sheet-filter-row sheet-filter-dropdown control-row control-row-touch" aria-haspopup="listbox" aria-expanded="false">
               <span class="sheet-filter-label">date:</span>
               <span class="sheet-filter-value" data-dropdown-label>all</span>
               <span class="sheet-filter-caret" aria-hidden="true">▾</span>
             </button>
-            <div class="sheet-filter-menu" role="listbox">
-              <button type="button" role="option" data-dropdown-value="all">all</button>
-              <button type="button" role="option" data-dropdown-value="today">today</button>
-              <button type="button" role="option" data-dropdown-value="week">this week</button>
+            <div class="sheet-filter-menu dropdown-surface" role="listbox">
+              <button type="button" class="dropdown-item dropdown-item-touch" role="option" data-dropdown-value="all">all</button>
+              <button type="button" class="dropdown-item dropdown-item-touch" role="option" data-dropdown-value="today">today</button>
+              <button type="button" class="dropdown-item dropdown-item-touch" role="option" data-dropdown-value="week">this week</button>
             </div>
           </div>
-          <button type="button" class="sheet-filter-row sheet-filter-check" data-recents-filter="starred" aria-pressed="false" aria-label="Show starred only">
+          <button type="button" class="sheet-filter-row sheet-filter-check control-row control-row-touch" data-recents-filter="starred" aria-pressed="false" aria-label="Show starred only">
             <span class="sheet-filter-checkbox" aria-hidden="true"></span>
             <span class="sheet-filter-label">starred only</span>
           </button>
-          <button type="button" class="sheet-filter-row sheet-filter-clear" id="mobile-recents-filters-clear">clear filters</button>
+          <button type="button" class="sheet-filter-clear btn btn-ghost btn-compact" id="mobile-recents-filters-clear">clear filters</button>
         </div>
         <div class="filter-chips" id="mobile-recents-chips"></div>
       </div>
@@ -148,47 +148,47 @@
         <div id="mobile-recents-pagination-summary" class="history-pagination-summary"></div>
         <div id="mobile-recents-pagination-controls" class="history-pagination-controls"></div>
       </div>
-      <div class="sheet-list nice-scroll" id="mobile-recents-list" aria-live="polite"></div>
+      <div class="sheet-list bottom-sheet-body nice-scroll" id="mobile-recents-list" aria-live="polite"></div>
     </div>
     <div id="mobile-menu-sheet-scrim" class="menu-sheet-scrim u-hidden" aria-hidden="true"></div>
-    <div id="mobile-menu-sheet" class="menu-sheet u-hidden" role="dialog" aria-label="Menu" aria-modal="true">
-      <div class="sheet-grab" aria-hidden="true"></div>
-      <div class="menu-title">
+    <div id="mobile-menu-sheet" class="menu-sheet bottom-sheet u-hidden" role="dialog" aria-label="Menu" aria-modal="true">
+      <div class="sheet-grab gesture-handle" aria-hidden="true"></div>
+      <div class="menu-title bottom-sheet-header">
         <span class="menu-title-label">Menu</span>
       </div>
 
       <div class="menu-group">
-        <button type="button" class="menu-item" data-menu-action="search">
+        <button type="button" class="menu-item nav-item" data-menu-action="search">
           <span class="menu-item-icon" aria-hidden="true">⌕</span>
           <span class="menu-item-label">search</span>
           <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
-        <button type="button" class="menu-item" data-menu-action="clear">
+        <button type="button" class="menu-item nav-item" data-menu-action="clear">
           <span class="menu-item-icon" aria-hidden="true">⌫</span>
           <span class="menu-item-label">clear</span>
         </button>
-        <button type="button" class="menu-item" data-menu-action="ln" aria-pressed="false">
+        <button type="button" class="menu-item nav-item" data-menu-action="ln" aria-pressed="false">
           <span class="menu-item-icon" aria-hidden="true">#</span>
           <span class="menu-item-label">line numbers</span>
           <span class="menu-item-toggle" id="mobile-menu-ln-state">off</span>
         </button>
-        <button type="button" class="menu-item menu-item-expander" data-menu-action="ts-toggle" aria-expanded="false" aria-controls="mobile-menu-ts-submenu">
+        <button type="button" class="menu-item nav-item menu-item-expander" data-menu-action="ts-toggle" aria-expanded="false" aria-controls="mobile-menu-ts-submenu">
           <span class="menu-item-icon" aria-hidden="true">◷</span>
           <span class="menu-item-label">timestamps</span>
           <span class="menu-item-toggle" id="mobile-menu-ts-state">off</span>
           <span class="disclosure-chev" aria-hidden="true">▸</span>
         </button>
         <div class="menu-submenu u-hidden" id="mobile-menu-ts-submenu" role="group" aria-label="Timestamps mode">
-          <button type="button" class="menu-subitem" data-menu-action="ts-set" data-ts-mode="off">
+          <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="off">
             <span class="menu-subitem-radio" aria-hidden="true"></span>
             <span class="menu-subitem-label">off</span>
           </button>
-          <button type="button" class="menu-subitem" data-menu-action="ts-set" data-ts-mode="elapsed">
+          <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="elapsed">
             <span class="menu-subitem-radio" aria-hidden="true"></span>
             <span class="menu-subitem-label">elapsed</span>
             <span class="menu-subitem-hint">+1.2s</span>
           </button>
-          <button type="button" class="menu-subitem" data-menu-action="ts-set" data-ts-mode="clock">
+          <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="clock">
             <span class="menu-subitem-radio" aria-hidden="true"></span>
             <span class="menu-subitem-label">clock</span>
             <span class="menu-subitem-hint">14:03:27</span>
@@ -199,49 +199,49 @@
       <div class="menu-group-divider" aria-hidden="true"></div>
 
       <div class="menu-group">
-        <button type="button" class="menu-item" data-menu-action="options">
+        <button type="button" class="menu-item nav-item" data-menu-action="options">
           <span class="menu-item-icon" aria-hidden="true">≡</span>
           <span class="menu-item-label">options</span>
           <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
-        <button type="button" class="menu-item" data-menu-action="history">
+        <button type="button" class="menu-item nav-item" data-menu-action="history">
           <span class="menu-item-icon" aria-hidden="true">⧖</span>
           <span class="menu-item-label">history</span>
           <span class="menu-item-hint" id="mobile-menu-history-count"></span>
           <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
-        <button type="button" class="menu-item" data-menu-action="workflows">
+        <button type="button" class="menu-item nav-item" data-menu-action="workflows">
           <span class="menu-item-icon" aria-hidden="true">⚙</span>
           <span class="menu-item-label">workflows</span>
           <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
           <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
         {% if workspace_enabled %}
-        <button type="button" class="menu-item" data-menu-action="workspace">
+        <button type="button" class="menu-item nav-item" data-menu-action="workspace">
           <span class="menu-item-icon" aria-hidden="true">▣</span>
           <span class="menu-item-label">files</span>
           <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
         {% endif %}
-        <button type="button" class="menu-item" data-menu-action="theme">
+        <button type="button" class="menu-item nav-item" data-menu-action="theme">
           <span class="menu-item-icon" aria-hidden="true">◐</span>
           <span class="menu-item-label">theme</span>
           <span class="menu-item-hint" id="mobile-menu-theme-hint"></span>
           <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
-        <button type="button" class="menu-item" data-menu-action="faq">
+        <button type="button" class="menu-item nav-item" data-menu-action="faq">
           <span class="menu-item-icon" aria-hidden="true">?</span>
           <span class="menu-item-label">FAQ</span>
           <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
-        <button type="button" class="menu-item u-hidden" id="mobile-menu-diag" data-menu-action="diag">
+        <button type="button" class="menu-item nav-item u-hidden" id="mobile-menu-diag" data-menu-action="diag">
           <span class="menu-item-icon" aria-hidden="true">◇</span>
           <span class="menu-item-label">diag</span>
           <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
       </div>
 
-      <a class="menu-footer" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
+      <a class="menu-footer bottom-sheet-footer" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
     </div>
   </div>
 </div>
@@ -257,12 +257,12 @@
         <div class="rail-wordmark-title">{{ app_name }}</div>
         <div class="rail-wordmark-sub">{% if version %}v{{ version }} · {% endif %}isolated</div>
       </div>
-      <button id="rail-collapse-btn" class="rail-collapse-btn" type="button" aria-label="{% if initial_rail.collapsed %}Expand sidebar (Alt+\){% else %}Collapse sidebar (Alt+\){% endif %}" title="{% if initial_rail.collapsed %}Expand sidebar (Alt+\){% else %}Collapse sidebar (Alt+\){% endif %}">{% if initial_rail.collapsed %}»{% else %}«{% endif %}</button>
+      <button id="rail-collapse-btn" class="rail-collapse-btn btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="{% if initial_rail.collapsed %}Expand sidebar (Alt+\){% else %}Collapse sidebar (Alt+\){% endif %}" title="{% if initial_rail.collapsed %}Expand sidebar (Alt+\){% else %}Collapse sidebar (Alt+\){% endif %}">{% if initial_rail.collapsed %}»{% else %}«{% endif %}</button>
     </div>
 
     <div class="rail-split-area{% if initial_rail.recent_open and initial_rail.workflows_open %} both-open{% endif %}{% if not initial_rail.workflows_open %} workflows-closed{% endif %}" id="rail-split-area">
       <div class="rail-section rail-section-recent{% if not initial_rail.recent_open %} closed{% endif %}" id="rail-section-recent">
-        <button class="rail-section-header" id="rail-recent-header" type="button" title="Toggle Recent commands section" aria-label="Toggle Recent">
+        <button class="rail-section-header nav-item" id="rail-recent-header" type="button" title="Toggle Recent commands section" aria-label="Toggle Recent">
           <span class="rail-section-header-left">
             <span class="disclosure-chev" aria-hidden="true">▸</span>
             <span class="rail-section-label">Recent</span>
@@ -275,7 +275,7 @@
       <div class="rail-splitter" id="rail-splitter"{% if not (initial_rail.recent_open and initial_rail.workflows_open) %} hidden{% endif %}></div>
 
       <div class="rail-section rail-section-workflows{% if not initial_rail.workflows_open %} closed{% endif %}" id="rail-section-workflows">
-        <button class="rail-section-header" id="rail-workflows-header" type="button" title="Toggle Workflows section" aria-label="Toggle Workflows">
+        <button class="rail-section-header nav-item" id="rail-workflows-header" type="button" title="Toggle Workflows section" aria-label="Toggle Workflows">
           <span class="rail-section-header-left">
             <span class="disclosure-chev" aria-hidden="true">▸</span>
             <span class="rail-section-label">Workflows</span>
@@ -287,14 +287,14 @@
     </div>
 
     <nav class="rail-nav" id="rail-nav">
-      <button class="rail-nav-item" data-action="options" type="button" title="Display and preference options (Alt+,)"><span class="rail-nav-glyph">≡</span><span class="rail-nav-label">options</span></button>
-      <button class="rail-nav-item" data-action="history" type="button" title="Run history (Alt+H)"><span class="rail-nav-glyph">⧖</span><span class="rail-nav-label">history</span></button>
+      <button class="rail-nav-item nav-item" data-action="options" type="button" title="Display and preference options (Alt+,)"><span class="rail-nav-glyph">≡</span><span class="rail-nav-label">options</span></button>
+      <button class="rail-nav-item nav-item" data-action="history" type="button" title="Run history (Alt+H)"><span class="rail-nav-glyph">⧖</span><span class="rail-nav-label">history</span></button>
       {% if workspace_enabled %}
-      <button class="rail-nav-item" data-action="workspace" type="button" title="Session files (Alt+Shift+F)"><span class="rail-nav-glyph">▣</span><span class="rail-nav-label">files</span></button>
+      <button class="rail-nav-item nav-item" data-action="workspace" type="button" title="Session files (Alt+Shift+F)"><span class="rail-nav-glyph">▣</span><span class="rail-nav-label">files</span></button>
       {% endif %}
-      <button class="rail-nav-item" data-action="theme" type="button" title="Theme selector (Alt+Shift+T)"><span class="rail-nav-glyph">◑</span><span class="rail-nav-label">theme</span></button>
-      <button class="rail-nav-item" data-action="faq" type="button" title="FAQ (Alt+/)"><span class="rail-nav-glyph">?</span><span class="rail-nav-label">FAQ</span></button>
-      <a class="rail-nav-item u-hidden" data-action="diag" id="rail-diag-btn" href="/diag" target="_blank" rel="noopener noreferrer" title="Operator diagnostics"><span class="rail-nav-glyph">⊕</span><span class="rail-nav-label">diag</span></a>
+      <button class="rail-nav-item nav-item" data-action="theme" type="button" title="Theme selector (Alt+Shift+T)"><span class="rail-nav-glyph">◑</span><span class="rail-nav-label">theme</span></button>
+      <button class="rail-nav-item nav-item" data-action="faq" type="button" title="FAQ (Alt+/)"><span class="rail-nav-glyph">?</span><span class="rail-nav-label">FAQ</span></button>
+      <a class="rail-nav-item nav-item u-hidden" data-action="diag" id="rail-diag-btn" href="/diag" target="_blank" rel="noopener noreferrer" title="Operator diagnostics"><span class="rail-nav-glyph">⊕</span><span class="rail-nav-label">diag</span></a>
       <a class="rail-nav-version" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
     </nav>
 
@@ -304,26 +304,26 @@
   <main class="main-col">
     <div class="terminal-bar tabbar">
       <div class="tabbar-scroll tab-scroll">
-        <button id="tabs-scroll-left" class="tabs-scroll-btn u-hidden" aria-label="Scroll tabs left" title="Scroll tabs left" aria-hidden="true">◀</button>
+        <button id="tabs-scroll-left" class="tabs-scroll-btn btn btn-ghost btn-icon-only btn-compact u-hidden" aria-label="Scroll tabs left" title="Scroll tabs left" aria-hidden="true">◀</button>
         <div class="tabs-bar" id="tabs-bar">
           <!-- tabs injected here -->
-          <button id="new-tab-btn" title="New tab (Option+T / Alt+T)" aria-label="New tab">+</button>
+          <button id="new-tab-btn" class="btn btn-ghost btn-icon-only btn-compact" title="New tab (Option+T / Alt+T)" aria-label="New tab">+</button>
         </div>
-        <button id="tabs-scroll-right" class="tabs-scroll-btn u-hidden" aria-label="Scroll tabs right" title="Scroll tabs right" aria-hidden="true">▶</button>
+        <button id="tabs-scroll-right" class="tabs-scroll-btn btn btn-ghost btn-icon-only btn-compact u-hidden" aria-label="Scroll tabs right" title="Scroll tabs right" aria-hidden="true">▶</button>
       </div>
       <div class="tabbar-chrome">
-        <button id="search-toggle-btn" class="chrome-btn" title="Search output (Alt+S)" data-search-label="search">⌕ search</button>
+        <button id="search-toggle-btn" class="chrome-btn btn btn-ghost btn-compact" title="Search output (Alt+S)" data-search-label="search">⌕ search</button>
         <span id="search-signal-summary" class="search-signal-summary u-hidden" aria-live="polite"></span>
-        <button id="search-summary-btn" class="chrome-btn" type="button" title="Summarize findings, warnings, errors, and summary lines">summarize</button>
+        <button id="search-summary-btn" class="chrome-btn btn btn-ghost btn-compact" type="button" title="Summarize findings, warnings, errors, and summary lines">summarize</button>
         <span class="tabbar-chrome-divider" aria-hidden="true"></span>
-        <button id="ln-btn" class="chrome-btn" title="Toggle line numbers">ln: off</button>
-        <button id="ts-btn" class="chrome-btn" title="Toggle timestamp display">ts: off</button>
+        <button id="ln-btn" class="chrome-btn btn btn-ghost btn-compact" title="Toggle line numbers">ln: off</button>
+        <button id="ts-btn" class="chrome-btn btn btn-ghost btn-compact" title="Toggle timestamp display">ts: off</button>
       </div>
     </div>
 
     <div class="terminal-wrap">
       <div class="search-bar u-hidden" id="search-bar">
-        <input id="search-input" type="text" placeholder="Search output…" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search output">
+        <input id="search-input" class="form-control form-control-compact form-control-quiet" type="text" placeholder="Search output…" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search output">
         <div class="search-scopes" role="toolbar" aria-label="Search scope">
           <button class="toggle-btn search-scope-btn active" type="button" data-search-scope="text" aria-pressed="true" title="Text search">text</button>
           <button class="toggle-btn search-scope-btn" type="button" data-search-scope="findings" aria-pressed="false" title="Jump between findings">findings</button>
@@ -337,8 +337,8 @@
         </div>
         <span class="search-count" id="search-count"></span>
         <div class="search-nav">
-          <button id="search-prev" type="button" aria-label="Previous match" title="Previous match (Shift+Enter)">↑</button>
-          <button id="search-next" type="button" aria-label="Next match" title="Next match (Enter)">↓</button>
+          <button id="search-prev" class="btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="Previous match" title="Previous match (Shift+Enter)">↑</button>
+          <button id="search-next" class="btn btn-ghost btn-icon-only btn-compact" type="button" aria-label="Next match" title="Next match (Enter)">↓</button>
         </div>
         <button id="search-close-btn" class="close-btn search-close-btn" type="button" aria-label="Close search" title="Close search">✕</button>
       </div>
@@ -352,17 +352,17 @@
           <span class="shell-prompt-caret" id="shell-prompt-caret"></span>
         </div>
       </div>
-      <div id="ac-dropdown" class="ac-dropdown nice-scroll u-hidden"></div>
-      <div id="hist-search-dropdown" class="hist-search-dropdown u-hidden"></div>
+      <div id="ac-dropdown" class="ac-dropdown dropdown-surface nice-scroll u-hidden"></div>
+      <div id="hist-search-dropdown" class="hist-search-dropdown dropdown-surface u-hidden"></div>
       <div id="shell-input-row" class="shell-input-row" aria-hidden="true">
         <input id="cmd" type="text" placeholder="" autocomplete="new-password" spellcheck="false" inputmode="none" aria-label="Command">
-        <button id="run-btn" hidden aria-hidden="true" tabindex="-1">Run</button>
+        <button id="run-btn" class="btn btn-primary" hidden aria-hidden="true" tabindex="-1">Run</button>
       </div>
     </div>
 
     <div class="hud" id="hud" aria-label="Run HUD">
       <div class="hud-pills" id="hud-pills">
-        <div class="hud-cell hud-status hud-cell-clickable" id="hud-status-cell" role="button" tabindex="0"
+        <div class="hud-cell hud-status hud-cell-clickable hud-action-cell" id="hud-status-cell" role="button" tabindex="0"
              aria-haspopup="dialog" aria-label="Open run monitor from status">
           <span class="hud-label">status</span>
           <span class="hud-status-value-row">
@@ -370,12 +370,12 @@
             <span id="run-timer" class="run-timer hud-value-amber"></span>
           </span>
         </div>
-        <div class="hud-cell hud-cell-clickable" id="hud-last-exit-cell" role="button" tabindex="0"
+        <div class="hud-cell hud-cell-clickable hud-action-cell" id="hud-last-exit-cell" role="button" tabindex="0"
              aria-haspopup="dialog" aria-label="Open run monitor from last exit">
           <span class="hud-label">last exit</span>
           <span id="hud-last-exit" class="hud-value hud-muted">—</span>
         </div>
-        <div class="hud-cell hud-cell-clickable" id="hud-tabs-cell" role="button" tabindex="0"
+        <div class="hud-cell hud-cell-clickable hud-action-cell" id="hud-tabs-cell" role="button" tabindex="0"
              aria-haspopup="dialog" aria-label="Open run monitor from tabs">
           <span class="hud-label">tabs</span>
           <span id="hud-tabs" class="hud-value hud-muted">0</span>
@@ -422,16 +422,16 @@
 </div>
 
 <!-- Run History panel -->
-<div id="history-panel" class="mobile-sheet-surface">
-  <div class="history-panel-header">
+<div id="history-panel" class="mobile-sheet-surface chrome-drawer">
+  <div class="history-panel-header surface-header">
     <span class="history-panel-title">HISTORY</span>
-    <button id="hist-clear-all-btn" class="history-action-btn history-panel-clear-all" type="button">delete all</button>
+    <button id="hist-clear-all-btn" class="history-action-btn history-panel-clear-all btn btn-secondary btn-compact" type="button">delete all</button>
     <button class="close-btn history-panel-close" id="history-close" type="button" aria-label="Close history panel">✕</button>
   </div>
-  <div class="history-panel-body nice-scroll">
+  <div class="history-panel-body surface-body nice-scroll">
     <div class="history-panel-filters">
-      <input id="history-search-input" type="text" placeholder="search history" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search history">
-      <button id="history-mobile-filters-toggle" class="history-action-btn history-mobile-filters-toggle" type="button" aria-expanded="false">filters</button>
+      <input id="history-search-input" class="form-control form-control-compact" type="text" placeholder="search history" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search history">
+      <button id="history-mobile-filters-toggle" class="history-action-btn history-mobile-filters-toggle btn btn-secondary btn-compact" type="button" aria-expanded="false">filters</button>
       <div id="history-advanced-filters" class="history-advanced-filters">
         <select id="history-type-filter" aria-label="Filter by history item type">
           <option value="all">type: all</option>
@@ -439,8 +439,8 @@
           <option value="snapshots">type: snapshots</option>
         </select>
         <div class="history-root-autocomplete">
-          <input id="history-root-input" type="text" placeholder="command name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Filter by command name">
-          <div id="history-root-dropdown" class="ac-dropdown history-root-dropdown nice-scroll u-hidden"></div>
+          <input id="history-root-input" class="form-control form-control-compact" type="text" placeholder="command name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Filter by command name">
+          <div id="history-root-dropdown" class="ac-dropdown dropdown-surface history-root-dropdown nice-scroll u-hidden"></div>
         </div>
         <select id="history-exit-filter" aria-label="Filter by exit code">
           <option value="all">exit: all</option>
@@ -454,11 +454,11 @@
           <option value="7d">date: 7d</option>
           <option value="30d">date: 30d</option>
         </select>
-        <label class="history-filter-toggle">
+        <label class="history-filter-toggle control-row form-control-compact">
           <input id="history-starred-toggle" type="checkbox">
           <span>starred</span>
         </label>
-        <button id="history-clear-filters" class="history-action-btn history-filter-clear-btn" type="button">clear filters</button>
+        <button id="history-clear-filters" class="history-action-btn history-filter-clear-btn btn btn-ghost btn-compact" type="button">clear filters</button>
       </div>
     </div>
     <div id="history-active-filters" class="history-active-filters u-hidden" aria-live="polite"></div>
@@ -530,7 +530,7 @@
           <div class="workspace-viewer-actions">
             <button type="button" class="btn btn-secondary btn-compact" data-workspace-viewer-action="edit">Edit</button>
             <button type="button" class="btn btn-secondary btn-compact" data-workspace-viewer-action="download">Download</button>
-            <button type="button" class="btn btn-destructive btn-compact" data-workspace-viewer-action="delete">Delete</button>
+            <button type="button" class="btn btn-secondary btn-compact" data-workspace-viewer-action="delete">Delete</button>
             <button type="button" class="btn btn-secondary btn-compact" id="workspace-close-viewer-btn">Close view</button>
           </div>
         </div>
@@ -538,9 +538,9 @@
       </section>
       <form id="workspace-editor" class="workspace-editor u-hidden">
         <label class="workspace-label" for="workspace-path-input">File Name</label>
-        <input id="workspace-path-input" class="form-input" type="text" placeholder="targets.txt" autocomplete="off" spellcheck="false">
+        <input id="workspace-path-input" class="form-input form-control" type="text" placeholder="targets.txt" autocomplete="off" spellcheck="false">
         <label class="workspace-label" for="workspace-text-input">Contents</label>
-        <textarea id="workspace-text-input" class="workspace-textarea nice-scroll" rows="12" placeholder="Paste file contents here"></textarea>
+        <textarea id="workspace-text-input" class="workspace-textarea form-control nice-scroll" rows="12" placeholder="Paste file contents here"></textarea>
         <div class="workspace-editor-actions">
           <button type="button" class="btn btn-secondary btn-compact" id="workspace-cancel-edit-btn">Close editor</button>
           <button type="submit" class="btn btn-primary btn-compact" id="workspace-save-btn">Save file</button>
@@ -675,7 +675,7 @@
             <button id="options-session-token-generate-btn" class="btn btn-secondary btn-compact" type="button">Generate</button>
             <button id="options-session-token-set-btn" class="btn btn-secondary btn-compact" type="button">Set</button>
             <button id="options-session-token-rotate-btn" class="btn btn-secondary btn-warning btn-compact" type="button">Rotate</button>
-            <button id="options-session-token-clear-btn" class="btn btn-destructive btn-compact" type="button">Clear</button>
+            <button id="options-session-token-clear-btn" class="btn btn-secondary btn-compact" type="button">Clear</button>
           </div>
           <div id="options-session-token-msg" class="options-session-token-msg" style="display:none"></div>
         </div>

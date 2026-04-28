@@ -101,8 +101,10 @@ describe('autocomplete helpers', () => {
     acShow(['ping', 'curl'])
 
     const items = document.querySelectorAll('.ac-item')
-    expect(items[0].className).toBe('ac-item')
-    expect(items[1].className).toBe('ac-item ac-active')
+    expect(items[0].classList.contains('ac-active')).toBe(false)
+    expect(items[0].classList.contains('dropdown-item')).toBe(true)
+    expect(items[1].classList.contains('ac-active')).toBe(true)
+    expect(items[1].classList.contains('dropdown-item-active')).toBe(true)
   })
 
   it('renders contextual suggestions with descriptions', () => {

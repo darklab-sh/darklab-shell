@@ -2640,7 +2640,7 @@ function wireFaqCommandChips(root = faqBody) {
 
 function makeAllowedCommandChip(cmd) {
   const chip = document.createElement('span');
-  chip.className = 'allowed-chip faq-chip';
+  chip.className = 'allowed-chip faq-chip chip chip-action';
   chip.textContent = cmd;
   chip.title = 'Click to load into prompt';
   chip.dataset.faqCommand = cmd;
@@ -3075,7 +3075,7 @@ function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
         main.className = 'workflow-step-main';
 
         const chip = document.createElement('span');
-        chip.className = 'allowed-chip faq-chip workflow-step-cmd';
+        chip.className = 'allowed-chip faq-chip workflow-step-cmd chip chip-action';
         chip.textContent = step.cmd || '';
         if (inputPanel) {
           chip.title = 'Fill required workflow inputs to load this step';

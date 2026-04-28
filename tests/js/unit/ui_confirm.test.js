@@ -59,7 +59,7 @@ function loadHelpers() {
 
 const KILL_ACTIONS = [
   { id: 'cancel', label: 'Cancel', role: 'cancel' },
-  { id: 'confirm', label: '■ Kill', role: 'primary', tone: 'danger' },
+  { id: 'confirm', label: '■ Kill', role: 'destructive' },
 ]
 
 describe('showConfirm', () => {
@@ -245,8 +245,21 @@ describe('showConfirm', () => {
   })
 
   describe('button classes', () => {
-    it('maps role:primary + tone:danger to btn-primary btn-danger', async () => {
+    it('maps role:destructive to btn-destructive', async () => {
       const promise = g.showConfirm({ actions: KILL_ACTIONS })
+      const btn = document.querySelector('[data-confirm-action-id="confirm"]')
+      expect(btn.className).toBe('btn btn-destructive')
+      g.cancelConfirm()
+      await promise
+    })
+
+    it('keeps role:primary + tone:danger available for high-emphasis danger actions', async () => {
+      const promise = g.showConfirm({
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'confirm', label: 'Confirm', role: 'primary', tone: 'danger' },
+        ],
+      })
       const btn = document.querySelector('[data-confirm-action-id="confirm"]')
       expect(btn.className).toBe('btn btn-primary btn-danger')
       g.cancelConfirm()

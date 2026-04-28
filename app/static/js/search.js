@@ -75,7 +75,7 @@ function _renderCompactSignalSummary(container, counts) {
     }
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'btn btn-ghost btn-compact search-signal-chip';
+    button.className = 'btn btn-ghost btn-compact search-signal-chip chip chip-action';
     button.dataset.searchSignalScope = scope;
     button.setAttribute('aria-label', `${count} ${_searchScopeUnitLabel(scope, count)} available`);
     button.textContent = `${count}${short}`;

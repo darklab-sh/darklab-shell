@@ -413,15 +413,9 @@ body.mobile-terminal-mode .output-follow-btn {
   position: absolute;
   bottom: calc(100% - 1px);
   right: 0;
-  background: var(--theme-dropdown-bg);
-  border: 1px solid var(--theme-dropdown-border);
   border-radius: 4px 4px 0 0;
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent),
-    0 -6px 18px var(--theme-dropdown-shadow);
   z-index: 200;
   min-width: 160px;
-  overflow: hidden;
 }
 
 .save-menu-wrap.open .save-menu {
@@ -431,20 +425,10 @@ body.mobile-terminal-mode .output-follow-btn {
 .save-menu button {
   display: block;
   width: 100%;
-  text-align: left;
-  background: transparent;
-  border: none;
-  color: color-mix(in srgb, var(--muted) 86%, var(--text));
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.3px;
-  padding: 6px 12px;
-  cursor: pointer;
   white-space: nowrap;
 }
 
 .save-menu button:hover {
-  background: color-mix(in srgb, var(--green) 7%, transparent);
   color: var(--text);
 }
 
@@ -537,29 +521,18 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 .hist-chip {
-  background: color-mix(in srgb, var(--theme-toolbar-button-bg) 74%, color-mix(in srgb, var(--surface) 88%, transparent));
-  border: 1px solid var(--border-bright);
-  border-radius: 999px;
-  color: var(--muted);
-  font-family: var(--font-mono);
   font-size: 11px;
   padding: 3px 11px;
-  cursor: pointer;
   max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transition: border-color 0.15s, color 0.15s, background 0.15s, transform 0.15s;
-  -webkit-tap-highlight-color: transparent;
   transform: translateY(0);
 }
 
 .hist-chip:focus:not(:focus-visible) { outline: none; }
-.hist-chip:active { border-color: var(--green-dim); color: var(--text); opacity: 0.7; }
 @media (hover: hover) {
   .hist-chip:hover {
-    border-color: var(--green-dim);
-    color: var(--text);
     transform: translateY(0) translateX(1px);
   }
 }
@@ -800,12 +773,6 @@ body.mobile-terminal-mode .output-follow-btn {
 
 .workspace-folder-row {
   border-color: color-mix(in srgb, var(--muted) 30%, var(--border));
-  cursor: pointer;
-}
-
-.workspace-folder-row:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--muted) 75%, white);
-  outline-offset: 2px;
 }
 
 .workspace-folder-icon,
@@ -824,12 +791,6 @@ body.mobile-terminal-mode .output-follow-btn {
 
 .workspace-file-meta-text {
   min-width: 0;
-}
-
-.workspace-empty,
-.workspace-file-row {
-  border: 1px solid var(--border);
-  border-radius: 6px;
 }
 
 .workspace-empty {
@@ -922,17 +883,6 @@ body.mobile-terminal-mode .output-follow-btn {
 .workspace-textarea {
   min-height: 220px;
   resize: vertical;
-}
-
-.workspace-textarea,
-.form-input {
-  background: var(--theme-chrome-control-bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 13px;
-  padding: 10px 12px;
 }
 
 .workspace-folder-form {
@@ -1262,10 +1212,6 @@ body.mobile-terminal-mode .output-follow-btn {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  background: var(--theme-chrome-control-bg);
-  border: 1px solid var(--theme-chrome-control-border);
-  border-radius: 4px;
-  color: var(--text);
   font-family: inherit;
   font-size: inherit;
   line-height: 1.2;
@@ -1314,13 +1260,7 @@ body.mobile-terminal-mode .output-follow-btn {
   right: 0;
   top: calc(100% + 4px);
   z-index: 360;
-  overflow: hidden;
-  background: var(--theme-dropdown-bg);
-  border: 1px solid var(--theme-dropdown-border);
   border-radius: 6px;
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent),
-    0 8px 22px var(--theme-dropdown-shadow);
 }
 
 .app-select.open .app-select-menu {
@@ -1333,24 +1273,13 @@ body.mobile-terminal-mode .output-follow-btn {
   -webkit-appearance: none;
   display: block;
   width: 100%;
-  background: transparent;
-  border: none;
-  color: color-mix(in srgb, var(--muted) 86%, var(--text));
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.3px;
-  padding: 9px 14px;
-  text-align: left;
 }
 
 .app-select-menu button:hover,
 .app-select-menu button:focus-visible,
 .app-select-menu button.active,
 .app-select-menu button[aria-selected="true"] {
-  background: var(--theme-dropdown-hover-bg, var(--bg3));
   color: var(--green);
-  outline: none;
 }
 
 .options-session-token-desc {
@@ -1563,10 +1492,8 @@ body.mobile-terminal-mode .output-follow-btn {
   border: 1px solid var(--border-bright);
   border-radius: 3px;
   color: var(--muted);
-  font-family: var(--font-mono);
   font-size: 11px;
   padding: 2px 8px;
-  cursor: pointer;
   transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
 

@@ -412,7 +412,7 @@
       saveWrap.classList.toggle('open');
     }, 'btn btn-secondary btn-compact', 'Save tab output (txt / html / pdf)');
     const saveMenu = document.createElement('div');
-    saveMenu.className = 'save-menu';
+    saveMenu.className = 'save-menu dropdown-surface dropdown-up';
     [
       ['Plain text (.txt)',   'save-txt',  () => { const id = _currentTabId(); if (id && typeof saveTab === 'function') saveTab(id); }],
       ['Styled HTML (.html)', 'save-html', () => { const id = _currentTabId(); if (id && typeof exportTabHtml === 'function') exportTabHtml(id); }],
@@ -420,6 +420,7 @@
     ].forEach(([label, action, fn]) => {
       const item = document.createElement('button');
       item.type = 'button';
+      item.className = 'dropdown-item dropdown-item-compact';
       item.textContent = label;
       item.dataset.action = action;
       bindPressable(item, {

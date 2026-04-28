@@ -176,13 +176,13 @@
 
     monitorEl = document.createElement('aside');
     monitorEl.id = 'run-monitor';
-    monitorEl.className = 'run-monitor u-hidden';
+    monitorEl.className = 'run-monitor chrome-drawer u-hidden';
     monitorEl.setAttribute('role', 'dialog');
     monitorEl.setAttribute('aria-modal', 'false');
     monitorEl.setAttribute('aria-labelledby', 'run-monitor-title');
 
     const header = document.createElement('div');
-    header.className = 'run-monitor-header';
+    header.className = 'run-monitor-header surface-header';
 
     const titleWrap = document.createElement('div');
     const title = document.createElement('div');
@@ -212,7 +212,7 @@
     header.append(titleWrap, closeBtn);
 
     listEl = document.createElement('div');
-    listEl.className = 'run-monitor-list';
+    listEl.className = 'run-monitor-list surface-body';
 
     monitorEl.append(header, listEl);
     monitorEl.addEventListener('click', event => event.stopPropagation());
@@ -233,10 +233,10 @@
     runs.forEach(run => {
       const tab = _tabForRun(run);
       const item = document.createElement('article');
-      item.className = 'run-monitor-item';
+      item.className = 'run-monitor-item chrome-row row-accent-green';
       item.dataset.runId = String(run?.run_id || run?.id || '');
       if (tab && typeof activateTab === 'function') {
-        item.classList.add('run-monitor-item-clickable');
+        item.classList.add('run-monitor-item-clickable', 'chrome-row-clickable');
         item.setAttribute('role', 'button');
         item.setAttribute('tabindex', '0');
         item.setAttribute('aria-label', `Open tab for ${String(run?.command || 'active run')}`);
@@ -366,7 +366,7 @@
   function _makeHudCellOpenMonitor(cell, source, label) {
     if (!cell || cell.dataset.runMonitorTrigger === '1') return;
     cell.dataset.runMonitorTrigger = '1';
-    cell.classList.add('hud-cell-clickable');
+    cell.classList.add('hud-cell-clickable', 'hud-action-cell');
     cell.setAttribute('role', 'button');
     cell.setAttribute('tabindex', '0');
     cell.setAttribute('aria-haspopup', 'dialog');

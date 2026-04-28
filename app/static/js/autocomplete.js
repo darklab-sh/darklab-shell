@@ -644,6 +644,7 @@ function _positionAutocomplete(itemsCount) {
     acDropdown.style.top = 'auto';
     acDropdown.style.bottom = 'calc(100% + 4px)';
     acDropdown.classList.add('ac-up');
+    acDropdown.classList.add('dropdown-up');
     return true;
   }
   acDropdown.classList.remove('ac-mobile');
@@ -657,6 +658,7 @@ function _positionAutocomplete(itemsCount) {
 
   if (!anchor || typeof anchor.getBoundingClientRect !== 'function') {
     acDropdown.classList.remove('ac-up');
+    acDropdown.classList.remove('dropdown-up');
     return false;
   }
   const rect = anchor.getBoundingClientRect();
@@ -670,6 +672,7 @@ function _positionAutocomplete(itemsCount) {
   const canFitAbove = spaceAbove >= (targetHeight + safetyPad);
   const showAbove = mobileComposerMode || (!canFitBelow && (canFitAbove || spaceAbove > spaceBelow));
   acDropdown.classList.toggle('ac-up', showAbove);
+  acDropdown.classList.toggle('dropdown-up', showAbove);
   const available = showAbove ? spaceAbove : spaceBelow;
   const edgeBuffer = mobileComposerMode ? 12 : (showAbove ? 20 : 30);
   const maxHeight = Math.max(0, Math.min(mobileComposerMode ? 200 : 260, available > edgeBuffer ? available - edgeBuffer : available));
@@ -731,7 +734,9 @@ function acShow(items) {
     (s && s.isExample ? Math.max(max, _acItemText(s).length) : max), 0);
   items.forEach((s, i) => {
     const div = document.createElement('div');
-    div.className = 'ac-item' + (i === acIndex ? ' ac-active' : '') + (s && s.isExample ? ' ac-example' : '');
+    div.className = 'ac-item dropdown-item dropdown-item-dense'
+      + (i === acIndex ? ' ac-active dropdown-item-active' : '')
+      + (s && s.isExample ? ' ac-example' : '');
     const label = _acItemText(s);
     const description = _acItemDescription(s);
     const val = String(matchValue || '');
