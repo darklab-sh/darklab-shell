@@ -58,6 +58,7 @@ async function loadAppFns({
   hasPendingTerminalConfirm: hasPendingTerminalConfirmOverride = vi.fn(() => false),
   cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride = vi.fn(() => false),
   getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride = vi.fn(() => []),
+  sessionVariables: sessionVariablesOverride = [],
   appConfig = { workspace_enabled: true },
   sessionId = 'session-old',
 } = {}) {
@@ -430,6 +431,7 @@ async function loadAppFns({
       _seedLocalStorageStarsToServer: seedLocalStorageStarsToServerOverride,
       hasPendingTerminalConfirm: hasPendingTerminalConfirmOverride,
       cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride,
+      sessionVariables: sessionVariablesOverride,
       getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride,
       ...domBindings,
       getOutput: getOutputOverride || (() => document.getElementById('history-list')),
@@ -1212,6 +1214,9 @@ describe('app helpers', () => {
           },
         ],
       },
+      sessionVariables: [
+        { name: 'HOST', value: 'ip.darklab.sh' },
+      ],
     })
     const context = getRuntimeAutocompleteContext({})
 
@@ -1222,6 +1227,10 @@ describe('app helpers', () => {
     expect(context.config.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'get', 'set'])
     expect(context.config.sequence_arg_hints['set line-numbers'].map(item => item.value)).toEqual(['on', 'off'])
     expect(context.var.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'set', 'unset'])
+    expect(context.var.arg_hints.set.filter(item => item.value === 'HOST')).toEqual([
+      { value: 'HOST', description: 'Current value: ip.darklab.sh' },
+    ])
+    expect(context.var.arg_hints.set.map(item => item.value)).toEqual(['HOST', 'PORT', 'IP_ADDR'])
     expect(context.var.sequence_arg_hints['set host'].map(item => item.value)).toEqual(['<value>'])
     expect(context.var.sequence_arg_hints['unset host']).toEqual([])
     expect(context.var.close_after).toEqual({ list: 0, set: 2, unset: 1 })

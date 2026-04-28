@@ -2457,6 +2457,10 @@ function _runtimeVariableHints(description = 'Session variable') {
 function _runtimeVarContext() {
   const variableHints = _runtimeVariableHints('Current value');
   const starterNames = ['HOST', 'PORT', 'IP_ADDR'];
+  const currentNames = new Set(variableHints.map(item => String(item.value || '').toUpperCase()));
+  const starterHints = starterNames
+    .filter(name => !currentNames.has(name))
+    .map(name => _runtimeHint(name, `Common ${name.toLowerCase()} value`));
   const sequenceArgHints = {};
   variableHints.concat(starterNames.map(name => _runtimeHint(name))).forEach(item => {
     const name = String(item && item.value || '').trim();
@@ -2467,7 +2471,7 @@ function _runtimeVarContext() {
   });
   const argHints = {
     list: [],
-    set: variableHints.concat(starterNames.map(name => _runtimeHint(name, `Common ${name.toLowerCase()} value`))),
+    set: variableHints.concat(starterHints),
     unset: variableHints,
     __positional__: [
       _runtimeHint('list', 'Show session variables'),
