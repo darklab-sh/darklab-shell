@@ -1,10 +1,29 @@
-import { readFileSync } from 'fs'
+import { readFileSync, readdirSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import yaml from 'js-yaml'
 import { MemoryStorage, fromDomScripts } from './helpers/extract.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
+const THEME_META_KEYS = new Set(['label', 'group', 'sort'])
+const THEME_BASE_KEYS = new Set([
+  'bg',
+  'surface',
+  'border',
+  'border_bright',
+  'border_soft',
+  'text',
+  'muted',
+  'green',
+  'green_dim',
+  'green_glow',
+  'amber',
+  'red',
+  'blue',
+  'terminal_font_size',
+  'terminal_line_height',
+])
 
 // This harness recreates the browser-global environment expected by the classic
 // script bundle so app.js can be tested without loading the full page.
@@ -658,6 +677,158 @@ async function loadAppFns({
   }
 }
 
+function builtInAutocompleteBase() {
+  const hint = (value, description = '', insertValue = undefined) => {
+    const item = { value, description }
+    if (insertValue !== undefined) item.insertValue = insertValue
+    return item
+  }
+  const emptyBuiltIn = description => ({
+    description,
+    flags: [],
+    expects_value: [],
+    arg_hints: { __positional__: [] },
+    sequence_arg_hints: {},
+    close_after: {},
+    examples: [],
+    subcommands: {},
+    argument_limit: null,
+  })
+  return {
+    commands: {
+      ...emptyBuiltIn('built-in: list built-in and allowed external commands'),
+      flags: [hint('--built-in', 'Show only built-in shell commands'), hint('--external', 'Show only allowed external commands')],
+    },
+    config: {
+      ...emptyBuiltIn('built-in: show or update user options'),
+      expects_value: ['get', 'set'],
+      arg_hints: {
+        list: [],
+        get: [],
+        set: [],
+        __positional__: [hint('list', 'Show all current user config'), hint('get', 'Show one user config value', 'get '), hint('set', 'Set one user config value', 'set ')],
+      },
+    },
+    theme: {
+      ...emptyBuiltIn('built-in: show or apply the active shell theme'),
+      expects_value: ['set'],
+      arg_hints: {
+        list: [],
+        current: [],
+        set: [],
+        __positional__: [hint('list', 'Show available themes'), hint('current', 'Show the active theme'), hint('set', 'Apply a theme', 'set ')],
+      },
+    },
+    var: {
+      ...emptyBuiltIn('built-in: set, list, or unset session command variables'),
+      expects_value: ['set', 'unset'],
+      close_after: { list: 0, set: 2, unset: 1 },
+      arg_hints: {
+        list: [],
+        set: [],
+        unset: [],
+        __positional__: [hint('list', 'Show session variables'), hint('set', 'Set a session variable', 'set '), hint('unset', 'Remove a session variable', 'unset ')],
+      },
+    },
+    runs: {
+      ...emptyBuiltIn('built-in: show active runs; use -v for details or --json for automation'),
+      flags: [hint('-v'), hint('--verbose'), hint('--json')],
+    },
+    jobs: {
+      ...emptyBuiltIn('built-in: alias for runs'),
+      flags: [hint('-v'), hint('--verbose'), hint('--json')],
+    },
+    'session-token': {
+      ...emptyBuiltIn('built-in: show or manage persistent session tokens'),
+      expects_value: ['set', 'revoke'],
+      arg_hints: {
+        generate: [],
+        copy: [],
+        clear: [],
+        rotate: [],
+        list: [],
+        set: [hint('<token>', 'Paste a tok_... token or UUID from another device')],
+        revoke: [hint('<token>', 'tok_ token to permanently invalidate on the server')],
+        __positional__: [
+          hint('generate', 'Generate a new session token and save it to this browser'),
+          hint('set <token>', 'Activate an existing session token from another device', 'set '),
+          hint('copy', 'Copy the active session token to the clipboard'),
+          hint('clear', 'Confirm before removing the active session token'),
+          hint('rotate', 'Generate a new token and migrate all history to it'),
+          hint('list', 'Show the active session token and its creation date'),
+          hint('revoke <token>', 'Permanently invalidate a tok_ token on this server', 'revoke '),
+        ],
+      },
+    },
+    file: {
+      ...emptyBuiltIn('built-in: list, view, create, edit, download, or remove session files'),
+      feature_required: 'workspace',
+      expects_value: ['show', 'add', 'edit', 'download', 'rm', 'delete'],
+      arg_hints: {
+        list: [],
+        help: [],
+        show: [],
+        add: [hint('<file>', 'New session file name')],
+        edit: [],
+        download: [],
+        rm: [],
+        delete: [],
+        __positional__: [
+          hint('list', 'List current session files'),
+          hint('show <file>', 'Print a session file in the terminal', 'show '),
+          hint('add <file>', 'Open the Files editor for a new session file', 'add '),
+          hint('edit <file>', 'Open the Files editor for an existing session file', 'edit '),
+          hint('download <file>', 'Download a session file through the browser', 'download '),
+          hint('delete <file>', 'Remove a session file from this session', 'delete '),
+          hint('help', 'Show file command usage'),
+        ],
+      },
+    },
+    cat: { ...emptyBuiltIn('built-in: show a session file'), feature_required: 'workspace', argument_limit: 1 },
+    ls: { ...emptyBuiltIn('built-in: list session files'), feature_required: 'workspace', argument_limit: 0 },
+    rm: {
+      ...emptyBuiltIn('built-in: remove a session file after confirmation'),
+      feature_required: 'workspace',
+      argument_limit: 1,
+    },
+    man: { ...emptyBuiltIn('built-in: show a real or built-in manual page'), argument_limit: 1 },
+    which: { ...emptyBuiltIn('built-in: locate a built-in command or allowed runtime command'), argument_limit: 1 },
+    type: { ...emptyBuiltIn('built-in: describe whether a command is built-in, installed, or missing'), argument_limit: 1 },
+    status: emptyBuiltIn('built-in: show the current session summary, limits, and backend health'),
+    whoami: emptyBuiltIn('built-in: describe this shell and link to the project README'),
+  }
+}
+
+function shippedThemeRegistry() {
+  const themeDir = resolve(REPO_ROOT, 'app/conf/themes')
+  const themes = readdirSync(themeDir)
+    .filter(name => name.endsWith('.yaml') && !name.endsWith('.local.yaml'))
+    .sort()
+    .map(filename => {
+      const raw = yaml.load(readFileSync(resolve(themeDir, filename), 'utf8')) || {}
+      const name = filename.replace(/\.yaml$/, '')
+      const vars = {}
+      Object.entries(raw).forEach(([key, value]) => {
+        if (THEME_META_KEYS.has(key) || key === 'color_scheme') return
+        const cssKey = String(key).replaceAll('_', '-')
+        const cssValue = String(value)
+        if (THEME_BASE_KEYS.has(key)) vars[`--${cssKey}`] = cssValue
+        vars[`--theme-${cssKey}`] = cssValue
+      })
+      return {
+        name,
+        filename,
+        label: raw.label || name,
+        group: raw.group || 'Other',
+        sort: Number.isInteger(raw.sort) ? raw.sort : null,
+        color_scheme: raw.color_scheme === 'light' ? 'only light' : 'only dark',
+        source: 'variant',
+        vars,
+      }
+    })
+  return { current: themes[0], themes }
+}
+
 describe('app helpers', () => {
   beforeEach(() => {
     ;[
@@ -993,6 +1164,81 @@ describe('app helpers', () => {
     expect(document.cookie).toContain('pref_theme_name=theme_light_olive')
   })
 
+  it('renders theme preview cards with the current desktop shell structure', async () => {
+    await loadAppFns({
+      themeRegistry: {
+        current: {
+          name: 'darklab_obsidian',
+          label: 'Darklab Obsidian',
+          source: 'variant',
+          vars: {
+            '--theme-chrome-bg': '#050505',
+            '--theme-panel-bg': '#111111',
+            '--theme-tab-active-bg': '#1a1a1a',
+          },
+        },
+        themes: [
+          {
+            name: 'darklab_obsidian',
+            label: 'Darklab Obsidian',
+            source: 'variant',
+            vars: {
+              '--theme-chrome-bg': '#050505',
+              '--theme-panel-bg': '#111111',
+              '--theme-tab-active-bg': '#1a1a1a',
+            },
+          },
+        ],
+      },
+    })
+
+    const card = document.querySelector('#theme-select .theme-card')
+    expect(card?.style.getPropertyValue('--theme-chrome-bg')).toBe('#050505')
+    expect(card?.querySelector('.theme-card-preview-rail')).not.toBeNull()
+    expect(card?.querySelector('.theme-card-preview-tab-active')).not.toBeNull()
+    expect(card?.querySelector('.theme-card-preview-content')).not.toBeNull()
+    expect(card?.querySelector('.theme-card-preview-hud')).not.toBeNull()
+    expect(card?.querySelectorAll('.theme-card-preview-rail-section')).toHaveLength(3)
+    expect(card?.querySelector('.theme-card-preview-modal')).not.toBeNull()
+    expect(card?.querySelectorAll('.theme-card-preview-modal-button')).toHaveLength(2)
+    expect(card?.querySelectorAll('.theme-card-preview-line')).toHaveLength(4)
+    expect(card?.querySelector('.theme-card-preview-bar')).toBeNull()
+    expect(card?.querySelector('.theme-card-preview-pill')).toBeNull()
+    expect(card?.querySelector('.theme-card-preview-chip')).toBeNull()
+    expect(card?.querySelector('.theme-card-preview-drawer')).toBeNull()
+  })
+
+  it('renders shipped theme preview cards with populated core surface tokens', async () => {
+    const registry = shippedThemeRegistry()
+    await loadAppFns({ themeRegistry: registry })
+
+    const cards = Array.from(document.querySelectorAll('#theme-select .theme-card'))
+    expect(cards).toHaveLength(registry.themes.length)
+
+    cards.forEach(card => {
+      const theme = registry.themes.find(item => item.name === card.dataset.themeName)
+      expect(theme, `missing registry theme for ${card.dataset.themeName}`).toBeTruthy()
+      ;[
+        '--bg',
+        '--surface',
+        '--theme-panel-bg',
+        '--theme-chrome-bg',
+        '--theme-modal-bg',
+        '--theme-tab-active-bg',
+        '--theme-button-secondary-bg',
+        '--theme-button-secondary-border',
+        '--theme-dropdown-bg',
+        '--theme-dropdown-border',
+      ].forEach(token => {
+        expect(card.style.getPropertyValue(token), `${theme.name} missing ${token}`).not.toBe('')
+      })
+      expect(card.querySelector('.theme-card-preview-rail')).not.toBeNull()
+      expect(card.querySelector('.theme-card-preview-hud')).not.toBeNull()
+      expect(card.querySelector('.theme-card-preview-content')).not.toBeNull()
+      expect(card.querySelector('.theme-card-preview-modal')).not.toBeNull()
+    })
+  })
+
   it('applies a theme from the terminal theme command', async () => {
     const { handleThemeCommand, appendCommandEcho, setStatus, recordSuccessfulLocalCommand } =
       await loadAppFns({
@@ -1215,7 +1461,7 @@ describe('app helpers', () => {
         { name: 'HOST', value: 'ip.darklab.sh' },
       ],
     })
-    const context = getRuntimeAutocompleteContext({})
+    const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
 
     expect(context.theme.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'current', 'set'])
     expect(context.theme.arg_hints.set.map(item => item.value)).toContain('theme_light_olive')
@@ -1236,7 +1482,11 @@ describe('app helpers', () => {
   it('serves runtime autocomplete context for built-in command lookup helpers', async () => {
     const { getRuntimeAutocompleteContext } = await loadAppFns()
 
-    const context = getRuntimeAutocompleteContext({ curl: {}, nmap: {} })
+    const context = getRuntimeAutocompleteContext({
+      ...builtInAutocompleteBase(),
+      curl: {},
+      nmap: {},
+    })
 
     expect(context.commands.flags.map(item => item.value)).toEqual(['--built-in', '--external'])
     expect(context.runs.flags.map(item => item.value)).toEqual(['-v', '--verbose', '--json'])
@@ -1249,7 +1499,7 @@ describe('app helpers', () => {
       'add <file>',
       'edit <file>',
       'download <file>',
-      'rm <file>',
+      'delete <file>',
       'help',
     ])
     expect(context.status).toBeTruthy()
@@ -1273,7 +1523,7 @@ describe('app helpers', () => {
       ],
     })
 
-    const context = getRuntimeAutocompleteContext({})
+    const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
 
     expect(context.file.arg_hints.show.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
     expect(context.file.arg_hints.edit.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
@@ -1291,7 +1541,7 @@ describe('app helpers', () => {
       appConfig: { workspace_enabled: false },
     })
 
-    const context = getRuntimeAutocompleteContext({ curl: {} })
+    const context = getRuntimeAutocompleteContext({ ...builtInAutocompleteBase(), curl: {} })
 
     expect(context.file).toBeUndefined()
     expect(context.cat).toBeUndefined()

@@ -859,6 +859,25 @@ class TestWorkflowsRoute:
         ]
         assert dns["steps"][0]["cmd"] == "dig {{domain}} A"
 
+    def test_workspace_required_workflows_follow_files_feature_flag(self):
+        client = get_client()
+        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": False}):
+            disabled = json.loads(client.get("/workflows").data)
+        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}):
+            enabled = json.loads(client.get("/workflows").data)
+
+        disabled_titles = {item["title"] for item in disabled["items"]}
+        enabled_by_title = {item["title"]: item for item in enabled["items"]}
+
+        assert "Subdomain HTTP Triage" not in disabled_titles
+        assert "Crawl And Scan" not in disabled_titles
+        assert enabled_by_title["Subdomain HTTP Triage"]["steps"][0]["cmd"] == (
+            "subfinder -d {{domain}} -silent -o subdomains.txt"
+        )
+        assert enabled_by_title["Crawl And Scan"]["steps"][2]["cmd"] == (
+            "nuclei -l crawled-urls.txt -severity high,critical -o nuclei-findings.txt"
+        )
+
 
 # ── /shortcuts ────────────────────────────────────────────────────────────────
 

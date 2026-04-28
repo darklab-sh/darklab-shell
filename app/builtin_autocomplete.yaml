@@ -1,0 +1,340 @@
+---
+version: 1
+
+# App-owned built-in autocomplete grammar. This file intentionally lives outside
+# app/conf because built-ins are code behavior, not operator policy.
+commands:
+  - root: banner
+    description: "built-in: print the configured banner art"
+    autocomplete:
+      arguments: []
+  - root: cat
+    description: "built-in: show a session file"
+    feature_required: workspace
+    autocomplete:
+      argument_limit: 1
+      arguments: []
+  - root: clear
+    description: "built-in: clear the current terminal tab output"
+    autocomplete:
+      arguments: []
+  - root: commands
+    description: "built-in: list built-in and allowed external commands"
+    autocomplete:
+      flags:
+        - value: --built-in
+          description: "Show only built-in shell commands"
+        - value: --external
+          description: "Show only allowed external commands"
+  - root: config
+    description: "built-in: show or update user options"
+    autocomplete:
+      subcommands:
+        - value: list
+          description: "Show all current user config"
+          closes: true
+        - value: get
+          description: "Show one user config value"
+          takes_value: true
+          insert: "get "
+        - value: set
+          description: "Set one user config value"
+          takes_value: true
+          insert: "set "
+  - root: date
+    description: "built-in: show the current server time"
+    autocomplete:
+      arguments: []
+  - root: df
+    description: "built-in: show a compact filesystem summary"
+    autocomplete:
+      flags:
+        - value: -h
+          description: "Human-readable disk usage"
+  - root: env
+    description: "built-in: show core environment values for this shell"
+    autocomplete:
+      arguments: []
+  - root: faq
+    description: "built-in: show configured FAQ entries"
+    autocomplete:
+      arguments: []
+  - root: file
+    description: >-
+      built-in: list, view, create, edit, download, or remove session files
+    feature_required: workspace
+    autocomplete:
+      subcommands:
+        - value: list
+          description: "List current session files"
+          closes: true
+        - value: show
+          description: "Print a session file in the terminal"
+          takes_value: true
+          insert: "show "
+          value_hint:
+            value: "<file>"
+            description: "Session file"
+        - value: add
+          description: "Open the Files editor for a new session file"
+          takes_value: true
+          insert: "add "
+          value_hint:
+            value: "<file>"
+            description: "New session file name"
+        - value: edit
+          description: "Open the Files editor for an existing session file"
+          takes_value: true
+          insert: "edit "
+          value_hint:
+            value: "<file>"
+            description: "Session file"
+        - value: download
+          description: "Download a session file through the browser"
+          takes_value: true
+          insert: "download "
+          value_hint:
+            value: "<file>"
+            description: "Session file"
+        - value: rm
+          description: "Remove a session file from this session"
+          takes_value: true
+          hidden: true
+          insert: "rm "
+          value_hint:
+            value: "<file>"
+            description: "Session file"
+        - value: delete
+          description: "Remove a session file from this session"
+          takes_value: true
+          insert: "delete "
+          value_hint:
+            value: "<file>"
+            description: "Session file"
+        - value: help
+          description: "Show file command usage"
+          closes: true
+  - root: fortune
+    description: "built-in: print a short operator-themed one-liner"
+    autocomplete:
+      arguments: []
+  - root: free
+    description: "built-in: show a compact memory summary"
+    autocomplete:
+      flags:
+        - value: -h
+          description: "Human-readable memory usage"
+  - root: groups
+    description: "built-in: show the shell group membership"
+    autocomplete:
+      arguments: []
+  - root: help
+    description: >-
+      built-in: show README, FAQ, shortcuts, and command-discovery guidance
+    autocomplete:
+      arguments: []
+  - root: history
+    description: "built-in: list recent commands from this session"
+    autocomplete:
+      arguments: []
+  - root: hostname
+    description: "built-in: show the configured shell instance name"
+    autocomplete:
+      arguments: []
+  - root: id
+    description: "built-in: show the shell identity"
+    autocomplete:
+      arguments: []
+  - root: ip
+    description: "built-in: show a minimal shell network interface view"
+    autocomplete:
+      arguments:
+        - value: a
+          description: "Show all network interfaces and addresses"
+  - root: jobs
+    description: "built-in: alias for runs"
+    autocomplete:
+      flags:
+        - value: -v
+          description: "Show full IDs, started timestamps, and metadata source"
+        - value: --verbose
+          description: "Show full IDs, started timestamps, and metadata source"
+        - value: --json
+          description: "Print active-run metadata as JSON"
+  - root: last
+    description: >-
+      built-in: show recent completed runs with timestamps and exit codes
+    autocomplete:
+      arguments: []
+  - root: limits
+    description: >-
+      built-in: show configured runtime, history, and retention limits
+    autocomplete:
+      arguments: []
+  - root: ls
+    description: "built-in: list session files"
+    feature_required: workspace
+    autocomplete:
+      argument_limit: 0
+      arguments: []
+  - root: man
+    description: "built-in: show a real or built-in manual page"
+    autocomplete:
+      argument_limit: 1
+      arguments: []
+  - root: ps
+    description: "built-in: show the current shell process view"
+    autocomplete:
+      flags:
+        - value: aux
+          description: "All processes with user and memory info"
+        - value: -ef
+          description: "All processes, full format"
+  - root: pwd
+    description: "built-in: show the session files path"
+    autocomplete:
+      arguments: []
+  - root: retention
+    description: "built-in: show retention and persisted-output settings"
+    autocomplete:
+      arguments: []
+  - root: rm
+    description: "built-in: remove a session file after confirmation"
+    feature_required: workspace
+    autocomplete:
+      argument_limit: 1
+      arguments: []
+  - root: route
+    description: "built-in: show the shell routing table summary"
+    autocomplete:
+      arguments: []
+  - root: runs
+    description: >-
+      built-in: show active runs; use -v for details or --json for automation
+    autocomplete:
+      flags:
+        - value: -v
+          description: "Show full IDs, started timestamps, and metadata source"
+        - value: --verbose
+          description: "Show full IDs, started timestamps, and metadata source"
+        - value: --json
+          description: "Print active-run metadata as JSON"
+  - root: session-token
+    description: "built-in: show or manage persistent session tokens"
+    autocomplete:
+      subcommands:
+        - value: generate
+          description: >-
+            Generate a new session token and save it to this browser
+          closes: true
+        - value: set
+          description: "Activate an existing session token from another device"
+          takes_value: true
+          insert: "set "
+          value_hint:
+            value: "<token>"
+            description: "Paste a tok_... token or UUID from another device"
+        - value: copy
+          description: "Copy the active session token to the clipboard"
+          closes: true
+        - value: clear
+          description: "Confirm before removing the active session token"
+          closes: true
+        - value: rotate
+          description: "Generate a new token and migrate all history to it"
+          closes: true
+        - value: list
+          description: "Show the active session token and its creation date"
+          closes: true
+        - value: revoke
+          description: "Permanently invalidate a tok_ token on this server"
+          takes_value: true
+          insert: "revoke "
+          value_hint:
+            value: "<token>"
+            description: "tok_ token to permanently invalidate on the server"
+  - root: shortcuts
+    description: "built-in: show current keyboard shortcuts"
+    autocomplete:
+      arguments: []
+  - root: stats
+    description: "built-in: show session activity totals and command breakdowns"
+    autocomplete:
+      arguments: []
+  - root: status
+    description: >-
+      built-in: show the current session summary, limits, and backend health
+    autocomplete:
+      arguments: []
+  - root: theme
+    description: "built-in: show or apply the active shell theme"
+    autocomplete:
+      subcommands:
+        - value: list
+          description: "Show available themes"
+          closes: true
+        - value: current
+          description: "Show the active theme"
+          closes: true
+        - value: set
+          description: "Apply a theme"
+          takes_value: true
+          insert: "set "
+  - root: tty
+    description: "built-in: show the web terminal device path"
+    autocomplete:
+      arguments: []
+  - root: type
+    description: >-
+      built-in: describe whether a command is built-in, installed, or missing
+    autocomplete:
+      argument_limit: 1
+      arguments: []
+  - root: uname
+    description: "built-in: show the shell platform string"
+    autocomplete:
+      flags:
+        - value: -a
+          description: "All system information"
+  - root: uptime
+    description: "built-in: show app uptime since process start"
+    autocomplete:
+      arguments: []
+  - root: var
+    description: "built-in: set, list, or unset session command variables"
+    autocomplete:
+      close_after:
+        list: 0
+        set: 2
+        unset: 1
+      subcommands:
+        - value: list
+          description: "Show session variables"
+          closes: true
+        - value: set
+          description: "Set a session variable"
+          takes_value: true
+          insert: "set "
+        - value: unset
+          description: "Remove a session variable"
+          takes_value: true
+          insert: "unset "
+  - root: version
+    description: >-
+      built-in: show shell, app, Flask, and Python version details
+    autocomplete:
+      arguments: []
+  - root: which
+    description: >-
+      built-in: locate a built-in command or allowed runtime command
+    autocomplete:
+      argument_limit: 1
+      arguments: []
+  - root: who
+    description: "built-in: show the current shell user and session"
+    autocomplete:
+      arguments: []
+  - root: whoami
+    description: "built-in: describe this shell and link to the project README"
+    autocomplete:
+      arguments: []

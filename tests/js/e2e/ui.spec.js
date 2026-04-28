@@ -335,25 +335,27 @@ test.describe('workflows modal', () => {
     })
 
     await ensurePromptReady(page)
-    const firstCard = await openWorkflowsModal(page)
-    const input = firstCard.locator('.workflow-input-control')
+    await openWorkflowsModal(page)
+    const workflowCard = page.locator('.workflow-card', { hasText: 'Subdomain HTTP Triage' })
+    await expect(workflowCard).toBeVisible()
+    const input = workflowCard.locator('.workflow-input-control')
     await input.fill('example.com')
     await expect(input).toHaveValue('example.com')
-    await expect(firstCard.locator('.workflow-run-all')).toBeEnabled()
-    await firstCard.locator('.workflow-run-all').click()
+    await expect(workflowCard.locator('.workflow-run-all')).toBeEnabled()
+    await workflowCard.locator('.workflow-run-all').click()
     await expect(page.locator('#workflows-overlay')).not.toHaveClass(/\bopen\b/)
     await expect(page.locator('.tab')).toHaveCount(1)
-    await expect(page.locator('body')).toContainText('[workflow] Running 5 steps sequentially in this tab.')
-    await expect(page.locator('body')).toContainText('dig example.com A')
-    await expect(page.locator('body')).toContainText('dig example.com NS')
-    await expect(page.locator('body')).toContainText('dig example.com MX')
+    await expect(page.locator('body')).toContainText('[workflow] Running 3 steps sequentially in this tab.')
+    await expect(page.locator('body')).toContainText('subfinder -d example.com -silent -o subdomains.txt')
+    await expect(page.locator('body')).toContainText('pd-httpx -l subdomains.txt -silent -o live-urls.txt')
+    await expect(page.locator('body')).toContainText(
+      'pd-httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt',
+    )
     await expect(page.locator('body')).toContainText('[workflow] Completed all queued steps.')
     await expect.poll(() => postedCommands).toEqual([
-      'dig example.com A',
-      'dig example.com NS',
-      'dig @8.8.8.8 example.com A',
-      'dig example.com +trace',
-      'dig example.com MX',
+      'subfinder -d example.com -silent -o subdomains.txt',
+      'pd-httpx -l subdomains.txt -silent -o live-urls.txt',
+      'pd-httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt',
     ])
   })
 

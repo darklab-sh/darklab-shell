@@ -191,6 +191,93 @@
       ]
     },
     {
+      "name": "subfinder_writes_subdomain_triage_file",
+      "command": "subfinder -d darklab.sh -silent -o subdomains.txt",
+      "exit_code": null,
+      "assert_files": {
+        "subdomains.txt": []
+      },
+      "cleanup_files": [
+        "subdomains.txt"
+      ]
+    },
+    {
+      "name": "pd_httpx_reads_subdomains_and_writes_live_urls",
+      "setup_files": {
+        "subdomains.txt": "ip.darklab.sh\n"
+      },
+      "command": "pd-httpx -l subdomains.txt -silent -o live-urls.txt",
+      "assert_files": {
+        "live-urls.txt": [
+          "ip.darklab.sh"
+        ]
+      },
+      "cleanup_files": [
+        "subdomains.txt",
+        "live-urls.txt"
+      ]
+    },
+    {
+      "name": "pd_httpx_reads_live_urls_and_writes_http_summary",
+      "setup_files": {
+        "live-urls.txt": "https://ip.darklab.sh\n"
+      },
+      "command": "pd-httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt",
+      "assert_files": {
+        "http-summary.txt": [
+          "https://ip.darklab.sh"
+        ]
+      },
+      "cleanup_files": [
+        "live-urls.txt",
+        "http-summary.txt"
+      ]
+    },
+    {
+      "name": "katana_writes_crawled_urls_file",
+      "command": "katana -u https://ip.darklab.sh -d 1 -silent -o crawled-urls.txt",
+      "exit_code": null,
+      "assert_files": {
+        "crawled-urls.txt": [
+          "https://ip.darklab.sh"
+        ]
+      },
+      "cleanup_files": [
+        "crawled-urls.txt"
+      ]
+    },
+    {
+      "name": "pd_httpx_reads_crawled_urls_and_writes_summary",
+      "setup_files": {
+        "crawled-urls.txt": "https://ip.darklab.sh\n"
+      },
+      "command": "pd-httpx -l crawled-urls.txt -status-code -title -o crawled-http.txt",
+      "assert_files": {
+        "crawled-http.txt": [
+          "https://ip.darklab.sh"
+        ]
+      },
+      "cleanup_files": [
+        "crawled-urls.txt",
+        "crawled-http.txt"
+      ]
+    },
+    {
+      "name": "nuclei_reads_crawled_urls_and_writes_findings",
+      "setup_files": {
+        "crawled-urls.txt": "https://ip.darklab.sh\n"
+      },
+      "command": "nuclei -l crawled-urls.txt -severity high,critical -o nuclei-findings.txt",
+      "exit_code": null,
+      "assert_files": {
+        "nuclei-findings.txt": []
+      },
+      "cleanup_files": [
+        "crawled-urls.txt",
+        "nuclei-findings.txt"
+      ]
+    },
+    {
       "name": "amass_enum_active_uses_managed_database",
       "command": "amass enum -active -d darklab.sh",
       "exit_code": null,

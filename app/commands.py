@@ -27,6 +27,7 @@ from workspace import (
 _HERE = os.path.dirname(__file__)
 _CONF = os.path.join(_HERE, "conf")
 COMMANDS_REGISTRY_FILE = os.path.join(_CONF, "commands.yaml")
+BUILTIN_AUTOCOMPLETE_FILE = os.path.join(_HERE, "builtin_autocomplete.yaml")
 FAQ_FILE              = os.path.join(_CONF, "faq.yaml")
 WORKFLOWS_FILE        = os.path.join(_CONF, "workflows.yaml")
 WELCOME_FILE          = os.path.join(_CONF, "welcome.yaml")
@@ -629,6 +630,8 @@ def _empty_autocomplete_context_entry() -> dict:
         "flags": [],
         "expects_value": [],
         "arg_hints": {},
+        "sequence_arg_hints": {},
+        "close_after": {},
         "subcommands": {},
         "argument_limit": None,
         "pipe_command": False,
@@ -712,6 +715,17 @@ def _normalize_commands_registry_entry(raw_entry, *, pipe_helper: bool = False) 
         "root": root,
         "autocomplete": _normalize_registry_autocomplete(root, raw_entry.get("autocomplete")),
     }
+    description = str(raw_entry.get("description") or "").strip()
+    if description:
+        entry["description"] = description
+    feature_required = raw_entry.get("feature_required") or raw_entry.get("requires_feature") or raw_entry.get("feature")
+    if feature_required:
+        if isinstance(feature_required, (list, tuple, set)):
+            entry["feature_required"] = [
+                str(value).strip().lower() for value in feature_required if str(value).strip()
+            ]
+        else:
+            entry["feature_required"] = str(feature_required).strip().lower()
     if pipe_helper:
         return entry
 
@@ -827,6 +841,16 @@ def load_commands_registry():
     return _merge_commands_registry(base, local)
 
 
+def load_builtin_autocomplete_registry():
+    """Read app-owned built-in autocomplete grammar.
+
+    This lives outside app/conf because built-in command grammar is not an
+    operator-facing policy/config surface. It still uses the same registry
+    shape and normalizer as external command autocomplete.
+    """
+    return _load_commands_registry_file(BUILTIN_AUTOCOMPLETE_FILE)
+
+
 def load_command_policy():
     """Return allow/deny prefixes from commands.yaml."""
     registry = load_commands_registry()
@@ -852,11 +876,21 @@ def autocomplete_context_from_commands_registry(registry: dict, cfg=None) -> dic
         for entry in registry.get(section, []) or []:
             root = str(entry.get("root") or "").strip().lower()
             autocomplete = entry.get("autocomplete")
-            if root and isinstance(autocomplete, dict) and autocomplete:
-                context[root] = _attach_workspace_autocomplete_flags(
+            if (
+                root
+                and isinstance(autocomplete, dict)
+                and autocomplete
+                and _suggestion_enabled_for_features(entry, cfg)
+            ):
+                spec = _attach_workspace_autocomplete_flags(
                     deepcopy(autocomplete),
                     entry.get("workspace_flags") or [],
                 )
+                if entry.get("description"):
+                    spec["description"] = entry["description"]
+                if entry.get("feature_required"):
+                    spec["feature_required"] = entry["feature_required"]
+                context[root] = spec
     return _filter_autocomplete_context_by_features(context, app_config.CFG if cfg is None else cfg)
 
 
@@ -908,8 +942,10 @@ def _attach_workspace_autocomplete_flags(spec: dict, workspace_flags: list[dict[
 
 
 def load_autocomplete_context_from_commands_registry(cfg=None) -> dict:
-    """Read autocomplete metadata from commands.yaml."""
-    return autocomplete_context_from_commands_registry(load_commands_registry(), cfg=cfg)
+    """Read autocomplete metadata from commands.yaml and app-owned built-ins."""
+    external = autocomplete_context_from_commands_registry(load_commands_registry(), cfg=cfg)
+    builtins = autocomplete_context_from_commands_registry(load_builtin_autocomplete_registry(), cfg=cfg)
+    return _merge_autocomplete_context(external, builtins)
 
 
 def _feature_enabled(feature, cfg=None):
@@ -1084,6 +1120,64 @@ def _builtin_workflows():
                 {
                     "cmd": "pd-httpx -u {{url}} -title -status-code -tech-detect",
                     "note": "Probe HTTPS and collect status, title, and technology hints.",
+                },
+            ],
+        },
+        {
+            "title": "Subdomain HTTP Triage",
+            "description": (
+                "Write discovered subdomains to Files, probe them for live HTTP services, "
+                "then save a compact HTTP summary for review."
+            ),
+            "feature_required": "workspace",
+            "inputs": [
+                {
+                    "id": "domain", "label": "Domain", "type": "domain", "required": True,
+                    "placeholder": "example.com", "default": "darklab.sh",
+                    "help": "The root domain to enumerate and triage.",
+                },
+            ],
+            "steps": [
+                {
+                    "cmd": "subfinder -d {{domain}} -silent -o subdomains.txt",
+                    "note": "Discover subdomains and save one hostname per line to Files.",
+                },
+                {
+                    "cmd": "pd-httpx -l subdomains.txt -silent -o live-urls.txt",
+                    "note": "Read the generated subdomain file and save live HTTP(S) URLs.",
+                },
+                {
+                    "cmd": "pd-httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt",
+                    "note": "Read live URLs and save status, title, and technology hints.",
+                },
+            ],
+        },
+        {
+            "title": "Crawl And Scan",
+            "description": (
+                "Crawl a starting URL into Files, summarize discovered URLs, then run a focused "
+                "high/critical nuclei pass against the crawl output."
+            ),
+            "feature_required": "workspace",
+            "inputs": [
+                {
+                    "id": "url", "label": "URL", "type": "url", "required": True,
+                    "placeholder": "https://example.com", "default": "https://ip.darklab.sh",
+                    "help": "The HTTP or HTTPS URL to crawl and scan.",
+                },
+            ],
+            "steps": [
+                {
+                    "cmd": "katana -u {{url}} -d 1 -silent -o crawled-urls.txt",
+                    "note": "Crawl one level from the seed URL and save discovered URLs.",
+                },
+                {
+                    "cmd": "pd-httpx -l crawled-urls.txt -status-code -title -o crawled-http.txt",
+                    "note": "Read crawled URLs and save HTTP status/title context.",
+                },
+                {
+                    "cmd": "nuclei -l crawled-urls.txt -severity high,critical -o nuclei-findings.txt",
+                    "note": "Run focused high/critical templates against the crawl output.",
                 },
             ],
         },
@@ -1289,12 +1383,25 @@ def _normalize_workflow_entry(entry):
         clean_steps.append({"cmd": cmd, "note": note})
     if not clean_steps:
         return None
-    return {
+    normalized = {
         "title": title,
         "description": description,
         "inputs": inputs,
         "steps": clean_steps,
     }
+    feature_required = entry.get("feature_required") or entry.get("requires_feature") or entry.get("feature")
+    if feature_required:
+        if isinstance(feature_required, (list, tuple, set)):
+            normalized["feature_required"] = [
+                str(value).strip().lower() for value in feature_required if str(value).strip()
+            ]
+        else:
+            normalized["feature_required"] = str(feature_required).strip().lower()
+    return normalized
+
+
+def _workflow_entry_enabled(entry, cfg=None):
+    return _suggestion_enabled_for_features(entry, cfg)
 
 
 def load_workflows():
@@ -1310,14 +1417,18 @@ def load_workflows():
     return result
 
 
-def load_all_workflows():
+def load_all_workflows(cfg=None):
     """Return the built-in workflows followed by any custom workflows.yaml entries."""
     builtins = []
     for entry in _builtin_workflows():
         normalized = _normalize_workflow_entry(entry)
-        if normalized:
+        if normalized and _workflow_entry_enabled(normalized, cfg):
             builtins.append(normalized)
-    return [*builtins, *load_workflows()]
+    custom = [
+        workflow for workflow in load_workflows()
+        if _workflow_entry_enabled(workflow, cfg)
+    ]
+    return [*builtins, *custom]
 
 
 def load_welcome():
@@ -1487,6 +1598,13 @@ def _filter_autocomplete_context_by_features(context: dict, cfg=None) -> dict:
             item for item in spec.get("examples", []) or []
             if _suggestion_enabled_for_features(item, cfg)
         ]
+        spec["sequence_arg_hints"] = {
+            trigger: [
+                item for item in hints or []
+                if _suggestion_enabled_for_features(item, cfg)
+            ]
+            for trigger, hints in (spec.get("sequence_arg_hints") or {}).items()
+        }
         filtered_subcommands = {}
         for name, raw_sub_spec in (spec.get("subcommands") or {}).items():
             if not isinstance(raw_sub_spec, dict):
@@ -1516,6 +1634,13 @@ def _filter_autocomplete_context_by_features(context: dict, cfg=None) -> dict:
                 item for item in sub_spec.get("examples", []) or []
                 if _suggestion_enabled_for_features(item, cfg)
             ]
+            sub_spec["sequence_arg_hints"] = {
+                trigger: [
+                    item for item in hints or []
+                    if _suggestion_enabled_for_features(item, cfg)
+                ]
+                for trigger, hints in (sub_spec.get("sequence_arg_hints") or {}).items()
+            }
             filtered_subcommands[name] = sub_spec
         spec["subcommands"] = filtered_subcommands
         filtered[root] = spec
@@ -1661,7 +1786,7 @@ def _normalize_single_autocomplete_spec(raw_spec: dict, *, include_pipe: bool = 
                 if raw_insert is not None:
                     subcommand_display["insert"] = str(raw_insert)
             normalized_sub = _normalize_context_suggestion(subcommand_display)
-            if normalized_sub:
+            if normalized_sub and not raw_sub.get("hidden"):
                 key = str(normalized_sub["value"]).lower()
                 if key not in positional_seen:
                     positional_seen.add(key)
@@ -1669,6 +1794,27 @@ def _normalize_single_autocomplete_spec(raw_spec: dict, *, include_pipe: bool = 
 
     raw_argument_limit = raw_spec.get("argument_limit")
     argument_limit = raw_argument_limit if isinstance(raw_argument_limit, int) and raw_argument_limit > 0 else None
+
+    sequence_arg_hints = {}
+    for trigger, hints in (raw_spec.get("sequence_arg_hints") or {}).items():
+        bucket = []
+        seen = set()
+        _append_unique_context_suggestions(bucket, seen, hints)
+        sequence_arg_hints[str(trigger or "").strip().lower()] = bucket
+
+    close_after = {}
+    raw_close_after = raw_spec.get("close_after")
+    if isinstance(raw_close_after, dict):
+        for raw_token, raw_limit in raw_close_after.items():
+            token = str(raw_token or "").strip().lower()
+            if not token:
+                continue
+            try:
+                limit = int(raw_limit)
+            except (TypeError, ValueError):
+                continue
+            if limit >= 0:
+                close_after[token] = limit
 
     raw_pipe_spec = raw_spec.get("pipe")
     pipe_spec: dict[str, object] = raw_pipe_spec if include_pipe and isinstance(raw_pipe_spec, dict) else {}
@@ -1693,6 +1839,8 @@ def _normalize_single_autocomplete_spec(raw_spec: dict, *, include_pipe: bool = 
         "flags": flags,
         "expects_value": expects_value,
         "arg_hints": arg_hints,
+        "sequence_arg_hints": sequence_arg_hints,
+        "close_after": close_after,
         "subcommands": subcommand_specs,
         "argument_limit": argument_limit,
         "pipe_command": pipe_command,
@@ -1724,6 +1872,8 @@ def _merge_autocomplete_context(base, overlay):
             "flags": [],
             "expects_value": [],
             "arg_hints": {},
+            "sequence_arg_hints": {},
+            "close_after": {},
             "subcommands": {},
             "argument_limit": None,
             "pipe_command": False,
@@ -1735,6 +1885,11 @@ def _merge_autocomplete_context(base, overlay):
 
         if isinstance(spec.get("argument_limit"), int) and spec["argument_limit"] > 0:
             current["argument_limit"] = spec["argument_limit"]
+
+        if spec.get("description"):
+            current["description"] = spec["description"]
+        if spec.get("feature_required"):
+            current["feature_required"] = spec["feature_required"]
 
         if spec.get("pipe_command"):
             current["pipe_command"] = True
@@ -1772,6 +1927,18 @@ def _merge_autocomplete_context(base, overlay):
                     continue
                 seen_hints.add(key)
                 bucket.append(hint)
+
+        for trigger, hints in (spec.get("sequence_arg_hints", {}) or {}).items():
+            bucket = current.setdefault("sequence_arg_hints", {}).setdefault(trigger, [])
+            seen_hints = {item["value"].lower() for item in bucket if isinstance(item, dict)}
+            for hint in hints or []:
+                key = hint["value"].lower()
+                if key in seen_hints:
+                    continue
+                seen_hints.add(key)
+                bucket.append(hint)
+
+        current.setdefault("close_after", {}).update(spec.get("close_after") or {})
 
         current_subcommands = current.setdefault("subcommands", {})
         for name, sub_spec in (spec.get("subcommands") or {}).items():
@@ -1891,7 +2058,7 @@ def load_container_smoke_test_commands():
             seen.add(command)
             commands.append(command)
 
-    for workflow in load_all_workflows():
+    for workflow in load_all_workflows({"workspace_enabled": False}):
         if not isinstance(workflow, dict):
             continue
         workflow_inputs = {

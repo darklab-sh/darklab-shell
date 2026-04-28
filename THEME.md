@@ -139,7 +139,7 @@ The checked-in files `app/conf/theme_dark.yaml.example` and `app/conf/theme_ligh
 
 ## Runtime Theme Selector
 
-The theme preview grid is driven by the runtime theme registry. Clicking a preview card immediately applies that theme and persists the selection to `localStorage`. On desktop, the selector opens as a right-side drawer so the shell remains visible behind it while comparing themes. On mobile, it remains a full-screen chooser with a two-column preview layout on wider phones.
+The theme preview grid is driven by the runtime theme registry. Clicking a preview card immediately applies that theme and persists the selection to `localStorage`. Each preview card renders a compact schematic of the current desktop shell — rail sections, tabbar with an active tab, terminal panel, HUD bar, and a small modal surface — so theme contrast is judged against the same surface relationships used by the live app. On desktop, the selector opens as a right-side drawer so the shell remains visible behind it while comparing themes. On mobile, it remains a full-screen chooser with a two-column preview layout on wider phones.
 
 The built-in `theme` button is a shortcut to the selector. The preview grid is the source of truth for named variants — registry entries without an explicit `label:` fall back to a humanized filename stem, and entries without a `group:` appear under "Other".
 
@@ -345,7 +345,6 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 | `dropdown_shadow_ring_strong` | `color-mix(in srgb, var(--theme-dropdown-shadow) 36%, transparent)` | `color-mix(in srgb, var(--theme-dropdown-shadow) 36%, transparent)` | Stronger dropdown shadow ring for keyboard-docked mobile dropdowns |
 | `dropdown_item_text` | `#9a9a9a` | `#4a5868` | Text for autocomplete and menu items |
 | `overlay_backdrop_bg` | `rgba(0,0,0,0.76)` | `rgba(34,58,88,0.22)` | Shared backdrop behind modals and overlays |
-| `inline_surface_bg` | `#141414` | `#dce6f0` | Inline code, allowed-command chips, and compact embedded surfaces |
 
 ### Search and Output Highlights
 
@@ -358,15 +357,11 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 | `search_signal_current_bg` | `color-mix(in srgb, var(--amber) 16%, transparent)` | `rgba(154,66,0,0.14)` | Output-line background for the current signal-scoped search match |
 | `search_signal_current_accent` | `color-mix(in srgb, var(--amber) 88%, transparent)` | `rgba(154,66,0,0.42)` | Output-line left accent for the current signal-scoped search match |
 
-### Action and Selection Text
+### Inline Surfaces
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
-| `on_accent_text` | `#000` | `#000` | Text on bright accent fills such as the caret block and run button |
-| `selection_text` | `#f7fff2` | `#f7fff2` | Prompt selection text color |
-| `selection_line_text` | `#eef7ee` | `#eef7ee` | Prompt line text while a selection is active |
-| `modal_danger_btn_text` | `#fff` | `#fff` | Text for danger-tone modal buttons |
-| `modal_warning_btn_text` | `#000` | `#000` | Text for warning-tone modal buttons |
+| `inline_surface_bg` | `#141414` | `#dce6f0` | Inline code, allowed-command chips, and compact embedded surfaces |
 
 ### Toasts
 
@@ -384,11 +379,21 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
+| `welcome_ascii_color` | `var(--green)` | `var(--green)` | Direct ASCII-art text color before filter and shadow treatment |
 | `welcome_command_hover_bg` | `color-mix(in srgb, var(--green) 6%, transparent)` | `rgba(42,93,24,0.06)` | Hover state for clickable welcome commands |
 | `welcome_command_hover_shadow` | `0 0 0 1px var(--green-glow)` | `0 0 0 1px rgba(42,93,24,0.1)` | Hover outline for clickable welcome commands |
-| `welcome_ascii_color` | `var(--green)` | `var(--green)` | Direct ASCII-art text color before filter and shadow treatment |
 | `welcome_ascii_text_shadow` | `0 0 10px color-mix(in srgb, var(--green) 14%, transparent), 0 0 4px color-mix(in srgb, var(--green) 18%, transparent), 0 1px 0 rgba(8,16,12,0.4)` | `0 0 0 transparent, 0 0 0 transparent, 0 1px 0 rgba(255,255,255,0.5)` | Welcome ASCII art text shadow |
 | `welcome_ascii_filter` | `saturate(1.12) contrast(1.08) brightness(1.08)` | `saturate(0.9) contrast(0.95) brightness(0.9)` | Welcome ASCII art filter |
+
+### Action and Selection Text
+
+| Key | Dark default | Light default | Used for |
+|-----|--------------|---------------|----------|
+| `on_accent_text` | `#000` | `#000` | Text on bright accent fills such as the caret block and run button |
+| `selection_text` | `#f7fff2` | `#f7fff2` | Prompt selection text color |
+| `selection_line_text` | `#eef7ee` | `#eef7ee` | Prompt line text while a selection is active |
+| `modal_danger_btn_text` | `#fff` | `#fff` | Text for danger-tone modal buttons |
+| `modal_warning_btn_text` | `#000` | `#000` | Text for warning-tone modal buttons |
 
 ---
 

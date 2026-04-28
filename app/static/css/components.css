@@ -798,7 +798,7 @@ body #history-panel { background: var(--theme-chrome-bg); }
   border-bottom: 1px solid var(--border);
   background: var(--theme-chrome-row-bg);
 }
-.history-mobile-filters-toggle {
+.history-mobile-filters-toggle.btn {
   display: none;
 }
 .history-advanced-filters {

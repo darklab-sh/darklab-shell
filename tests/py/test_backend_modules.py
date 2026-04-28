@@ -37,7 +37,7 @@ import fake_commands
 import session_variables
 import workspace as workspace_module
 from commands import (
-    split_chained_commands, load_all_faq, load_faq,
+    split_chained_commands, load_all_faq, load_all_workflows, load_faq,
     load_welcome, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
     load_mobile_welcome_hints, autocomplete_context_from_commands_registry,
     load_autocomplete_context_from_commands_registry, load_command_policy, load_container_smoke_test_commands,
@@ -766,6 +766,37 @@ class TestDerivedCommandRegistry:
         assert context["ping"]["examples"][0]["value"] == "ping -c 4 darklab.sh"
         assert context["grep"]["pipe_command"] is True
 
+    def test_builtin_autocomplete_registry_uses_app_owned_yaml(self):
+        context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
+
+        assert context["commands"]["flags"][0]["value"] == "--built-in"
+        assert context["runs"]["flags"][-1]["value"] == "--json"
+        assert context["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
+        assert [item["value"] for item in context["var"]["arg_hints"]["__positional__"]] == [
+            "list",
+            "set",
+            "unset",
+        ]
+        assert context["var"]["close_after"] == {"list": 0, "set": 2, "unset": 1}
+
+    def test_builtin_autocomplete_workspace_roots_follow_feature_flag(self):
+        disabled = load_autocomplete_context_from_commands_registry({"workspace_enabled": False})
+        enabled = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
+
+        assert {"file", "cat", "ls", "rm"}.isdisjoint(disabled)
+        assert {"file", "cat", "ls", "rm"}.issubset(enabled)
+        assert [item["value"] for item in enabled["file"]["arg_hints"]["__positional__"]] == [
+            "list",
+            "show <file>",
+            "add <file>",
+            "edit <file>",
+            "download <file>",
+            "delete <file>",
+            "help",
+        ]
+        assert "rm" in enabled["file"]["expects_value"]
+        assert "rm" in enabled["file"]["arg_hints"]
+
     def test_real_registry_workspace_file_flags_cover_supported_file_io_tools(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = {
@@ -1145,12 +1176,51 @@ class TestLoadFaq:
 # ── load_theme_registry / load_theme ─────────────────────────────────────────
 
 class TestThemeRegistry:
+    _THEME_METADATA_KEYS = {"label", "group", "sort"}
+    _RETIRED_THEME_KEYS = {
+        "chip_bg",
+        "chip_border",
+        "chip_text",
+        "confirm_modal_bg",
+        "dropdown_up_bg",
+        "dropdown_up_border",
+        "dropdown_up_shadow",
+        "form_control_bg",
+        "history_load_modal_bg",
+        "history_load_modal_border",
+        "history_load_modal_shadow",
+        "history_panel_shadow",
+        "mobile_composer_host_bg",
+        "mobile_composer_host_light_bg",
+        "mobile_menu_shadow",
+        "modal_header_bg",
+        "modal_section_bg",
+        "panel_alt_bg",
+        "tab_status_ok_bg",
+        "tabs_scroll_btn_bg",
+        "tabs_scroll_btn_border",
+        "tabs_scroll_btn_text",
+        "terminal_actions_bg",
+        "terminal_bar_border",
+        "window_btn_bg",
+        "window_btn_border",
+        "window_btn_text",
+    }
+
     def _write_theme(self, root, name, content):
         theme_dir = root / "themes"
         theme_dir.mkdir(parents=True, exist_ok=True)
         path = theme_dir / f"{name}.yaml"
         path.write_text(textwrap.dedent(content))
         return theme_dir, path
+
+    def _shipped_theme_files(self):
+        return sorted((REPO_ROOT / "app" / "conf" / "themes").glob("*.yaml"))
+
+    def _load_shipped_theme_yaml(self, path):
+        data = yaml.safe_load(path.read_text()) or {}
+        assert isinstance(data, dict), f"{path.name} must be a YAML mapping"
+        return data
 
     def test_missing_label_falls_back_to_humanized_filename(self, tmp_path, monkeypatch):
         theme_dir, _ = self._write_theme(
@@ -1292,6 +1362,95 @@ class TestThemeRegistry:
 
         assert dark_actual == dark_expected, "theme_dark.yaml.example is out of sync; run ./scripts/generate_theme_examples.py"
         assert light_actual == light_expected, "theme_light.yaml.example is out of sync; run ./scripts/generate_theme_examples.py"
+
+    def test_shipped_theme_files_have_complete_matching_key_sets(self):
+        required_keys = set(app_config._THEME_DEFAULTS["dark"]) | {"color_scheme"}
+        issues = []
+        for theme_path in self._shipped_theme_files():
+            data = self._load_shipped_theme_yaml(theme_path)
+            keys = set(data) - self._THEME_METADATA_KEYS
+            missing = sorted(required_keys - keys)
+            extra = sorted(keys - required_keys)
+            if missing:
+                issues.append(f"{theme_path.name} missing keys: {', '.join(missing)}")
+            if extra:
+                issues.append(f"{theme_path.name} has unknown keys: {', '.join(extra)}")
+
+        assert not issues, "Shipped theme YAML key drift:\n" + "\n".join(issues)
+
+    def test_shipped_themes_do_not_reintroduce_retired_keys(self):
+        issues = []
+        for theme_path in self._shipped_theme_files():
+            data = self._load_shipped_theme_yaml(theme_path)
+            retired = sorted(set(data) & self._RETIRED_THEME_KEYS)
+            if retired:
+                issues.append(f"{theme_path.name}: {', '.join(retired)}")
+
+        assert not issues, "Retired theme keys were reintroduced:\n" + "\n".join(issues)
+
+    def test_theme_key_reference_matches_runtime_order_and_defaults(self):
+        theme_doc = (REPO_ROOT / "THEME.md").read_text()
+        row_re = re.compile(r"^\| `([^`]+)` \| `([^`]*)` \| `([^`]*)` \| ", re.MULTILINE)
+        rows = row_re.findall(theme_doc.split("## Theme Key Reference", 1)[1])
+        documented_keys = [key for key, _, _ in rows]
+        expected_keys = list(app_config._THEME_CSS_ORDER)
+
+        assert documented_keys == expected_keys, (
+            "THEME.md Theme Key Reference drifted from _THEME_CSS_ORDER"
+        )
+
+        default_issues = []
+        for key, dark_value, light_value in rows:
+            expected_dark = str(app_config._THEME_DEFAULTS["dark"][key])
+            expected_light = str(app_config._THEME_DEFAULTS["light"][key])
+            if dark_value != expected_dark:
+                default_issues.append(f"{key}: dark doc={dark_value!r}, expected={expected_dark!r}")
+            if light_value != expected_light:
+                default_issues.append(f"{key}: light doc={light_value!r}, expected={expected_light!r}")
+
+        assert not default_issues, (
+            "THEME.md Theme Key Reference default values drifted:\n"
+            + "\n".join(default_issues)
+        )
+
+    def test_css_theme_var_references_are_defined_or_explicitly_fallbacked(self):
+        known_theme_vars = {
+            f"--theme-{key.replace('_', '-')}" for key in app_config._THEME_CSS_ORDER
+        }
+        var_call_re = re.compile(r"var\((--theme-[\w-]+)([^)]*)\)")
+        issues = []
+
+        for css_path in sorted((REPO_ROOT / "app" / "static" / "css").glob("*.css")):
+            for line_no, line in enumerate(css_path.read_text().splitlines(), start=1):
+                for match in var_call_re.finditer(line):
+                    var_name = match.group(1)
+                    if var_name in known_theme_vars:
+                        continue
+                    if "," in match.group(2):
+                        continue
+                    issues.append(f"{css_path.relative_to(REPO_ROOT)}:{line_no} uses undefined {var_name}")
+
+        assert not issues, "CSS references undefined theme vars without fallbacks:\n" + "\n".join(issues)
+
+    def test_css_color_literals_are_theme_vars_or_var_derived(self):
+        color_re = re.compile(r"(#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|\bcolor-mix\()")
+        issues = []
+
+        for css_path in sorted((REPO_ROOT / "app" / "static" / "css").glob("*.css")):
+            for line_no, line in enumerate(css_path.read_text().splitlines(), start=1):
+                stripped = line.strip()
+                if not color_re.search(stripped):
+                    continue
+                if stripped.startswith("--"):
+                    continue
+                if "var(--" in stripped:
+                    continue
+                issues.append(f"{css_path.relative_to(REPO_ROOT)}:{line_no}: {stripped}")
+
+        assert not issues, (
+            "CSS color literals outside token definitions must be var-derived or moved into theme vars:\n"
+            + "\n".join(issues)
+        )
 
     def test_darklab_obsidian_matches_dark_defaults_and_example(self):
         dark_example = yaml.safe_load((REPO_ROOT / "app" / "conf" / "theme_dark.yaml.example").read_text()) or {}
@@ -2415,6 +2574,26 @@ class TestWorkflowInputLoading:
                     {"cmd": "ping {{host}}", "note": ""},
                 ],
             }
+        ]
+
+    def test_load_all_workflows_filters_workspace_required_workflows(self):
+        disabled = load_all_workflows({"workspace_enabled": False})
+        enabled = load_all_workflows({"workspace_enabled": True})
+
+        disabled_titles = {item["title"] for item in disabled}
+        enabled_titles = {item["title"] for item in enabled}
+
+        assert "Subdomain HTTP Triage" not in disabled_titles
+        assert "Crawl And Scan" not in disabled_titles
+        assert "Subdomain HTTP Triage" in enabled_titles
+        assert "Crawl And Scan" in enabled_titles
+
+        subdomain = next(item for item in enabled if item["title"] == "Subdomain HTTP Triage")
+        assert subdomain["feature_required"] == "workspace"
+        assert [step["cmd"] for step in subdomain["steps"]] == [
+            "subfinder -d {{domain}} -silent -o subdomains.txt",
+            "pd-httpx -l subdomains.txt -silent -o live-urls.txt",
+            "pd-httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt",
         ]
 
 

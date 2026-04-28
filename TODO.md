@@ -22,51 +22,6 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Open TODOs
 
-- **Refresh theme preview cards for the current desktop shell**
-  - The Theme selector preview cards still approximate the pre-v1.6 terminal-window layout instead of the current desktop shell with rail, tabbar, content pane, HUD, and drawer-style chrome.
-  - Remove any remaining stale visual affordances from the preview cards as they are discovered.
-  - Redesign the preview thumbnail to show the canonical v1.6 surfaces:
-    - left rail / chrome strip using `chrome_bg`
-    - top tabbar with an active tab using `tab_active_bg`
-    - terminal/content panel using `panel_bg`
-    - bottom HUD/chrome row using `chrome_bg` / `chrome_row_bg`
-    - representative accent/status elements using the semantic green, amber, red, blue, and muted palette
-  - Keep the preview compact and schematic; it should communicate theme contrast and surface relationships, not reproduce the entire UI.
-  - Add/update unit coverage around the theme-card DOM structure so obsolete preview-only tokens do not creep back into the theme key set.
-
-- **Run Monitor telemetry polish**
-  - Build on the existing CPU and memory meters only where it adds clear operator value:
-    - tiny per-run CPU sparklines using the existing polling samples
-    - peak CPU / peak memory while the drawer is open
-    - an "idle" indicator when CPU stays near zero for a sustained window
-    - optional configured warning thresholds for runaway memory or sustained high CPU
-
-- **Workspace-native chained recon workflows**
-  - Add guided workflows that demonstrate the Files feature as an app-mediated pipeline: one recon tool writes a session file, and a later tool reads that generated file through declared workspace-aware flags.
-  - Keep these workflows small and reviewable. They should show why Files exists without turning `Run all` into a huge scanner blast.
-  - Registry prerequisites:
-    - Add `subfinder -o` as a workspace write flag so subdomain discovery can produce a clean line-oriented `subdomains.txt`.
-    - Verify `pd-httpx -silent -o live-urls.txt` emits clean URL lines suitable for `nuclei -l` and follow-up probes.
-    - Keep all file-reading/file-writing examples marked with `feature_required: workspace` so they only appear when Files are enabled and so generic smoke cases do not run them without setup.
-  - Candidate workflow: **Subdomain HTTP Triage**
-    - Input: `domain`
-    - `subfinder -d {{domain}} -silent -o subdomains.txt`
-    - `pd-httpx -l subdomains.txt -silent -o live-urls.txt`
-    - `pd-httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt`
-    - Output files: `subdomains.txt`, `live-urls.txt`, `http-summary.txt`
-  - Candidate workflow: **Crawl And Scan**
-    - Input: `url`
-    - `katana -u {{url}} -d 1 -silent -o crawled-urls.txt`
-    - `pd-httpx -l crawled-urls.txt -status-code -title -o crawled-http.txt`
-    - `nuclei -l crawled-urls.txt -severity high,critical -o nuclei-findings.txt`
-    - Output files: `crawled-urls.txt`, `crawled-http.txt`, `nuclei-findings.txt`
-  - Test coverage:
-    - Add/update smoke workspace fixtures for each new chained example that reaches `commands.yaml`.
-    - Add workflow rendering coverage so `Run all` preserves sequential same-tab behavior with generated file names.
-    - Verify workflows are hidden or clearly disabled when Files are disabled if their steps depend on workspace-only flags.
-
----
-
 ## Research
 
 ---
@@ -77,27 +32,26 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Technical Debt
 
-- **Theme visual drift guardrails**
-  - Add lightweight checks that prevent shared surface-token drift from returning:
-    - flag new hardcoded modal/drawer/sheet background colors unless explicitly allowlisted
-    - flag new per-surface background tokens when an existing canonical token should be used
-    - add visual capture coverage for Options, FAQ, Keyboard Shortcuts, Workflows, Files, History drawer, Run Monitor, and mobile sheets in default dark plus one light theme
-
-- **Move built-in autocomplete grammar into the command registry**
-  - Current state:
-    - External command autocomplete is declarative in `app/conf/commands.yaml`.
-    - Several built-in commands (`var`, `file`, `runs`, `session-token`, `config`, `theme`, `man`, `which`, `type`) rebuild similar autocomplete structures in `app/static/js/app.js`.
-    - This duplicates registry concepts such as subcommands, flags, `closes: true`, value expectations, examples, and argument hints.
-  - Target shape:
-    - Add a built-in autocomplete section to the registry, likely separate from external `commands:` entries so app-owned command grammar does not look like external execution policy.
-    - Keep static grammar in YAML: roots, subcommands, flags, examples, descriptions, `closes`, `takes_value`, argument placeholders, and sequence/value expectations.
-    - Keep dynamic suggestion providers in code behind named hooks, such as workspace files, session variables, theme names, config option values, and command lookup candidates for `man` / `which` / `type`.
-    - Have `/autocomplete` merge external command context and built-in command context into the same frontend shape the matcher already understands.
-    - Remove duplicated built-in autocomplete object construction from `app/static/js/app.js` after parity tests are in place.
-  - Testing:
-    - Add loader tests proving built-in registry metadata maps to the same frontend context shape as external command metadata.
-    - Add autocomplete tests for `closes: true`, subcommand value expectations, runtime hook fallback, and dynamic suggestions layered onto declarative built-in grammar.
-    - Keep workspace/theme/config/session-variable autocomplete regression tests during the migration.
+- **Front-end stale UI cleanup audit**
+  - Goal:
+    - Do a comprehensive review of the front-end templates, CSS, and JavaScript for UI code left behind by the v1.6 redesign and mobile shell iterations.
+    - Remove or quarantine stale selectors, DOM fragments, helper code, and tests only when they are confirmed unused in the current desktop/mobile UI.
+  - Known examples to start with:
+    - Old desktop tab-bar styling that still visually reads like the pre-redesign tab bar even though the current desktop shell uses the newer chrome/tab structure.
+    - Old mobile keyboard helper code/styles from the previous composer-helper design that may no longer be active after the mobile composer and helper-row revisions.
+  - Review scope:
+    - `app/templates/index.html` for stale elements, hidden compatibility containers, and modal/sheet fragments no longer opened by current JS.
+    - `app/static/css/*.css` for selectors that no longer match current DOM, duplicated legacy layouts, stale mobile-only rules, obsolete preview-only theme-card styles, and component-specific rules superseded by shared primitives.
+    - `app/static/js/*.js` for event handlers, state fields, feature flags, helper exports, and migration/compatibility paths that are no longer reachable.
+    - `tests/js/unit` and `tests/js/e2e` for coverage that still protects legacy behavior instead of the current UI contract.
+  - Suggested method:
+    - Start with static searches for old class/id names, hidden elements, and selectors that do not appear in templates or JS-created markup.
+    - Cross-check browser runtime behavior with focused desktop and mobile smoke flows before deleting anything.
+    - Prefer small cleanup commits by surface: desktop shell chrome, mobile composer/helper, modals/sheets, theme previews, and history/search controls.
+  - Guardrails:
+    - Do not remove elements that exist as accessibility anchors, focus traps, progressive enhancement fallbacks, test harness targets, or storage-migration compatibility until their replacement path is confirmed.
+    - Keep visual review separate from cleanup where possible: first remove dead code, then tune live code.
+    - Update button primitive allowlists, project-structure docs, and frontend design-system docs if cleanup changes the current UI contract.
 
 ---
 

@@ -1751,39 +1751,78 @@ function _buildThemePreviewCard(theme) {
   preview.className = 'theme-card-preview';
   preview.setAttribute('aria-hidden', 'true');
 
-  const bar = document.createElement('span');
-  bar.className = 'theme-card-preview-bar';
-  const pill = document.createElement('span');
-  pill.className = 'theme-card-preview-pill';
-  bar.appendChild(pill);
-
-  const panel = document.createElement('span');
-  panel.className = 'theme-card-preview-panel';
-  const prompt = document.createElement('span');
-  prompt.className = 'theme-card-preview-prompt';
-  const prefix = document.createElement('span');
-  prefix.className = 'theme-card-preview-prefix';
-  prefix.textContent = (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.prompt_prefix) || 'anon@darklab:~$';
-  prompt.appendChild(prefix);
-
-  const line1 = document.createElement('span');
-  line1.className = 'theme-card-preview-line';
-  const line2 = document.createElement('span');
-  line2.className = 'theme-card-preview-line theme-card-preview-line-short';
-  const chipRow = document.createElement('span');
-  chipRow.className = 'theme-card-preview-chip-row';
-  for (let i = 0; i < 2; i += 1) {
-    const chip = document.createElement('span');
-    chip.className = 'theme-card-preview-chip';
-    chipRow.appendChild(chip);
+  const rail = document.createElement('span');
+  rail.className = 'theme-card-preview-rail';
+  for (let i = 0; i < 3; i += 1) {
+    const railSection = document.createElement('span');
+    railSection.className = 'theme-card-preview-rail-section';
+    const railHeader = document.createElement('span');
+    railHeader.className = 'theme-card-preview-rail-header';
+    railSection.appendChild(railHeader);
+    for (let j = 0; j < 2; j += 1) {
+      const railLine = document.createElement('span');
+      railLine.className = 'theme-card-preview-rail-line';
+      railSection.appendChild(railLine);
+    }
+    rail.appendChild(railSection);
   }
 
-  panel.appendChild(prompt);
-  panel.appendChild(line1);
-  panel.appendChild(line2);
-  panel.appendChild(chipRow);
-  preview.appendChild(bar);
-  preview.appendChild(panel);
+  const shell = document.createElement('span');
+  shell.className = 'theme-card-preview-shell';
+
+  const tabbar = document.createElement('span');
+  tabbar.className = 'theme-card-preview-tabbar';
+  const activeTab = document.createElement('span');
+  activeTab.className = 'theme-card-preview-tab theme-card-preview-tab-active';
+  const idleTab = document.createElement('span');
+  idleTab.className = 'theme-card-preview-tab';
+  tabbar.appendChild(activeTab);
+  tabbar.appendChild(idleTab);
+
+  const content = document.createElement('span');
+  content.className = 'theme-card-preview-content';
+  const prompt = document.createElement('span');
+  prompt.className = 'theme-card-preview-prompt';
+  prompt.textContent = (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.prompt_prefix) || 'anon@darklab:~$';
+  content.appendChild(prompt);
+  for (let index = 0; index < 4; index += 1) {
+    const line = document.createElement('span');
+    line.className = 'theme-card-preview-line';
+    line.style.setProperty('--theme-preview-line-width', `${86 - (index * 13)}%`);
+    content.appendChild(line);
+  }
+
+  const modal = document.createElement('span');
+  modal.className = 'theme-card-preview-modal';
+  const modalHeader = document.createElement('span');
+  modalHeader.className = 'theme-card-preview-modal-header';
+  const modalBody = document.createElement('span');
+  modalBody.className = 'theme-card-preview-modal-body';
+  const modalActions = document.createElement('span');
+  modalActions.className = 'theme-card-preview-modal-actions';
+  for (let i = 0; i < 2; i += 1) {
+    const modalButton = document.createElement('span');
+    modalButton.className = 'theme-card-preview-modal-button';
+    modalActions.appendChild(modalButton);
+  }
+  modal.appendChild(modalHeader);
+  modal.appendChild(modalBody);
+  modal.appendChild(modalActions);
+
+  const hud = document.createElement('span');
+  hud.className = 'theme-card-preview-hud';
+  for (let i = 0; i < 5; i += 1) {
+    const cell = document.createElement('span');
+    cell.className = 'theme-card-preview-hud-cell';
+    hud.appendChild(cell);
+  }
+
+  shell.appendChild(tabbar);
+  shell.appendChild(content);
+  shell.appendChild(modal);
+  shell.appendChild(hud);
+  preview.appendChild(rail);
+  preview.appendChild(shell);
 
   const label = document.createElement('span');
   label.className = 'theme-card-label';
@@ -2219,65 +2258,86 @@ function _runtimeContextSpec({
   };
 }
 
-const _runtimeBuiltinCommandInfo = [
-  ['banner', 'built-in: print the configured banner art'],
-  ['cat', 'built-in: show a session file'],
-  ['clear', 'built-in: clear the current terminal tab output'],
-  ['commands', 'built-in: list built-in and allowed external commands'],
-  ['config', 'built-in: show or update user options'],
-  ['date', 'built-in: show the current server time'],
-  ['df', 'built-in: show a compact filesystem summary'],
-  ['env', 'built-in: show core environment values for this shell'],
-  ['faq', 'built-in: show configured FAQ entries'],
-  ['file', 'built-in: list, view, create, edit, download, or remove session files'],
-  ['fortune', 'built-in: print a short operator-themed one-liner'],
-  ['free', 'built-in: show a compact memory summary'],
-  ['groups', 'built-in: show the shell group membership'],
-  ['help', 'built-in: show README, FAQ, shortcuts, and command-discovery guidance'],
-  ['history', 'built-in: list recent commands from this session'],
-  ['hostname', 'built-in: show the configured shell instance name'],
-  ['id', 'built-in: show the shell identity'],
-  ['ip', 'built-in: show a minimal shell network interface view'],
-  ['jobs', 'built-in: alias for runs'],
-  ['last', 'built-in: show recent completed runs with timestamps and exit codes'],
-  ['limits', 'built-in: show configured runtime, history, and retention limits'],
-  ['ls', 'built-in: list session files'],
-  ['man', 'built-in: show a real or built-in manual page'],
-  ['ps', 'built-in: show the current shell process view'],
-  ['pwd', 'built-in: show the session files path'],
-  ['retention', 'built-in: show retention and persisted-output settings'],
-  ['rm', 'built-in: remove a session file after confirmation'],
-  ['route', 'built-in: show the shell routing table summary'],
-  ['runs', 'built-in: show active runs; use -v for details or --json for automation'],
-  ['session-token', 'built-in: show or manage persistent session tokens'],
-  ['shortcuts', 'built-in: show current keyboard shortcuts'],
-  ['stats', 'built-in: show session activity totals and command breakdowns'],
-  ['status', 'built-in: show the current session summary, limits, and backend health'],
-  ['theme', 'built-in: show or apply the active shell theme'],
-  ['tty', 'built-in: show the web terminal device path'],
-  ['type', 'built-in: describe whether a command is built-in, installed, or missing'],
-  ['uname', 'built-in: show the shell platform string'],
-  ['uptime', 'built-in: show app uptime since process start'],
-  ['var', 'built-in: set, list, or unset session command variables'],
-  ['version', 'built-in: show shell, app, Flask, and Python version details'],
-  ['which', 'built-in: locate a built-in command or allowed runtime command'],
-  ['who', 'built-in: show the current shell user and session'],
-  ['whoami', 'built-in: describe this shell and link to the project README'],
-];
-
-const _runtimeWorkspaceBuiltinNames = new Set(['cat', 'file', 'ls', 'rm']);
-
 function isWorkspaceFeatureEnabled() {
   return !!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true);
 }
 
-function _runtimeActiveBuiltinCommandInfo() {
-  if (isWorkspaceFeatureEnabled()) return _runtimeBuiltinCommandInfo;
-  return _runtimeBuiltinCommandInfo.filter(([name]) => !_runtimeWorkspaceBuiltinNames.has(name));
+function _runtimeSpecEnabledForFeatures(root, spec) {
+  const featureRequired = spec && spec.feature_required;
+  const features = Array.isArray(featureRequired) ? featureRequired : [featureRequired];
+  if (features.some(feature => String(feature || '').toLowerCase() === 'workspace')) {
+    return isWorkspaceFeatureEnabled();
+  }
+  return !['file', 'cat', 'ls', 'rm'].includes(String(root || '').toLowerCase()) || isWorkspaceFeatureEnabled();
 }
 
-function _runtimeBuiltinDescription(root) {
-  return _runtimeActiveBuiltinCommandInfo().find(([name]) => name === root)?.[1] || 'built-in command';
+function _cloneRuntimeSpec(spec) {
+  if (!spec || typeof spec !== 'object') return _runtimeContextSpec();
+  try {
+    return JSON.parse(JSON.stringify(spec));
+  } catch (err) {
+    return _runtimeContextSpec();
+  }
+}
+
+function _runtimeMergeHints(baseHints = {}, overlayHints = {}) {
+  const merged = Object.assign({}, baseHints || {});
+  Object.entries(overlayHints || {}).forEach(([trigger, hints]) => {
+    const bucket = Array.isArray(merged[trigger]) ? merged[trigger].slice() : [];
+    const seen = new Set(bucket.map(item => String(item && item.value || '').toLowerCase()));
+    (hints || []).forEach((hint) => {
+      const value = String(hint && hint.value || '');
+      const key = value.toLowerCase();
+      if (!value || seen.has(key)) return;
+      seen.add(key);
+      bucket.push(hint);
+    });
+    merged[trigger] = bucket;
+  });
+  return merged;
+}
+
+function _runtimeMergeContextSpec(baseSpec = {}, overlaySpec = {}) {
+  const merged = _cloneRuntimeSpec(baseSpec);
+  const appendItems = (key) => {
+    const bucket = Array.isArray(merged[key]) ? merged[key] : [];
+    const seen = new Set(bucket.map(item => String(item && item.value != null ? item.value : item).toLowerCase()));
+    (overlaySpec[key] || []).forEach((item) => {
+      const raw = item && item.value != null ? item.value : item;
+      const value = String(raw || '');
+      const lookup = value.toLowerCase();
+      if (!value || seen.has(lookup)) return;
+      seen.add(lookup);
+      bucket.push(item);
+    });
+    merged[key] = bucket;
+  };
+  appendItems('flags');
+  appendItems('expects_value');
+  appendItems('examples');
+  merged.arg_hints = _runtimeMergeHints(merged.arg_hints, overlaySpec.arg_hints);
+  merged.sequence_arg_hints = _runtimeMergeHints(merged.sequence_arg_hints, overlaySpec.sequence_arg_hints);
+  merged.close_after = Object.assign({}, merged.close_after || {}, overlaySpec.close_after || {});
+  if (Number.isInteger(overlaySpec.argument_limit) && overlaySpec.argument_limit > 0) {
+    merged.argument_limit = overlaySpec.argument_limit;
+  }
+  return merged;
+}
+
+function _runtimeActiveBuiltinRoots(baseRegistry = {}) {
+  const roots = new Set(
+    Array.isArray(acBuiltinCommandRoots) ? acBuiltinCommandRoots.map(root => String(root || '')) : [],
+  );
+  Object.entries(baseRegistry || {}).forEach(([root, spec]) => {
+    if (spec && typeof spec === 'object' && String(spec.description || '').startsWith('built-in:')) {
+      roots.add(root);
+    }
+  });
+  return [...roots].filter(Boolean).sort();
+}
+
+function _runtimeBuiltinDescription(root, baseRegistry = {}) {
+  return String(baseRegistry[root]?.description || 'built-in command');
 }
 
 function _runtimeAllowedCommandRoots() {
@@ -2293,8 +2353,14 @@ function _runtimeAllowedCommandRoots() {
 }
 
 function _runtimeCommandLookupHints(baseRegistry = {}, descriptionForExternal = 'manual page') {
-  const builtinNames = new Set(_runtimeActiveBuiltinCommandInfo().map(([name]) => name));
-  const externalRoots = new Set(Object.keys(baseRegistry || {}));
+  const builtinNames = new Set(
+    _runtimeActiveBuiltinRoots(baseRegistry)
+      .filter(root => _runtimeSpecEnabledForFeatures(root, baseRegistry[root])),
+  );
+  const externalRoots = new Set(
+    Object.keys(baseRegistry || {})
+      .filter(root => _runtimeSpecEnabledForFeatures(root, baseRegistry[root])),
+  );
   _runtimeAllowedCommandRoots().forEach(root => externalRoots.add(root));
   builtinNames.forEach(root => externalRoots.delete(root));
 
@@ -2303,76 +2369,10 @@ function _runtimeCommandLookupHints(baseRegistry = {}, descriptionForExternal = 
     items.push(_runtimeHint(root, `${root} ${descriptionForExternal}`));
   });
   [...builtinNames].sort().forEach(root => {
-    items.push(_runtimeHint(root, _runtimeBuiltinDescription(root)));
+    items.push(_runtimeHint(root, _runtimeBuiltinDescription(root, baseRegistry)));
   });
   items.push(_runtimeHint('<command>', 'Any built-in or allowed command'));
   return items;
-}
-
-function _runtimeStaticBuiltinContext() {
-  const emptySpec = _runtimeContextSpec();
-  const context = Object.fromEntries(
-    _runtimeActiveBuiltinCommandInfo().map(([root]) => [root, emptySpec]),
-  );
-
-  context.ps = _runtimeContextSpec({
-    flags: [
-      _runtimeHint('aux', 'All processes with user and memory info'),
-      _runtimeHint('-ef', 'All processes, full format'),
-    ],
-  });
-  context.df = _runtimeContextSpec({ flags: [_runtimeHint('-h', 'Human-readable disk usage')] });
-  context.free = _runtimeContextSpec({ flags: [_runtimeHint('-h', 'Human-readable memory usage')] });
-  context.uname = _runtimeContextSpec({ flags: [_runtimeHint('-a', 'All system information')] });
-  context.ip = _runtimeContextSpec({
-    argHints: { __positional__: [_runtimeHint('a', 'Show all network interfaces and addresses')] },
-  });
-  context.commands = _runtimeContextSpec({
-    flags: [
-      _runtimeHint('--built-in', 'Show only built-in shell commands'),
-      _runtimeHint('--external', 'Show only allowed external commands'),
-    ],
-  });
-  const activeRunFlags = [
-    _runtimeHint('-v', 'Show full IDs, started timestamps, and metadata source'),
-    _runtimeHint('--verbose', 'Show full IDs, started timestamps, and metadata source'),
-    _runtimeHint('--json', 'Print active-run metadata as JSON'),
-  ];
-  context.runs = _runtimeContextSpec({ flags: activeRunFlags });
-  context.jobs = _runtimeContextSpec({ flags: activeRunFlags });
-  if (isWorkspaceFeatureEnabled()) {
-    context.cat = _runtimeContextSpec({
-      argumentLimit: 1,
-      argHints: { __positional__: _runtimeWorkspaceFileHints() },
-    });
-    context.ls = _runtimeContextSpec({ argumentLimit: 0 });
-    context.rm = _runtimeContextSpec({
-      argumentLimit: 1,
-      argHints: { __positional__: _runtimeWorkspaceFileHints() },
-    });
-  }
-  context['session-token'] = _runtimeContextSpec({
-    expectsValue: ['set', 'revoke'],
-    argHints: {
-      generate: [],
-      copy: [],
-      clear: [],
-      rotate: [],
-      list: [],
-      set: [_runtimeHint('<token>', 'Paste a tok_... token or UUID from another device')],
-      revoke: [_runtimeHint('<token>', 'tok_ token to permanently invalidate on the server')],
-      __positional__: [
-        _runtimeHint('generate', 'Generate a new session token and save it to this browser'),
-        _runtimeHint('set <token>', 'Activate an existing session token from another device', 'set '),
-        _runtimeHint('copy', 'Copy the active session token to the clipboard'),
-        _runtimeHint('clear', 'Confirm before removing the active session token'),
-        _runtimeHint('rotate', 'Generate a new token and migrate all history to it'),
-        _runtimeHint('list', 'Show the active session token and its creation date'),
-        _runtimeHint('revoke <token>', 'Permanently invalidate a tok_ token on this server', 'revoke '),
-      ],
-    },
-  });
-  return context;
 }
 
 function _runtimeWorkspaceFileHints() {
@@ -2383,13 +2383,11 @@ function _runtimeWorkspaceFileHints() {
 function _runtimeWorkspaceContext() {
   const fileHints = _runtimeWorkspaceFileHints();
   return _runtimeContextSpec({
-    expectsValue: ['show', 'cat', 'add', 'edit', 'download', 'rm', 'delete'],
+    expectsValue: ['show', 'add', 'edit', 'download', 'rm', 'delete'],
     argHints: {
       list: [],
-      ls: [],
       help: [],
       show: fileHints,
-      cat: fileHints,
       add: [_runtimeHint('<file>', 'New session file name')],
       edit: fileHints,
       download: fileHints,
@@ -2401,7 +2399,7 @@ function _runtimeWorkspaceContext() {
         _runtimeHint('add <file>', 'Open the Files editor for a new session file', 'add '),
         _runtimeHint('edit <file>', 'Open the Files editor for an existing session file', 'edit '),
         _runtimeHint('download <file>', 'Download a session file through the browser', 'download '),
-        _runtimeHint('rm <file>', 'Remove a session file from this session', 'rm '),
+        _runtimeHint('delete <file>', 'Remove a session file from this session', 'delete '),
         _runtimeHint('help', 'Show file command usage'),
       ],
     },
@@ -2493,24 +2491,38 @@ function _runtimeVarContext() {
 }
 
 function getRuntimeAutocompleteContext(baseRegistry = {}) {
-  const context = _runtimeStaticBuiltinContext();
+  const context = {};
+  _runtimeActiveBuiltinRoots(baseRegistry).forEach((root) => {
+    if (baseRegistry[root] && _runtimeSpecEnabledForFeatures(root, baseRegistry[root])) {
+      context[root] = _cloneRuntimeSpec(baseRegistry[root]);
+    }
+  });
   const lookupHints = _runtimeCommandLookupHints(baseRegistry);
-  context.theme = _runtimeThemeContext();
-  context.config = _runtimeConfigContext();
-  context.var = _runtimeVarContext();
-  if (isWorkspaceFeatureEnabled()) context.file = _runtimeWorkspaceContext();
-  context.man = _runtimeContextSpec({
-    argumentLimit: 1,
+  context.theme = _runtimeMergeContextSpec(baseRegistry.theme, _runtimeThemeContext());
+  context.config = _runtimeMergeContextSpec(baseRegistry.config, _runtimeConfigContext());
+  context.var = _runtimeMergeContextSpec(baseRegistry.var, _runtimeVarContext());
+  if (isWorkspaceFeatureEnabled() && baseRegistry.file) {
+    context.file = _runtimeMergeContextSpec(baseRegistry.file, _runtimeWorkspaceContext());
+  }
+  if (isWorkspaceFeatureEnabled() && baseRegistry.cat) {
+    context.cat = _runtimeMergeContextSpec(baseRegistry.cat, _runtimeContextSpec({
+      argHints: { __positional__: _runtimeWorkspaceFileHints() },
+    }));
+  }
+  if (isWorkspaceFeatureEnabled() && baseRegistry.rm) {
+    context.rm = _runtimeMergeContextSpec(baseRegistry.rm, _runtimeContextSpec({
+      argHints: { __positional__: _runtimeWorkspaceFileHints() },
+    }));
+  }
+  context.man = _runtimeMergeContextSpec(baseRegistry.man, _runtimeContextSpec({
     argHints: { __positional__: lookupHints },
-  });
-  context.which = _runtimeContextSpec({
-    argumentLimit: 1,
+  }));
+  context.which = _runtimeMergeContextSpec(baseRegistry.which, _runtimeContextSpec({
     argHints: { __positional__: _runtimeCommandLookupHints(baseRegistry, 'command path') },
-  });
-  context.type = _runtimeContextSpec({
-    argumentLimit: 1,
+  }));
+  context.type = _runtimeMergeContextSpec(baseRegistry.type, _runtimeContextSpec({
     argHints: { __positional__: _runtimeCommandLookupHints(baseRegistry, 'command type') },
-  });
+  }));
   return context;
 }
 

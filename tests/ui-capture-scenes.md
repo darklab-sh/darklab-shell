@@ -90,7 +90,7 @@ scene where one of these appears to have drifted.
 - **Typography & rhythm** — prompt line, output line, header row, and sheet
   rows should sit on a consistent line-height grid across themes.
 
-## Desktop pack (32 scenes)
+## Desktop pack (33 scenes)
 
 Order matches the scene array in `tests/js/e2e/ui-capture.desktop.capture.js`.
 
@@ -112,7 +112,7 @@ Order matches the scene array in `tests/js/e2e/ui-capture.desktop.capture.js`.
 | 14 | `search-open-active-match` | `/` | Transcript search bar open with `localhost` matching three occurrences. | `<mark class="search-hl">` on each match; active-match tint stronger than inactive tint; counter reads `1 of 3` or equivalent. |
 | 15 | `files-panel-response-file` | `/` | Files panel open after `curl -L -o response.html https://noc.darklab.sh` creates a session file. | File row `response.html` visible; usage summary reflects one file; read-only viewer opens `response.html`; Files panel chrome matches theme. |
 | 16 | `workflow-modal-example` | `/` | First workflow modal open from the rail. | Step-row two-row grid; per-step ▶ run button present; step body readable; modal card max-width. |
-| 17 | `history-drawer` | `/` | History drawer open with one hydrated run. | Alternating row bands (even-row 6% text-on-surface tint); starred rows with amber left-edge stripe; action buttons (restore / permalink / star / delete) revealed on hover (hover state may or may not be captured). |
+| 17 | `history-drawer` | `/` | History drawer open with one hydrated run. | Chrome-row background matches the HUD/rail family; starred rows with amber left-edge stripe; action buttons (restore / permalink / star / delete) revealed on hover (hover state may or may not be captured). |
 | 18 | `history-drawer-snapshot-row` | `/` | History drawer showing a saved snapshot row. | Snapshot kind badge reads `SNAPSHOT`; row exposes `open`, `copy link`, and `delete`; snapshot row does not show the run-only star/restore affordances. |
 | 19 | `history-drawer-search-chip` | `/` | History drawer with `host` search applied and filter chip visible. | Active filter chip shows the current query; chip dismissal glyph (`✕`) visible; filtered row count reflects the query. |
 | 20 | `history-drawer-delete-all-confirmation` | `/` | History drawer + delete-all confirm modal stacked. | Confirm card sits above the drawer with backdrop dim; three buttons (`Cancel` / `Delete non-favorites` / `Delete all`) all fit on one row at 1024-wide. |
@@ -127,7 +127,8 @@ Order matches the scene array in `tests/js/e2e/ui-capture.desktop.capture.js`.
 | 29 | `line-numbers-and-timestamps-enabled` | `/` | Both prefixes stacked. | Combined prefix width accommodates both; content wraps correctly inside the remaining width (regression target for the mobile-overflow fix). |
 | 30 | `snapshot-page` | `/share/:id` | Permalink landing page from `/share`. | Expiry line promoted above the run-meta row; share-unredacted-vs-redacted treatment visible; page-level save menu present. |
 | 31 | `permalink-page` | `/history/:id` | Permalink landing page from `/history`. | Prompt prefix on echoed command lines renders the configured `prompt_prefix` (not a bare `$`); header metadata alignment; green border removed from the page title. |
-| 32 | `diag-page` | `/diag` | Operator `/diag` page. | Activity and Outcomes cards are split; generated-at freshness line under the header; config `true` values not green-by-default; diag back-button present only at mobile/touch breakpoints (it should not appear here). |
+| 32 | `run-monitor-active-telemetry` | `/` | Run Monitor drawer open while a command is active and resource telemetry has populated. | Drawer grows from the HUD without covering the rail; row uses the green active accent; CPU/MEM circular meters show populated values, not `n/a`; meter labels remain readable across themes. |
+| 33 | `diag-page` | `/diag` | Operator `/diag` page. | Activity and Outcomes cards are split; generated-at freshness line under the header; config `true` values not green-by-default; diag back-button present only at mobile/touch breakpoints (it should not appear here). |
 
 ## Mobile pack (27 scenes)
 
@@ -149,7 +150,7 @@ Mobile viewport: iPhone 15 Pro Max–class (430 × 932 @ 3x, final images 1290 �
 | 10 | `line-numbers-enabled` | `/` | Mobile transcript with line-number prefix. | Prefix renders inside the mobile viewport; content wraps at the correct visible edge (not shifted off-screen). |
 | 11 | `timestamps-enabled` | `/` | Mobile transcript with elapsed-timestamp prefix. | Same wrap-inside-viewport assertion as above; timestamp column readable on narrow widths. |
 | 12 | `line-numbers-and-timestamps-enabled` | `/` | Mobile with both prefixes stacked. | Combined prefix width does not push content off-screen; content wraps correctly. |
-| 13 | `history-sheet` | `/` | Mobile recents bottom-sheet open. | Alternating row bands (even-row 6% tint); starred rows with amber left-edge stripe; relative time cell (`Nm ago` / `Nh ago` / `Nd ago`) with absolute time in `title`; grab handle centered at the top. |
+| 13 | `history-sheet` | `/` | Mobile recents bottom-sheet open. | Chrome-row background matches the mobile menu/HUD family; starred rows with amber left-edge stripe; relative time cell (`Nm ago` / `Nh ago` / `Nd ago`) with absolute time in `title`; grab handle centered at the top. |
 | 14 | `history-sheet-snapshot-row` | `/` | Mobile recents sheet showing a saved snapshot row. | Snapshot kind badge reads `SNAPSHOT`; row exposes `open`, `copy link`, and `delete`; row height and action wrapping remain comfortable at 430px width. |
 | 15 | `history-sheet-search-filters-expanded` | `/` | Recents sheet with search `host` + filters expanded. | Advanced filter panel visible; `▾` glyph flipped; filter-root input populated; sheet body scrollable. |
 | 16 | `history-sheet-search-filters-collapsed-chip` | `/` | Recents sheet with filters collapsed and active-filter chip. | Chip shows the active filter; filters disclosure collapsed back; sheet height stable. |

@@ -185,9 +185,9 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/themes` | Returns the active theme plus the complete theme registry used by the Options modal. |
 | `GET` | `/allowed-commands` | Returns the allowed command prefixes grouped from `commands.yaml` for command reference surfaces. |
 | `GET` | `/faq` | Returns built-in FAQ entries plus custom `faq.yaml` entries. |
-| `GET` | `/workflows` | Returns built-in workflow entries plus custom `workflows.yaml` entries. |
+| `GET` | `/workflows` | Returns built-in workflow entries plus custom `workflows.yaml` entries, filtered by feature gates such as Files/workspace support. |
 | `GET` | `/shortcuts` | Returns the keyboard shortcut reference used by the `shortcuts` built-in and the browser overlay. |
-| `GET` | `/autocomplete` | Returns command-registry autocomplete context, built-in command roots, and special command keys. |
+| `GET` | `/autocomplete` | Returns merged external-command and app-owned built-in autocomplete context, built-in command roots, and special command keys. |
 | `GET` | `/welcome` | Returns welcome command samples from `welcome.yaml`. |
 | `GET` | `/welcome/ascii` | Returns the desktop welcome ASCII banner from `ascii.txt` as plain text. |
 | `GET` | `/welcome/ascii-mobile` | Returns the mobile welcome ASCII banner from `ascii_mobile.txt` as plain text. |
@@ -411,7 +411,7 @@ The detailed user-visible welcome behavior belongs in the README. Here, the impo
 
 Command editing is split into separate state machines rather than one overloaded dropdown path:
 
-- normal autocomplete merges structured external-tool `context` hints from `/autocomplete` with a code-owned runtime context for app built-ins, then runs both through the same token-aware matcher
+- normal autocomplete consumes structured external-tool and app-owned built-in `context` hints from `/autocomplete`, then overlays only dynamic runtime suggestions such as loaded Files, session variables, theme names, config values, and command lookup targets before passing everything through the same token-aware matcher
 - reverse-history search owns its own pre-draft, query, selection, and exit paths
 - `controller.js` routes keyboard events into the appropriate mode before the normal submit/edit handlers run
 - navigation semantics stay consistent regardless of whether a dropdown opens above or below the prompt
@@ -918,10 +918,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 1063
-- `vitest`: 863
+- `pytest`: 1078
+- `vitest`: 865
 - `playwright`: 219
-- total: 2,145
+- total: 2,162
 
 ### Testing Architecture
 

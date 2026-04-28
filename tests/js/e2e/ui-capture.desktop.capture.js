@@ -48,6 +48,44 @@ async function runFastCaptureCommand(page) {
   )
 }
 
+async function prepareRunMonitorTelemetryScene(page) {
+  let activePollCount = 0
+  await page.unroute('**/history/active').catch(() => {})
+  await page.route('**/history/active', route => {
+    activePollCount += 1
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        runs: [{
+          run_id: 'capture-long-run',
+          pid: 4242,
+          started: new Date(Date.now() - 9000).toISOString(),
+          command: LONG_RUN_CMD,
+          resource_usage: {
+            cpu_seconds: Math.min(12, 4 + activePollCount * 1.4),
+            memory_bytes: 268435456 + activePollCount * 1024 * 1024 * 16,
+            source: 'capture-mock',
+          },
+        }],
+      }),
+    })
+  })
+}
+
+async function waitForRunMonitorTelemetry(page) {
+  await expect(page.locator('#run-monitor')).toBeVisible()
+  await page.evaluate(async () => {
+    if (typeof window.refreshRunMonitor === 'function') {
+      await window.refreshRunMonitor()
+      await new Promise(resolve => window.setTimeout(resolve, 1100))
+      await window.refreshRunMonitor()
+    }
+  })
+  await expect(page.locator('.run-monitor-meter-cpu').first()).toHaveAttribute('aria-label', /CPU (?!n\/a|collecting)/)
+  await expect(page.locator('.run-monitor-meter-mem').first()).toHaveAttribute('aria-label', /MEM (?!n\/a)/)
+}
+
 async function openScopedWorkflow(page) {
   await waitForWorkflowsReady(page)
   const workflowsClosed = await page.locator('#rail-section-workflows').evaluate((node) =>
@@ -472,6 +510,18 @@ const scenes = [
       const copied = await page.evaluate(() => window.__clipboardText || '')
       await page.goto(copied, { waitUntil: 'domcontentloaded' })
       await expect(page.locator('body.permalink-page')).toBeVisible()
+    },
+  },
+  {
+    slug: 'run-monitor-active-telemetry',
+    title: 'Main UI - Run Monitor with active telemetry',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await prepareRunMonitorTelemetryScene(page)
+      await runLongCaptureCommand(page)
+      await page.locator('#hud-status-cell').click()
+      await waitForRunMonitorTelemetry(page)
     },
   },
   {

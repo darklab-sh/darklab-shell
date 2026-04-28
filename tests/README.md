@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 1063
-- `vitest`: 863
+- `pytest`: 1078
+- `vitest`: 865
 - `playwright`: 219
-- total: 2,145
+- total: 2,162
 
 This document is organized in two parts:
 
@@ -170,7 +170,7 @@ scripts/record_demo_mobile.sh                       # mobile (430×932 iPhone 15
 scripts/record_demo.sh --base-url http://localhost:9000
 ```
 
-Wrappers health-check the container, seed/register the demo session token, probe `GET /workspace/files` with that token so the Files segment can create `response.html`, set `RUN_DEMO=1`, run the spec, and stitch frames into `assets/darklab_shell_demo.mp4` / `assets/darklab_shell_mobile_demo.mp4` with ffmpeg (HEVC/VideoToolbox on macOS, VP9/libvpx on Linux). See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
+Wrappers health-check the container, seed/register the demo session token, probe `GET /workspace/files` with that token so the Files segment can create `response.html`, set `RUN_DEMO=1`, run the spec, and stitch frames into `assets/darklab_shell_demo.mp4` / `assets/darklab_shell_mobile_demo.mp4` with ffmpeg (HEVC/VideoToolbox on macOS, VP9/libvpx on Linux). The desktop recording also opens the HUD-attached Run Monitor during the long-running ping segment and pauses after telemetry has populated so the CPU/RSS memory meters appear in the final video. See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
 
 Desktop and mobile demo configs share a central visual contract in [config/playwright.visual.contracts.js](../config/playwright.visual.contracts.js), and both specs assert that contract at startup through `tests/js/e2e/visual_guardrails.js`. That keeps viewport, pixel density, touch/mobile-mode assumptions, and `/status` health aligned with the wrapper/config setup instead of drifting silently.
 
@@ -188,7 +188,7 @@ scripts/capture_ui_screenshots.sh --theme all
 scripts/capture_ui_screenshots.sh --theme all --theme-variant light
 ```
 
-The wrapper sets `RUN_CAPTURE=1` and writes PNGs, per-UI manifest JSON files, and a static `index.html` review page to `/tmp/darklab_shell-ui-capture/`. Unset `--theme` and `--theme default` resolve to the configured app default theme slug from `app/config.py`, so default captures are stored under that real theme name instead of a duplicate `default/` folder. The review page groups scenes by UI/theme and includes a full-screen image viewer with left/right keyboard navigation. Capture runs boot an isolated temp app instance with seeded history, workspace storage enabled, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, history-heavy states, and Files panel states look production-like. See [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
+The wrapper sets `RUN_CAPTURE=1` and writes PNGs, per-UI manifest JSON files, and a static `index.html` review page to `/tmp/darklab_shell-ui-capture/`. Unset `--theme` and `--theme default` resolve to the configured app default theme slug from `app/config.py`, so default captures are stored under that real theme name instead of a duplicate `default/` folder. The review page groups scenes by UI/theme and includes a full-screen image viewer with left/right keyboard navigation. Capture runs boot an isolated temp app instance with seeded history, workspace storage enabled, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, history-heavy states, Files panel states, and the Run Monitor active-telemetry drawer look production-like. See [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
 
 The capture configs use the same shared visual contract file as the demo pipeline, and `ui_capture_shared.js` runs `visual_guardrails.js` during each `freshHome(...)` reset. That means every captured scene re-checks viewport, density, touch/mobile-mode expectations, `/status` health, the fixed capture token, and the minimum seeded `/history` shape before screenshots are taken.
 
@@ -352,6 +352,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDerivedCommandRegistry.test_real_registry_openssl_uses_subcommand_scoped_autocomplete` | Verifies that OpenSSL autocomplete exposes allowlisted subcommands and keeps `s_client` and `ciphers` flags scoped to the matching subcommand. |
 | `TestDerivedCommandRegistry.test_real_registry_gobuster_uses_subcommand_scoped_autocomplete` | Verifies that Gobuster autocomplete exposes mode subcommands and keeps mode-specific flags scoped to the matching subcommand. |
 | `TestDerivedCommandRegistry.test_autocomplete_context_can_be_derived_from_commands_registry` | Verifies that browser autocomplete context can be derived from command and pipe-helper registry entries. |
+| `TestDerivedCommandRegistry.test_builtin_autocomplete_registry_uses_app_owned_yaml` | Verifies that built-in autocomplete grammar is loaded from the app-owned YAML registry and normalized into the browser context shape. |
+| `TestDerivedCommandRegistry.test_builtin_autocomplete_workspace_roots_follow_feature_flag` | Verifies that Files-only built-in autocomplete roots are hidden unless workspace support is enabled. |
 | `TestDerivedCommandRegistry.test_real_registry_workspace_file_flags_cover_supported_file_io_tools` | Verifies that supported file input/output flags in the real command registry are rewritten through session workspace paths. |
 | `TestDerivedCommandRegistry.test_workspace_rewrites_quote_shell_sensitive_paths` | Verifies that workspace file rewrites quote absolute paths containing shell-sensitive characters. |
 | `TestDerivedCommandRegistry.test_amass_runtime_environment_quotes_rewritten_workspace_paths` | Verifies that the Amass managed-directory runtime environment wrapper quotes rewritten workspace paths safely. |
@@ -372,6 +374,11 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestThemeRegistry.test_light_theme_uses_light_defaults_for_missing_keys` | Checks that light theme uses light defaults for missing keys. |
 | `TestThemeRegistry.test_missing_color_scheme_still_falls_back_to_dark_defaults` | Checks that missing color scheme still falls back to dark defaults. |
 | `TestThemeRegistry.test_theme_example_files_match_generated_defaults` | Detects drift between `_THEME_DEFAULTS` in `app/config.py` and the checked-in `app/conf/theme_dark.yaml.example` / `app/conf/theme_light.yaml.example` files. Fails with `theme_dark.yaml.example is out of sync` if the built-in defaults changed without regenerating the example files. Fix by running `./.venv/bin/python scripts/generate_theme_examples.py` and committing the updated files. |
+| `TestThemeRegistry.test_shipped_theme_files_have_complete_matching_key_sets` | Verifies that every shipped theme YAML carries the complete runtime theme key set and does not introduce unknown keys. |
+| `TestThemeRegistry.test_shipped_themes_do_not_reintroduce_retired_keys` | Verifies that retired object-specific theme keys are not reintroduced into shipped theme files. |
+| `TestThemeRegistry.test_theme_key_reference_matches_runtime_order_and_defaults` | Verifies that `THEME.md` lists theme keys in runtime export order and documents the current dark/light default values. |
+| `TestThemeRegistry.test_css_theme_var_references_are_defined_or_explicitly_fallbacked` | Verifies that CSS references to `--theme-*` variables are defined by the runtime theme registry or include explicit fallbacks. |
+| `TestThemeRegistry.test_css_color_literals_are_theme_vars_or_var_derived` | Verifies that CSS color literals outside token definitions are derived from CSS variables instead of becoming untracked one-offs. |
 | `TestThemeRegistry.test_darklab_obsidian_matches_dark_defaults_and_example` | Detects drift between the visible `darklab_obsidian` theme file, the app's default dark theme values, and the checked-in dark example file. |
 | `TestThemeRegistry.test_entries_missing_question_filtered_out` | Checks that entries missing question filtered out. |
 | `TestThemeRegistry.test_non_list_yaml_returns_empty` | Checks that non list YAML returns empty. |
@@ -462,6 +469,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_skip_workspace_required_examples` | Verifies that workspace-only command examples stay out of the generic smoke corpus because they need per-session file setup. |
 | `TestWorkflowInputLoading.test_load_workflows_keeps_declared_inputs` | Verifies that workflow input metadata is preserved when every referenced token is declared in the workflow schema. |
 | `TestWorkflowInputLoading.test_load_workflows_drops_steps_with_undeclared_tokens` | Verifies that workflow steps referencing undeclared input tokens are rejected instead of reaching the client as partially renderable templates. |
+| `TestWorkflowInputLoading.test_load_all_workflows_filters_workspace_required_workflows` | Verifies that Files-backed workflow chains are hidden when workspaces are disabled and retain their workspace feature gate when enabled. |
 | `TestSeedHistoryFixtures.test_visual_flows_fixture_only_stars_two_commands` | Verifies that the `visual-flows` seed fixture limits starred commands to two so capture and demo runs keep Recent rows visible. |
 | `TestSeedHistoryFixtures.test_seed_history_uses_runtime_command_registry_examples` | Verifies that `scripts/seed_history.py` pulls its seeded command pool from the command-registry examples and does not carry fake commands such as `bogus-command`. |
 | `TestSeedHistoryFixtures.test_seed_runs_avoids_adjacent_duplicate_commands` | Verifies that seeded history avoids back-to-back duplicate commands even when the overall run set still includes repeats. |
@@ -848,6 +856,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestWorkflowsRoute.test_includes_v15_recon_playbooks` | Verifies that the v1.5 recon workflow playbooks are present in the workflow payload. |
 | `TestWorkflowsRoute.test_payload_steps_are_prompt_fillable` | Verifies that every workflow step exposes a prompt-fill command and note text. |
 | `TestWorkflowsRoute.test_payload_includes_input_driven_workflows` | Verifies that `/workflows` includes workflows with declared inputs so the client can render prefilled, user-editable workflow forms. |
+| `TestWorkflowsRoute.test_workspace_required_workflows_follow_files_feature_flag` | Verifies that workspace-required workflows are omitted from `/workflows` when Files are disabled and returned when Files are enabled. |
 | `TestShortcutsRoute.test_returns_200` | Checks `/shortcuts` returns 200. |
 | `TestShortcutsRoute.test_payload_shape` | Verifies `sections[].title`, `sections[].items[]`, and `note` schema. |
 | `TestShortcutsRoute.test_sections_cover_terminal_tabs_and_ui` | Confirms the three canonical section titles (`Terminal`, `Tabs`, `UI`) are present in order. |
@@ -1236,6 +1245,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `clear cancels welcome, clears the active tab preserving run state, and closes the sheet` | Verifies that the mobile menu `clear` entry routes through `cancelWelcome(activeTabId)` + `clearTab(activeTabId, { preserveRunState: true })` and closes the menu sheet. |
 | `opens the theme selector from the theme button` | Verifies that opens the theme selector from the theme button. |
 | `populates the theme select from the registry and applies the selected theme` | Verifies that populates the theme select from the registry and applies the selected theme. |
+| `renders theme preview cards with the current desktop shell structure` | Verifies that theme preview cards render the current rail/tabbar/panel/HUD/drawer shell schematic and do not reintroduce old preview-only bar, pill, or chip elements. |
+| `renders shipped theme preview cards with populated core surface tokens` | Verifies that every shipped theme renders a preview card with the required terminal, chrome, modal, button, and dropdown surface tokens populated. |
 | `applies a theme from the terminal theme command` | Verifies that the terminal-native `theme` command applies a selected theme through the same runtime path as the theme selector. |
 | `groups terminal theme list output by color scheme` | Verifies that `theme list` separates dark, light, and fallback theme entries using the registry `color_scheme` value. |
 | `requires explicit set before applying a theme from the terminal theme command` | Verifies that `theme <theme>` is rejected and only `theme set <theme>` applies a terminal-native theme change. |

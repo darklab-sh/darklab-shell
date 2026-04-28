@@ -207,7 +207,7 @@ def faq():
 @content_bp.route("/workflows")
 def workflows():
     """Return built-in workflow entries plus any custom workflows.yaml entries."""
-    items = load_all_workflows()
+    items = load_all_workflows(_config.CFG)
     _log_content_view("/workflows", count=len(items))
     return jsonify({"items": items})
 

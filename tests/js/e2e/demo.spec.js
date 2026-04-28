@@ -27,6 +27,7 @@ import { CAPTURE_SESSION_TOKEN } from '../../../config/playwright.visual.contrac
 // Keystroke delay — intentionally closer to a real person than a script.
 const TYPE_DELAY_MS = 62
 const WORKSPACE_DEMO_CMD = 'curl -L -o response.html https://noc.darklab.sh'
+const LONG_DEMO_CMD = 'ping -i 0.5 -c 120 darklab.sh'
 const DEMO_THEME_NAME = 'charcoal_lavender'
 
 function typingDelay(char, index, baseDelay) {
@@ -177,6 +178,55 @@ async function openFirstWorkflowFromRail(page) {
   await page.locator('#workflows-overlay').waitFor({ state: 'visible' })
 }
 
+async function waitForRunMonitorResourceValues(page) {
+  await page.locator('#run-monitor').waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(3_400)
+  await page.evaluate(async () => {
+    if (typeof window.refreshRunMonitor === 'function') await window.refreshRunMonitor()
+  })
+  await expect(page.locator('.run-monitor-meter-cpu').first()).toHaveAttribute('aria-label', /CPU (?!n\/a|collecting)/, {
+    timeout: 10_000,
+  })
+  await expect(page.locator('.run-monitor-meter-mem').first()).toHaveAttribute('aria-label', /MEM (?!n\/a)/, {
+    timeout: 10_000,
+  })
+}
+
+async function prepareDemoRunMonitorTelemetry(page) {
+  let activePollCount = 0
+  const tabRun = await page.evaluate(() => {
+    const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
+    const rawStart = tab?.runStart
+    let startMs = typeof rawStart === 'number' ? rawStart : Date.parse(String(rawStart || ''))
+    if (!Number.isFinite(startMs)) startMs = Date.now() - 14_000
+    return {
+      runId: tab?.runId || 'demo-long-run',
+      started: new Date(startMs).toISOString(),
+    }
+  })
+  await page.unroute('**/history/active').catch(() => {})
+  await page.route('**/history/active', route => {
+    activePollCount += 1
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        runs: [{
+          run_id: tabRun.runId,
+          pid: 4242,
+          started: tabRun.started,
+          command: LONG_DEMO_CMD,
+          resource_usage: {
+            cpu_seconds: Math.min(22, 8 + activePollCount * 1.7),
+            memory_bytes: 301989888 + activePollCount * 1024 * 1024 * 18,
+            source: 'demo-mock',
+          },
+        }],
+      }),
+    })
+  })
+}
+
 test('demo', async ({ page }) => {
   test.skip(!process.env.RUN_DEMO, 'set RUN_DEMO=1 to record the demo (use scripts/record_demo.sh)')
   test.setTimeout(300_000)
@@ -297,7 +347,7 @@ test('demo', async ({ page }) => {
   await page.waitForTimeout(900)
 
   // ── Tab 1: ping — start and leave running ─────────────────────────────────
-  await typeSlowly(page, 'ping -i 0.5 -c 50 darklab.sh')
+  await typeSlowly(page, LONG_DEMO_CMD)
   await page.waitForTimeout(800)
   await submitCommand(page)
 
@@ -329,6 +379,20 @@ test('demo', async ({ page }) => {
   await page.waitForTimeout(700)
   await page.locator('.tab').first().click()
   await page.waitForTimeout(2_700)
+
+  // ── Run Monitor: active run telemetry ────────────────────────────────────
+  await prepareDemoRunMonitorTelemetry(page)
+  await page.locator('#hud-status-cell').hover()
+  await page.waitForTimeout(550)
+  await page.locator('#hud-status-cell').click()
+  await waitForRunMonitorResourceValues(page)
+  await freezeFrame(3_200)
+  await page.locator('.run-monitor-close').hover()
+  await page.waitForTimeout(600)
+  await page.locator('.run-monitor-close').click()
+  await page.locator('#run-monitor').waitFor({ state: 'hidden', timeout: 10_000 })
+  await page.unroute('**/history/active').catch(() => {})
+  await page.waitForTimeout(1_000)
 
   // ── History drawer ────────────────────────────────────────────────────────
   await page.locator('.rail-nav [data-action="history"]').hover()

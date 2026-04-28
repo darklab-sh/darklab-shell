@@ -101,9 +101,9 @@ Full per-feature reference for darklab_shell. See the [README](README.md) for th
 
 **Limits:** external-tool completions come from the static command-registry YAML, while app-owned built-ins come from the browser runtime. There is no shell introspection, no `--help` parsing, and no fuzzy matching beyond prefix + expand.
 
-**Configuration:** external-tool suggestions use `conf/commands.yaml` (plus optional `conf/commands.local.yaml`). App-owned built-ins are defined in application code. YAML changes reload on the next page load — no server restart needed.
+**Configuration:** external-tool suggestions use `conf/commands.yaml` (plus optional `conf/commands.local.yaml`). App-owned built-ins use `app/builtin_autocomplete.yaml`, which is packaged with the application rather than treated as operator config. YAML changes reload on the next page load — no server restart needed.
 
-**Related files:** `app/static/js/autocomplete.js`, `app/static/js/app.js`, `app/conf/commands.yaml`.
+**Related files:** `app/static/js/autocomplete.js`, `app/static/js/app.js`, `app/builtin_autocomplete.yaml`, `app/conf/commands.yaml`.
 
 **Keyboard controls:**
 
@@ -636,8 +636,9 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Workflows are listed in the **Workflows** panel on desktop and behind the mobile ☰ menu; opening one reveals its individual command steps.
 - Clicking a step pre-fills the prompt with its `cmd` — nothing runs automatically, so the operator inspects and edits each step before pressing Run.
 - Each step can show a short `note` explaining what the command checks.
-- Built-in workflows cover DNS troubleshooting, TLS/HTTPS checks, HTTP triage, quick reachability, email server checks, passive domain recon, subdomain enumeration and validation, web directory discovery, SSL/TLS deep dives, CDN/edge behavior checks, API recon, network path analysis, and fast port/service triage.
+- Built-in workflows cover DNS troubleshooting, TLS/HTTPS checks, HTTP triage, quick reachability, email server checks, passive domain recon, subdomain enumeration and validation, web directory discovery, SSL/TLS deep dives, CDN/edge behavior checks, API recon, network path analysis, fast port/service triage, and Files-backed chained recon such as subdomain HTTP triage and crawl-and-scan.
 - Custom workflows can be added to `conf/workflows.yaml`; the file is re-read on every request so edits take effect without a restart.
+- Workflows that depend on Files can declare `feature_required: workspace`; those entries are hidden when `workspace_enabled` is off.
 
 **Limits:** step commands still run through the command policy — a workflow step is only usable if its `cmd` is permitted by `commands.yaml`.
 
@@ -658,6 +659,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - `steps` — required list; each step needs at least a `cmd`.
 - `cmd` — required; loaded into the prompt when the step is clicked.
 - `note` — optional; helper text shown alongside the command.
+- `feature_required` — optional feature gate such as `workspace`; hides the workflow when the required app feature is disabled.
 
 **Related files:** `app/conf/workflows.yaml` (workflow definitions), `app/static/js/shell_chrome.js` (Workflows panel rendering), `app/blueprints/content.py` (workflows API endpoint).
 
@@ -759,7 +761,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** none. The built-in command surface is defined in application code, not in operator config.
 
-**Related files:** `app/fake_commands.py` (built-in command registry + output rendering), `app/commands.py` (dispatch + man routing), `app/static/js/app.js` (built-in autocomplete context, client-side command flows, and Options/theme command handling), `app/static/js/runner.js` (client-side command interception).
+**Related files:** `app/fake_commands.py` (built-in command registry + output rendering), `app/commands.py` (dispatch, autocomplete loading, and man routing), `app/builtin_autocomplete.yaml` (built-in autocomplete grammar), `app/static/js/app.js` (dynamic autocomplete hooks, client-side command flows, and Options/theme command handling), `app/static/js/runner.js` (client-side command interception).
 
 ---
 
