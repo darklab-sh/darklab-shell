@@ -42,6 +42,7 @@ function loadSearchFns({ tab = { id: 'tab-1', command: 'nmap -sV ip.darklab.sh' 
     prepareSearchBarForOpen,
     refreshSearchDiscoverabilityUi,
     summarizeCurrentOutputSignals,
+    _renderCompactSignalSummary,
     _setRegexMode: (value) => { searchRegexMode = value; },
   }`,
   )
@@ -390,6 +391,26 @@ describe('search helpers', () => {
     expect(document.getElementById('searchSignalSummary').textContent).toContain('1E')
     expect(document.querySelector('[data-search-signal-scope="findings"]').className)
       .toContain('btn btn-ghost btn-compact search-signal-chip')
+  })
+
+  it('renders signal summary chips with DOM APIs instead of parsing markup', () => {
+    const { _renderCompactSignalSummary } = loadSearchFns()
+    const summary = document.getElementById('searchSignalSummary')
+    const trickyCount = {
+      valueOf: () => 1,
+      toString: () => '<img src=x onerror=alert(1)>',
+    }
+
+    _renderCompactSignalSummary(summary, {
+      findings: trickyCount,
+      warnings: 0,
+      errors: 0,
+      summaries: 0,
+    })
+
+    expect(summary.querySelectorAll('button')).toHaveLength(1)
+    expect(summary.querySelector('img')).toBeNull()
+    expect(summary.textContent).toBe('<img src=x onerror=alert(1)>F')
   })
 
   it('clears the discoverability pulse when the active output has no findings', () => {

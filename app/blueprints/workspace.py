@@ -20,8 +20,8 @@ from workspace import (
     delete_workspace_path,
     list_workspace_directories,
     list_workspace_files,
+    open_workspace_file_for_download,
     read_workspace_text_file,
-    resolve_workspace_path,
     workspace_path_info,
     workspace_settings,
     workspace_usage,
@@ -195,11 +195,9 @@ def workspace_files_download():
         return error
     path = _path_from_request()
     try:
-        resolved = resolve_workspace_path(str(session_id), path)
-        if not resolved.is_file():
-            raise WorkspaceFileNotFound("session file was not found")
+        handle = open_workspace_file_for_download(str(session_id), path)
         return send_file(
-            resolved,
+            handle,
             as_attachment=True,
             download_name=Path(path).name,
             mimetype="text/plain; charset=utf-8",

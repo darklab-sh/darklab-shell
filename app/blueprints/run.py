@@ -14,6 +14,7 @@ import shutil
 import signal
 import subprocess  # nosec B404
 import threading
+import time
 import uuid
 from collections import deque
 from datetime import datetime, timezone
@@ -78,11 +79,29 @@ KILL_BIN  = shutil.which("kill") or "/bin/kill"
 
 CLIENT_SIDE_RUN_ROOTS = {"theme", "config", "session-token"}
 RUN_SUBPROCESS_UMASK = 0o027
+DETACHED_DRAIN_GRACE_SECONDS = 30
+DETACHED_DRAIN_FALLBACK_TIMEOUT_SECONDS = 3600
 
 
 def _prepare_run_child() -> None:
     os.setsid()
     os.umask(RUN_SUBPROCESS_UMASK)
+
+
+def _detached_drain_ceiling_seconds(command_timeout: int | float | None) -> int | float:
+    base_timeout = command_timeout if command_timeout else DETACHED_DRAIN_FALLBACK_TIMEOUT_SECONDS
+    return base_timeout + DETACHED_DRAIN_GRACE_SECONDS
+
+
+def _terminate_process_group(proc) -> None:
+    pgid = os.getpgid(proc.pid)
+    if SCANNER_PREFIX:
+        subprocess.run(
+            [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", f"-{pgid}"],
+            timeout=5
+        )  # nosec B603
+    else:
+        os.killpg(pgid, signal.SIGTERM)
 
 
 # ── Run output helpers ────────────────────────────────────────────────────────
@@ -235,7 +254,11 @@ def _make_nonblocking_stream_reader(stream):
     if not isinstance(fd, int):
         return {"stream": stream, "fd": None, "decoder": None, "pending": ""}
     fd = cast(int, fd)
-    os.set_blocking(fd, False)
+    try:
+        os.set_blocking(fd, False)
+    except OSError as exc:
+        log.warning("RUN_STREAM_NONBLOCKING_UNAVAILABLE", extra={"fd": fd, "error": str(exc)})
+        return {"stream": stream, "fd": None, "decoder": None, "pending": ""}
     encoding = getattr(stream, "encoding", None) or "utf-8"
     errors = getattr(stream, "errors", None) or "replace"
     return {
@@ -753,7 +776,20 @@ def run_command():
             if proc.stdout is None:
                 raise RuntimeError("Process stdout pipe was not created")
             stream_reader = _make_nonblocking_stream_reader(proc.stdout)
+            detached_started_monotonic = time.monotonic()
+            detached_ceiling = _detached_drain_ceiling_seconds(COMMAND_TIMEOUT)
             while True:
+                detached_elapsed = time.monotonic() - detached_started_monotonic
+                if detached_ceiling and detached_elapsed >= detached_ceiling:
+                    try:
+                        _terminate_process_group(proc)
+                    except (ProcessLookupError, subprocess.TimeoutExpired, OSError):
+                        pass
+                    log.warning("DETACHED_DRAIN_TIMEOUT", extra={
+                        "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
+                        "timeout": detached_ceiling, "cmd": original_command,
+                    })
+                    break
                 if COMMAND_TIMEOUT:
                     now_dt = datetime.now(timezone.utc)
                     elapsed = (now_dt - run_started_dt).total_seconds()

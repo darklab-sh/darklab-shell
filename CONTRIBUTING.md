@@ -135,6 +135,8 @@ Keep branches focused. If the work changes product behavior, tests, and docs, in
 
 Commit messages should describe the intent of the change, not just what files were touched. Lead with the affected area when it helps narrow scope — for example, `fix(mobile): restore scroll position on tab switch` or `feat(autocomplete): add positional hints for nmap`. Keep the subject line under 72 characters.
 
+Release branches may carry temporary merge-request and release-note drafts under `docs/release-drafts/`. Keep those drafts updated with user-facing features, fixes, risks, and validation as the branch evolves so release bookkeeping is visible in normal review. Remove the draft directory before merging back to `main` unless the project intentionally wants to preserve that release's draft artifacts.
+
 ---
 
 ## Code Style
@@ -159,7 +161,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1041 pytest + 849 Vitest + 219 Playwright = 2,109 tests**.
+Current totals: **1055 pytest + 852 Vitest + 219 Playwright = 2,126 tests**.
 
 Playwright notes:
 

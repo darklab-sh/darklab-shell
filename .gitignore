@@ -16,11 +16,14 @@ app/static/js/vendor/*
 !app/static/js/vendor/ansi_up.js
 !app/static/js/vendor/jspdf.umd.min.js
  
+# Persistent workspaces bind mount, if in use
+workspaces/
+
 # Persistent data (SQLite run history — contains user data, should not be committed)
 data/
 
 # Optional local config overlay for production/server-specific overrides.
-app/conf/*.local.*
+*.local.*
  
 # Node / JS tooling
 node_modules/

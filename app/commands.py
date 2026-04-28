@@ -2188,7 +2188,7 @@ def _apply_workspace_runtime_environment(command: str) -> str:
         # Amass v5 auto-starts `amass engine`; point its default config dir at
         # the same parent used by the rewritten `-dir` database path.
         xdg_config_home = os.path.dirname(directory)
-        return f"env XDG_CONFIG_HOME={shlex.quote(xdg_config_home)} {command}"
+        return shlex.join(["env", f"XDG_CONFIG_HOME={xdg_config_home}", *tokens])
 
     return command
 

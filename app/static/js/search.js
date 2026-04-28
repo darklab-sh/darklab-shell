@@ -56,20 +56,31 @@ function _formatFindingSummary(counts) {
   return parts.join(' • ');
 }
 
-function _formatCompactSignalSummary(counts) {
-  const parts = [];
-  const add = (scope, short, count) => {
-    if (count <= 0) return;
-    parts.push(
-      `<button type="button" class="btn btn-ghost btn-compact search-signal-chip" data-search-signal-scope="${scope}" ` +
-      `aria-label="${count} ${_searchScopeUnitLabel(scope, count)} available">${count}${short}</button>`,
-    );
-  };
-  add('findings', 'F', counts.findings);
-  add('warnings', 'W', counts.warnings);
-  add('errors', 'E', counts.errors);
-  add('summaries', 'S', counts.summaries);
-  return parts.join('<span class="search-signal-sep" aria-hidden="true">•</span>');
+function _renderCompactSignalSummary(container, counts) {
+  if (!(container instanceof Element)) return;
+  container.replaceChildren();
+  const chips = [
+    ['findings', 'F', counts.findings],
+    ['warnings', 'W', counts.warnings],
+    ['errors', 'E', counts.errors],
+    ['summaries', 'S', counts.summaries],
+  ].filter(([, , count]) => count > 0);
+  chips.forEach(([scope, short, count], index) => {
+    if (index > 0) {
+      const sep = document.createElement('span');
+      sep.className = 'search-signal-sep';
+      sep.setAttribute('aria-hidden', 'true');
+      sep.textContent = '•';
+      container.appendChild(sep);
+    }
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn btn-ghost btn-compact search-signal-chip';
+    button.dataset.searchSignalScope = scope;
+    button.setAttribute('aria-label', `${count} ${_searchScopeUnitLabel(scope, count)} available`);
+    button.textContent = `${count}${short}`;
+    container.appendChild(button);
+  });
 }
 
 function _clearSearchDiscoverabilityPulse() {
@@ -201,10 +212,9 @@ function refreshSearchDiscoverabilityUi() {
     }
   }
   if (typeof searchSignalSummary !== 'undefined' && searchSignalSummary) {
-    const compact = _formatCompactSignalSummary(counts);
     const hasSignals = counts.findings > 0 || counts.warnings > 0 || counts.errors > 0 || counts.summaries > 0;
     searchSignalSummary.classList.toggle('u-hidden', !hasSignals);
-    searchSignalSummary.innerHTML = compact;
+    _renderCompactSignalSummary(searchSignalSummary, counts);
     searchSignalSummary.title = hasSignals ? _formatFindingSummary(counts) : '';
     searchSignalSummary.setAttribute('aria-label', hasSignals ? _formatFindingSummary(counts) : '');
     if (hasSignals) {

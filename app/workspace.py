@@ -9,16 +9,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import errno
 import hashlib
+import logging
 import os
 from pathlib import Path, PurePosixPath
 import pwd
 import shutil
+import stat
 import subprocess  # nosec B404
 import tempfile
-from typing import Any
+from typing import Any, BinaryIO
 
 from config import CFG
+
+log = logging.getLogger(__name__)
 
 # Session directories are sticky + setgid so files created by scanner tools
 # inherit the shared appuser group without becoming world-readable.
@@ -147,8 +152,8 @@ def ensure_session_workspace(session_id: str, cfg: dict[str, Any] | None = None)
     path.mkdir(mode=WORKSPACE_DIR_MODE, parents=True, exist_ok=True)
     try:
         os.chmod(path, WORKSPACE_DIR_MODE)
-    except OSError:
-        pass
+    except OSError as exc:
+        log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", path, WORKSPACE_DIR_MODE, exc)
     return path
 
 
@@ -228,8 +233,8 @@ def resolve_workspace_path(
         parent.mkdir(mode=WORKSPACE_DIR_MODE, parents=True, exist_ok=True)
         try:
             os.chmod(parent, WORKSPACE_DIR_MODE)
-        except OSError:
-            pass
+        except OSError as exc:
+            log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", parent, WORKSPACE_DIR_MODE, exc)
         resolved_parent = parent.resolve(strict=True)
         if not _is_relative_to(resolved_parent, root):
             raise InvalidWorkspacePath("file path escapes the session directory")
@@ -241,14 +246,52 @@ def resolve_workspace_path(
     return resolved
 
 
+def _is_final_symlink_error(exc: OSError) -> bool:
+    return exc.errno in {errno.ELOOP, getattr(errno, "EMLINK", errno.ELOOP)}
+
+
+def _open_workspace_file_no_follow(path: Path) -> tuple[int, os.stat_result]:
+    flags = os.O_RDONLY
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError as exc:
+        raise WorkspaceFileNotFound("session file was not found") from exc
+    except OSError as exc:
+        if _is_final_symlink_error(exc):
+            raise InvalidWorkspacePath("session file symlinks are not allowed") from exc
+        raise
+    try:
+        file_stat = os.fstat(fd)
+        if not stat.S_ISREG(file_stat.st_mode):
+            raise WorkspaceFileNotFound("session file was not found")
+        return fd, file_stat
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def open_workspace_file_for_download(
+    session_id: str,
+    relative_path: str,
+    cfg: dict[str, Any] | None = None,
+) -> BinaryIO:
+    settings = workspace_settings(cfg)
+    _require_enabled(settings)
+    path = resolve_workspace_path(session_id, relative_path, cfg)
+    fd, _ = _open_workspace_file_no_follow(path)
+    return os.fdopen(fd, "rb")
+
+
 def prepare_workspace_file_for_command(path: Path, *, mode: str) -> None:
     """Make a validated workspace path usable by the unprivileged scanner user."""
     if path.exists() and path.is_file():
         target_mode = WORKSPACE_COMMAND_WRITE_FILE_MODE if mode in {"write", "read_write"} else WORKSPACE_FILE_MODE
         try:
             os.chmod(path, target_mode)
-        except OSError:
-            pass
+        except OSError as exc:
+            log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", path, target_mode, exc)
 
 
 def prepare_workspace_directory_for_command(path: Path, *, mode: str) -> None:
@@ -313,8 +356,8 @@ def prepare_workspace_directory_for_command(path: Path, *, mode: str) -> None:
         path.mkdir(mode=WORKSPACE_COMMAND_DIR_MODE, parents=True, exist_ok=True)
     try:
         os.chmod(path, WORKSPACE_COMMAND_DIR_MODE)
-    except OSError:
-        pass
+    except OSError as exc:
+        log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", path, WORKSPACE_COMMAND_DIR_MODE, exc)
 
 
 def workspace_usage(session_id: str, cfg: dict[str, Any] | None = None) -> WorkspaceUsage:
@@ -379,8 +422,8 @@ def create_workspace_directory(
     path.mkdir(mode=WORKSPACE_DIR_MODE, parents=True, exist_ok=True)
     try:
         os.chmod(path, WORKSPACE_DIR_MODE)
-    except OSError:
-        pass
+    except OSError as exc:
+        log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", path, WORKSPACE_DIR_MODE, exc)
     return {"path": _validate_relative_path(relative_path).as_posix()}
 
 
@@ -394,8 +437,14 @@ def _check_write_limits(
     if new_size > settings.max_file_bytes:
         raise WorkspaceQuotaExceeded("file exceeds session max file size")
     usage = workspace_usage(session_id, cfg)
-    existing_size = destination.stat().st_size if destination.exists() and destination.is_file() else 0
-    new_file_count = usage.file_count + (0 if destination.exists() else 1)
+    try:
+        destination_stat = destination.lstat()
+    except FileNotFoundError:
+        destination_stat = None
+    if destination_stat is not None and stat.S_ISLNK(destination_stat.st_mode):
+        raise InvalidWorkspacePath("session file symlinks are not allowed")
+    existing_size = destination_stat.st_size if destination_stat and stat.S_ISREG(destination_stat.st_mode) else 0
+    new_file_count = usage.file_count + (0 if destination_stat is not None else 1)
     if new_file_count > settings.max_files:
         raise WorkspaceQuotaExceeded("session file count limit exceeded")
     projected = usage.bytes_used - existing_size + new_size
@@ -438,11 +487,12 @@ def read_workspace_text_file(
     settings = workspace_settings(cfg)
     _require_enabled(settings)
     path = resolve_workspace_path(session_id, relative_path, cfg)
-    if not path.is_file():
-        raise WorkspaceFileNotFound("session file was not found")
-    if path.stat().st_size > settings.max_file_bytes:
+    fd, file_stat = _open_workspace_file_no_follow(path)
+    if file_stat.st_size > settings.max_file_bytes:
+        os.close(fd)
         raise WorkspaceQuotaExceeded("file exceeds session max file size")
-    content = path.read_bytes()
+    with os.fdopen(fd, "rb") as handle:
+        content = handle.read()
     if b"\x00" in content:
         raise WorkspaceBinaryFile("file appears to be binary; download it instead")
     try:
@@ -459,7 +509,13 @@ def delete_workspace_file(
     settings = workspace_settings(cfg)
     _require_enabled(settings)
     path = resolve_workspace_path(session_id, relative_path, cfg)
-    if not path.is_file():
+    try:
+        path_stat = path.lstat()
+    except FileNotFoundError as exc:
+        raise WorkspaceFileNotFound("session file was not found") from exc
+    if stat.S_ISLNK(path_stat.st_mode):
+        raise InvalidWorkspacePath("session file symlinks are not allowed")
+    if not stat.S_ISREG(path_stat.st_mode):
         raise WorkspaceFileNotFound("session file was not found")
     try:
         path.unlink()
@@ -516,9 +572,15 @@ def workspace_path_info(
     _require_enabled(settings)
     path = resolve_workspace_path(session_id, relative_path, cfg)
     normalized = _validate_relative_path(relative_path).as_posix()
-    if path.is_file():
+    try:
+        path_stat = path.lstat()
+    except FileNotFoundError as exc:
+        raise WorkspacePathNotFound("session file or folder was not found") from exc
+    if stat.S_ISLNK(path_stat.st_mode):
+        raise InvalidWorkspacePath("session file symlinks are not allowed")
+    if stat.S_ISREG(path_stat.st_mode):
         return {"path": normalized, "kind": "file", "file_count": 1}
-    if path.is_dir():
+    if stat.S_ISDIR(path_stat.st_mode):
         return {
             "path": normalized,
             "kind": "directory",
@@ -550,8 +612,8 @@ def delete_workspace_path(
 def _chmod_workspace_dir(path: Path) -> None:
     try:
         os.chmod(path, WORKSPACE_DIR_MODE)
-    except OSError:
-        pass
+    except OSError as exc:
+        log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", path, WORKSPACE_DIR_MODE, exc)
 
 
 def _target_parent_has_file(root: Path, target: Path) -> bool:

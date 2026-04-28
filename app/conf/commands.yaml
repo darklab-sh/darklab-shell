@@ -10,6 +10,7 @@ commands:
     policy:
       allow:
         - ping
+      # Deny rules take precedence when a command matches both allow and deny.
       deny:
         - ping -f
     autocomplete:

@@ -159,6 +159,8 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser && \
 # Grant raw socket capabilities to tools that require elevated network access,
 # so the scanner user can use them without full root privileges.
 
+# Keep both sudoers forms: the first permits appuser to run as scanner,
+# while the second also permits the appuser run group for shared workspace files.
 RUN setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap && \
     setcap cap_net_raw,cap_net_admin+eip /usr/bin/masscan && \
     setcap cap_net_raw,cap_net_admin+eip /usr/local/bin/naabu && \

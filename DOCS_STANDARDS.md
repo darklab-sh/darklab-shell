@@ -146,6 +146,8 @@ If the work shipped as one commit or one coordinated change, use T2 long. If it 
 
 Use for merge-request drafts.
 
+Release branches should keep active merge-request and release-note drafts under `docs/release-drafts/` so normal git diffs and review show when release messaging changes. Treat these files as temporary branch artifacts: update them alongside user-facing changes, keep them passing markdown lint, and remove them before merging to `main` unless the release intentionally preserves those drafts.
+
 Required section contract (top-level headings):
 
 - `Summary`

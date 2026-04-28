@@ -19,9 +19,11 @@ function _resetStalledTimeout(tabId) {
   _stalledTimeouts.set(tabId, setTimeout(() => {
     const t = getTab(tabId);
     if (!t || t.killed) return;  // already handled
-    _isTabRunStillActive(tabId).then(active => {
+    const runGeneration = _tabRunGeneration(tabId);
+    if (!runGeneration) return;
+    _isRunStillActive(runGeneration).then(active => {
       const latest = getTab(tabId);
-      if (!latest || latest.killed) return;
+      if (!latest || latest.killed || _tabRunGeneration(tabId) !== runGeneration) return;
       if (active) {
         _markStalledButRunning(tabId);
         _resetStalledTimeout(tabId);
@@ -59,9 +61,12 @@ function _activeRunIdsFromPayload(data) {
     .filter(Boolean));
 }
 
-function _isTabRunStillActive(tabId) {
+function _tabRunGeneration(tabId) {
   const t = getTab(tabId);
-  const runId = t && (t.runId || t.historyRunId);
+  return t && (t.runId || t.historyRunId) || '';
+}
+
+function _isRunStillActive(runId) {
   if (!runId || typeof apiFetch !== 'function') return Promise.resolve(false);
   return apiFetch('/history/active')
     .then(r => (r && r.ok !== false && typeof r.json === 'function') ? r.json() : null)
@@ -70,6 +75,10 @@ function _isTabRunStillActive(tabId) {
       _logRunnerError('active run stall check failed', err);
       return false;
     });
+}
+
+function _isTabRunStillActive(tabId) {
+  return _isRunStillActive(_tabRunGeneration(tabId));
 }
 
 function _markStalledButRunning(tabId) {

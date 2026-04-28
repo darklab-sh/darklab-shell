@@ -17,6 +17,7 @@ import importlib.util
 import os
 import random
 import re
+import shlex
 import sqlite3
 import tempfile
 import textwrap
@@ -25,6 +26,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
 import yaml
 import process
 import database
@@ -32,6 +34,7 @@ import app as shell_app
 import config as app_config
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
 import fake_commands
+import workspace as workspace_module
 from commands import (
     split_chained_commands, load_all_faq, load_faq,
     load_welcome, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
@@ -213,6 +216,26 @@ class TestLoadConfig:
                 except RuntimeError as exc:
                     assert "data_dir is not writable: /not-writable" in str(exc)
 
+    def test_workspace_root_env_warning_only_logs_on_mismatch(self):
+        with mock.patch.object(shell_app.log, "warning") as warning:
+            shell_app._warn_workspace_root_config_drift(
+                {"workspace_root": "/tmp/workspaces"},
+                {"WORKSPACE_ROOT": "/tmp/workspaces"},
+            )
+            warning.assert_not_called()
+
+        with mock.patch.object(shell_app.log, "warning") as warning:
+            shell_app._warn_workspace_root_config_drift(
+                {"workspace_root": "/tmp/app-workspaces"},
+                {"WORKSPACE_ROOT": "/tmp/env-workspaces"},
+            )
+
+        warning.assert_called_once()
+        args, kwargs = warning.call_args
+        assert args == ("WORKSPACE_ROOT_MISMATCH",)
+        assert kwargs["extra"]["workspace_root_env"].endswith("/tmp/env-workspaces")
+        assert kwargs["extra"]["workspace_root_config"].endswith("/tmp/app-workspaces")
+
 
 class TestSessionWorkspace:
     def _cfg(self, root, **overrides):
@@ -249,6 +272,20 @@ class TestSessionWorkspace:
             assert WORKSPACE_DIR_MODE == 0o3730
             assert mode & 0o1730 == 0o1730
             assert not mode & 0o004
+
+    def test_session_workspace_logs_chmod_failures_without_blocking_creation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            with mock.patch("workspace.os.chmod", side_effect=OSError("chmod blocked")):
+                with mock.patch.object(workspace_module.log, "warning") as warning:
+                    path = ensure_session_workspace("session-1", cfg)
+
+            assert path.exists()
+            warning.assert_called_once()
+            args = warning.call_args.args
+            assert args[0] == "WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s"
+            assert args[1] == path
+            assert args[2] == WORKSPACE_DIR_MODE
 
     def test_write_read_list_delete_text_file(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -364,6 +401,40 @@ class TestSessionWorkspace:
             except InvalidWorkspacePath:
                 pass
 
+    def test_rejects_final_component_symlink_swaps(self):
+        if not hasattr(os, "O_NOFOLLOW"):
+            pytest.skip("final-component no-follow open is not supported on this platform")
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            outside = Path(tmp) / "outside.txt"
+            outside.write_text("outside\n", encoding="utf-8")
+            real_resolve = workspace_module.resolve_workspace_path
+
+            def swap_final_component(session_id, relative_path, active_cfg=None, *, ensure_parent=False):
+                path = real_resolve(session_id, relative_path, active_cfg, ensure_parent=ensure_parent)
+                if path.exists() or path.is_symlink():
+                    path.unlink()
+                path.symlink_to(outside)
+                return path
+
+            operations = [
+                lambda: read_workspace_text_file("session-1", "target.txt", cfg),
+                lambda: workspace_module.open_workspace_file_for_download("session-1", "target.txt", cfg),
+                lambda: write_workspace_text_file("session-1", "target.txt", "replacement\n", cfg),
+                lambda: delete_workspace_file("session-1", "target.txt", cfg),
+                lambda: workspace_path_info("session-1", "target.txt", cfg),
+            ]
+            workspace_root = ensure_session_workspace("session-1", cfg)
+            for operation in operations:
+                target = workspace_root / "target.txt"
+                if target.exists() or target.is_symlink():
+                    target.unlink()
+                target.write_text("inside\n", encoding="utf-8")
+                with mock.patch("workspace.resolve_workspace_path", side_effect=swap_final_component):
+                    with pytest.raises(InvalidWorkspacePath):
+                        operation()
+                assert outside.read_text(encoding="utf-8") == "outside\n"
+
     def test_enforces_file_size_quota_and_file_count(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(
@@ -434,6 +505,17 @@ class TestSessionWorkspace:
 
             assert removed == 0
             assert root.exists()
+
+
+class TestEntrypointWorkspaceRepair:
+    def test_workspace_repair_targets_children_inside_session_directories(self):
+        entrypoint = (REPO_ROOT / "entrypoint.sh").read_text()
+
+        assert "find \"$WORKSPACE_ROOT\" -mindepth 2 -exec chown scanner:appuser" not in entrypoint
+        assert "find \"$session_dir\" -mindepth 1 -exec chown scanner:appuser" in entrypoint
+        assert "find \"$session_dir\" -mindepth 1 -type d -exec chmod 3770" in entrypoint
+        assert "find \"$session_dir\" -mindepth 1 -type f -exec chmod 640" in entrypoint
+
 
 class TestDerivedCommandRegistry:
     def test_commands_registry_loader_normalizes_policy_and_autocomplete(self):
@@ -767,6 +849,74 @@ class TestDerivedCommandRegistry:
             )
             assert not result.allowed
             assert "Command not allowed" in result.reason
+
+    def test_workspace_rewrites_quote_shell_sensitive_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace_root = Path(tmp) / "work space;$(subshell)&`tick`"
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": str(workspace_root),
+                "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            session_id = "quote-sensitive-paths"
+            write_workspace_text_file(session_id, "targets & dollars $.txt", "ip.darklab.sh\n", cfg)
+
+            result = commands.validate_command(
+                "masscan -iL 'targets & dollars $.txt' -oL 'masscan output $.txt' -p 80",
+                session_id=session_id,
+                cfg=cfg,
+            )
+
+            assert result.allowed, result.reason
+            assert result.workspace_reads == ["targets & dollars $.txt"]
+            assert result.workspace_writes == ["masscan output $.txt"]
+            assert ";$(subshell)&`tick`" in result.exec_command
+            expected_output_path = resolve_workspace_path(session_id, "masscan output $.txt", cfg)
+            assert shlex.quote(str(expected_output_path)) in result.exec_command
+            assert commands.split_command_argv(result.exec_command) == [
+                "masscan",
+                "-iL",
+                str(resolve_workspace_path(session_id, "targets & dollars $.txt", cfg)),
+                "-oL",
+                str(expected_output_path),
+                "-p",
+                "80",
+            ]
+
+    def test_amass_runtime_environment_quotes_rewritten_workspace_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace_root = Path(tmp) / "amass root;$(subshell)&`tick`"
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": str(workspace_root),
+                "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+
+            result = commands.validate_command(
+                "amass subs -d darklab.sh -names",
+                session_id="amass-quote-sensitive-paths",
+                cfg=cfg,
+            )
+
+            assert result.allowed, result.reason
+            assert result.exec_command.startswith("env ")
+            assert ";$(subshell)&`tick`" in result.exec_command
+            tokens = commands.split_command_argv(result.exec_command)
+            amass_dir = resolve_workspace_path("amass-quote-sensitive-paths", "amass", cfg, ensure_parent=True)
+            assert tokens[:3] == [
+                "env",
+                f"XDG_CONFIG_HOME={amass_dir.parent}",
+                "amass",
+            ]
+            assert tokens[-2:] == ["-dir", str(amass_dir)]
 
     def test_autocomplete_context_filters_workspace_feature_hints(self):
         registry = {

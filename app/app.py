@@ -6,6 +6,8 @@ Then open http://localhost:8888 or read the README.md for Docker instructions.
 """
 
 import logging
+import os
+from pathlib import Path
 import signal  # noqa: F401 — re-exported for test compatibility
 import time
 
@@ -27,6 +29,29 @@ from logging_setup import configure_logging
 configure_logging(CFG)
 
 log = logging.getLogger("shell")
+
+
+def _warn_workspace_root_config_drift(cfg, environ=None):
+    """Warn when container env and app config point at different workspace roots."""
+    active_environ = os.environ if environ is None else environ
+    env_root = str(active_environ.get("WORKSPACE_ROOT") or "").strip()
+    cfg_root = str(cfg.get("workspace_root") or "").strip()
+    if not env_root or not cfg_root:
+        return
+    normalized_env_root = Path(env_root).expanduser().resolve(strict=False)
+    normalized_cfg_root = Path(cfg_root).expanduser().resolve(strict=False)
+    if normalized_env_root == normalized_cfg_root:
+        return
+    log.warning(
+        "WORKSPACE_ROOT_MISMATCH",
+        extra={
+            "workspace_root_env": str(normalized_env_root),
+            "workspace_root_config": str(normalized_cfg_root),
+        },
+    )
+
+
+_warn_workspace_root_config_drift(CFG)
 
 # Import blueprints and shared helpers after logging is configured.
 from extensions import limiter  # noqa: E402

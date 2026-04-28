@@ -222,6 +222,24 @@ class TestRunStreaming:
                 os.close(write_fd)
             reader.close()
 
+    def test_nonblocking_stream_reader_logs_when_nonblocking_setup_fails(self):
+        read_fd, write_fd = os.pipe()
+        reader = os.fdopen(read_fd, "r", encoding="utf-8", newline="")
+        try:
+            with mock.patch("blueprints.run.os.set_blocking", side_effect=OSError("not supported")), \
+                    mock.patch.object(run_routes.log, "warning") as warning:
+                state = run_routes._make_nonblocking_stream_reader(reader)
+
+            assert state == {"stream": reader, "fd": None, "decoder": None, "pending": ""}
+            warning.assert_called_once()
+            args, kwargs = warning.call_args
+            assert args == ("RUN_STREAM_NONBLOCKING_UNAVAILABLE",)
+            assert kwargs["extra"]["fd"] == read_fd
+            assert kwargs["extra"]["error"] == "not supported"
+        finally:
+            os.close(write_fd)
+            reader.close()
+
     def test_run_returns_500_when_spawn_fails(self):
         client = get_client()
 
@@ -638,6 +656,53 @@ class TestRunStreaming:
 
         assert fake_proc.stdout.closed is True
         assert fake_proc.wait_calls == 1
+
+    def test_detached_run_drain_has_hard_ceiling(self):
+        fake_proc = _FakeProc(lines=[], returncode=None, wait_returncode=-15)
+
+        class _ImmediateThread:
+            def __init__(
+                self,
+                *,
+                target: Callable[[], None],
+                name: str | None = None,
+                daemon: bool | None = None,
+            ):
+                self.target = target
+
+            def start(self) -> None:
+                self.target()
+
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop") as pid_pop, \
+             mock.patch("blueprints.run.active_run_remove") as active_run_remove, \
+             mock.patch("blueprints.run.threading.Thread", _ImmediateThread), \
+             mock.patch("blueprints.run.time.monotonic", side_effect=[0, 2]), \
+             mock.patch("blueprints.run.os.getpgid", return_value=4321), \
+             mock.patch("blueprints.run.os.killpg") as killpg, \
+             mock.patch("blueprints.run.DETACHED_DRAIN_FALLBACK_TIMEOUT_SECONDS", 1), \
+             mock.patch("blueprints.run.DETACHED_DRAIN_GRACE_SECONDS", 0), \
+             mock.patch.dict("config.CFG", {"command_timeout_seconds": 0}):
+            shell_app.app.config["RATELIMIT_ENABLED"] = False
+            from blueprints.run import run_command
+
+            with shell_app.app.test_request_context("/run", method="POST", json={"command": "sleep forever"}):
+                resp = run_command()
+                if isinstance(resp, tuple):
+                    pytest.fail(f"Expected streaming Response, got error tuple: {resp!r}")
+                response_iter = cast(Iterator[str], resp.response)
+                next(response_iter)
+                close = getattr(response_iter, "close", None)
+                if close is not None:
+                    close()
+
+        killpg.assert_called_once_with(4321, shell_app.signal.SIGTERM)
+        assert fake_proc.stdout.closed is True
+        assert fake_proc.wait_calls == 1
+        pid_pop.assert_called_once()
+        active_run_remove.assert_called_once()
 
     def test_fake_commands_streams_grouped_catalog_and_persists_history(self):
         client = get_client()

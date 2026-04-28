@@ -145,6 +145,89 @@ describe('stall recovery notices', () => {
     expect(document.querySelector('.tab-kill-btn').hidden).toBe(true)
   })
 
+  it('does not apply quiet-stall state after the run was killed while the active check was pending', async () => {
+    vi.useFakeTimers()
+    const appendLine = vi.fn()
+    let resolveJson
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => new Promise(resolve => { resolveJson = resolve }),
+    }))
+    const {
+      _resetStalledTimeout,
+      status,
+      runBtn,
+      tabs,
+    } = loadRunnerFns({
+      tabs: [{
+        id: 'tab-1',
+        st: 'running',
+        runId: 'run-1',
+        historyRunId: 'run-1',
+        killed: false,
+        pendingKill: false,
+        runStart: Date.now() - 5_000,
+      }],
+      appendLine,
+      apiFetch,
+    })
+
+    _resetStalledTimeout('tab-1')
+    await vi.advanceTimersByTimeAsync(45_000)
+    tabs[0].killed = true
+    tabs[0].st = 'killed'
+    resolveJson({ runs: [{ run_id: 'run-1' }] })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(appendLine).not.toHaveBeenCalled()
+    expect(status.textContent).not.toBe('RUNNING')
+    expect(tabs[0].st).toBe('killed')
+    expect(runBtn.disabled).toBe(false)
+  })
+
+  it('does not apply stale inactive state after the tab starts a newer run', async () => {
+    vi.useFakeTimers()
+    const appendLine = vi.fn()
+    let resolveJson
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => new Promise(resolve => { resolveJson = resolve }),
+    }))
+    const {
+      _resetStalledTimeout,
+      status,
+      runBtn,
+      tabs,
+    } = loadRunnerFns({
+      tabs: [{
+        id: 'tab-1',
+        st: 'running',
+        runId: 'run-1',
+        historyRunId: 'run-1',
+        killed: false,
+        pendingKill: false,
+        runStart: Date.now() - 5_000,
+      }],
+      appendLine,
+      apiFetch,
+    })
+
+    _resetStalledTimeout('tab-1')
+    await vi.advanceTimersByTimeAsync(45_000)
+    tabs[0].runId = 'run-2'
+    tabs[0].historyRunId = 'run-2'
+    tabs[0].st = 'running'
+    resolveJson({ runs: [] })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(appendLine).not.toHaveBeenCalled()
+    expect(status.textContent).toBe('')
+    expect(tabs[0].st).toBe('running')
+    expect(runBtn.disabled).toBe(false)
+  })
+
   it('restores the tab to running if stream activity resumes after a quiet warning', async () => {
     vi.useFakeTimers()
     const appendLine = vi.fn()

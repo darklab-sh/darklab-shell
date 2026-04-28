@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 1041
-- `vitest`: 849
+- `pytest`: 1055
+- `vitest`: 852
 - `playwright`: 219
-- total: 2,109
+- total: 2,126
 
 This document is organized in two parts:
 
@@ -38,18 +38,14 @@ This document is organized in two parts:
 - [Running the Suites](#running-the-suites)
 - [Recommended Workflow](#recommended-workflow)
 - [Suite Summaries](#suite-summaries)
+  - [Pytest](#pytest)
+  - [Vitest](#vitest)
+  - [Playwright](#playwright)
 - [History Seeding](#history-seeding)
 - [Choosing the Right Test Layer](#choosing-the-right-test-layer)
 - [Test Artifacts](#test-artifacts)
 - [Testing Conventions](#testing-conventions)
 - [Full Appendix](#full-appendix)
-  - [Pytest](#pytest)
-  - [Vitest](#vitest)
-  - [Playwright](#playwright)
-  - [Demo Recording Specs](#demo-recording-specs)
-  - [UI Screenshot Capture Specs](#ui-screenshot-capture-specs)
-  - [Container Smoke Test Reference](#container-smoke-test-reference)
-  - [History Seeding Reference](#history-seeding-reference)
 - [Related Docs](#related-docs)
 
 ---
@@ -174,7 +170,7 @@ scripts/record_demo_mobile.sh                       # mobile (430×932 iPhone 15
 scripts/record_demo.sh --base-url http://localhost:9000
 ```
 
-Wrappers health-check the container, seed/register the demo session token, probe `GET /workspace/files` with that token so the Files segment can create `response.html`, set `RUN_DEMO=1`, run the spec, and stitch frames into `assets/darklab_shell_demo.mp4` / `assets/darklab_shell_mobile_demo.mp4` with ffmpeg (HEVC/VideoToolbox on macOS, VP9/libvpx on Linux). See the appendix [Demo Recording Specs](#demo-recording-specs) for per-spec details and [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
+Wrappers health-check the container, seed/register the demo session token, probe `GET /workspace/files` with that token so the Files segment can create `response.html`, set `RUN_DEMO=1`, run the spec, and stitch frames into `assets/darklab_shell_demo.mp4` / `assets/darklab_shell_mobile_demo.mp4` with ffmpeg (HEVC/VideoToolbox on macOS, VP9/libvpx on Linux). See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
 
 Desktop and mobile demo configs share a central visual contract in [config/playwright.visual.contracts.js](../config/playwright.visual.contracts.js), and both specs assert that contract at startup through `tests/js/e2e/visual_guardrails.js`. That keeps viewport, pixel density, touch/mobile-mode assumptions, and `/status` health aligned with the wrapper/config setup instead of drifting silently.
 
@@ -192,7 +188,7 @@ scripts/capture_ui_screenshots.sh --theme all
 scripts/capture_ui_screenshots.sh --theme all --theme-variant light
 ```
 
-The wrapper sets `RUN_CAPTURE=1` and writes PNGs, per-UI manifest JSON files, and a static `index.html` review page to `/tmp/darklab_shell-ui-capture/`. Unset `--theme` and `--theme default` resolve to the configured app default theme slug from `app/config.py`, so default captures are stored under that real theme name instead of a duplicate `default/` folder. The review page groups scenes by UI/theme and includes a full-screen image viewer with left/right keyboard navigation. Capture runs boot an isolated temp app instance with seeded history, workspace storage enabled, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, history-heavy states, and Files panel states look production-like. See the appendix [UI Screenshot Capture Specs](#ui-screenshot-capture-specs) for per-spec details, and [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
+The wrapper sets `RUN_CAPTURE=1` and writes PNGs, per-UI manifest JSON files, and a static `index.html` review page to `/tmp/darklab_shell-ui-capture/`. Unset `--theme` and `--theme default` resolve to the configured app default theme slug from `app/config.py`, so default captures are stored under that real theme name instead of a duplicate `default/` folder. The review page groups scenes by UI/theme and includes a full-screen image viewer with left/right keyboard navigation. Capture runs boot an isolated temp app instance with seeded history, workspace storage enabled, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, history-heavy states, and Files panel states look production-like. See [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
 
 The capture configs use the same shared visual contract file as the demo pipeline, and `ui_capture_shared.js` runs `visual_guardrails.js` during each `freshHome(...)` reset. That means every captured scene re-checks viewport, density, touch/mobile-mode expectations, `/status` health, the fixed capture token, and the minimum seeded `/history` shape before screenshots are taken.
 
@@ -210,7 +206,7 @@ Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py
 ./scripts/container_smoke_test.sh --cmd "nmap -h"           # single command
 ```
 
-GitLab CI exposes this as the manual `container-smoke-test` job for verifying a fresh image before merging dependency or Dockerfile changes. See the appendix [Container Smoke Test Reference](#container-smoke-test-reference) for flags, the capture workflow for updating expectations, and the command-registry sync helper.
+GitLab CI exposes this as the manual `container-smoke-test` job for verifying a fresh image before merging dependency or Dockerfile changes.
 
 ---
 
@@ -226,7 +222,7 @@ The script must run **inside the container** so the same SQLite version that own
 docker compose exec -T shell python - --new-token < scripts/seed_history.py
 ```
 
-See the appendix [History Seeding Reference](#history-seeding-reference) for all invocation forms, the full flag list, and the rationale behind the host-write refusal.
+Use `--help` for the full flag list and invocation forms.
 
 ---
 
@@ -296,6 +292,7 @@ Practical note:
 - For tests that need isolated rate-limit buckets, use `makeTestIp()` to get a deterministic `198.18.x.x` test-network address in `X-Forwarded-For`. Prefer per-test hashing rather than one fixed IP per file so repeated suite runs do not collide in the same limiter bucket.
 - For browser tests that need a long-running command without hitting the backend limiter, prefer a browser-side `window.fetch` mock that returns an open SSE stream, like the kill-spec coverage.
 - When a browser test needs to exercise a `.catch(...)` branch, prefer aborting the request or rejecting the promise rather than returning a 500 response.
+- Keep this appendix and the README project tree in stable file-listing order. `tests/py/test_docs.py` checks appendix section order against `git ls-files --cached`, row order against each collector's test listing, and the README `## Project Structure` tree against the tracked-file listing with parent directories inserted before children.
 
 ---
 
@@ -331,8 +328,10 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadConfig.test_resolve_data_dir_uses_configured_data_dir_when_environment_is_unset` | Verifies that operator-configured `data_dir` is used when the internal environment override is absent. |
 | `TestLoadConfig.test_resolve_data_dir_falls_back_to_tmp_when_data_is_not_writable` | Verifies that auto-detection falls back to `/tmp` when image-created `/data` is not writable. |
 | `TestLoadConfig.test_resolve_data_dir_rejects_unwritable_configured_data_dir` | Verifies that an explicit but unwritable `data_dir` fails loudly instead of silently falling back. |
+| `TestLoadConfig.test_workspace_root_env_warning_only_logs_on_mismatch` | Verifies that startup warns when `WORKSPACE_ROOT` and configured `workspace_root` diverge, without warning for matching paths. |
 | `TestSessionWorkspace.test_disabled_workspace_rejects_operations` | Verifies that workspace helpers reject operations while the feature is disabled. |
 | `TestSessionWorkspace.test_session_workspace_uses_hashed_session_directory` | Verifies that session workspace directories use hashed session names instead of raw session identifiers. |
+| `TestSessionWorkspace.test_session_workspace_logs_chmod_failures_without_blocking_creation` | Verifies that workspace chmod repair failures are logged while keeping best-effort workspace creation available. |
 | `TestSessionWorkspace.test_write_read_list_delete_text_file` | Verifies the backend workspace text-file lifecycle for write, read, list, usage, and delete operations. |
 | `TestSessionWorkspace.test_prepare_workspace_file_for_command_uses_limited_write_mode` | Verifies that command output targets get limited group-write permissions without becoming world-readable. |
 | `TestSessionWorkspace.test_delete_workspace_file_falls_back_to_scanner_owner_for_nested_command_files` | Verifies that deleting scanner-owned nested workspace files falls back through the validated scanner sudo path when sticky directory permissions block direct unlink. |
@@ -341,17 +340,21 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_rejects_absolute_traversal_and_backslash_paths` | Verifies that unsafe workspace paths are rejected before touching the filesystem. |
 | `TestSessionWorkspace.test_allows_hidden_files_that_are_listed_by_workspace` | Verifies that hidden session file paths can be resolved so listed tool artifacts remain accessible. |
 | `TestSessionWorkspace.test_rejects_symlink_escape` | Verifies that symlinked workspace paths cannot escape the session directory. |
+| `TestSessionWorkspace.test_rejects_final_component_symlink_swaps` | Verifies that final-component symlink swaps are rejected during read, download, write, delete, and info operations. |
 | `TestSessionWorkspace.test_enforces_file_size_quota_and_file_count` | Verifies max-file-size, total-quota, and max-file-count enforcement. |
 | `TestSessionWorkspace.test_cleanup_removes_only_expired_session_directories` | Verifies that cleanup removes only expired hashed session directories and leaves unrelated paths alone. |
 | `TestSessionWorkspace.test_cleanup_uses_session_directory_activity_not_file_mtime` | Verifies that workspace cleanup uses the session directory activity timestamp rather than preserving a session because one file has a newer timestamp. |
 | `TestSessionWorkspace.test_touch_session_workspace_extends_cleanup_activity` | Verifies that app-mediated workspace access refreshes the session directory activity timestamp so active workspaces are retained. |
+| `TestEntrypointWorkspaceRepair.test_workspace_repair_targets_children_inside_session_directories` | Verifies that entrypoint workspace permission repair explicitly targets files and folders inside hashed session directories. |
 | `TestDerivedCommandRegistry.test_commands_registry_loader_normalizes_policy_and_autocomplete` | Verifies that the `commands.yaml` loader normalizes policy entries and autocomplete metadata, including pipe-helper entries. |
 | `TestDerivedCommandRegistry.test_commands_registry_local_overlay_appends_policy_and_context` | Verifies that `commands.local.yaml` appends policy entries, adds new roots, overrides categories, and merges autocomplete hints without replacing the base registry. |
-| `TestDerivedCommandRegistry.test_autocomplete_context_can_be_derived_from_commands_registry` | Verifies that browser autocomplete context can be derived from command and pipe-helper registry entries. |
-| `TestDerivedCommandRegistry.test_real_registry_workspace_file_flags_cover_supported_file_io_tools` | Verifies that supported file input/output flags in the real command registry are rewritten through session workspace paths. |
 | `TestDerivedCommandRegistry.test_real_registry_amass_uses_subcommand_scoped_autocomplete` | Verifies that Amass autocomplete exposes root subcommands and keeps subcommand-specific flags and examples scoped to the matching subcommand. |
 | `TestDerivedCommandRegistry.test_real_registry_openssl_uses_subcommand_scoped_autocomplete` | Verifies that OpenSSL autocomplete exposes allowlisted subcommands and keeps `s_client` and `ciphers` flags scoped to the matching subcommand. |
 | `TestDerivedCommandRegistry.test_real_registry_gobuster_uses_subcommand_scoped_autocomplete` | Verifies that Gobuster autocomplete exposes mode subcommands and keeps mode-specific flags scoped to the matching subcommand. |
+| `TestDerivedCommandRegistry.test_autocomplete_context_can_be_derived_from_commands_registry` | Verifies that browser autocomplete context can be derived from command and pipe-helper registry entries. |
+| `TestDerivedCommandRegistry.test_real_registry_workspace_file_flags_cover_supported_file_io_tools` | Verifies that supported file input/output flags in the real command registry are rewritten through session workspace paths. |
+| `TestDerivedCommandRegistry.test_workspace_rewrites_quote_shell_sensitive_paths` | Verifies that workspace file rewrites quote absolute paths containing shell-sensitive characters. |
+| `TestDerivedCommandRegistry.test_amass_runtime_environment_quotes_rewritten_workspace_paths` | Verifies that the Amass managed-directory runtime environment wrapper quotes rewritten workspace paths safely. |
 | `TestDerivedCommandRegistry.test_autocomplete_context_filters_workspace_feature_hints` | Verifies that workspace-only autocomplete examples, flags, and value hints are hidden unless Files are enabled. |
 | `TestDerivedCommandRegistry.test_command_policy_can_be_derived_from_commands_registry` | Verifies that command-policy allow and deny prefixes are derived from `commands.yaml` policy entries. |
 | `TestLoadFaq.test_missing_file_returns_empty_list` | Checks that missing file returns empty list. |
@@ -452,12 +455,15 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestMobileWelcomeHintLoading.test_missing_mobile_hints_file_returns_empty_list` | Checks that missing mobile hints file returns empty list. |
 | `TestMobileWelcomeHintLoading.test_mobile_hints_loader_ignores_blank_lines_and_comments` | Checks that mobile hints loader ignores blank lines and comments. |
 | `TestMobileWelcomeHintLoading.test_mobile_hints_loader_skips_workspace_section_when_disabled` | Verifies that workspace-scoped mobile welcome hints are hidden when Files are disabled and restored when Files are enabled. |
-| `TestAutocompleteContextLoading.test_container_smoke_test_commands_spread_sensitive_roots` | Verifies that the smoke-test command corpus spaces repeated `dig` and `whois` commands apart during smoke execution without changing the source-owned registry or workflow order. |
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_include_registry_examples_and_workflows` | Verifies that the shared container smoke corpus includes both registry examples and workflow commands while deduplicating overlaps in stable order. |
+| `TestAutocompleteContextLoading.test_container_smoke_test_commands_spread_sensitive_roots` | Verifies that the smoke-test command corpus spaces repeated `dig` and `whois` commands apart during smoke execution without changing the source-owned registry or workflow order. |
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_render_workflow_defaults` | Verifies that workflow-backed smoke commands render declared default input values instead of leaking raw `{{token}}` placeholders into the shared smoke corpus. |
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_skip_workspace_required_examples` | Verifies that workspace-only command examples stay out of the generic smoke corpus because they need per-session file setup. |
 | `TestWorkflowInputLoading.test_load_workflows_keeps_declared_inputs` | Verifies that workflow input metadata is preserved when every referenced token is declared in the workflow schema. |
 | `TestWorkflowInputLoading.test_load_workflows_drops_steps_with_undeclared_tokens` | Verifies that workflow steps referencing undeclared input tokens are rejected instead of reaching the client as partially renderable templates. |
+| `TestSeedHistoryFixtures.test_visual_flows_fixture_only_stars_two_commands` | Verifies that the `visual-flows` seed fixture limits starred commands to two so capture and demo runs keep Recent rows visible. |
+| `TestSeedHistoryFixtures.test_seed_history_uses_runtime_command_registry_examples` | Verifies that `scripts/seed_history.py` pulls its seeded command pool from the command-registry examples and does not carry fake commands such as `bogus-command`. |
+| `TestSeedHistoryFixtures.test_seed_runs_avoids_adjacent_duplicate_commands` | Verifies that seeded history avoids back-to-back duplicate commands even when the overall run set still includes repeats. |
 | `TestRewriteIdempotent.test_mtr_already_report_wide_unchanged` | Checks that mtr already report wide unchanged. |
 | `TestRewriteIdempotent.test_mtr_report_flag_unchanged` | Checks that mtr report flag unchanged. |
 | `TestRewriteIdempotent.test_nmap_already_privileged_unchanged` | Checks that nmap already privileged unchanged. |
@@ -492,9 +498,6 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestFakeStatus.test_includes_session_summary_counts` | Checks that the `status` built-in reports session type, run and snapshot counts, starred-command count, saved-options presence, and active-job count for the current session. |
 | `TestFakeStats.test_reports_session_activity_and_command_breakdown` | Checks that the `stats` built-in reports masked session identity, activity totals, success rate, average duration, and external command-root breakdowns for the current session. |
 | `TestFakeStats.test_top_commands_empty_state_ignores_builtin_only_sessions` | Verifies that built-in-only sessions still affect `stats` totals but do not appear in the external-tool Top commands section. |
-| `TestSeedHistoryFixtures.test_visual_flows_fixture_only_stars_two_commands` | Verifies that the `visual-flows` seed fixture limits starred commands to two so capture and demo runs keep Recent rows visible. |
-| `TestSeedHistoryFixtures.test_seed_history_uses_runtime_command_registry_examples` | Verifies that `scripts/seed_history.py` pulls its seeded command pool from the command-registry examples and does not carry fake commands such as `bogus-command`. |
-| `TestSeedHistoryFixtures.test_seed_runs_avoids_adjacent_duplicate_commands` | Verifies that seeded history avoids back-to-back duplicate commands even when the overall run set still includes repeats. |
 
 #### `test_container_smoke_test.py`
 
@@ -509,6 +512,40 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `test_container_smoke_test_expectations_cover_all_user_facing_commands` | Checks that the smoke-test expectation fixture covers every command in the shared user-facing smoke corpus. |
 | `test_container_smoke_test_command_matches_expected_output` | Checks that each smoke command matches expected output, retrying transient failures with `RUN_CONTAINER_SMOKE_TEST_RETRIES` before failing. |
 | `test_container_smoke_test_workspace_file_flags` | Verifies that the built image can create workspace files through the API, run workspace-enabled input/output flags through `/run`, read generated files back, and clean up through the workspace API. |
+
+#### `test_docs.py`
+
+Meta-tests that verify documentation stays in sync with the test suite. Runs `pytest --collect-only`, `npx vitest list`, and `npx playwright test --list` as subprocesses (once per module via shared fixtures) and compares results against the appendix tables and documented totals for all three runtimes.
+
+| Test | Description |
+| --- | --- |
+| `TestPytestAppendixDrift.test_documented_files_match_actual` | Checks that each pytest file's row count in the tests/README.md appendix matches the number of unique test function names collected by pytest (parameterised variants collapsed to a single entry). |
+| `TestPytestAppendixDrift.test_all_test_files_have_appendix_sections` | Checks that every `test_*.py` file collected by pytest has a corresponding appendix section in tests/README.md. |
+| `TestPytestAppendixDrift.test_appendix_order_matches_collection_order` | Checks that pytest appendix sections follow tracked-file order and rows follow pytest collection order. |
+| `TestVitestAppendixDrift.test_documented_files_match_actual` | Checks that each Vitest `*.test.js` file's row count in the tests/README.md appendix matches the number of unique test names returned by `npx vitest list`. |
+| `TestVitestAppendixDrift.test_all_test_files_have_appendix_sections` | Checks that every `*.test.js` file listed by Vitest has a corresponding appendix section in tests/README.md. |
+| `TestVitestAppendixDrift.test_appendix_order_matches_listing_order` | Checks that Vitest appendix sections follow tracked-file order and rows follow `npx vitest list` order. |
+| `TestPlaywrightAppendixDrift.test_documented_files_match_actual` | Checks that each Playwright `*.spec.js` and standalone `*.capture.js` file's row count in the tests/README.md appendix matches the number of unique test names returned by the normal suite plus the dedicated demo/capture `--list` configs. |
+| `TestPlaywrightAppendixDrift.test_all_test_files_have_appendix_sections` | Checks that every Playwright `*.spec.js` and standalone `*.capture.js` file listed by the normal suite or the dedicated demo/capture configs has a corresponding appendix section in tests/README.md. |
+| `TestPlaywrightAppendixDrift.test_appendix_order_matches_listing_order` | Checks that Playwright appendix sections follow tracked-file order and rows follow the combined Playwright listing order. |
+| `TestDocumentedPytestTotals.test_tests_readme` | Checks that the `pytest` total recorded in tests/README.md matches the actual collected test count (all parameterised variants included). |
+| `TestDocumentedPytestTotals.test_contributing` | Checks that the `pytest` total recorded in CONTRIBUTING.md matches the actual collected test count. |
+| `TestDocumentedPytestTotals.test_architecture` | Checks that the `pytest` total recorded in ARCHITECTURE.md matches the actual collected test count. |
+| `TestDocumentedVitestTotals.test_tests_readme` | Checks that the `vitest` total recorded in tests/README.md matches the raw Vitest test count from `npx vitest list`. |
+| `TestDocumentedVitestTotals.test_contributing` | Checks that the `Vitest` total recorded in CONTRIBUTING.md matches the raw Vitest test count. |
+| `TestDocumentedVitestTotals.test_architecture` | Checks that the `vitest` total recorded in ARCHITECTURE.md matches the raw Vitest test count. |
+| `TestDocumentedPlaywrightTotals.test_tests_readme` | Checks that the `playwright` total recorded in tests/README.md matches the raw Playwright total reported by `npx playwright test --list`. |
+| `TestDocumentedPlaywrightTotals.test_contributing` | Checks that the `Playwright` total recorded in CONTRIBUTING.md matches the raw Playwright total. |
+| `TestDocumentedPlaywrightTotals.test_architecture` | Checks that the `playwright` total recorded in ARCHITECTURE.md matches the raw Playwright total. |
+| `TestDocumentedCombinedTotals.test_tests_readme` | Checks that the combined total recorded in tests/README.md matches the sum of the pytest, Vitest, and Playwright collected counts. |
+| `TestDocumentedCombinedTotals.test_contributing` | Checks that the combined total recorded in CONTRIBUTING.md matches the sum of the pytest, Vitest, and Playwright collected counts. |
+| `TestDocumentedCombinedTotals.test_architecture` | Checks that the combined total recorded in ARCHITECTURE.md matches the sum of the pytest, Vitest, and Playwright collected counts. |
+| `TestProjectStructureCoverage.test_no_files_missing_from_structure` | Checks that every git-tracked file is listed in the README.md `## Project Structure` tree, allowing only the explicit per-file exclusions and opaque-directory subtrees declared in test_docs.py. |
+| `TestProjectStructureCoverage.test_opaque_dirs_appear_in_structure` | Checks that every directory declared opaque in `_PROJECT_STRUCTURE_OPAQUE_DIRS` still appears as a parent entry in the README tree, so contributors are pointed at the directory even when its individual files aren't enumerated. |
+| `TestProjectStructureCoverage.test_listed_paths_exist_in_git` | Checks that every leaf path written into the README project-structure tree corresponds to a real tracked or untracked-but-not-gitignored path on disk, catching typos and stale entries left behind after deletions. |
+| `TestProjectStructureCoverage.test_structure_order_matches_git_file_listing` | Checks that the README.md `## Project Structure` tree follows `git ls-files --cached` order with parent directories inserted before children. |
+| `TestReleaseDraftDocs.test_release_draft_convention_is_documented_when_drafts_exist` | Checks that release-draft branch docs are documented when `docs/release-drafts/` exists. |
+| `TestReleaseDraftDocs.test_release_drafts_are_paired_by_version` | Checks that each release draft version has both merge-request and release-notes files. |
 
 #### `test_logging.py`
 
@@ -665,6 +702,27 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunSpawnErrorEvent.test_spawn_error_extra_has_ip` | Checks that spawn error extra has IP. |
 | `TestRunSpawnErrorEvent.test_spawn_error_extra_has_cmd` | Checks that spawn error extra has command. |
 
+#### `test_output_search.py`
+
+SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code path (when `runs_fts` is available) and the graceful fallback to `LOWER(command) LIKE` when the FTS table is absent.
+
+| Test | Description |
+| --- | --- |
+| `TestOutputSearch.test_finds_run_by_output_content` | Verifies that a term appearing in `output_search_text` (e.g. a port number from nmap output) is found by the history search endpoint. |
+| `TestOutputSearch.test_does_not_match_other_session` | Verifies that FTS results are scoped to the requesting session and do not surface runs from other sessions. |
+| `TestOutputSearch.test_finds_run_by_command_text` | Verifies that the command column is also indexed by FTS so command-text queries still work. |
+| `TestOutputSearch.test_no_match_returns_empty` | Verifies that a query with no matching runs returns an empty list, not an error. |
+| `TestOutputSearch.test_special_chars_do_not_crash` | Verifies that FTS special characters (`"`, `(`, `*`, `\`) in the query are escaped and do not raise an unhandled error. |
+| `TestOutputSearch.test_combined_with_exit_code_filter` | Verifies that an FTS query can be combined with the `exit_code` filter and returns only matching runs with the correct exit status. |
+| `TestOutputSearch.test_empty_query_returns_all_runs` | Verifies that an empty or absent `q` parameter returns all runs for the session without touching the FTS path. |
+| `TestOutputSearch.test_multiword_query_restricts_results` | Verifies that a multi-word query performs an AND search — only runs containing all terms are returned. |
+| `TestOutputSearch.test_partial_substring_match_via_trigram` | Verifies that compound tokens like `443/tcp` do not crash the search endpoint regardless of whether the trigram tokenizer is available. |
+| `TestOutputSearch.test_short_query_under_trigram_threshold_matches_via_like` | Regression: a 2-char command-scoped query (e.g. `ps`) must still match the `ps aux` run even though the trigram tokenizer can't index <3-char terms; `_build_fts_query` returns None for short terms and the endpoint falls back to LIKE on `r.command`. |
+| `TestOutputSearch.test_partial_typing_narrows_progressively` | Regression for reverse-i-search: every keystroke from 1 character upward (`p`, `pi`, `pin`, `ping`) narrows the result set via LIKE/FTS without a silent empty intermediate; matches bash i-search expectations. |
+| `TestOutputSearch.test_scope_command_ignores_output_matches` | Reverse-i-search must only match typed command text, not output text. Verifies `scope=command` suppresses the FTS path so a term that appears only in `output_search_text` is not surfaced, while the default scope still returns it for the drawer's full-text search. |
+| `TestOutputSearch.test_full_output_text_beyond_preview_window_is_searchable` | Verifies that `output_search_text` can index content from beyond the capped preview window — simulates a truncated run whose full artifact text contains terms absent from `output_preview`, and asserts they are found. |
+| `TestOutputSearch.test_fts_failure_falls_back_to_command_like` | Verifies graceful degradation when the `runs_fts` table does not exist: command-text queries succeed via `LIKE` fallback and return HTTP 200; output-only queries return an empty list rather than a 500 error. |
+
 #### `test_request_kill_and_commands.py`
 
 | Test | Description |
@@ -706,7 +764,6 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIndexRoute.test_returns_html` | Checks returns HTML handling. |
 | `TestIndexRoute.test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button` | Checks that desktop diagnostics link opens in new tab while mobile action stays button. |
 | `TestIndexRoute.test_bootstrapped_app_config_matches_config_route` | Verifies that the server-rendered APP_CONFIG bootstrap JSON matches the `/config` payload. |
-| `TestIndexRoute.test_workspace_menu_affordances_follow_config` | Verifies that desktop and mobile Files entry points are rendered only when workspace storage is enabled. |
 | `TestHealthRoute.test_returns_200_when_db_ok` | Returns 200 when database ok. |
 | `TestHealthRoute.test_response_is_json` | Checks response is JSON handling. |
 | `TestHealthRoute.test_db_true_when_sqlite_available` | Checks that database true when SQLite available. |
@@ -726,6 +783,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestStatusRoute.test_server_time_is_ms_epoch` | `server_time` is a millisecond-epoch integer in a plausible range. |
 | `TestConfigRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestConfigRoute.test_contains_expected_keys` | Checks contains expected keys handling. |
+| `TestConfigRoute.test_workspace_menu_affordances_follow_config` | Checks that test workspace menu affordances follow config. |
 | `TestConfigRoute.test_max_tabs_is_int` | Checks that max tabs is int. |
 | `TestConfigRoute.test_contains_timeout_and_welcome_keys` | Contains timeout and welcome keys. |
 | `TestConfigRoute.test_all_new_keys_are_ints` | Checks that all new keys are ints. |
@@ -734,13 +792,13 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestConfigRoute.test_project_readme_is_constant` | Checks that project readme is constant. |
 | `TestConfigRoute.test_welcome_timing_reflects_cfg` | Checks that welcome timing reflects CFG. |
 | `TestConfigRoute.test_command_timeout_defaults_to_one_hour` | Checks that command timeout defaults to one hour. |
-| `TestConfigRoute.test_share_redaction_rules_reflect_cfg` | Checks that share redaction rules are exposed through the config route. |
-| `TestConfigRoute.test_share_redaction_rules_empty_when_disabled` | Checks that the config route returns no effective share redaction rules when the feature is disabled. |
 | `TestConfigRoute.test_diag_enabled_false_when_cidrs_empty` | Checks that diagnostics enabled false when cidrs empty. |
 | `TestConfigRoute.test_diag_enabled_false_when_client_ip_not_in_cidrs` | Checks that diagnostics enabled false when client IP not in cidrs. |
 | `TestConfigRoute.test_diag_enabled_true_when_client_ip_in_cidrs` | Checks that diagnostics enabled true when client IP in cidrs. |
 | `TestConfigRoute.test_diag_enabled_uses_trusted_forwarded_for_when_present` | Checks that diagnostics enabled uses trusted forwarded for when present. |
 | `TestConfigRoute.test_diag_enabled_ignores_forwarded_for_from_untrusted_peer` | Checks that diagnostics enabled ignores forwarded for from untrusted peer. |
+| `TestConfigRoute.test_share_redaction_rules_reflect_cfg` | Checks that share redaction rules are exposed through the config route. |
+| `TestConfigRoute.test_share_redaction_rules_empty_when_disabled` | Checks that the config route returns no effective share redaction rules when the feature is disabled. |
 | `TestThemesRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestThemesRoute.test_response_has_current_and_themes` | Checks that response has current and themes. |
 | `TestThemesRoute.test_includes_named_theme_variants` | Includes named theme variants. |
@@ -777,6 +835,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestAllowedCommandsRoute.test_unrestricted_when_no_file` | Checks that unrestricted when no file. |
 | `TestAllowedCommandsRoute.test_restricted_when_file_present` | Checks that restricted when file present. |
 | `TestAllowedCommandsRoute.test_returns_grouped_commands_when_restricted` | Returns grouped commands when restricted. |
+| `TestAutocompleteWorkspaceRoute.test_workspace_roots_follow_workspace_config` | Verifies that file built-in roots are included in autocomplete only when Files are enabled. |
+| `TestAutocompleteWorkspaceRoute.test_workspace_autocomplete_examples_follow_workspace_config` | Verifies that workspace-only command examples and file flags are hidden from `/autocomplete` until Files are enabled. |
 | `TestFaqRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestFaqRoute.test_items_key_present` | Checks items key present handling. |
 | `TestFaqRoute.test_includes_builtin_faq_entries` | Includes builtin FAQ entries. |
@@ -864,8 +924,6 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWelcomeRoute.test_returns_list` | Checks returns list handling. |
 | `TestWelcomeRoute.test_returns_cmd_and_out_fields_when_configured` | Returns command and out fields when configured. |
 | `TestWelcomeRoute.test_returns_empty_list_when_no_welcome_file` | Returns empty list when no welcome file. |
-| `TestAutocompleteWorkspaceRoute.test_workspace_roots_follow_workspace_config` | Verifies that file built-in roots are included in autocomplete only when Files are enabled. |
-| `TestAutocompleteWorkspaceRoute.test_workspace_autocomplete_examples_follow_workspace_config` | Verifies that workspace-only command examples and file flags are hidden from `/autocomplete` until Files are enabled. |
 | `TestAutocompleteRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestAutocompleteRoute.test_has_suggestions_key` | Checks has suggestions key handling. |
 | `TestAutocompleteRoute.test_returns_configured_context` | Checks that the autocomplete endpoint returns the configured context object. |
@@ -910,6 +968,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunStreaming.test_run_emits_started_notice_output_and_exit` | Checks that run emits started notice output and exit. |
 | `TestRunStreaming.test_run_output_events_include_signal_metadata` | Verifies that live `/run` output events include backend signal metadata for classified lines. |
 | `TestRunStreaming.test_history_restore_json_preserves_signal_metadata` | Verifies that history restore JSON preserves per-line signal metadata from persisted run output. |
+| `TestRunStreaming.test_nonblocking_stream_reader_preserves_partial_lines_until_finalize` | Checks that the nonblocking stream reader buffers partial lines until a newline or finalize flush completes them. |
+| `TestRunStreaming.test_nonblocking_stream_reader_logs_when_nonblocking_setup_fails` | Verifies that non-blocking stream setup failures warn before falling back to blocking line reads. |
 | `TestRunStreaming.test_run_returns_500_when_spawn_fails` | Checks that run returns 500 when spawn fails. |
 | `TestRunStreaming.test_run_emits_heartbeat_when_silent` | Checks that run emits heartbeat when silent. |
 | `TestRunStreaming.test_run_emits_heartbeat_when_readable_stdout_has_only_partial_line` | Verifies that readable partial stdout still emits a heartbeat before the buffered line is finalized. |
@@ -922,11 +982,11 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunStreaming.test_run_filters_output_through_chained_synthetic_helpers` | Checks that chained synthetic helpers stream and persist the final post-processed output instead of the intermediate lines. |
 | `TestRunStreaming.test_run_rejects_invalid_synthetic_grep_regex` | Checks that invalid synthetic `grep -E` regexes fail as user-facing errors. |
 | `TestRunStreaming.test_run_emits_timeout_notice_when_command_exceeds_limit` | Checks that run emits timeout notice when command exceeds limit. |
-| `TestRunStreaming.test_nonblocking_stream_reader_preserves_partial_lines_until_finalize` | Checks that the nonblocking stream reader buffers partial lines until a newline or finalize flush completes them. |
 | `TestRunStreaming.test_run_still_exits_when_history_save_fails` | Checks that run still exits when history save fails. |
 | `TestRunStreaming.test_run_waits_before_emitting_exit_code` | Checks that successful runs wait before emitting the final exit code when the subprocess return code is still pending at EOF. |
 | `TestRunStreaming.test_run_cleans_up_stdout_and_waits_when_streaming_errors` | Checks that stream errors still close stdout and wait on the subprocess. |
 | `TestRunStreaming.test_run_disconnect_detaches_and_cleans_up_stdout` | Checks that disconnect-driven detaches still close stdout and wait on the subprocess. |
+| `TestRunStreaming.test_detached_run_drain_has_hard_ceiling` | Verifies that disconnected run drains kill and clean up a non-closing process after the detached ceiling. |
 | `TestRunStreaming.test_fake_commands_streams_grouped_catalog_and_persists_history` | Checks that fake `commands` streams the grouped command catalog and persists the run to history. |
 | `TestRunStreaming.test_fake_clear_emits_clear_event_and_persists_history` | Checks that fake clear emits clear event and persists history. |
 | `TestRunStreaming.test_fake_env_returns_web_environment` | Checks that fake env returns web environment. |
@@ -1040,6 +1100,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionTokenInfo.test_returns_created_date_for_tok_session` | Checks that the `created` date is populated for an issued token. |
 | `TestSessionTokenInfo.test_returns_null_for_tok_not_in_db` | Checks that a `tok_`-prefixed token never stored in the DB is treated as anonymous (both fields null). |
 | `TestSessionTokenInfo.test_revoked_token_is_treated_as_anonymous` | Checks that after revocation, using the old token returns anonymous (null) info. |
+| `TestSessionPreferences.test_returns_empty_preferences_when_none_saved` | Checks that `GET /session/preferences` returns an empty normalized preference payload when the session has no stored preferences yet. |
+| `TestSessionPreferences.test_persists_and_returns_current_session_preferences` | Checks that `POST /session/preferences` stores the current session's normalized preference snapshot and `GET` returns it back. |
+| `TestSessionPreferences.test_ignores_unknown_session_preference_keys` | Checks that unknown keys are dropped before session preferences are stored or returned. |
 | `TestSessionTokenRevoke.test_returns_200_for_existing_token` | Checks that revoking a valid token returns HTTP 200 with `ok: true`. |
 | `TestSessionTokenRevoke.test_deletes_token_from_db` | Checks that the revoked token is deleted from `session_tokens`. |
 | `TestSessionTokenRevoke.test_returns_404_for_unknown_token` | Checks that revoking an unknown token returns 404. |
@@ -1047,58 +1110,6 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionTokenRevoke.test_rejects_missing_token_field` | Checks that a 400 is returned when the `token` field is absent from the revoke request. |
 | `TestSessionTokenRevoke.test_can_revoke_own_current_token` | Checks that revoking the caller's own active token (passed in both body and header) is permitted. |
 | `TestSessionTokenRevoke.test_second_revoke_returns_404` | Checks that attempting to revoke an already-revoked token returns 404. |
-| `TestSessionPreferences.test_returns_empty_preferences_when_none_saved` | Checks that `GET /session/preferences` returns an empty normalized preference payload when the session has no stored preferences yet. |
-| `TestSessionPreferences.test_persists_and_returns_current_session_preferences` | Checks that `POST /session/preferences` stores the current session's normalized preference snapshot and `GET` returns it back. |
-| `TestSessionPreferences.test_ignores_unknown_session_preference_keys` | Checks that unknown keys are dropped before session preferences are stored or returned. |
-
-#### `test_output_search.py`
-
-SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code path (when `runs_fts` is available) and the graceful fallback to `LOWER(command) LIKE` when the FTS table is absent.
-
-| Test | Description |
-| --- | --- |
-| `TestOutputSearch.test_finds_run_by_output_content` | Verifies that a term appearing in `output_search_text` (e.g. a port number from nmap output) is found by the history search endpoint. |
-| `TestOutputSearch.test_does_not_match_other_session` | Verifies that FTS results are scoped to the requesting session and do not surface runs from other sessions. |
-| `TestOutputSearch.test_finds_run_by_command_text` | Verifies that the command column is also indexed by FTS so command-text queries still work. |
-| `TestOutputSearch.test_no_match_returns_empty` | Verifies that a query with no matching runs returns an empty list, not an error. |
-| `TestOutputSearch.test_special_chars_do_not_crash` | Verifies that FTS special characters (`"`, `(`, `*`, `\`) in the query are escaped and do not raise an unhandled error. |
-| `TestOutputSearch.test_combined_with_exit_code_filter` | Verifies that an FTS query can be combined with the `exit_code` filter and returns only matching runs with the correct exit status. |
-| `TestOutputSearch.test_empty_query_returns_all_runs` | Verifies that an empty or absent `q` parameter returns all runs for the session without touching the FTS path. |
-| `TestOutputSearch.test_multiword_query_restricts_results` | Verifies that a multi-word query performs an AND search — only runs containing all terms are returned. |
-| `TestOutputSearch.test_partial_substring_match_via_trigram` | Verifies that compound tokens like `443/tcp` do not crash the search endpoint regardless of whether the trigram tokenizer is available. |
-| `TestOutputSearch.test_full_output_text_beyond_preview_window_is_searchable` | Verifies that `output_search_text` can index content from beyond the capped preview window — simulates a truncated run whose full artifact text contains terms absent from `output_preview`, and asserts they are found. |
-| `TestOutputSearch.test_fts_failure_falls_back_to_command_like` | Verifies graceful degradation when the `runs_fts` table does not exist: command-text queries succeed via `LIKE` fallback and return HTTP 200; output-only queries return an empty list rather than a 500 error. |
-| `TestOutputSearch.test_short_query_under_trigram_threshold_matches_via_like` | Regression: a 2-char command-scoped query (e.g. `ps`) must still match the `ps aux` run even though the trigram tokenizer can't index <3-char terms; `_build_fts_query` returns None for short terms and the endpoint falls back to LIKE on `r.command`. |
-| `TestOutputSearch.test_partial_typing_narrows_progressively` | Regression for reverse-i-search: every keystroke from 1 character upward (`p`, `pi`, `pin`, `ping`) narrows the result set via LIKE/FTS without a silent empty intermediate; matches bash i-search expectations. |
-| `TestOutputSearch.test_scope_command_ignores_output_matches` | Reverse-i-search must only match typed command text, not output text. Verifies `scope=command` suppresses the FTS path so a term that appears only in `output_search_text` is not surfaced, while the default scope still returns it for the drawer's full-text search. |
-
-#### `test_docs.py`
-
-Meta-tests that verify documentation stays in sync with the test suite. Runs `pytest --collect-only`, `npx vitest list`, and `npx playwright test --list` as subprocesses (once per module via shared fixtures) and compares results against the appendix tables and documented totals for all three runtimes.
-
-| Test | Description |
-| --- | --- |
-| `TestPytestAppendixDrift.test_documented_files_match_actual` | Checks that each pytest file's row count in the tests/README.md appendix matches the number of unique test function names collected by pytest (parameterised variants collapsed to a single entry). |
-| `TestPytestAppendixDrift.test_all_test_files_have_appendix_sections` | Checks that every `test_*.py` file collected by pytest has a corresponding appendix section in tests/README.md. |
-| `TestVitestAppendixDrift.test_documented_files_match_actual` | Checks that each Vitest `*.test.js` file's row count in the tests/README.md appendix matches the number of unique test names returned by `npx vitest list`. |
-| `TestVitestAppendixDrift.test_all_test_files_have_appendix_sections` | Checks that every `*.test.js` file listed by Vitest has a corresponding appendix section in tests/README.md. |
-| `TestPlaywrightAppendixDrift.test_documented_files_match_actual` | Checks that each Playwright `*.spec.js` and standalone `*.capture.js` file's row count in the tests/README.md appendix matches the number of unique test names returned by the normal suite plus the dedicated demo/capture `--list` configs. |
-| `TestPlaywrightAppendixDrift.test_all_test_files_have_appendix_sections` | Checks that every Playwright `*.spec.js` and standalone `*.capture.js` file listed by the normal suite or the dedicated demo/capture configs has a corresponding appendix section in tests/README.md. |
-| `TestDocumentedPytestTotals.test_tests_readme` | Checks that the `pytest` total recorded in tests/README.md matches the actual collected test count (all parameterised variants included). |
-| `TestDocumentedPytestTotals.test_contributing` | Checks that the `pytest` total recorded in CONTRIBUTING.md matches the actual collected test count. |
-| `TestDocumentedPytestTotals.test_architecture` | Checks that the `pytest` total recorded in ARCHITECTURE.md matches the actual collected test count. |
-| `TestDocumentedVitestTotals.test_tests_readme` | Checks that the `vitest` total recorded in tests/README.md matches the raw Vitest test count from `npx vitest list`. |
-| `TestDocumentedVitestTotals.test_contributing` | Checks that the `Vitest` total recorded in CONTRIBUTING.md matches the raw Vitest test count. |
-| `TestDocumentedVitestTotals.test_architecture` | Checks that the `vitest` total recorded in ARCHITECTURE.md matches the raw Vitest test count. |
-| `TestDocumentedPlaywrightTotals.test_tests_readme` | Checks that the `playwright` total recorded in tests/README.md matches the raw Playwright total reported by `npx playwright test --list`. |
-| `TestDocumentedPlaywrightTotals.test_contributing` | Checks that the `Playwright` total recorded in CONTRIBUTING.md matches the raw Playwright total. |
-| `TestDocumentedPlaywrightTotals.test_architecture` | Checks that the `playwright` total recorded in ARCHITECTURE.md matches the raw Playwright total. |
-| `TestDocumentedCombinedTotals.test_tests_readme` | Checks that the combined total recorded in tests/README.md matches the sum of the pytest, Vitest, and Playwright collected counts. |
-| `TestDocumentedCombinedTotals.test_contributing` | Checks that the combined total recorded in CONTRIBUTING.md matches the sum of the pytest, Vitest, and Playwright collected counts. |
-| `TestDocumentedCombinedTotals.test_architecture` | Checks that the combined total recorded in ARCHITECTURE.md matches the sum of the pytest, Vitest, and Playwright collected counts. |
-| `TestProjectStructureCoverage.test_no_files_missing_from_structure` | Checks that every git-tracked file (or untracked-but-not-gitignored file) is listed in the README.md `## Project Structure` tree, allowing only the explicit per-file exclusions and opaque-directory subtrees declared in test_docs.py. |
-| `TestProjectStructureCoverage.test_opaque_dirs_appear_in_structure` | Checks that every directory declared opaque in `_PROJECT_STRUCTURE_OPAQUE_DIRS` still appears as a parent entry in the README tree, so contributors are pointed at the directory even when its individual files aren't enumerated. |
-| `TestProjectStructureCoverage.test_listed_paths_exist_in_git` | Checks that every leaf path written into the README project-structure tree corresponds to a real tracked or untracked-but-not-gitignored path on disk, catching typos and stale entries left behind after deletions. |
 
 #### `test_validation.py`
 
@@ -1381,13 +1392,12 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `uses subcommand-scoped value hints` | Verifies that value hints for repeated flags such as `-o` come from the active subcommand context. |
 | `prefers runtime autocomplete suggestions for client-side commands` | Verifies that client-side commands can provide dynamic autocomplete suggestions before falling back to the static autocomplete registry. |
 | `merges runtime autocomplete context with the YAML-loaded context registry` | Verifies that runtime built-in context and YAML-loaded tool context feed the same autocomplete matching engine. |
-| `uses live workspace file hints for workspace read flags instead of static examples` | Verifies that workspace-aware input flags prefer current session file names over baked registry examples. |
 | `uses sequence-specific runtime value hints without leaking them to sibling subcommands` | Verifies that runtime context can offer values for sequences such as `config set line-numbers` without also suggesting those values after `config get line-numbers`. |
 | `keeps an exact single flag match visible so its description is still shown` | Verifies that typing a full flag token such as `curl -w` keeps the single matching flag row visible long enough to expose its description instead of collapsing the dropdown immediately. |
 | `still collapses an exact single non-flag match` | Verifies that the exact-match dropdown auto-hide rule still applies to normal non-flag suggestions such as a flat `ping` root match. |
 | `shows positional hints alongside flag hints at command-root whitespace` | Verifies that positional guidance like `<target>` appears alongside root-level flag hints after a known command plus trailing space, and that `<placeholder>` entries are flagged `hintOnly` with an empty `insertValue`. |
 | `keeps positional hints visible when the displayed autocomplete list is capped` | Verifies that display-only positional guidance remains visible when a long flag list reaches the autocomplete display cap. |
-| `marks <placeholder> value hints as hintOnly and preserves trailing insert whitespace` | Verifies that `session-token se` + Tab inserts `set ` with the trailing space preserved (not trimmed), that `session-token set ` surfaces `<token>` as a display-only `hintOnly` item with `insertValue: ''`, and that calling `acAccept` on a `hintOnly` item is a no-op. |
+| `marks <placeholder> arg_hints as hintOnly and preserves insertValue whitespace` | Checks that marks <placeholder> arg hints as hintOnly and preserves insertValue whitespace. |
 | `keeps direct placeholder hints visible while typing the argument value` | Verifies that a direct placeholder hint such as `session-token set <token>` stays visible as guidance even after the user starts typing the real token value. |
 | `returns value hints after a value-taking flag and trailing space` | Verifies that value hints appear after accepting or typing a value-taking flag such as `curl -o `. |
 | `keeps placeholder guidance after concrete value hints and preserves ordering` | Verifies that a value-taking slot with both concrete suggestions and a placeholder keeps concrete matches first and the display-only placeholder last. |
@@ -1396,9 +1406,10 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `shows starter values together with placeholders and then leaves only the placeholder while typing` | Verifies that starter values like `https://` can appear alongside a `<url>` placeholder at the argument slot, and that the placeholder remains once the typed token no longer matches the starter value. |
 | `stops suggesting more positional arguments after reaching argument_limit, but still allows flags` | Verifies that `argument_limit` suppresses further positional guidance once the configured number of positional arguments is filled, while still allowing flag suggestions in a later flag slot. |
 | `suggests built-in pipe commands after a supported command pipe` | Verifies that typing a piped command can switch autocomplete into the narrow built-in pipe stage. |
+| `uses live workspace file hints for workspace read flags instead of static examples` | Verifies that workspace-aware input flags prefer current session file names over baked registry examples. |
 | `returns pipe-stage flag hints for grep` | Verifies that the built-in pipe stage can expose contextual `grep` flags such as `-i`, `-v`, and `-E`. |
 | `returns pipe-stage count hints after head -n and wc flag hints after wc space` | Verifies that pipe-stage value hints work for `head -n` and that `wc ` narrows correctly to `-l`. |
-| `suggests another built-in helper after an earlier pipe helper stage` | Verifies that autocomplete can continue offering allowlisted helpers after an existing helper stage such as `help \| grep ttl \| `. |
+| `suggests additional pipe helpers after an earlier helper stage` | Checks that suggests additional pipe helpers after an earlier helper stage. |
 | `returns chained pipe-stage flag and value hints from the last helper stage` | Verifies that chained helper pipelines still expose flag and value hints from the last helper stage rather than the earlier stages. |
 | `does not offer chained pipe autocomplete after an invalid earlier stage` | Verifies that multi-pipe autocomplete fails closed when an earlier stage is not an allowlisted helper. |
 | `mousedown on a suggestion accepts it without blurring the input` | Verifies that mousedown on a suggestion accepts it without blurring the input. |
@@ -1458,6 +1469,22 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `falls back to an existing window APP_CONFIG object for non-template harnesses` | Verifies that non-template test harnesses can still pre-seed `window.APP_CONFIG`. |
 | `does not hard-code server config defaults in config.js` | Verifies that frontend bootstrap code does not duplicate server-owned defaults or built-in redaction rules. |
 
+#### `export_pdf.test.js`
+
+| Test | Description |
+| --- | --- |
+| `exposes ExportPdfUtils on window with the expected API` | Verifies the IIFE exposes `buildTerminalExportPdf`, `parseCssColor`, and `themeColors` on `window.ExportPdfUtils`. |
+| `returns a jsPDF doc instance` | Verifies `buildTerminalExportPdf` returns a jsPDF document object when given valid inputs. |
+| `returns a doc when rawLines is empty` | Verifies `buildTerminalExportPdf` handles an empty `rawLines` array without throwing. |
+| `renders exit-ok / exit-fail / denied / notice / prompt-echo line classes without throwing` | Verifies all supported line class variants render without errors using a canvas-capable document mock. |
+| `renders runMeta badges without throwing` | Verifies the exit code, duration, line count, and version badge row renders when `runMeta` is provided. |
+| `renders prefix gutter when getPrefix returns non-empty strings` | Verifies the line-number/timestamp prefix gutter renders correctly when `getPrefix` returns non-empty strings. |
+| `uses ExportHtmlUtils theme vars before falling back to computed CSS` | Verifies theme-color resolution prefers the shared HTML export vars before falling back to computed CSS values. |
+| `uses the shared header model ordering for app name, meta line, and run meta` | Verifies PDF header text consumes the shared export header model ordering for app name, meta line, and run-meta items. |
+| `embeds JetBrains Mono into the PDF when font VFS hooks are available` | Verifies PDF export embeds the committed JetBrains Mono fonts when jsPDF font VFS hooks are available. |
+| `uses the dim green border color for success badges` | Verifies the success badge border uses the dim green export token rather than the brighter text green. |
+| `skips fully empty raw lines without prefixes so PDF output matches browser rendering` | Verifies PDF export skips raw lines that have neither a prefix nor renderable content so blank rows do not drift from browser rendering. |
+
 #### `history.test.js`
 
 | Test | Description |
@@ -1505,15 +1532,15 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `refreshHistoryPanel renders pagination controls and advances to the next page` | Verifies that the history drawer shows a paginated window and advances with the control buttons. |
 | `populates command root suggestions from loaded history runs` | Verifies that the history drawer populates command-root suggestions from the server-provided root list. |
 | `keeps root suggestions stable when a refresh returns no roots while typing` | Verifies that auto-refresh responses cannot erase the command-root suggestion list while the user is typing in the focused command-name filter. |
+| `keeps the root suggestion menu hidden until at least one character is typed` | Verifies that the command-root suggestion menu stays hidden on bare focus and only opens after input. |
+| `hides the root suggestion menu when the only matching suggestion exactly matches the input` | Verifies that the custom command-root suggestion menu disappears once the input already matches the only suggestion. |
+| `accepts a root suggestion with one mobile-style pointer interaction` | Verifies that the custom command-root menu accepts with a single pointer interaction instead of requiring a second native picker confirmation. |
 | `renders active filter chips for the current history filters` | Verifies that active history filters render as removable chips. |
 | `removes an individual filter when its active filter chip is cleared` | Verifies that removing a single history filter chip updates the request state and control value. |
 | `keeps the history drawer open when removing an active filter chip` | Verifies that clearing a filter chip does not trip the global outside-click handler and close the drawer. |
 | `toggles the mobile advanced history filters section` | Verifies that the mobile-only advanced history filter block expands and collapses correctly. |
 | `resetHistoryMobileFilters collapses the advanced mobile history filters` | Verifies that reopening or closing the mobile history drawer resets the advanced filter block to the collapsed state. |
 | `shows the active filter count in the mobile filters button label` | Verifies that the mobile filters button shows the current active-filter count. |
-| `hides the root suggestion menu when the only matching suggestion exactly matches the input` | Verifies that the custom command-root suggestion menu disappears once the input already matches the only suggestion. |
-| `accepts a root suggestion with one mobile-style pointer interaction` | Verifies that the custom command-root menu accepts with a single pointer interaction instead of requiring a second native picker confirmation. |
-| `keeps the root suggestion menu hidden until at least one character is typed` | Verifies that the command-root suggestion menu stays hidden on bare focus and only opens after input. |
 | `refreshHistoryPanel sends starred-only as a server-side filter` | Verifies that starred-only history filtering is passed to `/history` and rendered from the server response. |
 | `clearHistoryFilters resets the drawer controls and the request URL` | Verifies that clearing all history filters resets both control values and the generated `/history` query string. |
 | `shows a filtered empty state when no runs match the active filters` | Verifies that the drawer distinguishes “no matching runs” from “no runs yet”. |
@@ -1544,24 +1571,22 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `dropdown keeps cmdHistory matches when server fetch returns empty` | Regression: typing a character used to show in-memory recents briefly, then the server response overwrote `_histSearchRuns = []` and the dropdown cleared. Client-side matches must not be dropped by an empty server response. |
 | `dropdown merges cmdHistory matches with unique server-only matches` | Verifies that server-surfaced older runs beyond the in-memory recents cap extend the dropdown list (deduped) rather than replacing the cmdHistory matches. |
 
-#### `mobile_running_indicator.test.js` (12 tests)
-
-Contract-layer coverage for the mobile running-indicator surface in `app/static/js/mobile_chrome.js` (the trailing chip and pair of edge-glow overlays that surface background-tab run state). The IIFE is re-loaded per test into a fresh `Function` scope with a synchronous `requestAnimationFrame` stub and `location.search` pre-set so the `?ri=off` / `?ri=0` kill switch (read once at init) can be exercised. iOS-Safari-specific behavior (cold smooth-scroll drop, momentum destabilization from sticky children) is covered by the Playwright suite.
+#### `mobile_running_indicator.test.js`
 
 | Test | Description |
 | --- | --- |
-| `mounts the chip and both edge-glow overlays when enabled` | Verifies the `<button id="mobile-running-chip">` chip (with the `Cycle to next running tab` aria-label) and both `.tab-edge-glow-left` / `.tab-edge-glow-right` overlays are inserted on mount. |
-| `does not mount a separate mobile runtime pill because the header timer is canonical` | Verifies that `mobile_chrome.js` does not insert a separate `#mobile-runtime` timer surface, leaving the shared header `#run-timer` as the only elapsed-time display. |
-| `?ri=off kill switch skips mounting the chip and edge glows entirely` | Verifies that when the page is loaded with `?ri=off`, neither the chip nor the edge glows are mounted — the kill switch reads `location.search` once at IIFE init. |
-| `?ri=0 kill switch also skips mounting` | Verifies the `?ri=0` alias for the kill switch also suppresses the mount. |
-| `hides the chip when there are no running non-active tabs` | Verifies that with no running non-active tabs, the chip carries `u-hidden`. |
-| `shows the chip with a count that equals the number of running non-active tabs` | Verifies that the chip's `.mobile-running-count` renders the count of running non-active tabs (3 running + 1 idle/active → "3"). |
-| `excludes the active tab from the count even if it is running` | Verifies the active tab is excluded from the count even when itself running (3 running tabs, middle one active → "2"). |
-| `activates the edge glow when a running non-active tab is only partially clipped off-screen` | Verifies that the left and right edge glows activate once a running non-active tab is even partially clipped past the tab-strip boundary, not only when the full tab is off-screen. |
-| `chip tap activates the next running non-active tab in tab-row order` | Verifies chip click invokes `activateTab(id, {focusComposer: false})` with the next running non-active tab id in tab-row order. |
-| `chip tap cycles through the running set and wraps around` | Verifies successive chip taps cycle through all running non-active tabs and wrap back to the first after the last. |
-| `hides the chip and edge glows when the body is not in mobile-terminal-mode` | Verifies that when `body.mobile-terminal-mode` is absent, the chip carries `u-hidden` and the edge-glow overlays do not enter the `is-active` state. |
-| `re-syncs the chip count from tab lifecycle events instead of DOM mutation observers` | Verifies that the running-indicator count re-syncs from the explicit tab lifecycle event stream rather than depending on tab-row DOM mutation observers. |
+| `mounts the chip and both edge-glow overlays when enabled` | Checks that mounts the chip and both edge-glow overlays when enabled. |
+| `does not mount a separate mobile runtime pill because the header timer is canonical` | Checks that does not mount a separate mobile runtime pill because the header timer is canonical. |
+| `?ri=off kill switch skips mounting the chip and edge glows entirely` | Checks that ?ri=off kill switch skips mounting the chip and edge glows entirely. |
+| `?ri=0 kill switch also skips mounting` | Checks that ?ri=0 kill switch also skips mounting. |
+| `hides the chip when there are no running non-active tabs` | Checks that hides the chip when there are no running non-active tabs. |
+| `shows the chip with a count that equals the number of running non-active tabs` | Checks that shows the chip with a count that equals the number of running non-active tabs. |
+| `excludes the active tab from the count even if it is running` | Checks that excludes the active tab from the count even if it is running. |
+| `activates the edge glow when a running non-active tab is only partially clipped off-screen` | Checks that activates the edge glow when a running non-active tab is only partially clipped off-screen. |
+| `chip tap activates the next running non-active tab in tab-row order` | Checks that chip tap activates the next running non-active tab in tab-row order. |
+| `chip tap cycles through the running set and wraps around` | Checks that chip tap cycles through the running set and wraps around. |
+| `re-syncs the chip count from tab lifecycle events instead of DOM mutation observers` | Checks that re-syncs the chip count from tab lifecycle events instead of DOM mutation observers. |
+| `hides the chip and edge glows when the body is not in mobile-terminal-mode` | Checks that hides the chip and edge glows when the body is not in mobile-terminal-mode. |
 
 #### `output.test.js`
 
@@ -1641,6 +1666,11 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `formats multi-minute durations without hours` | Verifies that formats multi-minute durations without hours. |
 | `formats exactly one hour` | Verifies that formats exactly one hour. |
 | `formats hour + minutes + seconds` | Verifies that formats hour + minutes + seconds. |
+| `keeps a quiet stalled tab running when the backend still lists the run active` | Verifies that stalled-stream handling keeps the tab running when `/history/active` still contains the run. |
+| `clears the running state when a stalled stream is no longer active` | Verifies that stalled-stream handling falls back to history recovery when `/history/active` no longer contains the run. |
+| `does not apply quiet-stall state after the run was killed while the active check was pending` | Verifies that stale active-run checks do not resurrect a tab after the user has killed that run. |
+| `does not apply stale inactive state after the tab starts a newer run` | Verifies that stale inactive results from an older run do not fail a tab that has already started a newer run. |
+| `restores the tab to running if stream activity resumes after a quiet warning` | Verifies that stalled-run recovery clears the quiet-stream warning and keeps the HUD running when output resumes. |
 | `accepts the narrow synthetic grep form` | Verifies that accepts the narrow synthetic grep form. |
 | `accepts no-space pipe variants` | Verifies that accepts no-space pipe variants. |
 | `accepts chained synthetic pipe helpers` | Verifies that chained allowlisted pipe helpers are still treated as the narrow synthetic post-filter path. |
@@ -1661,9 +1691,6 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `clears stale failed tab and HUD state after a successful client-side built-in` | Verifies that successful client-side built-ins reset stale failed tab indicators, tab exit codes, and HUD state. |
 | `setStatus shows RUNNING only while running and IDLE otherwise` | Verifies that setStatus shows RUNNING only while running and IDLE otherwise. |
 | `doKill sends /kill immediately when runId is already known` | Verifies that doKill sends /kill immediately when runId is already known. |
-| `keeps a quiet stalled tab running when the backend still lists the run active` | Verifies that stalled-stream handling keeps the tab running when `/history/active` still contains the run. |
-| `clears the running state when a stalled stream is no longer active` | Verifies that stalled-stream handling falls back to history recovery when `/history/active` no longer contains the run. |
-| `restores the tab to running if stream activity resumes after a quiet warning` | Verifies that stalled-run recovery clears the quiet-stream warning and keeps the HUD running when output resumes. |
 | `restoreActiveRunsAfterReload marks restored tabs as running placeholders` | Verifies that reload continuity restores running placeholder tabs with preserved run IDs and command labels. |
 | `restoreActiveRunsAfterReload does not overwrite a restored non-running tab` | Verifies that active-run reconnect creates a separate tab instead of clobbering an already-restored idle tab. |
 | `pollActiveRunsAfterReload restores a completed reconnected run through history` | Verifies that a reconnected placeholder tab swaps into the saved history view when the active run disappears. |
@@ -1671,6 +1698,8 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `doKill marks pendingKill when runId is not yet available` | Verifies that doKill marks pendingKill when runId is not yet available. |
 | `runCommand blocks shell operators client-side before calling the API` | Verifies that runCommand blocks shell operators client-side before calling the API. |
 | `runCommand allows the narrow synthetic grep form through to the API` | Verifies that runCommand allows the narrow synthetic grep form through to the API. |
+| `adds commands to the preview recents even when they exit non-zero` | Verifies that valid commands still update the preview recents when they finish with a non-zero exit status. |
+| `does not add unsupported fake commands to the preview recents` | Verifies that obvious fake-command typos are excluded from preview recents even though real non-zero commands are kept. |
 | `runCommand allows other synthetic post-filters through to the API` | Verifies that runCommand allows other synthetic post-filters through to the API. |
 | `runCommand allows exact special built-in commands with shell punctuation through to the API` | Verifies that runCommand allows exact special built-in commands with shell punctuation through to the API. |
 | `runCommand on blank or whitespace input creates a new empty prompt line` | Verifies that runCommand on blank or whitespace input creates a new empty prompt line. |
@@ -1680,8 +1709,6 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `runCommand handles a 500 response as a friendly server error` | Verifies that runCommand handles a 500 response as a friendly server error. |
 | `runCommand handles a 403 response as a denied command` | Verifies that runCommand handles a 403 response as a denied command. |
 | `runCommand handles a 429 response as rate limited` | Verifies that runCommand handles a 429 response as rate limited. |
-| `adds commands to the preview recents even when they exit non-zero` | Verifies that valid commands still update the preview recents when they finish with a non-zero exit status. |
-| `does not add unsupported fake commands to the preview recents` | Verifies that obvious fake-command typos are excluded from preview recents even though real non-zero commands are kept. |
 | `runCommand dismisses the mobile keyboard after a successful submit` | Verifies that runCommand dismisses the mobile keyboard after a successful submit. |
 | `runCommand cancels and clears welcome output when the active tab owns welcome` | Verifies that runCommand cancels and clears welcome output when the active tab owns welcome. |
 | `runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line` | Verifies that runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line. |
@@ -1714,13 +1741,6 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `blocks token activation when verify returns ok but exists is false` | Verifies that blocks token activation when verify returns ok but exists is false. |
 | `skips verify entirely for UUID-format tokens` | Verifies that skips verify entirely for UUID-format tokens. |
 | `defers the success copy until after the migration answer is accepted` | Verifies that `session-token set` does not print its success lines before the migration question is resolved. |
-| `does nothing when pref is off` | Verifies that does nothing when pref is off. |
-| `does nothing when Notification is not available` | Verifies that does nothing when Notification is not available. |
-| `does nothing when permission is not granted` | Verifies that does nothing when permission is not granted. |
-| `fires with command root as title and exit code + elapsed in body for exit 0` | Verifies that fires with command root as title and exit code + elapsed in body for exit 0. |
-| `fires with non-zero exit code in body for failed run` | Verifies that fires with non-zero exit code in body for failed run. |
-| `fires with killed status and elapsed in body when run is killed` | Verifies that fires with killed status and elapsed in body when run is killed. |
-| `shows only the command root in the title, not arguments` | Verifies that shows only the command root in the title, not arguments. |
 | `opens a terminal yes/no confirmation before clearing the token` | Verifies that `session-token clear` opens a transcript-owned confirmation prompt instead of clearing immediately. |
 | `clears the token only after answering yes to the terminal confirmation` | Verifies that `session-token clear` removes the active token only after an explicit `yes` answer. |
 | `leaves the session token untouched when the user answers no` | Verifies that answering `no` leaves the active session token unchanged. |
@@ -1747,6 +1767,13 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `requires yes before revoking a session token` | Verifies that `session-token revoke <token>` warns and waits for an explicit `yes` before calling the revoke API. |
 | `cancels session-token revoke on no without calling the API` | Verifies that answering `no` cancels token revocation without contacting the revoke route. |
 | `treats Ctrl+C as cancel for session-token revoke` | Verifies that `Ctrl+C` cancels token revocation without contacting the revoke route. |
+| `does nothing when pref is off` | Verifies that does nothing when pref is off. |
+| `does nothing when Notification is not available` | Verifies that does nothing when Notification is not available. |
+| `does nothing when permission is not granted` | Verifies that does nothing when permission is not granted. |
+| `fires with command root as title and exit code + elapsed in body for exit 0` | Verifies that fires with command root as title and exit code + elapsed in body for exit 0. |
+| `fires with non-zero exit code in body for failed run` | Verifies that fires with non-zero exit code in body for failed run. |
+| `fires with killed status and elapsed in body when run is killed` | Verifies that fires with killed status and elapsed in body when run is killed. |
+| `shows only the command root in the title, not arguments` | Verifies that shows only the command root in the title, not arguments. |
 
 #### `search.test.js`
 
@@ -1768,6 +1795,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `treats nslookup answer rows as findings when the server marks them` | Verifies that server-tagged `nslookup` answer sections count as findings while the untagged resolver header does not. |
 | `clearSearch resets scoped search back to text mode` | Verifies that closing search clears any active findings/warnings/errors/summaries scope and returns to plain text mode. |
 | `updates the search button and scope labels with scoped counts` | Verifies that the tabbar search affordance and scoped buttons expose live signal counts. |
+| `renders signal summary chips with DOM APIs instead of parsing markup` | Verifies that compact signal chips render unsafe-looking values as text instead of parsing them as HTML. |
 | `clears the discoverability pulse when the active output has no findings` | Verifies that a stale findings pulse is removed when the active tab changes to output with no findings. |
 | `signal chips are clickable and route to the matching scope` | Verifies that F/W/E/S chips open search in the matching scope. |
 | `disables summarize when there are no signals` | Verifies that summarize stays disabled until the current tab has at least one finding, warning, error, or summary line. |
@@ -1785,8 +1813,8 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `groups nc summary output by host instead of positional ports` | Verifies that `nc` summaries group repeated port checks by host while ignoring positional port arguments. |
 | `splits one command block by server-provided per-line targets` | Verifies that one command using an input file can summarize findings under each server-provided target instead of merging all host output together. |
 | `falls back to command summaries when a target cannot be extracted` | Verifies that summarize keeps the per-command output shape when a command has signals but no reliable target extractor. |
-| `omits command blocks that have no signals` | Verifies that summarize skips commands with zero findings, warnings, errors, and summary lines. |
 | `ignores built-in command output for signals and summaries` | Verifies that built-in command output is excluded from findings, warnings, errors, summaries, and generated command-findings blocks. |
+| `omits command blocks that have no signals` | Verifies that summarize skips commands with zero findings, warnings, errors, and summary lines. |
 
 #### `session.test.js`
 
@@ -1804,6 +1832,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `falls back to session_id UUID when session_token is absent` | Verifies that `SESSION_ID` falls back to the UUID stored under `session_id` when no session token is set. |
 | `updateSessionId switches SESSION_ID at runtime` | Verifies that calling `updateSessionId` with a new value changes `SESSION_ID` without a page reload. |
 | `apiFetch sends updated session token after updateSessionId` | Verifies that `apiFetch` uses the new `SESSION_ID` set by `updateSessionId` in subsequent requests. |
+| `updateSessionId reloads session preferences when the helper is available` | Verifies that runtime session switches trigger `loadSessionPreferences()` so the active option set follows the new session identity. |
 | `maskSessionToken masks a tok_ token showing only the first 4 hex chars` | Verifies that a `tok_`-prefixed token is masked as `tok_XXXX••••`. |
 | `maskSessionToken masks a UUID session showing the first 8 chars` | Verifies that a UUID session ID is masked to its first 8 characters followed by bullets. |
 | `maskSessionToken returns (none) for empty input` | Verifies that `maskSessionToken` returns `(none)` for an empty string or null. |
@@ -1811,10 +1840,9 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `storage event from another tab reverts SESSION_ID to UUID when token is cleared` | Verifies that a `storage` event clearing `session_token` in another tab reverts `SESSION_ID` to the UUID fallback. |
 | `storage event for an unrelated key does not change SESSION_ID` | Verifies that `storage` events for keys other than `session_token` have no effect on `SESSION_ID`. |
 | `storage event calls reloadSessionHistory when available to refresh passive tab UI` | Verifies that storage event calls reloadSessionHistory when available to refresh passive tab UI. |
-| `updateSessionId reloads session preferences when the helper is available` | Verifies that runtime session switches trigger `loadSessionPreferences()` so the active option set follows the new session identity. |
-| `storage event calls _updateOptionsSessionTokenStatus when available` | Verifies that storage event calls _updateOptionsSessionTokenStatus when available. |
 | `storage event calls loadSessionPreferences when available` | Verifies that passive-tab `session_token` changes trigger `loadSessionPreferences()` so session-scoped options refresh without a reload. |
-| `storage event does not throw when reloadSessionHistory, loadSessionPreferences, and _updateOptionsSessionTokenStatus are absent` | Verifies that the passive-tab session-sync path stays safe even when the optional history, preference, and token-status refresh helpers are not present. |
+| `storage event calls _updateOptionsSessionTokenStatus when available` | Verifies that storage event calls _updateOptionsSessionTokenStatus when available. |
+| `storage event does not throw when reloadSessionHistory and _updateOptionsSessionTokenStatus are absent` | Checks that storage event does not throw when reloadSessionHistory and  updateOptionsSessionTokenStatus are absent. |
 
 #### `shell_chrome.test.js`
 
@@ -1822,27 +1850,6 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | --- | --- |
 | `marks Redis offline when the status poll cannot reach the server` | Verifies that a failed HUD status poll clears a previously online Redis pill instead of leaving stale state visible. |
 | `keeps Redis as N/A on a failed poll when Redis was not configured` | Verifies that an unreachable server does not turn an already unconfigured Redis pill into a false configured-offline state. |
-
-#### `workspace.test.js`
-
-| Test | Description |
-| --- | --- |
-| `renders workspace files with usage summary and row actions` | Verifies that workspace payloads render usage totals, file rows, and edit/download/delete actions. |
-| `renders nested workspace paths as navigable folders with breadcrumbs` | Verifies that nested workspace paths render as folders, support entering/leaving folders, and update breadcrumbs. |
-| `renders explicit empty directories from the workspace payload` | Verifies that explicit empty folders render and remain navigable even when they contain no files. |
-| `confirms folder deletion with file counts before deleting from the browser` | Verifies that folder delete actions show count-aware confirmation copy before recursively deleting through the workspace route. |
-| `shows an empty state when the workspace has no files` | Verifies that the workspace modal explains the empty state before any files exist. |
-| `saves new files relative to the currently selected folder` | Verifies that New File keeps the name field clean while saving relative to the active folder. |
-| `keeps the editor hidden until the user starts or closes an edit` | Verifies that the workspace editor stays collapsed until New File or edit mode opens it, and closes cleanly afterward. |
-| `opens the editor with a prefilled file name from terminal commands` | Verifies that terminal-native file add/edit flows can open the Files editor with a prefilled file name. |
-| `shows file contents in a read-only viewer and keeps edit mode separate` | Verifies that View opens a read-only file display at the top of the file without exposing the larger edit form. |
-| `refreshes the currently viewed file when the files list is refreshed` | Verifies that Refresh updates both the file browser and the currently open read-only viewer. |
-| `runs edit download and delete actions from the viewer header for the viewed file` | Verifies that viewer-header actions operate on the currently viewed workspace file. |
-| `formats obvious JSON files in the read-only viewer` | Verifies that JSON-looking workspace files render as pretty-printed JSON in the read-only viewer. |
-| `serves current workspace files as autocomplete hints after the file list is loaded` | Verifies that the workspace file cache exposes file names as autocomplete hints. |
-| `refreshes from the workspace route` | Verifies that the modal refresh path calls `/workspace/files` and renders the returned file list. |
-| `saves editor contents through the workspace route` | Verifies that saving posts the file name and text content to `/workspace/files` and refreshes the visible state. |
-| `creates folders through the workspace directory route` | Verifies that New Folder posts to the directory route, refreshes the browser, and enters the created folder. |
 
 #### `state.test.js`
 
@@ -1913,37 +1920,52 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `reorders tabs through touch pointer dragging on mobile` | Verifies that reorders tabs through touch pointer dragging on mobile. |
 | `reorders desktop tabs through pointer dragging` | Verifies that reorders desktop tabs through pointer dragging. |
 
-#### `ui_pressable.test.js`
+#### `ui_confirm.test.js`
 
 | Test | Description |
 | --- | --- |
-| `invokes onActivate on click for a native <button>` | Verifies that bindPressable wires the click handler for native buttons. |
-| `invokes onActivate on Enter for role="button" div` | Verifies keyboard activation via Enter on non-button elements. |
-| `invokes onActivate on Space for role="button" div` | Verifies keyboard activation via Space on non-button elements. |
-| `ignores other keys` | Verifies that keys other than Enter and Space do not activate. |
-| `does NOT add keydown listener for native <button> (browser handles Enter/Space)` | Verifies no double-fire risk — native buttons rely on browser activation. |
-| `is idempotent — second bind is a no-op` | Verifies the data-pressable-bound guard prevents duplicate bindings. |
-| `blurs the element if it owns focus after activation` | Verifies sticky :focus styling is cleared after click. |
-| `calls refocusComposerAfterAction by default` | Verifies the canonical composer refocus runs automatically. |
-| `skips refocus when refocusComposer: false` | Verifies disclosure surfaces can opt out of composer refocus. |
-| `passes defer through to refocus` | Verifies the defer option is forwarded to refocusComposerAfterAction. |
-| `passes preventScroll: false through to refocus` | Verifies the preventScroll option can be disabled. |
-| `skips refocus when onActivate opened a confirm modal` | Verifies `_afterActivate` defers to `isConfirmOpen()` and leaves focus on the modal's default action. |
-| `runs refocus even if onActivate throws` | Verifies the try/finally contract keeps refocus deterministic. |
-| `preventFocusTheft blocks pointerdown default (primary button only)` | Verifies focus-theft prevention on primary contact and pass-through on secondary. |
-| `preventFocusTheft: false does not add pointerdown listener` | Verifies opt-in semantics for preventFocusTheft. |
-| `clearPressStyle sets data-pressable-clearing then removes it` | Verifies the CSS-state escape hatch for non-focusable surfaces. |
-| `clearPressStyle opt-out leaves no data attribute` | Verifies clearPressStyle is off by default. |
-| `does nothing when onActivate is missing` | Verifies guard against missing activation callback. |
-| `does nothing when el is null` | Verifies guard against missing element. |
-| `sets data-pressable-bound guard on successful bind` | Verifies the idempotency marker is set. |
-| `tolerates missing refocusComposerAfterAction on global` | Verifies bindPressable works before ui_helpers.js loads in a partial harness. |
-| `dispose > returns a handle exposing dispose() on successful bind` | Verifies the dispose contract: a successful bind returns `{ dispose }`. |
-| `dispose > returns null on guard-fail paths (missing onActivate, missing el, already bound)` | Verifies guard-fail paths consistently return null instead of undefined. |
-| `dispose > dispose() removes the click listener` | Verifies dispose unwinds the click listener so subsequent clicks are inert. |
-| `dispose > dispose() removes the keydown listener for non-native buttons` | Verifies dispose unwinds the Enter/Space keydown handler installed for role="button" surfaces. |
-| `dispose > dispose() removes the pointerdown listener when preventFocusTheft was on` | Verifies dispose unwinds the focus-theft pointerdown handler so default is no longer prevented. |
-| `dispose > dispose() clears the data-pressable-bound marker so the element can rebind` | Verifies dispose returns the element to a rebindable state. |
+| `rejects when #confirm-host is not present` | Verifies the guard against a missing pre-minted host node. |
+| `rejects when actions is empty` | Verifies the guard against an empty actions array. |
+| `rejects when actions is missing` | Verifies the guard when the actions option is omitted. |
+| `rejects a concurrent second call` | Verifies only one confirm can be open at a time. |
+| `resolves with the clicked action id` | Verifies clicking a button resolves the promise with that action's id. |
+| `resolves null when the cancel action is clicked` | Documents that role:'cancel' resolves with its id; null is reserved for non-button dismissal. |
+| `resolves null on backdrop click` | Verifies backdrop dismissal resolves the promise with null. |
+| `resolves null on Escape via closeTopmostDismissible` | Verifies Escape routed through the shared dismissible dispatcher resolves with null. |
+| `resolves null via cancelConfirm()` | Verifies the imperative cancel entrypoint resolves with null. |
+| `hides the host and clears action markup after resolve` | Verifies cleanup hides the host, re-applies u-hidden, and clears rendered buttons. |
+| `refocuses the composer on resolve` | Verifies resolution triggers refocusComposerAfterAction with defer:true. |
+| `renders a plain string body` | Verifies string bodies are set as textContent on the body slot. |
+| `renders {text, note} as text + <br> + .modal-copy-note span` | Verifies the {text, note} shape renders primary copy plus a styled secondary note. |
+| `renders a Node body directly` | Verifies a DOM Node body is appended without re-wrapping. |
+| `applies modal-card-danger when tone: danger` | Verifies tone:'danger' adds modal-card-danger to the card. |
+| `applies modal-card-warning when tone: warning` | Verifies tone:'warning' adds modal-card-warning to the card. |
+| `applies neither tone class when tone is omitted` | Verifies the card has no tone class when tone is not set. |
+| `clears stale tone class between opens` | Verifies the previous tone class is cleared before a new open applies its own. |
+| `maps role:primary + tone:danger to btn-primary btn-danger` | Verifies the role+tone class mapping for the kill-style primary-danger button. |
+| `maps role:cancel to btn-secondary` | Verifies role:'cancel' renders as btn-secondary and sets data-confirm-role. |
+| `maps role:secondary + tone:warning to btn-secondary btn-warning` | Verifies role+tone mapping for a non-primary warning action. |
+| `focuses the role:cancel button by default` | Verifies default focus lands on the cancel action so Enter routes to cancel. |
+| `honors defaultFocus when no cancel action is present` | Verifies defaultFocus selects a specific action id when no cancel is available. |
+| `falls back to the first button when no cancel and no defaultFocus` | Verifies the focus fallback when neither a cancel role nor a defaultFocus is given. |
+| `stacks when there are 3+ actions regardless of viewport` | Verifies modal-actions-stacked is applied when action count is 3 or more. |
+| `stacks when the viewport is <=480px even with 2 actions` | Verifies modal-actions-stacked is applied on narrow viewports for a 2-action dialog. |
+| `does not stack for 2 actions on wide viewports` | Verifies the default side-by-side layout for 2 actions above the breakpoint. |
+| `renders a single Node into the content slot` | Verifies a DOM Node passed as `content` is appended to the `[data-confirm-content]` slot. |
+| `renders an array of Nodes into the content slot in order` | Verifies an array of Nodes is appended into the content slot preserving order. |
+| `skips non-Node items in an array silently` | Verifies non-Node items in the content array are ignored rather than throwing. |
+| `clears the content slot on resolve` | Verifies caller-supplied content is removed when the confirm promise settles. |
+| `clears stale content between opens` | Verifies a second open does not carry over content from the previous call. |
+| `keeps the modal open when onActivate returns false (sync)` | Verifies a primary action's sync onActivate returning false keeps the modal open instead of resolving. |
+| `closes and resolves when onActivate returns true` | Verifies a sync onActivate returning true closes the modal and resolves with the action id. |
+| `keeps the modal open while an async onActivate is pending` | Verifies the modal stays open until an async onActivate settles. |
+| `closes and resolves when an async onActivate resolves truthy` | Verifies an async onActivate resolving truthy closes the modal and resolves the confirm promise. |
+| `keeps the modal open when onActivate throws synchronously` | Verifies a sync throw in onActivate is caught and the modal stays open so callers can surface errors inline. |
+| `keeps the modal open when an async onActivate rejects` | Verifies a rejected async onActivate is caught and the modal stays open. |
+| `focuses an explicit Node passed as defaultFocus, overriding role:cancel` | Verifies a Node passed as `defaultFocus` receives focus on open instead of the cancel button. |
+| `wraps Tab from the last action back to the first` | Verifies the focus-trap wraps Tab forward inside the confirm modal instead of escaping to the document. |
+| `wraps Shift+Tab from the first action back to the last` | Verifies the focus-trap wraps Shift+Tab backward inside the confirm modal. |
+| `cycles confirm actions with ArrowRight/ArrowDown and ArrowLeft/ArrowUp` | Verifies confirmation modals opt into arrow-key focus cycling that follows and reverses the same action order as Tab. |
 
 #### `ui_disclosure.test.js`
 
@@ -2010,52 +2032,19 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `skips entries that report closed` | Verifies closed entries are ignored during cascade dispatch. |
 | `closes only one surface per call` | Verifies closeTopmostDismissible closes at most one surface. |
 
-#### `ui_confirm.test.js`
+#### `ui_focus_helpers.test.js`
 
 | Test | Description |
 | --- | --- |
-| `rejects when #confirm-host is not present` | Verifies the guard against a missing pre-minted host node. |
-| `rejects when actions is empty` | Verifies the guard against an empty actions array. |
-| `rejects when actions is missing` | Verifies the guard when the actions option is omitted. |
-| `rejects a concurrent second call` | Verifies only one confirm can be open at a time. |
-| `resolves with the clicked action id` | Verifies clicking a button resolves the promise with that action's id. |
-| `resolves null when the cancel action is clicked` | Documents that role:'cancel' resolves with its id; null is reserved for non-button dismissal. |
-| `resolves null on backdrop click` | Verifies backdrop dismissal resolves the promise with null. |
-| `resolves null on Escape via closeTopmostDismissible` | Verifies Escape routed through the shared dismissible dispatcher resolves with null. |
-| `resolves null via cancelConfirm()` | Verifies the imperative cancel entrypoint resolves with null. |
-| `hides the host and clears action markup after resolve` | Verifies cleanup hides the host, re-applies u-hidden, and clears rendered buttons. |
-| `refocuses the composer on resolve` | Verifies resolution triggers refocusComposerAfterAction with defer:true. |
-| `renders a plain string body` | Verifies string bodies are set as textContent on the body slot. |
-| `renders {text, note} as text + <br> + .modal-copy-note span` | Verifies the {text, note} shape renders primary copy plus a styled secondary note. |
-| `renders a Node body directly` | Verifies a DOM Node body is appended without re-wrapping. |
-| `applies modal-card-danger when tone: danger` | Verifies tone:'danger' adds modal-card-danger to the card. |
-| `applies modal-card-warning when tone: warning` | Verifies tone:'warning' adds modal-card-warning to the card. |
-| `applies neither tone class when tone is omitted` | Verifies the card has no tone class when tone is not set. |
-| `clears stale tone class between opens` | Verifies the previous tone class is cleared before a new open applies its own. |
-| `maps role:primary + tone:danger to btn-primary btn-danger` | Verifies the role+tone class mapping for the kill-style primary-danger button. |
-| `maps role:cancel to btn-secondary` | Verifies role:'cancel' renders as btn-secondary and sets data-confirm-role. |
-| `maps role:secondary + tone:warning to btn-secondary btn-warning` | Verifies role+tone mapping for a non-primary warning action. |
-| `focuses the role:cancel button by default` | Verifies default focus lands on the cancel action so Enter routes to cancel. |
-| `honors defaultFocus when no cancel action is present` | Verifies defaultFocus selects a specific action id when no cancel is available. |
-| `falls back to the first button when no cancel and no defaultFocus` | Verifies the focus fallback when neither a cancel role nor a defaultFocus is given. |
-| `stacks when there are 3+ actions regardless of viewport` | Verifies modal-actions-stacked is applied when action count is 3 or more. |
-| `stacks when the viewport is <=480px even with 2 actions` | Verifies modal-actions-stacked is applied on narrow viewports for a 2-action dialog. |
-| `does not stack for 2 actions on wide viewports` | Verifies the default side-by-side layout for 2 actions above the breakpoint. |
-| `renders a single Node into the content slot` | Verifies a DOM Node passed as `content` is appended to the `[data-confirm-content]` slot. |
-| `renders an array of Nodes into the content slot in order` | Verifies an array of Nodes is appended into the content slot preserving order. |
-| `skips non-Node items in an array silently` | Verifies non-Node items in the content array are ignored rather than throwing. |
-| `clears the content slot on resolve` | Verifies caller-supplied content is removed when the confirm promise settles. |
-| `clears stale content between opens` | Verifies a second open does not carry over content from the previous call. |
-| `keeps the modal open when onActivate returns false (sync)` | Verifies a primary action's sync onActivate returning false keeps the modal open instead of resolving. |
-| `closes and resolves when onActivate returns true` | Verifies a sync onActivate returning true closes the modal and resolves with the action id. |
-| `keeps the modal open while an async onActivate is pending` | Verifies the modal stays open until an async onActivate settles. |
-| `closes and resolves when an async onActivate resolves truthy` | Verifies an async onActivate resolving truthy closes the modal and resolves the confirm promise. |
-| `keeps the modal open when onActivate throws synchronously` | Verifies a sync throw in onActivate is caught and the modal stays open so callers can surface errors inline. |
-| `keeps the modal open when an async onActivate rejects` | Verifies a rejected async onActivate is caught and the modal stays open. |
-| `focuses an explicit Node passed as defaultFocus, overriding role:cancel` | Verifies a Node passed as `defaultFocus` receives focus on open instead of the cancel button. |
-| `wraps Tab from the last action back to the first` | Verifies the focus-trap wraps Tab forward inside the confirm modal instead of escaping to the document. |
-| `wraps Shift+Tab from the first action back to the last` | Verifies the focus-trap wraps Shift+Tab backward inside the confirm modal. |
-| `cycles confirm actions with ArrowRight/ArrowDown and ArrowLeft/ArrowUp` | Verifies confirmation modals opt into arrow-key focus cycling that follows and reverses the same action order as Tab. |
+| `returns false when el is null` | Verifies focusElement null-guard. |
+| `returns false when el has no focus method` | Verifies focusElement guards against non-focusable targets. |
+| `focuses a real DOM element and returns true` | Verifies focusElement focuses a live input. |
+| `passes { preventScroll: true } when requested` | Verifies preventScroll is forwarded to focus(). |
+| `calls focus without options when preventScroll is omitted` | Verifies the default path calls focus() with no args. |
+| `falls back to bare focus() when preventScroll throws` | Verifies the preventScroll fallback covers engines that reject the options arg. |
+| `returns false when activeElement is null` | Verifies blurActiveElement guards against null activeElement. |
+| `returns false when the active element has no blur method` | Verifies blurActiveElement guards against non-blurrable targets. |
+| `blurs the focused element and returns true` | Verifies blurActiveElement blurs the currently-focused element. |
 
 #### `ui_focus_trap.test.js`
 
@@ -2098,19 +2087,37 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `dispose() removes the listener so further clicks do not close` | Verifies dispose detaches the handler. |
 | `dispose() on a scope-override handle removes the listener from that scope` | Verifies dispose on a scoped handle removes the listener from its scope. |
 
-#### `ui_focus_helpers.test.js`
+#### `ui_pressable.test.js`
 
 | Test | Description |
 | --- | --- |
-| `returns false when el is null` | Verifies focusElement null-guard. |
-| `returns false when el has no focus method` | Verifies focusElement guards against non-focusable targets. |
-| `focuses a real DOM element and returns true` | Verifies focusElement focuses a live input. |
-| `passes { preventScroll: true } when requested` | Verifies preventScroll is forwarded to focus(). |
-| `calls focus without options when preventScroll is omitted` | Verifies the default path calls focus() with no args. |
-| `falls back to bare focus() when preventScroll throws` | Verifies the preventScroll fallback covers engines that reject the options arg. |
-| `returns false when activeElement is null` | Verifies blurActiveElement guards against null activeElement. |
-| `returns false when the active element has no blur method` | Verifies blurActiveElement guards against non-blurrable targets. |
-| `blurs the focused element and returns true` | Verifies blurActiveElement blurs the currently-focused element. |
+| `invokes onActivate on click for a native <button>` | Verifies that bindPressable wires the click handler for native buttons. |
+| `invokes onActivate on Enter for role="button" div` | Verifies keyboard activation via Enter on non-button elements. |
+| `invokes onActivate on Space for role="button" div` | Verifies keyboard activation via Space on non-button elements. |
+| `ignores other keys` | Verifies that keys other than Enter and Space do not activate. |
+| `does NOT add keydown listener for native <button> (browser handles Enter/Space)` | Verifies no double-fire risk — native buttons rely on browser activation. |
+| `is idempotent — second bind is a no-op` | Verifies the data-pressable-bound guard prevents duplicate bindings. |
+| `blurs the element if it owns focus after activation` | Verifies sticky :focus styling is cleared after click. |
+| `calls refocusComposerAfterAction by default` | Verifies the canonical composer refocus runs automatically. |
+| `skips refocus when refocusComposer: false` | Verifies disclosure surfaces can opt out of composer refocus. |
+| `passes defer through to refocus` | Verifies the defer option is forwarded to refocusComposerAfterAction. |
+| `passes preventScroll: false through to refocus` | Verifies the preventScroll option can be disabled. |
+| `skips refocus when onActivate opened a confirm modal` | Verifies `_afterActivate` defers to `isConfirmOpen()` and leaves focus on the modal's default action. |
+| `runs refocus even if onActivate throws` | Verifies the try/finally contract keeps refocus deterministic. |
+| `preventFocusTheft blocks pointerdown default (primary button only)` | Verifies focus-theft prevention on primary contact and pass-through on secondary. |
+| `preventFocusTheft: false does not add pointerdown listener` | Verifies opt-in semantics for preventFocusTheft. |
+| `clearPressStyle sets data-pressable-clearing then removes it` | Verifies the CSS-state escape hatch for non-focusable surfaces. |
+| `clearPressStyle opt-out leaves no data attribute` | Verifies clearPressStyle is off by default. |
+| `does nothing when onActivate is missing` | Verifies guard against missing activation callback. |
+| `does nothing when el is null` | Verifies guard against missing element. |
+| `sets data-pressable-bound guard on successful bind` | Verifies the idempotency marker is set. |
+| `tolerates missing refocusComposerAfterAction on global` | Verifies bindPressable works before ui_helpers.js loads in a partial harness. |
+| `returns a handle exposing dispose() on successful bind` | Checks that returns a handle exposing dispose() on successful bind. |
+| `returns null on guard-fail paths (missing onActivate, missing el, already bound)` | Checks that returns null on guard-fail paths (missing onActivate, missing el, already bound). |
+| `dispose() removes the click listener` | Checks that dispose() removes the click listener. |
+| `dispose() removes the keydown listener for non-native buttons` | Checks that dispose() removes the keydown listener for non-native buttons. |
+| `dispose() removes the pointerdown listener when preventFocusTheft was on` | Checks that dispose() removes the pointerdown listener when preventFocusTheft was on. |
+| `dispose() clears the data-pressable-bound marker so the element can rebind` | Checks that dispose() clears the data-pressable-bound marker so the element can rebind. |
 
 #### `utils.test.js`
 
@@ -2171,21 +2178,26 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `_sampleWelcomeBlocks prefers a featured basics command first and avoids duplicates` | _sampleWelcomeBlocks prefers a featured basics command first and avoids duplicates. |
 | `uses the mobile welcome path with the mobile banner and no sample commands` | Verifies that uses the mobile welcome path with the mobile banner and no sample commands. |
 
-#### `export_pdf.test.js`
+#### `workspace.test.js`
 
 | Test | Description |
 | --- | --- |
-| `exposes ExportPdfUtils on window with the expected API` | Verifies the IIFE exposes `buildTerminalExportPdf`, `parseCssColor`, and `themeColors` on `window.ExportPdfUtils`. |
-| `returns a jsPDF doc instance` | Verifies `buildTerminalExportPdf` returns a jsPDF document object when given valid inputs. |
-| `returns a doc when rawLines is empty` | Verifies `buildTerminalExportPdf` handles an empty `rawLines` array without throwing. |
-| `renders exit-ok / exit-fail / denied / notice / prompt-echo line classes without throwing` | Verifies all supported line class variants render without errors using a canvas-capable document mock. |
-| `renders runMeta badges without throwing` | Verifies the exit code, duration, line count, and version badge row renders when `runMeta` is provided. |
-| `renders prefix gutter when getPrefix returns non-empty strings` | Verifies the line-number/timestamp prefix gutter renders correctly when `getPrefix` returns non-empty strings. |
-| `uses ExportHtmlUtils theme vars before falling back to computed CSS` | Verifies theme-color resolution prefers the shared HTML export vars before falling back to computed CSS values. |
-| `uses the shared header model ordering for app name, meta line, and run meta` | Verifies PDF header text consumes the shared export header model ordering for app name, meta line, and run-meta items. |
-| `embeds JetBrains Mono into the PDF when font VFS hooks are available` | Verifies PDF export embeds the committed JetBrains Mono fonts when jsPDF font VFS hooks are available. |
-| `uses the dim green border color for success badges` | Verifies the success badge border uses the dim green export token rather than the brighter text green. |
-| `skips fully empty raw lines without prefixes so PDF output matches browser rendering` | Verifies PDF export skips raw lines that have neither a prefix nor renderable content so blank rows do not drift from browser rendering. |
+| `renders workspace files with usage summary and row actions` | Verifies that workspace payloads render usage totals, file rows, and edit/download/delete actions. |
+| `renders nested workspace paths as navigable folders with breadcrumbs` | Verifies that nested workspace paths render as folders, support entering/leaving folders, and update breadcrumbs. |
+| `renders explicit empty directories from the workspace payload` | Verifies that explicit empty folders render and remain navigable even when they contain no files. |
+| `confirms folder deletion with file counts before deleting from the browser` | Verifies that folder delete actions show count-aware confirmation copy before recursively deleting through the workspace route. |
+| `shows an empty state when the workspace has no files` | Verifies that the workspace modal explains the empty state before any files exist. |
+| `saves new files relative to the currently selected folder` | Verifies that New File keeps the name field clean while saving relative to the active folder. |
+| `keeps the editor hidden until the user starts or closes an edit` | Verifies that the workspace editor stays collapsed until New File or edit mode opens it, and closes cleanly afterward. |
+| `opens the editor with a prefilled file name from terminal commands` | Verifies that terminal-native file add/edit flows can open the Files editor with a prefilled file name. |
+| `shows file contents in a read-only viewer and keeps edit mode separate` | Verifies that View opens a read-only file display at the top of the file without exposing the larger edit form. |
+| `refreshes the currently viewed file when the files list is refreshed` | Verifies that Refresh updates both the file browser and the currently open read-only viewer. |
+| `runs edit download and delete actions from the viewer header for the viewed file` | Verifies that viewer-header actions operate on the currently viewed workspace file. |
+| `formats obvious JSON files in the read-only viewer` | Verifies that JSON-looking workspace files render as pretty-printed JSON in the read-only viewer. |
+| `serves current workspace files as autocomplete hints after the file list is loaded` | Verifies that the workspace file cache exposes file names as autocomplete hints. |
+| `refreshes from the workspace route` | Verifies that the modal refresh path calls `/workspace/files` and renders the returned file list. |
+| `saves editor contents through the workspace route` | Verifies that saving posts the file name and text content to `/workspace/files` and refreshes the visible state. |
+| `creates folders through the workspace directory route` | Verifies that New Folder posts to the directory route, refreshes the browser, and enters the created folder. |
 
 ### Playwright
 
@@ -2214,6 +2226,22 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `output appears in the terminal after running a command` | Verifies that output appears in the terminal after running a command. |
 | `HUD LAST EXIT shows 0 after a successful run and output has exit-ok line` | Verifies that HUD LAST EXIT shows 0 after a successful run and output has exit-ok line. |
 | `denied command shows [denied] in output and non-zero LAST EXIT` | Verifies that denied command shows [denied] in output and non-zero LAST EXIT. |
+
+#### `demo.mobile.spec.js`
+
+Mobile demo recording spec. Mirrors `demo.spec.js` for the mobile shell UI (`#mobile-cmd`, `#mobile-run-btn`, hamburger menu). Injects a fake iOS keyboard image to avoid Chromium's headless keyboard-simulation overlay, which would otherwise paint above all page content regardless of z-index and shrink the visual viewport. Captures frames via `page.screenshot()` at `deviceScaleFactor: 3` physical resolution (1290×2796) for the 430×932 iPhone 15-class viewport. Stitched at 15 fps.
+
+| Test | Description |
+| --- | --- |
+| `demo-mobile` | Full mobile shell demo sequence: ping, nslookup, `curl -L -o response.html https://noc.darklab.sh`, Files panel, history sheet, workflows modal, theme switching with README-first pacing. |
+
+#### `demo.spec.js`
+
+Desktop demo recording spec. Drives a tightened README-first interaction sequence — ping tab, DNS lookup tab, history drawer scroll, workflows modal, and one theme switch — against a live container to produce `assets/darklab_shell_demo.mp4` (or `.webm` on Linux). Mocks the `/history` route with a realistic paginated history list. Captures frames via `page.screenshot()` (not Playwright's built-in video recorder) to get full `deviceScaleFactor: 2` resolution (3200×1800). Stitched at 15 fps. Theme transitions call `applyThemeSelection()` directly in the page context rather than dispatching a DOM click — clicking a `<button>` triggers Chromium's focus-scroll management and causes a one-frame container jump even when the card is already fully visible.
+
+| Test | Description |
+| --- | --- |
+| `demo` | Full desktop shell demo sequence: ping, DNS lookup, `curl -L -o response.html https://noc.darklab.sh`, Files panel, history drawer, workflows modal, theme switching. |
 
 #### `failure-paths.spec.js`
 
@@ -2254,7 +2282,6 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `shortcuts overlay closes via button, backdrop, and Escape — each path refocuses the composer` | Same three-path bindDismissible contract applied to the keyboard shortcuts overlay. |
 | `FAQ question disclosure keeps aria-expanded in sync with the .faq-open class` | Verifies the bindDisclosure contract on a real FAQ item: aria-expanded and the `.faq-open` class toggle together across a full open/close/open cycle. |
 | `desktop rail section header disclosure keeps aria-expanded in sync with the .closed class (panel: null caller-owns-visibility)` | Verifies the bindDisclosure `panel: null` path where the caller owns class mutation: rail Workflows section header keeps aria-expanded in sync with the section's `.closed` class. |
-| `HUD save-menu: trigger toggles, inside-panel click stays open, outside click closes` | Verifies the bindOutsideClickClose contract on the HUD save-menu: trigger click toggles, inside-panel click stays open (helper treats inside clicks as non-dismissing), outside click at document.body dismisses. |
 | `each app-level modal card carries data-focus-trap-bound after startup wiring` | Asserts `setupModalFocusTraps()` in `controller.js` ran at boot — every app-level modal card (`#options-modal`, `#theme-modal`, `#faq-modal`, `#workflows-modal`) carries `data-focus-trap-bound="1"` so focus cannot fall through to the rail / tabs / HUD behind the backdrop. |
 | `FAQ modal wraps Tab and Shift+Tab at its card boundary` | Opens the FAQ modal, focuses the last focusable descendant of `#faq-modal`, presses Tab, and asserts focus wrapped to the first focusable; then presses Shift+Tab and asserts focus wrapped back to the last. |
 | `theme modal wraps Tab and Shift+Tab at its card boundary` | Same boundary-wrap assertion on the theme selector modal `#theme-modal`. |
@@ -2265,6 +2292,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `stacks actions when the viewport narrows to <=480px` | Opens the confirm on a 1024-wide viewport (not stacked), resizes to 390-wide, and asserts `.modal-actions-stacked` lands on `[data-confirm-actions]` — covers both the initial apply path and the reactive matchMedia listener path. |
 | `stacks actions when there are 3 or more actions regardless of viewport` | Opens a 3-action confirm at desktop viewport and asserts `.modal-actions-stacked` is applied — the action-count branch of `_shouldStack()` is independent of viewport width. |
 | `onActivate keeps the dialog open when the callback returns false` | Wires an `onActivate` returning false on the primary action, clicks it twice, and asserts the modal stays visible and the callback ran twice — pins the gate-close contract so validation errors can stay on screen. |
+| `HUD save-menu: trigger toggles, inside-panel click stays open, outside click closes` | Verifies the bindOutsideClickClose contract on the HUD save-menu: trigger click toggles, inside-panel click stays open (helper treats inside clicks as non-dismissing), outside click at document.body dismisses. |
 
 #### `kill.spec.js`
 
@@ -2430,7 +2458,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `default labels restore after a command finishes running` | Verifies that a default tab label shows the active command only while it runs, then returns to its stable shell label. |
 | `input is empty on the initial tab` | Verifies that input is empty on the initial tab. |
 | `switching to a tab does not restore prior commands into input` | Verifies that switching to a tab does not restore prior commands into input. |
-| `up/down recall stays local to the active tab` | Verifies that a new tab does not recall commands from another tab and that switching back restores only that tab's own command recall stack. |
+| `up/down recall prefers the active tab before global history` | Checks that up/down recall prefers the active tab before global history. |
 | `running a command in one tab does not block another tab from running` | Verifies that running a command in one tab does not block another tab from running. |
 | `a freshly created tab starts with an empty input` | Verifies that a freshly created tab starts with an empty input. |
 | `reload restores non-running tabs, transcript preview, and the active draft` | Verifies that reload restores idle-tab transcript state and the selected tab's saved draft within the same browser session. |
@@ -2460,6 +2488,22 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `line numbers work with timestamps and typing continues after toggling display modes` | Verifies that line numbers work with timestamps and typing continues after toggling display modes. |
 | `toggling timestamps or line numbers keeps a long man page pinned to the live bottom` | Verifies that toggling timestamps or line numbers keeps a long man page pinned to the live bottom. |
 
+#### `ui-capture.desktop.capture.js`
+
+Desktop UI screenshot capture spec. Walks the desktop shell through a curated pack of settled states for design review and theming QA, then saves labelled PNGs plus a manifest entry per scene and refreshes the shared HTML review index. Uses the dedicated desktop capture config and a seeded isolated app instance so history-heavy, workflow, and diagnostics states look production-like.
+
+| Test | Description |
+| --- | --- |
+| `desktop screenshot capture pack` | Full desktop screenshot pack: welcome, autocomplete, tabs, running states, rail/history/modal states, Files panel with a captured response file, snapshot-row actions, session-token clear confirmation, confirmation modals (kill + 3-action stacked variant), keyboard-shortcuts overlay, line numbers/timestamps, snapshot/permalink/diag. |
+
+#### `ui-capture.mobile.capture.js`
+
+Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the mobile shell, including the settled welcome screen, running-tab states, mobile sheets/modals, search, timestamp/line-number views, and standalone snapshot/permalink/diag pages. Saves labelled PNGs plus manifest entries and refreshes the shared HTML review index using the same seeded isolated app instance strategy.
+
+| Test | Description |
+| --- | --- |
+| `mobile screenshot capture pack` | Full mobile screenshot pack: settled welcome, tabs, running states (including the trailing running-indicator chip with two inactive running tabs), sheets/modals, Files panel with a captured response file, snapshot-row actions, session-token clear confirmation, search, line numbers/timestamps, snapshot/permalink/diag. |
+
 #### `ui.spec.js`
 
 | Test | Description |
@@ -2483,15 +2527,13 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `clicking a rail workflow opens the scoped modal without collapsing the rail list` | Verifies that clicking a workflow entry in the desktop rail opens a one-workflow modal view without replacing the full rail workflow list. |
 | `persists theme, timestamps, line number, and HUD clock preferences across reload` | Verifies that persists theme, timestamps, line number, and HUD clock preferences across reload. |
 
-#### `welcome.spec.js`
+#### `welcome-context.spec.js`
 
 | Test | Description |
 | --- | --- |
-| `running a command cancels the welcome animation and clears partial output` | Verifies that running a command cancels the welcome animation and clears partial output. |
-| `welcome finishes with a hint row after the intro and command blocks` | Verifies that welcome finishes with a hint row after the intro and command blocks. |
-| `typing into the prompt settles the remaining welcome intro immediately` | Verifies that typing into the prompt settles the remaining welcome intro immediately. |
-| `pressing Space in the prompt settles the remaining welcome intro immediately` | Verifies that pressing Space in the prompt settles the remaining welcome intro immediately. |
-| `pressing Escape in the prompt settles welcome without changing input text` | Verifies that pressing Escape in the prompt settles welcome without changing input text. |
+| `running a command in another tab does not tear down the original welcome tab` | Verifies that running a command in another tab does not tear down the original welcome tab. |
+| `clearing a non-welcome tab does not remove the original welcome UI` | Verifies that clearing a non-welcome tab does not remove the original welcome UI. |
+| `switches to the mobile welcome path with the mobile banner` | Verifies that switches to the mobile welcome path with the mobile banner. |
 
 #### `welcome-interactions.spec.js`
 
@@ -2503,164 +2545,15 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `pressing Space on the try this first badge loads the featured command into the prompt` | Verifies that pressing Space on the try this first badge loads the featured command into the prompt. |
 | `pressing Ctrl+C while welcome is active settles the intro without opening kill confirmation` | Verifies that pressing Ctrl+C while welcome is active settles the intro without opening kill confirmation. |
 
-#### `welcome-context.spec.js`
+#### `welcome.spec.js`
 
 | Test | Description |
 | --- | --- |
-| `running a command in another tab does not tear down the original welcome tab` | Verifies that running a command in another tab does not tear down the original welcome tab. |
-| `clearing a non-welcome tab does not remove the original welcome UI` | Verifies that clearing a non-welcome tab does not remove the original welcome UI. |
-| `switches to the mobile welcome path with the mobile banner` | Verifies that switches to the mobile welcome path with the mobile banner. |
-
-### Demo Recording Specs
-
-These specs are not part of the normal test suite. They are excluded from both `config/playwright.config.js` and `config/playwright.parallel.config.js`, matched only by `config/playwright.demo.config.js` and `config/playwright.demo.mobile.config.js`, and guarded by `test.skip(!process.env.RUN_DEMO, ...)`. Run them via `scripts/record_demo.sh` or `scripts/record_demo_mobile.sh`. See the [Demo Recording](#demo-recording) section above for the full usage guide.
-
-#### `demo.spec.js`
-
-Desktop demo recording spec. Drives a tightened README-first interaction sequence — ping tab, DNS lookup tab, history drawer scroll, workflows modal, and one theme switch — against a live container to produce `assets/darklab_shell_demo.mp4` (or `.webm` on Linux). Mocks the `/history` route with a realistic paginated history list. Captures frames via `page.screenshot()` (not Playwright's built-in video recorder) to get full `deviceScaleFactor: 2` resolution (3200×1800). Stitched at 15 fps. Theme transitions call `applyThemeSelection()` directly in the page context rather than dispatching a DOM click — clicking a `<button>` triggers Chromium's focus-scroll management and causes a one-frame container jump even when the card is already fully visible.
-
-| Test | Description |
-| --- | --- |
-| `demo` | Full desktop shell demo sequence: ping, DNS lookup, `curl -L -o response.html https://noc.darklab.sh`, Files panel, history drawer, workflows modal, theme switching. |
-
-#### `demo.mobile.spec.js`
-
-Mobile demo recording spec. Mirrors `demo.spec.js` for the mobile shell UI (`#mobile-cmd`, `#mobile-run-btn`, hamburger menu). Injects a fake iOS keyboard image to avoid Chromium's headless keyboard-simulation overlay, which would otherwise paint above all page content regardless of z-index and shrink the visual viewport. Captures frames via `page.screenshot()` at `deviceScaleFactor: 3` physical resolution (1290×2796) for the 430×932 iPhone 15-class viewport. Stitched at 15 fps.
-
-| Test | Description |
-| --- | --- |
-| `demo-mobile` | Full mobile shell demo sequence: ping, nslookup, `curl -L -o response.html https://noc.darklab.sh`, Files panel, history sheet, workflows modal, theme switching with README-first pacing. |
-
-### UI Screenshot Capture Specs
-
-These specs are also standalone. They are excluded from both `config/playwright.config.js` and `config/playwright.parallel.config.js`, matched only by `config/playwright.capture.desktop.config.js` and `config/playwright.capture.mobile.config.js`, and guarded by `test.skip(!process.env.RUN_CAPTURE, ...)`. Run them via `scripts/capture_ui_screenshots.sh`. See the [UI Screenshot Capture](#ui-screenshot-capture) section above for the full usage guide.
-
-#### `ui-capture.desktop.capture.js`
-
-Desktop UI screenshot capture spec. Walks the desktop shell through a curated pack of settled states for design review and theming QA, then saves labelled PNGs plus a manifest entry per scene and refreshes the shared HTML review index. Uses the dedicated desktop capture config and a seeded isolated app instance so history-heavy, workflow, and diagnostics states look production-like.
-
-| Test | Description |
-| --- | --- |
-| `desktop screenshot capture pack` | Full desktop screenshot pack: welcome, autocomplete, tabs, running states, rail/history/modal states, Files panel with a captured response file, snapshot-row actions, session-token clear confirmation, confirmation modals (kill + 3-action stacked variant), keyboard-shortcuts overlay, line numbers/timestamps, snapshot/permalink/diag. |
-
-#### `ui-capture.mobile.capture.js`
-
-Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the mobile shell, including the settled welcome screen, running-tab states, mobile sheets/modals, search, timestamp/line-number views, and standalone snapshot/permalink/diag pages. Saves labelled PNGs plus manifest entries and refreshes the shared HTML review index using the same seeded isolated app instance strategy.
-
-| Test | Description |
-| --- | --- |
-| `mobile screenshot capture pack` | Full mobile screenshot pack: settled welcome, tabs, running states (including the trailing running-indicator chip with two inactive running tabs), sheets/modals, Files panel with a captured response file, snapshot-row actions, session-token clear confirmation, search, line numbers/timestamps, snapshot/permalink/diag. |
-
-### Container Smoke Test Reference
-
-Detailed runtime behaviour, flag reference, and capture/sync workflow for the opt-in Container Smoke Test. See the [Container Smoke Test](#container-smoke-test) overview above for motivation and the common run commands.
-
-The underlying `tests/py/test_container_smoke_test.py` fixture reads `docker-compose.yml`, builds a unique base image with `docker build`, commits a runtime image with the repo `app/` tree and a generated `config.local.yaml`, and writes a temporary compose file that runs the committed image with no bind mounts. It strips fixed `container_name` values so locally running stacks do not collide with the test services. The generated smoke config disables rate limiting, enables Files with a tmpfs-backed workspace root, and keeps the command timeout short enough to catch hangs. Before startup and after teardown, the fixture also removes stale Docker resources from prior smoke projects whose names match `darklab_shell-test-*`; this protects local machines from Redis/shell containers left behind by interrupted or killed runs. The wrapper performs a startup gate first — build, compose startup, or health-check failures stop the run immediately. When scan-style nuclei commands are in the selected corpus, the fixture warms `/tmp/nuclei-templates` with `nuclei -update-templates` before running command cases. Each command case retries transient failures before failing so externally backed tools can prove their command syntax and runtime wiring without making the full smoke suite fail on a single dropped external response. Workspace fixture cases separately create/read/delete files through `/workspace/files` and run commands that consume or write those files through `/run`. All test cases run to completion and failures are reported together at the end.
-
-**`scripts/container_smoke_test.sh` flags:**
-
-| Flag | Description |
-| --- | --- |
-| `--cmd <command>` | Run only the named command(s). Repeatable. |
-| `-k <pattern>` | Passed through to pytest to filter by test ID pattern. |
-| Any other flag | Passed through to pytest directly. |
-
-**Retry tuning:**
-
-| Environment variable | Default | Description |
-| --- | --- | --- |
-| `RUN_CONTAINER_SMOKE_TEST_RETRIES` | `3` | Number of retries after a command case fails. Total attempts are retries plus the first attempt. |
-| `RUN_CONTAINER_SMOKE_TEST_RETRY_DELAY_SECONDS` | `3` | Delay between retry attempts. |
-
-#### Updating expectations
-
-When user-facing smoke-test commands change intentionally, run the capture script to record a fresh baseline:
-
-```bash
-./scripts/capture_container_smoke_test_outputs.sh
-```
-
-This launches a browser session against the running container (`http://localhost:8888` by default), runs every command from the shared smoke corpus (`commands.yaml` examples plus workflow steps), and writes the raw output files to `/tmp/darklab_shell-container-smoke-test-corpus/`. It captures the full real output including the true exit code — no commands are killed early.
-
-The capture script does **not** automatically update `tests/py/fixtures/container_smoke_test-expectations.json`. Use the captured output files as a reference to write or update the expected text snippets in that file manually, then re-run the smoke test to confirm.
-
-To capture only a specific subset (e.g. newly added examples or commands that drifted), write the commands to a plain-text file and pass it with `--commands-file`:
-
-```bash
-./scripts/capture_container_smoke_test_outputs.sh --commands-file /tmp/missing.txt
-```
-
-**`scripts/capture_container_smoke_test_outputs.sh` flags:**
-
-| Flag | Description |
-| --- | --- |
-| `--commands-file <path>` | Plain-text file of commands to capture (one per line, `#` comments ignored). Default: the full shared smoke corpus. |
-| `--base-url <url>` | App URL to connect to. Default: `http://localhost:8888`. |
-| `--out-dir <dir>` | Directory to write captured `.txt` files. Default: `/tmp/darklab_shell-container-smoke-test-corpus`. |
-| `--start-from-command <cmd>` | Skip all commands before the first exact match, to resume an interrupted run. |
-| `--pause-ms <ms>` | Pause between commands to avoid rate limits. Default: `500`. |
-| `--settle-ms <ms>` | Minimum wait after a command finishes before saving output. Default: `2500` (longer for heavy tools like `nmap`). |
-| `--stable-ms <ms>` | How long the output line count must be stable before saving. Default: `1000`. |
-| `--command-timeout-ms <ms>` | Maximum time to wait for a command to finish. Default: `300000` (5 min); extended automatically for `nmap`, `masscan`, `nuclei`, etc. |
-| `--save-timeout-ms <ms>` | Timeout for the browser download after clicking save. Default: `10000`. |
-| `--toast-timeout-ms <ms>` | Timeout when waiting for a no-output toast. Default: `2000`. |
-| `--headed` | Launch a visible browser window instead of headless. |
-| `--no-clear-between` | Leave output in the tab between commands instead of clearing. |
-| `--keep-browser-open` | Leave the browser open after capture finishes. |
-
-#### Keeping expectations in sync with the smoke corpus
-
-The expectations file should cover every command in the shared smoke corpus. To check which surfaced commands are missing expectations:
-
-```python
-python3 -c "
-import json, sys
-sys.path.insert(0, 'app')
-import commands
-examples = commands.load_container_smoke_test_commands()
-recorded = {r['command'] for r in json.load(open('tests/py/fixtures/container_smoke_test-expectations.json'))['records']}
-[print(c) for c in examples if c not in recorded]
-"
-```
-
-Any entry in `container_smoke_test-expectations.json` whose command does not appear in the shared smoke corpus is stale and should be removed.
-
-### History Seeding Reference
-
-Full invocation forms and flag reference for `scripts/seed_history.py`. See the [History Seeding](#history-seeding) overview above for when to use the script.
-
-**Why it must run inside the container:** running it on the host against the project's `data/history.db` while the container is up — or with the container stopped if the host's SQLite differs from the container's — can corrupt the FTS5 internal pages. The script refuses to write from the host by default (`--allow-host-write` bypasses the refusal but is rarely the right call).
-
-**Why the stdin pipe:** `scripts/` is not mounted into the container (only `./app:/app:ro` and `./data:/data` are), so the script is piped in over stdin. `-T` disables TTY allocation so the redirect works; `python -` reads the program from stdin and forwards the trailing argv to it.
-
-```bash
-# Generate a new tok_ session and seed 70 runs across the last 7 days:
-docker compose exec -T shell python - --new-token < scripts/seed_history.py
-
-# Seed an existing token's session:
-docker compose exec -T shell python - --token tok_abcdef0123456789abcdef0123456789 < scripts/seed_history.py
-
-# Seed an anonymous UUID session:
-docker compose exec -T shell python - --uuid 11111111-2222-3333-4444-555555555555 < scripts/seed_history.py
-
-# Custom count and star some seeded commands:
-docker compose exec -T shell python - --new-token --count 40 --star 5 < scripts/seed_history.py
-```
-
-**Flags:**
-
-| Flag | Description |
-| --- | --- |
-| `--new-token` | Generate a new `tok_`-prefixed token and seed its session. The generated token is printed on stdout so you can paste it into the UI. |
-| `--token <tok_…>` | Seed an existing server-issued `tok_` token (32 hex chars). |
-| `--uuid <uuid>` | Seed an anonymous UUID session. |
-| `--count N` | Number of runs to insert (default 70). |
-| `--days N` | Spread the inserted runs across the last N days (default 7). |
-| `--star N` | Star this many distinct seeded commands (default 4, 0 to skip). The named `visual-flows` fixture overrides this to `2` so capture/demo sessions keep both stars and Recent rows visible in the desktop rail. |
-| `--seed N` | Fix the RNG seed for reproducible runs. |
-| `--allow-host-write` | Bypass the host-write refusal. Only use if you understand the FTS5 cross-version corruption risk and the container is not running. |
-
-After seeding a `--new-token` session, paste the printed token into the browser via `session-token set <token>` (or the Options panel) to activate it.
+| `running a command cancels the welcome animation and clears partial output` | Verifies that running a command cancels the welcome animation and clears partial output. |
+| `welcome finishes with a hint row after the intro and command blocks` | Verifies that welcome finishes with a hint row after the intro and command blocks. |
+| `typing into the prompt settles the remaining welcome intro immediately` | Verifies that typing into the prompt settles the remaining welcome intro immediately. |
+| `pressing Space in the prompt settles the remaining welcome intro immediately` | Verifies that pressing Space in the prompt settles the remaining welcome intro immediately. |
+| `pressing Escape in the prompt settles welcome without changing input text` | Verifies that pressing Escape in the prompt settles welcome without changing input text. |
 
 ---
 

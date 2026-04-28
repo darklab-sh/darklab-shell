@@ -518,7 +518,7 @@ These rewrites happen in `rewrite_command()` silently (no user-visible notice un
 | `wapiti` | Adds `-f txt -o /dev/stdout` | wapiti writes reports to file by default; this streams to terminal. Silent. |
 | `naabu` | Adds `-scan-type c` | Uses TCP connect scanning instead of raw SYN mode for container reliability. Silent. |
 
-Workspace-aware validation also rewrites declared file and directory flags from `app/conf/commands.yaml` into the active session workspace. Amass uses an additional runtime environment override: database-backed subcommands such as `amass enum`, `amass subs`, `amass track`, and `amass viz` get a managed `-dir amass` workspace directory and `XDG_CONFIG_HOME` is pointed at the session workspace so `amass engine` and the CLI share the same per-session database path. See [External Command Integrations](docs/external-command-integrations.md) for the command-specific integration contracts.
+Workspace-aware validation also rewrites declared file and directory flags from `app/conf/commands.yaml` into the active session workspace. Rewritten token lists are reassembled with shell-safe quoting before they cross the existing `sh -c` subprocess boundary, so app-injected workspace paths cannot accidentally change shell parsing when a valid session file or folder name contains spaces or shell metacharacters. Amass uses an additional runtime environment override: database-backed subcommands such as `amass enum`, `amass subs`, `amass track`, and `amass viz` get a managed `-dir amass` workspace directory and `XDG_CONFIG_HOME` is pointed at the session workspace so `amass engine` and the CLI share the same per-session database path. See [External Command Integrations](docs/external-command-integrations.md) for the command-specific integration contracts.
 
 Synthetic post-filters also sit on this run-lifecycle boundary rather than on the shell-parser path. `parse_synthetic_postfilter()` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the `/run` stream applies the selected helper before lines are emitted or persisted.
 
@@ -528,7 +528,7 @@ Commands flow through `POST /run`, which validates and rewrites the request, res
 
 Fast output bursts are rendered in small batches instead of forcing a full DOM update per line. The batching keeps commands like `man curl` responsive enough for the browser to repaint while output is streaming, and the terminal stays pinned to the bottom only while the user has not scrolled away. If the user scrolls up, live following stops until they return to the tail.
 
-The `/run` generator keeps the transport alive with heartbeat comments during idle periods, and the subprocess stdout reader now uses a nonblocking buffered path rather than `select()` followed by `readline()`. That matters for tools that emit partial progress lines: partial output no longer wedges the generator waiting for a newline and starving the heartbeat stream. On the browser side, `runner.js` treats 45 seconds of browser-visible silence as a potentially stalled stream, then checks `/history/active` before changing tab state. If the run is still active, the tab stays `RUNNING`, Kill remains available, and the warning copy says the process is still alive; only inactive runs fall back to the history/final-result recovery path. If the same stream later resumes, the runner prints an explicit recovery notice and keeps the tab/HUD in the running state instead of leaving the UI failed-looking while output silently continues.
+The `/run` generator keeps the transport alive with heartbeat comments during idle periods, and the subprocess stdout reader now uses a nonblocking buffered path rather than `select()` followed by `readline()`. That matters for tools that emit partial progress lines: partial output no longer wedges the generator waiting for a newline and starving the heartbeat stream. If a platform refuses nonblocking setup, the server warning-logs the fallback so a deployment that could stall on partial-line output leaves an operator-visible trail. When the browser disconnects from a still-running command, the detached drain thread keeps recording output only up to the configured command timeout plus a short grace window; after that ceiling it terminates the process group and clears PID/active-run metadata so one non-closing scanner cannot pin a worker thread forever. On the browser side, `runner.js` treats 45 seconds of browser-visible silence as a potentially stalled stream, then checks `/history/active` before changing tab state. If the run is still active, the tab stays `RUNNING`, Kill remains available, and the warning copy says the process is still alive; only inactive runs fall back to the history/final-result recovery path. The async recovery path captures the tab/run generation before it awaits backend state and re-checks that generation before applying status, which prevents stale timeout promises from overwriting a newer run after rapid tab switches, kills, or restarts. If the same stream later resumes, the runner prints an explicit recovery notice and keeps the tab/HUD in the running state instead of leaving the UI failed-looking while output silently continues.
 
 ### Output Prefixes And Follow State
 
@@ -780,9 +780,9 @@ The container uses two unprivileged system users:
 
 The container starts as root only long enough for `entrypoint.sh` to fix `/data` ownership after volume mount, normalize the optional workspace root, set `/tmp` to `1777`, pre-create `/tmp/.config` and `/tmp/.cache` for `scanner`, and then drop to `appuser` via `gosu`.
 
-For workspace-backed host bind mounts, the host path should already be owned by the numeric UID/GID for the image's `appuser` account. The current image creates `appuser` as `995:995` and `scanner` as `994:994`, and launches scanner commands with the shared `appuser` run group when executing user commands. The runtime still attempts to repair ownership and modes on startup, but pre-setting the bind mount keeps rootless Docker, NFS-like mounts, and stricter host policies from leaving the workspace root owned by `root:root`. The expected mode model is `0730` for the workspace root, `3730` for hashed session directories, `0640` for app-created files, and `0660` for command-created files that must remain writable by the `scanner` process through the shared `appuser` run group.
+For workspace-backed host bind mounts, the host path should already be owned by the numeric UID/GID for the image's `appuser` account. The current image creates `appuser` as `995:995` and `scanner` as `994:994`, and launches scanner commands with the shared `appuser` run group when executing user commands. The runtime still attempts to repair ownership and modes on startup, including files directly inside each `sess_*` directory, but pre-setting the bind mount keeps rootless Docker, NFS-like mounts, and stricter host policies from leaving the workspace root owned by `root:root`. Permission-repair failures are warning-logged rather than swallowed, and startup warning-logs if the `WORKSPACE_ROOT` environment value prepared by the entrypoint differs from the app's configured `workspace_root`. The expected mode model is `0730` for the workspace root, `3730` for hashed session directories, `0640` for app-created files, and `0660` for command-created files that must remain writable by the `scanner` process through the shared `appuser` run group.
 
-Workspace cleanup is request-driven rather than a separate daemon. Each worker checks periodically before handling a request, then calls the backend cleanup helper when workspace storage is enabled. Cleanup evaluates the hashed session directory mtime as the workspace activity marker and only deletes resolved `sess_*` roots under the configured workspace root.
+Workspace cleanup is request-driven rather than a separate daemon. Each worker checks periodically before handling a request, then calls the backend cleanup helper when workspace storage is enabled. Cleanup evaluates the hashed session directory mtime as the workspace activity marker and only deletes resolved `sess_*` roots under the configured workspace root. Normal workspace path resolution rejects symlink components before use, and file reads/downloads also open the final component with no-follow semantics where the platform supports it so a same-principal symlink swap cannot escape the session root between validation and open.
 
 ### Trust Boundary Notes
 
@@ -826,10 +826,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 1041
-- `vitest`: 849
+- `pytest`: 1055
+- `vitest`: 852
 - `playwright`: 219
-- total: 2,109
+- total: 2,126
 
 ### Testing Architecture
 
