@@ -1421,6 +1421,7 @@ class TestRunStreaming:
                 "pid": 4242,
                 "command": "ping darklab.sh",
                 "started": "2026-01-01T00:00:00+00:00",
+                "resource_usage": {"cpu_seconds": 12.345, "memory_bytes": 1536, "process_count": 2},
             },
             {
                 "run_id": "run-fedcba987654",
@@ -1436,9 +1437,12 @@ class TestRunStreaming:
         assert "Active runs:\\n" in body
         assert "run-abcd" in body
         assert "4242" in body
+        assert "0.0%" in body
+        assert "1.5 KB" in body
         assert "ping darklab.sh\\n" in body
         assert "run-fedc" in body
         assert "ffuf -u https://darklab.sh/FUZZ -w words.txt\\n" in body
+        assert "Tip: click STATUS in the HUD for real-time CPU/MEM monitoring.\\n" in body
 
     def test_fake_jobs_alias_reports_when_no_active_runs_exist(self):
         client = get_client()
@@ -1460,6 +1464,7 @@ class TestRunStreaming:
                 "command": "ping darklab.sh",
                 "started": "2026-01-01T00:00:00+00:00",
                 "source": "redis",
+                "resource_usage": {"cpu_seconds": 12.345, "memory_bytes": 1536, "process_count": 2},
             },
             {
                 "run_id": "run-fedcba987654",
@@ -1481,21 +1486,31 @@ class TestRunStreaming:
         assert "run" in body
         assert "pid" in body
         assert "elapsed" in body
+        assert "cpu" in body
+        assert "mem" in body
         assert "\\u001b[4mcommand\\u001b[0m\\n" in body
         assert "\\u001b[36mrun-abcd\\u001b[0m" in body
         assert "\\u001b[2m4242\\u001b[0m" in body
+        assert "\\u001b[33m0.0%\\u001b[0m" in body
+        assert "\\u001b[2m1.5 KB\\u001b[0m" in body
         assert "ping darklab.sh\\n" in body
         assert "\\u001b[36mrun-fedc\\u001b[0m" in body
         assert "\\u001b[2m-\\u001b[0m" in body
         assert "ffuf -u https://darklab.sh/FUZZ -w words.txt\\n" in body
+        assert "Tip: click STATUS in the HUD for real-time CPU/MEM monitoring.\\n" in body
         assert verbose_resp.status_code == 200
         assert "\\u001b[36mrun-abcdef123456\\u001b[0m" in verbose_body
+        assert "\\u001b[4mcpu\\u001b[0m" in verbose_body
+        assert "\\u001b[4mcpu time\\u001b[0m" in verbose_body
+        assert "\\u001b[4mmem\\u001b[0m" in verbose_body
+        assert "\\u001b[2m12.3s\\u001b[0m" in verbose_body
         assert "\\u001b[4mstarted\\u001b[0m" in verbose_body
         assert "\\u001b[36mredis\\u001b[0m" in verbose_body
         assert json_resp.status_code == 200
         assert '\\"run_id\\": \\"run-abcdef123456\\"' in json_body
         assert '\\"source\\": \\"redis\\"' in json_body
         assert '\\"elapsed\\":' in json_body
+        assert '\\"resource_usage\\": {\\"cpu_seconds\\": 12.345, \\"memory_bytes\\": 1536, \\"process_count\\": 2}' in json_body
 
     def test_fake_runs_reports_when_no_active_runs_exist(self):
         client = get_client()

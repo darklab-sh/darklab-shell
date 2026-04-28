@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 1061
-- `vitest`: 853
+- `pytest`: 1062
+- `vitest`: 858
 - `playwright`: 219
-- total: 2,133
+- total: 2,139
 
 This document is organized in two parts:
 
@@ -409,6 +409,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_dead_pid` | Checks that active-run metadata is pruned when the stored process no longer exists. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_pid_reuse` | Checks that Redis-backed active-run metadata is pruned when a PID has been reused by a different process. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_legacy_metadata_on_linux` | Checks that legacy Redis metadata without PID start-time tracking is pruned on Linux instead of trusting a reused PID. |
+| `TestActiveRunMetadata.test_active_run_resource_usage_reports_cumulative_cpu_and_memory` | Verifies that active-run resource telemetry reports process-tree CPU seconds and RSS memory for Run Monitor display. |
 | `TestFormatRetention.test_zero_returns_unlimited` | Checks zero returns unlimited handling. |
 | `TestFormatRetention.test_365_returns_one_year` | Checks that 365 returns one year. |
 | `TestFormatRetention.test_730_returns_two_years` | Checks that 730 returns two years. |
@@ -1017,9 +1018,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunStreaming.test_fake_rm_root_refuses_exact_root_delete_pattern` | Checks that fake rm root refuses exact root delete pattern. |
 | `TestRunStreaming.test_fake_date_hostname_and_uptime_render_shell_style_information` | Checks that fake date hostname and uptime render shell style information. |
 | `TestRunStreaming.test_fake_ip_route_df_and_free_render_shell_style_summaries` | Checks that `ip a`, `route`, `df -h`, and `free -h` render shell-style summary output. |
-| `TestRunStreaming.test_fake_jobs_aliases_runs_metadata` | Checks that `jobs` aliases the app-native `runs` metadata output. |
+| `TestRunStreaming.test_fake_jobs_aliases_runs_metadata` | Checks that `jobs` aliases the app-native `runs` metadata output with resource snapshots and HUD monitoring hints. |
 | `TestRunStreaming.test_fake_jobs_alias_reports_when_no_active_runs_exist` | Checks that the `jobs` alias reports cleanly when the current session has no active runs. |
-| `TestRunStreaming.test_fake_runs_lists_active_run_metadata` | Checks that `runs` lists app-native active-run IDs, PIDs, elapsed time, commands, verbose metadata, and JSON output. |
+| `TestRunStreaming.test_fake_runs_lists_active_run_metadata` | Checks that `runs` lists app-native active-run IDs, PIDs, elapsed time, resource snapshots, commands, verbose metadata, and JSON output. |
 | `TestRunStreaming.test_fake_runs_reports_when_no_active_runs_exist` | Checks that `runs` reports cleanly when the current session has no active runs. |
 | `TestRunStreaming.test_fake_man_renders_real_page_for_allowed_topic` | Checks that fake man renders real page for allowed topic. |
 | `TestRunStreaming.test_fake_man_does_not_clip_to_max_output_lines` | Checks that fake man does not clip to max output lines. |
@@ -1662,6 +1663,16 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `save-html download uses appName and exportTimestamp` | Verifies that save-html download uses appName and exportTimestamp. |
 | `includes line numbers in copied text when lnMode is on` | Verifies that includes line numbers in copied text when lnMode is on. |
 | `omits prefix in copied text when both lnMode and tsMode are off` | Verifies that omits prefix in copied text when both lnMode and tsMode are off. |
+
+#### `run_monitor.test.js`
+
+| Test | Description |
+| --- | --- |
+| `renders active-run CPU and memory telemetry when available` | Verifies that the Run Monitor renders CPU and memory meters from active-run resource telemetry. |
+| `renders unavailable telemetry chips when backend stats are absent` | Verifies that the Run Monitor still shows CPU and memory meter placeholders when backend resource telemetry is not available. |
+| `opens as a header-only drawer when there are no active runs` | Verifies that the Run Monitor opens to a header-only `0 active runs` drawer when no commands are running. |
+| `calculates CPU from cumulative samples, keeps the last value, and caps display at 100%` | Verifies that the Run Monitor derives CPU percentage from adjacent cumulative CPU samples, preserves the last value when a later poll lacks CPU data, and display-caps at 100%. |
+| `adds the running status affordance and pulses it once per session` | Verifies that the STATUS HUD cell gets the Run Monitor expansion affordance while running and only pulses once per browser session. |
 
 #### `runner.test.js`
 

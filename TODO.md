@@ -22,6 +22,24 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Open TODOs
 
+- **Run Monitor CPU and memory usage**
+  - Add lightweight resource telemetry to the Run Monitor so long-running commands show whether they are actively consuming CPU or memory instead of only showing elapsed time.
+  - MVP:
+    - Use the existing active-run PID/metadata tracking as the source of truth.
+    - Add best-effort backend resource usage to `/history/active` for each active run.
+    - Prefer `psutil` so the implementation works consistently in Linux containers and local macOS/Linux development.
+    - Aggregate at least the tracked process plus recursive children so scanners that spawn workers are represented more accurately than parent-PID-only stats.
+    - Report memory as RSS bytes and cumulative process-tree CPU seconds from the backend; calculate the live CPU percentage in the Run Monitor from adjacent poll samples so multi-worker deployments do not need a shared telemetry cache.
+    - Keep the API fail-soft: if stats are unavailable, omit the telemetry or mark it unavailable without breaking active-run listing.
+    - Render CPU and memory as stacked circular meters in the Run Monitor drawer/sheet and keep the existing polling cadence modest. Treat 1 GB RSS as 100% fill for the memory meter while still labeling the actual memory value.
+    - Add unit coverage for backend resource aggregation and frontend formatting/rendering.
+  - Future:
+    - Add tiny per-run CPU sparklines using the same polling samples.
+    - Track peak memory and maybe peak CPU while the drawer is open.
+    - Add an "idle" indicator when CPU stays near zero for a sustained window.
+    - Consider container-level CPU/memory totals in the status surface if operators need app/container health, separate from per-run command health.
+    - Consider configured warning thresholds for runaway memory or sustained high CPU.
+
 - **Workspace-native chained recon workflows**
   - Add guided workflows that demonstrate the Files feature as an app-mediated pipeline: one recon tool writes a session file, and a later tool reads that generated file through declared workspace-aware flags.
   - Keep these workflows small and reviewable. They should show why Files exists without turning `Run all` into a huge scanner blast.
@@ -57,6 +75,33 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 ---
 
 ## Technical Debt
+
+- **Normalize theme tokens across shared surfaces**
+  - Problem:
+    - The theme system has enough surface-specific tokens that visually similar objects can drift apart. For example, Options and Keyboard Shortcuts can render with different modal backgrounds, Files and Shortcuts do not have the same explicit theme sections as older modals, and newer drawer surfaces can end up choosing colors by local CSS instead of shared semantic roles.
+    - Several tokens appear to encode the same role (`faq_modal_bg`, `options_modal_bg`, `confirm_modal_bg`, workspace/workflows/shortcuts modal backgrounds, `mobile_menu_bg`, sheet backgrounds, row backgrounds) while other surfaces rely directly on `surface`, `panel_bg`, `panel_alt_bg`, or `status_bar_bg`.
+  - Inventory pass:
+    - Build a table of shared UI objects and their current background/border/text tokens: Options, FAQ, Keyboard Shortcuts, Workflows, Files, Theme selector, Confirm dialogs, History drawer, Run Monitor drawer, mobile sheets, dropdowns, toasts, file/history/run rows, modal sections, form controls, chips, and inline code blocks.
+    - For each object, record whether it is a modal, sheet, drawer, row, section, control, or semantic state. The goal is to classify by role before touching colors.
+    - Include at least the default dark theme, one light theme, and one non-green dark theme in the first visual comparison so consolidation does not accidentally optimize only for Darklab Obsidian.
+  - Target token model:
+    - Keep the base palette small: `bg`, `surface`, `border`, `border_bright`, `text`, `muted`, `green`, `amber`, `red`, `blue`.
+    - Add or standardize semantic shared tokens such as `modal_bg`, `modal_header_bg`, `modal_section_bg`, `sheet_bg`, `drawer_bg`, `drawer_row_bg`, `drawer_row_hover_bg`, `control_bg`, and `inline_surface_bg`.
+    - Preserve intentional component identities for surfaces that should differ: `status_bar_bg`, `history_panel_bg`, `terminal_bar_bg`, tab styling, and theme-selector presentation if it needs special treatment.
+    - Prefer old per-surface tokens becoming aliases/fallbacks to canonical tokens before removing them, e.g. `--theme-faq-modal-bg: var(--theme-modal-bg)`, so themes can migrate incrementally.
+  - CSS refactor direction:
+    - Introduce shared structural classes for color decisions: `.modal-surface`, `.sheet-surface`, `.drawer-surface`, `.surface-row`, `.surface-section`, and `.control-surface`.
+    - Keep ID selectors for sizing, positioning, and surface-specific layout only. Avoid new ID-level color decisions unless there is a documented exception.
+    - Start with modal/sheet background consolidation because it is the most visible inconsistency: Options, FAQ, Keyboard Shortcuts, Workflows, Files, Theme selector, and Confirm dialogs.
+    - Then consolidate drawer/row backgrounds for History and Run Monitor.
+  - Theme cleanup:
+    - Audit all `app/conf/themes/*.yaml` files for identical or near-identical surface tokens that can be removed or changed to canonical values.
+    - Mark tokens that are intentionally different per theme versus tokens that only differ because the theme files drifted.
+    - Update `THEME.md` with the canonical surface-token roles and examples of when a component-specific override is acceptable.
+  - Guardrails:
+    - Add tests that every shipped theme defines the required canonical tokens or inherits documented defaults.
+    - Add a CSS/theme drift check that flags new hardcoded modal/drawer background colors and new per-surface background tokens unless allowlisted.
+    - Add visual capture coverage for Options, FAQ, Keyboard Shortcuts, Workflows, Files, History drawer, Run Monitor, and mobile sheets in default dark plus one light theme.
 
 - **Move built-in autocomplete grammar into the command registry**
   - Current state:

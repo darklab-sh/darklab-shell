@@ -1694,6 +1694,46 @@ class TestActiveRunMetadata:
 
             assert fake_redis.get("procmeta:run-legacy") is None
 
+    def test_active_run_resource_usage_reports_cumulative_cpu_and_memory(self):
+        class FakeTimes:
+            def __init__(self, user, system):
+                self.user = user
+                self.system = system
+
+        class FakeMemory:
+            def __init__(self, rss):
+                self.rss = rss
+
+        class FakeProcess:
+            def __init__(self, user, system, rss, children=None):
+                self._times = FakeTimes(user, system)
+                self._memory = FakeMemory(rss)
+                self._children = children or []
+
+            def children(self, recursive=True):
+                assert recursive is True
+                return self._children
+
+            def cpu_times(self):
+                return self._times
+
+            def memory_info(self):
+                return self._memory
+
+        root = FakeProcess(1.0, 0.5, 200, [FakeProcess(0.4, 0.1, 100)])
+        fake_psutil = mock.Mock()
+        fake_psutil.Process.return_value = root
+
+        with mock.patch.object(process, "psutil", fake_psutil):
+            usage = process._active_run_resource_usage("run-stats", 12345)
+
+        assert usage == {
+            "status": "ok",
+            "cpu_seconds": 2.0,
+            "memory_bytes": 300,
+            "process_count": 2,
+        }
+
 
 # ── _format_retention ─────────────────────────────────────────────────────────
 

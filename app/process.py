@@ -17,6 +17,11 @@ from typing import Any, cast
 
 from config import CFG
 
+try:
+    import psutil  # pyright: ignore[reportMissingModuleSource]
+except ImportError:  # pragma: no cover - exercised by environments without optional telemetry deps
+    psutil = None  # type: ignore[assignment]
+
 log = logging.getLogger("shell")
 
 # REDIS_URL can be set via environment variable or config.yaml redis_url key.
@@ -201,6 +206,43 @@ def _pid_start_time(pid: int) -> str | None:
     return fields[19]
 
 
+def _active_run_resource_usage(run_id: str, pid: int) -> dict[str, object] | None:
+    """Return best-effort CPU and RSS memory stats for an active run."""
+    del run_id
+    if not psutil or pid <= 0:
+        return None
+
+    try:
+        root = psutil.Process(pid)
+        processes = [root] + root.children(recursive=True)
+    except Exception:
+        return None
+
+    rss_bytes = 0
+    cpu_seconds = 0.0
+    process_count = 0
+    for proc in processes:
+        try:
+            cpu_times = proc.cpu_times()
+            memory_info = proc.memory_info()
+        except Exception:
+            continue
+        cpu_seconds += float(getattr(cpu_times, "user", 0.0) or 0.0)
+        cpu_seconds += float(getattr(cpu_times, "system", 0.0) or 0.0)
+        rss_bytes += int(getattr(memory_info, "rss", 0) or 0)
+        process_count += 1
+
+    if process_count <= 0:
+        return None
+
+    return {
+        "status": "ok",
+        "cpu_seconds": round(cpu_seconds, 6),
+        "memory_bytes": rss_bytes,
+        "process_count": process_count,
+    }
+
+
 def _active_run_is_alive(payload: dict[str, Any]) -> bool:
     """Verify stored active-run metadata still points at the original process."""
     try:
@@ -293,6 +335,26 @@ def active_run_remove(run_id: str) -> None:
                 _session_run_ids.pop(session_id, None)
 
 
+def _active_run_public_item(item: dict[str, Any], source: str) -> dict[str, object]:
+    pid = int(item.get("pid", 0) or 0)
+    run_id = str(item.get("run_id", ""))
+    public_item: dict[str, object] = {
+        "run_id": run_id,
+        "pid": pid,
+        "command": str(item.get("command", "")),
+        "started": str(item.get("started", "")),
+        "source": source,
+    }
+    usage = _active_run_resource_usage(run_id, pid)
+    if usage is not None:
+        public_item["resource_usage"] = usage
+    return public_item
+
+
+def _active_run_started_sort_key(item: dict[str, object]) -> str:
+    return str(item.get("started", ""))
+
+
 def active_runs_for_session(session_id: str) -> list[dict]:
     """Return in-flight runs for one session, ordered oldest-first by start time."""
     if not session_id:
@@ -322,20 +384,12 @@ def active_runs_for_session(session_id: str) -> list[dict]:
             items.append(payload)
         if stale:
             redis_client.srem(session_key, *stale)
-        return sorted(
-            [
-                {
-                    "run_id": str(item.get("run_id", "")),
-                    "pid": int(item.get("pid", 0) or 0),
-                    "command": str(item.get("command", "")),
-                    "started": str(item.get("started", "")),
-                    "source": "redis",
-                }
-                for item in items
-                if item.get("run_id") and item.get("command") and item.get("started")
-            ],
-            key=lambda item: item["started"],
-        )
+        public_items = [
+            _active_run_public_item(item, "redis")
+            for item in items
+            if item.get("run_id") and item.get("command") and item.get("started")
+        ]
+        return sorted(public_items, key=_active_run_started_sort_key)
 
     with _pid_lock:
         run_ids = list(_session_run_ids.get(session_id, set()))
@@ -349,22 +403,12 @@ def active_runs_for_session(session_id: str) -> list[dict]:
             if not _active_run_is_alive(item):
                 stale.append(run_id)
                 continue
-            items.append(
-                {
-                    "run_id": str(item.get("run_id", "")),
-                    "pid": int(item.get("pid", 0) or 0),
-                    "command": str(item.get("command", "")),
-                    "started": str(item.get("started", "")),
-                    "source": "memory",
-                }
-            )
+            items.append(_active_run_public_item(item, "memory"))
         for run_id in stale:
             _active_run_meta.pop(run_id, None)
             if session_id in _session_run_ids:
                 _session_run_ids[session_id].discard(run_id)
         if session_id in _session_run_ids and not _session_run_ids[session_id]:
             _session_run_ids.pop(session_id, None)
-        return sorted(
-            [item for item in items if item["run_id"] and item["command"] and item["started"]],
-            key=lambda item: item["started"],
-        )
+        public_items = [item for item in items if item["run_id"] and item["command"] and item["started"]]
+        return sorted(public_items, key=_active_run_started_sort_key)

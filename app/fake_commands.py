@@ -1158,18 +1158,90 @@ def _format_run_started(started: str) -> str:
     return start.astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _active_run_resource_usage(run: dict) -> dict[str, object]:
+    usage = run.get("resource_usage")
+    if isinstance(usage, dict):
+        return usage
+    return {}
+
+
+def _active_run_numeric_value(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _active_run_cpu_seconds(run: dict) -> float | None:
+    usage = _active_run_resource_usage(run)
+    return _active_run_numeric_value(usage.get("cpu_seconds"))
+
+
+def _active_run_elapsed_seconds(run: dict) -> float | None:
+    try:
+        start = _parse_dt(str(run.get("started", "")))
+    except (TypeError, ValueError):
+        return None
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    elapsed = (datetime.now(timezone.utc) - start.astimezone(timezone.utc)).total_seconds()
+    return max(0.0, elapsed)
+
+
+def _active_run_cpu_label(run: dict) -> str:
+    cpu_seconds = _active_run_cpu_seconds(run)
+    elapsed_seconds = _active_run_elapsed_seconds(run)
+    if cpu_seconds is None or not elapsed_seconds:
+        return "-"
+    cpu_percent = max(0.0, min(100.0, (cpu_seconds / elapsed_seconds) * 100.0))
+    return f"{cpu_percent:.1f}%"
+
+
+def _active_run_cpu_time_label(run: dict) -> str:
+    cpu_seconds = _active_run_cpu_seconds(run)
+    if cpu_seconds is None:
+        return "-"
+    return f"{cpu_seconds:.1f}s"
+
+
+def _active_run_memory_label(run: dict) -> str:
+    usage = _active_run_resource_usage(run)
+    memory_bytes = _active_run_numeric_value(usage.get("memory_bytes"))
+    if memory_bytes is None:
+        return "-"
+    return _format_bytes(int(memory_bytes))
+
+
 def _active_run_json_rows(runs: list[dict]) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for run in runs:
-        rows.append({
+        row: dict[str, object] = {
             "run_id": str(run.get("run_id", "")),
             "pid": int(run.get("pid", 0) or 0),
             "started": str(run.get("started", "")),
             "elapsed": _run_elapsed(str(run.get("started", ""))),
             "source": str(run.get("source", "")) or "unknown",
             "command": str(run.get("command", "")).strip(),
-        })
+        }
+        usage = _active_run_resource_usage(run)
+        if usage:
+            row["resource_usage"] = {
+                key: value
+                for key, value in usage.items()
+                if key in {"cpu_seconds", "memory_bytes", "process_count", "status"}
+            }
+        rows.append(row)
     return rows
+
+
+def _active_run_monitor_hint() -> dict[str, str]:
+    return _output_line("Tip: click STATUS in the HUD for real-time CPU/MEM monitoring.", "fake-note")
 
 
 def _run_fake_runs(command: str, session_id: str) -> list[dict[str, str]]:
@@ -1191,12 +1263,18 @@ def _run_fake_runs(command: str, session_id: str) -> list[dict[str, str]]:
         run_labels = [str(run.get("run_id", "")) or "-" for run in runs]
         pid_labels = [str(run.get("pid") or "-") for run in runs]
         elapsed_labels = [_run_elapsed(str(run.get("started", ""))) for run in runs]
+        cpu_labels = [_active_run_cpu_label(run) for run in runs]
+        cpu_time_labels = [_active_run_cpu_time_label(run) for run in runs]
+        memory_labels = [_active_run_memory_label(run) for run in runs]
         started_labels = [_format_run_started(str(run.get("started", ""))) for run in runs]
         source_labels = [str(run.get("source", "")) or "unknown" for run in runs]
 
         run_width = max(3, *(len(label) for label in run_labels))
         pid_width = max(3, *(len(label) for label in pid_labels))
         elapsed_width = max(7, *(len(label) for label in elapsed_labels))
+        cpu_width = max(3, *(len(label) for label in cpu_labels))
+        cpu_time_width = max(8, *(len(label) for label in cpu_time_labels))
+        memory_width = max(3, *(len(label) for label in memory_labels))
         started_width = max(7, *(len(label) for label in started_labels))
         source_width = max(6, *(len(label) for label in source_labels))
         lines = [
@@ -1206,17 +1284,33 @@ def _run_fake_runs(command: str, session_id: str) -> list[dict[str, str]]:
                 f"{_ansi_cell('run', run_width, '<', _ansi_underline)}  "
                 f"{_ansi_cell('pid', pid_width, '>', _ansi_underline)}  "
                 f"{_ansi_cell('elapsed', elapsed_width, '>', _ansi_underline)}  "
+                f"{_ansi_cell('cpu', cpu_width, '>', _ansi_underline)}  "
+                f"{_ansi_cell('cpu time', cpu_time_width, '>', _ansi_underline)}  "
+                f"{_ansi_cell('mem', memory_width, '>', _ansi_underline)}  "
                 f"{_ansi_cell('started', started_width, '<', _ansi_underline)}  "
                 f"{_ansi_cell('source', source_width, '<', _ansi_underline)}  "
                 f"{_ansi_underline('command')}",
                 "fake-help-row",
             ),
         ]
-        for run, run_label, pid_label, elapsed_label, started_label, source_label in zip(
+        for (
+            run,
+            run_label,
+            pid_label,
+            elapsed_label,
+            cpu_label,
+            cpu_time_label,
+            memory_label,
+            started_label,
+            source_label,
+        ) in zip(
             runs,
             run_labels,
             pid_labels,
             elapsed_labels,
+            cpu_labels,
+            cpu_time_labels,
+            memory_labels,
             started_labels,
             source_labels,
             strict=False,
@@ -1227,20 +1321,28 @@ def _run_fake_runs(command: str, session_id: str) -> list[dict[str, str]]:
                 f"{_ansi_cell(run_label, run_width, '<', _ansi_cyan)}  "
                 f"{_ansi_cell(pid_label, pid_width, '>', _ansi_dim)}  "
                 f"{_ansi_cell(elapsed_label, elapsed_width, '>', _ansi_green)}  "
+                f"{_ansi_cell(cpu_label, cpu_width, '>', _ansi_amber)}  "
+                f"{_ansi_cell(cpu_time_label, cpu_time_width, '>', _ansi_dim)}  "
+                f"{_ansi_cell(memory_label, memory_width, '>', _ansi_dim)}  "
                 f"{_ansi_cell(started_label, started_width, '<', _ansi_dim)}  "
                 f"{_ansi_cell(source_label, source_width, '<', _ansi_cyan)}  "
                 f"{command_text}",
                 "fake-plain",
             ))
+        lines.append(_active_run_monitor_hint())
         return lines
 
     run_labels = [str(run.get("run_id", ""))[:8] or "-" for run in runs]
     pid_labels = [str(run.get("pid") or "-") for run in runs]
     elapsed_labels = [_run_elapsed(str(run.get("started", ""))) for run in runs]
+    cpu_labels = [_active_run_cpu_label(run) for run in runs]
+    memory_labels = [_active_run_memory_label(run) for run in runs]
 
     run_width = max(3, *(len(label) for label in run_labels))
     pid_width = max(3, *(len(label) for label in pid_labels))
     elapsed_width = max(7, *(len(label) for label in elapsed_labels))
+    cpu_width = max(3, *(len(label) for label in cpu_labels))
+    memory_width = max(3, *(len(label) for label in memory_labels))
     lines = [
         _output_line("Active runs:", "fake-section"),
         _output_line(
@@ -1248,20 +1350,33 @@ def _run_fake_runs(command: str, session_id: str) -> list[dict[str, str]]:
             f"{_ansi_cell('run', run_width, '<', _ansi_underline)}  "
             f"{_ansi_cell('pid', pid_width, '>', _ansi_underline)}  "
             f"{_ansi_cell('elapsed', elapsed_width, '>', _ansi_underline)}  "
+            f"{_ansi_cell('cpu', cpu_width, '>', _ansi_underline)}  "
+            f"{_ansi_cell('mem', memory_width, '>', _ansi_underline)}  "
             f"{_ansi_underline('command')}",
             "fake-help-row",
         ),
     ]
-    for run, run_label, pid_label, elapsed_label in zip(runs, run_labels, pid_labels, elapsed_labels, strict=False):
+    for run, run_label, pid_label, elapsed_label, cpu_label, memory_label in zip(
+        runs,
+        run_labels,
+        pid_labels,
+        elapsed_labels,
+        cpu_labels,
+        memory_labels,
+        strict=False,
+    ):
         command = str(run.get("command", "")).strip()
         lines.append(_output_line(
             "  "
             f"{_ansi_cell(run_label, run_width, '<', _ansi_cyan)}  "
             f"{_ansi_cell(pid_label, pid_width, '>', _ansi_dim)}  "
             f"{_ansi_cell(elapsed_label, elapsed_width, '>', _ansi_green)}  "
+            f"{_ansi_cell(cpu_label, cpu_width, '>', _ansi_amber)}  "
+            f"{_ansi_cell(memory_label, memory_width, '>', _ansi_dim)}  "
             f"{command}",
             "fake-plain",
         ))
+    lines.append(_active_run_monitor_hint())
     return lines
 
 

@@ -533,6 +533,8 @@ Fast output bursts are rendered in small batches instead of forcing a full DOM u
 
 The `/run` generator keeps the transport alive with heartbeat comments during idle periods, and the subprocess stdout reader now uses a nonblocking buffered path rather than `select()` followed by `readline()`. That matters for tools that emit partial progress lines: partial output no longer wedges the generator waiting for a newline and starving the heartbeat stream. If a platform refuses nonblocking setup, the server warning-logs the fallback so a deployment that could stall on partial-line output leaves an operator-visible trail. When the browser disconnects from a still-running command, the detached drain thread keeps recording output only up to the configured command timeout plus a short grace window; after that ceiling it terminates the process group and clears PID/active-run metadata so one non-closing scanner cannot pin a worker thread forever. On the browser side, `runner.js` treats 45 seconds of browser-visible silence as a potentially stalled stream, then checks `/history/active` before changing tab state. If the run is still active, the tab stays `RUNNING`, Kill remains available, and the warning copy says the process is still alive; only inactive runs fall back to the history/final-result recovery path. The async recovery path captures the tab/run generation before it awaits backend state and re-checks that generation before applying status, which prevents stale timeout promises from overwriting a newer run after rapid tab switches, kills, or restarts. If the same stream later resumes, the runner prints an explicit recovery notice and keeps the tab/HUD in the running state instead of leaving the UI failed-looking while output silently continues.
 
+Active-run metadata is also the source for the Run Monitor. `/history/active` returns the current run IDs, PIDs, commands, start times, metadata source, and best-effort `psutil` resource telemetry when available. The backend reports summed RSS bytes and cumulative process-tree CPU seconds for the tracked process plus recursive children. The desktop Run Monitor is a HUD-attached drawer that can open even when idle, rendering a header-only `0 active runs` state; mobile uses the same data in a sheet. The monitor calculates the displayed CPU percentage from adjacent poll samples in the browser and caps the display at 100%, which avoids per-worker CPU sample caches and keeps multi-worker deployments from flickering when successive polls land on different workers. Memory fill is normalized client-side against a 1 GB scale while the label continues to show the actual RSS value. Telemetry failures are intentionally non-fatal and omitted from the response rather than breaking reload recovery, stall checks, or the terminal `runs` command.
+
 ### Output Prefixes And Follow State
 
 Line numbers and timestamps are rendered from stored per-line metadata rather than by rebuilding transcript text. Each appended `.line` keeps timestamp attributes plus a stable `data-line-number` assigned at append time; trimming old rows at `max_output_lines` does not renumber the remaining DOM. The `data-prefix` attribute carries only the active timestamp fragment, and the shared prefix width is updated incrementally during normal appends while `syncOutputPrefixes()` is reserved for restore/toggle paths that intentionally revisit existing rows. Output appends flush in larger batches for bursty commands, offscreen rows opt into browser `content-visibility`, and live trimming uses a live row collection instead of snapshotting every `.line` on each append.
@@ -830,10 +832,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 1061
-- `vitest`: 853
+- `pytest`: 1062
+- `vitest`: 858
 - `playwright`: 219
-- total: 2,133
+- total: 2,139
 
 ### Testing Architecture
 

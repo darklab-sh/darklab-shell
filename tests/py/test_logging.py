@@ -1576,14 +1576,14 @@ class TestSessionStateEvents:
 class TestRunSpawnErrorEvent:
     """RUN_SPAWN_ERROR is emitted at ERROR when subprocess.Popen raises."""
 
-    # RFC 5737 TEST-NET-3 — never routed, gives this class its own rate-limit bucket
-    _IP = "203.0.113.99"
-
     def _post_run(self, client, cmd):
+        # RFC 5737 TEST-NET-3 — never routed, unique per request so Flask-Limiter's
+        # in-memory counter cannot leak into this class during full-suite runs.
+        ip = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
         return client.post(
             "/run",
             json={"command": cmd},
-            headers={"X-Forwarded-For": self._IP, "X-Session-ID": "rse-session"},
+            headers={"X-Forwarded-For": ip, "X-Session-ID": "rse-session"},
         )
 
     def test_spawn_error_returns_500(self):
