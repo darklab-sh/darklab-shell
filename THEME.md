@@ -273,6 +273,9 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 | `chrome_control_border` | `var(--border-bright)` | `var(--border-bright)` | Inputs and compact control borders inside shell chrome surfaces |
 | `chrome_divider_color` | `#2a2a2a` | `rgba(0,0,0,0.15)` | Divider lines inside shell chrome surfaces |
 | `chrome_shadow` | `rgba(0,0,0,0.6)` | `rgba(0,0,0,0.6)` | Shared shadow for chrome drawers and sheets |
+| `scrollbar_track` | `color-mix(in srgb, var(--surface) 72%, transparent)` | `color-mix(in srgb, var(--surface) 72%, transparent)` | Shared terminal/permalink scrollbar track |
+| `scrollbar_thumb` | `color-mix(in srgb, var(--muted) 44%, var(--border-bright))` | `color-mix(in srgb, var(--muted) 44%, var(--border-bright))` | Shared terminal/permalink scrollbar thumb |
+| `scrollbar_thumb_hover` | `color-mix(in srgb, var(--text) 38%, var(--border-bright))` | `color-mix(in srgb, var(--text) 38%, var(--border-bright))` | Shared terminal/permalink scrollbar thumb hover |
 
 ### Toolbar Buttons and Chips
 
@@ -287,6 +290,18 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 | `toolbar_button_active_bg` | `rgba(57,255,20,0.06)` | `#a0b4c8` | Active chrome button background |
 | `toolbar_button_active_border` | `#1a7a08` | `#6880a0` | Active chrome button border |
 | `toolbar_button_active_text` | `#39ff14` | `#101820` | Active chrome button text |
+| `button_secondary_bg` | `color-mix(in srgb, var(--surface) 66%, transparent)` | `color-mix(in srgb, var(--surface) 66%, transparent)` | Shared secondary button background |
+| `button_secondary_border` | `color-mix(in srgb, var(--border-bright) 88%, transparent)` | `color-mix(in srgb, var(--border-bright) 88%, transparent)` | Shared secondary button border |
+| `button_secondary_text` | `color-mix(in srgb, var(--muted) 86%, var(--text))` | `color-mix(in srgb, var(--muted) 86%, var(--text))` | Shared secondary button text |
+| `button_secondary_hover_bg` | `color-mix(in srgb, var(--_tone) 7%, transparent)` | `color-mix(in srgb, var(--_tone) 7%, transparent)` | Shared secondary button hover wash; resolves against the active button tone |
+| `button_secondary_hover_border` | `color-mix(in srgb, var(--_tone-dim) 72%, var(--border-bright))` | `color-mix(in srgb, var(--_tone-dim) 72%, var(--border-bright))` | Shared secondary button hover border; resolves against the active button tone |
+| `button_ghost_border` | `color-mix(in srgb, var(--border-bright) 58%, transparent)` | `color-mix(in srgb, var(--border-bright) 58%, transparent)` | Shared ghost button border |
+| `button_ghost_text` | `color-mix(in srgb, var(--muted) 86%, var(--text))` | `color-mix(in srgb, var(--muted) 86%, var(--text))` | Shared ghost button text |
+| `button_ghost_hover_bg` | `color-mix(in srgb, var(--_tone) 10%, transparent)` | `color-mix(in srgb, var(--_tone) 10%, transparent)` | Shared ghost button hover wash; resolves against the active button tone |
+| `button_ghost_hover_border` | `color-mix(in srgb, var(--_tone-dim) 62%, var(--border-bright))` | `color-mix(in srgb, var(--_tone-dim) 62%, var(--border-bright))` | Shared ghost button hover border; resolves against the active button tone |
+| `button_destructive_bg` | `color-mix(in srgb, var(--_tone) 8%, transparent)` | `color-mix(in srgb, var(--_tone) 8%, transparent)` | Shared destructive button background; resolves against the active destructive tone |
+| `button_destructive_text` | `color-mix(in srgb, var(--muted) 86%, var(--text))` | `color-mix(in srgb, var(--muted) 86%, var(--text))` | Shared destructive button text |
+| `button_destructive_hover_bg` | `color-mix(in srgb, var(--_tone) 16%, transparent)` | `color-mix(in srgb, var(--_tone) 16%, transparent)` | Shared destructive button hover background; resolves against the active destructive tone |
 
 ### Tabs and Tab Controls
 
@@ -324,10 +339,24 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 | `modal_bg` | `#141414` | `#e8eef6` | Shared background for standard modal surfaces and the Theme selector |
 | `dropdown_bg` | `color-mix(in srgb, var(--surface) 96%, transparent)` | `#d4e0ec` | Shared dropdown background for autocomplete, save menus, and app-native select menus |
 | `dropdown_border` | `color-mix(in srgb, var(--green) 18%, transparent)` | `rgba(26,90,170,0.25)` | Shared dropdown border for autocomplete, save menus, and app-native select menus |
+| `dropdown_border_soft` | `color-mix(in srgb, var(--green) 14%, transparent)` | `rgba(26,90,170,0.18)` | Softer dropdown border used when dropdowns dock against mobile keyboard chrome |
 | `dropdown_shadow` | `rgba(0,0,0,0.35)` | `rgba(0,0,0,0.14)` | Shared dropdown shadow for autocomplete, save menus, and app-native select menus |
+| `dropdown_shadow_ring` | `color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent)` | `color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent)` | Subtle one-pixel shadow ring for dropdown surfaces |
+| `dropdown_shadow_ring_strong` | `color-mix(in srgb, var(--theme-dropdown-shadow) 36%, transparent)` | `color-mix(in srgb, var(--theme-dropdown-shadow) 36%, transparent)` | Stronger dropdown shadow ring for keyboard-docked mobile dropdowns |
 | `dropdown_item_text` | `#9a9a9a` | `#4a5868` | Text for autocomplete and menu items |
 | `overlay_backdrop_bg` | `rgba(0,0,0,0.76)` | `rgba(34,58,88,0.22)` | Shared backdrop behind modals and overlays |
 | `inline_surface_bg` | `#141414` | `#dce6f0` | Inline code, allowed-command chips, and compact embedded surfaces |
+
+### Search and Output Highlights
+
+| Key | Dark default | Light default | Used for |
+|-----|--------------|---------------|----------|
+| `search_highlight_bg` | `color-mix(in srgb, var(--amber) 35%, transparent)` | `rgba(154,66,0,0.18)` | Inline search match highlight fill |
+| `search_highlight_current_bg` | `color-mix(in srgb, var(--amber) 70%, transparent)` | `rgba(154,66,0,0.34)` | Inline current search match highlight fill |
+| `search_signal_bg` | `color-mix(in srgb, var(--amber) 8%, transparent)` | `rgba(154,66,0,0.08)` | Output-line background for signal-scoped search matches |
+| `search_signal_accent` | `color-mix(in srgb, var(--amber) 55%, transparent)` | `rgba(154,66,0,0.28)` | Output-line left accent for signal-scoped search matches |
+| `search_signal_current_bg` | `color-mix(in srgb, var(--amber) 16%, transparent)` | `rgba(154,66,0,0.14)` | Output-line background for the current signal-scoped search match |
+| `search_signal_current_accent` | `color-mix(in srgb, var(--amber) 88%, transparent)` | `rgba(154,66,0,0.42)` | Output-line left accent for the current signal-scoped search match |
 
 ### Action and Selection Text
 
@@ -349,6 +378,7 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 | `toast_error_bg` | `color-mix(in srgb, var(--red) 8%, var(--bg))` | `#e4eef8` | Error toast background |
 | `toast_error_text` | `#ff3c3c` | `#cc2200` | Error toast text |
 | `toast_error_border` | `color-mix(in srgb, var(--red) 45%, transparent)` | `rgba(204,34,0,0.38)` | Error toast border |
+| `toast_shadow` | `0 12px 28px color-mix(in srgb, var(--theme-panel-shadow) 74%, transparent)` | `0 12px 28px color-mix(in srgb, var(--theme-panel-shadow) 74%, transparent)` | Shared toast elevation shadow |
 
 ### Welcome and Onboarding
 

@@ -34,6 +34,9 @@
   --theme-chrome-control-border: var(--border-bright);
   --theme-chrome-divider-color: #2a2a2a;
   --theme-chrome-shadow: rgba(0,0,0,0.6);
+  --theme-scrollbar-track: color-mix(in srgb, var(--surface) 72%, transparent);
+  --theme-scrollbar-thumb: color-mix(in srgb, var(--muted) 44%, var(--border-bright));
+  --theme-scrollbar-thumb-hover: color-mix(in srgb, var(--text) 38%, var(--border-bright));
   --theme-toolbar-button-bg: transparent;
   --theme-toolbar-button-border: #2e2e2e;
   --theme-toolbar-button-text: #7a7a7a;
@@ -43,6 +46,18 @@
   --theme-toolbar-button-active-bg: rgba(57,255,20,0.06);
   --theme-toolbar-button-active-border: #1a7a08;
   --theme-toolbar-button-active-text: #39ff14;
+  --theme-button-secondary-bg: color-mix(in srgb, var(--surface) 66%, transparent);
+  --theme-button-secondary-border: color-mix(in srgb, var(--border-bright) 88%, transparent);
+  --theme-button-secondary-text: color-mix(in srgb, var(--muted) 86%, var(--text));
+  --theme-button-secondary-hover-bg: color-mix(in srgb, var(--_tone) 7%, transparent);
+  --theme-button-secondary-hover-border: color-mix(in srgb, var(--_tone-dim) 72%, var(--border-bright));
+  --theme-button-ghost-border: color-mix(in srgb, var(--border-bright) 58%, transparent);
+  --theme-button-ghost-text: color-mix(in srgb, var(--muted) 86%, var(--text));
+  --theme-button-ghost-hover-bg: color-mix(in srgb, var(--_tone) 10%, transparent);
+  --theme-button-ghost-hover-border: color-mix(in srgb, var(--_tone-dim) 62%, var(--border-bright));
+  --theme-button-destructive-bg: color-mix(in srgb, var(--_tone) 8%, transparent);
+  --theme-button-destructive-text: color-mix(in srgb, var(--muted) 86%, var(--text));
+  --theme-button-destructive-hover-bg: color-mix(in srgb, var(--_tone) 16%, transparent);
   --theme-tabs-bar-scrollbar-track: rgba(255,255,255,0.06);
   --theme-tabs-bar-scrollbar-thumb: #555555;
   --theme-tabs-bar-scrollbar-thumb-hover: #777777;
@@ -65,9 +80,18 @@
   --theme-modal-bg: #141414;
   --theme-dropdown-bg: color-mix(in srgb, var(--surface) 96%, transparent);
   --theme-dropdown-border: color-mix(in srgb, var(--green) 18%, transparent);
+  --theme-dropdown-border-soft: color-mix(in srgb, var(--green) 14%, transparent);
   --theme-dropdown-shadow: rgba(0,0,0,0.35);
+  --theme-dropdown-shadow-ring: color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent);
+  --theme-dropdown-shadow-ring-strong: color-mix(in srgb, var(--theme-dropdown-shadow) 36%, transparent);
   --theme-dropdown-item-text: #7a7a7a;
   --theme-overlay-backdrop-bg: rgba(0,0,0,0.75);
+  --theme-search-highlight-bg: color-mix(in srgb, var(--amber) 35%, transparent);
+  --theme-search-highlight-current-bg: color-mix(in srgb, var(--amber) 70%, transparent);
+  --theme-search-signal-bg: color-mix(in srgb, var(--amber) 8%, transparent);
+  --theme-search-signal-accent: color-mix(in srgb, var(--amber) 55%, transparent);
+  --theme-search-signal-current-bg: color-mix(in srgb, var(--amber) 16%, transparent);
+  --theme-search-signal-current-accent: color-mix(in srgb, var(--amber) 88%, transparent);
   --theme-inline-surface-bg: #141414;
   --theme-toast-bg: #141414;
   --theme-toast-text: #39ff14;
@@ -75,6 +99,7 @@
   --theme-toast-error-bg: color-mix(in srgb, var(--red) 8%, var(--bg));
   --theme-toast-error-text: #ff3c3c;
   --theme-toast-error-border: color-mix(in srgb, var(--red) 45%, transparent);
+  --theme-toast-shadow: 0 12px 28px color-mix(in srgb, var(--theme-panel-shadow) 74%, transparent);
   --theme-welcome-ascii-color: var(--green);
   --theme-welcome-command-hover-bg: color-mix(in srgb, var(--green) 6%, transparent);
   --theme-welcome-command-hover-shadow: 0 0 0 1px var(--green-glow);
@@ -330,7 +355,7 @@ header .version {
   background: var(--theme-dropdown-bg);
   border: 1px solid var(--theme-dropdown-border);
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent),
+    0 0 0 1px var(--theme-dropdown-shadow-ring),
     0 10px 24px var(--theme-dropdown-shadow);
   color: var(--theme-dropdown-item-text);
   font-family: var(--font-mono);
@@ -339,7 +364,7 @@ header .version {
 
 .dropdown-surface.dropdown-up {
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent),
+    0 0 0 1px var(--theme-dropdown-shadow-ring),
     0 -10px 24px var(--theme-dropdown-shadow);
 }
 
@@ -426,9 +451,9 @@ header .version {
 }
 
 body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
-  border-color: color-mix(in srgb, var(--theme-dropdown-border) 78%, transparent);
+  border-color: var(--theme-dropdown-border-soft);
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--theme-dropdown-shadow) 36%, transparent),
+    0 0 0 1px var(--theme-dropdown-shadow-ring-strong),
     0 -12px 26px var(--theme-dropdown-shadow);
 }
 

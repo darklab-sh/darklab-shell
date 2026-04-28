@@ -625,15 +625,15 @@ body #search-toggle-btn.search-discover-pulse {
   border-color: var(--text);
 }
 .search-toggles { display: flex; gap: 4px; }
-mark.search-hl { background: color-mix(in srgb, var(--amber) 35%, transparent); color: inherit; border-radius: 2px; }
-mark.search-hl.current { background: color-mix(in srgb, var(--amber) 70%, transparent); }
+mark.search-hl { background: var(--theme-search-highlight-bg); color: inherit; border-radius: 2px; }
+mark.search-hl.current { background: var(--theme-search-highlight-current-bg); }
 .line.search-signal-hl {
-  background: color-mix(in srgb, var(--amber) 8%, transparent);
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--amber) 55%, transparent);
+  background: var(--theme-search-signal-bg);
+  box-shadow: inset 2px 0 0 var(--theme-search-signal-accent);
 }
 .line.search-signal-hl.current {
-  background: color-mix(in srgb, var(--amber) 16%, transparent);
-  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--amber) 88%, transparent);
+  background: var(--theme-search-signal-current-bg);
+  box-shadow: inset 3px 0 0 var(--theme-search-signal-current-accent);
 }
 
 /* ── Permalink toast ── */
@@ -701,7 +701,7 @@ body #copy-toast {
   background: var(--theme-toast-bg);
   border-color: var(--theme-toast-border);
   color: var(--theme-toast-text);
-  box-shadow: 0 12px 28px color-mix(in srgb, var(--theme-panel-shadow) 74%, transparent);
+  box-shadow: var(--theme-toast-shadow);
 }
 body #permalink-toast.toast-success,
 body #copy-toast.toast-success {
@@ -1488,14 +1488,14 @@ body #history-panel { background: var(--theme-chrome-bg); }
    and hover wash toward the tone color while keeping the resting state
    restrained. */
 .btn-secondary {
-  background: color-mix(in srgb, var(--surface) 66%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border-bright) 88%, transparent);
-  color: color-mix(in srgb, var(--muted) 86%, var(--text));
+  background: var(--theme-button-secondary-bg);
+  border: 1px solid var(--theme-button-secondary-border);
+  color: var(--theme-button-secondary-text);
 }
 .btn-secondary:hover:not([aria-disabled="true"]):not(:disabled) {
-  border-color: color-mix(in srgb, var(--_tone-dim) 72%, var(--border-bright));
+  border-color: var(--theme-button-secondary-hover-border);
   color: var(--text);
-  background: color-mix(in srgb, var(--_tone) 7%, transparent);
+  background: var(--theme-button-secondary-hover-bg);
   transform: translateY(-1px);
 }
 .btn-secondary.btn-warning:hover:not([aria-disabled="true"]):not(:disabled),
@@ -1508,8 +1508,8 @@ body #history-panel { background: var(--theme-chrome-bg); }
 /* Role: ghost — transparent, low emphasis; icon-only permitted */
 .btn-ghost {
   background: transparent;
-  border: 1px solid color-mix(in srgb, var(--border-bright) 58%, transparent);
-  color: color-mix(in srgb, var(--muted) 86%, var(--text));
+  border: 1px solid var(--theme-button-ghost-border);
+  color: var(--theme-button-ghost-text);
 }
 .btn-ghost.btn-warning,
 .btn-ghost.btn-danger,
@@ -1517,8 +1517,8 @@ body #history-panel { background: var(--theme-chrome-bg); }
   color: var(--_tone);
 }
 .btn-ghost:hover:not([aria-disabled="true"]):not(:disabled) {
-  background: color-mix(in srgb, var(--_tone) 10%, transparent);
-  border-color: color-mix(in srgb, var(--_tone-dim) 62%, var(--border-bright));
+  background: var(--theme-button-ghost-hover-bg);
+  border-color: var(--theme-button-ghost-hover-border);
   color: var(--text);
 }
 .btn-ghost.btn-warning:hover:not([aria-disabled="true"]):not(:disabled),
@@ -1533,12 +1533,12 @@ body #history-panel { background: var(--theme-chrome-bg); }
    the reversible-destructive treatment (caution yellow). Accepts labels
    only — never icon-only, to prevent unlabeled destructive controls. */
 .btn-destructive {
-  background: color-mix(in srgb, var(--_tone) 8%, transparent);
+  background: var(--theme-button-destructive-bg);
   border: 1px solid var(--_tone-dim);
-  color: color-mix(in srgb, var(--muted) 86%, var(--text));
+  color: var(--theme-button-destructive-text);
 }
 .btn-destructive:hover:not([aria-disabled="true"]):not(:disabled) {
-  background: color-mix(in srgb, var(--_tone) 16%, transparent);
+  background: var(--theme-button-destructive-hover-bg);
   color: var(--text);
   transform: translateY(-1px);
 }

@@ -48,6 +48,20 @@ toolbar_button_active_bg: "#dfbcc8"
 toolbar_button_active_border: "#a07e8f"
 toolbar_button_active_text: "#1f141a"
 
+# Button primitives
+button_secondary_bg: "color-mix(in srgb, var(--surface) 66%, transparent)"
+button_secondary_border: "color-mix(in srgb, var(--border-bright) 88%, transparent)"
+button_secondary_text: "color-mix(in srgb, var(--muted) 86%, var(--text))"
+button_secondary_hover_bg: "color-mix(in srgb, var(--_tone) 7%, transparent)"
+button_secondary_hover_border: "color-mix(in srgb, var(--_tone-dim) 72%, var(--border-bright))"
+button_ghost_border: "color-mix(in srgb, var(--border-bright) 58%, transparent)"
+button_ghost_text: "color-mix(in srgb, var(--muted) 86%, var(--text))"
+button_ghost_hover_bg: "color-mix(in srgb, var(--_tone) 10%, transparent)"
+button_ghost_hover_border: "color-mix(in srgb, var(--_tone-dim) 62%, var(--border-bright))"
+button_destructive_bg: "color-mix(in srgb, var(--_tone) 8%, transparent)"
+button_destructive_text: "color-mix(in srgb, var(--muted) 86%, var(--text))"
+button_destructive_hover_bg: "color-mix(in srgb, var(--_tone) 16%, transparent)"
+
 
 tabs_bar_scrollbar_track: "rgba(96, 72, 84, 0.12)"
 tabs_bar_scrollbar_thumb: "#b0899a"
@@ -69,15 +83,29 @@ tab_touch_drag_text_shadow: "0 0 10px rgba(194,66,98,0.14)"
 tab_drop_shadow: "0 0 10px rgba(194,66,98,0.22)"
 
 chrome_shadow: "rgba(96, 72, 84, 0.28)"
+scrollbar_track: "color-mix(in srgb, var(--surface) 72%, transparent)"
+scrollbar_thumb: "color-mix(in srgb, var(--muted) 44%, var(--border-bright))"
+scrollbar_thumb_hover: "color-mix(in srgb, var(--text) 38%, var(--border-bright))"
 history_load_overlay_bg: "rgba(28, 20, 24, 0.72)"
 
 modal_bg: "#fff7f8"
 
 dropdown_bg: "#f2e2e8"
 dropdown_border: "rgba(62, 138, 94, 0.28)"
+dropdown_border_soft: "rgba(26,90,170,0.18)"
 dropdown_shadow: "rgba(96, 72, 84, 0.18)"
+dropdown_shadow_ring: "color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent)"
+dropdown_shadow_ring_strong: "color-mix(in srgb, var(--theme-dropdown-shadow) 36%, transparent)"
 dropdown_item_text: "#544349"
 overlay_backdrop_bg: "rgba(28, 20, 24, 0.72)"
+
+# Search highlights
+search_highlight_bg: "rgba(154,66,0,0.18)"
+search_highlight_current_bg: "rgba(154,66,0,0.34)"
+search_signal_bg: "rgba(154,66,0,0.08)"
+search_signal_accent: "rgba(154,66,0,0.28)"
+search_signal_current_bg: "rgba(154,66,0,0.14)"
+search_signal_current_accent: "rgba(154,66,0,0.42)"
 
 inline_surface_bg: "#f0dde3"
 
@@ -87,6 +115,7 @@ toast_border: "rgba(96, 72, 84, 0.26)"
 toast_error_bg: "#fff6f8"
 toast_error_text: "#c24262"
 toast_error_border: "rgba(194, 66, 98, 0.36)"
+toast_shadow: "0 12px 28px color-mix(in srgb, var(--theme-panel-shadow) 74%, transparent)"
 
 
 welcome_ascii_color: "var(--green)"

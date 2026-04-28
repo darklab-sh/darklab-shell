@@ -76,6 +76,9 @@ SECTION_ORDER = [
                     "chrome_control_border",
                     "chrome_divider_color",
                     "chrome_shadow",
+                    "scrollbar_track",
+                    "scrollbar_thumb",
+                    "scrollbar_thumb_hover",
                 ],
             ),
             (
@@ -90,6 +93,23 @@ SECTION_ORDER = [
                     "toolbar_button_active_bg",
                     "toolbar_button_active_border",
                     "toolbar_button_active_text",
+                ],
+            ),
+            (
+                "# Button primitives",
+                [
+                    "button_secondary_bg",
+                    "button_secondary_border",
+                    "button_secondary_text",
+                    "button_secondary_hover_bg",
+                    "button_secondary_hover_border",
+                    "button_ghost_border",
+                    "button_ghost_text",
+                    "button_ghost_hover_bg",
+                    "button_ghost_hover_border",
+                    "button_destructive_bg",
+                    "button_destructive_text",
+                    "button_destructive_hover_bg",
                 ],
             ),
             (
@@ -132,9 +152,23 @@ SECTION_ORDER = [
                 [
                     "dropdown_bg",
                     "dropdown_border",
+                    "dropdown_border_soft",
                     "dropdown_shadow",
+                    "dropdown_shadow_ring",
+                    "dropdown_shadow_ring_strong",
                     "dropdown_item_text",
                     "overlay_backdrop_bg",
+                ],
+            ),
+            (
+                "# Search highlights",
+                [
+                    "search_highlight_bg",
+                    "search_highlight_current_bg",
+                    "search_signal_bg",
+                    "search_signal_accent",
+                    "search_signal_current_bg",
+                    "search_signal_current_accent",
                 ],
             ),
             (
@@ -150,6 +184,7 @@ SECTION_ORDER = [
                     "toast_error_bg",
                     "toast_error_text",
                     "toast_error_border",
+                    "toast_shadow",
                 ],
             ),
             (

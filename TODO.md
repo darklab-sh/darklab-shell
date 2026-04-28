@@ -77,26 +77,6 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Technical Debt
 
-- **Centralize local color transforms into derived theme tokens**
-  - Problem:
-    - The surface-token pass removed the major one-off surface roles, but the component CSS still contains many local `color-mix()` formulas for washes, soft borders, text blends, glows, shadows, dropdown outlines, search affordances, mobile running indicators, Run Monitor meters, and welcome-screen decorative states.
-    - Some local transforms are legitimate state math, but leaving formulas scattered across `app/static/css/*.css` makes it easy for similar states to drift and harder for theme authors to tune the app consistently.
-  - Direction:
-    - Add a small derived-token layer rather than one token per selector. Candidate roles include soft/medium green washes, amber/red washes, muted text blends, soft borders, dropdown outlines, chrome meter rings, mobile running indicators, search highlight fills, and scrollbar track/thumb colors.
-    - Keep semantic transforms in theme/config values when they are true theme roles, and keep one-off animation-only math local when it is purely transient geometry/opacity.
-    - Replace repeated local formulas with shared variables only when the visual role is reused or theme authors would reasonably want to tune it.
-  - Audit starting points:
-    - Prompt selection/caret/dropdown outlines in `app/static/css/base.css`.
-    - Search bar, signal chips, toggle buttons, and button primitives in `app/static/css/components.css`.
-    - Mobile running chip/edge glows in `app/static/css/mobile.css`.
-    - Run Monitor meter accents and HUD affordance details in `app/static/css/shell-chrome.css`.
-    - Welcome decorative tints in `app/static/css/welcome.css`.
-    - Terminal/export scrollbar styling shared between `app/static/css/shell.css` and `app/static/css/terminal_export.css`.
-  - Guardrails:
-    - Do not reintroduce surface-specific tokens for modals, chrome, or rows unless a genuinely new role appears.
-    - Keep the first pass small enough for visual review across `darklab_obsidian`, a light theme, and one non-green dark theme.
-    - Update `THEME.md` only for stable derived roles that theme authors should know about.
-
 - **Theme visual drift guardrails**
   - Add lightweight checks that prevent shared surface-token drift from returning:
     - flag new hardcoded modal/drawer/sheet background colors unless explicitly allowlisted
