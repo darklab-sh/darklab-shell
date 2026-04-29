@@ -2583,6 +2583,56 @@ describe('app helpers', () => {
     }
   })
 
+  it('keeps the active output pinned to the bottom when the mobile keyboard closes', async () => {
+    const output = document.createElement('div')
+    let scrollTop = 0
+    Object.defineProperty(output, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value) => {
+        scrollTop = value
+      },
+    })
+    Object.defineProperty(output, 'scrollHeight', {
+      configurable: true,
+      get: () => 300,
+    })
+    const { restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 768, offsetTop: 0 },
+      tabs: [
+        {
+          id: 'tab-1',
+          followOutput: true,
+          suppressOutputScrollTracking: false,
+          _outputFollowToken: 0,
+        },
+      ],
+      getOutput: () => output,
+    })
+    try {
+      const mobileCmdInput = document.getElementById('mobile-cmd')
+      let activeElement = mobileCmdInput
+      document.body.classList.add('mobile-terminal-mode')
+      Object.defineProperty(document, 'activeElement', {
+        configurable: true,
+        get: () => activeElement,
+      })
+
+      window.visualViewport.height = 500
+      mobileCmdInput.dispatchEvent(new Event('focus'))
+      expect(scrollTop).toBe(300)
+
+      scrollTop = 12
+      activeElement = document.body
+      window.visualViewport.height = 768
+      mobileCmdInput.dispatchEvent(new Event('blur'))
+
+      expect(scrollTop).toBe(300)
+    } finally {
+      restoreViewport()
+    }
+  })
+
   it('keeps the mobile keyboard helper row visible when the viewport resize lands before focus', async () => {
     const { syncMobileComposerKeyboardState, restoreViewport } = await loadAppFns({
       mobileViewport: { height: 768, offsetTop: 0 },
@@ -2932,7 +2982,7 @@ describe('app helpers', () => {
     )
 
     expect(shellMatch).not.toBeNull()
-    expect(shellMatch[1]).toMatch(/background:\s*var\(--surface\)/)
+    expect(shellMatch[1]).toMatch(/background:\s*transparent/)
     expect(shellMatch[1]).not.toMatch(/rgba\(13,13,13/)
 
     expect(composerMatch).not.toBeNull()

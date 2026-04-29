@@ -399,7 +399,7 @@ header .version {
 
 .ac-dropdown.ac-mobile {
   position: absolute;
-  z-index: 45;
+  z-index: 65;
   max-width: none;
   border-radius: 6px 6px 0 0;
   padding: 4px 0;

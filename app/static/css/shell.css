@@ -1761,6 +1761,22 @@ body .tab .tab-status.ok { background: var(--green); }
 #faq-modal .faq-body .faq-item .faq-q:hover::after {
   color: var(--green);
 }
+#faq-modal .faq-body .faq-item .faq-q[data-pressable-clearing="1"],
+#faq-modal .faq-body .faq-item .faq-q[data-pressable-clearing="1"]:hover {
+  color: var(--green);
+}
+#faq-modal .faq-body .faq-item .faq-q[data-pressable-clearing="1"]::after,
+#faq-modal .faq-body .faq-item .faq-q[data-pressable-clearing="1"]:hover::after {
+  color: var(--green-dim);
+}
+@media (hover: none) {
+  #faq-modal .faq-body .faq-item .faq-q:hover {
+    color: var(--green);
+  }
+  #faq-modal .faq-body .faq-item .faq-q:hover::after {
+    color: var(--green-dim);
+  }
+}
 #faq-modal .faq-body .faq-item .faq-a {
   display: none;
   margin-top: 10px;
@@ -1845,9 +1861,48 @@ body .tab .tab-status.ok { background: var(--green); }
 
 /* ── Workflow cards ───────────────────────────────────────────────── */
 .workflow-card {
+  flex: 0 0 auto;
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 16px 18px;
+}
+
+.workflow-card-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.workflow-card-toggle-icon {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  line-height: 1;
+  transition: transform 0.15s, color 0.15s;
+}
+
+.workflow-card-toggle:hover .workflow-card-toggle-icon,
+.workflow-card-toggle:focus-visible .workflow-card-toggle-icon {
+  color: var(--green);
+}
+
+.workflow-card.is-collapsed .workflow-card-toggle-icon {
+  transform: rotate(-90deg);
+}
+
+.workflow-card.is-collapsed .workflow-card-body {
+  display: none;
+}
+
+.workflow-card-body {
+  margin-top: 6px;
 }
 
 .workflow-title {
@@ -1856,14 +1911,14 @@ body .tab .tab-status.ok { background: var(--green); }
   font-weight: 700;
   color: var(--green);
   letter-spacing: 0.3px;
-  margin-bottom: 6px;
+  margin-bottom: 0;
 }
 
 .workflow-desc {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.6;
-  margin-bottom: 14px;
+  margin: 0 0 14px;
 }
 
 .workflow-input-panel {

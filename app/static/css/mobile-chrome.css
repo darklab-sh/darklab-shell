@@ -604,19 +604,6 @@ body.mobile-terminal-mode {
     outline: none;
   }
 
-  /* Composer picks up an amber ring while a command is running so typing
-     feels distinct from the idle prompt. Scoped so desktop is untouched. */
-  #mobile-composer.is-running {
-    box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, var(--amber) 35%, transparent),
-      0 0 0 3px color-mix(in srgb, var(--amber) 10%, transparent);
-    transition: box-shadow 160ms ease;
-  }
-  #mobile-composer.is-running #mobile-cmd {
-    caret-color: var(--amber);
-    border-bottom-color: color-mix(in srgb, var(--amber) 40%, var(--border-bright));
-  }
-
   /* Run ↔ Kill swap in the composer. The Kill button mirrors the desktop
      HUD Kill primitive (.btn.btn-destructive.btn-compact) but tuned for the
      tighter mobile row. */

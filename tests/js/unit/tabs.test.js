@@ -523,6 +523,21 @@ describe('tabs helpers', () => {
     expect(tab.followOutput).toBe(true)
   })
 
+  it('does not treat a simple output tap as user scroll intent', () => {
+    const { createTab, _getTabs } = loadTabsFns()
+    const id = createTab('tab 1')
+    const tab = _getTabs()[0]
+    const output = document.getElementById(`output-${id}`)
+
+    output.dispatchEvent(touchPointerEvent('pointerdown', { pointerType: 'touch' }))
+    output.dispatchEvent(touchEvent('touchstart', [{ identifier: 1, clientX: 20, clientY: 20 }]))
+
+    expect(tab.outputUserScrollUntil).toBe(0)
+
+    output.dispatchEvent(touchPointerEvent('pointermove', { pointerType: 'touch' }))
+    expect(tab.outputUserScrollUntil).toBeGreaterThan(Date.now() - 10)
+  })
+
   it('shows a live jump button while output is streaming off the live tail', () => {
     const { createTab, _getTabs, setTabStatus, updateOutputFollowButton } = loadTabsFns()
     const id = createTab('tab 1')

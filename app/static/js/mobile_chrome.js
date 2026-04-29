@@ -536,6 +536,7 @@
     btn.className = `sheet-item-action btn btn-${role} btn-compact`;
     btn.textContent = label;
     bindPressable(btn, {
+      clearPressStyle: true,
       onActivate: (e) => {
         e.stopPropagation();
         try { handler(); } catch (_) { /* non-critical */ }
@@ -769,11 +770,17 @@
       backdropEl: recentsSheetScrim,
     });
   }
-  recentsSheetClearBtn?.addEventListener('click', () => {
-    if (typeof global.confirmHistAction === 'function') {
-      global.confirmHistAction('clear');
-    }
-  });
+  if (recentsSheetClearBtn) {
+    bindPressable(recentsSheetClearBtn, {
+      refocusComposer: false,
+      clearPressStyle: true,
+      onActivate: () => {
+        if (typeof global.confirmHistAction === 'function') {
+          global.confirmHistAction('clear');
+        }
+      },
+    });
+  }
 
   if (typeof onUiEvent === 'function') {
     onUiEvent('app:history-panel-refreshed', () => {
@@ -856,7 +863,11 @@
       x.className = 'filter-chip-x';
       x.textContent = '×';
       chip.append(label, x);
-      chip.addEventListener('click', () => _clearOneFilter(key));
+      bindPressable(chip, {
+        refocusComposer: false,
+        clearPressStyle: true,
+        onActivate: () => _clearOneFilter(key),
+      });
       recentsChipsEl.appendChild(chip);
     };
     const s = _recentsFilterState;
@@ -918,6 +929,7 @@
       panel: recentsFiltersExpanded,
       openClass: null,
       hiddenClass: 'u-hidden',
+      clearPressStyle: true,
       onToggle: (open) => {
         if (!open) _closeRecentsDropdowns();
         // _recentsSyncFilterUI() rewrites the toggle label ("filters" vs
@@ -943,21 +955,31 @@
   recentsDropdowns.forEach(wrap => {
     const key = wrap.dataset.recentsDropdown;
     const trigger = wrap.querySelector('.sheet-filter-dropdown');
-    trigger?.addEventListener('click', () => {
-      const open = wrap.classList.contains('open');
-      _closeRecentsDropdowns(open ? null : wrap);
-      wrap.classList.toggle('open', !open);
-      trigger.setAttribute('aria-expanded', !open ? 'true' : 'false');
-    });
+    if (trigger) {
+      bindPressable(trigger, {
+        refocusComposer: false,
+        clearPressStyle: true,
+        onActivate: () => {
+          const open = wrap.classList.contains('open');
+          _closeRecentsDropdowns(open ? null : wrap);
+          wrap.classList.toggle('open', !open);
+          trigger.setAttribute('aria-expanded', !open ? 'true' : 'false');
+        },
+      });
+    }
     wrap.querySelectorAll('[data-dropdown-value]').forEach(opt => {
-      opt.addEventListener('click', () => {
-        _recentsFilterState[key] = opt.dataset.dropdownValue;
-        if (key === 'type' && _recentsFilterState.type === 'snapshots') _recentsResetRunOnlyFilters();
-        wrap.classList.remove('open');
-        trigger?.setAttribute('aria-expanded', 'false');
-        _recentsSyncFilterUI();
-        _recentsPaging.page = 1;
-        _recentsRefresh();
+      bindPressable(opt, {
+        refocusComposer: false,
+        clearPressStyle: true,
+        onActivate: () => {
+          _recentsFilterState[key] = opt.dataset.dropdownValue;
+          if (key === 'type' && _recentsFilterState.type === 'snapshots') _recentsResetRunOnlyFilters();
+          wrap.classList.remove('open');
+          trigger?.setAttribute('aria-expanded', 'false');
+          _recentsSyncFilterUI();
+          _recentsPaging.page = 1;
+          _recentsRefresh();
+        },
       });
     });
   });
@@ -978,6 +1000,7 @@
   if (recentsFilterStarred) {
     bindPressable(recentsFilterStarred, {
       refocusComposer: false,
+      clearPressStyle: true,
       onActivate: () => {
         _recentsFilterState.starred = !_recentsFilterState.starred;
         _recentsSyncFilterUI();
@@ -990,6 +1013,7 @@
   if (recentsFiltersClear) {
     bindPressable(recentsFiltersClear, {
       refocusComposer: false,
+      clearPressStyle: true,
       onActivate: () => {
         _recentsFilterState.type = 'all';
         _recentsFilterState.root = '';

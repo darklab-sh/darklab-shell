@@ -319,6 +319,24 @@ function _restoreOutputTailAfterLayout(out, tab) {
   });
 }
 
+function _isMobileTerminalMode() {
+  return !!(
+    typeof document !== 'undefined'
+    && document.body
+    && document.body.classList
+    && document.body.classList.contains('mobile-terminal-mode')
+  );
+}
+
+function _followOutputAfterAppend(out, tab, { afterLargeBatch = false } = {}) {
+  if (!out || !tab || tab.followOutput === false) return;
+  if (afterLargeBatch && _isMobileTerminalMode()) {
+    _restoreOutputTailAfterLayout(out, tab);
+    return;
+  }
+  setTimeout(() => _stickOutputToBottom(out, tab), 0);
+}
+
 function _syncTabRawLines(tab, rawLine) {
   if (!tab || !rawLine) return;
   tab.rawLines.push(rawLine);
@@ -387,15 +405,9 @@ function renderRestoredTabOutput(tabId, rawLines) {
   tab.rawLines = lines;
   lines.forEach(line => _appendRestoredOutputSpan(out, line));
   syncOutputPrefixes(out);
-  const mobileMode = !!(
-    typeof document !== 'undefined'
-    && document.body
-    && document.body.classList
-    && document.body.classList.contains('mobile-terminal-mode')
-  );
   if (lines.length) {
     tab.followOutput = true;
-    if (mobileMode) _stickOutputToBottom(out, tab);
+    if (_isMobileTerminalMode()) _stickOutputToBottom(out, tab);
     else _restoreOutputTailAfterLayout(out, tab);
   }
   if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(tabId);
@@ -421,6 +433,7 @@ function _flushPendingOutputBatch(tabId) {
 
   const shouldStickToBottom = tab.followOutput !== false;
   const fragment = document.createDocumentFragment();
+  const wasLargeBurst = state.burstCount >= _OUTPUT_SYNC_BURST_LIMIT || state.items.length > 1;
   const batch = state.items.splice(0, _OUTPUT_BATCH_SIZE);
   batch.forEach(entry => {
     entry.span.dataset.prefix = _isPrefixExcludedLine(entry.span) ? '' : _lineTimestampPrefix(entry.span);
@@ -433,7 +446,7 @@ function _flushPendingOutputBatch(tabId) {
 
   _syncOutputPrefixesForAppend(out);
   if (shouldStickToBottom) {
-    setTimeout(() => _stickOutputToBottom(out, tab), 0);
+    _followOutputAfterAppend(out, tab, { afterLargeBatch: wasLargeBurst || batch.length > 1 });
   }
   if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(tabId);
   if (tabId === activeTabId && typeof refreshSearchDiscoverabilityUi === 'function') {
@@ -457,7 +470,7 @@ function _refreshFollowingOutputsAfterLayout() {
     if (!tab || tab.followOutput === false) return;
     const out = getOutput(tab.id);
     if (!out) return;
-    setTimeout(() => _stickOutputToBottom(out, tab), 16);
+    setTimeout(() => _restoreOutputTailAfterLayout(out, tab), 16);
   });
 }
 
@@ -581,9 +594,7 @@ function appendLine(text, cls, tabId, metadata = null) {
   _trimOutputToMaxLines(out);
 
   _syncOutputPrefixesForAppend(out, span);
-  if (tab?.followOutput !== false) {
-    setTimeout(() => _stickOutputToBottom(out, tab), 0);
-  }
+  _followOutputAfterAppend(out, tab);
   if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(id);
   if (id === activeTabId && typeof refreshSearchDiscoverabilityUi === 'function') {
     if (typeof isSearchBarOpen === 'function' && isSearchBarOpen()) runSearch();

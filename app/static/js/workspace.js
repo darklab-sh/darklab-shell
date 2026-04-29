@@ -477,8 +477,15 @@ async function promptWorkspaceFolderName() {
   input.className = 'form-input form-control';
   input.type = 'text';
   input.placeholder = current ? `${current}/reports` : 'reports';
-  input.autocomplete = 'off';
-  input.spellcheck = false;
+  if (typeof applyMobileTextInputDefaults === 'function') {
+    applyMobileTextInputDefaults(input);
+  } else {
+    input.autocomplete = 'off';
+    input.autocapitalize = 'none';
+    input.autocorrect = 'off';
+    input.spellcheck = false;
+    input.inputMode = 'text';
+  }
   input.value = promptDefault;
   const error = document.createElement('div');
   error.className = 'workspace-folder-error u-hidden';

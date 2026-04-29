@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 1078
-- `vitest`: 864
-- `playwright`: 219
-- total: 2,161
+- `vitest`: 867
+- `playwright`: 222
+- total: 2,167
 
 This document is organized in two parts:
 
@@ -1285,6 +1285,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `tracks mobile keyboard state and keeps the prompt visible while typing` | Verifies that tracks mobile keyboard state and keeps the prompt visible while typing. |
 | `keeps the simplified mobile shell node structure intact while the keyboard is open` | Verifies that keeps the simplified mobile shell node structure intact while the keyboard is open. |
 | `keeps the active output pinned to the bottom when the mobile keyboard opens` | Verifies that keeps the active output pinned to the bottom when the mobile keyboard opens. |
+| `keeps the active output pinned to the bottom when the mobile keyboard closes` | Verifies that a following mobile transcript returns to the live bottom after the keyboard closes and the visual viewport settles. |
 | `keeps the mobile keyboard helper row visible when the viewport resize lands before focus` | Verifies that keeps the mobile keyboard helper row visible when the viewport resize lands before focus. |
 | `does not programmatically focus the mobile composer` | Verifies that does not programmatically focus the mobile composer. |
 | `does not programmatically refocus the mobile composer when the user taps the input` | Verifies that does not programmatically refocus the mobile composer when the user taps the input. |
@@ -1630,6 +1631,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `does nothing when there is no output container for the target tab` | Verifies that does nothing when there is no output container for the target tab. |
 | `re-sticks restored output to the tail after delayed layout growth` | Verifies that restored transcripts keep the prompt tail visible after delayed layout growth. |
 | `batches large bursts of output and finishes rendering on the next tick` | Verifies that batches large bursts of output and finishes rendering on the next tick. |
+| `uses delayed tail restore for large mobile output bursts` | Verifies that large mobile output bursts keep the transcript pinned to the prompt after delayed layout growth. |
 
 #### `permalink.test.js`
 
@@ -1908,6 +1910,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `mountShellPrompt does not render prompt when tab is running even when forced` | Verifies that mountShellPrompt does not render prompt when tab is running even when forced. |
 | `mountShellPrompt keeps the desktop prompt mirror out of mobile mode` | Verifies that mountShellPrompt keeps the desktop prompt mirror out of mobile mode. |
 | `tracks whether the output should keep following the live tail` | Verifies that tracks whether the output should keep following the live tail. |
+| `does not treat a simple output tap as user scroll intent` | Verifies that tapping the output to dismiss the mobile keyboard does not disable live-tail following unless the user actually scrolls. |
 | `shows a live jump button while output is streaming off the live tail` | Verifies that shows a live jump button while output is streaming off the live tail. |
 | `hides the jump button when the output is already pinned to the bottom` | Verifies that hides the jump button when the output is already pinned to the bottom. |
 | `returns the output to the tail when the jump button is clicked` | Verifies that returns the output to the tail when the jump button is clicked. |
@@ -2353,6 +2356,7 @@ Desktop demo recording spec. Drives a tightened README-first interaction sequenc
 | `tapping the mobile command input opens the keyboard without jumping the page` | Verifies that tapping the mobile command input opens the keyboard without jumping the page. |
 | `reloading on mobile restores the active output pane at the bottom` | Verifies that reloading on mobile restores the active tab transcript to the live bottom instead of reopening at the top. |
 | `mobile autocomplete accepts a suggestion by tap and keeps the mobile composer focused` | Verifies that mobile autocomplete accepts a suggestion by tap and keeps the mobile composer focused. |
+| `mobile autocomplete opens above the keyboard helper row` | Verifies that mobile autocomplete opens above the keyboard helper row instead of rendering behind it. |
 | `mobile contextual autocomplete shows value hints after accepting a value-taking flag` | Verifies that mobile contextual autocomplete continues into follow-up value hints such as `curl -o ` -> `/dev/null`. |
 | `clicking the mobile transcript closes the keyboard and helper row` | Verifies that clicking the mobile transcript closes the keyboard and helper row. |
 | `mobile tab action buttons still work while the keyboard is open` | Verifies that mobile tab action buttons still work while the keyboard is open. |
@@ -2365,12 +2369,14 @@ Desktop demo recording spec. Drives a tightened README-first interaction sequenc
 | `clicking the hamburger opens the mobile menu` | Verifies that clicking the hamburger opens the mobile menu. |
 | `mobile menu FAQ and options open overlays in the mobile shell` | Verifies that mobile menu FAQ and options open overlays in the mobile shell and can be dismissed by tapping the backdrop, matching the shared mobile-sheet contract. |
 | `mobile menu contains history and theme action buttons` | Verifies that mobile menu contains history and theme action buttons. |
+| `mobile Files create inputs use mobile-safe text defaults` | Verifies that mobile Files create inputs use mobile-safe text defaults and 16px text to avoid browser focus zoom. |
 | `timestamps menu expands inline and applies the selected mode` | Verifies that the mobile menu `timestamps` row expands inline to a three-mode picker (off / elapsed / clock), keeps the sheet open while expanded, applies the selected mode on tap, closes the sheet, and resets the sub-menu to collapsed on the next sheet open. |
 | `mobile theme selector opens full screen with evenly sized grouped sections` | Verifies that mobile theme selector opens full screen with evenly sized grouped sections. |
 | `selecting a theme on mobile applies the shell palette, not just the modal preview` | Verifies that selecting a theme on mobile applies the shell palette, not just the modal preview. |
 | `clicking outside the menu closes it` | Verifies that clicking outside the menu closes it. |
 | `tapping the sticky header dismisses the mobile menu sheet` | Verifies that tapping inside the mobile-terminal sticky header (`page.mouse.click(40, 10)`) while the menu sheet is open lands on the scrim and dismisses the sheet — guards the scrim z-index lift above the header. |
 | `workflows sheet reopens at full height after an interrupted drag` | Verifies that the workflows mobile sheet reopens at full viewport-relative height after a synthetic drag is externally closed via the backdrop — guards the `bindMobileSheet` visibility-observer cleanup that scrubs leaked `transform: translateY(...)` inline styles. |
+| `workflows sheet starts collapsed and wraps commands inside cards` | Verifies that mobile workflow cards start collapsed, expand on tap, and keep wrapped command chips inside the sheet width. |
 | `mobile recent peek summarizes recent runs and opens the recents sheet on tap` | Verifies that the idle peek row between the transcript and the composer shows the recent-command count plus a one-line preview, and that tapping it opens the full mobile recents pull-up sheet. |
 | `mobile recents sheet injects the tapped command into the composer and closes` | Verifies that tapping a row in the mobile recents sheet populates `#mobile-cmd` with the selected command and dismisses the sheet — the primary tap path is now composer-injection, not tab-restore. |
 | `mobile recents sheet restore action loads the run into the active tab` | Verifies that the per-row `restore` action button in the mobile recents sheet loads the corresponding run into the active tab — the pre-swap row-tap behavior now lives on an explicit button. |

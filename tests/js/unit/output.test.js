@@ -36,6 +36,7 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {} } = {}) {
 
 describe('appendLine', () => {
   beforeEach(() => {
+    document.body.className = ''
     document.body.innerHTML = `
       <div id="out" class="output">
         <div id="shell-prompt-wrap" class="prompt-wrap shell-prompt-wrap">
@@ -352,5 +353,52 @@ describe('appendLine', () => {
     expect(lines).toHaveLength(65)
     expect(lines[0].textContent).toContain('line 1')
     expect(lines[64].textContent).toContain('line 65')
+  })
+
+  it('uses delayed tail restore for large mobile output bursts', () => {
+    document.body.classList.add('mobile-terminal-mode')
+    const timers = []
+    const { appendLine, _getTabs } = loadOutputFns({
+      appConfig: { max_output_lines: 100 },
+      extraGlobals: {
+        setTimeout: (fn, delay) => {
+          timers.push({ fn, delay })
+          return timers.length
+        },
+      },
+    })
+    const out = document.getElementById('out')
+    const tab = _getTabs()[0]
+    let scrollTop = 0
+    let scrollHeight = 900
+
+    Object.defineProperty(out, 'clientHeight', { configurable: true, get: () => 300 })
+    Object.defineProperty(out, 'scrollHeight', { configurable: true, get: () => scrollHeight })
+    Object.defineProperty(out, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value) => {
+        scrollTop = value
+      },
+    })
+
+    for (let i = 1; i <= 60; i++) {
+      appendLine(`line ${i}`, '', 'tab-1')
+    }
+    timers.length = 0
+
+    appendLine('line 61', '', 'tab-1')
+
+    expect(timers.map(timer => timer.delay)).toEqual([16])
+    timers[0].fn()
+    expect(timers.map(timer => timer.delay)).toEqual([16, 0, 16, 64, 160, 320])
+    expect(scrollTop).toBe(900)
+    expect(tab.followOutput).toBe(true)
+    expect(tab.suppressOutputScrollTracking).toBe(true)
+
+    scrollHeight = 1600
+    timers.slice(1).forEach(timer => timer.fn())
+    expect(scrollTop).toBe(1600)
+    expect(tab.suppressOutputScrollTracking).toBe(false)
   })
 })

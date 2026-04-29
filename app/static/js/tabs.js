@@ -653,8 +653,10 @@ function createTab(label) {
   if (outputEl) {
     const markUserScrollIntent = () => _markOutputUserScrollIntent(id);
     outputEl.addEventListener('wheel', markUserScrollIntent, { passive: true });
-    outputEl.addEventListener('touchstart', markUserScrollIntent, { passive: true });
-    outputEl.addEventListener('pointerdown', markUserScrollIntent, { passive: true });
+    outputEl.addEventListener('touchmove', markUserScrollIntent, { passive: true });
+    outputEl.addEventListener('pointermove', e => {
+      if (e.pointerType === 'touch' || e.pointerType === 'pen') markUserScrollIntent();
+    }, { passive: true });
     outputEl.addEventListener('scroll', () => {
       const t = getTab(id);
       if (!t || t.suppressOutputScrollTracking) return;

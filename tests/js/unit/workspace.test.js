@@ -52,6 +52,13 @@ function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     _closeMajorOverlays: vi.fn(),
     blurVisibleComposerInputIfMobile: vi.fn(),
     refocusComposerAfterAction: vi.fn(),
+    applyMobileTextInputDefaults: vi.fn((input) => {
+      input.setAttribute('autocomplete', 'off')
+      input.setAttribute('autocapitalize', 'none')
+      input.setAttribute('autocorrect', 'off')
+      input.setAttribute('spellcheck', 'false')
+      input.setAttribute('inputmode', 'text')
+    }),
     showConfirm: vi.fn(() => Promise.resolve('delete')),
     showToast: vi.fn(),
     bindPressable: vi.fn((el, opts) => {
@@ -607,6 +614,10 @@ describe('workspace UI helpers', () => {
 
     expect(nativePrompt).not.toHaveBeenCalled()
     expect(showConfirm).toHaveBeenCalledTimes(1)
+    const input = showConfirm.mock.calls[0][0].content.querySelector('input')
+    expect(input.getAttribute('autocapitalize')).toBe('none')
+    expect(input.getAttribute('autocorrect')).toBe('off')
+    expect(input.getAttribute('inputmode')).toBe('text')
     expect(apiFetch).toHaveBeenCalledWith('/workspace/directories', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ path: 'reports' }),

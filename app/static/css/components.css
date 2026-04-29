@@ -223,12 +223,6 @@ body #hamburger-btn:active {
     color: var(--theme-toolbar-button-hover-text);
   }
 }
-body #ts-btn.active,
-body #ln-btn.active {
-  color: var(--theme-toolbar-button-active-text);
-  border-color: var(--theme-toolbar-button-active-border);
-  background: var(--theme-toolbar-button-active-bg);
-}
 .tab .tab-close {
   opacity: 0;
   width: 22px;
@@ -447,6 +441,15 @@ body #search-toggle-btn.search-discover-pulse {
   border-color: var(--green-dim);
   color: var(--text);
   opacity: 0.7;
+}
+.chip[data-pressable-clearing="1"],
+.chip[data-pressable-clearing="1"]:hover,
+.chip[data-pressable-clearing="1"]:active {
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+  border-color: color-mix(in srgb, var(--green-dim) 54%, var(--border-bright));
+  color: color-mix(in srgb, var(--text) 90%, var(--muted));
+  opacity: 1;
+  transform: none;
 }
 
 .badge {
@@ -1217,12 +1220,6 @@ body #history-panel { background: var(--theme-chrome-bg); }
   color: var(--green);
   background: color-mix(in srgb, var(--green) 7%, transparent);
 }
-#ts-btn.active, #ln-btn.active {
-  color: var(--green);
-  border-color: var(--green-dim);
-  background: color-mix(in srgb, var(--green) 12%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 10%, transparent);
-}
 #ts-btn.active::before, #ln-btn.active::before {
   background: color-mix(in srgb, var(--green) 78%, transparent);
   border-color: color-mix(in srgb, var(--green) 88%, transparent);
@@ -1452,6 +1449,13 @@ body #history-panel { background: var(--theme-chrome-bg); }
   background: color-mix(in srgb, var(--_tone-bg) 92%, var(--text));
   transform: translateY(-1px);
 }
+.btn-primary[data-pressable-clearing="1"],
+.btn-primary[data-pressable-clearing="1"]:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: var(--_tone-bg);
+  border-color: var(--_tone-dim);
+  color: var(--_tone-fg);
+  transform: none;
+}
 
 /* Role: secondary — outlined with neutral default; tone pulls the outline
    and hover wash toward the tone color while keeping the resting state
@@ -1466,6 +1470,13 @@ body #history-panel { background: var(--theme-chrome-bg); }
   color: var(--text);
   background: var(--theme-button-secondary-hover-bg);
   transform: translateY(-1px);
+}
+.btn-secondary[data-pressable-clearing="1"],
+.btn-secondary[data-pressable-clearing="1"]:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: var(--theme-button-secondary-bg);
+  border-color: var(--theme-button-secondary-border);
+  color: var(--theme-button-secondary-text);
+  transform: none;
 }
 .btn-secondary.btn-warning:hover:not([aria-disabled="true"]):not(:disabled),
 .btn-secondary.btn-danger:hover:not([aria-disabled="true"]):not(:disabled) {
@@ -1490,6 +1501,13 @@ body #history-panel { background: var(--theme-chrome-bg); }
   border-color: var(--theme-button-ghost-hover-border);
   color: var(--text);
 }
+.btn-ghost[data-pressable-clearing="1"],
+.btn-ghost[data-pressable-clearing="1"]:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: transparent;
+  border-color: var(--theme-button-ghost-border);
+  color: var(--theme-button-ghost-text);
+  transform: none;
+}
 .btn-ghost.btn-warning:hover:not([aria-disabled="true"]):not(:disabled),
 .btn-ghost.btn-danger:hover:not([aria-disabled="true"]):not(:disabled),
 .btn-ghost.btn-destructive:hover:not([aria-disabled="true"]):not(:disabled) {
@@ -1510,6 +1528,41 @@ body #history-panel { background: var(--theme-chrome-bg); }
   background: var(--theme-button-destructive-hover-bg);
   color: var(--text);
   transform: translateY(-1px);
+}
+.btn-destructive[data-pressable-clearing="1"],
+.btn-destructive[data-pressable-clearing="1"]:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: var(--theme-button-destructive-bg);
+  border-color: var(--_tone-dim);
+  color: var(--theme-button-destructive-text);
+  transform: none;
+}
+
+@media (hover: none) {
+  .btn-primary:hover:not([aria-disabled="true"]):not(:disabled) {
+    background: var(--_tone-bg);
+    transform: none;
+  }
+  .btn-secondary:hover:not([aria-disabled="true"]):not(:disabled) {
+    background: var(--theme-button-secondary-bg);
+    border-color: var(--theme-button-secondary-border);
+    color: var(--theme-button-secondary-text);
+    transform: none;
+  }
+  .btn-ghost:hover:not([aria-disabled="true"]):not(:disabled) {
+    background: transparent;
+    border-color: var(--theme-button-ghost-border);
+    color: var(--theme-button-ghost-text);
+  }
+  .btn-destructive:hover:not([aria-disabled="true"]):not(:disabled) {
+    background: var(--theme-button-destructive-bg);
+    color: var(--theme-button-destructive-text);
+    transform: none;
+  }
+  .chip:hover {
+    background: color-mix(in srgb, var(--green) 8%, transparent);
+    border-color: color-mix(in srgb, var(--green-dim) 54%, var(--border-bright));
+    color: color-mix(in srgb, var(--text) 90%, var(--muted));
+  }
 }
 
 /* Size — compact */
@@ -1572,6 +1625,12 @@ body #history-panel { background: var(--theme-chrome-bg); }
   background: color-mix(in srgb, var(--green) 6%, transparent);
   color: var(--green);
 }
+.nav-item[data-pressable-clearing="1"],
+.nav-item[data-pressable-clearing="1"]:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text);
+}
 .nav-item:focus-visible {
   outline: 2px solid var(--green);
   outline-offset: -2px;
@@ -1586,6 +1645,12 @@ body #history-panel { background: var(--theme-chrome-bg); }
 .nav-item[aria-current="page"] {
   color: var(--green);
   background: color-mix(in srgb, var(--green) 8%, transparent);
+}
+@media (hover: none) {
+  .nav-item:hover:not([aria-disabled="true"]):not(:disabled) {
+    background: transparent;
+    color: var(--text);
+  }
 }
 
 /* ── Close-btn primitive ────────────────────────────────────────────────────

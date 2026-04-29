@@ -296,7 +296,7 @@ function syncMobileComposerLayout(mobileMode) {
     { node: shellInputRow, visibleOnMobile: false, visibleOnDesktop: true, ariaHiddenOnMobile: 'true', ariaHiddenOnDesktop: 'true' },
   ]);
   if (useMobile) {
-    _moveComposerNode(acDropdown, mobileComposerRefs.row);
+    _moveComposerNode(acDropdown, mobileComposerRefs.host, mobileComposerRefs.host.firstElementChild || null);
   } else {
     if (typeof shellInputRow !== 'undefined' && shellInputRow && _shellInputRowHomeParent) {
       _moveComposerNode(shellInputRow, _shellInputRowHomeParent);
@@ -367,12 +367,10 @@ function syncMobileViewportState() {
   syncMobileShellLayout(activeMobileMode);
   syncMobileComposerLayout(activeMobileMode);
   if (activeMobileMode) syncMobileViewportHeight({ keyboardOpen });
-  if (activeMobileMode && keyboardOpen && typeof _refreshFollowingOutputsAfterLayout === 'function') {
-    setTimeout(() => {
-      if (!useMobileTerminalViewportMode()) return;
-      if (!document.body || !document.body.classList.contains('mobile-keyboard-open')) return;
-      _refreshFollowingOutputsAfterLayout();
-    }, 0);
+  if (activeMobileMode && keyboardOpen) {
+    queueMobileOutputTailRefresh({ keyboardOpen: true, delays: [0] });
+  } else if (activeMobileMode && wasMobileKeyboardOpen) {
+    queueMobileOutputTailRefresh({ keyboardOpen: false });
   }
   if (activeMobileMode && keyboardOpen) {
     hideMobileMenu();
@@ -1368,6 +1366,21 @@ function syncMobileViewportHeight({ keyboardOpen = null } = {}) {
   document.documentElement.style.setProperty('--mobile-viewport-height', `${h}px`);
 }
 
+function queueMobileOutputTailRefresh({ keyboardOpen = null, delays = [0, 80, 180, 320] } = {}) {
+  if (typeof _refreshFollowingOutputsAfterLayout !== 'function') return;
+  delays.forEach(delay => {
+    setTimeout(() => {
+      if (!useMobileTerminalViewportMode()) return;
+      if (!document.body) return;
+      if (
+        typeof keyboardOpen === 'boolean'
+        && document.body.classList.contains('mobile-keyboard-open') !== keyboardOpen
+      ) return;
+      _refreshFollowingOutputsAfterLayout();
+    }, delay);
+  });
+}
+
 function syncMobileComposerKeyboard({ open = null } = {}) {
   if (typeof window === 'undefined') return;
   const offset = getMobileKeyboardOffset();
@@ -1375,12 +1388,7 @@ function syncMobileComposerKeyboard({ open = null } = {}) {
     ? syncMobileComposerKeyboardState(offset, { open })
     : !!open;
   syncMobileViewportHeight({ keyboardOpen });
-  if (keyboardOpen && typeof _refreshFollowingOutputsAfterLayout === 'function') {
-    setTimeout(() => {
-      if (!document.body || !document.body.classList.contains('mobile-keyboard-open')) return;
-      _refreshFollowingOutputsAfterLayout();
-    }, 0);
-  }
+  queueMobileOutputTailRefresh({ keyboardOpen, delays: keyboardOpen ? [0] : [0, 80, 180, 320] });
 }
 
 let _mobileComposerKeyboardSyncTimer = null;
@@ -2959,29 +2967,61 @@ function renderWorkflowInputCard(card, workflow) {
   return panel;
 }
 
+function isMobileWorkflowSheetMode() {
+  return !!(
+    typeof useMobileTerminalViewportMode === 'function'
+    && useMobileTerminalViewportMode()
+  );
+}
+
 function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
   const body = document.querySelector('.workflows-body');
   if (!body) return;
   body.innerHTML = '';
   const list = Array.isArray(items) ? items : [];
-  list.forEach(item => {
+  const collapseCards = isMobileWorkflowSheetMode();
+  list.forEach((item, idx) => {
     const card = document.createElement('div');
-    card.className = 'workflow-card';
+    card.className = 'workflow-card workflow-card-accordion';
+    if (collapseCards) card.classList.add('is-collapsed');
 
-    const titleEl = document.createElement('div');
+    const cardBodyId = `workflow-card-body-${idx}`;
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'workflow-card-toggle';
+    toggleBtn.setAttribute('aria-expanded', collapseCards ? 'false' : 'true');
+    toggleBtn.setAttribute('aria-controls', cardBodyId);
+
+    const titleEl = document.createElement('span');
     titleEl.className = 'workflow-title';
     titleEl.textContent = item.title || '';
-    card.appendChild(titleEl);
+    toggleBtn.appendChild(titleEl);
+
+    const toggleIcon = document.createElement('span');
+    toggleIcon.className = 'workflow-card-toggle-icon';
+    toggleIcon.setAttribute('aria-hidden', 'true');
+    toggleIcon.textContent = '⌄';
+    toggleBtn.appendChild(toggleIcon);
+    toggleBtn.addEventListener('click', () => {
+      const nextExpanded = card.classList.toggle('is-collapsed') === false;
+      toggleBtn.setAttribute('aria-expanded', nextExpanded ? 'true' : 'false');
+    });
+    card.appendChild(toggleBtn);
+
+    const cardBody = document.createElement('div');
+    cardBody.className = 'workflow-card-body';
+    cardBody.id = cardBodyId;
 
     if (item.description) {
       const desc = document.createElement('div');
       desc.className = 'workflow-desc';
       desc.textContent = item.description;
-      card.appendChild(desc);
+      cardBody.appendChild(desc);
     }
 
     const inputPanel = renderWorkflowInputCard(card, item);
-    if (inputPanel) card.appendChild(inputPanel);
+    if (inputPanel) cardBody.appendChild(inputPanel);
 
     const steps = item.steps || [];
     if (steps.length) {
@@ -3034,8 +3074,10 @@ function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
 
         stepsEl.appendChild(li);
       });
-      card.appendChild(stepsEl);
+      cardBody.appendChild(stepsEl);
     }
+
+    card.appendChild(cardBody);
 
     if (inputPanel && typeof inputPanel._workflowApplyRenderedState === 'function') {
       inputPanel._workflowApplyRenderedState();

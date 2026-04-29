@@ -257,6 +257,35 @@ test.describe('mobile menu', () => {
     await expect(dropdown).toBeHidden()
   })
 
+  test('mobile autocomplete opens above the keyboard helper row', async ({ page }) => {
+    await ensurePromptReady(page)
+    await openMobileKeyboard(page)
+    await expect(page.locator('#mobile-kb-helper')).toBeVisible()
+    await setComposerValueForTest(page, 'nmap -', { mobile: true })
+
+    const dropdown = page.locator('#ac-dropdown')
+    await expect
+      .poll(async () => ({
+        hidden: await dropdown.evaluate((node) => node.classList.contains('u-hidden')),
+        text: (await dropdown.textContent()) || '',
+      }))
+      .toEqual(
+        expect.objectContaining({
+          hidden: false,
+          text: expect.stringContaining('-sT'),
+        }),
+      )
+
+    const gap = await page.evaluate(() => {
+      const menu = document.getElementById('ac-dropdown')?.getBoundingClientRect()
+      const helper = document.getElementById('mobile-kb-helper')?.getBoundingClientRect()
+      if (!menu || !helper) return null
+      return Math.round(helper.top - menu.bottom)
+    })
+    expect(gap).not.toBeNull()
+    expect(gap).toBeGreaterThanOrEqual(2)
+  })
+
   test('mobile contextual autocomplete shows value hints after accepting a value-taking flag', async ({
     page,
   }) => {
@@ -438,6 +467,37 @@ test.describe('mobile menu', () => {
     await expect(menu.locator('[data-menu-action="theme"]')).toBeVisible()
   })
 
+  test('mobile Files create inputs use mobile-safe text defaults', async ({ page }) => {
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="workspace"]').click()
+    await expect(page.locator('#workspace-overlay')).toHaveClass(/open/)
+
+    await page.locator('#workspace-new-btn').click()
+    const fileName = page.locator('#workspace-path-input')
+    const fileContents = page.locator('#workspace-text-input')
+    for (const field of [fileName, fileContents]) {
+      await expect(field).toHaveAttribute('autocomplete', 'off')
+      await expect(field).toHaveAttribute('autocapitalize', 'none')
+      await expect(field).toHaveAttribute('autocorrect', 'off')
+      await expect(field).toHaveAttribute('spellcheck', 'false')
+      await expect(field).toHaveAttribute('inputmode', 'text')
+      await expect
+        .poll(async () => field.evaluate((el) => window.getComputedStyle(el).fontSize))
+        .toBe('16px')
+    }
+
+    await page.locator('#workspace-new-folder-btn').click()
+    const folderName = page.locator('#confirm-host .workspace-folder-form input')
+    await expect(folderName).toHaveAttribute('autocomplete', 'off')
+    await expect(folderName).toHaveAttribute('autocapitalize', 'none')
+    await expect(folderName).toHaveAttribute('autocorrect', 'off')
+    await expect(folderName).toHaveAttribute('spellcheck', 'false')
+    await expect(folderName).toHaveAttribute('inputmode', 'text')
+    await expect
+      .poll(async () => folderName.evaluate((el) => window.getComputedStyle(el).fontSize))
+      .toBe('16px')
+  })
+
   test('timestamps menu expands inline and applies the selected mode', async ({ page }) => {
     await page.locator('#hamburger-btn').click()
     const sheet = page.locator('#mobile-menu-sheet')
@@ -598,6 +658,35 @@ test.describe('mobile menu', () => {
     // The sheet renders roughly 88svh tall; it must occupy the majority of
     // the viewport, not collapse to a sliver at the bottom.
     expect(box.height).toBeGreaterThan(viewport.height * 0.5)
+  })
+
+  test('workflows sheet starts collapsed and wraps commands inside cards', async ({ page }) => {
+    await page.setViewportSize(MOBILE)
+    await page.goto('/')
+    await page.waitForFunction(() => document.querySelectorAll('#workflows-modal .workflow-card').length > 0)
+
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="workflows"]').click()
+    await expect(page.locator('#workflows-modal')).toBeVisible()
+
+    const cards = page.locator('#workflows-modal .workflow-card')
+    await expect(cards.first()).toHaveClass(/\bis-collapsed\b/)
+    await expect(cards.first().locator('.workflow-step').first()).toBeHidden()
+
+    await cards.first().locator('.workflow-card-toggle').click()
+    await expect(cards.first()).not.toHaveClass(/\bis-collapsed\b/)
+    await expect(cards.first().locator('.workflow-step').first()).toBeVisible()
+
+    await page.locator('#workflows-modal .workflow-card-toggle').evaluateAll(buttons => {
+      buttons.forEach(button => {
+        const card = button.closest('.workflow-card')
+        if (card?.classList.contains('is-collapsed')) button.click()
+      })
+    })
+    const overflowingChipCount = await page
+      .locator('#workflows-modal .workflow-step-cmd')
+      .evaluateAll(chips => chips.filter(chip => chip.scrollWidth > chip.clientWidth + 1).length)
+    expect(overflowingChipCount).toBe(0)
   })
 
   test('mobile recent peek summarizes recent runs and opens the recents sheet on tap', async ({
