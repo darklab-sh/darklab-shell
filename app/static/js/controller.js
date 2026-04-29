@@ -66,8 +66,6 @@ function toggleHistoryPanelSurface(force = null) {
 }
 
 window.toggleHistoryPanelSurface = toggleHistoryPanelSurface;
-window.openHistoryPanelSurface = () => toggleHistoryPanelSurface(true);
-window.closeHistoryPanelSurface = () => toggleHistoryPanelSurface(false);
 
 function renderShortcuts(data) {
   const listEl = document.getElementById('shortcuts-list');
@@ -226,10 +224,6 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
   if (headerTitle) headerTitle.textContent = cfg.app_name;
   const wmVersion = cfg.version ? ` v${cfg.version}` : '';
   const projectText = `${cfg.project_name || 'darklab_shell'}${wmVersion}`;
-  document.querySelectorAll('.terminal-wordmark').forEach(el => {
-    el.textContent = projectText;
-    if (cfg.project_readme) el.href = cfg.project_readme;
-  });
   document.querySelectorAll('.menu-footer, .rail-nav-version').forEach(el => {
     el.textContent = projectText;
     if (cfg.project_readme) el.href = cfg.project_readme;
@@ -238,8 +232,6 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
   updateNewTabBtn();
   renderFaqLimits(cfg);
   if (cfg.diag_enabled) {
-    const legacyDiagBtn = document.getElementById('diag-btn');
-    if (legacyDiagBtn) legacyDiagBtn.classList.remove('u-hidden');
     const railDiagBtn = document.getElementById('rail-diag-btn');
     if (railDiagBtn) railDiagBtn.classList.remove('u-hidden');
     const mobileDiagBtn = _uiOverlayRefs.mobileMenu?.querySelector('button[data-menu-action="diag"]');
@@ -256,10 +248,8 @@ _uiOverlayRefs.hamburgerBtn.addEventListener('click', e => {
   else showMobileMenu();
 });
 
-// Mobile menu action dispatch. Exposed globally so the mobile-shell sheet
-// (mobile_chrome.js) can route its own data-menu-action button clicks here
-// without re-implementing the action body, and so a few flows (e.g. routing
-// 'history' to the recents pull-up sheet on mobile) can override one branch.
+// Mobile menu action dispatch. The click wiring below routes data-menu-action
+// buttons through this shared action body.
 function dispatchMobileMenuAction(action, btn = null) {
   if (action === 'search') {
     const visible = isSearchBarOpen();
@@ -315,7 +305,6 @@ function dispatchMobileMenuAction(action, btn = null) {
   if (action === 'faq') openFaq();
   if (action === 'diag') window.location.href = '/diag';
 }
-window.dispatchMobileMenuAction = dispatchMobileMenuAction;
 
 _uiOverlayRefs.mobileMenu?.querySelectorAll('button[data-menu-action]').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -1311,7 +1300,6 @@ if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && cmdInput) {
 }
 
 _bindMobileComposerInteractions(_mobileUiLayoutRefs);
-_bindMobileEditBarInteractions(_mobileUiLayoutRefs && _mobileUiLayoutRefs.composer && _mobileUiLayoutRefs.composer.editBar);
 
 if (cmdInput) {
   cmdInput.addEventListener('focus', () => {

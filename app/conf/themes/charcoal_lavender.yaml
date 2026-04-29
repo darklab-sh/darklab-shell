@@ -56,17 +56,9 @@ button_ghost_hover_border: "color-mix(in srgb, var(--_tone-dim) 62%, var(--borde
 button_destructive_bg: "color-mix(in srgb, var(--_tone) 8%, transparent)"
 button_destructive_text: "color-mix(in srgb, var(--muted) 86%, var(--text))"
 button_destructive_hover_bg: "color-mix(in srgb, var(--_tone) 16%, transparent)"
-tabs_bar_scrollbar_track: rgba(255,255,255,0.05)
-tabs_bar_scrollbar_thumb: '#4c4960'
-tabs_bar_scrollbar_thumb_hover: '#64617a'
-tab_bg: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))
-tab_border: '#282533'
 tab_text: '#9b97a8'
 tab_hover_text: '#eceaf3'
 tab_active_bg: rgba(167,139,250,0.05)
-tab_active_border: rgba(167,139,250,0.34)
-tab_active_text: '#a78bfa'
-tab_active_shadow: none
 tab_close_bg: rgba(255,255,255,0.02)
 tab_close_border: rgba(255,255,255,0.06)
 tab_close_hover_bg: color-mix(in srgb, var(--green-dim) 18%, transparent)

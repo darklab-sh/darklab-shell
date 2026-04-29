@@ -43,25 +43,6 @@
     const input = global.getVisibleComposerInput();
     return input ? input.value : '';
   };
-  global.getComposerSelection = () => {
-    if (typeof getComposerState === 'function') {
-      const composer = getComposerState();
-      if (composer) {
-        const value = typeof composer.value === 'string' ? composer.value : '';
-        const len = value.length;
-        const start = typeof composer.selectionStart === 'number' ? Math.max(0, Math.min(composer.selectionStart, len)) : len;
-        const end = typeof composer.selectionEnd === 'number' ? Math.max(0, Math.min(composer.selectionEnd, len)) : len;
-        return start <= end ? { start, end } : { start: end, end: start };
-      }
-    }
-    const input = global.getVisibleComposerInput();
-    if (!input) return { start: 0, end: 0 };
-    const value = input.value || '';
-    let start = typeof input.selectionStart === 'number' ? input.selectionStart : value.length;
-    let end = typeof input.selectionEnd === 'number' ? input.selectionEnd : value.length;
-    if (start > end) [start, end] = [end, start];
-    return { start, end };
-  };
   let _setComposerValueInProgress = false;
   const _baseSetComposerState = typeof global.setComposerState === 'function'
     ? global.setComposerState
@@ -172,19 +153,10 @@
     return global.focusComposerInput(target, { preventScroll });
   };
   global.getMobileKeyboardOffsetBaseline = () => state._mobileKeyboardOffsetBaseline;
-  global.setMobileKeyboardOffsetBaseline = (value) => {
-    state._mobileKeyboardOffsetBaseline = typeof value === 'number' ? value : null;
-    return state._mobileKeyboardOffsetBaseline;
-  };
   global.getMobileViewportClosedHeight = () => state._mobileViewportClosedHeight;
   global.setMobileViewportClosedHeight = (value) => {
     state._mobileViewportClosedHeight = typeof value === 'number' ? value : null;
     return state._mobileViewportClosedHeight;
-  };
-  global.getMobileKeyboardLastOpenOffset = () => state._mobileKeyboardLastOpenOffset || 0;
-  global.setMobileKeyboardLastOpenOffset = (value) => {
-    state._mobileKeyboardLastOpenOffset = Math.max(0, Number(value) || 0);
-    return state._mobileKeyboardLastOpenOffset;
   };
   global.blurVisibleComposerInput = () => {
     const target = (typeof getVisibleComposerInput === 'function')
@@ -207,7 +179,7 @@
     const requestedOpen = typeof open === 'boolean'
       ? open
       : document.body.classList.contains('mobile-keyboard-open');
-    const lastOpenOffset = global.getMobileKeyboardLastOpenOffset();
+    const lastOpenOffset = state._mobileKeyboardLastOpenOffset || 0;
     const nextOffset = requestedOpen && requestedOffset <= 0 && lastOpenOffset > 0
       ? lastOpenOffset
       : requestedOffset;
@@ -484,13 +456,6 @@
   global.hideModalOverlay = (el) => {
     if (el && el.style) el.style.display = 'none';
   };
-  global.toggleModalOverlay = (el, force = null, display = 'flex') => {
-    if (!el || !el.style) return false;
-    const next = force === null ? el.style.display !== display : !!force;
-    el.style.display = next ? display : 'none';
-    return next;
-  };
-  global.isModalOverlayOpen = (el, display = 'flex') => !!(el && el.style && el.style.display === display);
   global.showHistoryPanel = () => showPanelOverlay(historyPanel);
   global.hideHistoryPanel = () => {
     hidePanelOverlay(historyPanel);
@@ -537,7 +502,6 @@
     if (historyLoadOverlay && historyLoadOverlay.classList) historyLoadOverlay.classList.remove('open');
     if (historyLoadOverlay) historyLoadOverlay.setAttribute('aria-hidden', 'true');
   };
-  global.isHistoryLoadOverlayOpen = () => !!(historyLoadOverlay && historyLoadOverlay.classList && historyLoadOverlay.classList.contains('open'));
   // Initialise inline display so the inline style takes precedence over the
   // conflicting .search-bar { display: flex } class rule (same specificity,
   // later in the sheet) when .u-hidden is also present on the element.
@@ -556,7 +520,6 @@
   global.hideHistoryRow = () => {
     if (histRow && histRow.style) histRow.style.display = 'none';
   };
-  global.isHistoryRowVisible = () => !!(histRow && histRow.style && histRow.style.display !== 'none');
   global.showRunTimer = () => {
     if (runTimer && runTimer.style) runTimer.style.display = 'inline';
   };
@@ -564,7 +527,6 @@
     if (runTimer && runTimer.style) runTimer.style.display = 'none';
     if (runTimer) runTimer.textContent = '';
   };
-  global.isRunTimerVisible = () => !!(runTimer && runTimer.style && runTimer.style.display !== 'none');
   global.setRunButtonDisabled = (disabled) => {
     const next = !!disabled;
     if (typeof runBtn !== 'undefined' && runBtn) runBtn.disabled = next;
@@ -643,10 +605,6 @@
         el.setAttribute('aria-hidden', String(ariaHidden));
       }
     }
-  };
-  global.setDisplayState = (el, visible, display = 'block') => {
-    if (!el || !el.style) return;
-    el.style.display = visible ? display : 'none';
   };
   const _appSelects = new Map();
   function _closeAppSelects(exceptWrap = null) {
@@ -747,13 +705,12 @@
     select.addEventListener('change', () => _syncAppSelect(select));
     _syncAppSelect(select);
   }
-  global.enhanceAppSelects = (root = document) => {
+  function enhanceAppSelects(root = document) {
     if (!root || typeof root.querySelectorAll !== 'function') return;
     root.querySelectorAll('select.form-select, .history-panel-filters select').forEach(_enhanceAppSelect);
-  };
+  }
   global.syncAppSelect = (select) => _syncAppSelect(select);
-  global.syncAppSelects = () => _appSelects.forEach((_, select) => _syncAppSelect(select));
-  global.enhanceAppSelects();
+  enhanceAppSelects();
   if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
     document.addEventListener('click', (event) => {
       const target = event.target;

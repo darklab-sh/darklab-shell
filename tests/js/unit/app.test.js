@@ -85,13 +85,9 @@ async function loadAppFns({
   document.body.innerHTML = `
     <header><h1></h1></header>
     <button id="ts-btn"></button>
-    <button id="theme-btn"></button>
-    <button id="options-btn"></button>
-    <button id="faq-btn"></button>
     <button id="hamburger-btn"></button>
     <button id="new-tab-btn"></button>
     <button id="search-toggle-btn"></button>
-    <button id="hist-btn"></button>
     <button id="ln-btn"></button>
     <button id="history-close"></button>
     <button id="hist-clear-all-btn"></button>
@@ -107,16 +103,6 @@ async function loadAppFns({
       <div id="mobile-shell-transcript"></div>
       <div id="mobile-shell-composer">
         <div id="mobile-composer-host">
-          <div id="mobile-edit-bar">
-            <button data-edit-action="home"></button>
-            <button data-edit-action="word-left"></button>
-            <button data-edit-action="left"></button>
-            <button data-edit-action="delete-word"></button>
-            <button data-edit-action="end"></button>
-            <button data-edit-action="word-right"></button>
-            <button data-edit-action="right"></button>
-            <button data-edit-action="delete-line"></button>
-          </div>
           <div id="mobile-composer-row">
             <span class="mobile-prompt-label">$</span>
             <input id="mobile-cmd" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" />
@@ -150,7 +136,6 @@ async function loadAppFns({
         <button id="tabs-scroll-left"></button>
         <div class="tabs-bar" id="tabs-bar"></div>
         <button id="tabs-scroll-right"></button>
-        <div class="terminal-bar-btns"></div>
         <span id="status"></span>
         <span id="run-timer"></span>
       </div>
@@ -159,7 +144,6 @@ async function loadAppFns({
         <div id="shell-prompt-line">
           <span id="shell-prompt-text" class="shell-prompt-text"></span>
           <span id="shell-prompt-caret"></span>
-          <span id="shell-prompt-ghost" class="shell-prompt-ghost"></span>
         </div>
         <div id="ac-dropdown" style="display:none"></div>
         <button id="run-btn" aria-label="Run command">Run</button>
@@ -198,7 +182,6 @@ async function loadAppFns({
     <button id="options-session-token-copy-btn"></button>
     <div id="options-session-token-msg"></div>
     <div id="workflows-overlay"></div>
-    <button id="workflows-btn"></button>
     <button class="workflows-close"></button>
     <select id="options-ts-select">
       <option value="off">off</option>
@@ -294,14 +277,11 @@ async function loadAppFns({
   const acDropdown = document.getElementById('ac-dropdown')
   const domBindings = {
     hamburgerBtn: document.getElementById('hamburger-btn'),
-    faqBtn: document.getElementById('faq-btn'),
     faqCloseBtn: document.querySelector('.faq-close'),
-    optionsBtn: document.getElementById('options-btn'),
     optionsCloseBtn: document.querySelector('.options-close'),
     themeCloseBtn: document.querySelector('.theme-close'),
     newTabBtn: document.getElementById('new-tab-btn'),
     searchToggleBtn: document.getElementById('search-toggle-btn'),
-    histBtn: document.getElementById('hist-btn'),
     historyCloseBtn: document.getElementById('history-close'),
     histClearAllBtn: document.getElementById('hist-clear-all-btn'),
     searchPrevBtn: document.getElementById('search-prev'),
@@ -316,11 +296,8 @@ async function loadAppFns({
     themeSelect: document.getElementById('theme-select'),
     tsBtn: document.getElementById('ts-btn'),
     lnBtn: document.getElementById('ln-btn'),
-    themeBtn: document.getElementById('theme-btn'),
     headerTitle: document.querySelector('header h1'),
     faqBody: document.querySelector('.faq-body'),
-    faqLimitsText: document.getElementById('faq-limits-text'),
-    faqAllowedText: document.getElementById('faq-allowed-text'),
     status: document.getElementById('status'),
     histRow: document.getElementById('history-row'),
     tabsBar: document.getElementById('tabs-bar'),
@@ -329,11 +306,9 @@ async function loadAppFns({
     mobileShell: document.getElementById('mobile-shell'),
     mobileShellChrome: document.getElementById('mobile-shell-chrome'),
     mobileShellTranscript: document.getElementById('mobile-shell-transcript'),
-    mobileShellComposer: document.getElementById('mobile-shell-composer'),
     mobileShellOverlays: document.getElementById('mobile-shell-overlays'),
     mobileComposerHost: document.getElementById('mobile-composer-host'),
     mobileComposerRow: document.getElementById('mobile-composer-row'),
-    mobileEditBar: document.getElementById('mobile-edit-bar'),
     mobileCmdInput: document.getElementById('mobile-cmd'),
     mobileRunBtn: document.getElementById('mobile-run-btn'),
     mobileMenu: document.getElementById('mobile-menu-sheet'),
@@ -344,20 +319,16 @@ async function loadAppFns({
     historyList: document.getElementById('history-list'),
     historyLoadOverlay: document.getElementById('history-load-overlay'),
     acDropdown,
-    themeCloseBtn: document.querySelector('.theme-close'),
     faqOverlay: document.getElementById('faq-overlay'),
     optionsOverlay: document.getElementById('options-overlay'),
     workflowsOverlay: document.getElementById('workflows-overlay'),
-    workflowsBtn: document.getElementById('workflows-btn'),
     workflowsCloseBtn: document.querySelector('.workflows-close'),
     permalinkToast: document.getElementById('permalink-toast'),
     runTimer: document.getElementById('run-timer'),
     searchCaseBtn: document.getElementById('search-case-btn'),
     searchRegexBtn: document.getElementById('search-regex-btn'),
     shellPromptWrap: document.getElementById('shell-prompt-wrap'),
-    shellPromptLine: document.getElementById('shell-prompt-line'),
     shellPromptText: document.getElementById('shell-prompt-text'),
-    shellPromptCaret: document.getElementById('shell-prompt-caret'),
     shellInputRow: document.getElementById('shell-input-row'),
     runBtn: document.getElementById('run-btn'),
   }
@@ -368,7 +339,6 @@ async function loadAppFns({
   const mobileComposerHostEl = document.getElementById('mobile-composer-host')
   mobileComposerHostEl.scrollIntoView = vi.fn()
   const mobileCmdInput = document.getElementById('mobile-cmd')
-  cmdInput.focus = vi.fn()
   mobileCmdInput.focus = vi.fn()
   mobileCmdInput.blur = vi.fn()
 
@@ -514,7 +484,6 @@ async function loadAppFns({
       welcomeOwnsTab: welcomeOwnsTabOverride,
       shellPromptWrap: shellPromptWrapEl,
       shellPromptText: document.getElementById('shell-prompt-text'),
-      shellPromptCaret: document.getElementById('shell-prompt-caret'),
       terminalWrap: document.querySelector('.terminal-wrap'),
       terminalBar: document.querySelector('.terminal-bar'),
       histRow: document.getElementById('history-row'),
@@ -522,16 +491,13 @@ async function loadAppFns({
       mobileShell: document.getElementById('mobile-shell'),
       mobileShellChrome: document.getElementById('mobile-shell-chrome'),
       mobileShellTranscript: document.getElementById('mobile-shell-transcript'),
-      mobileShellComposer: document.getElementById('mobile-shell-composer'),
       mobileShellOverlays: document.getElementById('mobile-shell-overlays'),
       mobileComposerHost: document.getElementById('mobile-composer-host'),
       mobileComposerRow: document.getElementById('mobile-composer-row'),
-      mobileEditBar: document.getElementById('mobile-edit-bar'),
       mobileMenu: document.getElementById('mobile-menu-sheet'),
       faqOverlay: document.getElementById('faq-overlay'),
       optionsOverlay: document.getElementById('options-overlay'),
       workflowsOverlay: document.getElementById('workflows-overlay'),
-      workflowsBtn: document.getElementById('workflows-btn'),
       workflowsCloseBtn: document.querySelector('.workflows-close'),
       permalinkToast: document.getElementById('permalink-toast'),
       mobileComposerHostEl,
@@ -557,9 +523,7 @@ async function loadAppFns({
     handleComposerInputChange,
     setComposerValue,
     moveCmdCaret,
-    setCmdCaret,
     handleComposerWordArrowShortcut,
-    deleteCmdWordLeft,
     performMobileEditAction,
     syncMobileComposerKeyboardState,
     focusVisibleComposerInput,
@@ -1042,12 +1006,12 @@ describe('app helpers', () => {
     const toggle = sheet.querySelector('[data-menu-action="ts-toggle"]')
 
     sheet.classList.remove('u-hidden')
-    // Controller dispatcher is a no-op for ts-toggle and skips hideMobileMenu
-    // in the button click path; the inline submenu's aria-expanded / u-hidden
-    // lifecycle moved to bindDisclosure in mobile_chrome.js (covered in
-    // ui_disclosure.test.js). What this test still guarantees is that the
+    // Controller dispatch is a no-op for ts-toggle and skips hideMobileMenu
+    // in the real button click path; the inline submenu's aria-expanded /
+    // u-hidden lifecycle moved to bindDisclosure in mobile_chrome.js (covered
+    // in ui_disclosure.test.js). What this test still guarantees is that the
     // ts-toggle click does not cascade into closing the parent sheet.
-    window.dispatchMobileMenuAction('ts-toggle', toggle)
+    toggle.click()
     expect(sheet.classList.contains('u-hidden')).toBe(false)
   })
 
@@ -2639,8 +2603,6 @@ describe('app helpers', () => {
     )
     mobileCmdInput.dispatchEvent(new Event('focus'))
     expect(document.body.classList.contains('mobile-keyboard-open')).toBe(true)
-    expect(document.getElementById('mobile-edit-bar').hidden).toBe(false)
-
     restoreViewport()
   })
 
@@ -2874,23 +2836,6 @@ describe('app helpers', () => {
     await Promise.resolve()
 
     expect(document.title).toBe('darklab_shell')
-  })
-
-  it('updates existing terminal-wordmark elements with app name and version after config loads', async () => {
-    // loadAppFns resets document.body.innerHTML internally, so the wordmark must be
-    // injected after setup but before the async config handler drains.
-    await loadAppFns()
-    const wordmark = document.createElement('a')
-    wordmark.className = 'terminal-wordmark'
-    wordmark.href = '#'
-    document.body.appendChild(wordmark)
-
-    await new Promise((resolve) => setImmediate(resolve))
-
-    expect(wordmark.textContent).toBe('darklab_shell v9.9')
-    expect(wordmark.getAttribute('href')).toBe(
-      'https://gitlab.com/darklab.sh/darklab_shell',
-    )
   })
 
   it('keeps the mobile run button visible after the keyboard closes', async () => {
@@ -3358,15 +3303,10 @@ describe('app helpers', () => {
     expect(cmdInput.selectionStart).toBe(16)
   })
 
-  it('supports the mobile edit bar actions', async () => {
-    const { getVisibleComposerInput, setComposerState } = await loadAppFns({
+  it('supports the mobile keyboard helper edit actions', async () => {
+    const { getVisibleComposerInput, performMobileEditAction, setComposerState } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
     })
-    const press = (selector) => {
-      document
-        .querySelector(selector)
-        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
-    }
 
     document.body.classList.add('mobile-terminal-mode')
     const cmdInput = document.getElementById('cmd')
@@ -3383,41 +3323,36 @@ describe('app helpers', () => {
     })
     const visibleInput = getVisibleComposerInput()
 
-    press('[data-edit-action="left"]')
+    performMobileEditAction('left')
     expect(visibleInput.selectionStart).toBe(visibleInput.value.length - 1)
 
-    press('[data-edit-action="home"]')
+    performMobileEditAction('home')
     expect(visibleInput.selectionStart).toBe(0)
 
-    press('[data-edit-action="word-right"]')
+    performMobileEditAction('word-right')
     expect(visibleInput.selectionStart).toBe(4)
 
-    press('[data-edit-action="right"]')
+    performMobileEditAction('right')
     expect(visibleInput.selectionStart).toBe(5)
 
-    press('[data-edit-action="word-left"]')
+    performMobileEditAction('word-left')
     expect(visibleInput.selectionStart).toBe(0)
 
-    press('[data-edit-action="end"]')
+    performMobileEditAction('end')
     expect(visibleInput.selectionStart).toBe(visibleInput.value.length)
 
-    press('[data-edit-action="delete-word"]')
+    performMobileEditAction('delete-word')
     expect(visibleInput.value).toBe('ping -c 4 ')
 
-    press('[data-edit-action="delete-line"]')
+    performMobileEditAction('delete-line')
     expect(visibleInput.value).toBe('')
     expect(visibleInput.selectionStart).toBe(0)
   })
 
-  it('keeps the mobile composer scrolled to the caret when edit-bar navigation moves through long input', async () => {
-    const { getVisibleComposerInput, setComposerState } = await loadAppFns({
+  it('keeps the mobile composer scrolled to the caret when helper navigation moves through long input', async () => {
+    const { getVisibleComposerInput, performMobileEditAction, setComposerState } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
     })
-    const press = (selector) => {
-      document
-        .querySelector(selector)
-        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
-    }
 
     document.body.classList.add('mobile-terminal-mode')
     const mobileCmdInput = document.getElementById('mobile-cmd')
@@ -3435,11 +3370,11 @@ describe('app helpers', () => {
     })
     const visibleInput = getVisibleComposerInput()
 
-    press('[data-edit-action="end"]')
+    performMobileEditAction('end')
     expect(visibleInput.selectionStart).toBe(longValue.length)
     expect(visibleInput.scrollLeft).toBeGreaterThan(0)
 
-    press('[data-edit-action="home"]')
+    performMobileEditAction('home')
     expect(visibleInput.selectionStart).toBe(0)
     expect(visibleInput.scrollLeft).toBe(0)
   })

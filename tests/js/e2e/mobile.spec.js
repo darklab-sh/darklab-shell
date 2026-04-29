@@ -130,7 +130,7 @@ test.describe('mobile menu', () => {
     await expect(page.locator('.line.welcome-hint')).toBeVisible({ timeout: 15_000 })
     // Desktop run button stays hidden; the mobile helper row stays hidden until the keyboard opens
     await expect(page.locator('#run-btn')).toBeHidden()
-    await expect(page.locator('#mobile-edit-bar')).toBeHidden()
+    await expect(page.locator('#mobile-kb-helper')).toBeHidden()
     await expect(page.locator('#mobile-composer')).toBeVisible()
     await expect(page.locator('#mobile-shell-transcript')).toBeVisible()
     await expect(
@@ -143,7 +143,7 @@ test.describe('mobile menu', () => {
     expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(MOBILE.height)
   })
 
-  test('mobile edit bar appears when the mobile command input is focused', async ({ page }) => {
+  test('mobile keyboard helper appears when the mobile command input is focused', async ({ page }) => {
     await openMobileKeyboard(page)
     await expect(page.locator('#mobile-kb-helper')).toBeVisible()
   })
@@ -333,7 +333,7 @@ test.describe('mobile menu', () => {
     await page.locator('#new-tab-btn').click()
 
     await expect(page.locator('#mobile-cmd')).not.toBeFocused()
-    await expect(page.locator('#mobile-edit-bar')).toBeHidden()
+    await expect(page.locator('#mobile-kb-helper')).toBeHidden()
     await expect
       .poll(async () => page.evaluate(() => window.scrollY))
       .toBeLessThanOrEqual(startScrollY + 12)
@@ -348,7 +348,7 @@ test.describe('mobile menu', () => {
     await page.locator('.tab').nth(1).locator('.tab-close').click()
 
     await expect(page.locator('#mobile-cmd')).not.toBeFocused()
-    await expect(page.locator('#mobile-edit-bar')).toBeHidden()
+    await expect(page.locator('#mobile-kb-helper')).toBeHidden()
     await expect.poll(async () => page.evaluate(() => window.scrollY)).toBeLessThanOrEqual(12)
   })
 
@@ -772,7 +772,7 @@ test.describe('mobile menu', () => {
     await expect(page.evaluate(() => window.__copyFallbackUsed)).resolves.toBe(true)
   })
 
-  test('mobile edit bar moves the caret and deletes a word', async ({ page }) => {
+  test('mobile keyboard helper moves the caret and deletes a word', async ({ page }) => {
     await ensurePromptReady(page)
 
     // Show the helper row through the real keyboard-state path rather than

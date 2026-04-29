@@ -115,17 +115,9 @@ SECTION_ORDER = [
             (
                 "# Tabs bar / tabs",
                 [
-                    "tabs_bar_scrollbar_track",
-                    "tabs_bar_scrollbar_thumb",
-                    "tabs_bar_scrollbar_thumb_hover",
-                    "tab_bg",
-                    "tab_border",
                     "tab_text",
                     "tab_hover_text",
                     "tab_active_bg",
-                    "tab_active_border",
-                    "tab_active_text",
-                    "tab_active_shadow",
                     "tab_close_bg",
                     "tab_close_border",
                     "tab_close_hover_bg",

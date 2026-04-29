@@ -58,17 +58,9 @@
   --theme-button-destructive-bg: color-mix(in srgb, var(--_tone) 8%, transparent);
   --theme-button-destructive-text: color-mix(in srgb, var(--muted) 86%, var(--text));
   --theme-button-destructive-hover-bg: color-mix(in srgb, var(--_tone) 16%, transparent);
-  --theme-tabs-bar-scrollbar-track: rgba(255,255,255,0.06);
-  --theme-tabs-bar-scrollbar-thumb: #555555;
-  --theme-tabs-bar-scrollbar-thumb-hover: #777777;
-  --theme-tab-bg: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
-  --theme-tab-border: #2e2e2e;
   --theme-tab-text: #7a7a7a;
   --theme-tab-hover-text: #e0e0e0;
   --theme-tab-active-bg: rgba(57,255,20,0.04);
-  --theme-tab-active-border: color-mix(in srgb, var(--green) 42%, transparent);
-  --theme-tab-active-text: #39ff14;
-  --theme-tab-active-shadow: none;
   --theme-tab-close-bg: rgba(255,255,255,0.02);
   --theme-tab-close-border: rgba(255,255,255,0.06);
   --theme-tab-close-hover-bg: color-mix(in srgb, var(--red) 18%, transparent);
@@ -163,13 +155,6 @@ header .version {
   opacity: 0.62;
 }
 
-/* ── Shell input ── */
-.input-row {
-  display: flex;
-  gap: 10px;
-  align-items: stretch;
-}
-
 .shell-input-row {
   position: fixed;
   left: -10000px;
@@ -197,10 +182,6 @@ header .version {
   border-color: var(--green-dim);
   box-shadow: 0 0 0 3px var(--green-glow);
 }
-.prompt-wrap.prompt-wrap-loaded {
-  animation: prompt-load-flash 0.95s ease;
-}
-
 .u-hidden {
   display: none;
 }

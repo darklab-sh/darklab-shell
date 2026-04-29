@@ -97,7 +97,6 @@
     min-height: 0;
     padding: 5px 12px;
   }
-  .terminal-wordmark { display: none; }
   .history-row {
     background: var(--surface);
     align-items: center;
@@ -111,7 +110,6 @@
   }
   .history-row::-webkit-scrollbar { display: none; }
   .history-label { flex: 0 0 auto; }
-  .terminal-bar-btns { display: none; }
   #hamburger-btn { display: block; }
   #mobile-header-actions { display: none; }
   .hist-chip { max-width: 140px; flex: 0 0 auto; }
@@ -151,27 +149,14 @@
     padding: 0;
     background: transparent;
   }
-  body.mobile-terminal-mode #mobile-edit-bar,
-  body.mobile-terminal-mode #mobile-composer-row {
-    margin: 0 0 8px;
-  }
   body.mobile-terminal-mode #mobile-composer-row {
     display: flex;
     flex-direction: row;
     align-items: center;
     gap: 10px;
+    margin: 0 0 8px;
     padding: 0;
     position: relative;
-  }
-  body.mobile-terminal-mode #mobile-composer-prefix {
-    display: block;
-    flex: 0 0 auto;
-    color: var(--blue);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0.5px;
-    white-space: nowrap;
-    align-self: center;
   }
   body.mobile-terminal-mode #mobile-shell-composer #mobile-composer {
     display: flex;
@@ -827,66 +812,6 @@
   #mobile-cmd {
     font-size: 16px;
   }
-
-  #mobile-edit-bar {
-    display: none;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 4px;
-    overflow: visible;
-    scrollbar-width: none;
-  }
-
-  body.mobile-keyboard-open #mobile-edit-bar {
-    display: grid;
-  }
-
-  #mobile-edit-bar button {
-    width: 100%;
-    min-width: 0;
-    min-height: 34px;
-    appearance: none;
-    -webkit-appearance: none;
-    background: transparent;
-    border: 1px solid var(--border-bright);
-    color: var(--muted);
-    font-family: var(--font-mono);
-    font-size: 12px;
-    padding: 6px 4px;
-    border-radius: 3px;
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  #mobile-edit-bar button:active {
-    border-color: var(--green-dim);
-    color: var(--text);
-    opacity: 0.7;
-  }
-  @media (hover: hover) {
-    #mobile-edit-bar button:hover {
-      border-color: var(--green-dim);
-      color: var(--text);
-    }
-  }
-
-  #mobile-edit-bar button[data-mobile-edit="left"],
-  #mobile-edit-bar button[data-mobile-edit="right"] {
-    font-size: 25px;
-    font-weight: 700;
-    letter-spacing: 0;
-    line-height: 1;
-    padding-top: 2px;
-    padding-bottom: 2px;
-  }
-
-  #mobile-edit-bar button[data-mobile-edit="word-left"],
-  #mobile-edit-bar button[data-mobile-edit="word-right"] {
-    font-size: 11px;
-  }
-
 
 }
 

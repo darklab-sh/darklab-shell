@@ -186,8 +186,7 @@ function _getMobileUiLayoutRefs() {
   const shellRoot = typeof mobileShell !== 'undefined' && mobileShell ? mobileShell : null;
   const composerHost = typeof mobileComposerHost !== 'undefined' && mobileComposerHost ? mobileComposerHost : null;
   const composerRow = typeof mobileComposerRow !== 'undefined' && mobileComposerRow ? mobileComposerRow : null;
-  const editBar = typeof mobileEditBar !== 'undefined' && mobileEditBar ? mobileEditBar : null;
-  if (!shellRoot && !composerHost && !composerRow && !editBar) return null;
+  if (!shellRoot && !composerHost && !composerRow) return null;
   return {
     shell: shellRoot ? {
       root: shellRoot,
@@ -198,7 +197,6 @@ function _getMobileUiLayoutRefs() {
     composer: {
       host: composerHost,
       row: composerRow,
-      editBar,
     },
   };
 }
@@ -221,74 +219,6 @@ const _uiOverlayRefs = {
 function _bindMobileComposerInteractions(uiRefs) {
   const composerRefs = uiRefs && uiRefs.composer;
   if (!composerRefs || !composerRefs.host || !cmdInput) return;
-}
-
-function _bindMobileEditBarInteractions(editBar) {
-  if (!editBar || !cmdInput) return;
-  editBar.querySelectorAll('button[data-mobile-edit], button[data-edit-action]').forEach(btn => {
-    if (btn.dataset.mobileEditBound === '1') return;
-    btn.dataset.mobileEditBound = '1';
-    const action = btn.dataset.mobileEdit || btn.dataset.editAction;
-    const repeating = action === 'left' || action === 'right';
-    let handledPointerDown = false;
-    let _repeatDelay = null;
-    let _repeatInterval = null;
-    const _clearRepeat = () => {
-      if (_repeatDelay)    { clearTimeout(_repeatDelay);   _repeatDelay = null; }
-      if (_repeatInterval) { clearInterval(_repeatInterval); _repeatInterval = null; }
-      if (typeof document !== 'undefined') {
-        document.removeEventListener('pointerup',     stopRepeat);
-        document.removeEventListener('pointercancel', stopRepeat);
-        document.removeEventListener('touchend',      stopRepeat);
-        document.removeEventListener('touchcancel',   stopRepeat);
-      }
-    };
-    const stopRepeat = () => _clearRepeat();
-    const handler = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      performMobileEditAction(action);
-      if (repeating) {
-        _clearRepeat();
-        _repeatDelay = setTimeout(() => {
-          _repeatInterval = setInterval(() => performMobileEditAction(action), 60);
-        }, 400);
-        if (typeof document !== 'undefined') {
-          document.addEventListener('pointerup',     stopRepeat);
-          document.addEventListener('pointercancel', stopRepeat);
-          document.addEventListener('touchend',      stopRepeat);
-          document.addEventListener('touchcancel',   stopRepeat);
-        }
-      }
-    };
-    if (typeof window !== 'undefined' && typeof window.PointerEvent === 'function') {
-      btn.addEventListener('pointerdown', e => {
-        handledPointerDown = true;
-        handler(e);
-      });
-      btn.addEventListener('mousedown', e => {
-        if (handledPointerDown) {
-          handledPointerDown = false;
-          e.preventDefault();
-          return;
-        }
-        handler(e);
-      });
-      if (repeating) {
-        btn.addEventListener('pointerup',     stopRepeat);
-        btn.addEventListener('pointercancel', stopRepeat);
-        btn.addEventListener('pointerleave',  stopRepeat);
-      }
-    } else {
-      btn.addEventListener('mousedown',  handler);
-      btn.addEventListener('touchstart', handler, { passive: false });
-      if (repeating) {
-        btn.addEventListener('mouseup',     stopRepeat);
-        btn.addEventListener('touchend',    stopRepeat);
-        btn.addEventListener('touchcancel', stopRepeat);
-      }
-    }
-  });
 }
 
 const _mobileShellChromeNodes = [
@@ -1185,10 +1115,8 @@ function handleActionShortcut(e) {
 // or require a context-dependent chord that's a net UX loss. Alt+S has no
 // readline conflict and works identically from everywhere.
 //
-// Each chord toggles its surface directly rather than delegating to the
-// corresponding header button's click handler. The header buttons share a
-// pre-existing quirk where they call _closeMajorOverlays() before toggling,
-// which cancels out the close half of the toggle.
+// Each chord toggles its surface directly so the shortcut behavior stays in
+// sync with the current rail/menu surfaces.
 function handleChromeShortcut(e) {
   if (!e.altKey || e.ctrlKey || e.metaKey) return false;
   if (shouldIgnoreGlobalShortcutTarget(e.target)) return false;
@@ -1297,14 +1225,6 @@ function moveCmdCaret(delta) {
   syncShellPrompt();
 }
 
-function setCmdCaret(position) {
-  const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || '');
-  const next = Math.max(0, Math.min(value.length, position));
-  if (typeof syncComposerSelection === 'function') syncComposerSelection(next, next, { input: getVisibleComposerInput() });
-  else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(next, next);
-  syncShellPrompt();
-}
-
 function moveCmdCaretByWord(direction) {
   const input = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : cmdInput;
   if (typeof syncFocusedComposerState === 'function') syncFocusedComposerState(input);
@@ -1329,18 +1249,6 @@ function handleComposerWordArrowShortcut(e) {
   e.stopPropagation();
   moveCmdCaretByWord(e.key === 'ArrowLeft' ? -1 : 1);
   return true;
-}
-
-function deleteCmdWordLeft() {
-  const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || '');
-  const { start, end } = getCmdSelection(value);
-  if (start !== end) {
-    replaceCmdRange(value, start, end);
-    return;
-  }
-  if (start === 0) return;
-  const cut = findWordBoundaryLeft(value, start);
-  replaceCmdRange(value, cut, start);
 }
 
 function performMobileEditAction(action) {

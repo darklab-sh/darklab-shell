@@ -212,11 +212,6 @@ body.mobile-terminal-mode {
   .recents-sheet #mobile-recents-filter-root {
     font-size: 16px;
   }
-  .recents-sheet .sheet-filter-row .filter-placeholder {
-    flex: 1;
-    color: var(--muted);
-    opacity: 0.7;
-  }
   .recents-sheet .sheet-filter-toggle {
     justify-content: center;
     cursor: pointer;

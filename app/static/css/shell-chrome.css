@@ -39,19 +39,6 @@
   background: color-mix(in srgb, var(--text) 10%, transparent);
 }
 
-/* Chrome buttons with border (share / copy / save / clear) */
-.chrome-btn-border {
-  transition: background 120ms, color 120ms, border-color 120ms;
-}
-.chrome-btn-border:hover {
-  background: color-mix(in srgb, var(--text) 6%, transparent) !important;
-  color: var(--theme-toolbar-button-hover-text, var(--text)) !important;
-  border-color: var(--theme-toolbar-button-hover-border, var(--border-bright)) !important;
-}
-.chrome-btn-border:active {
-  background: color-mix(in srgb, var(--text) 10%, transparent) !important;
-}
-
 /* ============================================================
    Desktop layout.  All rules scoped behind min-width: 601px so the
    mobile path in mobile.css is untouched.

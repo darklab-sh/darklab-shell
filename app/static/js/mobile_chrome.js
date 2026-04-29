@@ -17,8 +17,6 @@
   const mobileShellChrome     = document.getElementById('mobile-shell-chrome');
   const mobileComposer        = document.getElementById('mobile-composer');
   const mobileKillBtn         = document.getElementById('mobile-kill-btn');
-  const mobileEditBar         = document.getElementById('mobile-edit-bar');
-  const hamburgerBtnEl        = document.getElementById('hamburger-btn');
   const statusPillEl          = document.getElementById('status');
   const recentPeek            = document.getElementById('mobile-recent-peek');
   const recentPeekCount       = document.getElementById('mobile-recent-peek-count');
@@ -1061,14 +1059,8 @@
                     && document.body.classList.contains('mobile-keyboard-open'));
     if (open) {
       show(kbHelper);
-      // body.mobile-keyboard-open #mobile-edit-bar outranks .u-hidden, so
-      // suppress the shared edit bar with an inline style while the helper row is
-      // active. Reset the style on close so the default CSS display:none
-      // applies again.
-      if (mobileEditBar && mobileEditBar.style) mobileEditBar.style.display = 'none';
     } else {
       hide(kbHelper);
-      if (mobileEditBar && mobileEditBar.style) mobileEditBar.style.display = '';
     }
   }
   if (typeof onUiEvent === 'function') {
@@ -1076,11 +1068,8 @@
   }
   syncKbHelper();
 
-  // The #mobile-edit-bar handlers in app.js are bound to pointerdown,
-  // not click, so proxy.click() on them does nothing. Invoke the same
-  // performMobileEditAction entry point directly. preventDefault on
-  // pointerdown keeps the composer input from losing focus when a helper
-  // key is tapped.
+  // Invoke the shared edit action directly. preventDefault on pointerdown keeps
+  // the composer input from losing focus when a helper key is tapped.
   kbHelper?.querySelectorAll('button[data-kb-action]').forEach(btn => {
     const action = btn.dataset.kbAction;
     const fire = () => {
@@ -1151,15 +1140,4 @@
     if (e.cancelable) e.preventDefault();
   }, { passive: false });
 
-  global._mobileChrome = {
-    nodes: {
-      mobileShellChrome, recentPeek, recentPeekCount, recentPeekPreview,
-      menuSheet, menuSheetScrim, menuLnState, menuTsState,
-      menuWorkflowsCount, menuThemeHint, kbHelper, progressBar,
-    },
-    openMenuSheet, closeMenuSheet, isMenuSheetOpen,
-    renderRecentPeek, syncRunState, syncKbHelper,
-    refreshMenuStateHints, refreshWorkflowsCount, refreshThemeHint,
-    syncRunningIndicator,
-  };
 })(typeof window !== 'undefined' ? window : this);

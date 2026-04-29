@@ -24,7 +24,6 @@
   const railWorkflowsCount = document.getElementById('rail-workflows-count');
   const railNav           = document.getElementById('rail-nav');
 
-  const hudStatusCell     = document.getElementById('hud-status-cell');
   const hud               = document.getElementById('hud');
   const hudLastExitEl     = document.getElementById('hud-last-exit');
   const hudTabsEl         = document.getElementById('hud-tabs');
@@ -311,8 +310,7 @@
 
   // ── Nav menu ─────────────────────────────────────────────────────
   // The visible rail is the desktop source of truth. Route clicks directly
-  // into the shared action layer instead of proxying through hidden header
-  // buttons.
+  // into the shared action layer.
   railNav?.addEventListener('click', e => {
     const item = e.target.closest?.('[data-action]');
     if (!item) return;
@@ -338,15 +336,6 @@
     if (action === 'faq' && typeof global.openFaq === 'function') {
       global.openFaq();
     }
-  });
-
-  // ── HUD: status cell toggle (debug affordance; safe no-op elsewhere) ──
-  // Clicking the status cell is a design affordance for toggling mock state.
-  // In the real app, status is driven by runner.js — leave this inert unless
-  // no run is active, so curious users can't desync the runtime.
-  hudStatusCell?.addEventListener('click', () => {
-    // Intentionally no-op: status reflects runner state and must not be
-    // forced from UI. Left in place to preserve cursor affordance.
   });
 
   // ── HUD action buttons ──────────────────────────────────────────

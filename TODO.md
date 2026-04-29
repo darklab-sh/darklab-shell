@@ -32,27 +32,6 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Technical Debt
 
-- **Front-end stale UI cleanup audit**
-  - Goal:
-    - Do a comprehensive review of the front-end templates, CSS, and JavaScript for UI code left behind by the v1.6 redesign and mobile shell iterations.
-    - Remove or quarantine stale selectors, DOM fragments, helper code, and tests only when they are confirmed unused in the current desktop/mobile UI.
-  - Known examples to start with:
-    - Old desktop tab-bar styling that still visually reads like the pre-redesign tab bar even though the current desktop shell uses the newer chrome/tab structure.
-    - Old mobile keyboard helper code/styles from the previous composer-helper design that may no longer be active after the mobile composer and helper-row revisions.
-  - Review scope:
-    - `app/templates/index.html` for stale elements, hidden compatibility containers, and modal/sheet fragments no longer opened by current JS.
-    - `app/static/css/*.css` for selectors that no longer match current DOM, duplicated legacy layouts, stale mobile-only rules, obsolete preview-only theme-card styles, and component-specific rules superseded by shared primitives.
-    - `app/static/js/*.js` for event handlers, state fields, feature flags, helper exports, and migration/compatibility paths that are no longer reachable.
-    - `tests/js/unit` and `tests/js/e2e` for coverage that still protects legacy behavior instead of the current UI contract.
-  - Suggested method:
-    - Start with static searches for old class/id names, hidden elements, and selectors that do not appear in templates or JS-created markup.
-    - Cross-check browser runtime behavior with focused desktop and mobile smoke flows before deleting anything.
-    - Prefer small cleanup commits by surface: desktop shell chrome, mobile composer/helper, modals/sheets, theme previews, and history/search controls.
-  - Guardrails:
-    - Do not remove elements that exist as accessibility anchors, focus traps, progressive enhancement fallbacks, test harness targets, or storage-migration compatibility until their replacement path is confirmed.
-    - Keep visual review separate from cleanup where possible: first remove dead code, then tune live code.
-    - Update button primitive allowlists, project-structure docs, and frontend design-system docs if cleanup changes the current UI contract.
-
 ---
 
 ## Ideas

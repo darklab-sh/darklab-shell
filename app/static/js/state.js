@@ -115,7 +115,6 @@
   }
 
   global.getAppState = () => state;
-  global.resetAppState = () => Object.assign(state, defaults);
   global.getComposerState = () => ({
     value: state._composerValue,
     selectionStart: state._composerSelectionStart,

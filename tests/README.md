@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 1078
-- `vitest`: 865
+- `vitest`: 864
 - `playwright`: 219
-- total: 2,162
+- total: 2,161
 
 This document is organized in two parts:
 
@@ -1300,7 +1300,6 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `publishes mobile focus and selection changes into composer state without mirroring the hidden input` | Verifies that publishes mobile focus and selection changes into composer state without mirroring the hidden input. |
 | `does not enter mobile mode on a narrow desktop viewport without touch support` | Verifies that does not enter mobile mode on a narrow desktop viewport without touch support. |
 | `sets the document title from the server config` | Verifies that sets the document title from the server config. |
-| `updates existing terminal-wordmark elements with app name and version after config loads` | Verifies that updates existing terminal-wordmark elements with app name and version after config loads. |
 | `keeps the mobile run button visible after the keyboard closes` | Verifies that keeps the mobile run button visible after the keyboard closes. |
 | `submits the visible mobile composer through the shared submit helper` | Verifies that submits the visible mobile composer through the shared submit helper. |
 | `keeps the desktop and mobile run buttons in sync when disabled` | Verifies that keeps the desktop and mobile run buttons in sync when disabled. |
@@ -1322,8 +1321,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `supports ctrl+e to move to the end of the line` | Verifies that supports ctrl+e to move to the end of the line. |
 | `supports Alt+B and Alt+F to move by word` | Verifies that supports Alt+B and Alt+F to move by word. |
 | `supports macOS Option+B and Option+F word movement via physical key codes` | Verifies that supports macOS Option+B and Option+F word movement via physical key codes. |
-| `supports the mobile edit bar actions` | Verifies character moves, word-left / word-right jumps, Home / End, and delete-word actions in the mobile helper row. |
-| `keeps the mobile composer scrolled to the caret when edit-bar navigation moves through long input` | Verifies that keeps the mobile composer scrolled to the caret when edit-bar navigation moves through long input. |
+| `supports the mobile keyboard helper edit actions` | Verifies character moves, word-left / word-right jumps, Home / End, and delete-word actions in the mobile helper row. |
+| `keeps the mobile composer scrolled to the caret when helper navigation moves through long input` | Verifies that keeps the mobile composer scrolled to the caret when helper navigation moves through long input. |
 | `uses Ctrl+C to open kill confirm when active tab is running` | Verifies that uses Ctrl+C to open kill confirm when active tab is running. |
 | `uses Ctrl+C to jump to a new prompt line when no command is running` | Verifies that uses Ctrl+C to jump to a new prompt line when no command is running. |
 | `uses Ctrl+C to cancel a pending terminal confirmation before opening a fresh prompt` | Verifies that a pending transcript-owned yes/no confirm consumes `Ctrl+C` as a cancel action before the normal fresh-prompt interrupt path runs. |
@@ -2350,7 +2349,7 @@ Desktop demo recording spec. Drives a tightened README-first interaction sequenc
 | `back button is visible at 850px touch viewport (shell threshold)` | Verifies that the diagnostics back button appears at 850px on a touch device — the shell's mobile-mode threshold — so chrome parity holds beyond the old 760px breakpoint. |
 | `back button is hidden at 850px non-touch viewport` | Verifies that the diagnostics back button is hidden at 850px on a non-touch (pointer: fine) device, where the shell stays in desktop mode. |
 | `mobile startup uses the mobile welcome and keeps the composer visible` | Verifies that mobile startup uses the mobile welcome and keeps the composer visible. |
-| `mobile edit bar appears when the mobile command input is focused` | Verifies that mobile edit bar appears when the mobile command input is focused. |
+| `mobile keyboard helper appears when the mobile command input is focused` | Verifies that mobile keyboard helper appears when the mobile command input is focused. |
 | `tapping the mobile command input opens the keyboard without jumping the page` | Verifies that tapping the mobile command input opens the keyboard without jumping the page. |
 | `reloading on mobile restores the active output pane at the bottom` | Verifies that reloading on mobile restores the active tab transcript to the live bottom instead of reopening at the top. |
 | `mobile autocomplete accepts a suggestion by tap and keeps the mobile composer focused` | Verifies that mobile autocomplete accepts a suggestion by tap and keeps the mobile composer focused. |
@@ -2379,7 +2378,7 @@ Desktop demo recording spec. Drives a tightened README-first interaction sequenc
 | `mobile history permalink action keeps the drawer open` | Verifies that the permalink action in the mobile recents sheet does not dismiss the drawer after tap, reducing repeated reopen churn. |
 | `mobile run button disables while a command is running` | Verifies that the mobile Run button follows the same running-state guard as desktop. |
 | `mobile permalink copies via the fallback path when clipboard writeText is unavailable` | Verifies that the mobile permalink flow still succeeds when the Clipboard API fallback path is required. |
-| `mobile edit bar moves the caret and deletes a word` | Verifies character moves, word jumps, and delete-word behavior through the real mobile helper row. |
+| `mobile keyboard helper moves the caret and deletes a word` | Verifies character moves, word jumps, and delete-word behavior through the real mobile helper row. |
 | `mobile output wraps inside the transcript when timestamps and line numbers are on` | Regression for mobile output overflow: injects a long prefixed line with `body.ln-on` and `body.ts-clock` active and asserts `.line-content`'s right edge stays within `.output`'s right edge at mobile viewport width. |
 | `mobile long commands keep the composer usable` | Verifies that mobile long commands keep the composer usable. |
 

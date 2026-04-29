@@ -102,11 +102,6 @@ function mountModule({
 
 describe('mobile running-state indicator', () => {
   let ctx = null
-  beforeEach(() => {
-    // Clear any stale `_mobileChrome` export from the previous case so
-    // a failed mount doesn't leak state across tests.
-    delete window._mobileChrome
-  })
   afterEach(() => {
     if (ctx && ctx.restore) ctx.restore()
     ctx = null

@@ -1,7 +1,5 @@
 // ── Desktop UI module ──
 let _tabsScrollControlsBound = false;
-let _draggedTabId = null;
-let _dragMoved = false;
 let _tabDragSuppressClickUntil = 0;
 let _touchDragState = null;
 let _tabSeq = 0;

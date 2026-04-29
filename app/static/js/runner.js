@@ -357,21 +357,6 @@ function elapsedSeconds() {
   return timerStart ? (Date.now() - timerStart) / 1000 : null;
 }
 
-// ── Kill button ──
-function getTabKillBtn(tabId) {
-  return tabPanels ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`) : null;
-}
-
-function _showTabKillBtnFallback(tabId) {
-  const btn = getTabKillBtn(tabId);
-  setDisplayState(btn, true, 'inline-block');
-}
-
-function _hideTabKillBtnFallback(tabId) {
-  const btn = getTabKillBtn(tabId);
-  setDisplayState(btn, false, 'inline-block');
-}
-
 function _setRunButtonDisabled(disabled) {
   if (typeof syncRunButtonDisabled === 'function') {
     syncRunButtonDisabled();

@@ -8,20 +8,6 @@ const _SEARCH_SCOPE_LABELS = {
   summaries: 'summaries',
 };
 
-const _FINDINGS_FRIENDLY_ROOTS = new Set([
-  'nmap',
-  'ffuf',
-  'gobuster',
-  'feroxbuster',
-  'nuclei',
-  'dig',
-  'testssl',
-  'sslscan',
-  'sslyze',
-  'naabu',
-  'rustscan',
-]);
-
 const _SEARCH_SUMMARY_LIMIT = 25;
 
 let _searchTogglePulseTimer = null;
@@ -158,14 +144,6 @@ function _getSearchSignalCounts(out) {
     if (_lineMatchesSearchScope(line, 'summaries')) counts.summaries += 1;
   });
   return counts;
-}
-
-function _shouldPreferFindingsScope(counts) {
-  if (!counts || counts.findings <= 0) return false;
-  const tab = typeof getTab === 'function' ? getTab(activeTabId) : null;
-  const command = String(tab?.command || '').trim();
-  const root = command.split(/\s+/, 1)[0]?.toLowerCase() || '';
-  return _FINDINGS_FRIENDLY_ROOTS.has(root) || counts.findings >= 2;
 }
 
 function refreshSearchDiscoverabilityUi() {
@@ -386,14 +364,6 @@ function _highlightSearchLine(line, re, startMatchIdx) {
 
 function _lineMatchesSearchScope(line, scope) {
   return _lineMatchesSearchScopeForRoot(line, scope, null);
-}
-
-function _collectSearchSignalTexts(out, scope) {
-  const lines = Array.from(out.querySelectorAll('.line'));
-  return lines
-    .filter((line) => _lineMatchesSearchScope(line, scope))
-    .map((line) => (line.textContent || '').trim())
-    .filter(Boolean);
 }
 
 function _promptEchoCommandText(line) {

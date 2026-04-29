@@ -110,17 +110,9 @@ button_destructive_hover_bg: "color-mix(in srgb, var(--_tone) 16%, transparent)"
 # History chips / starred chips
 
 # Tabs bar / tabs
-tabs_bar_scrollbar_track: "rgba(255,255,255,0.06)"
-tabs_bar_scrollbar_thumb: "#6d6d6d"
-tabs_bar_scrollbar_thumb_hover: "#8a8a8a"
-tab_bg: "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))"
-tab_border: "#3c3c3c"
 tab_text: "#9a9a9a"
 tab_hover_text: "#e0e0e0"
 tab_active_bg: "rgba(57,255,20,0.04)"
-tab_active_border: "color-mix(in srgb, var(--green) 42%, transparent)"
-tab_active_text: "#39ff14"
-tab_active_shadow: "none"
 tab_close_bg: "rgba(255,255,255,0.02)"
 tab_close_border: "rgba(255,255,255,0.06)"
 tab_close_hover_bg: "color-mix(in srgb, var(--green-dim) 18%, transparent)"

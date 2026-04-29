@@ -16,16 +16,6 @@
 </head>
 <body data-theme="{{ current_theme.name }}">
 
-<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" aria-hidden="true" style="position:absolute;pointer-events:none">
-  <defs>
-    <filter id="dot-crisp">
-      <feComponentTransfer>
-        <feFuncA type="discrete" tableValues="0 1"/>
-      </feComponentTransfer>
-    </filter>
-  </defs>
-</svg>
-
 <header>
   <h1><span id="header-title">{{ app_name }}</span></h1>
   <div id="mobile-header-actions">
@@ -45,16 +35,6 @@
   <div id="mobile-shell-composer">
     <div id="mobile-composer-host" aria-hidden="true">
       <div id="mobile-composer">
-        <div id="mobile-edit-bar" aria-label="Mobile edit controls">
-          <button type="button" class="kb-key" data-mobile-edit="home" data-edit-action="home" aria-label="Move to start">Home</button>
-          <button type="button" class="kb-key" data-mobile-edit="word-left" data-edit-action="word-left" aria-label="Move left by word">Word ←</button>
-          <button type="button" class="kb-key" data-mobile-edit="left" data-edit-action="left" aria-label="Move left">←</button>
-          <button type="button" class="kb-key" data-mobile-edit="delete-word" data-edit-action="delete-word" aria-label="Delete word">Del Word</button>
-          <button type="button" class="kb-key" data-mobile-edit="end" data-edit-action="end" aria-label="Move to end">End</button>
-          <button type="button" class="kb-key" data-mobile-edit="word-right" data-edit-action="word-right" aria-label="Move right by word">Word →</button>
-          <button type="button" class="kb-key" data-mobile-edit="right" data-edit-action="right" aria-label="Move right">→</button>
-          <button type="button" class="kb-key" data-mobile-edit="delete-line" data-edit-action="delete-line" aria-label="Delete line">Del Line</button>
-        </div>
         <div id="mobile-kb-helper" class="kb-helper u-hidden" aria-label="Edit helper" role="toolbar">
           <button type="button" class="kb-key" data-kb-action="word-left" aria-label="Word left">‹‹</button>
           <button type="button" class="kb-key" data-kb-action="left" aria-label="Left">
@@ -90,7 +70,7 @@
       <div class="sheet-title bottom-sheet-header">
         <span class="sheet-title-label">History</span>
         <span class="sheet-title-spacer"></span>
-        <button type="button" class="sheet-clear-btn btn btn-secondary btn-compact" id="mobile-recents-clear" aria-label="Delete all history">delete all</button>
+        <button type="button" class="btn btn-secondary btn-compact" id="mobile-recents-clear" aria-label="Delete all history">delete all</button>
       </div>
       <div class="sheet-filters">
         <input id="mobile-recents-search" class="sheet-filter-row form-control control-row-touch" type="text" placeholder="search history" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search history">
@@ -172,7 +152,7 @@
           <span class="menu-item-label">line numbers</span>
           <span class="menu-item-toggle" id="mobile-menu-ln-state">off</span>
         </button>
-        <button type="button" class="menu-item nav-item menu-item-expander" data-menu-action="ts-toggle" aria-expanded="false" aria-controls="mobile-menu-ts-submenu">
+        <button type="button" class="menu-item nav-item" data-menu-action="ts-toggle" aria-expanded="false" aria-controls="mobile-menu-ts-submenu">
           <span class="menu-item-icon" aria-hidden="true">◷</span>
           <span class="menu-item-label">timestamps</span>
           <span class="menu-item-toggle" id="mobile-menu-ts-state">off</span>
@@ -234,7 +214,7 @@
           <span class="menu-item-label">FAQ</span>
           <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
-        <button type="button" class="menu-item nav-item u-hidden" id="mobile-menu-diag" data-menu-action="diag">
+        <button type="button" class="menu-item nav-item u-hidden" data-menu-action="diag">
           <span class="menu-item-icon" aria-hidden="true">◇</span>
           <span class="menu-item-label">diag</span>
           <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
@@ -265,7 +245,7 @@
         <button class="rail-section-header nav-item" id="rail-recent-header" type="button" title="Toggle Recent commands section" aria-label="Toggle Recent">
           <span class="rail-section-header-left">
             <span class="disclosure-chev" aria-hidden="true">▸</span>
-            <span class="rail-section-label">Recent</span>
+            <span>Recent</span>
           </span>
           <span class="rail-section-count" id="rail-recent-count">0</span>
         </button>
@@ -278,7 +258,7 @@
         <button class="rail-section-header nav-item" id="rail-workflows-header" type="button" title="Toggle Workflows section" aria-label="Toggle Workflows">
           <span class="rail-section-header-left">
             <span class="disclosure-chev" aria-hidden="true">▸</span>
-            <span class="rail-section-label">Workflows</span>
+            <span>Workflows</span>
           </span>
           <span class="rail-section-count" id="rail-workflows-count">0</span>
         </button>
@@ -425,7 +405,7 @@
 <div id="history-panel" class="mobile-sheet-surface chrome-drawer">
   <div class="history-panel-header surface-header">
     <span class="history-panel-title">HISTORY</span>
-    <button id="hist-clear-all-btn" class="history-action-btn history-panel-clear-all btn btn-secondary btn-compact" type="button">delete all</button>
+    <button id="hist-clear-all-btn" class="history-action-btn btn btn-secondary btn-compact" type="button">delete all</button>
     <button class="close-btn history-panel-close" id="history-close" type="button" aria-label="Close history panel">✕</button>
   </div>
   <div class="history-panel-body surface-body nice-scroll">

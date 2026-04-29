@@ -67,6 +67,7 @@ function mountHistoryHarness() {
   const historyPaginationSummary = document.getElementById('history-pagination-summary')
   const historyPaginationControls = document.getElementById('history-pagination-controls')
   const cmdInput = document.getElementById('cmd')
+  window.open = vi.fn()
   const apiFetch = vi.fn((url) => {
     if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
       return Promise.resolve({
@@ -114,7 +115,6 @@ function mountHistoryHarness() {
       setTabStatus: vi.fn(),
       hideTabKillBtn: vi.fn(),
       showToast: vi.fn(),
-      window: { open: vi.fn() },
       refreshHistoryPanel: () => {},
       renderHistory: () => {},
       hideHistoryPanel: vi.fn(),
@@ -211,15 +211,6 @@ function mountMobileHarness() {
     shareUrl: vi.fn(() => Promise.resolve()),
     showToast: vi.fn(),
     _toggleStar: vi.fn(),
-    _historyPageWindow: (page, pageCount) => {
-      const totalPages = Math.max(0, Number(pageCount) || 0)
-      if (totalPages <= 0) return []
-      if (totalPages <= 3) return Array.from({ length: totalPages }, (_, idx) => idx + 1)
-      const current = Math.min(Math.max(1, Number(page) || 1), totalPages)
-      if (current <= 2) return [1, 2, 3, '..', totalPages]
-      if (current >= totalPages - 1) return [1, '..', totalPages - 2, totalPages - 1, totalPages]
-      return [1, '..', current - 1, current, current + 1, '..', totalPages]
-    },
   }
 
   window.apiFetch = apiFetch
@@ -236,7 +227,7 @@ function mountMobileHarness() {
   fromDomScripts(
     ['app/static/js/mobile_chrome.js'],
     globals,
-    '{ _mobileChrome: window._mobileChrome }',
+    '{}',
   )
 
   return { apiFetch, mobileMenuHistoryBtn: document.querySelector('[data-menu-action="history"]') }

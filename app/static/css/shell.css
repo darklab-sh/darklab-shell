@@ -320,25 +320,6 @@ body.ts-clock .output .shell-prompt-wrap {
   flex-shrink: 0;
 }
 
-.terminal-wordmark {
-  margin-right: auto;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: color-mix(in srgb, var(--theme-toolbar-button-text) 88%, var(--text));
-  text-decoration: none;
-  opacity: 0.92;
-  letter-spacing: 0.7px;
-  align-self: center;
-  padding-bottom: 1px;
-  border-bottom: 1px solid transparent;
-  transition: color 0.2s, opacity 0.2s, border-color 0.2s;
-}
-.terminal-wordmark:hover {
-  color: var(--text);
-  opacity: 0.94;
-  border-bottom-color: color-mix(in srgb, var(--text) 72%, transparent);
-}
-
 .terminal-body {
   position: relative;
 }
@@ -1560,13 +1541,6 @@ body.mobile-terminal-mode .output-follow-btn {
   font-weight: 700;
 }
 
-.faq-limits-note {
-  display: block;
-  margin-top: 12px;
-  color: var(--muted);
-  font-style: italic;
-}
-
 @media (max-width: 720px) {
   .faq-limits-row {
     grid-template-columns: 1fr;
@@ -1638,11 +1612,6 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 .line.fake-help-row {
   margin: 1px 0;
-}
-.line.fake-help-note {
-  color: var(--muted);
-  font-style: italic;
-  margin-bottom: 2px;
 }
 .line.fake-signal-summary-header {
   color: var(--blue);
@@ -1740,8 +1709,7 @@ body .faq-a {
 }
 body .prompt-prefix,
 body .wlc-prompt,
-body .mobile-prompt-label,
-body #mobile-composer-prefix {
+body .mobile-prompt-label {
   color: var(--blue);
 }
 body .welcome-command-badge {
@@ -1859,15 +1827,6 @@ body .tab .tab-status.ok { background: var(--green); }
   .shortcuts-list {
     column-count: 1;
   }
-}
-.shortcuts-note {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--border);
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.5;
 }
 .shortcuts-close {
   background: transparent;

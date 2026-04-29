@@ -291,15 +291,6 @@ body #ln-btn.active {
 .tab .tab-status.killed { background: var(--red); }
 .tab .tab-status.idle { background: var(--muted); }
 
-.terminal-bar-btns {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  flex-shrink: 0;
-  padding: 0 8px 0 6px;
-  border-right: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-}
-
 #new-tab-btn {
   display: inline-flex;
   align-items: center;
@@ -637,8 +628,7 @@ mark.search-hl.current { background: var(--theme-search-highlight-current-bg); }
 }
 
 /* ── Permalink toast ── */
-#permalink-toast,
-#copy-toast {
+#permalink-toast {
   position: fixed;
   bottom: 24px;
   left: 50%;
@@ -678,39 +668,33 @@ mark.search-hl.current { background: var(--theme-search-highlight-current-bg); }
 .toast-action-btn:active {
   opacity: 1;
 }
-#permalink-toast.toast-success,
-#copy-toast.toast-success {
+#permalink-toast.toast-success {
   background: var(--surface);
   border-color: var(--green-dim);
   color: var(--green);
 }
-#permalink-toast.toast-error,
-#copy-toast.toast-error {
+#permalink-toast.toast-error {
   background: color-mix(in srgb, var(--red) 8%, var(--bg));
   border-color: color-mix(in srgb, var(--red) 45%, transparent);
   color: var(--red);
 }
-#permalink-toast.show,
-#copy-toast.show {
+#permalink-toast.show {
   transform: translateX(-50%) translateY(0);
   opacity: 1;
   visibility: visible;
 }
-body #permalink-toast,
-body #copy-toast {
+body #permalink-toast {
   background: var(--theme-toast-bg);
   border-color: var(--theme-toast-border);
   color: var(--theme-toast-text);
   box-shadow: var(--theme-toast-shadow);
 }
-body #permalink-toast.toast-success,
-body #copy-toast.toast-success {
+body #permalink-toast.toast-success {
   background: var(--theme-toast-bg);
   border-color: var(--theme-toast-border);
   color: var(--theme-toast-text);
 }
-body #permalink-toast.toast-error,
-body #copy-toast.toast-error {
+body #permalink-toast.toast-error {
   background: var(--theme-toast-error-bg);
   border-color: var(--theme-toast-error-border);
   color: var(--theme-toast-error-text);
@@ -1081,17 +1065,6 @@ body #history-panel { background: var(--theme-chrome-bg); }
 }
 .history-entry-meta .exit-ok { color: var(--green); }
 .history-entry-meta .exit-fail { color: var(--red); }
-.history-entry-icon {
-  color: var(--muted);
-  cursor: default;
-  font-size: 18px;
-  transform: none;
-  padding-right: 2px;
-}
-.history-delete-note {
-  color: var(--muted);
-  font-size: 11px;
-}
 .history-actions {
   display: flex;
   gap: 6px;
@@ -1280,10 +1253,6 @@ body #history-panel { background: var(--theme-chrome-bg); }
 @media (hover: hover) {
   #hamburger-btn:hover { color: var(--green); border-color: var(--green-dim); }
 }
-
-/* .mobile-sheet-handle was retired in favour of the .gesture-handle primitive
-   shared by every mobile bottom-sheet — see mobile-chrome.css and
-   app/static/js/mobile_sheet.js::bindMobileSheet. */
 
 /* ── Selected-card primitive ─────────────────────────────────────────────
    Shared visual for "this card is the current selection from a set."
@@ -1618,16 +1587,12 @@ body #history-panel { background: var(--theme-chrome-bg); }
   color: var(--green);
   background: color-mix(in srgb, var(--green) 8%, transparent);
 }
-.nav-item.is-muted { color: var(--muted); }
 
 /* ── Close-btn primitive ────────────────────────────────────────────────────
    The single icon-close control. Composes with faq-close, workflows-close,
    shortcuts-close, theme-close, options-close, history-panel-close,
    search-close-btn, sheet-close. Surface classes remain as JS hooks and
    for surface-local overrides (e.g. sheet-close mobile touch padding).
-
-   Subtle variant (.close-btn-subtle) renders with opacity-only chrome for
-   contexts where the X should recede until hovered.
 
    Documented exception: .tab .tab-close retains its own surface-specific
    chrome (circular shape, per-theme bg/border tokens, parent-hover opacity
@@ -1662,22 +1627,10 @@ body #history-panel { background: var(--theme-chrome-bg); }
   pointer-events: none;
 }
 
-.close-btn-subtle {
-  opacity: 0.4;
-  margin-left: 0;
-  padding: 1px 4px;
-  font-size: 13px;
-}
-.close-btn-subtle:hover:not([aria-disabled="true"]):not(:disabled) {
-  opacity: 1;
-  background: color-mix(in srgb, var(--red) 12%, transparent);
-  color: var(--red);
-}
-
 /* ── Toggle-btn primitive ───────────────────────────────────────────────────
    aria-pressed mode toggles: case-sensitive / regex in search, starred
-   filter, mobile recents filter-checks, star icons on history and recents
-   rows. The "is the mode on?" state is always carried by aria-pressed; the
+   filter, and mobile recents filter-checks. The "is the mode on?" state is
+   always carried by aria-pressed; the
    CSS only reacts to that attribute. */
 .toggle-btn {
   display: inline-flex;
@@ -1716,25 +1669,4 @@ body #history-panel { background: var(--theme-chrome-bg); }
   opacity: 0.45;
   cursor: not-allowed;
   pointer-events: none;
-}
-
-/* Star toggle — icon-only variant used by history and recents rows. Yellow
-   when pressed is a named exception to the semantic color mapping (starred
-   items use amber regardless). */
-.toggle-btn-star {
-  border: none;
-  padding: 2px 4px;
-  min-height: 20px;
-  font-size: 14px;
-  color: var(--muted);
-}
-.toggle-btn-star:hover:not([aria-disabled="true"]):not(:disabled) {
-  color: var(--amber);
-  border: none;
-  background: transparent;
-}
-.toggle-btn-star[aria-pressed="true"] {
-  color: var(--amber);
-  border: none;
-  background: transparent;
 }

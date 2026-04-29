@@ -29,7 +29,7 @@
 // - preventFocusTheft: binds pointerdown → preventDefault so pressing a
 //   chrome button does not pull focus off the composer (matches the
 //   pointerdown + preventDefault pattern used today around the mobile
-//   edit-bar buttons)
+//   keyboard helper buttons)
 (function (global) {
   'use strict';
 

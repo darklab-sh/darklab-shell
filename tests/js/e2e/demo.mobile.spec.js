@@ -231,7 +231,7 @@ async function mountKeyboard(page) {
     el.appendChild(img)
     document.body.appendChild(el)
 
-    // Activate mobile-keyboard-open so the keyboard helper bar (#mobile-edit-bar)
+    // Activate mobile-keyboard-open so the keyboard helper bar (#mobile-kb-helper)
     // becomes visible. getMobileKeyboardOffset is patched to 272 so layout code
     // sees the correct offset. isMobileKeyboardOpen is patched to check for the
     // fake keyboard element — syncMobileViewportState calls isMobileKeyboardOpen

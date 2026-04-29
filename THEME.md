@@ -307,17 +307,9 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
-| `tabs_bar_scrollbar_track` | `rgba(255,255,255,0.06)` | `rgba(0,0,0,0.08)` | Tabs bar scrollbar track |
-| `tabs_bar_scrollbar_thumb` | `#6d6d6d` | `#7890a8` | Tabs bar scrollbar thumb |
-| `tabs_bar_scrollbar_thumb_hover` | `#8a8a8a` | `#5a6878` | Hover thumb color |
-| `tab_bg` | `linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))` | `linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))` | Inactive tab background |
-| `tab_border` | `#3c3c3c` | `rgba(0,0,0,0.15)` | Inactive tab border |
 | `tab_text` | `#9a9a9a` | `#5a6878` | Inactive tab text |
 | `tab_hover_text` | `#e0e0e0` | `#101820` | Hovered tab text |
 | `tab_active_bg` | `rgba(57,255,20,0.04)` | `#c0cedd` | Active tab background |
-| `tab_active_border` | `color-mix(in srgb, var(--green) 42%, transparent)` | `#8898b0` | Active tab border |
-| `tab_active_text` | `#39ff14` | `#101820` | Active tab text |
-| `tab_active_shadow` | `none` | `inset 0 0 0 1px rgba(255,255,255,0.22)` | Active tab depth styling |
 | `tab_close_bg` | `rgba(255,255,255,0.02)` | `rgba(255,255,255,0.02)` | Close-button background inside a tab |
 | `tab_close_border` | `rgba(255,255,255,0.06)` | `rgba(255,255,255,0.06)` | Close-button border inside a tab |
 | `tab_close_hover_bg` | `color-mix(in srgb, var(--green-dim) 18%, transparent)` | `color-mix(in srgb, var(--red) 18%, transparent)` | Close-button hover background |
