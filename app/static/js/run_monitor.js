@@ -9,9 +9,15 @@
   let summaryEl = null;
   let pollTimer = null;
   let tickTimer = null;
+  let closedPollTimer = null;
+  let warmupTimer = null;
+  let openFollowupTimer = null;
   let isOpen = false;
+  let cachedRuns = [];
 
   const POLL_MS = 3000;
+  const CLOSED_POLL_MS = 8000;
+  const CPU_SAMPLE_WARMUP_MS = 900;
   const STATUS_AFFORDANCE_PULSE_KEY = 'run_monitor_status_affordance_seen';
   const resourceStateByRunId = new Map();
 
@@ -62,6 +68,9 @@
         cpuPercent = (deltaCpu / elapsedSeconds) * 100;
       }
     }
+    if (cpuSeconds !== null && !_isTelemetryNumber(cpuPercent)) {
+      cpuPercent = Number.NaN;
+    }
     const memoryBytes = _isTelemetryNumber(usage.memory_bytes)
       ? Number(usage.memory_bytes)
       : previous?.memory_bytes;
@@ -79,6 +88,15 @@
       resourceStateByRunId.set(runId, resolved);
     }
     return resolved;
+  }
+
+  function _runsNeedCpuFollowup(runs) {
+    return (Array.isArray(runs) ? runs : []).some((run) => {
+      const runId = String(run?.run_id || run?.id || '');
+      if (!runId) return false;
+      const state = resourceStateByRunId.get(runId);
+      return state && _isTelemetryNumber(state.cpu_seconds) && !_isTelemetryNumber(state.cpu_percent);
+    });
   }
 
   function _formatMemoryBytes(value) {
@@ -107,11 +125,11 @@
     return Math.min(100, Math.max(0, Number(value)));
   }
 
-  function _runMonitorMeter({ label, value, percent, className = '' }) {
+  function _runMonitorMeter({ label, value, percent, className = '', collecting = false, ariaValue = value }) {
     const meter = document.createElement('div');
-    meter.className = `run-monitor-meter ${className}`.trim();
-    meter.style.setProperty('--meter-percent', `${_meterPercent(percent)}%`);
-    meter.setAttribute('aria-label', `${label} ${value}`);
+    meter.className = `run-monitor-meter ${className} ${collecting ? 'run-monitor-meter-collecting' : ''}`.trim();
+    meter.style.setProperty('--meter-percent', `${collecting ? 75 : _meterPercent(percent)}%`);
+    meter.setAttribute('aria-label', `${label} ${ariaValue}`);
 
     const labelEl = document.createElement('span');
     labelEl.className = 'run-monitor-meter-label';
@@ -166,6 +184,18 @@
     return Array.isArray(data?.runs) ? data.runs : [];
   }
 
+  async function _refreshActiveRunCache({ render = false } = {}) {
+    const runs = await _loadActiveRuns();
+    cachedRuns = runs;
+    if (render || isOpen) _renderRuns(runs);
+    else runs.forEach(run => _runResourceUsage(run));
+    if (!runs.length) {
+      resourceStateByRunId.clear();
+      _stopClosedPolling();
+    }
+    return runs;
+  }
+
   function _ensureMonitor() {
     if (monitorEl && scrimEl && listEl && summaryEl) return;
 
@@ -176,7 +206,7 @@
 
     monitorEl = document.createElement('aside');
     monitorEl.id = 'run-monitor';
-    monitorEl.className = 'run-monitor chrome-drawer u-hidden';
+    monitorEl.className = 'run-monitor chrome-drawer mobile-sheet-surface u-hidden';
     monitorEl.setAttribute('role', 'dialog');
     monitorEl.setAttribute('aria-modal', 'false');
     monitorEl.setAttribute('aria-labelledby', 'run-monitor-title');
@@ -217,6 +247,9 @@
     monitorEl.append(header, listEl);
     monitorEl.addEventListener('click', event => event.stopPropagation());
     document.body.append(scrimEl, monitorEl);
+    if (typeof bindMobileSheet === 'function') {
+      bindMobileSheet(monitorEl, { onClose: () => closeRunMonitor() });
+    }
   }
 
   function _renderRuns(runs) {
@@ -275,14 +308,18 @@
       details.append(command, meta);
 
       const usage = _runResourceUsage(run);
+      const cpuValue = _formatCpuPercent(usage.cpu_percent);
+      const cpuCollecting = cpuValue === 'collecting';
       const meters = document.createElement('div');
       meters.className = 'run-monitor-meters';
       meters.append(
         _runMonitorMeter({
           label: 'CPU',
-          value: _formatCpuPercent(usage.cpu_percent),
+          value: cpuCollecting ? '' : cpuValue,
           percent: usage.cpu_percent,
           className: 'run-monitor-meter-cpu',
+          collecting: cpuCollecting,
+          ariaValue: cpuValue,
         }),
         _runMonitorMeter({
           label: 'MEM',
@@ -301,8 +338,8 @@
   async function refreshRunMonitor() {
     _ensureMonitor();
     try {
-      const runs = await _loadActiveRuns();
-      _renderRuns(runs);
+      const runs = await _refreshActiveRunCache({ render: true });
+      _scheduleOpenCpuFollowup(runs);
     } catch (err) {
       if (summaryEl) summaryEl.textContent = 'Unavailable';
       if (listEl) {
@@ -315,7 +352,60 @@
     }
   }
 
+  function _clearWarmupTimer() {
+    if (warmupTimer) clearTimeout(warmupTimer);
+    warmupTimer = null;
+  }
+
+  function _clearOpenFollowupTimer() {
+    if (openFollowupTimer) clearTimeout(openFollowupTimer);
+    openFollowupTimer = null;
+  }
+
+  function _scheduleOpenCpuFollowup(runs) {
+    _clearOpenFollowupTimer();
+    if (!isOpen || !_runsNeedCpuFollowup(runs)) return;
+    openFollowupTimer = setTimeout(() => {
+      openFollowupTimer = null;
+      if (isOpen && document.visibilityState === 'visible') void refreshRunMonitor();
+    }, CPU_SAMPLE_WARMUP_MS);
+  }
+
+  function _startClosedPolling() {
+    if (closedPollTimer) return;
+    closedPollTimer = setInterval(() => {
+      if (isOpen || document.visibilityState !== 'visible') return;
+      void _refreshActiveRunCache({ render: false }).catch(() => {});
+    }, CLOSED_POLL_MS);
+  }
+
+  function _stopClosedPolling() {
+    if (closedPollTimer) clearInterval(closedPollTimer);
+    closedPollTimer = null;
+  }
+
+  function _primeRunMonitorSamples() {
+    _clearWarmupTimer();
+    if (document.visibilityState !== 'visible') {
+      _startClosedPolling();
+      return;
+    }
+    void _refreshActiveRunCache({ render: isOpen }).then((runs) => {
+      if (!runs.length) return;
+      _startClosedPolling();
+      warmupTimer = setTimeout(() => {
+        warmupTimer = null;
+        if (document.visibilityState === 'visible') {
+          void _refreshActiveRunCache({ render: isOpen }).catch(() => {});
+        }
+      }, CPU_SAMPLE_WARMUP_MS);
+    }).catch(() => {
+      _startClosedPolling();
+    });
+  }
+
   function _startPolling() {
+    _stopClosedPolling();
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(() => {
       if (isOpen && document.visibilityState === 'visible') void refreshRunMonitor();
@@ -335,29 +425,40 @@
 
   async function openRunMonitor(options = {}) {
     const source = String(options.source || 'command');
-    let runs = [];
-    try {
-      runs = await _loadActiveRuns();
-    } catch (err) {
-      if (typeof showToast === 'function') showToast(err?.message || 'Run monitor failed to load', 'error');
-      return false;
-    }
-
     _ensureMonitor();
     isOpen = true;
     _positionMonitor();
-    document.body.classList.toggle('run-monitor-mobile-open', _isMobileRunMonitor());
+    const mobile = _isMobileRunMonitor();
+    document.body.classList.toggle('run-monitor-mobile-open', mobile);
+    monitorEl?.classList.toggle('chrome-drawer', !mobile);
     scrimEl?.classList.remove('u-hidden');
     monitorEl?.classList.remove('u-hidden');
     if (monitorEl) monitorEl.dataset.source = source;
-    _renderRuns(runs);
+    if (cachedRuns.length) _renderRuns(cachedRuns);
+    else if (summaryEl) summaryEl.textContent = 'Loading...';
     _startPolling();
+
+    let runs = [];
+    try {
+      runs = await _refreshActiveRunCache({ render: true });
+    } catch (err) {
+      if (!cachedRuns.length) {
+        closeRunMonitor();
+        if (typeof showToast === 'function') showToast(err?.message || 'Run monitor failed to load', 'error');
+        return false;
+      }
+      if (typeof showToast === 'function') showToast(err?.message || 'Run monitor failed to refresh', 'error');
+      return true;
+    }
+    _scheduleOpenCpuFollowup(runs);
     return true;
   }
 
   function closeRunMonitor() {
     isOpen = false;
     _stopPolling();
+    _clearOpenFollowupTimer();
+    if (cachedRuns.length && _activeHudStatusIsRunning()) _startClosedPolling();
     document.body.classList.remove('run-monitor-mobile-open');
     scrimEl?.classList.add('u-hidden');
     monitorEl?.classList.add('u-hidden');
@@ -415,6 +516,10 @@
     if (running) _maybePulseStatusAffordance(cell);
   }
 
+  function _activeHudStatusIsRunning() {
+    return String(document.getElementById('status')?.textContent || '').trim().toUpperCase() === 'RUNNING';
+  }
+
   function _bindHudTriggers() {
     _makeHudCellOpenMonitor(
       document.getElementById('hud-status-cell'),
@@ -438,9 +543,17 @@
   });
   document.addEventListener('visibilitychange', () => {
     if (isOpen && document.visibilityState === 'visible') void refreshRunMonitor();
+    else if (document.visibilityState === 'visible' && cachedRuns.length) _primeRunMonitorSamples();
   });
   document.addEventListener('app:status-changed', event => {
-    _syncStatusAffordance(event?.detail?.status);
+    const status = String(event?.detail?.status || '').trim().toLowerCase();
+    _syncStatusAffordance(status);
+    if (status === 'running') {
+      _primeRunMonitorSamples();
+    } else if (!isOpen) {
+      _clearWarmupTimer();
+      _stopClosedPolling();
+    }
   });
   window.addEventListener('resize', () => {
     if (isOpen) _positionMonitor();

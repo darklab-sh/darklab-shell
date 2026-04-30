@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fromDomScripts } from './helpers/extract.js'
 
-function loadRunMonitor({ runs = [] } = {}) {
+function loadRunMonitor({ runs = [], mobile = false, bindMobileSheet = undefined } = {}) {
   const responses = Array.isArray(runs[0]) ? runs : [runs]
   let responseIndex = 0
   const apiFetch = vi.fn(() => Promise.resolve({
@@ -12,7 +12,7 @@ function loadRunMonitor({ runs = [] } = {}) {
       return Promise.resolve({ runs: response })
     },
   }))
-  window.matchMedia = vi.fn(() => ({ matches: false }))
+  window.matchMedia = vi.fn(() => ({ matches: mobile }))
   return fromDomScripts(
     ['app/static/js/run_monitor.js'],
     {
@@ -22,6 +22,7 @@ function loadRunMonitor({ runs = [] } = {}) {
       showToast: vi.fn(),
       getTabs: vi.fn(() => []),
       activateTab: vi.fn(),
+      ...(bindMobileSheet ? { bindMobileSheet } : {}),
     },
     `{
       apiFetch,
@@ -41,6 +42,10 @@ describe('Run Monitor', () => {
     `
     sessionStorage.clear()
     vi.useRealTimers()
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    })
   })
 
   it('renders active-run CPU and memory telemetry when available', async () => {
@@ -63,7 +68,11 @@ describe('Run Monitor', () => {
 
     await openRunMonitor({ source: 'test' })
 
-    expect(document.querySelector('.run-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU n/a')
+    const cpuMeter = document.querySelector('.run-monitor-meter-cpu')
+    expect(cpuMeter?.getAttribute('aria-label')).toBe('CPU collecting')
+    expect(cpuMeter?.classList.contains('run-monitor-meter-collecting')).toBe(true)
+    expect(cpuMeter?.style.getPropertyValue('--meter-percent')).toBe('75%')
+    expect(cpuMeter?.querySelector('.run-monitor-meter-value')?.textContent).toBe('')
     expect(document.querySelector('.run-monitor-meter-mem')?.getAttribute('aria-label')).toBe('MEM 512 MB')
     expect(document.querySelector('.run-monitor-meter-mem')?.style.getPropertyValue('--meter-percent')).toBe('50%')
 
@@ -90,6 +99,97 @@ describe('Run Monitor', () => {
     closeRunMonitor()
   })
 
+  it('warms CPU samples while closed so first open can show a percent', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
+    const started = new Date().toISOString()
+    const { openRunMonitor, closeRunMonitor, apiFetch } = loadRunMonitor({
+      runs: [
+        [
+          {
+            run_id: 'run-warm',
+            pid: 1234,
+            command: 'nmap -sV darklab.sh',
+            started,
+            resource_usage: { status: 'ok', cpu_seconds: 5, memory_bytes: 4096 },
+          },
+        ],
+        [
+          {
+            run_id: 'run-warm',
+            pid: 1234,
+            command: 'nmap -sV darklab.sh',
+            started,
+            resource_usage: { status: 'ok', cpu_seconds: 5.4, memory_bytes: 8192 },
+          },
+        ],
+        [
+          {
+            run_id: 'run-warm',
+            pid: 1234,
+            command: 'nmap -sV darklab.sh',
+            started,
+            resource_usage: { status: 'ok', cpu_seconds: 5.4, memory_bytes: 8192 },
+          },
+        ],
+      ],
+    })
+
+    document.dispatchEvent(new CustomEvent('app:status-changed', { detail: { status: 'running' } }))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    vi.setSystemTime(new Date('2026-01-01T00:00:01Z'))
+    await vi.advanceTimersByTimeAsync(900)
+
+    await openRunMonitor({ source: 'test' })
+
+    expect(apiFetch).toHaveBeenCalledTimes(3)
+    expect(document.querySelector('.run-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU 44%')
+    expect(document.querySelector('.run-monitor-meter-mem')?.getAttribute('aria-label')).toBe('MEM 8.0 KB')
+
+    closeRunMonitor()
+  })
+
+  it('does a quick follow-up refresh after opening on a baseline-only CPU sample', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
+    const started = new Date().toISOString()
+    const { openRunMonitor, closeRunMonitor, apiFetch } = loadRunMonitor({
+      runs: [
+        [
+          {
+            run_id: 'run-open-followup',
+            pid: 1234,
+            command: 'ffuf -u https://ip.darklab.sh/FUZZ',
+            started,
+            resource_usage: { status: 'ok', cpu_seconds: 2, memory_bytes: 4096 },
+          },
+        ],
+        [
+          {
+            run_id: 'run-open-followup',
+            pid: 1234,
+            command: 'ffuf -u https://ip.darklab.sh/FUZZ',
+            started,
+            resource_usage: { status: 'ok', cpu_seconds: 2.9, memory_bytes: 4096 },
+          },
+        ],
+      ],
+    })
+
+    await openRunMonitor({ source: 'test' })
+    expect(document.querySelector('.run-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU collecting')
+
+    vi.setSystemTime(new Date('2026-01-01T00:00:01Z'))
+    await vi.advanceTimersByTimeAsync(900)
+
+    expect(apiFetch).toHaveBeenCalledTimes(2)
+    expect(document.querySelector('.run-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU 47%')
+
+    closeRunMonitor()
+  })
+
   it('opens as a header-only drawer when there are no active runs', async () => {
     const { openRunMonitor, closeRunMonitor } = loadRunMonitor({ runs: [] })
 
@@ -100,6 +200,25 @@ describe('Run Monitor', () => {
     expect(document.querySelector('.run-monitor-list')?.children.length).toBe(0)
 
     closeRunMonitor()
+  })
+
+  it('uses mobile sheet chrome and shared sheet binding on mobile', async () => {
+    const bindMobileSheet = vi.fn((sheet) => {
+      const grab = document.createElement('div')
+      grab.className = 'sheet-grab gesture-handle'
+      grab.setAttribute('aria-hidden', 'true')
+      sheet.insertBefore(grab, sheet.firstChild || null)
+    })
+    const { openRunMonitor } = loadRunMonitor({ runs: [], mobile: true, bindMobileSheet })
+
+    await openRunMonitor({ source: 'mobile-peek' })
+
+    const monitor = document.getElementById('run-monitor')
+    expect(monitor?.classList.contains('mobile-sheet-surface')).toBe(true)
+    expect(monitor?.classList.contains('chrome-drawer')).toBe(false)
+    expect(document.body.classList.contains('run-monitor-mobile-open')).toBe(true)
+    expect(document.querySelector('#run-monitor > .sheet-grab.gesture-handle')).not.toBeNull()
+    expect(bindMobileSheet).toHaveBeenCalledWith(monitor, expect.objectContaining({ onClose: expect.any(Function) }))
   })
 
   it('calculates CPU from cumulative samples, keeps the last value, and caps display at 100%', async () => {
@@ -150,7 +269,7 @@ describe('Run Monitor', () => {
     })
 
     await openRunMonitor({ source: 'test' })
-    expect(document.querySelector('.run-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU n/a')
+    expect(document.querySelector('.run-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU collecting')
 
     vi.setSystemTime(new Date('2026-01-01T00:00:01Z'))
     await window.refreshRunMonitor()

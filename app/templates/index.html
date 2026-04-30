@@ -501,33 +501,46 @@
       <div id="workspace-message" class="workspace-message u-hidden"></div>
       <nav id="workspace-breadcrumbs" class="workspace-breadcrumbs" aria-label="Files folder path"></nav>
       <div id="workspace-file-list" class="workspace-file-list" aria-live="polite"></div>
-      <section id="workspace-viewer" class="workspace-viewer u-hidden" aria-live="polite">
-        <div class="workspace-viewer-header">
-          <div>
-            <div class="workspace-label">Viewing</div>
-            <div id="workspace-viewer-title" class="workspace-file-name"></div>
-          </div>
-          <div class="workspace-viewer-actions">
-            <button type="button" class="btn btn-secondary btn-compact" data-workspace-viewer-action="edit">Edit</button>
-            <button type="button" class="btn btn-secondary btn-compact" data-workspace-viewer-action="download">Download</button>
-            <button type="button" class="btn btn-secondary btn-compact" data-workspace-viewer-action="delete">Delete</button>
-            <button type="button" class="btn btn-secondary btn-compact" id="workspace-close-viewer-btn">Close view</button>
-          </div>
-        </div>
-        <pre id="workspace-viewer-text" class="workspace-viewer-text nice-scroll"></pre>
-      </section>
-      <form id="workspace-editor" class="workspace-editor u-hidden">
-        <label class="workspace-label" for="workspace-path-input">File Name</label>
-        <input id="workspace-path-input" class="form-input form-control" type="text" placeholder="targets.txt" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text">
-        <label class="workspace-label" for="workspace-text-input">Contents</label>
-        <textarea id="workspace-text-input" class="workspace-textarea form-control nice-scroll" rows="12" placeholder="Paste file contents here" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text"></textarea>
-        <div class="workspace-editor-actions">
-          <button type="button" class="btn btn-secondary btn-compact" id="workspace-cancel-edit-btn">Close editor</button>
-          <button type="submit" class="btn btn-primary btn-compact" id="workspace-save-btn">Save file</button>
-        </div>
-      </form>
     </div>
   </div>
+</div>
+
+<div id="workspace-editor-overlay" class="modal-overlay mobile-sheet-overlay u-hidden">
+  <form id="workspace-editor" class="workspace-editor mobile-sheet-surface u-hidden" role="dialog" aria-modal="true" aria-labelledby="workspace-editor-title">
+    <div class="workspace-viewer-header">
+      <div>
+        <div class="workspace-label">File editor</div>
+        <div id="workspace-editor-title" class="workspace-file-name">New file</div>
+      </div>
+      <button type="button" class="btn btn-secondary btn-compact" id="workspace-cancel-edit-btn">Close editor</button>
+    </div>
+    <label class="workspace-label" for="workspace-path-input">File Name</label>
+    <input id="workspace-path-input" class="form-input form-control" type="text" placeholder="targets.txt" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text">
+    <label class="workspace-label" for="workspace-text-input">Contents</label>
+    <textarea id="workspace-text-input" class="workspace-textarea form-control nice-scroll" rows="18" placeholder="Paste file contents here" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text"></textarea>
+    <div class="workspace-editor-actions">
+      <button type="submit" class="btn btn-primary btn-compact" id="workspace-save-btn">Save file</button>
+    </div>
+  </form>
+</div>
+
+<div id="workspace-viewer-overlay" class="modal-overlay mobile-sheet-overlay u-hidden">
+  <section id="workspace-viewer" class="workspace-viewer mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="workspace-viewer-title" aria-live="polite">
+    <div class="workspace-viewer-header">
+      <div>
+        <div class="workspace-label">Viewing</div>
+        <div id="workspace-viewer-title" class="workspace-file-name"></div>
+      </div>
+      <div class="workspace-viewer-actions">
+        <button type="button" class="btn btn-secondary btn-compact" data-workspace-viewer-action="edit">Edit</button>
+        <button type="button" class="btn btn-secondary btn-compact" data-workspace-viewer-action="download">Download</button>
+        <button type="button" class="btn btn-secondary btn-compact" data-workspace-viewer-action="delete">Delete</button>
+        <button type="button" class="btn btn-secondary btn-compact" id="workspace-close-viewer-btn">Close view</button>
+      </div>
+    </div>
+    <div id="workspace-viewer-controls" class="workspace-viewer-controls"></div>
+    <div id="workspace-viewer-text" class="workspace-viewer-text nice-scroll"></div>
+  </section>
 </div>
 
 <!-- Workflows Modal -->

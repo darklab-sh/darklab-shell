@@ -948,6 +948,20 @@
   color: var(--green);
 }
 
+.run-monitor-meter-collecting .run-monitor-meter-ring {
+  animation: run-monitor-meter-spin 960ms linear infinite;
+}
+
+@keyframes run-monitor-meter-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run-monitor-meter-collecting .run-monitor-meter-ring {
+    animation: none;
+  }
+}
+
 .run-monitor-empty {
   padding: 14px;
   color: var(--muted);
@@ -991,13 +1005,18 @@ body.mobile-terminal-mode .tabbar-scroll { display: contents; }
     background: var(--theme-chrome-bg);
     border: 1px solid var(--border-bright);
     border-bottom: none;
-    border-radius: 8px 8px 0 0;
+    border-radius: 14px 14px 0 0;
     box-shadow: 0 -14px 28px var(--theme-chrome-shadow);
     font-family: var(--font-mono);
+    animation: none;
   }
 
   .run-monitor-scrim {
     z-index: 119;
     background: color-mix(in srgb, var(--bg) 45%, transparent);
+  }
+
+  body.run-monitor-mobile-open .run-monitor-close {
+    display: none !important;
   }
 }

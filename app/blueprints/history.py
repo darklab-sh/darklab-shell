@@ -257,9 +257,10 @@ def get_history():
         type_filter = "all"
 
     def _query_history(conn, *, force_like=False):
-        run_rows = []
         roots_rows = []
         fts_q = None
+        run_sql = ""
+        run_params: list[Any] = []
         snapshots_available = _history_table_exists(conn, "snapshots")
         if type_filter in {"all", "runs"}:
             run_sql, run_params, fts_q = _history_base_clause(
@@ -272,13 +273,6 @@ def get_history():
                 starred_only=starred_only,
                 force_like=force_like,
             )
-            run_rows = conn.execute(
-                "SELECT r.id, r.command, r.started, r.finished, r.exit_code, "
-                "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated"
-                + run_sql
-                + " ORDER BY r.started DESC",
-                run_params,
-            ).fetchall()
             roots_rows = conn.execute(
                 "SELECT "
                 "CASE "
@@ -293,7 +287,8 @@ def get_history():
                 run_params,
             ).fetchall()
 
-        snapshot_rows = []
+        snap_sql = ""
+        snap_params: list[Any] = []
         snapshot_filters_active = bool(
             command_root
             or exit_code_filter not in {"", "all"}
@@ -306,39 +301,54 @@ def get_history():
             and not snapshot_filters_active
         ):
             snap_sql, snap_params = _history_snapshot_base_clause(session_id, query, date_range)
-            snapshot_rows = conn.execute(
-                "SELECT s.id, s.label, s.created"
-                + snap_sql
-                + " ORDER BY s.created DESC",
-                snap_params,
-            ).fetchall()
 
-        items = []
-        for row in run_rows:
-            item = dict(row)
-            item["type"] = "run"
-            item["label"] = item["command"]
-            item["created"] = item["started"]
-            item["preview_truncated"] = bool(item.get("preview_truncated"))
-            item["full_output_available"] = bool(item.get("full_output_available"))
-            item["full_output_truncated"] = bool(item.get("full_output_truncated"))
-            item["_sort_created"] = item["started"]
-            items.append(item)
-        for row in snapshot_rows:
-            item = dict(row)
-            item["type"] = "snapshot"
-            item["created"] = item["created"]
-            item["_sort_created"] = item["created"]
-            items.append(item)
-
-        items.sort(key=lambda item: item.get("_sort_created") or "", reverse=True)
-        total_count = len(items) if include_total else None
+        total_count = None
+        if include_total:
+            total_count = 0
+            if run_sql:
+                total_count += int(conn.execute("SELECT COUNT(*) AS count" + run_sql, run_params).fetchone()["count"])
+            if snap_sql:
+                total_count += int(conn.execute("SELECT COUNT(*) AS count" + snap_sql, snap_params).fetchone()["count"])
         page_count = math.ceil(total_count / page_size) if include_total and total_count else 0
         current_page = max(page, 1)
         if include_total:
             current_page = min(current_page, page_count or 1)
         offset = (current_page - 1) * page_size
-        paged_items = items[offset:offset + page_size]
+
+        run_select = (
+            "SELECT 'run' AS type, r.id, r.command, r.started, r.finished, r.exit_code, "
+            "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated, "
+            "r.command AS label, r.started AS created, r.started AS sort_created"
+            + run_sql
+        ) if run_sql else ""
+        snap_select = (
+            "SELECT 'snapshot' AS type, s.id, NULL AS command, NULL AS started, NULL AS finished, NULL AS exit_code, "
+            "NULL AS preview_truncated, NULL AS output_line_count, NULL AS full_output_available, "
+            "NULL AS full_output_truncated, s.label AS label, s.created AS created, s.created AS sort_created"
+            + snap_sql
+        ) if snap_sql else ""
+        item_sql_parts = [part for part in (run_select, snap_select) if part]
+        if item_sql_parts:
+            item_sql = " UNION ALL ".join(item_sql_parts) + " ORDER BY sort_created DESC LIMIT ? OFFSET ?"
+            item_params = []
+            if run_select:
+                item_params.extend(run_params)
+            if snap_select:
+                item_params.extend(snap_params)
+            item_params.extend([page_size, offset])
+            rows = conn.execute(item_sql, item_params).fetchall()
+        else:
+            rows = []
+
+        paged_items = []
+        for row in rows:
+            item = dict(row)
+            item["_sort_created"] = item.pop("sort_created", None)
+            if item.get("type") == "run":
+                item["preview_truncated"] = bool(item.get("preview_truncated"))
+                item["full_output_available"] = bool(item.get("full_output_available"))
+                item["full_output_truncated"] = bool(item.get("full_output_truncated"))
+            paged_items.append(item)
         paged_runs = [item for item in paged_items if item.get("type") == "run"]
         return paged_items, paged_runs, roots_rows, total_count, page_count, current_page, fts_q
 

@@ -93,7 +93,7 @@ def _maybe_cleanup_workspaces():
         return
     _last_workspace_cleanup_monotonic = now
     try:
-        removed = cleanup_inactive_workspaces(CFG)
+        removed = cleanup_inactive_workspaces(CFG, skip_session_id=get_session_id())
         if removed:
             log.info("WORKSPACE_CLEANUP", extra={"removed": removed})
     except Exception:

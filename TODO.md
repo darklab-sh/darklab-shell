@@ -7,6 +7,7 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 ## Table of Contents
 
 - [Open TODOs](#open-todos)
+- [Recently Completed](#recently-completed)
 - [Research](#research)
 - [Known Issues](#known-issues)
 - [Technical Debt](#technical-debt)
@@ -21,6 +22,132 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 ---
 
 ## Open TODOs
+
+- **User-created workflows and workflow CLI**
+  - Add user-created workflows as a session-scoped layer above built-in workflows.
+    - Workflows should have a title, optional description, and ordered command steps.
+    - Each step should support a command template and optional note/instructions.
+    - Use `{{variables}}` for workflow inputs so workflow templating stays distinct from session command variables like `$HOST`.
+    - User-created workflows should appear above built-ins in the Workflows panel, probably under `My workflows`.
+  - Add a workflow editor modal.
+    - First step starts with one command field and helper copy explaining `{{variables}}`.
+    - A `+` control adds additional command steps dynamically.
+    - Support edit, duplicate, delete, and maybe export/import once the core save path is stable.
+    - Infer required variables from all step templates and show them before save/run.
+  - Add a `workflow` terminal command so workflows can be launched without opening the modal.
+    - `workflow list`
+    - `workflow show <name>`
+    - `workflow run <name>`
+    - `workflow run <name> --host example.com --ports 80,443`
+    - If required variables are missing, prompt for them transcript-style before preparing the workflow.
+    - Autocomplete should suggest workflow names and known variable flags for the selected workflow.
+  - Decide how `Run All` interacts with user-created workflows.
+    - Keep the existing guided one-step-at-a-time behavior available.
+    - Allow `Run All` only after variables are resolved and the full expanded command list is previewed.
+    - Consider requiring confirmation when a workflow contains commands marked `risky`, `slow`, or `high-output` by command metadata.
+    - Preserve operator control: even if workflows become small automation tasks, they should remain bounded, visible, and cancellable.
+  - Store workflow run context.
+    - Link each generated run back to the workflow name/id and step index.
+    - In history, show when a run came from a workflow.
+    - Later, project mode can group workflow runs under the active project and track workflow progress.
+  - Add a follow-up path for "promote recent runs to workflow."
+    - Let users select recent history rows and save them as a workflow.
+    - Allow replacing repeated literals with `{{variables}}` during promotion.
+  - Add tests for workflow template parsing, variable prompting, CLI flag inputs, autocomplete, Run All preview/confirmation, history linkage, and session-token migration.
+
+- **Run comparison**
+  - Promote run comparison from a broad idea into a concrete history-centered feature.
+  - Add a `compare` action to run rows in the history drawer.
+    - If a plausible previous similar run exists, offer `Compare with previous similar run` as the primary/default path.
+    - Also offer a manual picker so the user can search/select a second run.
+    - Prefill the manual picker with filters based on the selected source run: command root, inferred target when available, and project later.
+  - Define "previous similar run" conservatively for the first version.
+    - Best match: same normalized command.
+    - Next best: same command root and same inferred target metadata.
+    - Fallback: same command root only, shown with weaker confidence copy.
+    - Do not over-normalize commands until the matching behavior is easy to explain.
+  - Build the first compare view as a focused modal/drawer rather than a full side-by-side editor.
+    - Show run A / run B commands, timestamps, exit codes, elapsed times, and output line counts.
+    - Show summary deltas: exit code changed, duration changed, finding count changed, output grew/shrank.
+    - Show collapsible `Added lines` and `Removed lines` sections.
+    - Hide unchanged lines by default.
+    - Include actions to open/restore each source run.
+  - Add follow-up entry points after the history-row version works.
+    - Active tab `compare` action for restored/completed runs.
+    - Findings strip action such as `compare findings with previous run`.
+    - Project baseline compare once projects exist.
+    - Snapshot/permalink compare later if the run-vs-run model proves useful.
+  - Phase the diff intelligence.
+    - Phase 1: raw text added/removed lines plus run metadata deltas.
+    - Phase 2: finding-level diff using signal/finding metadata: new, disappeared, unchanged, and changed-severity findings.
+  - Phase 3: tool-aware diffs for common outputs such as `nmap` ports/services, URL/status/title lists, subdomain lists, and TLS certificate changes.
+  - Add tests for best-previous-run selection, manual picker filtering, raw added/removed diff output, empty/no-match states, large output handling, and later finding-aware diffs.
+
+- **ProjectDiscovery session-scoped runtime state and output path surfacing**
+  - Make ProjectDiscovery tools write useful config, resume, and generated artifact state into the active session workspace instead of anonymous `/tmp/.config/...` paths.
+    - Start with `nuclei`, `subfinder`, `pd-httpx`, `katana`, and `naabu`.
+    - Keep the existing `amass` managed `-dir amass` behavior as the model for command-specific state that should persist across related commands in one session.
+    - Treat ProjectDiscovery tools as a shared family because their Go helpers generally resolve config paths through `$XDG_CONFIG_HOME` when set, falling back to `$HOME/.config`.
+  - Add a command-runtime environment layer for tool-owned state.
+    - For these tools, set `XDG_CONFIG_HOME=<session workspace>` when workspace storage is enabled so default paths become session-visible folders such as `katana/`, `subfinder/`, `httpx/`, `naabu/`, and `nuclei/`.
+    - Preserve the current `nuclei -ud /tmp/nuclei-templates` injection so large template caches stay tmpfs-backed unless we deliberately decide templates should become workspace artifacts.
+    - Keep `HOME=/tmp` in the scanner wrapper for generic tool scratch behavior.
+    - Do not make provider/API-key config files public by accident. Audit share/export package behavior before including generated ProjectDiscovery config directories.
+  - Surface container paths as user-facing workspace paths.
+    - Add a run-output postfilter that rewrites absolute paths under the current session workspace root to `/relative/path`.
+    - Example: `Creating resume file: /workspaces/sess_<hash>/katana/resume-abc.cfg` should display as `Creating resume file: /katana/resume-abc.cfg`.
+    - Keep the stored full-output artifact aligned with the user-facing transcript so restored history and share pages do not expose hashed session paths.
+  - Expand workspace-aware flags for generated directories and secondary outputs.
+    - `katana`: support `-store-response-dir` / `-srd`, `-store-field-dir` / `-sfd`, and validate whether `-resume` should autocomplete from session files.
+    - `pd-httpx`: support `-store-response-dir` / `-srd`, screenshot / response-store output directories where applicable, and config-file reads if useful.
+    - `nuclei`: review resume, trace/error log, headless artifact, and config/template related paths; keep template cache policy explicit.
+    - `subfinder`: review `-config` and provider config behavior carefully because those files can contain API keys.
+    - `naabu`: review config, input/output, nmap integration output, and metrics behavior.
+  - Testing expectations:
+    - Backend tests for command validation wrapping each selected root with `XDG_CONFIG_HOME=<session workspace>` only when workspaces are enabled.
+    - Backend tests that `nuclei` keeps `-ud /tmp/nuclei-templates` while also receiving the ProjectDiscovery config env.
+    - Route/streaming tests for rewriting current-session absolute workspace paths in output lines.
+    - Command-registry tests for any newly declared workspace directory flags.
+    - Container smoke coverage for at least `katana` resume output and one `pd-httpx` or `katana` stored-response directory.
+  - Documentation expectations:
+    - Update `docs/external-command-integrations.md` with a ProjectDiscovery section before or after the Amass section.
+    - Update README tool notes for any visible behavior changes.
+    - Update CHANGELOG and release drafts with the user-facing path behavior and the security note around provider configs.
+
+- **Declarative command runtime adaptations in `commands.yaml`**
+  - Move command-specific runtime rewrites and environment tweaks out of app-owned Python branches and into the command registry.
+    - Current hardcoded examples to migrate include:
+      - `nmap` injecting `--privileged` when absent.
+      - `nuclei` injecting `-ud /tmp/nuclei-templates` when absent.
+      - `naabu` injecting `-scan-type c` when no scan type is present.
+      - `mtr` injecting `--report-wide` plus the user-facing non-interactive note.
+      - `wapiti` injecting `-f txt -o /dev/stdout` plus the terminal-output note.
+      - `amass` managed database behavior: inject managed `-dir amass`, reject alternate DB dirs for database subcommands, rewrite that directory to the session workspace, and launch with `XDG_CONFIG_HOME=<session workspace>`.
+    - Keep the registry expressive enough for future ProjectDiscovery runtime state handling without adding more per-tool Python conditionals.
+  - Proposed `commands.yaml` model:
+    - `runtime_adaptations.inject_flags`: append or prepend flags when none of a set of equivalent flags is already present.
+    - `runtime_adaptations.managed_workspace_directory`: declare a tool-owned relative directory, applicable subcommands, the flag that receives it, whether alternate user values are rejected, and whether it counts as a workspace write.
+    - `runtime_adaptations.environment`: declare environment variables for subprocess launch, including templated values such as `{workspace_root}`, `{session_workspace}`, and `{managed_workspace_parent}`.
+    - `runtime_adaptations.output_notice`: optional notice text when a rewrite changes user-visible behavior.
+    - `runtime_adaptations.applies_to`: root/subcommand/help-flag guards so help commands are not mutated unexpectedly.
+  - Implementation notes:
+    - Normalize this metadata in the existing command-registry loader, with schema validation and safe defaults.
+    - Apply declarative adaptations after workspace flag rewriting and before deny-prefix evaluation when the injected flags need deny exemptions, or explicitly model the correct phase if some adaptations must happen later.
+    - Keep the final execution command assembled with `shlex.join` so injected paths with spaces/metacharacters stay safe.
+    - Preserve current behavior exactly during migration before adding new behavior.
+    - Do not expose arbitrary environment injection from local config without considering operator/security boundaries; this is command-registry behavior, not a free-form user command escape hatch.
+  - Testing expectations:
+    - Backend registry normalization tests for each adaptation shape.
+    - Migration parity tests proving `nmap`, `nuclei`, `naabu`, `mtr`, `wapiti`, and `amass` produce the same execution commands/notices as before.
+    - Negative tests for Amass alternate DB directories and help commands that should not receive managed directories.
+    - Tests for quoting templated workspace paths containing spaces or shell metacharacters.
+    - Docs drift tests after adding or renaming test cases.
+  - Documentation expectations:
+    - Update `docs/external-command-integrations.md` to describe declarative runtime adaptations as the source of truth.
+    - Update `ARCHITECTURE.md` command execution details so special command behavior points at `commands.yaml` instead of Python branches.
+    - Update README tool notes only where user-visible behavior changes or becomes more clearly explained.
+
+## Recently Completed
 
 ## Research
 
@@ -73,7 +200,6 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
 | History bookmarks beyond stars | M | M | Schema change + label management UI; complements run labels from terminal |
 | Saved command presets | M | M | New DB table + preset management UI |
 | Workflow replay and promotion | M | M–H | Promotion from history is the core feature; YAML parameterization is secondary |
-| Run comparison | M | H | Diff algorithm + run-selection UI; more compelling once history filtering is stronger |
 | Per-command policy metadata | M | M | Allowlist format extension + hint surfaces |
 | Richer audit trail | L–M | L | Logging additions only |
 | Autocomplete from output context | L–M | M | Narrow use case; useful but not on the critical path |
@@ -123,16 +249,6 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
   - Deferred until primary is done:
     - collapse long low-signal sections (genuinely complex, lower incremental value)
 
-- **Run comparison**
-  - Compare two runs side by side, especially for repeated scans or before/after checks.
-  - More compelling once history filtering is stronger.
-  - Focus the first version on repeated commands:
-    - compare two runs of the same command
-    - show added / removed lines
-    - surface exit-code and elapsed-time changes
-    - allow a "differences only" view
-  - The diff target should explicitly include permalinks and snapshots (not just history entries) — the most common real-world case is comparing a new scan against last month's saved permalink, not two history rows in the same session.
-
 - **Tool-specific guidance**
   - Add lightweight inline notes for tools with non-obvious web-shell behavior like `mtr`, `nmap`, `wapiti`, or `nuclei`.
   - Good fit for the existing help / FAQ / welcome surfaces.
@@ -170,7 +286,7 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
   - Add optional structured builders for common tools like `curl`, `dig`, `nmap`, and `ffuf`.
   - Keep raw-shell usage intact while making common tasks easier.
   - Build these on top of a reusable command/workflow preset model rather than as a disconnected UI feature.
-  - The autocomplete YAML already models command structure (`flags`, `expects_value`, `arg_hints`, `__positional__`). Forms should be a structured render of that same data — not a parallel model — so the two features stay consistent and share maintenance. Design against the structured command catalog (see Architecture) before building.
+  - The autocomplete YAML already models command structure (`flags`, `arguments`, `subcommands`, and `pipe_helpers`). Forms should be a structured render of that same data — not a parallel model — so the two features stay consistent and share maintenance. Design against the structured command catalog (see Architecture) before building.
 
 - **Run collections / case folders**
   - Let users group related runs and snapshots into named investigations or cases.

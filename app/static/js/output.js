@@ -36,18 +36,71 @@ let lnMode = 'off';
 
 const _OUTPUT_SYNC_BURST_LIMIT = 60;
 const _OUTPUT_BATCH_SIZE = 300;
+const _OUTPUT_APPEND_LINES_CHUNK_SIZE = 300;
 const _OUTPUT_RESTORE_TAIL_DELAYS = [0, 16, 64, 160, 320];
 const _pendingOutputBatches = new Map();
+const _OUTPUT_SIGNAL_SCOPES = ['findings', 'warnings', 'errors', 'summaries'];
+
+function promptIdentityPrefix(rawPrefix = null) {
+  const configured = rawPrefix !== null
+    ? String(rawPrefix || '')
+    : (typeof APP_CONFIG !== 'undefined' && APP_CONFIG && typeof APP_CONFIG.prompt_prefix === 'string'
+        ? APP_CONFIG.prompt_prefix
+        : '');
+  let prefix = String(configured || '').trim() || 'anon@darklab';
+  if (prefix.endsWith('$')) prefix = prefix.slice(0, -1).trimEnd();
+  prefix = prefix.replace(/:[^\s:]+$/, '').trim() || 'anon@darklab';
+  return prefix;
+}
+
+function currentPromptWorkspacePath() {
+  if (
+    typeof APP_CONFIG !== 'undefined'
+    && APP_CONFIG
+    && APP_CONFIG.workspace_enabled === true
+  ) {
+    const rawPath = typeof _workspaceCwd === 'function'
+      ? _workspaceCwd(typeof activeTabId !== 'undefined' ? activeTabId : undefined)
+      : '';
+    const parts = String(rawPath || '').split('/').map(part => String(part || '').trim()).filter(Boolean);
+    const normalized = parts.join('/');
+    if (typeof workspaceDisplayPath === 'function') return workspaceDisplayPath(normalized);
+    return normalized ? `/${normalized}` : '/';
+  }
+  return '~';
+}
+
+function buildPromptLabel(rawPrefix = null, path = null) {
+  const promptPath = path === null ? currentPromptWorkspacePath() : String(path || '~');
+  return `${promptIdentityPrefix(rawPrefix)}:${promptPath} $`;
+}
+
+function stripPromptLabelFromEchoText(text = '') {
+  const value = String(text || '');
+  const current = buildPromptLabel();
+  if (value.startsWith(current)) return value.slice(current.length).replace(/^\s+/, '');
+  const identity = promptIdentityPrefix();
+  const legacyPattern = new RegExp(`^${identity.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:[^\\s]+\\$\\s*`);
+  if (legacyPattern.test(value)) return value.replace(legacyPattern, '');
+  if (value === '$') return '';
+  if (value.startsWith('$ ')) return value.slice(2);
+  return value;
+}
 
 function _outputPromptPrefix() {
+  if (
+    typeof APP_CONFIG !== 'undefined'
+    && APP_CONFIG
+    && APP_CONFIG.workspace_enabled === true
+    && !(typeof shellPromptWrap !== 'undefined' && shellPromptWrap && shellPromptWrap.classList.contains('shell-prompt-confirm'))
+  ) {
+    return buildPromptLabel();
+  }
   const promptPrefix = (typeof shellPromptWrap !== 'undefined' && shellPromptWrap)
     ? shellPromptWrap.querySelector('.prompt-prefix')
     : document.querySelector('#shell-prompt-wrap .prompt-prefix');
   const text = promptPrefix ? String(promptPrefix.textContent || '').trim() : '';
-  const configured = typeof APP_CONFIG !== 'undefined' && APP_CONFIG && typeof APP_CONFIG.prompt_prefix === 'string'
-    ? APP_CONFIG.prompt_prefix.trim()
-    : '';
-  return text || configured || '$';
+  return text || buildPromptLabel();
 }
 
 function _formatOutputPrefix(index, tsText, includeTimestamp) {
@@ -87,16 +140,139 @@ function _prefixWidthForOutput(out) {
   return lineDigits + timestampWidth + (lineDigits && timestampWidth ? 1 : 0);
 }
 
+function _tabForOutput(out) {
+  const id = String(out?.id || '').replace(/^output-/, '');
+  return id && typeof getTab === 'function' ? getTab(id) : null;
+}
+
 function _trimOutputToMaxLines(out) {
   const max = APP_CONFIG.max_output_lines;
   if (!(max > 0) || !out || typeof out.getElementsByClassName !== 'function') return 0;
   const lines = out.getElementsByClassName('line');
-  let removed = 0;
-  while (lines.length > max) {
-    lines[0].remove();
-    removed += 1;
+  const removed = Math.max(0, lines.length - max);
+  if (!removed) return 0;
+  const removedLines = [];
+  for (let index = 0; index < removed; index += 1) {
+    if (lines[index]) removedLines.push(lines[index]);
   }
+  removedLines.forEach(line => line.remove());
   return removed;
+}
+
+function _syncOutputLinePrefixMetadata(out, tab = null) {
+  if (!out || typeof out.getElementsByClassName !== 'function') return;
+  const lines = Array.from(out.getElementsByClassName('line'));
+  const prefixStrings = [];
+  let visibleIndex = 0;
+  let maxLineNumber = Math.max(
+    Number(tab?._outputLineCounter || 0),
+    Number(out.dataset?.outputLineCounter || 0),
+  );
+
+  lines.forEach((line) => {
+    if (_isPrefixExcludedLine(line)) {
+      line.dataset.prefix = '';
+      delete line.dataset.lineNumber;
+      return;
+    }
+    visibleIndex += 1;
+    const existingNumber = Number(line.dataset.lineNumber || 0);
+    const lineNumber = existingNumber > 0 ? existingNumber : visibleIndex;
+    line.dataset.lineNumber = String(lineNumber);
+    maxLineNumber = Math.max(maxLineNumber, lineNumber);
+    const tsText = _lineTimestampPrefix(line);
+    line.dataset.prefix = tsText;
+    prefixStrings.push(_formatOutputPrefix(lineNumber, tsText, true));
+  });
+
+  const prompt = out.querySelector?.('#shell-prompt-wrap');
+  if (prompt) {
+    const promptTsText = _promptTimestampPrefix();
+    prompt.dataset.lineNumber = String(maxLineNumber + 1);
+    prompt.dataset.prefix = promptTsText;
+    prefixStrings.push(_formatOutputPrefix(maxLineNumber + 1, promptTsText, true));
+  }
+
+  out.dataset.outputLineCounter = String(maxLineNumber);
+  const targetTab = tab || _tabForOutput(out);
+  if (targetTab) targetTab._outputLineCounter = maxLineNumber;
+  if (out.style) {
+    const prefixWidth = Math.max(0, ...prefixStrings.map(s => String(s || '').length));
+    out.style.setProperty('--output-prefix-width', `${prefixWidth}ch`);
+  }
+}
+
+function _emptyOutputSignalCounts() {
+  return { findings: 0, warnings: 0, errors: 0, summaries: 0 };
+}
+
+function _isOutputSignalSummaryClassName(cls) {
+  return [
+    'fake-signal-summary-header',
+    'fake-signal-summary-section',
+    'fake-signal-summary-row',
+    'fake-signal-summary-note',
+    'fake-signal-summary-sep',
+  ].includes(cls);
+}
+
+function _outputLineHasClass(rawLine, className) {
+  const cls = String(rawLine?.cls || '');
+  return cls.split(/\s+/).filter(Boolean).includes(className);
+}
+
+function _isOutputSignalCountableLine(rawLine) {
+  if (!rawLine || _outputLineHasClass(rawLine, 'prompt-echo')) return false;
+  const classes = String(rawLine.cls || '').split(/\s+/).filter(Boolean);
+  return !classes.some(cls => _isOutputSignalSummaryClassName(cls));
+}
+
+function _isOutputBuiltinCommandRoot(root) {
+  const builtinRoots = (
+    typeof acBuiltinCommandRoots !== 'undefined' && Array.isArray(acBuiltinCommandRoots)
+  ) ? acBuiltinCommandRoots : [];
+  return !!root && builtinRoots.includes(root);
+}
+
+function _countableOutputSignalScopes(rawLine) {
+  if (!_isOutputSignalCountableLine(rawLine)) return [];
+  const commandRoot = String(rawLine?.command_root || '').trim();
+  if (_isOutputBuiltinCommandRoot(commandRoot)) return [];
+  const signals = _normalizeOutputSignals(rawLine?.signals);
+  if (!signals.length) return [];
+  const uniqueScopes = new Set(signals.filter(scope => _OUTPUT_SIGNAL_SCOPES.includes(scope)));
+  return Array.from(uniqueScopes);
+}
+
+function _ensureTabOutputSignalCounts(tab) {
+  if (!tab) return _emptyOutputSignalCounts();
+  if (!tab._outputSignalCounts || typeof tab._outputSignalCounts !== 'object') {
+    tab._outputSignalCounts = _emptyOutputSignalCounts();
+  }
+  _OUTPUT_SIGNAL_SCOPES.forEach((scope) => {
+    tab._outputSignalCounts[scope] = Math.max(0, Number(tab._outputSignalCounts[scope] || 0));
+  });
+  return tab._outputSignalCounts;
+}
+
+function _adjustTabOutputSignalCounts(tab, rawLine, delta) {
+  if (!tab || !rawLine || !delta) return;
+  const scopes = _countableOutputSignalScopes(rawLine);
+  if (!scopes.length) return;
+  const counts = _ensureTabOutputSignalCounts(tab);
+  scopes.forEach((scope) => {
+    counts[scope] = Math.max(0, Number(counts[scope] || 0) + delta);
+  });
+  tab._outputSignalCountsValid = true;
+}
+
+function _resetTabOutputSignalCounts(tab, rawLines = []) {
+  if (!tab) return;
+  tab._outputSignalCounts = _emptyOutputSignalCounts();
+  tab._outputSignalCountsValid = true;
+  (Array.isArray(rawLines) ? rawLines : []).forEach((rawLine) => {
+    _adjustTabOutputSignalCounts(tab, rawLine, 1);
+  });
 }
 
 function _syncOutputPrefixesForAppend(out, appendedLine = null) {
@@ -133,16 +309,16 @@ function _isPrefixExcludedLine(line) {
 }
 
 function _assignOutputLineNumber(out, tab, line) {
-  if (!out || !line) return;
+  if (!out || !line) return 0;
   if (_isPrefixExcludedLine(line)) {
     delete line.dataset.lineNumber;
-    return;
+    return 0;
   }
   const existing = Number(line.dataset.lineNumber || 0);
   if (existing > 0) {
     if (tab) tab._outputLineCounter = Math.max(Number(tab._outputLineCounter || 0), existing);
     out.dataset.outputLineCounter = String(Math.max(Number(out.dataset.outputLineCounter || 0), existing));
-    return;
+    return existing;
   }
   const base = Math.max(
     Number(tab?._outputLineCounter || 0),
@@ -152,6 +328,7 @@ function _assignOutputLineNumber(out, tab, line) {
   line.dataset.lineNumber = String(next);
   if (tab) tab._outputLineCounter = next;
   out.dataset.outputLineCounter = String(next);
+  return next;
 }
 
 function _getPendingOutputBatch(tabId) {
@@ -339,11 +516,14 @@ function _followOutputAfterAppend(out, tab, { afterLargeBatch = false } = {}) {
 
 function _syncTabRawLines(tab, rawLine) {
   if (!tab || !rawLine) return;
+  if (!Array.isArray(tab.rawLines)) tab.rawLines = [];
   tab.rawLines.push(rawLine);
+  _adjustTabOutputSignalCounts(tab, rawLine, 1);
   const max = APP_CONFIG.max_output_lines;
   if (max > 0 && tab.rawLines.length > max) {
     const removed = tab.rawLines.length - max;
-    tab.rawLines.splice(0, removed);
+    const removedLines = tab.rawLines.splice(0, removed);
+    removedLines.forEach(line => _adjustTabOutputSignalCounts(tab, line, -1));
     if (typeof tab.currentRunStartIndex === 'number' && tab.currentRunStartIndex >= 0) {
       tab.currentRunStartIndex = Math.max(0, tab.currentRunStartIndex - removed);
     }
@@ -356,6 +536,7 @@ function _appendRestoredOutputSpan(out, rawLine) {
   span.className = 'line' + (cls ? ' ' + cls : '');
   span.dataset.tsC = String(rawLine && rawLine.tsC || '');
   if (rawLine && rawLine.tsE) span.dataset.tsE = String(rawLine.tsE);
+  if (Number.isInteger(rawLine && rawLine.line_number)) span.dataset.lineNumber = String(rawLine.line_number);
   _applyOutputSignalMetadata(span, {}, rawLine);
 
   const content = document.createElement('span');
@@ -369,14 +550,7 @@ function _appendRestoredOutputSpan(out, rawLine) {
     prefixEl.textContent = prefix;
     content.appendChild(prefixEl);
 
-    let bodyText = text;
-    if (text.startsWith(prefix)) {
-      bodyText = text.slice(prefix.length).replace(/^\s+/, '');
-    } else if (text === '$') {
-      bodyText = '';
-    } else if (text.startsWith('$ ')) {
-      bodyText = text.slice(2);
-    }
+    const bodyText = stripPromptLabelFromEchoText(text);
     if (bodyText) content.appendChild(document.createTextNode(bodyText));
   } else if (cls === 'notice' || cls === 'denied' || cls === 'exit-ok' || cls === 'exit-fail') {
     content.textContent = text;
@@ -398,11 +572,13 @@ function renderRestoredTabOutput(tabId, rawLines) {
     tsE: String(line && line.tsE || ''),
     signals: _normalizeOutputSignals(line && line.signals),
     line_index: Number.isInteger(line && line.line_index) ? line.line_index : undefined,
+    line_number: Number.isInteger(line && line.line_number) ? line.line_number : undefined,
     command_root: String(line && line.command_root || ''),
     target: String(line && line.target || ''),
   })) : [];
   out.innerHTML = '';
   tab.rawLines = lines;
+  _resetTabOutputSignalCounts(tab, lines);
   lines.forEach(line => _appendRestoredOutputSpan(out, line));
   syncOutputPrefixes(out);
   if (lines.length) {
@@ -498,40 +674,7 @@ function syncOutputPrefixes(scope = document) {
     ? [...document.querySelectorAll('.output')]
     : (looksLikeOutput ? [scope] : [...(scope?.querySelectorAll?.('.output') || [])]);
 
-  outputs.forEach(out => {
-    const lines = [...out.querySelectorAll('.line')];
-    const prefixStrings = [];
-    let visibleIndex = 0;
-    let maxLineNumber = 0;
-
-    lines.forEach(line => {
-      if (_isPrefixExcludedLine(line)) {
-        line.dataset.prefix = '';
-        delete line.dataset.lineNumber;
-        return;
-      }
-      visibleIndex += 1;
-      const existingNumber = Number(line.dataset.lineNumber || 0);
-      const lineNumber = existingNumber > 0 ? existingNumber : visibleIndex;
-      line.dataset.lineNumber = String(lineNumber);
-      maxLineNumber = Math.max(maxLineNumber, lineNumber);
-      const tsText = _lineTimestampPrefix(line);
-      line.dataset.prefix = tsText;
-      prefixStrings.push(_formatOutputPrefix(lineNumber, tsText, true));
-    });
-
-  const prompt = out.querySelector('#shell-prompt-wrap');
-  if (prompt) {
-    const promptTsText = _promptTimestampPrefix();
-    prompt.dataset.lineNumber = String(maxLineNumber + 1);
-    prompt.dataset.prefix = promptTsText;
-    prefixStrings.push(_formatOutputPrefix(maxLineNumber + 1, promptTsText, true));
-  }
-
-    out.dataset.outputLineCounter = String(maxLineNumber);
-    const prefixWidth = Math.max(0, ...prefixStrings.map(s => String(s || '').length));
-    out.style.setProperty('--output-prefix-width', `${prefixWidth}ch`);
-  });
+  outputs.forEach(out => _syncOutputLinePrefixMetadata(out, _tabForOutput(out)));
 }
 
 function _setLnMode(mode) {
@@ -578,7 +721,8 @@ function appendLine(text, cls, tabId, metadata = null) {
   const state = _getPendingOutputBatch(id);
   const shouldBatch = state.scheduled || state.items.length > 0 || state.burstCount >= _OUTPUT_SYNC_BURST_LIMIT;
   const { span, rawLine } = _buildOutputLine(text, cls, id, now, runStart, metadata);
-  _assignOutputLineNumber(out, tab, span);
+  const lineNumber = _assignOutputLineNumber(out, tab, span);
+  if (lineNumber > 0) rawLine.line_number = lineNumber;
 
   if (shouldBatch) {
     state.items.push({ span, rawLine });
@@ -596,11 +740,54 @@ function appendLine(text, cls, tabId, metadata = null) {
   _syncOutputPrefixesForAppend(out, span);
   _followOutputAfterAppend(out, tab);
   if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(id);
+  _syncTabRawLines(tab, rawLine);
   if (id === activeTabId && typeof refreshSearchDiscoverabilityUi === 'function') {
     if (typeof isSearchBarOpen === 'function' && isSearchBarOpen()) runSearch();
     else if (typeof scheduleSearchDiscoverabilityRefresh === 'function') scheduleSearchDiscoverabilityRefresh();
     else refreshSearchDiscoverabilityUi();
   }
+}
 
-  _syncTabRawLines(tab, rawLine);
+function _normalizeAppendLinesEntry(entry) {
+  if (entry && typeof entry === 'object') {
+    return {
+      text: String(entry.text ?? ''),
+      cls: String(entry.cls || ''),
+      metadata: entry.metadata && typeof entry.metadata === 'object' ? entry.metadata : entry,
+    };
+  }
+  return { text: String(entry ?? ''), cls: '', metadata: null };
+}
+
+function appendLines(lines, tabId) {
+  const id = tabId || activeTabId;
+  const out = getOutput(id);
+  const tab = getTab(id);
+  const sourceLines = Array.isArray(lines) ? lines : [];
+  if (!out || !sourceLines.length) return Promise.resolve();
+
+  let index = 0;
+  return new Promise((resolve) => {
+    const queueChunk = () => {
+      const state = _getPendingOutputBatch(id);
+      const now = Date.now();
+      const runStart = tab?.runStart || 0;
+      const end = Math.min(index + _OUTPUT_APPEND_LINES_CHUNK_SIZE, sourceLines.length);
+      for (; index < end; index += 1) {
+        const entry = _normalizeAppendLinesEntry(sourceLines[index]);
+        const { span, rawLine } = _buildOutputLine(entry.text, entry.cls, id, now, runStart, entry.metadata);
+        const lineNumber = _assignOutputLineNumber(out, tab, span);
+        if (lineNumber > 0) rawLine.line_number = lineNumber;
+        state.items.push({ span, rawLine });
+      }
+      state.burstCount = Math.max(state.burstCount, _OUTPUT_SYNC_BURST_LIMIT);
+      _schedulePendingOutputFlush(id);
+      if (index < sourceLines.length) {
+        setTimeout(queueChunk, 0);
+        return;
+      }
+      resolve();
+    };
+    queueChunk();
+  });
 }

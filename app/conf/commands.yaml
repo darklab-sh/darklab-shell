@@ -47,6 +47,7 @@ commands:
           takes_value: true
       arguments:
         - placeholder: <host>
+          value_type: domain
           description: Hostname or IP address to probe
   - root: fping
     category: Network Diagnostics
@@ -85,6 +86,7 @@ commands:
           takes_value: true
       arguments:
         - placeholder: <host>
+          value_type: domain
           description: Hostname or IP to probe
   - root: traceroute
     category: Network Diagnostics
@@ -136,6 +138,7 @@ commands:
           description: Use TCP SYN probes
       arguments:
         - placeholder: <host>
+          value_type: domain
           description: Hostname or IP to trace
   - root: tcptraceroute
     category: Network Diagnostics
@@ -167,6 +170,7 @@ commands:
               description: Two-second per-hop timeout
       arguments:
         - placeholder: <host>
+          value_type: domain
           description: Hostname or IP to trace
         - placeholder: <port>
           description: TCP port to probe
@@ -204,6 +208,7 @@ commands:
               description: Short timeout in seconds
       arguments:
         - placeholder: <host>
+          value_type: domain
           description: Hostname or IP followed by one or more ports
   - root: mtr
     category: Network Diagnostics
@@ -239,6 +244,7 @@ commands:
           description: Wide report output
       arguments:
         - placeholder: <host>
+          value_type: domain
           description: Hostname or IP to trace
   - root: dig
     category: Network Diagnostics
@@ -274,6 +280,7 @@ commands:
           description: Mail exchanger lookup
       arguments:
         - placeholder: <domain>
+          value_type: domain
           description: Domain name to query
   - root: nslookup
     category: Network Diagnostics
@@ -306,6 +313,7 @@ commands:
           description: Print extra resolver details
       arguments:
         - placeholder: <domain>
+          value_type: domain
           description: Domain name to query
   - root: host
     category: Network Diagnostics
@@ -338,6 +346,7 @@ commands:
               description: Name server lookup
       arguments:
         - placeholder: <domain>
+          value_type: domain
           description: Domain name to query
   - root: whois
     category: Network Diagnostics
@@ -379,6 +388,7 @@ commands:
           description: Hide legal disclaimers when supported
       arguments:
         - placeholder: <domain-or-ip>
+          value_type: domain
           description: Domain name, IP address, or ASN to query
   - root: curl
     category: Network Diagnostics
@@ -622,6 +632,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <hostname>
+                value_type: domain
                 description: SNI hostname matching the certificate
             - value: -showcerts
               description: Display the full certificate chain
@@ -735,6 +746,7 @@ commands:
               description: Ten-second socket timeout
       arguments:
         - placeholder: <host>
+          value_type: domain
           description: Hostname or host:port to scan
   - root: sslyze
     category: TLS / Certificates
@@ -802,6 +814,7 @@ commands:
               description: Save JSON scan results
       arguments:
         - placeholder: <host>
+          value_type: domain
           description: Hostname or host:port to scan
   - root: dnsrecon
     category: Network Reconnaissance
@@ -856,6 +869,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <domain>
+            value_type: domain
             description: Target domain to enumerate
         - value: -t
           description: Discovery mode
@@ -879,6 +893,8 @@ commands:
         - value: -D
           description: Wordlist for brute force mode
           takes_value: true
+          value_type: wordlist
+          wordlist_category: dns
           suggest:
             - value: /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
               description: Common subdomain wordlist
@@ -915,6 +931,7 @@ commands:
               description: Save XML DNS results
       arguments:
         - placeholder: <domain>
+          value_type: domain
           description: Usually provided through -d
   - root: subfinder
     category: Network Reconnaissance
@@ -966,6 +983,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <domain>
+            value_type: domain
             description: Target domain to enumerate
         - value: -silent
           description: Minimal output
@@ -1089,6 +1107,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <domain>
+                value_type: domain
                 description: Target domain to enumerate
             - value: -timeout
               description: Minutes to run without progress before terminating
@@ -1149,6 +1168,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <domain>
+                value_type: domain
                 description: Target domain to read from the database
             - value: -names
               description: Print names only when reading Amass database results
@@ -1192,6 +1212,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <domain>
+                value_type: domain
                 description: Target domain to track
             - value: -since
               description: Limit track output to assets after a timestamp
@@ -1228,6 +1249,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <domain>
+                value_type: domain
                 description: Target domain to visualize
             - value: -d3
               description: Generate a D3 HTML graph with amass viz
@@ -1314,10 +1336,13 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <domain>
+            value_type: domain
             description: Target domain to enumerate
         - value: -w
           description: Wordlist for brute force
           takes_value: true
+          value_type: wordlist
+          wordlist_category: dns
           suggest:
             - value: /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
               description: Common subdomain wordlist
@@ -1355,6 +1380,7 @@ commands:
               description: Save DNS responses
       arguments:
         - placeholder: <domain>
+          value_type: domain
           description: Usually provided through -d
   - root: pd-httpx
     category: Network Reconnaissance
@@ -1457,6 +1483,7 @@ commands:
           description: Only discover subdomains of the target domain
       arguments:
         - placeholder: <domain>
+          value_type: domain
           description: Domain name to enumerate
   - root: fierce
     category: Network Reconnaissance
@@ -1483,6 +1510,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <domain>
+            value_type: domain
             description: Target domain to enumerate
         - value: --dns-servers
           description: Resolver or name server to use
@@ -1490,6 +1518,11 @@ commands:
           suggest:
             - value: 8.8.8.8
               description: Example resolver address
+        - value: --subdomain-file
+          description: Wordlist for subdomain brute force
+          takes_value: true
+          value_type: wordlist
+          wordlist_category: dns
         - value: --traverse
           description: Maximum recursive traversal depth
           takes_value: true
@@ -1523,11 +1556,17 @@ commands:
           suggest:
             - value: 8.8.8.8
               description: Example public resolver
+        - value: -f
+          description: Wordlist for subdomain brute force
+          takes_value: true
+          value_type: wordlist
+          wordlist_category: dns
         - value: --threads
           description: Number of worker threads
           takes_value: true
       arguments:
         - placeholder: <domain>
+          value_type: domain
           description: Domain name to enumerate
   - root: gobuster
     category: Network Reconnaissance
@@ -1579,6 +1618,8 @@ commands:
             - value: -w
               description: Wordlist path
               takes_value: true
+              value_type: wordlist
+              wordlist_category: web-content
               suggest:
                 - value: /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
                   description: Common web-content wordlist
@@ -1635,10 +1676,13 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <domain>
+                value_type: domain
                 description: Target root domain
             - value: -w
               description: Wordlist path
               takes_value: true
+              value_type: wordlist
+              wordlist_category: dns
               suggest:
                 - value: /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
                   description: Common DNS wordlist
@@ -1689,6 +1733,8 @@ commands:
             - value: -w
               description: Wordlist path
               takes_value: true
+              value_type: wordlist
+              wordlist_category: dns
               suggest:
                 - value: /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
                   description: Common virtual-host wordlist
@@ -1733,6 +1779,11 @@ commands:
             - value: -w
               description: Wordlist path
               takes_value: true
+              value_type: wordlist
+              wordlist_category:
+                - web-content
+                - api
+                - fuzzing
               suggest:
                 - value: /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
                   description: Common web-content wordlist
@@ -1770,6 +1821,8 @@ commands:
             - value: -w
               description: Bucket-name wordlist path
               takes_value: true
+              value_type: wordlist
+              wordlist_category: fuzzing
               suggest:
                 - value: bucket-names.txt
                   description: Session bucket-name wordlist
@@ -1786,6 +1839,8 @@ commands:
             - value: -w
               description: Bucket-name wordlist path
               takes_value: true
+              value_type: wordlist
+              wordlist_category: fuzzing
               suggest:
                 - value: bucket-names.txt
                   description: Session bucket-name wordlist
@@ -1808,6 +1863,10 @@ commands:
             - value: -w
               description: File-name wordlist path
               takes_value: true
+              value_type: wordlist
+              wordlist_category:
+                - web-content
+                - fuzzing
               suggest:
                 - value: filenames.txt
                   description: Session file-name wordlist
@@ -1862,6 +1921,12 @@ commands:
         - value: -w
           description: Wordlist path
           takes_value: true
+          value_type: wordlist
+          wordlist_category:
+            - web-content
+            - api
+            - fuzzing
+            - dns
           suggest:
             - value: /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
               description: Common web-content wordlist
@@ -1939,6 +2004,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <host>
+            value_type: domain
             description: Target hostname or IP address
         - value: -p
           description: Ports or port ranges to scan
@@ -2304,6 +2370,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <host>
+            value_type: domain
             description: Target hostname or IP address
         - value: -p
           description: Specific ports to scan
@@ -2470,6 +2537,7 @@ commands:
               description: Session file containing NSE script arguments
       arguments:
         - placeholder: <target>
+          value_type: domain
           description: Hostname, IP, or CIDR
   - root: testssl
     category: Vulnerability Scanning
@@ -2623,6 +2691,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <host>
+            value_type: domain
             description: Target host, hostname, or URL
         - value: -p
           description: Target port

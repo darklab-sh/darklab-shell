@@ -486,6 +486,9 @@ test.describe('mobile menu', () => {
         .toBe('16px')
     }
 
+    await page.locator('#workspace-cancel-edit-btn').click()
+    await expect(page.locator('#workspace-editor')).not.toBeVisible()
+
     await page.locator('#workspace-new-folder-btn').click()
     const folderName = page.locator('#confirm-host .workspace-folder-form input')
     await expect(folderName).toHaveAttribute('autocomplete', 'off')
@@ -723,6 +726,7 @@ test.describe('mobile menu', () => {
       if (index < commands.length - 1) await page.waitForTimeout(250)
     }
     await waitForHistoryRuns(page, commands.length)
+    await expect(page.locator('#mobile-recent-peek')).toHaveAttribute('data-peek-mode', 'recents', { timeout: 5_000 })
 
     await page.locator('#mobile-recent-peek').click()
     await expect(page.locator('#mobile-recents-sheet')).toBeVisible()

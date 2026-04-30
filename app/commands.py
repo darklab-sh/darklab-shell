@@ -1548,6 +1548,23 @@ def _normalize_context_suggestion(item):
             result["label"] = label
     if "hintOnly" in item:
         result["hintOnly"] = bool(item.get("hintOnly"))
+    value_type = str(item.get("value_type") or item.get("value_kind") or item.get("type") or "").strip().lower()
+    if value_type:
+        result["value_type"] = value_type
+    raw_wordlist_category = item.get("wordlist_category")
+    if raw_wordlist_category:
+        if isinstance(raw_wordlist_category, (list, tuple, set)):
+            categories = [
+                str(value).strip().lower()
+                for value in raw_wordlist_category
+                if str(value).strip()
+            ]
+            if categories:
+                result["wordlist_category"] = categories
+        else:
+            category = str(raw_wordlist_category).strip().lower()
+            if category:
+                result["wordlist_category"] = category
     feature_required = item.get("feature_required") or item.get("requires_feature") or item.get("feature")
     if feature_required:
         if isinstance(feature_required, (list, tuple, set)):
@@ -1699,6 +1716,12 @@ def _normalize_single_autocomplete_spec(raw_spec: dict, *, include_pipe: bool = 
         token = str(raw_flag.get("value") or "").strip()
         if not token:
             continue
+        flag_value_type = str(
+            raw_flag.get("value_type")
+            or raw_flag.get("value_kind")
+            or raw_flag.get("type")
+            or ""
+        ).strip().lower()
         if raw_flag.get("takes_value"):
             _append_unique_context_token(expects_value, seen_value_flags, token)
         if raw_flag.get("closes"):
@@ -1709,8 +1732,26 @@ def _normalize_single_autocomplete_spec(raw_spec: dict, *, include_pipe: bool = 
             hint_sources.extend(raw_value_hint if isinstance(raw_value_hint, list) else [raw_value_hint])
         if raw_flag.get("suggest") is not None:
             hint_sources.extend(raw_flag.get("suggest") or [])
+        if flag_value_type and not hint_sources:
+            hint_sources.append({
+                "placeholder": f"<{flag_value_type}>",
+                "description": str(raw_flag.get("description") or "").strip(),
+                "value_type": flag_value_type,
+            })
         if hint_sources:
             bucket, seen = _hint_bucket(token)
+            if flag_value_type:
+                enriched_sources = []
+                for source in hint_sources:
+                    if isinstance(source, dict):
+                        enriched = dict(source)
+                        enriched.setdefault("value_type", flag_value_type)
+                        if raw_flag.get("wordlist_category") and "wordlist_category" not in enriched:
+                            enriched["wordlist_category"] = raw_flag.get("wordlist_category")
+                        enriched_sources.append(enriched)
+                    else:
+                        enriched_sources.append(source)
+                hint_sources = enriched_sources
             _append_unique_context_suggestions(bucket, seen, hint_sources)
 
     positional_bucket, positional_seen = _hint_bucket("__positional__")

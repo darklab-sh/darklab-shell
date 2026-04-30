@@ -77,6 +77,9 @@ async function loadAppFns({
   hasPendingTerminalConfirm: hasPendingTerminalConfirmOverride = vi.fn(() => false),
   cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride = vi.fn(() => false),
   getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride = vi.fn(() => []),
+  getWorkspaceAutocompleteDirectoryHints: getWorkspaceAutocompleteDirectoryHintsOverride = vi.fn(() => []),
+  getWorkspaceDirectoryEntries: getWorkspaceDirectoryEntriesOverride = undefined,
+  workspaceCwd: workspaceCwdOverride = '',
   sessionVariables: sessionVariablesOverride = [],
   appConfig = { workspace_enabled: true },
   sessionId = 'session-old',
@@ -140,7 +143,7 @@ async function loadAppFns({
         <span id="run-timer"></span>
       </div>
       <div id="shell-prompt-wrap" class="prompt-wrap shell-prompt-wrap">
-        <span class="prompt-prefix" data-mobile-label="$">anon@darklab:~$</span>
+        <span class="prompt-prefix" data-mobile-label="$">anon@darklab:/ $</span>
         <div id="shell-prompt-line">
           <span id="shell-prompt-text" class="shell-prompt-text"></span>
           <span id="shell-prompt-caret"></span>
@@ -419,6 +422,13 @@ async function loadAppFns({
       cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride,
       sessionVariables: sessionVariablesOverride,
       getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride,
+      getWorkspaceAutocompleteDirectoryHints: getWorkspaceAutocompleteDirectoryHintsOverride,
+      ...(getWorkspaceDirectoryEntriesOverride ? { getWorkspaceDirectoryEntries: getWorkspaceDirectoryEntriesOverride } : {}),
+      _workspaceCwd: () => workspaceCwdOverride,
+      workspaceDisplayPath: (path = '') => {
+        const normalized = String(path || '').split('/').filter(Boolean).join('/')
+        return normalized ? `/${normalized}` : '/'
+      },
       ...domBindings,
       getOutput: getOutputOverride || (() => document.getElementById('history-list')),
       renderMotd: (text) => text,
@@ -727,20 +737,24 @@ function builtInAutocompleteBase() {
     file: {
       ...emptyBuiltIn('built-in: list, view, create, edit, download, or remove session files'),
       feature_required: 'workspace',
-      expects_value: ['show', 'add', 'edit', 'download', 'rm', 'delete'],
+      expects_value: ['show', 'add', 'add-dir', 'edit', 'download', 'rm', 'delete', 'ls'],
       arg_hints: {
         list: [],
+        ls: [],
         help: [],
         show: [],
         add: [hint('<file>', 'New session file name')],
+        'add-dir': [hint('<folder>', 'New session folder')],
         edit: [],
         download: [],
         rm: [],
         delete: [],
         __positional__: [
           hint('list', 'List current session files'),
+          hint('ls', 'List current session files'),
           hint('show <file>', 'Print a session file in the terminal', 'show '),
           hint('add <file>', 'Open the Files editor for a new session file', 'add '),
+          hint('add-dir <folder>', 'Create a session folder', 'add-dir '),
           hint('edit <file>', 'Open the Files editor for an existing session file', 'edit '),
           hint('download <file>', 'Download a session file through the browser', 'download '),
           hint('delete <file>', 'Remove a session file from this session', 'delete '),
@@ -749,12 +763,21 @@ function builtInAutocompleteBase() {
       },
     },
     cat: { ...emptyBuiltIn('built-in: show a session file'), feature_required: 'workspace', argument_limit: 1 },
-    ls: { ...emptyBuiltIn('built-in: list session files'), feature_required: 'workspace', argument_limit: 0 },
+    cd: { ...emptyBuiltIn('built-in: change the current workspace folder'), feature_required: 'workspace', argument_limit: 1 },
+    grep: { ...emptyBuiltIn('built-in: filter a session file'), feature_required: 'workspace', argument_limit: 2 },
+    head: { ...emptyBuiltIn('built-in: print the first lines of a session file'), feature_required: 'workspace', argument_limit: 1 },
+    ll: { ...emptyBuiltIn('built-in: long-list session files'), feature_required: 'workspace', argument_limit: 1 },
+    ls: { ...emptyBuiltIn('built-in: list session files'), feature_required: 'workspace', argument_limit: 1 },
+    mkdir: { ...emptyBuiltIn('built-in: create a session folder'), feature_required: 'workspace', argument_limit: 1 },
     rm: {
       ...emptyBuiltIn('built-in: remove a session file after confirmation'),
       feature_required: 'workspace',
       argument_limit: 1,
     },
+    sort: { ...emptyBuiltIn('built-in: sort a session file'), feature_required: 'workspace', argument_limit: 1 },
+    tail: { ...emptyBuiltIn('built-in: print the last lines of a session file'), feature_required: 'workspace', argument_limit: 1 },
+    uniq: { ...emptyBuiltIn('built-in: collapse adjacent duplicate lines in a session file'), feature_required: 'workspace', argument_limit: 1 },
+    wc: { ...emptyBuiltIn('built-in: count lines in a session file'), feature_required: 'workspace', argument_limit: 1 },
     man: { ...emptyBuiltIn('built-in: show a real or built-in manual page'), argument_limit: 1 },
     which: { ...emptyBuiltIn('built-in: locate a built-in command or allowed runtime command'), argument_limit: 1 },
     type: { ...emptyBuiltIn('built-in: describe whether a command is built-in, installed, or missing'), argument_limit: 1 },
@@ -930,18 +953,41 @@ describe('app helpers', () => {
     const promptPrefix = shellPromptWrap.querySelector('.prompt-prefix')
     const mobilePromptLabel = document.querySelector('#mobile-composer-row .mobile-prompt-label')
 
-    expect(promptPrefix.textContent).toBe('anon@darklab:~$')
-    expect(mobilePromptLabel.textContent).toBe('$')
+    expect(promptPrefix.textContent).toBe('anon@darklab:/ $')
+    expect(mobilePromptLabel.textContent).toBe('')
+    expect(mobilePromptLabel.hidden).toBe(true)
+    expect(document.getElementById('mobile-cmd').placeholder).toBe('/ · type command')
 
     setComposerPromptMode('confirm')
     expect(promptPrefix.textContent).toBe('[yes/no]:')
     expect(mobilePromptLabel.textContent).toBe('[yes/no]:')
+    expect(mobilePromptLabel.hidden).toBe(false)
+    expect(document.getElementById('mobile-cmd').placeholder).toBe('')
     expect(shellPromptWrap.classList.contains('shell-prompt-confirm')).toBe(true)
 
     setComposerPromptMode(null)
-    expect(promptPrefix.textContent).toBe('anon@darklab:~$')
-    expect(mobilePromptLabel.textContent).toBe('$')
+    expect(promptPrefix.textContent).toBe('anon@darklab:/ $')
+    expect(mobilePromptLabel.textContent).toBe('')
+    expect(mobilePromptLabel.hidden).toBe(true)
+    expect(document.getElementById('mobile-cmd').placeholder).toBe('/ · type command')
     expect(shellPromptWrap.classList.contains('shell-prompt-confirm')).toBe(false)
+  })
+
+  it('uses a compact cwd placeholder instead of the mobile prompt label', async () => {
+    const { setComposerPromptMode } = await loadAppFns({
+      workspaceCwd: 'very/deep/reports/nuclei-output',
+    })
+    const mobilePromptLabel = document.querySelector('#mobile-composer-row .mobile-prompt-label')
+    const mobileCmd = document.getElementById('mobile-cmd')
+
+    expect(mobilePromptLabel.textContent).toBe('')
+    expect(mobilePromptLabel.hidden).toBe(true)
+    expect(mobileCmd.placeholder).toBe('.../nuclei-output · type command')
+
+    setComposerPromptMode('confirm')
+    setComposerPromptMode(null)
+
+    expect(mobileCmd.placeholder).toBe('.../nuclei-output · type command')
   })
 
   it('_setTsMode updates body classes and button labels', async () => {
@@ -1459,8 +1505,10 @@ describe('app helpers', () => {
     expect(context['session-token'].arg_hints.set[0].value).toBe('<token>')
     expect(context.file.arg_hints.__positional__.map(item => item.value)).toEqual([
       'list',
+      'ls',
       'show <file>',
       'add <file>',
+      'add-dir <folder>',
       'edit <file>',
       'download <file>',
       'delete <file>',
@@ -1485,6 +1533,9 @@ describe('app helpers', () => {
         { value: 'targets.txt', description: 'session file · 11 B' },
         { value: 'ffuf.json', description: 'session file · 2 KB' },
       ],
+      getWorkspaceAutocompleteDirectoryHints: () => [
+        { value: 'reports', description: 'session folder' },
+      ],
     })
 
     const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
@@ -1493,11 +1544,50 @@ describe('app helpers', () => {
     expect(context.file.arg_hints.edit.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
     expect(context.file.arg_hints.download.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
     expect(context.file.arg_hints.rm.map(item => item.description)).toEqual([
+      'Remove folders recursively',
+      'Remove folders recursively',
       'session file · 11 B',
       'session file · 2 KB',
+      'session folder',
     ])
     expect(context.cat.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
-    expect(context.rm.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
+    expect(context.cd.arg_hints.__positional__.map(item => item.value)).toEqual(['reports', '/'])
+    expect(context.ll.arg_hints.__positional__.map(item => item.value)).toEqual(['-R', 'reports', '/'])
+    expect(context.ls.arg_hints.__positional__.map(item => item.value)).toEqual(['-l', '-R', 'reports', '/'])
+    expect(context.mkdir.arg_hints.__positional__.map(item => item.value)).toEqual(['reports', '<folder>'])
+    expect(context.grep.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
+    expect(context.head.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
+    expect(context.rm.arg_hints.__positional__.map(item => item.value)).toEqual(['-r', '-rf', 'targets.txt', 'ffuf.json', 'reports'])
+  })
+
+  it('serves workspace autocomplete values relative to the active workspace folder', async () => {
+    const { getRuntimeAutocompleteContext } = await loadAppFns({
+      workspaceCwd: 'reports',
+      getWorkspaceAutocompleteFileHints: () => [
+        { value: 'reports/summary.txt', description: 'session file · 11 B' },
+        { value: 'reports/nested/deep.txt', description: 'session file · 2 KB' },
+        { value: 'root.txt', description: 'session file · 1 B' },
+      ],
+      getWorkspaceAutocompleteDirectoryHints: () => [
+        { value: 'reports', description: 'session folder' },
+        { value: 'reports/nested', description: 'session folder' },
+      ],
+      getWorkspaceDirectoryEntries: () => ({
+        folders: [{ name: 'nested', path: 'reports/nested' }],
+        files: [{ name: 'summary.txt', path: 'reports/summary.txt' }],
+      }),
+    })
+
+    const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
+
+    expect(context.cd.arg_hints.__positional__.map(item => item.value)).toEqual(['../', 'nested', '/'])
+    expect(context.ll.arg_hints.__positional__.map(item => item.value)).toEqual(['-R', '../', 'nested', '/'])
+    expect(context.ls.arg_hints.__positional__.map(item => item.value)).toEqual(['-l', '-R', '../', 'nested', '/'])
+    expect(context.cat.arg_hints.__positional__.map(item => item.value)).toEqual(['summary.txt'])
+    expect(context.grep.arg_hints.__positional__.map(item => item.value)).toEqual(['summary.txt'])
+    expect(context.file.arg_hints.show.map(item => item.value)).toEqual(['summary.txt'])
+    expect(context.file.arg_hints.list.map(item => item.value)).toEqual(['-l', '-R', 'nested', '/'])
+    expect(context.file.arg_hints.ls.map(item => item.value)).toEqual(['-l', '-R', 'nested', '/'])
   })
 
   it('hides workspace built-ins from runtime autocomplete when Files are disabled', async () => {
@@ -1509,7 +1599,11 @@ describe('app helpers', () => {
 
     expect(context.file).toBeUndefined()
     expect(context.cat).toBeUndefined()
+    expect(context.cd).toBeUndefined()
+    expect(context.grep).toBeUndefined()
+    expect(context.ll).toBeUndefined()
     expect(context.ls).toBeUndefined()
+    expect(context.mkdir).toBeUndefined()
     expect(context.rm).toBeUndefined()
     expect(context.man.arg_hints.__positional__.map(item => item.value)).not.toContain('file')
   })
@@ -1520,10 +1614,10 @@ describe('app helpers', () => {
       [...commandsYaml.matchAll(/^- root: ([a-z0-9_-]+)/gm)].map(match => match[1]),
     )
     const runtimeRoots = [
-      'banner', 'cat', 'clear', 'commands', 'config', 'date', 'df', 'env', 'faq', 'fortune', 'free',
-      'file', 'groups', 'help', 'history', 'hostname', 'id', 'ip', 'jobs', 'last', 'limits', 'ls', 'man',
-      'ps', 'pwd', 'retention', 'rm', 'route', 'runs', 'session-token', 'shortcuts', 'stats', 'status', 'theme',
-      'tty', 'type', 'uname', 'uptime', 'version', 'which', 'who', 'whoami',
+      'banner', 'cat', 'cd', 'clear', 'commands', 'config', 'date', 'df', 'env', 'faq', 'fortune', 'free',
+      'file', 'grep', 'groups', 'head', 'help', 'history', 'hostname', 'id', 'ip', 'jobs', 'last', 'limits', 'll', 'ls', 'man',
+      'mkdir', 'ps', 'pwd', 'retention', 'rm', 'route', 'runs', 'session-token', 'shortcuts', 'sort', 'stats', 'status',
+      'tail', 'theme', 'tty', 'type', 'uname', 'uniq', 'uptime', 'version', 'wc', 'which', 'who', 'whoami',
     ]
 
     expect(runtimeRoots.filter(root => yamlRoots.has(root))).toEqual([])
@@ -2120,6 +2214,7 @@ describe('app helpers', () => {
             label: 'tab 1',
             command: '',
             renamed: false,
+            workspaceCwd: 'shell',
             draftInput: 'dig darklab.sh',
             st: 'idle',
             exitCode: null,
@@ -2133,6 +2228,7 @@ describe('app helpers', () => {
             label: 'tab 2',
             command: '',
             renamed: false,
+            workspaceCwd: 'shell/reports',
             draftInput: 'hostname',
             st: 'idle',
             exitCode: null,
@@ -2149,6 +2245,8 @@ describe('app helpers', () => {
     expect(restoreTabSessionState()).toBe(true)
     expect(getTab('tab-1')?.draftInput).toBe('dig darklab.sh')
     expect(getTab('tab-2')?.draftInput).toBe('hostname')
+    expect(getTab('tab-1')?.workspaceCwd).toBe('shell')
+    expect(getTab('tab-2')?.workspaceCwd).toBe('shell/reports')
   })
 
   it('preserves the last created non-active tab draft when the final restored active tab is different', async () => {
@@ -2483,7 +2581,8 @@ describe('app helpers', () => {
     expect(runBtn.hidden).toBe(true)
     expect(shellInputRow.hidden).toBe(true)
     expect(shellInputRow.getAttribute('aria-hidden')).toBe('true')
-    expect(mobileComposerRow.querySelector('.mobile-prompt-label')?.textContent).toBe('$')
+    expect(mobileComposerRow.querySelector('.mobile-prompt-label')?.textContent).toBe('')
+    expect(mobileCmdInput.placeholder).toBe('/ · type command')
     expect(shellPromptWrap.scrollIntoView).not.toHaveBeenCalled()
 
     restoreViewport()

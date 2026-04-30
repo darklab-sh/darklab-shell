@@ -32,7 +32,7 @@ darklab_shell is a full-stack, self-hosted web terminal for running network diag
 - **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy and a `save ▾` dropdown (txt / html / pdf), a jump-to-live / jump-to-bottom helper when you scroll away from the tail, and export output that keeps the live header/title/meta treatment aligned across permalink pages, saved HTML, and PDF as closely as the PDF renderer allows
 - **History and sharing** — recent command chips, a persistent history surface on desktop and mobile with full-text search across command text and stored output text (SQLite FTS5), filtering by type / command name / exit code / date range / starred status, starring/favorites, reconnect-to-active-run continuity after reload, session restore for non-running tabs and drafts, canonical run permalinks, snapshot rows with open/copy/delete actions, snapshot permalinks with native share-sheet support, and full-output artifacts for longer runs
 - **Session command variables** — `var set HOST ip.darklab.sh`, `var list`, and `var unset HOST` define per-session target values that can be referenced as `$HOST` or `${HOST}` in later commands; expansion is app-mediated before policy validation, typed history stays readable, and the transcript shows the expanded command that actually ran
-- **Session files** — optional app-mediated per-session file access for tools that need small input/output files, with a Files panel for creating, viewing, editing, downloading, and deleting session-scoped files; strict relative filenames, quota enforcement, hashed session directories, visible file-count/usage/remaining quota in `file list`, compact session file usage in `status`, terminal-native `file` helpers including `file download <file>` plus `ls` / `cat` / confirmed `rm` aliases, and command-registry metadata that safely rewrites selected file flags without enabling shell navigation or redirection
+- **Session files** — optional app-mediated per-session file access for tools that need small input/output files, with a Files panel for creating, viewing, editing, downloading, and deleting session-scoped files; strict relative filenames, quota enforcement, hashed session directories, visible file-count/usage/remaining quota in the Files panel, compact session file usage in `status`, terminal-native cwd-aware helpers including `file download <file>` plus `ls` / `cat` / confirmed `rm` aliases, and command-registry metadata that safely rewrites selected file flags without enabling shell navigation or redirection
 - **Session tokens** — generate a persistent `tok_` session token to carry your run history, shell identity, command variables, workspace files, and saved user options across browsers and devices; `session-token generate/set/copy/clear/rotate/list/revoke` manage the full token lifecycle with optional history/file migration, atomic rotate with rollback on failure, terminal-native yes/no confirmations for the interactive CLI flows, automatic cross-tab identity sync with session-scoped UI refresh, server-side revocation, masked token arguments in local history, and a destructive clear-confirm in Options that can copy the token before the browser forgets it; the Options modal exposes the common inline actions (`Generate`, `Set`, `Copy`, `Rotate`, `Clear`) without entering commands
 - **Safer sharing** — a built-in basic redaction baseline can mask common secrets or infrastructure details on snapshot permalinks, with optional operator regex rules appended on top. Permalink creation can choose raw vs redacted sharing per snapshot without changing the stored run history; local `save txt/html/pdf` exports remain raw
 - **Run notifications** — optional browser desktop notifications fire on run completion (any exit code or kill); toggled from the Options panel on desktop and intentionally hidden from the mobile Options sheet; uses only the command root in the notification title to avoid exposing arguments or token values
@@ -40,7 +40,7 @@ darklab_shell is a full-stack, self-hosted web terminal for running network diag
 - **Built-in commands** — native shell commands like `help`, `commands`, `history`, `last`, `limits`, `status`, `runs`, `stats`, `file`, `ls`, `cat`, `rm`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available; `help` points users to the README, FAQ, shortcuts, and the command catalog, `commands` groups built-ins and allowed external tools in one place, `status` summarizes session type, runs, snapshots, starred commands, saved options, active runs, and backend health, `runs` shows active app-run metadata with CPU percent / RSS-memory snapshots and a STATUS HUD hint for real-time monitoring, `jobs` aliases the same terminal output, `runs -v` shows full IDs/source metadata, `runs --json` prints an automation-friendly snapshot, and `stats` summarizes session activity by command root
 - **Guided workflows** — built-in diagnostic sequences for DNS, TLS/HTTPS, HTTP, reachability, email, passive domain recon, subdomain validation, directory discovery, CDN/edge checks, API recon, network path analysis, fast port/service triage, and workspace-native recon chains that pass generated Files between tools with reusable target inputs, per-step prompt fills, and sequential `Run all`; extendable with site-specific sequences via `conf/workflows.yaml`
 - **Security and operations** — registry-backed command policy with deny-prefix lists for loopback and path blocking, shell metacharacter blocking, Redis-backed rate limiting and PID tracking, structured logging with `text` and `gelf` format support, and an IP-gated `/diag` page showing app health, database and Redis status, activity stats, top commands, and per-tool availability
-- **Pre-installed security tooling** — nmap, rustscan, naabu, masscan, nuclei, ffuf, feroxbuster, wfuzz, katana, wafw00f, sslscan, sslyze, openssl, and more, all sandboxed under a dedicated `scanner` user with enforced allowlists and the full [SecLists](https://github.com/danielmiessler/SecLists) collection pre-installed at `/usr/share/wordlists/seclists/`
+- **Pre-installed security tooling** — nmap, rustscan, naabu, masscan, nuclei, ffuf, gobuster, katana, amass, wafw00f, sslscan, sslyze, openssl, and more, all sandboxed under a dedicated `scanner` user with enforced allowlists and the full [SecLists](https://github.com/danielmiessler/SecLists) collection pre-installed at `/usr/share/wordlists/seclists/`; the built-in `wordlist` command and typed autocomplete catalog surface high-signal SecLists entries without dumping the whole corpus into suggestions
 - **Operator customization** — context-aware external-tool command metadata surfaced from `conf/commands.yaml`, custom FAQ entries via `conf/faq.yaml`, welcome animation with custom ASCII art and sampled commands via `conf/welcome.yaml`, all reloaded live without a server restart
 - **Configurable deployment** — Docker-first runtime, non-Docker local mode, YAML-driven config and theme overlays, SQLite persistence for history, previews, snapshots, and artifacts, and configurable retention pruning via `permalink_retention_days`
 
@@ -156,7 +156,7 @@ All application settings live in `app/conf/config.yaml`. The values below are th
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `app_name` | `darklab_shell` | Name shown in the browser tab, header, and permalink pages |
-| `prompt_prefix` | `anon@darklab:~$` | Prompt text shown in the shell input and welcome samples. Can be customized independently of `app_name` |
+| `prompt_prefix` | `anon@darklab` | Prompt identity shown in the shell input and welcome samples. The UI appends `:~ $` when workspaces are disabled and `:<workspace path> $` when workspaces are enabled. Can be customized independently of `app_name` |
 | `motd` | _(empty)_ | Optional operator message shown at the top of the welcome sequence as a centered “Message From The Operator” notice. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
 | `default_theme` | `darklab_obsidian.yaml` | Default theme filename for new visitors. Must match a file in `app/conf/themes/`. Overridden by the user's saved preference |
 | `share_redaction_enabled` | `true` | Enables the built-in basic snapshot-share redaction baseline for bearer tokens, email addresses, IPv4 addresses, IPv6 addresses, and hostnames/dotted domains. When enabled, the `share snapshot` action asks whether to share the raw or redacted snapshot until the user sets a persistent default in the Options modal. If the prompt’s checkbox is enabled, the chosen raw/redacted mode is written back to that same persistent default. When disabled, no built-in or custom snapshot-share redaction rules run |
@@ -228,6 +228,8 @@ See [THEME.md](THEME.md) for the full theme architecture, token reference, and a
 
 The following tools are installed in the Docker image and available for use:
 
+SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordlist` command lists curated categories, searches installed entries, and prints copy-friendly paths; autocomplete only suggests installed wordlists in command slots explicitly marked with `value_type: wordlist`.
+
 | Tool | Purpose |
 |------|---------|
 | `ping` | ICMP reachability |
@@ -235,15 +237,18 @@ The following tools are installed in the Docker image and available for use:
 | `dig` / `nslookup` / `host` | DNS lookups |
 | `whois` | Domain & IP registration info |
 | `traceroute` / `tcptraceroute` | Route tracing (ICMP and TCP) |
+| `nc` | TCP connection testing and simple banner checks |
 | `mtr` | Combined ping + traceroute (auto-rewritten to report mode, see Tool Notes) |
 | `nmap` | Port scanning and service detection |
-| `testssl.sh` | TLS/SSL vulnerability scanning |
+| `openssl` | TLS client diagnostics and cipher inspection |
+| `testssl` / `testssl.sh` | TLS/SSL vulnerability scanning |
 | `dnsrecon` | DNS enumeration and zone transfer testing |
 | `nikto` | Web server vulnerability scanning |
 | `wapiti` | Web application vulnerability scanning |
 | `wpscan` | WordPress vulnerability scanning |
 | `nuclei` | Fast CVE/misconfiguration scanner using community templates |
 | `subfinder` | Passive subdomain enumeration (ProjectDiscovery) |
+| `amass` | OWASP subdomain enumeration, asset discovery, tracking, and visualization |
 | `pd-httpx` | HTTP/HTTPS probing — status codes, titles, tech detection (ProjectDiscovery). Renamed from `httpx` to avoid conflict with the Python `httpx` library pulled in by wapiti3 |
 | `dnsx` | Fast DNS resolution and record querying (ProjectDiscovery) |
 | `gobuster` | Directory, file, DNS, and vhost brute-forcing. Wordlists installed at `/usr/share/wordlists/seclists/` |
@@ -523,7 +528,8 @@ To prevent commands from writing to either path directly, the app blocks any com
 - [DECISIONS.md](DECISIONS.md) - Architectural rationale, tradeoffs, and implementation-history notes
 - [tests/README.md](tests/README.md) - Detailed suite appendix, smoke-test coverage, and focused test commands
 - [THEME.md](THEME.md) - Theme registry, selector metadata, and override behavior
-- [docs/theme-inventory.md](docs/theme-inventory.md) - Working inventory for shared modal, drawer, sheet, row, and control theme-token cleanup
+- [docs/external-command-integrations.md](docs/external-command-integrations.md) - External command registry, rewrite, environment, Files, and smoke-test contracts
+- [docs/ROADMAP.md](docs/ROADMAP.md) - Product roadmap for projects, annotations, artifacts, notes, exports, and target context
 - [FEATURES.md](FEATURES.md) - Full per-feature reference: autocomplete, pipe support, keyboard shortcuts, allowlist, welcome animation, history, permalinks, themes, and more
 
 ---
@@ -579,6 +585,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── theme_light.yaml.example # Generated light-theme reference template — regenerate with scripts/generate_theme_examples.py
 │   │   ├── themes/                 # Built-in theme definitions (one YAML per theme — apricot_sand, charcoal_amber, darklab_obsidian, etc.)
 │   │   ├── welcome.yaml            # Welcome command samples with optional group/featured metadata (optional)
+│   │   ├── wordlists.yaml          # Curated SecLists catalog categories used by the wordlist command and autocomplete
 │   │   └── workflows.yaml          # Guided workflows panel definitions (multi-step diagnostic command sequences)
 │   ├── config.py               # load_config(), CFG defaults, SCANNER_PREFIX detection, theme registry
 │   ├── database.py             # SQLite connection, schema init, retention pruning
@@ -650,6 +657,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── permalink_error.html # Missing/expired permalink template
 │   │   ├── theme_vars_script.html # Injected JS theme metadata/bootstrap block
 │   │   └── theme_vars_style.html # Injected CSS variable block for the active theme
+│   ├── wordlists.py            # SecLists catalog loader and filtering helpers for wordlist command/autocomplete
 │   └── workspace.py            # App-mediated per-session workspace path, quota, and cleanup helpers
 ├── assets/                     # README media assets (demo videos)
 ├── config/
@@ -671,6 +679,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   └── history.db              #   stores run history and tab snapshots
 ├── docker-compose.yml
 ├── docs/
+│   ├── ROADMAP.md              # Product roadmap for projects, annotations, artifacts, notes, exports, and target context
 │   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
 │   ├── release-drafts/       # Temporary release-branch merge-request and release-note drafts; remove before merging to main unless intentionally preserving them
 │   │   ├── v1.6-merge-request.md # Draft GitLab merge request notes for the v1.6 branch

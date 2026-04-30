@@ -14,6 +14,12 @@ commands:
     autocomplete:
       argument_limit: 1
       arguments: []
+  - root: cd
+    description: "built-in: change the current workspace folder"
+    feature_required: workspace
+    autocomplete:
+      argument_limit: 1
+      arguments: []
   - root: clear
     description: "built-in: clear the current terminal tab output"
     autocomplete:
@@ -67,7 +73,18 @@ commands:
       subcommands:
         - value: list
           description: "List current session files"
-          closes: true
+          takes_value: true
+          insert: "list "
+          value_hint:
+            value: "<folder>"
+            description: "Session folder"
+        - value: ls
+          description: "List current session files"
+          takes_value: true
+          insert: "ls "
+          value_hint:
+            value: "<folder>"
+            description: "Session folder"
         - value: show
           description: "Print a session file in the terminal"
           takes_value: true
@@ -82,6 +99,13 @@ commands:
           value_hint:
             value: "<file>"
             description: "New session file name"
+        - value: add-dir
+          description: "Create a session folder"
+          takes_value: true
+          insert: "add-dir "
+          value_hint:
+            value: "<folder>"
+            description: "New session folder"
         - value: edit
           description: "Open the Files editor for an existing session file"
           takes_value: true
@@ -128,6 +152,32 @@ commands:
     description: "built-in: show the shell group membership"
     autocomplete:
       arguments: []
+  - root: grep
+    description: "built-in: filter a session file"
+    feature_required: workspace
+    autocomplete:
+      flags:
+        - value: -i
+          description: "Ignore case"
+        - value: -v
+          description: "Invert match"
+        - value: -E
+          description: "Extended regex"
+      argument_limit: 2
+      arguments: []
+  - root: head
+    description: "built-in: print the first lines of a session file"
+    feature_required: workspace
+    autocomplete:
+      flags:
+        - value: -n
+          description: "Line count"
+          takes_value: true
+          suggest:
+            - value: "10"
+              description: "Ten lines"
+      argument_limit: 1
+      arguments: []
   - root: help
     description: >-
       built-in: show README, FAQ, shortcuts, and command-discovery guidance
@@ -171,11 +221,31 @@ commands:
       built-in: show configured runtime, history, and retention limits
     autocomplete:
       arguments: []
+  - root: ll
+    description: "built-in: long-list session files"
+    feature_required: workspace
+    autocomplete:
+      flags:
+        - value: -R
+          description: "Recursive listing"
+      argument_limit: 1
+      arguments: []
   - root: ls
     description: "built-in: list session files"
     feature_required: workspace
     autocomplete:
-      argument_limit: 0
+      flags:
+        - value: -l
+          description: "Long listing"
+        - value: -R
+          description: "Recursive listing"
+      argument_limit: 1
+      arguments: []
+  - root: mkdir
+    description: "built-in: create a session folder"
+    feature_required: workspace
+    autocomplete:
+      argument_limit: 1
       arguments: []
   - root: man
     description: "built-in: show a real or built-in manual page"
@@ -202,6 +272,13 @@ commands:
     description: "built-in: remove a session file after confirmation"
     feature_required: workspace
     autocomplete:
+      flags:
+        - value: -r
+          description: "Remove folders recursively"
+        - value: -f
+          description: "Force-style flag; confirmation is still required"
+        - value: -rf
+          description: "Remove folders recursively"
       argument_limit: 1
       arguments: []
   - root: route
@@ -261,10 +338,36 @@ commands:
     description: "built-in: show session activity totals and command breakdowns"
     autocomplete:
       arguments: []
+  - root: sort
+    description: "built-in: sort a session file"
+    feature_required: workspace
+    autocomplete:
+      flags:
+        - value: -r
+          description: "Reverse sort"
+        - value: -n
+          description: "Numeric sort"
+        - value: -u
+          description: "Unique lines"
+      argument_limit: 1
+      arguments: []
   - root: status
     description: >-
       built-in: show the current session summary, limits, and backend health
     autocomplete:
+      arguments: []
+  - root: tail
+    description: "built-in: print the last lines of a session file"
+    feature_required: workspace
+    autocomplete:
+      flags:
+        - value: -n
+          description: "Line count"
+          takes_value: true
+          suggest:
+            - value: "10"
+              description: "Ten lines"
+      argument_limit: 1
       arguments: []
   - root: theme
     description: "built-in: show or apply the active shell theme"
@@ -300,6 +403,15 @@ commands:
     description: "built-in: show app uptime since process start"
     autocomplete:
       arguments: []
+  - root: uniq
+    description: "built-in: collapse adjacent duplicate lines in a session file"
+    feature_required: workspace
+    autocomplete:
+      flags:
+        - value: -c
+          description: "Prefix lines by duplicate count"
+      argument_limit: 1
+      arguments: []
   - root: var
     description: "built-in: set, list, or unset session command variables"
     autocomplete:
@@ -330,6 +442,34 @@ commands:
     autocomplete:
       argument_limit: 1
       arguments: []
+  - root: wordlist
+    description: "built-in: list and search installed SecLists wordlists"
+    autocomplete:
+      subcommands:
+        - value: list
+          description: "List curated wordlists"
+          takes_value: true
+          insert: "list "
+          value_hint:
+            value: "<category>"
+            description: "Wordlist category"
+        - value: search
+          description: "Search curated wordlists"
+          takes_value: true
+          insert: "search "
+          value_hint:
+            value: "<term>"
+            description: "Search term"
+        - value: path
+          description: "Print one wordlist path"
+          takes_value: true
+          insert: "path "
+          value_hint:
+            value: "<name>"
+            description: "Wordlist name or relative path"
+      flags:
+        - value: --all
+          description: "List every installed SecLists file"
   - root: who
     description: "built-in: show the current shell user and session"
     autocomplete:
@@ -338,3 +478,14 @@ commands:
     description: "built-in: describe this shell and link to the project README"
     autocomplete:
       arguments: []
+  - root: wc
+    description: "built-in: count lines in a session file"
+    feature_required: workspace
+    autocomplete:
+      flags:
+        - value: -l
+          description: "Count lines"
+          takes_value: true
+          value_hint:
+            value: "<file>"
+            description: "Session file"

@@ -834,6 +834,63 @@ class TestRunStreaming:
         assert "curl -I\\n" not in body
         assert '"type": "exit"' in body
 
+    def test_fake_wordlist_lists_searches_and_prints_paths(self):
+        client = get_client()
+        catalog = {
+            "root": "/usr/share/wordlists/seclists",
+            "categories": [{"key": "dns", "label": "DNS", "description": "DNS lists"}],
+            "items": [
+                {
+                    "name": "subdomains-top1million-5000.txt",
+                    "category": "dns",
+                    "category_label": "DNS",
+                    "description": "DNS lists",
+                    "path": "/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
+                    "relpath": "Discovery/DNS/subdomains-top1million-5000.txt",
+                    "aliases": ["subdomains-top1million-5000.txt"],
+                }
+            ],
+            "all_items": None,
+        }
+        with mock.patch("fake_commands.load_wordlist_catalog", return_value=catalog):
+            listed = client.post(
+                "/run",
+                json={"command": "wordlist list dns"},
+                headers={"X-Session-ID": "sess-wordlist"},
+            )
+            searched = client.post(
+                "/run",
+                json={"command": "wordlist search subdomains"},
+                headers={"X-Session-ID": "sess-wordlist"},
+            )
+            path = client.post(
+                "/run",
+                json={"command": "wordlist path subdomains-top1million-5000.txt"},
+                headers={"X-Session-ID": "sess-wordlist"},
+            )
+
+        assert "Curated dns wordlists:\\n" in listed.get_data(as_text=True)
+        assert "Discovery/DNS/subdomains-top1million-5000.txt" in searched.get_data(as_text=True)
+        assert "/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt" in path.get_data(as_text=True)
+
+    def test_fake_wordlist_reports_missing_catalog(self):
+        client = get_client()
+        with mock.patch("fake_commands.load_wordlist_catalog", return_value={
+            "root": "/usr/share/wordlists/seclists",
+            "categories": [],
+            "items": [],
+            "all_items": None,
+        }):
+            resp = client.post(
+                "/run",
+                json={"command": "wordlist"},
+                headers={"X-Session-ID": "sess-wordlist-missing"},
+            )
+
+        body = resp.get_data(as_text=True)
+        assert "Installed SecLists wordlists were not found.\\n" in body
+        assert "Expected path: /usr/share/wordlists/seclists\\n" in body
+
     def test_fake_workspace_lists_shows_and_removes_session_files(self, tmp_path):
         client = get_client()
         session = "sess-workspace-command"
@@ -873,6 +930,16 @@ class TestRunStreaming:
                 json={"command": "file list"},
                 headers={"X-Session-ID": session},
             )
+            list_long_resp = client.post(
+                "/run",
+                json={"command": "file ls -l"},
+                headers={"X-Session-ID": session},
+            )
+            list_recursive_resp = client.post(
+                "/run",
+                json={"command": "file ls -Rl"},
+                headers={"X-Session-ID": session},
+            )
             show_resp = client.post(
                 "/run",
                 json={"command": "file show targets.txt"},
@@ -884,22 +951,34 @@ class TestRunStreaming:
         assert created_nested_report.status_code == 200
         assert created_empty_folder.status_code == 200
         assert list_resp.status_code == 200
+        assert list_long_resp.status_code == 200
+        assert list_recursive_resp.status_code == 200
         list_body = list_resp.get_data(as_text=True)
         assert "Session files:\\n" in list_body
         assert "usage" in list_body
         assert "62 B / 1.0 MB\\n" in list_body
         assert "remaining" in list_body
-        assert "\\u001b[4mpath\\u001b[0m  " in list_body
-        assert "\\u001b[4msize\\u001b[0m    " in list_body
-        assert "\\u001b[4mmodified\\u001b[0m" in list_body
         assert "targets.txt" in list_body
         assert "empty-folder/" in list_body
         assert "reports/" in list_body
-        assert "  amass.txt" in list_body
-        assert "  reports/nested/" in list_body
-        assert "    httpx.txt" in list_body
-        assert list_body.index("reports/") < list_body.index("  amass.txt")
-        assert list_body.index("  reports/nested/") < list_body.index("    httpx.txt")
+        assert "amass.txt" not in list_body
+        assert "httpx.txt" not in list_body
+
+        long_body = list_long_resp.get_data(as_text=True)
+        assert "\\u001b[4mpath\\u001b[0m  " in long_body
+        assert "\\u001b[4msize\\u001b[0m    " in long_body
+        assert "\\u001b[4mmodified\\u001b[0m" in long_body
+        assert "reports/" in long_body
+        assert "targets.txt" in long_body
+        assert "amass.txt" not in long_body
+
+        recursive_body = list_recursive_resp.get_data(as_text=True)
+        assert "reports/" in recursive_body
+        assert "  amass.txt" in recursive_body
+        assert "  reports/nested/" in recursive_body
+        assert "    httpx.txt" in recursive_body
+        assert recursive_body.index("reports/") < recursive_body.index("  amass.txt")
+        assert recursive_body.index("  reports/nested/") < recursive_body.index("    httpx.txt")
 
         assert show_resp.status_code == 200
         show_body = show_resp.get_data(as_text=True)
@@ -955,6 +1034,7 @@ class TestRunStreaming:
         assert help_resp.status_code == 200
         help_body = help_resp.get_data(as_text=True)
         assert "Session file commands:\\n" in help_body
+        assert "file ls [-lR] [folder]\\n" in help_body
         assert "file download <file>\\n" in help_body
         assert "Aliases:\\n" in help_body
         assert "Create targets.txt from the Files panel.\\n" in help_body
@@ -1672,11 +1752,24 @@ class TestRunStreaming:
     def test_fake_pwd_returns_synthetic_path(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "pwd"})
+        with mock.patch("fake_commands.CFG", {**shell_app.CFG, "workspace_enabled": False}):
+            resp = client.post("/run", json={"command": "pwd"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
         assert f"/app/{shell_app.CFG['app_name']}/bin\\n" in body
+        assert '"type": "exit"' in body
+
+    def test_fake_pwd_returns_workspace_root_when_workspace_enabled(self):
+        client = get_client()
+
+        with mock.patch("fake_commands.CFG", {**shell_app.CFG, "workspace_enabled": True}):
+            resp = client.post("/run", json={"command": "pwd"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert '"text": "/\\n"' in body
+        assert f"/app/{shell_app.CFG['app_name']}/bin\\n" not in body
         assert '"type": "exit"' in body
 
     def test_fake_uname_a_returns_web_shell_environment(self):

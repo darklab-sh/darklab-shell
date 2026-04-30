@@ -20,6 +20,7 @@ from commands import (
 )
 from fake_commands import get_current_shortcuts, get_fake_command_roots, get_special_command_keys
 from helpers import get_client_ip, get_log_session_id, ip_is_in_cidrs, resolve_theme
+from wordlists import wordlist_autocomplete_items
 
 log = logging.getLogger("shell")
 
@@ -83,6 +84,22 @@ def _initial_rail_state():
     }
 
 
+def _prompt_identity_prefix(raw_prefix: str) -> str:
+    prefix = str(raw_prefix or "").strip() or "anon@darklab"
+    if prefix.endswith("$"):
+        prefix = prefix[:-1].rstrip()
+    if ":" in prefix:
+        head, tail = prefix.rsplit(":", 1)
+        if head and tail and not any(ch.isspace() for ch in tail):
+            prefix = head.strip()
+    return prefix or "anon@darklab"
+
+
+def _prompt_label(workspace_enabled: bool) -> str:
+    path = "/" if workspace_enabled else "~"
+    return f"{_prompt_identity_prefix(_config.CFG.get('prompt_prefix', ''))}:{path} $"
+
+
 def _frontend_config_payload():
     """Return the browser-facing config payload derived from server config."""
     cfg = _config.CFG
@@ -138,7 +155,7 @@ def index():
         version=_config.APP_VERSION,
         project_readme=_config.PROJECT_README,
         initial_rail=_initial_rail_state(),
-        prompt_prefix=_config.CFG["prompt_prefix"],
+        prompt_prefix=_prompt_label(bool(_config.CFG.get("workspace_enabled", False))),
         current_theme=current_theme,
         current_theme_css=current_theme["vars"],
         theme_registry={"current": current_theme, "themes": _config.THEME_REGISTRY},
@@ -233,6 +250,7 @@ def autocomplete():
     return jsonify({
         "suggestions": [],
         "context": context,
+        "wordlists": wordlist_autocomplete_items(),
         "special_commands": special_commands,
         "builtin_command_roots": builtin_command_roots,
     })

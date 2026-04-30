@@ -11,10 +11,34 @@ const _defaultMobilePromptLabel = (() => {
 })();
 let _composerPromptMode = null;
 
+function _compactMobileComposerPath(path = '/') {
+  const displayPath = String(path || '/').trim() || '/';
+  if (displayPath === '/') return '/';
+  if (displayPath.length <= 18) return displayPath;
+  const parts = displayPath.split('/').filter(Boolean);
+  const folder = parts[parts.length - 1] || displayPath.replace(/^\/+/, '') || '/';
+  return `.../${folder}`;
+}
+
+function _mobileComposerPlaceholder() {
+  if (
+    typeof APP_CONFIG !== 'undefined'
+    && APP_CONFIG
+    && APP_CONFIG.workspace_enabled === true
+    && typeof currentPromptWorkspacePath === 'function'
+  ) {
+    return `${_compactMobileComposerPath(currentPromptWorkspacePath())} · type command`;
+  }
+  return 'Type a command';
+}
+
 function _applyComposerPromptMode() {
   const isConfirm = _composerPromptMode === 'confirm';
-  const desktopLabel = isConfirm ? '[yes/no]:' : _defaultDesktopPromptLabel;
-  const mobileLabel = isConfirm ? '[yes/no]:' : _defaultMobilePromptLabel;
+  const defaultPromptLabel = typeof buildPromptLabel === 'function'
+    ? buildPromptLabel()
+    : (_defaultDesktopPromptLabel || 'anon@darklab:~ $');
+  const desktopLabel = isConfirm ? '[yes/no]:' : defaultPromptLabel;
+  const mobileLabel = isConfirm ? '[yes/no]:' : '';
   const promptPrefix = typeof shellPromptWrap !== 'undefined' && shellPromptWrap
     ? shellPromptWrap.querySelector('.prompt-prefix')
     : null;
@@ -25,7 +49,13 @@ function _applyComposerPromptMode() {
   const mobilePromptLabel = typeof mobileComposerRow !== 'undefined' && mobileComposerRow
     ? mobileComposerRow.querySelector('.mobile-prompt-label')
     : null;
-  if (mobilePromptLabel) mobilePromptLabel.textContent = mobileLabel;
+  if (mobilePromptLabel) {
+    mobilePromptLabel.textContent = mobileLabel;
+    mobilePromptLabel.hidden = !isConfirm;
+  }
+  if (typeof mobileCmdInput !== 'undefined' && mobileCmdInput) {
+    mobileCmdInput.placeholder = isConfirm ? '' : _mobileComposerPlaceholder();
+  }
 }
 
 function setComposerPromptMode(mode = null) {
@@ -210,6 +240,8 @@ const _uiOverlayRefs = {
   hamburgerBtn: hamburgerBtn || null,
   workflowsOverlay: typeof workflowsOverlay !== 'undefined' && workflowsOverlay ? workflowsOverlay : null,
   workspaceOverlay: _workspaceOverlayEl,
+  workspaceViewerOverlay: typeof workspaceViewerOverlay !== 'undefined' && workspaceViewerOverlay ? workspaceViewerOverlay : null,
+  workspaceEditorOverlay: typeof workspaceEditorOverlay !== 'undefined' && workspaceEditorOverlay ? workspaceEditorOverlay : null,
   faqOverlay: typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay : null,
   themeOverlay: typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay : null,
   optionsOverlay: typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay : null,
@@ -851,6 +883,7 @@ function _snapshotTabRawLines(rawLines) {
       ? line.signals.map(signal => String(signal || '')).filter(Boolean)
       : [],
     line_index: Number.isInteger(line && line.line_index) ? line.line_index : undefined,
+    line_number: Number.isInteger(line && line.line_number) ? line.line_number : undefined,
     command_root: String(line && line.command_root || ''),
     target: String(line && line.target || ''),
   }));
@@ -873,6 +906,7 @@ function _tabSessionSnapshot() {
       label: String(tab.label || ''),
       command: String(tab.command || ''),
       renamed: !!tab.renamed,
+      workspaceCwd: String(tab.workspaceCwd || ''),
       draftInput: String(tab.draftInput || ''),
       commandHistory: Array.isArray(tab.commandHistory)
         ? tab.commandHistory.map(cmd => String(cmd || '')).filter(Boolean)
@@ -895,6 +929,11 @@ function _tabSessionSnapshot() {
     activeIndex: activeIndex >= 0 ? activeIndex : 0,
     tabs: persisted,
   };
+}
+
+function _normalizeRestoredWorkspaceCwd(path = '') {
+  const parts = String(path || '').split('/').map(part => String(part || '').trim()).filter(Boolean);
+  return parts.join('/');
 }
 
 function persistTabSessionStateNow() {
@@ -967,6 +1006,7 @@ function restoreTabSessionState() {
       if (!tab) return;
       tab.command = String(item && item.command || '');
       tab.renamed = !!(item && item.renamed);
+      tab.workspaceCwd = _normalizeRestoredWorkspaceCwd(item && item.workspaceCwd || '');
       tab.draftInput = String(item && item.draftInput || '');
       tab.commandHistory = Array.isArray(item && item.commandHistory)
         ? item.commandHistory.map(cmd => String(cmd || '')).filter(Boolean)
@@ -995,6 +1035,7 @@ function restoreTabSessionState() {
       if (!tab) return;
       tab.command = String(item && item.command || '');
       tab.renamed = !!(item && item.renamed);
+      tab.workspaceCwd = _normalizeRestoredWorkspaceCwd(item && item.workspaceCwd || '');
       tab.draftInput = String(item && item.draftInput || '');
       tab.commandHistory = Array.isArray(item && item.commandHistory)
         ? item.commandHistory.map(cmd => String(cmd || '')).filter(Boolean)
@@ -1699,7 +1740,9 @@ function _buildThemePreviewCard(theme) {
   content.className = 'theme-card-preview-content';
   const prompt = document.createElement('span');
   prompt.className = 'theme-card-preview-prompt';
-  prompt.textContent = (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.prompt_prefix) || 'anon@darklab:~$';
+  prompt.textContent = typeof buildPromptLabel === 'function'
+    ? buildPromptLabel()
+    : 'anon@darklab:~ $';
   content.appendChild(prompt);
   for (let index = 0; index < 4; index += 1) {
     const line = document.createElement('span');
@@ -2292,27 +2335,87 @@ function _runtimeCommandLookupHints(baseRegistry = {}, descriptionForExternal = 
 }
 
 function _runtimeWorkspaceFileHints() {
+  return _runtimeWorkspaceEntryHints('file');
+}
+
+function _runtimeWorkspaceDirectoryHints() {
+  return _runtimeWorkspaceEntryHints('directory');
+}
+
+function _runtimeWorkspaceCwd() {
+  if (typeof _workspaceCwd === 'function') return _workspaceCwd(activeTabId);
+  if (typeof getTab === 'function') {
+    const tab = getTab(activeTabId);
+    const parts = String(tab && tab.workspaceCwd || '').split('/').filter(Boolean);
+    return parts.join('/');
+  }
+  return '';
+}
+
+function _runtimeWorkspaceRelativeValue(path = '', cwd = '') {
+  const normalizedPath = String(path || '').split('/').filter(Boolean).join('/');
+  const normalizedCwd = String(cwd || '').split('/').filter(Boolean).join('/');
+  if (!normalizedCwd) return normalizedPath;
+  if (!normalizedPath.startsWith(`${normalizedCwd}/`)) return '';
+  return normalizedPath.slice(normalizedCwd.length + 1);
+}
+
+function _runtimeWorkspaceDirectHintFromPath(item, cwd = '') {
+  const relative = _runtimeWorkspaceRelativeValue(item && item.value, cwd);
+  if (!relative || relative.includes('/')) return null;
+  return _runtimeHint(relative, item && item.description || '');
+}
+
+function _runtimeWorkspaceEntryHints(kind = 'file') {
+  const cwd = _runtimeWorkspaceCwd();
+  if (typeof getWorkspaceDirectoryEntries === 'function') {
+    const entries = getWorkspaceDirectoryEntries(cwd) || {};
+    const source = kind === 'directory' ? entries.folders : entries.files;
+    const allHints = kind === 'directory'
+      ? (typeof getWorkspaceAutocompleteDirectoryHints === 'function' ? getWorkspaceAutocompleteDirectoryHints() : [])
+      : (typeof getWorkspaceAutocompleteFileHints === 'function' ? getWorkspaceAutocompleteFileHints() : []);
+    return (Array.isArray(source) ? source : []).map((entry) => {
+      const path = String(entry && entry.path || '').split('/').filter(Boolean).join('/');
+      const value = String(entry && entry.name || _runtimeWorkspaceRelativeValue(path, cwd)).trim();
+      const existing = allHints.find(item => String(item && item.value || '') === path);
+      return value ? _runtimeHint(value, existing && existing.description || (kind === 'directory' ? 'session folder' : 'session file')) : null;
+    }).filter(Boolean);
+  }
+  if (kind === 'directory') {
+    if (typeof getWorkspaceAutocompleteDirectoryHints !== 'function') return [];
+    return getWorkspaceAutocompleteDirectoryHints()
+      .map(item => _runtimeWorkspaceDirectHintFromPath(item, cwd))
+      .filter(Boolean);
+  }
   if (typeof getWorkspaceAutocompleteFileHints !== 'function') return [];
-  return getWorkspaceAutocompleteFileHints();
+  return getWorkspaceAutocompleteFileHints()
+    .map(item => _runtimeWorkspaceDirectHintFromPath(item, cwd))
+    .filter(Boolean);
 }
 
 function _runtimeWorkspaceContext() {
   const fileHints = _runtimeWorkspaceFileHints();
+  const directoryHints = _runtimeWorkspaceDirectoryHints();
+  const deleteHints = fileHints.concat(directoryHints);
   return _runtimeContextSpec({
-    expectsValue: ['show', 'add', 'edit', 'download', 'rm', 'delete'],
+    expectsValue: ['show', 'add', 'add-dir', 'edit', 'download', 'rm', 'delete', 'ls'],
     argHints: {
-      list: [],
+      list: [_runtimeHint('-l', 'Long listing'), _runtimeHint('-R', 'Recursive listing')].concat(directoryHints, [_runtimeHint('/', 'Session workspace root')]),
+      ls: [_runtimeHint('-l', 'Long listing'), _runtimeHint('-R', 'Recursive listing')].concat(directoryHints, [_runtimeHint('/', 'Session workspace root')]),
       help: [],
       show: fileHints,
       add: [_runtimeHint('<file>', 'New session file name')],
+      'add-dir': directoryHints.concat([_runtimeHint('<folder>', 'New session folder')]),
       edit: fileHints,
       download: fileHints,
-      rm: fileHints,
-      delete: fileHints,
+      rm: [_runtimeHint('-r', 'Remove folders recursively'), _runtimeHint('-rf', 'Remove folders recursively')].concat(deleteHints),
+      delete: [_runtimeHint('-r', 'Remove folders recursively'), _runtimeHint('-rf', 'Remove folders recursively')].concat(deleteHints),
       __positional__: [
         _runtimeHint('list', 'List current session files'),
+        _runtimeHint('ls', 'List current session files'),
         _runtimeHint('show <file>', 'Print a session file in the terminal', 'show '),
         _runtimeHint('add <file>', 'Open the Files editor for a new session file', 'add '),
+        _runtimeHint('add-dir <folder>', 'Create a session folder', 'add-dir '),
         _runtimeHint('edit <file>', 'Open the Files editor for an existing session file', 'edit '),
         _runtimeHint('download <file>', 'Download a session file through the browser', 'download '),
         _runtimeHint('delete <file>', 'Remove a session file from this session', 'delete '),
@@ -2320,6 +2423,14 @@ function _runtimeWorkspaceContext() {
       ],
     },
   });
+}
+
+function _runtimeWorkspaceNavigableDirectoryHints() {
+  const hints = _runtimeWorkspaceDirectoryHints();
+  const cwd = _runtimeWorkspaceCwd();
+  if (cwd) hints.unshift(_runtimeHint('../', 'Parent workspace folder'));
+  hints.push(_runtimeHint('/', 'Session workspace root'));
+  return hints;
 }
 
 function _runtimeThemeContext() {
@@ -2406,6 +2517,28 @@ function _runtimeVarContext() {
   });
 }
 
+function _runtimeWordlistContext() {
+  const wordlists = (typeof acWordlists !== 'undefined' && Array.isArray(acWordlists)) ? acWordlists : [];
+  const categoryHints = [];
+  const seenCategories = new Set();
+  wordlists.forEach((item) => {
+    const category = String(item && (item.wordlist_category || item.category) || '').trim();
+    if (!category || seenCategories.has(category.toLowerCase())) return;
+    seenCategories.add(category.toLowerCase());
+    categoryHints.push(_runtimeHint(category, 'Wordlist category'));
+  });
+  const pathHints = wordlists.map(item => _runtimeHint(
+    String(item && item.name || item && item.label || item && item.value || ''),
+    String(item && item.description || 'Installed wordlist'),
+  )).filter(item => item.value);
+  return _runtimeContextSpec({
+    argHints: {
+      list: categoryHints,
+      path: pathHints,
+    },
+  });
+}
+
 function getRuntimeAutocompleteContext(baseRegistry = {}) {
   const context = {};
   _runtimeActiveBuiltinRoots(baseRegistry).forEach((root) => {
@@ -2417,6 +2550,9 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
   context.theme = _runtimeMergeContextSpec(baseRegistry.theme, _runtimeThemeContext());
   context.config = _runtimeMergeContextSpec(baseRegistry.config, _runtimeConfigContext());
   context.var = _runtimeMergeContextSpec(baseRegistry.var, _runtimeVarContext());
+  if (baseRegistry.wordlist) {
+    context.wordlist = _runtimeMergeContextSpec(baseRegistry.wordlist, _runtimeWordlistContext());
+  }
   if (isWorkspaceFeatureEnabled() && baseRegistry.file) {
     context.file = _runtimeMergeContextSpec(baseRegistry.file, _runtimeWorkspaceContext());
   }
@@ -2425,9 +2561,45 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
       argHints: { __positional__: _runtimeWorkspaceFileHints() },
     }));
   }
+  if (isWorkspaceFeatureEnabled() && baseRegistry.cd) {
+    context.cd = _runtimeMergeContextSpec(baseRegistry.cd, _runtimeContextSpec({
+      argHints: { __positional__: _runtimeWorkspaceNavigableDirectoryHints() },
+    }));
+  }
+  if (isWorkspaceFeatureEnabled() && baseRegistry.ls) {
+    context.ls = _runtimeMergeContextSpec(baseRegistry.ls, _runtimeContextSpec({
+      argHints: { __positional__: [_runtimeHint('-l', 'Long listing'), _runtimeHint('-R', 'Recursive listing')].concat(_runtimeWorkspaceNavigableDirectoryHints()) },
+    }));
+  }
+  if (isWorkspaceFeatureEnabled() && baseRegistry.ll) {
+    context.ll = _runtimeMergeContextSpec(baseRegistry.ll, _runtimeContextSpec({
+      argHints: { __positional__: [_runtimeHint('-R', 'Recursive listing')].concat(_runtimeWorkspaceNavigableDirectoryHints()) },
+    }));
+  }
+  if (isWorkspaceFeatureEnabled() && baseRegistry.mkdir) {
+    context.mkdir = _runtimeMergeContextSpec(baseRegistry.mkdir, _runtimeContextSpec({
+      argHints: { __positional__: _runtimeWorkspaceDirectoryHints().concat([_runtimeHint('<folder>', 'New session folder')]) },
+    }));
+  }
   if (isWorkspaceFeatureEnabled() && baseRegistry.rm) {
+    const deleteHints = _runtimeWorkspaceFileHints().concat(_runtimeWorkspaceDirectoryHints());
     context.rm = _runtimeMergeContextSpec(baseRegistry.rm, _runtimeContextSpec({
-      argHints: { __positional__: _runtimeWorkspaceFileHints() },
+      argHints: {
+        __positional__: [_runtimeHint('-r', 'Remove folders recursively'), _runtimeHint('-rf', 'Remove folders recursively')].concat(deleteHints),
+      },
+    }));
+  }
+  ['grep', 'head', 'tail', 'sort', 'uniq'].forEach((root) => {
+    if (isWorkspaceFeatureEnabled() && baseRegistry[root]) {
+      context[root] = _runtimeMergeContextSpec(baseRegistry[root], _runtimeContextSpec({
+        argHints: { __positional__: _runtimeWorkspaceFileHints() },
+      }));
+    }
+  });
+  if (isWorkspaceFeatureEnabled() && baseRegistry.wc) {
+    context.wc = _runtimeMergeContextSpec(baseRegistry.wc, _runtimeContextSpec({
+      argHints: { '-l': _runtimeWorkspaceFileHints() },
+      sequenceArgHints: { '-l': _runtimeWorkspaceFileHints() },
     }));
   }
   context.man = _runtimeMergeContextSpec(baseRegistry.man, _runtimeContextSpec({

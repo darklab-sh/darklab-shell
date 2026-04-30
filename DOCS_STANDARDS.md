@@ -362,7 +362,7 @@ Before finalizing doc changes, check:
 - Are sibling sections more consistent than before?
 - Do anchors and cross-links still resolve?
 - For CHANGELOG entries, does the T2 short vs T2 long choice match the ≥5-sentence / multi-concept threshold?
-- Does `python -m pytest tests/py/test_docs.py -q` still pass (21/21)?
+- Does `python -m pytest tests/py/test_docs.py -q` still pass (28/28)?
 - Does `npm run lint:md` still report zero errors?
 
 ---

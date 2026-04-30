@@ -122,7 +122,7 @@ Commands containing loopback addresses (`localhost`, `127.0.0.1`, `0.0.0.0`, `[:
 Three complementary layers enforce the restriction:
 
 1. **Server-side regex** (`commands.py` `_is_command_allowed`) — authoritative; catches any tool and any URL form (bare hostname, with port, with scheme, etc.)
-2. **Allowlist deny entries** (`conf/allowed_commands.txt`) — client-side feedback for the most obvious bare-hostname patterns (`!curl localhost`, `!curl 127.0.0.1`, etc.)
+2. **Command registry deny entries** (`app/conf/commands.yaml` `policy.deny`) — client-side feedback for the most obvious bare-hostname patterns (`curl localhost`, `curl 127.0.0.1`, etc.)
 3. **iptables rule** (`entrypoint.sh`) — OS-level TCP block for the `scanner` uid on the app port; fires before the Flask app sees the request and covers tools that bypass command validation (e.g. scripting languages)
 
 The iptables rule is added by `entrypoint.sh` as root before the `gosu` drop. It uses `REJECT --reject-with tcp-reset` so connections from the scanner user fail immediately rather than timing out. The `|| true` ensures the rule failure does not abort startup in environments where `xt_owner` is unavailable.
@@ -159,9 +159,9 @@ Header sync alone is not sufficient, though. Passive tabs also need to refresh s
 
 **Deny entries match denied flags anywhere in the command, not just as a command prefix.**
 
-Allow-listed tools can have specific flags blocked via `!`-prefixed deny entries in `conf/allowed_commands.txt`. Early implementations only matched the deny entry as a prefix of the command — `!curl -o` would catch `curl -o /tmp/out` but not `curl -s -o /tmp/out` where other flags precede the denied one.
+Allow-listed tools can have specific flags blocked through `policy.deny` entries in `app/conf/commands.yaml`. Early implementations only matched the deny entry as a prefix of the command — `curl -o` would catch `curl -o /tmp/out` but not `curl -s -o /tmp/out` where other flags precede the denied one.
 
-`_is_denied()` tokenizes both the incoming command and the deny entry using the shared `split_command_argv` helper. Tool names and subcommand prefixes are compared case-insensitively; flags are compared with exact case, so `!curl -K` (disable TLS verification, uppercase) does not fire on `curl -k` (lowercase). For short combined flags (`-sU`), `_flag_matches_token` checks whether the denied flag letter appears within the token, so `!nmap -sU` catches `-sU`, `-UsT`, and other combinations. The tool prefix must still match first, so `!gobuster dir -o` only fires for `gobuster dir` subcommand invocations, not `gobuster dns`.
+`_is_denied()` tokenizes both the incoming command and the deny entry using the shared `split_command_argv` helper. Tool names and subcommand prefixes are compared case-insensitively; flags are compared with exact case, so `curl -K` (disable TLS verification, uppercase) does not fire on `curl -k` (lowercase). For short combined flags (`-sU`), `_flag_matches_token` checks whether the denied flag letter appears within the token, so `nmap -sU` catches `-sU`, `-UsT`, and other combinations. The tool prefix must still match first, so `gobuster dir -o` only fires for `gobuster dir` subcommand invocations, not `gobuster dns`.
 
 **`/dev/null` exception:** a denied output flag is allowed when its argument is `/dev/null` (e.g. `curl -o /dev/null -s -w "%{http_code}" <url>`). This is a common pattern for checking HTTP response codes without writing to the filesystem. The exception checks for `flag /dev/null\b` immediately after the flag match.
 
@@ -411,7 +411,7 @@ Confirmations were originally per-surface: the kill flow, history clear, history
 
 **ESLint was chosen over Prettier for JS linting.** Prettier's `--check` mode only identifies which files differ from its expected output — it does not show which line or rule is violated. ESLint shows the exact file, line, column, and rule name on every violation, which is far more actionable in a pre-commit hook. ESLint is configured in `config/eslint.config.js` with three rules scoped to config and test files (`tests/js/`, `playwright*.js`): 2-space `indent`, `singleQuote`, and `semi: never`. The browser-side app JS (`app/static/js/`) is excluded because it follows a different convention (semicolons) and rewriting it would be a large unrelated diff.
 
-**Git hooks live in `scripts/hooks/` instead of `.githooks/` or `.git/hooks/`.** `.git/hooks/` is not version-controlled and requires every developer to manually copy or symlink files after cloning. `.githooks/` is trackable but is a non-standard directory name that requires explicit opt-in. `scripts/hooks/` is tracked like any other script, follows the project's existing `scripts/` convention, and is activated with one command: `git config core.hooksPath scripts/hooks`. The previous Python-only hook at `.githooks/pre-commit` has been superseded; the consolidated hook at `scripts/hooks/pre-commit` covers all twelve checks (flake8, bandit, pytest, pip-audit, vitest, eslint, npm audit, shellcheck, hadolint, yamllint, markdownlint, vendor:check).
+**Git hooks live in `scripts/hooks/` instead of `.githooks/` or `.git/hooks/`.** `.git/hooks/` is not version-controlled and requires every developer to manually copy or symlink files after cloning. `.githooks/` is trackable but is a non-standard directory name that requires explicit opt-in. `scripts/hooks/` is tracked like any other script, follows the project's existing `scripts/` convention, and is activated with one command: `git config core.hooksPath scripts/hooks`. The previous Python-only hook at `.githooks/pre-commit` has been superseded; the consolidated hook at `scripts/hooks/pre-commit` covers the tracked local checks (flake8, bandit, pytest, pip-audit, vitest, eslint, npm audit, shellcheck, hadolint, yamllint, jsonlint, markdownlint, and vendor:check).
 
 ### Long-Running and Local-Dev Edge Cases
 

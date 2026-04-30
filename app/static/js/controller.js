@@ -138,6 +138,26 @@ function setupDismissibleOverlays() {
     onClose: () => { if (typeof closeWorkspace === 'function') closeWorkspace(); },
     closeButtons: typeof workspaceCloseBtn !== 'undefined' ? workspaceCloseBtn : null,
   });
+  bindDismissible(_uiOverlayRefs.workspaceViewerOverlay, {
+    level: 'modal',
+    isOpen: () => (
+      typeof workspaceViewerOverlay !== 'undefined'
+      && workspaceViewerOverlay
+      && !workspaceViewerOverlay.classList.contains('u-hidden')
+    ),
+    onClose: () => { if (typeof hideWorkspaceViewer === 'function') hideWorkspaceViewer(); },
+    closeButtons: typeof workspaceCloseViewerBtn !== 'undefined' ? workspaceCloseViewerBtn : null,
+  });
+  bindDismissible(_uiOverlayRefs.workspaceEditorOverlay, {
+    level: 'modal',
+    isOpen: () => (
+      typeof workspaceEditorOverlay !== 'undefined'
+      && workspaceEditorOverlay
+      && !workspaceEditorOverlay.classList.contains('u-hidden')
+    ),
+    onClose: () => { if (typeof hideWorkspaceEditor === 'function') hideWorkspaceEditor(); },
+    closeButtons: typeof workspaceCancelEditBtn !== 'undefined' ? workspaceCancelEditBtn : null,
+  });
   bindDismissible(_uiOverlayRefs.faqOverlay, {
     level: 'panel',
     isOpen: isFaqOverlayOpen,
@@ -974,6 +994,14 @@ function hasActiveTerminalConfirm() {
   return typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm();
 }
 
+function isAnyPanelOverlayOpen() {
+  return (typeof isFaqOverlayOpen === 'function' && isFaqOverlayOpen())
+    || (typeof isWorkflowsOverlayOpen === 'function' && isWorkflowsOverlayOpen())
+    || (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen())
+    || (typeof isOptionsOverlayOpen === 'function' && isOptionsOverlayOpen())
+    || (typeof isThemeOverlayOpen === 'function' && isThemeOverlayOpen());
+}
+
 document.addEventListener('keydown', e => {
   // Unified Escape dispatch: closes the topmost open dismissible
   // (modal > sheet > panel) via the registry populated by
@@ -1366,6 +1394,7 @@ if (typeof document !== 'undefined') {
 apiFetch('/autocomplete').then(r => r.json()).then(data => {
   acSuggestions = data.suggestions || [];
   acContextRegistry = data.context || {};
+  acWordlists = Array.isArray(data.wordlists) ? data.wordlists : [];
   acSpecialCommands = data.special_commands || [];
   acBuiltinCommandRoots = data.builtin_command_roots || [];
   if (typeof loadSessionVariables === 'function') loadSessionVariables().catch(() => {});
@@ -1400,7 +1429,7 @@ cmdInput.addEventListener('input', () => {
 });
 
 cmdInput.addEventListener('keydown', e => {
-  if (isFaqOverlayOpen() || isWorkflowsOverlayOpen() || isWorkspaceOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen()) {
+  if (isAnyPanelOverlayOpen()) {
     if (e.key === 'Escape') {
       closeFaq(); closeWorkflows(); if (typeof closeWorkspace === 'function') closeWorkspace(); closeOptions(); closeThemeSelector();
       refocusComposerAfterAction({ defer: true });
@@ -1648,6 +1677,7 @@ if (typeof window !== 'undefined') {
 // ── Run button ──
 runBtn.addEventListener('click', runCommand);
 
+if (typeof _applyComposerPromptMode === 'function') _applyComposerPromptMode();
 syncShellPrompt();
 if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
 

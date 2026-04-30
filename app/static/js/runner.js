@@ -786,18 +786,89 @@ function _isClientSideUiCommand(cmd) {
   return root === 'theme' || root === 'config';
 }
 
-function _workspaceDeleteTarget(cmd) {
-  const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
+function _workspaceDeleteCommand(cmd) {
+  const parts = _workspaceCommandTokens(cmd);
   const root = (parts[0] || '').toLowerCase();
-  if (root === 'rm' && parts.length === 2) return parts[1];
-  if (root === 'file' && parts.length === 3 && ['rm', 'delete'].includes((parts[1] || '').toLowerCase())) {
-    return parts[2];
+  const fileAction = (parts[1] || 'delete').toLowerCase();
+  const usage = root === 'file'
+    ? `Usage: file ${fileAction} [-r|-f|-rf] <file-or-folder>`
+    : 'Usage: rm [-r|-f|-rf] <file-or-folder>';
+  const start = root === 'file' ? 2 : 1;
+  if (root === 'file' && !['rm', 'delete'].includes((parts[1] || '').toLowerCase())) return null;
+  if (root !== 'rm' && root !== 'file') return null;
+  const args = parts.slice(start);
+  const flags = [];
+  const targets = [];
+  args.forEach((part) => {
+    if (/^-[rf]+$/.test(part)) flags.push(part);
+    else if (String(part || '').startsWith('-')) targets.push(part);
+    else targets.push(part);
+  });
+  const recursive = flags.some(flag => flag.includes('r'));
+  const force = flags.some(flag => flag.includes('f'));
+  const invalid = targets.length !== 1 || args.some(part => String(part || '').startsWith('-') && !/^-[rf]+$/.test(part));
+  return {
+    target: invalid ? '' : targets[0],
+    recursive,
+    force,
+    usage,
+    invalid,
+  };
+}
+
+function _workspaceDeleteTarget(cmd) {
+  const parsed = _workspaceDeleteCommand(cmd);
+  return parsed && !parsed.invalid ? parsed.target : '';
+}
+
+function _workspaceListCommand(parts) {
+  const root = (parts[0] || '').toLowerCase();
+  const parseListArgs = (args, usage) => {
+    let long = false;
+    let recursive = false;
+    const targets = [];
+    let invalid = false;
+    args.forEach((part) => {
+      const value = String(part || '');
+      if (/^-[lR]+$/.test(value)) {
+        if (value.includes('l')) long = true;
+        if (value.includes('R')) recursive = true;
+      } else if (value.startsWith('-')) {
+        invalid = true;
+      } else {
+        targets.push(part);
+      }
+    });
+    if (targets.length > 1) invalid = true;
+    return {
+      target: targets[0] || '',
+      long,
+      recursive,
+      usage,
+      invalid,
+    };
+  };
+  if (root === 'll') {
+    const parsed = parseListArgs(parts.slice(1), 'Usage: ll [-R] [folder]');
+    parsed.long = true;
+    return parsed;
+  }
+  const usage = root === 'file' ? 'Usage: file list [-lR] [folder]' : 'Usage: ls [-lR] [folder]';
+  const start = root === 'file' ? 2 : 1;
+  if (root === 'file' && !['list', 'ls'].includes((parts[1] || '').toLowerCase())) return null;
+  return parseListArgs(parts.slice(start), usage);
+}
+
+function _workspaceListTarget(parts) {
+  const parsed = _workspaceListCommand(parts);
+  if (parsed && !parsed.invalid) {
+    return parsed.target;
   }
   return '';
 }
 
 function _workspaceEditorCommand(cmd) {
-  const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
+  const parts = _workspaceCommandTokens(cmd);
   const root = (parts[0] || '').toLowerCase();
   const action = (parts[1] || '').toLowerCase();
   if (root !== 'file' || !['add', 'edit'].includes(action)) return null;
@@ -805,25 +876,127 @@ function _workspaceEditorCommand(cmd) {
 }
 
 function _workspaceDownloadTarget(cmd) {
-  const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
+  const parts = _workspaceCommandTokens(cmd);
   const root = (parts[0] || '').toLowerCase();
   const action = (parts[1] || '').toLowerCase();
   if (root === 'file' && action === 'download' && parts.length === 3) return parts[2];
   return '';
 }
 
+function _workspaceCommandTokens(cmd) {
+  const tokens = [];
+  const re = /"[^"]*"|'[^']*'|\S+/g;
+  let match = re.exec(String(cmd || '').trim());
+  while (match) {
+    let token = match[0];
+    if (token.length >= 2 && ((token[0] === '"' && token[token.length - 1] === '"') || (token[0] === "'" && token[token.length - 1] === "'"))) {
+      token = token.slice(1, -1);
+    }
+    tokens.push(token);
+    match = re.exec(String(cmd || '').trim());
+  }
+  return tokens;
+}
+
+function _workspaceCwd(tabId = activeTabId) {
+  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+  return _normalizeWorkspaceTerminalPath(tab && tab.workspaceCwd || '');
+}
+
+function _setWorkspaceCwd(tabId, path = '') {
+  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+  const normalized = _normalizeWorkspaceTerminalPath(path);
+  if (tab) tab.workspaceCwd = normalized;
+  if (typeof _applyComposerPromptMode === 'function') _applyComposerPromptMode();
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+  return normalized;
+}
+
+function _workspaceDisplayPath(path = '') {
+  if (typeof workspaceDisplayPath === 'function') return workspaceDisplayPath(_normalizeWorkspaceTerminalPath(path));
+  const normalized = _normalizeWorkspaceTerminalPath(path);
+  return normalized ? `/${normalized}` : '/';
+}
+
+function _normalizeWorkspaceTerminalPath(path = '') {
+  const parts = String(path || '').split('/').map(part => String(part || '').trim()).filter(Boolean);
+  return parts.join('/');
+}
+
+function _resolveWorkspaceCommandPath(rawPath = '', { cwd = _workspaceCwd(), defaultToCwd = false } = {}) {
+  const text = String(rawPath ?? '').trim();
+  const normalizedCwd = _normalizeWorkspaceTerminalPath(cwd);
+  if (!text && defaultToCwd) return normalizedCwd;
+  if (typeof normalizeWorkspaceCommandPath === 'function') {
+    return _normalizeWorkspaceTerminalPath(normalizeWorkspaceCommandPath(text || '.', normalizedCwd));
+  }
+  const base = text.startsWith('/') ? [] : normalizedCwd.split('/').filter(Boolean);
+  const parts = String(text || '.').split('/').filter(Boolean);
+  for (const part of parts) {
+    if (part === '.') continue;
+    if (part === '..') {
+      if (!base.length) throw new Error('path escapes the session workspace');
+      base.pop();
+    } else {
+      base.push(part);
+    }
+  }
+  return base.join('/');
+}
+
+function _workspacePathExists(path = '', kind = 'any') {
+  const target = String(path || '').split('/').filter(Boolean).join('/');
+  if (!target) return kind === 'directory' || kind === 'any';
+  if (kind === 'directory' || kind === 'any') {
+    const dirHints = typeof getWorkspaceAutocompleteDirectoryHints === 'function'
+      ? getWorkspaceAutocompleteDirectoryHints()
+      : [];
+    if (dirHints.some(item => String(item && item.value || '') === target)) return true;
+  }
+  if (kind === 'file' || kind === 'any') {
+    const fileHints = typeof getWorkspaceAutocompleteFileHints === 'function'
+      ? getWorkspaceAutocompleteFileHints()
+      : [];
+    if (fileHints.some(item => String(item && item.value || '') === target)) return true;
+  }
+  return false;
+}
+
+function _resolveExistingWorkspaceCommandPath(rawPath = '', { cwd = _workspaceCwd(), kind = 'any', defaultToCwd = false } = {}) {
+  const text = String(rawPath ?? '').trim();
+  const target = _resolveWorkspaceCommandPath(text, { cwd, defaultToCwd });
+  if (_workspacePathExists(target, kind)) return target;
+  const normalizedRaw = String(text || '').split('/').filter(Boolean).join('/');
+  if (text && !text.startsWith('/') && normalizedRaw && normalizedRaw !== target && _workspacePathExists(normalizedRaw, kind)) {
+    return normalizedRaw;
+  }
+  return target;
+}
+
+async function _ensureWorkspaceCache() {
+  if (typeof refreshWorkspaceFileCache === 'function') {
+    await refreshWorkspaceFileCache();
+  }
+}
+
 function _isWorkspaceDeleteCommand(cmd) {
   if (!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true)) {
     return false;
   }
-  return !!_workspaceDeleteTarget(cmd);
+  const parts = _workspaceCommandTokens(cmd);
+  const root = (parts[0] || '').toLowerCase();
+  const action = (parts[1] || '').toLowerCase();
+  return root === 'rm' || (root === 'file' && ['rm', 'delete'].includes(action));
 }
 
 function _isWorkspaceEditorCommand(cmd) {
   if (!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true)) {
     return false;
   }
-  return !!_workspaceEditorCommand(cmd);
+  const parts = _workspaceCommandTokens(cmd);
+  const root = (parts[0] || '').toLowerCase();
+  const action = (parts[1] || '').toLowerCase();
+  return root === 'file' && ['add', 'edit'].includes(action);
 }
 
 function _isWorkspaceDownloadCommand(cmd) {
@@ -832,6 +1005,15 @@ function _isWorkspaceDownloadCommand(cmd) {
   }
   const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
   return (parts[0] || '').toLowerCase() === 'file' && (parts[1] || '').toLowerCase() === 'download';
+}
+
+function _isWorkspaceTerminalCommand(cmd) {
+  if (!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true)) return false;
+  const parts = _workspaceCommandTokens(cmd);
+  const root = (parts[0] || '').toLowerCase();
+  if (['cd', 'pwd', 'ls', 'll', 'cat', 'mkdir', 'grep', 'head', 'tail', 'wc', 'sort', 'uniq'].includes(root)) return true;
+  if (root === 'file' && ['list', 'ls', 'show', 'add-dir', 'mkdir'].includes((parts[1] || '').toLowerCase())) return true;
+  return false;
 }
 
 function _historySafeCommand(cmd) {
@@ -1458,6 +1640,282 @@ async function _sessionTokenRevokeConfirmed(token, tabId) {
   }
 }
 
+function _workspacePlainLine(text = '') {
+  return { text: String(text), cls: '' };
+}
+
+function _workspaceSplitLines(text = '') {
+  const raw = String(text ?? '');
+  if (!raw) return [];
+  const lines = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  if (lines.length && lines[lines.length - 1] === '') lines.pop();
+  return lines.map(line => _workspacePlainLine(line));
+}
+
+function _workspaceFileDescription(file) {
+  const size = typeof _formatWorkspaceBytes === 'function'
+    ? _formatWorkspaceBytes(file && file.size)
+    : `${Number(file && file.size) || 0} B`;
+  return `${String(file && file.name || file && file.path || '')}${file && file.mtime ? `\t${size}\t${file.mtime}` : `\t${size}`}`;
+}
+
+function _workspaceListLines(entries, target = '') {
+  const rows = [];
+  if (target) rows.push({ name: '../', type: 'dir', size: '-', modified: '' });
+  (entries.folders || []).forEach(folder => {
+    rows.push({
+      name: `${String(folder && folder.name || folder && folder.path || '').replace(/\/+$/, '')}/`,
+      type: 'dir',
+      size: '-',
+      modified: folder && folder.mtime ? String(folder.mtime) : '',
+    });
+  });
+  (entries.files || []).forEach(file => {
+    rows.push({
+      name: String(file && file.name || file && file.path || ''),
+      type: 'file',
+      size: typeof _formatWorkspaceBytes === 'function'
+        ? _formatWorkspaceBytes(file && file.size)
+        : `${Number(file && file.size) || 0} B`,
+      modified: file && file.mtime ? String(file.mtime) : '',
+    });
+  });
+  if (!rows.length) return [_workspacePlainLine('(empty)')];
+  const widths = {
+    name: Math.max(...rows.map(row => row.name.length), 4),
+    type: Math.max(...rows.map(row => row.type.length), 4),
+    size: Math.max(...rows.map(row => row.size.length), 4),
+  };
+  return rows.map(row => _workspacePlainLine([
+    row.name.padEnd(widths.name),
+    row.type.padEnd(widths.type),
+    row.size.padEnd(widths.size),
+    row.modified,
+  ].filter((part, index) => index < 3 || part).join('  ').trimEnd()));
+}
+
+function _workspaceShortListLines(entries) {
+  const names = [];
+  (entries.folders || []).forEach(folder => {
+    const name = String(folder && folder.name || folder && folder.path || '').replace(/\/+$/, '');
+    if (name) names.push(`${name}/`);
+  });
+  (entries.files || []).forEach(file => {
+    const name = String(file && file.name || file && file.path || '');
+    if (name) names.push(name);
+  });
+  if (!names.length) return [_workspacePlainLine('(empty)')];
+  return [_workspacePlainLine(names.join(' '))];
+}
+
+function _workspaceRelativeListName(path = '', base = '', isDirectory = false) {
+  const normalized = String(path || '').split('/').filter(Boolean).join('/');
+  const normalizedBase = String(base || '').split('/').filter(Boolean).join('/');
+  let relative = normalized;
+  if (normalizedBase && normalized.startsWith(`${normalizedBase}/`)) {
+    relative = normalized.slice(normalizedBase.length + 1);
+  }
+  relative = relative.split('/').filter(Boolean).join('/');
+  if (!relative) return '';
+  return isDirectory ? `${relative.replace(/\/+$/, '')}/` : relative;
+}
+
+function _workspaceDirectListEntries(entries, base = '') {
+  const normalizedBase = String(base || '').split('/').filter(Boolean).join('/');
+  const directFolders = new Map();
+  const directFiles = [];
+  const addDirectFolder = (path, fallbackName = '') => {
+    const relative = _workspaceRelativeListName(path, normalizedBase, false)
+      || String(fallbackName || '').replace(/\/+$/, '');
+    const parts = relative.split('/').filter(Boolean);
+    if (parts.length !== 1) return;
+    const name = parts[0];
+    const folderPath = normalizedBase ? `${normalizedBase}/${name}` : name;
+    directFolders.set(folderPath, { name, path: folderPath });
+  };
+  (entries.folders || []).forEach(folder => {
+    addDirectFolder(folder && folder.path, folder && folder.name);
+  });
+  (entries.files || []).forEach(file => {
+    const path = String(file && file.path || '').split('/').filter(Boolean).join('/');
+    const relative = _workspaceRelativeListName(path, normalizedBase, false);
+    const parts = relative.split('/').filter(Boolean);
+    if (parts.length > 1) {
+      addDirectFolder(normalizedBase ? `${normalizedBase}/${parts[0]}` : parts[0], parts[0]);
+    } else if (parts.length === 1) {
+      directFiles.push({ ...file, path, name: parts[0] });
+    }
+  });
+  return {
+    folders: [...directFolders.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    files: directFiles.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))),
+  };
+}
+
+function _workspaceRecursiveEntries(base = '') {
+  const folders = [];
+  const files = [];
+  const seenFolders = new Set();
+  const queue = [String(base || '').split('/').filter(Boolean).join('/')];
+  while (queue.length) {
+    const current = queue.shift();
+    const entries = typeof getWorkspaceDirectoryEntries === 'function'
+      ? getWorkspaceDirectoryEntries(current)
+      : { folders: [], files: [] };
+    (entries.folders || []).forEach((folder) => {
+      const path = String(folder && folder.path || '').split('/').filter(Boolean).join('/');
+      if (!path || seenFolders.has(path)) return;
+      seenFolders.add(path);
+      folders.push({
+        ...folder,
+        path,
+        name: _workspaceRelativeListName(path, base, true).replace(/\/+$/, ''),
+      });
+      queue.push(path);
+    });
+    (entries.files || []).forEach((file) => {
+      const path = String(file && file.path || '').split('/').filter(Boolean).join('/');
+      if (!path) return;
+      files.push({
+        ...file,
+        path,
+        name: _workspaceRelativeListName(path, base, false),
+      });
+    });
+  }
+  return { folders, files };
+}
+
+function _workspaceDeleteUsageForCommand(parsed) {
+  return parsed && parsed.usage ? parsed.usage : 'Usage: rm [-r|-f|-rf] <file-or-folder>';
+}
+
+async function _workspaceReadLines(path) {
+  const data = await readWorkspaceFile(path);
+  return _workspaceSplitLines(data && data.text || '');
+}
+
+function _workspaceStandaloneFilterSpec(parts) {
+  const root = (parts[0] || '').toLowerCase();
+  if (root === 'grep') {
+    if (parts.length < 3) return { error: 'Usage: grep [-i|-v|-E] <search> <file>' };
+    const flags = [];
+    let index = 1;
+    while (index < parts.length - 2 && /^-[ivE]+$/.test(parts[index])) {
+      flags.push(parts[index]);
+      index += 1;
+    }
+    if (index !== parts.length - 2) return { error: 'Usage: grep [-i|-v|-E] <search> <file>' };
+    const stage = _parseSyntheticPostFilterCommand(`cat x | grep ${flags.join(' ')} ${JSON.stringify(parts[index])}`);
+    if (!stage) return { error: 'grep supports only -i, -v, and -E.' };
+    return { path: parts[index + 1], spec: stage };
+  }
+  if (root === 'head' || root === 'tail') {
+    if (parts.length < 2) return { error: `Usage: ${root} [-n N] <file>` };
+    const file = parts[parts.length - 1];
+    const option = parts.slice(1, -1).join(' ');
+    const stage = _parseSyntheticPostFilterCommand(`cat x | ${root}${option ? ' ' + option : ''}`);
+    if (!stage) return { error: `Usage: ${root} [-n N] <file>` };
+    return { path: file, spec: stage };
+  }
+  if (root === 'wc') {
+    if (parts.length !== 3 || parts[1] !== '-l') return { error: 'Usage: wc -l <file>' };
+    return { path: parts[2], spec: _parseSyntheticPostFilterCommand('cat x | wc -l') };
+  }
+  if (root === 'sort') {
+    if (parts.length < 2 || parts.length > 3) return { error: 'Usage: sort [-r|-n|-u|-rn] <file>' };
+    const file = parts[parts.length - 1];
+    const option = parts.length === 3 ? parts[1] : '';
+    const stage = _parseSyntheticPostFilterCommand(`cat x | sort${option ? ' ' + option : ''}`);
+    if (!stage) return { error: 'sort supports only -r, -n, and -u flags.' };
+    return { path: file, spec: stage };
+  }
+  if (root === 'uniq') {
+    if (parts.length < 2 || parts.length > 3) return { error: 'Usage: uniq [-c] <file>' };
+    const file = parts[parts.length - 1];
+    const option = parts.length === 3 ? parts[1] : '';
+    const stage = _parseSyntheticPostFilterCommand(`cat x | uniq${option ? ' ' + option : ''}`);
+    if (!stage) return { error: 'uniq supports only -c.' };
+    return { path: file, spec: stage };
+  }
+  return null;
+}
+
+async function _runWorkspaceListCommand(parts, tabId) {
+  const parsed = _workspaceListCommand(parts);
+  if (!parsed || parsed.invalid) throw new Error(parsed?.usage || 'Usage: ls [-l] [folder]');
+  const rawTarget = parsed.target;
+  await _ensureWorkspaceCache();
+  const target = _resolveExistingWorkspaceCommandPath(rawTarget, { cwd: _workspaceCwd(tabId), kind: 'directory', defaultToCwd: true });
+  const entries = typeof getWorkspaceDirectoryEntries === 'function'
+    ? getWorkspaceDirectoryEntries(target)
+    : { folders: [], files: [] };
+  const isRoot = !target;
+  const directoryExists = isRoot || _workspacePathExists(target, 'directory');
+  const fileHints = typeof getWorkspaceAutocompleteFileHints === 'function' ? getWorkspaceAutocompleteFileHints() : [];
+  const file = fileHints.find(item => String(item.value || '') === target);
+  if (!directoryExists && file) return [_workspacePlainLine(target)];
+  if (!directoryExists) throw new Error(`folder not found: ${_workspaceDisplayPath(target)}`);
+  const listingEntries = parsed.recursive ? _workspaceRecursiveEntries(target) : _workspaceDirectListEntries(entries, target);
+  return parsed.long ? _workspaceListLines(listingEntries, target) : _workspaceShortListLines(listingEntries);
+}
+
+async function _handleWorkspaceTerminalCommand(cmd, tabId) {
+  const parts = _workspaceCommandTokens(cmd);
+  const root = (parts[0] || '').toLowerCase();
+  const action = (parts[1] || '').toLowerCase();
+  appendCommandEcho(cmd, tabId);
+  try {
+    let outputLines = [];
+    if (root === 'pwd') {
+      outputLines = [_workspacePlainLine(_workspaceDisplayPath(_workspaceCwd(tabId)))];
+    } else if (root === 'cd') {
+      if (parts.length > 2) throw new Error('Usage: cd [folder]');
+      await _ensureWorkspaceCache();
+      const target = _resolveExistingWorkspaceCommandPath(parts[1] || '/', { cwd: _workspaceCwd(tabId), kind: 'directory', defaultToCwd: false });
+      if (target && !_workspacePathExists(target, 'directory')) {
+        throw new Error(`folder not found: ${_workspaceDisplayPath(target)}`);
+      }
+      _setWorkspaceCwd(tabId, target);
+      outputLines = [_workspacePlainLine(_workspaceDisplayPath(target))];
+    } else if (root === 'ls' || root === 'll' || (root === 'file' && ['list', 'ls'].includes(action))) {
+      outputLines = await _runWorkspaceListCommand(parts, tabId);
+    } else if (root === 'cat' || (root === 'file' && action === 'show')) {
+      const rawTarget = root === 'cat' ? parts[1] : parts[2];
+      if (!rawTarget || (root === 'cat' ? parts.length !== 2 : parts.length !== 3)) {
+        throw new Error(root === 'cat' ? 'Usage: cat <file>' : 'Usage: file show <file>');
+      }
+      await _ensureWorkspaceCache();
+      const target = _resolveExistingWorkspaceCommandPath(rawTarget, { cwd: _workspaceCwd(tabId), kind: 'file' });
+      outputLines = await _workspaceReadLines(target);
+    } else if (root === 'mkdir' || (root === 'file' && ['add-dir', 'mkdir'].includes(action))) {
+      const rawTarget = root === 'mkdir' ? parts[1] : parts[2];
+      if (!rawTarget || (root === 'mkdir' ? parts.length !== 2 : parts.length !== 3)) {
+        throw new Error(root === 'mkdir' ? 'Usage: mkdir <folder>' : 'Usage: file add-dir <folder>');
+      }
+      const target = _resolveWorkspaceCommandPath(rawTarget, { cwd: _workspaceCwd(tabId) });
+      const data = await createWorkspaceDirectory(target);
+      const path = data && data.directory && data.directory.path ? data.directory.path : target;
+      outputLines = [_workspacePlainLine(`file: created folder ${path}`)];
+    } else {
+      const parsed = _workspaceStandaloneFilterSpec(parts);
+      if (!parsed || parsed.error) throw new Error(parsed && parsed.error ? parsed.error : 'unsupported workspace command');
+      await _ensureWorkspaceCache();
+      const target = _resolveExistingWorkspaceCommandPath(parsed.path, { cwd: _workspaceCwd(tabId), kind: 'file' });
+      const inputLines = await _workspaceReadLines(target);
+      outputLines = _applySyntheticPostFilterLines(inputLines, parsed.spec);
+    }
+    outputLines.forEach(line => appendLine(line.text, line.cls || '', tabId));
+    _recordSuccessfulLocalCommand(cmd);
+    _persistClientSideRun(cmd, outputLines, 'ok');
+    setStatus('ok');
+  } catch (err) {
+    appendLine(`[error] ${err.message || 'workspace command failed'}`, 'exit-fail', tabId);
+    logClientError('workspace terminal command', err);
+    setStatus('fail');
+  }
+}
+
 async function _handleSessionTokenCommand(cmd, tabId) {
   const parts = cmd.trim().split(/\s+/);
   const sub = (parts[1] || '').toLowerCase();
@@ -1486,15 +1944,18 @@ async function _handleSessionTokenCommand(cmd, tabId) {
 }
 
 async function _handleWorkspaceDeleteCommand(cmd, tabId) {
-  const target = _workspaceDeleteTarget(cmd);
+  const parsedDelete = _workspaceDeleteCommand(cmd);
+  let target = parsedDelete && !parsedDelete.invalid ? parsedDelete.target : '';
   appendCommandEcho(cmd);
   if (!target) {
-    appendLine('Usage: file rm <file-or-folder>', 'exit-fail', tabId);
+    appendLine(_workspaceDeleteUsageForCommand(parsedDelete), 'exit-fail', tabId);
     setStatus('fail');
     return;
   }
   let targetInfo = null;
   try {
+    await _ensureWorkspaceCache();
+    target = _resolveExistingWorkspaceCommandPath(target, { cwd: _workspaceCwd(tabId), kind: 'any' });
     const existsResp = await apiFetch(`/workspace/files/info?path=${encodeURIComponent(target)}`);
     if (!existsResp.ok) {
       const data = await existsResp.json().catch(() => ({}));
@@ -1509,6 +1970,11 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
   }
   const isDirectory = targetInfo && targetInfo.kind === 'directory';
   const fileCount = Number(targetInfo && targetInfo.file_count) || 0;
+  if (isDirectory && !(parsedDelete && parsedDelete.recursive)) {
+    appendLine(`[error] ${target} is a folder; use rm -r ${target} or file delete -r ${target}`, 'exit-fail', tabId);
+    setStatus('fail');
+    return;
+  }
   appendLine(`delete session ${isDirectory ? 'folder' : 'file'} '${target}'?`, '', tabId);
   if (isDirectory && fileCount > 0) {
     appendLine(`warning: this will also delete ${fileCount} ${fileCount === 1 ? 'file' : 'files'} in this folder.`, 'warning', tabId);
@@ -1558,8 +2024,14 @@ async function _handleWorkspaceEditorCommand(cmd, tabId) {
     return;
   }
   try {
-    await openWorkspaceEditorFromCommand(parsed.action, parsed.target);
-    const targetLabel = parsed.target ? ` ${parsed.target}` : '';
+    if (parsed.action === 'edit') await _ensureWorkspaceCache();
+    const target = parsed.target
+      ? (parsed.action === 'edit'
+          ? _resolveExistingWorkspaceCommandPath(parsed.target, { cwd: _workspaceCwd(tabId), kind: 'file' })
+          : _resolveWorkspaceCommandPath(parsed.target, { cwd: _workspaceCwd(tabId) }))
+      : '';
+    await openWorkspaceEditorFromCommand(parsed.action, target);
+    const targetLabel = target ? ` ${target}` : '';
     appendLine(`file: opened${targetLabel} in the Files panel`, '', tabId);
     _recordSuccessfulLocalCommand(cmd);
     _persistClientSideRun(cmd, [{ text: `file: opened${targetLabel} in the Files panel` }], 'ok');
@@ -1572,7 +2044,7 @@ async function _handleWorkspaceEditorCommand(cmd, tabId) {
 }
 
 async function _handleWorkspaceDownloadCommand(cmd, tabId) {
-  const target = _workspaceDownloadTarget(cmd);
+  let target = _workspaceDownloadTarget(cmd);
   appendCommandEcho(cmd);
   if (!target) {
     appendLine('Usage: file download <file>', 'exit-fail', tabId);
@@ -1585,6 +2057,8 @@ async function _handleWorkspaceDownloadCommand(cmd, tabId) {
     return;
   }
   try {
+    await _ensureWorkspaceCache();
+    target = _resolveExistingWorkspaceCommandPath(target, { cwd: _workspaceCwd(tabId), kind: 'file' });
     const downloaded = await downloadWorkspaceFile(target);
     if (!downloaded) throw new Error('file download failed');
     const text = `file: downloading ${target}`;
@@ -1604,11 +2078,16 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
   const baseCommand = spec ? (spec.baseCommand || cmd) : cmd;
   const capturedLines = [];
   const originalAppendLine = appendLine;
+  const originalAppendLines = typeof appendLines === 'function' ? appendLines : null;
   const originalAppendCommandEcho = appendCommandEcho;
   const originalRecordSuccessfulLocalCommand = _recordSuccessfulLocalCommand;
   const originalPersistSessionTokenRun = _persistSessionTokenRun;
   const originalSetStatus = setStatus;
   let finalStatus = 'idle';
+  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+  if (tab) {
+    tab.command = cmd;
+  }
 
   appendCommandEcho(cmd, tabId);
   try {
@@ -1619,8 +2098,13 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
       finalStatus = statusValue;
       originalSetStatus(statusValue);
     };
-    appendLine = (text, cls = '', lineTabId = tabId) => {
-      capturedLines.push({ text: String(text ?? ''), cls: String(cls || ''), tabId: lineTabId });
+    appendLine = (text, cls = '', lineTabId = tabId, metadata = null) => {
+      capturedLines.push({
+        text: String(text ?? ''),
+        cls: String(cls || ''),
+        tabId: lineTabId,
+        metadata,
+      });
     };
     const result = runBaseCommand(baseCommand);
     if (!_pendingTerminalConfirm) await result;
@@ -1633,9 +2117,13 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
   }
 
   const outputLines = spec ? _applySyntheticPostFilterLines(capturedLines, spec) : capturedLines;
-  outputLines.forEach((line) => {
-    originalAppendLine(line.text, line.cls || '', tabId);
-  });
+  if (originalAppendLines) await originalAppendLines(outputLines, tabId);
+  else {
+    outputLines.forEach((line) => {
+      if (line.metadata) originalAppendLine(line.text, line.cls || '', tabId, line.metadata);
+      else originalAppendLine(line.text, line.cls || '', tabId);
+    });
+  }
   if (!_pendingTerminalConfirm) {
     _finalizeClientSideCommandStatus(tabId, finalStatus);
     if (finalStatus !== 'fail') _recordSuccessfulLocalCommand(cmd);
@@ -1725,12 +2213,22 @@ function submitCommand(rawCmd) {
   }
 
   addToHistory(_historySafeCommand(cmd));
+  if (typeof rememberRecentDomainsFromCommand === 'function') {
+    try { rememberRecentDomainsFromCommand(cmd); } catch (_) { /* autocomplete recents are best-effort */ }
+  }
 
   // Session-token subcommands (generate / set / clear / rotate) run entirely
   // client-side.  The bare 'session-token' status command goes to the server.
   if (_isSessionTokenSubcommand(cmd)) {
     void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
       _handleSessionTokenCommand(baseCommand, activeTabId)
+    ));
+    return true;
+  }
+
+  if (_isWorkspaceTerminalCommand(cmd)) {
+    void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
+      _handleWorkspaceTerminalCommand(baseCommand, activeTabId)
     ));
     return true;
   }

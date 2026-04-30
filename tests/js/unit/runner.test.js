@@ -535,6 +535,13 @@ function loadRunnerFns({
   refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride = undefined,
   openWorkspaceEditorFromCommand: openWorkspaceEditorFromCommandOverride = undefined,
   downloadWorkspaceFile: downloadWorkspaceFileOverride = undefined,
+  readWorkspaceFile: readWorkspaceFileOverride = undefined,
+  createWorkspaceDirectory: createWorkspaceDirectoryOverride = undefined,
+  getWorkspaceDirectoryEntries: getWorkspaceDirectoryEntriesOverride = undefined,
+  getWorkspaceAutocompleteDirectoryHints: getWorkspaceAutocompleteDirectoryHintsOverride = undefined,
+  getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride = undefined,
+  normalizeWorkspaceCommandPath: normalizeWorkspaceCommandPathOverride = undefined,
+  workspaceDisplayPath: workspaceDisplayPathOverride = undefined,
   runnerInitCode = '',
 } = {}) {
   const normalizedTabs = tabs.map((tab) => ({
@@ -687,6 +694,13 @@ function loadRunnerFns({
       ...(downloadWorkspaceFileOverride
         ? { downloadWorkspaceFile: downloadWorkspaceFileOverride }
         : {}),
+      ...(readWorkspaceFileOverride ? { readWorkspaceFile: readWorkspaceFileOverride } : {}),
+      ...(createWorkspaceDirectoryOverride ? { createWorkspaceDirectory: createWorkspaceDirectoryOverride } : {}),
+      ...(getWorkspaceDirectoryEntriesOverride ? { getWorkspaceDirectoryEntries: getWorkspaceDirectoryEntriesOverride } : {}),
+      ...(getWorkspaceAutocompleteDirectoryHintsOverride ? { getWorkspaceAutocompleteDirectoryHints: getWorkspaceAutocompleteDirectoryHintsOverride } : {}),
+      ...(getWorkspaceAutocompleteFileHintsOverride ? { getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride } : {}),
+      ...(normalizeWorkspaceCommandPathOverride ? { normalizeWorkspaceCommandPath: normalizeWorkspaceCommandPathOverride } : {}),
+      ...(workspaceDisplayPathOverride ? { workspaceDisplayPath: workspaceDisplayPathOverride } : {}),
       ...(NotificationOverride !== undefined ? { Notification: NotificationOverride } : {}),
     },
     `{
@@ -2105,6 +2119,257 @@ describe('session-token clear', () => {
 })
 
 describe('workspace file delete confirmation', () => {
+  const normalizeWorkspaceCommandPath = (path = '', cwd = '') => {
+    const raw = String(path || '').trim()
+    const base = raw.startsWith('/') ? [] : String(cwd || '').split('/').filter(Boolean)
+    for (const part of String(raw || '.').split('/').filter(Boolean)) {
+      if (part === '.') continue
+      if (part === '..') {
+        if (!base.length) throw new Error('path escapes the session workspace')
+        base.pop()
+      } else {
+        base.push(part)
+      }
+    }
+    return base.join('/')
+  }
+  const workspaceDisplayPath = path => {
+    const normalized = String(path || '').split('/').filter(Boolean).join('/')
+    return normalized ? `/${normalized}` : '/'
+  }
+
+  it('treats the empty workspace cwd as root for pwd, cd, and mkdir', async () => {
+    const appendLine = vi.fn()
+    const createWorkspaceDirectory = vi.fn(path => Promise.resolve({ directory: { path } }))
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand, tabs } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: '' }],
+      appendLine,
+      createWorkspaceDirectory,
+      refreshWorkspaceFileCache,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [
+        { value: 'tmp', description: 'session folder' },
+        { value: 'tmp/tmptmp', description: 'session folder' },
+      ],
+    })
+
+    await submitCommand('pwd')
+    await submitCommand('mkdir tmp')
+    await submitCommand('cd tmp')
+    await vi.waitFor(() => expect(tabs[0].workspaceCwd).toBe('tmp'))
+    await submitCommand('mkdir tmptmp')
+
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('/', '', 'tab-1'))
+    expect(createWorkspaceDirectory).toHaveBeenCalledWith('tmp')
+    expect(appendLine).toHaveBeenCalledWith('/tmp', '', 'tab-1')
+    expect(createWorkspaceDirectory).toHaveBeenCalledWith('tmp/tmptmp')
+  })
+
+  it('tracks a workspace current directory per tab and resolves relative file commands', async () => {
+    const appendLine = vi.fn()
+    const readWorkspaceFile = vi.fn(path => Promise.resolve({ path, text: 'alpha\nbeta\n' }))
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand, tabs, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: '' }],
+      appendLine,
+      readWorkspaceFile,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [{ value: 'reports', description: 'session folder' }],
+    })
+
+    await submitCommand('cd reports')
+    await vi.waitFor(() => expect(tabs[0].workspaceCwd).toBe('reports'))
+    expect(appendLine).toHaveBeenCalledWith('/reports', '', 'tab-1')
+
+    await submitCommand('cat output.txt')
+    await vi.waitFor(() => expect(readWorkspaceFile).toHaveBeenCalledWith('reports/output.txt'))
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('alpha', '', 'tab-1'))
+    expect(appendLine).toHaveBeenCalledWith('beta', '', 'tab-1')
+    expect(tabs[0].command).toBe('cat output.txt')
+    expect(status.className).toBe('status-pill ok')
+  })
+
+  it('resolves nested cd commands from the current workspace folder', async () => {
+    const appendLine = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand, tabs } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: '' }],
+      appendLine,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [
+        { value: 'reports', description: 'session folder' },
+        { value: 'reports/nested', description: 'session folder' },
+      ],
+    })
+
+    await submitCommand('cd reports')
+    await vi.waitFor(() => expect(tabs[0].workspaceCwd).toBe('reports'))
+    await submitCommand('cd nested')
+
+    await vi.waitFor(() => expect(tabs[0].workspaceCwd).toBe('reports/nested'))
+    expect(appendLine).toHaveBeenCalledWith('/reports/nested', '', 'tab-1')
+  })
+
+  it('does not double-prefix a root-relative autocomplete path from a workspace folder', async () => {
+    const appendLine = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand, tabs } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'reports' }],
+      appendLine,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [
+        { value: 'reports', description: 'session folder' },
+        { value: 'reports/nested', description: 'session folder' },
+      ],
+    })
+
+    await submitCommand('cd reports/nested')
+
+    await vi.waitFor(() => expect(tabs[0].workspaceCwd).toBe('reports/nested'))
+    expect(appendLine).toHaveBeenCalledWith('/reports/nested', '', 'tab-1')
+  })
+
+  it('lists the current workspace folder non-recursively on one short line', async () => {
+    const appendLine = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'reports' }],
+      appendLine,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [{ value: 'reports', description: 'session folder' }],
+      getWorkspaceAutocompleteFileHints: () => [{ value: 'reports/a.txt', description: 'session file · 1 B' }],
+      getWorkspaceDirectoryEntries: () => ({
+        folders: [
+          { name: 'nested', path: 'reports/nested' },
+          { name: 'deeper', path: 'reports/nested/deeper' },
+        ],
+        files: [
+          { name: 'a.txt', path: 'reports/a.txt', size: 1, mtime: 'now' },
+          { name: 'deep.txt', path: 'reports/nested/deep.txt', size: 2, mtime: 'later' },
+        ],
+      }),
+    })
+
+    await submitCommand('ls')
+
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('nested/ a.txt', '', 'tab-1'))
+    expect(appendLine).not.toHaveBeenCalledWith('nested/', '', 'tab-1')
+    expect(appendLine).not.toHaveBeenCalledWith('a.txt', '', 'tab-1')
+    expect(appendLine).not.toHaveBeenCalledWith(expect.stringContaining('deep.txt'), '', 'tab-1')
+  })
+
+  it('lists workspace folders recursively only when -R is present with flags in any order', async () => {
+    const appendLine = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const directoryEntries = {
+      reports: {
+        folders: [{ name: 'nested', path: 'reports/nested' }],
+        files: [{ name: 'a.txt', path: 'reports/a.txt', size: 1, mtime: 'now' }],
+      },
+      'reports/nested': {
+        folders: [],
+        files: [{ name: 'deep.txt', path: 'reports/nested/deep.txt', size: 2, mtime: 'later' }],
+      },
+    }
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'reports' }],
+      appendLine,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [
+        { value: 'reports', description: 'session folder' },
+        { value: 'reports/nested', description: 'session folder' },
+      ],
+      getWorkspaceAutocompleteFileHints: () => [
+        { value: 'reports/a.txt', description: 'session file · 1 B' },
+        { value: 'reports/nested/deep.txt', description: 'session file · 2 B' },
+      ],
+      getWorkspaceDirectoryEntries: path => directoryEntries[path || 'reports'] || { folders: [], files: [] },
+    })
+
+    await submitCommand('file ls -Rl')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('nested/          dir   -', '', 'tab-1'))
+    expect(appendLine).toHaveBeenCalledWith('nested/deep.txt  file  2 B   later', '', 'tab-1')
+  })
+
+  it('lists workspace folders in long format with ll', async () => {
+    const appendLine = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'reports' }],
+      appendLine,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [{ value: 'reports', description: 'session folder' }],
+      getWorkspaceAutocompleteFileHints: () => [{ value: 'reports/a.txt', description: 'session file · 1 B' }],
+      getWorkspaceDirectoryEntries: () => ({
+        folders: [{ name: 'nested', path: 'reports/nested' }],
+        files: [{ name: 'a.txt', path: 'reports/a.txt', size: 1, mtime: 'now' }],
+      }),
+    })
+
+    await submitCommand('ll')
+
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('../      dir   -', '', 'tab-1'))
+    expect(appendLine).toHaveBeenCalledWith('nested/  dir   -', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('a.txt    file  1 B   now', '', 'tab-1')
+  })
+
+  it('creates workspace directories with mkdir and file add-dir', async () => {
+    const appendLine = vi.fn()
+    const createWorkspaceDirectory = vi.fn(path => Promise.resolve({ directory: { path } }))
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'reports' }],
+      appendLine,
+      createWorkspaceDirectory,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+    })
+
+    await submitCommand('mkdir scans')
+    await submitCommand('file add-dir /shared')
+
+    await vi.waitFor(() => expect(createWorkspaceDirectory).toHaveBeenCalledWith('reports/scans'))
+    expect(createWorkspaceDirectory).toHaveBeenCalledWith('shared')
+    expect(appendLine).toHaveBeenCalledWith('file: created folder reports/scans', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('file: created folder shared', '', 'tab-1')
+  })
+
+  it('runs standalone pipe helpers against workspace files', async () => {
+    const appendLine = vi.fn()
+    const readWorkspaceFile = vi.fn(path => Promise.resolve({ path, text: 'beta\nalpha\nbeta\n' }))
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: '' }],
+      appendLine,
+      readWorkspaceFile,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+    })
+
+    await submitCommand('grep beta targets.txt')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('beta', '', 'tab-1'))
+    await submitCommand('wc -l targets.txt')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('3', '', 'tab-1'))
+    await submitCommand('sort -u targets.txt')
+
+    await vi.waitFor(() => expect(readWorkspaceFile).toHaveBeenCalledWith('targets.txt'))
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('alpha', '', 'tab-1'))
+    expect(appendLine).toHaveBeenCalledWith('beta', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('3', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('alpha', '', 'tab-1')
+  })
+
   it('does not intercept workspace delete aliases when Files are disabled', async () => {
     const apiFetch = vi.fn(() => Promise.resolve())
     const appendCommandEcho = vi.fn()
@@ -2122,6 +2387,24 @@ describe('workspace file delete confirmation', () => {
       '/workspace/files?path=targets.txt',
       expect.objectContaining({ method: 'DELETE' }),
     )
+  })
+
+  it('shows usage for bare rm and file delete commands', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve(new Response('{}', { status: 404 })))
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      apiFetch,
+    })
+
+    await submitCommand('rm')
+    await submitCommand('file delete')
+
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('Usage: rm [-r|-f|-rf] <file-or-folder>', 'exit-fail', 'tab-1'))
+    expect(appendLine).toHaveBeenCalledWith('Usage: file delete [-r|-f|-rf] <file-or-folder>', 'exit-fail', 'tab-1')
+    expect(apiFetch).not.toHaveBeenCalledWith('/run', expect.anything())
+    expect(status.className).toBe('status-pill fail')
   })
 
   it('opens a terminal yes/no confirmation before deleting a workspace file', async () => {
@@ -2154,7 +2437,7 @@ describe('workspace file delete confirmation', () => {
     expect(status.className).toBe('status-pill idle')
   })
 
-  it('opens a warning terminal confirmation before deleting a workspace folder with files', async () => {
+  it('requires recursive rm flags before deleting a workspace folder', async () => {
     const appendLine = vi.fn()
     const setComposerPromptMode = vi.fn()
     const apiFetch = vi.fn((url) => {
@@ -2173,7 +2456,39 @@ describe('workspace file delete confirmation', () => {
       apiFetch,
     })
 
-    await submitCommand('file rm reports')
+    await submitCommand('rm reports')
+
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith(
+        '[error] reports is a folder; use rm -r reports or file delete -r reports',
+        'exit-fail',
+        'tab-1',
+      ),
+    )
+    expect(setComposerPromptMode).not.toHaveBeenCalledWith('confirm')
+    expect(status.className).toBe('status-pill fail')
+  })
+
+  it('opens a warning terminal confirmation before recursively deleting a workspace folder with files', async () => {
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/workspace/files/info?path=reports')) {
+        return Promise.resolve(new Response(JSON.stringify({ path: 'reports', kind: 'directory', file_count: 2 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      return Promise.resolve(new Response('{}', { status: 404 }))
+    })
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      setComposerPromptMode,
+      apiFetch,
+    })
+
+    await submitCommand('rm -fr reports')
 
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith("delete session folder 'reports'?", '', 'tab-1'),
@@ -2300,7 +2615,7 @@ describe('workspace file delete confirmation', () => {
       refreshWorkspaceFileCache,
     })
 
-    await submitCommand('file rm reports')
+    await submitCommand('file delete -r reports')
     await vi.waitFor(() => expect(setComposerPromptMode).toHaveBeenCalledWith('confirm'))
     await submitCommand('yes')
     await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith(
@@ -2400,7 +2715,7 @@ describe('workspace file delete confirmation', () => {
     await submitCommand('file download reports/output.json')
 
     await vi.waitFor(() => expect(downloadWorkspaceFile).toHaveBeenCalledWith('reports/output.json'))
-    expect(appendLine).toHaveBeenCalledWith('file: downloading reports/output.json', '', 'tab-1')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('file: downloading reports/output.json', '', 'tab-1'))
     expect(status.className).toBe('status-pill ok')
   })
 

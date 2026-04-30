@@ -36,6 +36,7 @@ import commands  # noqa: F401 — used as mock.patch("commands.X") target
 import fake_commands
 import session_variables
 import workspace as workspace_module
+import wordlists
 from commands import (
     split_chained_commands, load_all_faq, load_all_workflows, load_faq,
     load_welcome, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
@@ -507,11 +508,28 @@ class TestSessionWorkspace:
             assert removed == 0
             assert root.exists()
 
+    def test_cleanup_can_skip_current_session_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
+            current_root = ensure_session_workspace("current-session", cfg)
+            old_root = ensure_session_workspace("old-session", cfg)
+            os.utime(current_root, (1000, 1000))
+            os.utime(old_root, (1000, 1000))
+
+            removed = cleanup_inactive_workspaces(cfg, now=4601, skip_session_id="current-session")
+
+            assert removed == 1
+            assert current_root.exists()
+            assert not old_root.exists()
+
 
 class TestEntrypointWorkspaceRepair:
     def test_workspace_repair_targets_children_inside_session_directories(self):
         entrypoint = (REPO_ROOT / "entrypoint.sh").read_text()
 
+        assert "chown -R appuser:appuser \"$WORKSPACE_ROOT\"" not in entrypoint
+        assert "chown appuser:appuser \"$WORKSPACE_ROOT\"" in entrypoint
+        assert "-exec chown appuser:appuser {} \\;" in entrypoint
         assert "find \"$WORKSPACE_ROOT\" -mindepth 2 -exec chown scanner:appuser" not in entrypoint
         assert "find \"$session_dir\" -mindepth 1 -exec chown scanner:appuser" in entrypoint
         assert "find \"$session_dir\" -mindepth 1 -type d -exec chmod 3770" in entrypoint
@@ -552,6 +570,15 @@ class TestDerivedCommandRegistry:
                       suggest:
                         - value: "4"
                           description: Four probes
+                    - value: -d
+                      description: Target domain
+                      takes_value: true
+                      value_type: domain
+                    - value: -w
+                      description: DNS wordlist
+                      takes_value: true
+                      value_type: wordlist
+                      wordlist_category: dns
                   subcommands:
                     stats:
                       description: Show ping stats
@@ -587,8 +614,20 @@ class TestDerivedCommandRegistry:
             {"flag": "-oN", "mode": "write", "value": "separate_or_attached", "format": "text"},
         ]
         assert ping["autocomplete"]["flags"][0] == {"value": "-c", "description": "Count"}
-        assert ping["autocomplete"]["expects_value"] == ["-c"]
+        assert ping["autocomplete"]["flags"][1] == {"value": "-d", "description": "Target domain", "value_type": "domain"}
+        assert ping["autocomplete"]["flags"][2] == {
+            "value": "-w",
+            "description": "DNS wordlist",
+            "value_type": "wordlist",
+            "wordlist_category": "dns",
+        }
+        assert ping["autocomplete"]["expects_value"] == ["-c", "-d", "-w"]
         assert ping["autocomplete"]["arg_hints"]["-c"][0]["value"] == "4"
+        assert ping["autocomplete"]["arg_hints"]["-d"][0]["value"] == "<domain>"
+        assert ping["autocomplete"]["arg_hints"]["-d"][0]["value_type"] == "domain"
+        assert ping["autocomplete"]["arg_hints"]["-w"][0]["value"] == "<wordlist>"
+        assert ping["autocomplete"]["arg_hints"]["-w"][0]["value_type"] == "wordlist"
+        assert ping["autocomplete"]["arg_hints"]["-w"][0]["wordlist_category"] == "dns"
         assert ping["autocomplete"]["arg_hints"]["__positional__"][0]["value"] == "stats"
         assert ping["autocomplete"]["subcommands"]["stats"]["description"] == "Show ping stats"
         assert ping["autocomplete"]["subcommands"]["stats"]["flags"][0]["value"] == "--json"
@@ -704,6 +743,8 @@ class TestDerivedCommandRegistry:
         assert "-d3" not in {item["value"] for item in amass["subcommands"]["subs"]["flags"]}
         assert "-d3" in {item["value"] for item in amass["subcommands"]["viz"]["flags"]}
         assert "-names" not in {item["value"] for item in amass["subcommands"]["viz"]["flags"]}
+        assert amass["subcommands"]["enum"]["arg_hints"]["-d"][0]["value_type"] == "domain"
+        assert amass["subcommands"]["subs"]["arg_hints"]["-d"][0]["value_type"] == "domain"
         assert "amass subs -d darklab.sh -show" in {
             item["value"] for item in amass["subcommands"]["subs"]["examples"]
         }
@@ -751,6 +792,23 @@ class TestDerivedCommandRegistry:
         assert "--append-domain" in vhost_flags
         assert "-d" not in vhost_flags
         assert gobuster["subcommands"]["dir"]["workspace_file_flags"] == ["-w"]
+        assert gobuster["subcommands"]["dir"]["arg_hints"]["-w"][0]["value_type"] == "wordlist"
+        assert gobuster["subcommands"]["dir"]["arg_hints"]["-w"][0]["wordlist_category"] == "web-content"
+
+    def test_real_registry_wordlist_metadata_covers_known_wordlist_flags(self):
+        context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
+
+        assert context["dnsrecon"]["arg_hints"]["-D"][0]["wordlist_category"] == "dns"
+        assert context["dnsx"]["arg_hints"]["-w"][0]["wordlist_category"] == "dns"
+        assert context["fierce"]["arg_hints"]["--subdomain-file"][0]["wordlist_category"] == "dns"
+        assert context["dnsenum"]["arg_hints"]["-f"][0]["wordlist_category"] == "dns"
+        assert context["ffuf"]["arg_hints"]["-w"][0]["value_type"] == "wordlist"
+        assert context["ffuf"]["arg_hints"]["-w"][0]["wordlist_category"] == [
+            "web-content",
+            "api",
+            "fuzzing",
+            "dns",
+        ]
 
     def test_autocomplete_context_can_be_derived_from_commands_registry(self):
         context = autocomplete_context_from_commands_registry({
@@ -786,9 +844,11 @@ class TestDerivedCommandRegistry:
         assert {"file", "cat", "ls", "rm"}.isdisjoint(disabled)
         assert {"file", "cat", "ls", "rm"}.issubset(enabled)
         assert [item["value"] for item in enabled["file"]["arg_hints"]["__positional__"]] == [
-            "list",
+            "list <folder>",
+            "ls <folder>",
             "show <file>",
             "add <file>",
+            "add-dir <folder>",
             "edit <file>",
             "download <file>",
             "delete <file>",
@@ -2498,6 +2558,79 @@ class TestAutocompleteContextLoading:
         assert result == ["curl -I https://ip.darklab.sh"]
 
 
+class TestWordlistCatalog:
+    def test_load_wordlist_catalog_filters_and_sorts_curated_matches(self, tmp_path):
+        root = tmp_path / "seclists"
+        (root / "Discovery" / "DNS").mkdir(parents=True)
+        (root / "Discovery" / "DNS" / "b.txt").write_text("beta\n")
+        (root / "Discovery" / "DNS" / "a.txt").write_text("alpha\n")
+        (root / "Discovery" / "DNS" / "README.md").write_text("docs\n")
+        config_path = tmp_path / "wordlists.yaml"
+        config_path.write_text(textwrap.dedent(f"""
+        root: {root}
+        categories:
+          - key: dns
+            label: DNS
+            description: DNS lists
+            include:
+              - Discovery/DNS/*.txt
+              - Discovery/DNS/README.md
+        """))
+
+        catalog = wordlists.load_wordlist_catalog(config_path=config_path)
+
+        assert [item["relpath"] for item in catalog["items"]] == [
+            "Discovery/DNS/a.txt",
+            "Discovery/DNS/b.txt",
+        ]
+        assert catalog["items"][0]["category"] == "dns"
+        assert catalog["items"][0]["path"].endswith("/Discovery/DNS/a.txt")
+
+    def test_wordlist_catalog_search_path_and_all_scan(self, tmp_path):
+        root = tmp_path / "seclists"
+        (root / "Discovery" / "Web-Content").mkdir(parents=True)
+        (root / "Passwords").mkdir(parents=True)
+        (root / "Discovery" / "Web-Content" / "common.txt").write_text("admin\n")
+        (root / "Passwords" / "top.txt").write_text("password\n")
+        (root / "Passwords" / "archive.7z").write_text("compressed\n")
+        config_path = tmp_path / "wordlists.yaml"
+        config_path.write_text(textwrap.dedent(f"""
+        root: {root}
+        categories:
+          - key: web-content
+            label: Web Content
+            include:
+              - Discovery/Web-Content/common.txt
+        """))
+
+        catalog = wordlists.load_wordlist_catalog(config_path=config_path, include_all=True)
+        matches = wordlists.filter_wordlists(catalog["items"], search="common")
+        found = wordlists.find_wordlist("common.txt", catalog["items"])
+
+        assert [item["name"] for item in matches] == ["common.txt"]
+        assert found is not None
+        assert found["relpath"] == "Discovery/Web-Content/common.txt"
+        assert [item["relpath"] for item in catalog["all_items"]] == [
+            "Discovery/Web-Content/common.txt",
+            "Passwords/top.txt",
+        ]
+
+    def test_wordlist_catalog_missing_root_returns_empty_items(self, tmp_path):
+        config_path = tmp_path / "wordlists.yaml"
+        config_path.write_text(textwrap.dedent(f"""
+        root: {tmp_path / "missing"}
+        categories:
+          - key: dns
+            include:
+              - Discovery/DNS/*.txt
+        """))
+
+        catalog = wordlists.load_wordlist_catalog(config_path=config_path)
+
+        assert catalog["items"] == []
+        assert catalog["categories"][0]["key"] == "dns"
+
+
 class TestWorkflowInputLoading:
     def test_load_workflows_keeps_declared_inputs(self):
         payload = textwrap.dedent(
@@ -2747,15 +2880,15 @@ class TestExpiryNote:
 class TestPromptEchoText:
     def test_uses_configured_prompt_prefix(self):
         with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
-            assert _prompt_echo_text("ls -la") == "ops@darklab:~$ ls -la"
+            assert _prompt_echo_text("ls -la") == "ops@darklab:~ $ ls -la"
 
-    def test_falls_back_to_dollar_when_prefix_missing(self):
+    def test_falls_back_to_default_identity_when_prefix_missing(self):
         with mock.patch.dict("permalinks.CFG", {"prompt_prefix": ""}):
-            assert _prompt_echo_text("ls -la") == "$ ls -la"
+            assert _prompt_echo_text("ls -la") == "anon@darklab:~ $ ls -la"
 
     def test_strips_trailing_space_when_label_empty(self):
         with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "anon@darklab:~$"}):
-            assert _prompt_echo_text("") == "anon@darklab:~$"
+            assert _prompt_echo_text("") == "anon@darklab:~ $"
 
 
 class TestNormalizePermalinkLinesPromptEcho:
@@ -2768,7 +2901,7 @@ class TestNormalizePermalinkLinesPromptEcho:
         with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
             lines = _normalize_permalink_lines(["hello", "world"], label="echo hello")
         assert lines[0]["cls"] == "prompt-echo"
-        assert lines[0]["text"] == "ops@darklab:~$ echo hello"
+        assert lines[0]["text"] == "ops@darklab:~ $ echo hello"
 
     def test_structured_snapshot_without_echo_gets_configured_prefix(self):
         content = [
@@ -2778,7 +2911,7 @@ class TestNormalizePermalinkLinesPromptEcho:
         with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
             lines = _normalize_permalink_lines(content, label="echo hello")
         assert lines[0]["cls"] == "prompt-echo"
-        assert lines[0]["text"] == "ops@darklab:~$ echo hello"
+        assert lines[0]["text"] == "ops@darklab:~ $ echo hello"
 
     def test_structured_snapshot_with_existing_echo_is_preserved(self):
         content = [

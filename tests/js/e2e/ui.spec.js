@@ -135,8 +135,15 @@ test.describe('workspace modal', () => {
 
     await page.locator('#workspace-new-btn').click()
     await expect(page.locator('#workspace-editor')).toBeVisible()
-    await page.locator('#workspace-path-input').fill('targets.txt')
-    await page.locator('#workspace-text-input').fill('darklab.sh\n')
+    const pathInput = page.locator('#workspace-path-input')
+    const textInput = page.locator('#workspace-text-input')
+    await expect(pathInput).toBeVisible()
+    await expect(textInput).toBeVisible()
+    await pathInput.fill('targets.txt')
+    await expect(pathInput).toHaveValue('targets.txt')
+    await textInput.click()
+    await textInput.fill('darklab.sh\n')
+    await expect(textInput).toHaveValue('darklab.sh\n')
     await page.locator('#workspace-save-btn').click()
     await expect(page.locator('#workspace-editor')).not.toBeVisible()
 
@@ -147,8 +154,10 @@ test.describe('workspace modal', () => {
     await row.locator('[data-workspace-action="view"]').click()
     await expect(page.locator('#workspace-viewer')).toBeVisible()
     await expect(page.locator('#workspace-viewer-title')).toHaveText('targets.txt')
-    await expect(page.locator('#workspace-viewer-text')).toHaveText('darklab.sh')
+    await expect(page.locator('#workspace-viewer-text .workspace-line-text').first()).toHaveText('darklab.sh')
 
+    await page.locator('#workspace-close-viewer-btn').click()
+    await expect(page.locator('#workspace-viewer')).not.toBeVisible()
     await row.locator('[data-workspace-action="edit"]').click()
     await expect(page.locator('#workspace-editor')).toBeVisible()
     await page.locator('#workspace-text-input').fill('darklab.sh\nip.darklab.sh\n')
@@ -157,6 +166,8 @@ test.describe('workspace modal', () => {
     await row.locator('[data-workspace-action="view"]').click()
     await expect(page.locator('#workspace-viewer-text')).toContainText('ip.darklab.sh')
 
+    await page.locator('#workspace-close-viewer-btn').click()
+    await expect(page.locator('#workspace-viewer')).not.toBeVisible()
     const [download] = await Promise.all([
       page.waitForEvent('download'),
       row.locator('[data-workspace-action="download"]').click(),
@@ -167,7 +178,7 @@ test.describe('workspace modal', () => {
     await expect(page.locator('#workspace-overlay')).not.toHaveClass(/open/)
 
     await runCommand(page, 'cat targets.txt')
-    await expect(page.locator('.tab-panel.active .output')).toContainText('file: targets.txt')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('darklab.sh')
     await expect(page.locator('.tab-panel.active .output')).toContainText('ip.darklab.sh')
   })
 
@@ -219,6 +230,8 @@ test.describe('workspace modal', () => {
     await expect(page.locator('#workspace-viewer [data-workspace-viewer-action="download"]')).toBeVisible()
     await expect(page.locator('#workspace-viewer [data-workspace-viewer-action="delete"]')).toBeVisible()
 
+    await page.locator('#workspace-close-viewer-btn').click()
+    await expect(page.locator('#workspace-viewer')).not.toBeVisible()
     await page.locator('#workspace-breadcrumbs [data-workspace-dir=""]').click()
     await expect(folder).toBeVisible()
   })

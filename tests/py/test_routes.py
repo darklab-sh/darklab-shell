@@ -1272,6 +1272,27 @@ class TestWorkspaceRoutes:
         finally:
             shell_app._last_workspace_cleanup_monotonic = previous_cleanup
 
+    def test_periodic_cleanup_skips_request_session_workspace(self):
+        client = get_client()
+        previous_cleanup = shell_app._last_workspace_cleanup_monotonic
+        try:
+            shell_app._last_workspace_cleanup_monotonic = 0
+            with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+                from workspace import ensure_session_workspace
+                current_root = ensure_session_workspace("active-session", config.CFG)
+                expired_root = ensure_session_workspace("expired-session", config.CFG)
+                os.utime(current_root, (1000, 1000))
+                os.utime(expired_root, (1000, 1000))
+
+                with mock.patch("app.time.monotonic", return_value=1000):
+                    resp = client.get("/health", headers={"X-Session-ID": "active-session"})
+
+                assert resp.status_code == 200
+                assert current_root.exists()
+                assert not expired_root.exists()
+        finally:
+            shell_app._last_workspace_cleanup_monotonic = previous_cleanup
+
 
 # ── /run ──────────────────────────────────────────────────────────────────────
 
@@ -2168,6 +2189,21 @@ class TestAutocompleteRoute:
             data = json.loads(client.get("/autocomplete").data)
         assert data["suggestions"] == []
         assert "nmap" in data["context"]
+
+    def test_returns_wordlist_autocomplete_catalog(self):
+        client = get_client()
+        with mock.patch("blueprints.content.wordlist_autocomplete_items", return_value=[
+            {
+                "value": "/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
+                "label": "Discovery/DNS/subdomains-top1million-5000.txt",
+                "description": "DNS wordlist",
+                "wordlist_category": "dns",
+            },
+        ]):
+            data = json.loads(client.get("/autocomplete").data)
+
+        assert data["wordlists"][0]["wordlist_category"] == "dns"
+        assert data["wordlists"][0]["value"].endswith("subdomains-top1million-5000.txt")
 
 
 # ── /history session isolation ────────────────────────────────────────────────

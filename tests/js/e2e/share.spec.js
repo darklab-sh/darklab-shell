@@ -263,8 +263,8 @@ test.describe('permalink / share', () => {
     for await (const chunk of txtStream) txtChunks.push(chunk)
     const txt = Buffer.concat(txtChunks).toString('utf8')
 
-    expect(txt).toContain('anon@darklab:~$ hostname')
-    expect(txt).toMatch(/1\s+\+0\.0s\s+anon@darklab:~\$ hostname/)
+    expect(txt).toContain('anon@darklab:/ $ hostname')
+    expect(txt).toMatch(/1\s+\+0\.0s\s+anon@darklab:\/ \$ hostname/)
     expect(txt).toContain('+')
 
     await page.locator('#perm-save-btn').click()

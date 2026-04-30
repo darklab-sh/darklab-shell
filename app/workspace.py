@@ -741,18 +741,26 @@ def migrate_session_workspace(
     )
 
 
-def cleanup_inactive_workspaces(cfg: dict[str, Any] | None = None, *, now: float | None = None) -> int:
+def cleanup_inactive_workspaces(
+    cfg: dict[str, Any] | None = None,
+    *,
+    now: float | None = None,
+    skip_session_id: str | None = None,
+) -> int:
     settings = workspace_settings(cfg)
     if not settings.enabled or settings.inactivity_ttl_hours <= 0:
         return 0
     root = workspace_root(settings)
     if not root.exists():
         return 0
+    skip_name = session_workspace_name(skip_session_id) if skip_session_id else ""
     ttl_seconds = settings.inactivity_ttl_hours * 60 * 60
     cutoff = (datetime.now(timezone.utc).timestamp() if now is None else float(now)) - ttl_seconds
     removed = 0
     for child in root.iterdir():
         if child.is_symlink() or not child.is_dir() or not child.name.startswith("sess_"):
+            continue
+        if skip_name and child.name == skip_name:
             continue
         if child.stat().st_mtime < cutoff:
             shutil.rmtree(child)

@@ -335,7 +335,7 @@ Within that non-module shell, repeated tab/history/FAQ-limit surfaces are built 
 
 External dependencies: local vendor routes serving committed builds of `ansi_up` and `jspdf` from `app/static/js/vendor/`, and committed font files from `app/static/fonts/`. Both JS libraries are tracked in `package.json` under `dependencies`. `scripts/build_vendor.mjs` generates `app/static/js/vendor/ansi_up.js` (an IIFE-wrapped browser global, because `ansi_up` v6 is ESM-only) and `app/static/js/vendor/jspdf.umd.min.js` (copied directly from the npm UMD build). The generated files are committed so local development and docker-compose runs never need an explicit build step. Run `npm run vendor:sync` to regenerate after a version bump; `npm run vendor:check` verifies the committed files in `app/static/js/vendor/` match what `build_vendor.mjs` would produce from the current `node_modules/` packages. Fonts are committed to `app/static/fonts/` and served through `/vendor/fonts/`.
 
-**JS module load order:** `session.js` → `state.js` → `utils.js` → `config.js` → `dom.js` → `ui_helpers.js` → `ui_pressable.js` → `ui_disclosure.js` → `ui_dismissible.js` → `ui_outside_click.js` → `export_pdf.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `welcome.js` → `runner.js` → `app.js` → `mobile_sheet.js` → `controller.js` → `shell_chrome.js` → `mobile_chrome.js`. `state.js` owns the shared store boundary, `ui_helpers.js` owns DOM-facing setters/getters and visibility helpers, the four `ui_*` helper modules form the shared UI interaction layer (see **UI Interaction Helpers** below), `app.js` still provides reusable browser helpers, `controller.js` owns the composition root, and `shell_chrome.js` / `mobile_chrome.js` load last so their rail, tabbar, HUD, and mobile-sheet wiring can attach after all tab, search, and action helpers are defined. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
+**JS module load order:** `session.js` → `state.js` → `utils.js` → `export_html.js` → `config.js` → `dom.js` → `ui_helpers.js` → `ui_pressable.js` → `ui_disclosure.js` → `ui_dismissible.js` → `ui_focus_trap.js` → `ui_confirm.js` → `ui_outside_click.js` → `export_pdf.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `workspace.js` → `welcome.js` → `run_monitor.js` → `runner.js` → `app.js` → `mobile_sheet.js` → `controller.js` → `shell_chrome.js` → `mobile_chrome.js`. `state.js` owns the shared store boundary, `ui_helpers.js` owns DOM-facing setters/getters and visibility helpers, the `ui_*` helper modules form the shared UI interaction layer (see **UI Interaction Helpers** below), `app.js` still provides reusable browser helpers, `controller.js` owns the composition root, and `shell_chrome.js` / `mobile_chrome.js` load last so their rail, tabbar, HUD, and mobile-sheet wiring can attach after all tab, search, and action helpers are defined. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
 
 **UI Interaction Helpers.** A five-helper family in `static/js/ui_helpers.js` + four sibling `ui_*.js` modules is the single contract for chrome-surface interaction. Every module loads before the domain scripts that consume it, so every downstream module sees the helpers as plain globals — no wiring glue at call sites.
 
@@ -918,10 +918,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 1078
-- `vitest`: 867
+- `pytest`: 1088
+- `vitest`: 906
 - `playwright`: 222
-- total: 2,167
+- total: 2,216
 
 ### Testing Architecture
 

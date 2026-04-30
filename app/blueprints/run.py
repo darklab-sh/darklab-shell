@@ -79,7 +79,25 @@ SHELL_BIN = shutil.which("sh") or "/bin/sh"
 SUDO_BIN  = shutil.which("sudo") or "/usr/bin/sudo"
 KILL_BIN  = shutil.which("kill") or "/bin/kill"
 
-CLIENT_SIDE_RUN_ROOTS = {"theme", "config", "session-token"}
+CLIENT_SIDE_RUN_ROOTS = {
+    "cat",
+    "cd",
+    "config",
+    "file",
+    "grep",
+    "head",
+    "ll",
+    "ls",
+    "mkdir",
+    "pwd",
+    "rm",
+    "session-token",
+    "sort",
+    "tail",
+    "theme",
+    "uniq",
+    "wc",
+}
 
 
 def _variable_notice_line(expanded_command: str, used_names: tuple[str, ...]) -> str:

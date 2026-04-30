@@ -50,6 +50,7 @@ function loadTabsFns({
   const historyPanel = document.getElementById('history-panel')
   const clipboardWrites = []
   const shellPromptWrap = document.createElement('div')
+  shellPromptWrap.id = 'shell-prompt-wrap'
   shellPromptWrap.className = 'shell-prompt-wrap'
 
   const navigator = {
@@ -159,6 +160,7 @@ function loadTabsAndOutputFns({
   const newTabBtn = document.getElementById('new-tab-btn')
   const historyPanel = document.getElementById('history-panel')
   const shellPromptWrap = document.createElement('div')
+  shellPromptWrap.id = 'shell-prompt-wrap'
   shellPromptWrap.className = 'shell-prompt-wrap'
 
   const navigator = {
@@ -214,11 +216,15 @@ function loadTabsAndOutputFns({
       Blob,
       shellPromptWrap,
       getOutput: (id) => document.getElementById(`output-${id}`),
+      _welcomeBootPending: false,
     },
     `{
     createTab,
     mountShellPrompt,
+    closeTab,
     renderRestoredTabOutput,
+    appendLine,
+    _setLnMode,
     _getTabs: () => getTabs(),
     _stickOutputToBottom,
     _maybeMountDeferredPrompt,
@@ -383,6 +389,36 @@ describe('tabs helpers', () => {
     expect(document.querySelector('.tab-label').textContent).toBe('shell 1')
     expect(closeBtn.blur).toHaveBeenCalled()
     activeElementSpy.mockRestore()
+  })
+
+  it('closeTab resets the preserved last tab line counter before the next command output', () => {
+    const { createTab, closeTab, appendLine, _setLnMode, _getTabs, shellPromptWrap } = loadTabsAndOutputFns()
+    const id = createTab('first label')
+    const tab = _getTabs()[0]
+
+    _setLnMode('on')
+    appendLine('old one', '', id)
+    appendLine('old two', '', id)
+    tab.workspaceCwd = 'reports'
+    tab.draftInput = 'stale draft'
+    tab.commandHistory = ['cat old.txt']
+
+    closeTab(id)
+
+    const out = document.getElementById(`output-${id}`)
+    expect(out.dataset.outputLineCounter).toBe('0')
+    expect(tab._outputLineCounter).toBe(0)
+    expect(tab.workspaceCwd).toBe('')
+    expect(tab.draftInput).toBe('')
+    expect(tab.commandHistory).toEqual([])
+    expect(shellPromptWrap.dataset.lineNumber).toBe('1')
+
+    appendLine('fresh one', '', id)
+
+    const lines = out.getElementsByClassName('line')
+    expect(lines).toHaveLength(1)
+    expect(lines[0].dataset.lineNumber).toBe('1')
+    expect(shellPromptWrap.dataset.lineNumber).toBe('2')
   })
 
   it('clearTab preserves a running tab state when asked to keep the run active', () => {
@@ -664,8 +700,8 @@ describe('tabs helpers', () => {
     ])
 
     const promptLine = document.querySelector(`#output-${id} .line.prompt-echo`)
-    expect(promptLine?.querySelector('.prompt-prefix')?.textContent).toBe('anon@darklab:~$')
-    expect(promptLine?.textContent).toBe('anon@darklab:~$dig darklab.sh')
+    expect(promptLine?.querySelector('.prompt-prefix')?.textContent).toBe('anon@darklab:~ $')
+    expect(promptLine?.textContent).toBe('anon@darklab:~ $dig darklab.sh')
   })
 
   it('keeps currentRunStartIndex aligned when old raw lines are pruned from the front', () => {

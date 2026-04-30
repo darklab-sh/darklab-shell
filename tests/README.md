@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 1078
-- `vitest`: 867
+- `pytest`: 1088
+- `vitest`: 906
 - `playwright`: 222
-- total: 2,167
+- total: 2,216
 
 This document is organized in two parts:
 
@@ -345,12 +345,14 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_cleanup_removes_only_expired_session_directories` | Verifies that cleanup removes only expired hashed session directories and leaves unrelated paths alone. |
 | `TestSessionWorkspace.test_cleanup_uses_session_directory_activity_not_file_mtime` | Verifies that workspace cleanup uses the session directory activity timestamp rather than preserving a session because one file has a newer timestamp. |
 | `TestSessionWorkspace.test_touch_session_workspace_extends_cleanup_activity` | Verifies that app-mediated workspace access refreshes the session directory activity timestamp so active workspaces are retained. |
+| `TestSessionWorkspace.test_cleanup_can_skip_current_session_directory` | Verifies that workspace cleanup can preserve the request session while sweeping other expired session directories. |
 | `TestEntrypointWorkspaceRepair.test_workspace_repair_targets_children_inside_session_directories` | Verifies that entrypoint workspace permission repair explicitly targets files and folders inside hashed session directories. |
 | `TestDerivedCommandRegistry.test_commands_registry_loader_normalizes_policy_and_autocomplete` | Verifies that the `commands.yaml` loader normalizes policy entries and autocomplete metadata, including pipe-helper entries. |
 | `TestDerivedCommandRegistry.test_commands_registry_local_overlay_appends_policy_and_context` | Verifies that `commands.local.yaml` appends policy entries, adds new roots, overrides categories, and merges autocomplete hints without replacing the base registry. |
 | `TestDerivedCommandRegistry.test_real_registry_amass_uses_subcommand_scoped_autocomplete` | Verifies that Amass autocomplete exposes root subcommands and keeps subcommand-specific flags and examples scoped to the matching subcommand. |
 | `TestDerivedCommandRegistry.test_real_registry_openssl_uses_subcommand_scoped_autocomplete` | Verifies that OpenSSL autocomplete exposes allowlisted subcommands and keeps `s_client` and `ciphers` flags scoped to the matching subcommand. |
 | `TestDerivedCommandRegistry.test_real_registry_gobuster_uses_subcommand_scoped_autocomplete` | Verifies that Gobuster autocomplete exposes mode subcommands and keeps mode-specific flags scoped to the matching subcommand. |
+| `TestDerivedCommandRegistry.test_real_registry_wordlist_metadata_covers_known_wordlist_flags` | Verifies that known wordlist-consuming command slots declare `value_type: wordlist` and the expected wordlist categories. |
 | `TestDerivedCommandRegistry.test_autocomplete_context_can_be_derived_from_commands_registry` | Verifies that browser autocomplete context can be derived from command and pipe-helper registry entries. |
 | `TestDerivedCommandRegistry.test_builtin_autocomplete_registry_uses_app_owned_yaml` | Verifies that built-in autocomplete grammar is loaded from the app-owned YAML registry and normalized into the browser context shape. |
 | `TestDerivedCommandRegistry.test_builtin_autocomplete_workspace_roots_follow_feature_flag` | Verifies that Files-only built-in autocomplete roots are hidden unless workspace support is enabled. |
@@ -467,6 +469,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_spread_sensitive_roots` | Verifies that the smoke-test command corpus spaces repeated `dig` and `whois` commands apart during smoke execution without changing the source-owned registry or workflow order. |
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_render_workflow_defaults` | Verifies that workflow-backed smoke commands render declared default input values instead of leaking raw `{{token}}` placeholders into the shared smoke corpus. |
 | `TestAutocompleteContextLoading.test_container_smoke_test_commands_skip_workspace_required_examples` | Verifies that workspace-only command examples stay out of the generic smoke corpus because they need per-session file setup. |
+| `TestWordlistCatalog.test_load_wordlist_catalog_filters_and_sorts_curated_matches` | Verifies that the wordlist catalog applies configured globs, ignores non-wordlist docs, and returns deterministic curated ordering. |
+| `TestWordlistCatalog.test_wordlist_catalog_search_path_and_all_scan` | Verifies curated wordlist search, path lookup, and the opt-in full SecLists scan while excluding archive files. |
+| `TestWordlistCatalog.test_wordlist_catalog_missing_root_returns_empty_items` | Verifies that a missing SecLists root returns an empty catalog without losing configured category metadata. |
 | `TestWorkflowInputLoading.test_load_workflows_keeps_declared_inputs` | Verifies that workflow input metadata is preserved when every referenced token is declared in the workflow schema. |
 | `TestWorkflowInputLoading.test_load_workflows_drops_steps_with_undeclared_tokens` | Verifies that workflow steps referencing undeclared input tokens are rejected instead of reaching the client as partially renderable templates. |
 | `TestWorkflowInputLoading.test_load_all_workflows_filters_workspace_required_workflows` | Verifies that Files-backed workflow chains are hidden when workspaces are disabled and retain their workspace feature gate when enabled. |
@@ -485,7 +490,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestExpiryNote.test_returns_empty_on_invalid_date` | Returns empty on invalid date. |
 | `TestExpiryNote.test_includes_expiry_date` | Checks includes expiry date handling. |
 | `TestPromptEchoText.test_uses_configured_prompt_prefix` | Checks `_prompt_echo_text` renders the configured `CFG["prompt_prefix"]`. |
-| `TestPromptEchoText.test_falls_back_to_dollar_when_prefix_missing` | Checks fallback to bare `$` when `prompt_prefix` is empty. |
+| `TestPromptEchoText.test_falls_back_to_default_identity_when_prefix_missing` | Checks fallback to the default prompt identity when `prompt_prefix` is empty. |
 | `TestPromptEchoText.test_strips_trailing_space_when_label_empty` | Checks trailing-space strip when the echoed label is empty. |
 | `TestNormalizePermalinkLinesPromptEcho.test_unstructured_content_uses_configured_prefix` | Unstructured content synthesizes a prompt-echo line using the configured prefix. |
 | `TestNormalizePermalinkLinesPromptEcho.test_structured_snapshot_without_echo_gets_configured_prefix` | Structured snapshots without an echo line get one synthesized with the configured prefix. |
@@ -884,6 +889,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestWorkspaceRoutes.test_enforces_quota_and_type_checks` | Verifies request-body validation and workspace quota errors at the HTTP boundary. |
 | `TestWorkspaceRoutes.test_download_streams_session_owned_file` | Verifies that validated session-owned files can be downloaded without exposing absolute paths. |
 | `TestWorkspaceRoutes.test_periodic_cleanup_runs_before_requests_when_workspace_enabled` | Verifies that request-driven workspace cleanup removes expired session directories when workspace storage is enabled. |
+| `TestWorkspaceRoutes.test_periodic_cleanup_skips_request_session_workspace` | Verifies that request-driven workspace cleanup preserves the active request session while removing other expired workspaces. |
 | `TestRunRoute.test_missing_command_returns_400` | Checks that missing command returns 400. |
 | `TestRunRoute.test_empty_command_returns_400` | Checks that empty command returns 400. |
 | `TestRunRoute.test_non_string_command_returns_400` | Checks that non string command returns 400. |
@@ -940,6 +946,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestAutocompleteRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestAutocompleteRoute.test_has_suggestions_key` | Checks has suggestions key handling. |
 | `TestAutocompleteRoute.test_returns_configured_context` | Checks that the autocomplete endpoint returns the configured context object. |
+| `TestAutocompleteRoute.test_returns_wordlist_autocomplete_catalog` | Verifies that `/autocomplete` includes the curated installed-wordlist catalog for typed value slots. |
 | `TestHistorySessionIsolation.test_empty_history_for_fresh_session` | Checks that empty history for fresh session. |
 | `TestHistorySessionIsolation.test_history_scoped_to_session` | Checks that history scoped to session. |
 | `TestHistorySessionIsolation.test_delete_only_affects_own_session` | Checks that delete only affects own session. |
@@ -1007,6 +1014,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunStreaming.test_fake_commands_lists_built_in_and_external_catalogs` | Checks that fake `commands` prints built-in and allowed external sections while deduping external command variants down to roots. |
 | `TestRunStreaming.test_fake_commands_supports_built_in_only_filter` | Checks that `commands --built-in` prints only the built-in command section. |
 | `TestRunStreaming.test_fake_commands_supports_external_only_filter` | Checks that `commands --external` prints only the allowed external command section. |
+| `TestRunStreaming.test_fake_wordlist_lists_searches_and_prints_paths` | Verifies that the `wordlist` built-in lists categories, searches curated entries, and prints a copy-friendly path. |
+| `TestRunStreaming.test_fake_wordlist_reports_missing_catalog` | Verifies that the `wordlist` built-in fails gracefully when the installed SecLists root is missing. |
 | `TestRunStreaming.test_fake_workspace_lists_shows_and_removes_session_files` | Verifies that the `file` built-in can list, show, and remove session-owned files. |
 | `TestRunStreaming.test_fake_workspace_aliases_list_and_show_session_files` | Verifies that `ls` lists session workspace files and `cat <file>` shows a session workspace file without exposing arbitrary filesystem access. |
 | `TestRunStreaming.test_fake_workspace_show_reports_binary_files` | Verifies that `file show` and `cat` report binary session files cleanly instead of surfacing a server error. |
@@ -1042,6 +1051,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunStreaming.test_fake_history_lists_recent_session_commands` | Checks that fake history lists recent session commands. |
 | `TestRunStreaming.test_fake_history_honors_recent_commands_limit` | Verifies that the built-in `history` command uses the configured recent-command limit instead of a separate hard cap. |
 | `TestRunStreaming.test_fake_pwd_returns_synthetic_path` | Checks that fake pwd returns synthetic path. |
+| `TestRunStreaming.test_fake_pwd_returns_workspace_root_when_workspace_enabled` | Verifies that fake `pwd` reports `/` when workspace storage owns the terminal path model. |
 | `TestRunStreaming.test_fake_uname_a_returns_web_shell_environment` | Checks that fake uname a returns web shell environment. |
 | `TestRunStreaming.test_fake_uname_without_flags_returns_kernel_name` | Checks that plain `uname` returns the short kernel name form. |
 | `TestRunStreaming.test_fake_xyzzy_coffee_and_fork_bomb_easter_eggs` | Checks that the undocumented `xyzzy`, `coffee`, and fork-bomb easter eggs return their special responses. |
@@ -1236,6 +1246,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `applies saved timestamp, line number, and HUD clock preferences from cookies at startup` | Verifies that applies saved timestamp, line number, and HUD clock preferences from cookies at startup. |
 | `applies saved session preferences on startup over stale local cookies` | Verifies that session-scoped preferences loaded from `/session/preferences` override stale browser-local cookies during boot. |
 | `switches the visible prompt into confirmation mode when requested` | Verifies that the composer prompt swaps from the normal shell prompt to the transcript-owned `[yes/no]:` confirmation prompt while a terminal confirm is pending. |
+| `uses a compact cwd placeholder instead of the mobile prompt label` | Verifies that the mobile composer hides the full prompt label during normal command entry and uses a compact cwd-aware placeholder instead. |
 | `_setTsMode updates body classes and button labels` | _setTsMode updates body classes and button labels. |
 | `_setLnMode updates body classes and button labels` | _setLnMode updates body classes and button labels. |
 | `allows timestamps and line numbers to be enabled at the same time` | Verifies that allows timestamps and line numbers to be enabled at the same time. |
@@ -1256,6 +1267,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `serves runtime autocomplete context for theme and config values` | Verifies that theme slugs, config keys, and config values are generated into the shared autocomplete context instead of duplicated static lists. |
 | `serves runtime autocomplete context for built-in command lookup helpers` | Verifies that runtime built-in context covers `session-token`, simple built-ins, and dynamic `man` / `which` / `type` lookup suggestions. |
 | `serves loaded workspace files as file command autocomplete values` | Verifies that loaded session files are offered as autocomplete values for `file show`, `file edit`, `file download`, `file rm`, and `cat`. |
+| `serves workspace autocomplete values relative to the active workspace folder` | Verifies that workspace autocomplete offers current-folder file and folder names instead of root-relative paths. |
 | `hides workspace built-ins from runtime autocomplete when Files are disabled` | Verifies that file commands and aliases are removed from runtime autocomplete when the operator disables Files. |
 | `keeps code-owned built-ins out of commands.yaml` | Verifies that app-owned built-ins are not duplicated in the operator-facing command registry. |
 | `groups theme cards into labeled sections in the preview modal` | Verifies that groups theme cards into labeled sections in the preview modal. |
@@ -1409,6 +1421,12 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `shows subcommand-scoped examples when a partial subcommand uniquely matches` | Verifies that partial subcommand input such as `amass s` surfaces examples once it uniquely matches one subcommand. |
 | `keeps ambiguous partial subcommands as token suggestions instead of examples` | Verifies that ambiguous partial subcommands such as `gobuster d` keep showing matching subcommand tokens instead of prematurely expanding examples. |
 | `uses subcommand-scoped value hints` | Verifies that value hints for repeated flags such as `-o` come from the active subcommand context. |
+| `tracks recent domains from structured flag and positional slots, capped per session` | Verifies that recent domain capture reads known domain argument slots, preserves recency order, and enforces the per-session cap. |
+| `keeps recent domains isolated by session id` | Verifies that recent domain suggestions do not leak between session IDs. |
+| `suggests recent domains only inside known domain value slots` | Verifies that recent domain autocomplete appears only where command metadata identifies a domain value. |
+| `does not infer recent-domain slots from placeholder text without value_type metadata` | Verifies that recent-domain capture and suggestions require explicit `value_type: domain` metadata. |
+| `suggests installed wordlists only inside marked wordlist slots` | Verifies that installed SecLists suggestions appear only in explicit `value_type: wordlist` slots and filter by category. |
+| `keeps workspace file hints while adding installed wordlists for wordlist slots` | Verifies that wordlist autocomplete adds installed SecLists paths without dropping session workspace file hints. |
 | `prefers runtime autocomplete suggestions for client-side commands` | Verifies that client-side commands can provide dynamic autocomplete suggestions before falling back to the static autocomplete registry. |
 | `merges runtime autocomplete context with the YAML-loaded context registry` | Verifies that runtime built-in context and YAML-loaded tool context feed the same autocomplete matching engine. |
 | `uses sequence-specific runtime value hints without leaking them to sibling subcommands` | Verifies that runtime context can offer values for sequences such as `config set line-numbers` without also suggesting those values after `config get line-numbers`. |
@@ -1602,6 +1620,11 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `hides the chip when there are no running non-active tabs` | Checks that hides the chip when there are no running non-active tabs. |
 | `shows the chip with a count that equals the number of running non-active tabs` | Checks that shows the chip with a count that equals the number of running non-active tabs. |
 | `excludes the active tab from the count even if it is running` | Checks that excludes the active tab from the count even if it is running. |
+| `replaces the mobile recents peek with Run Monitor while the active tab is running` | Verifies that the mobile bottom peek switches from recents to Run Monitor details for the active running tab. |
+| `opens Run Monitor from the running peek instead of the recents sheet` | Verifies that tapping the running mobile peek opens Run Monitor rather than the recents sheet. |
+| `shows elapsed time for the active mobile Run Monitor peek when runStart is known` | Verifies that the mobile Run Monitor peek shows elapsed time when the active run has a start timestamp. |
+| `suppresses the mobile Run Monitor peek wiggle for reduced motion` | Verifies that the mobile Run Monitor peek does not animate when reduced motion is requested. |
+| `returns the peek to recents after the active run finalization hold expires` | Verifies that the mobile peek briefly holds Run Monitor state after completion, then returns to recents. |
 | `activates the edge glow when a running non-active tab is only partially clipped off-screen` | Checks that activates the edge glow when a running non-active tab is only partially clipped off-screen. |
 | `chip tap activates the next running non-active tab in tab-row order` | Checks that chip tap activates the next running non-active tab in tab-row order. |
 | `chip tap cycles through the running set and wraps around` | Checks that chip tap cycles through the running set and wraps around. |
@@ -1614,13 +1637,16 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | --- | --- |
 | `renders notice lines with textContent (not HTML)` | Verifies that renders notice lines with textContent (not HTML). |
 | `renders non-plain classes through ansi_to_html` | Verifies that renders non-plain classes through ansi_to_html. |
+| `renders shell as a normal workspace folder in the prompt` | Verifies that a workspace folder named `shell` is displayed normally in the prompt instead of being treated as a mount prefix. |
 | `falls back to plain-text rendering when AnsiUp is unavailable` | Verifies that falls back to plain-text rendering when AnsiUp is unavailable. |
 | `wraps output content in a line-content container so prefix mode does not reshape the line flow` | Verifies that wraps output content in a line-content container so prefix mode does not reshape the line flow. |
 | `trims old lines and keeps rawLines in sync` | Verifies that trims old lines and keeps rawLines in sync. |
 | `avoids full output scans while trimming in default prefix mode` | Verifies that appending lines in the default no-prefix mode trims max-line output without rescanning every rendered row. |
-| `keeps line-number appends incremental after max-line trimming` | Verifies that line-number mode assigns stable row numbers without rescanning every rendered row after max-line trimming. |
+| `keeps absolute line numbers after max-line trimming` | Verifies that max-line trimming keeps displayed line numbers tied to emitted output order instead of renumbering the visible tail. |
+| `preserves absolute line numbers when line-number mode is enabled later` | Verifies that enabling line numbers after output trimming uses stored absolute line numbers for retained rows. |
 | `adds timestamp dataset fields` | Verifies that adds timestamp dataset fields. |
 | `stores server-provided signal metadata on DOM lines and rawLines` | Verifies that streamed backend signal metadata is attached to rendered output rows and retained in tab rawLines. |
+| `keeps cached signal counts in sync when old lines are trimmed` | Verifies that per-tab signal counts decrement when max-line trimming removes old signal rows. |
 | `uses +0.0s for lines without a true elapsed runtime` | Verifies that synthetic or untimed lines surface `+0.0s` instead of a blank elapsed prefix. |
 | `toggles the line-number body class and button labels` | Verifies that toggles the line-number body class and button labels. |
 | `numbers the prompt line after the current output rows` | Verifies that numbers the prompt line after the current output rows. |
@@ -1631,6 +1657,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `does nothing when there is no output container for the target tab` | Verifies that does nothing when there is no output container for the target tab. |
 | `re-sticks restored output to the tail after delayed layout growth` | Verifies that restored transcripts keep the prompt tail visible after delayed layout growth. |
 | `batches large bursts of output and finishes rendering on the next tick` | Verifies that batches large bursts of output and finishes rendering on the next tick. |
+| `queues multi-line appends in chunks and updates raw lines once flushed` | Verifies that bulk output replay queues multi-line output through the batch flusher and syncs raw lines after flush. |
 | `uses delayed tail restore for large mobile output bursts` | Verifies that large mobile output bursts keep the transcript pinned to the prompt after delayed layout growth. |
 
 #### `permalink.test.js`
@@ -1672,6 +1699,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `does nothing for unknown data-action values` | Verifies that does nothing for unknown data-action values. |
 | `clicking perm-save-btn toggles open class` | Verifies that clicking perm-save-btn toggles open class. |
 | `clicking perm-save-btn again closes the dropdown` | Verifies that clicking perm-save-btn again closes the dropdown. |
+| `positions the permalink save menu inside the mobile viewport` | Verifies that the permalink save dropdown uses fixed, viewport-clamped positioning on narrow screens. |
 | `save-txt download uses appName and exportTimestamp` | Verifies that save-txt download uses appName and exportTimestamp. |
 | `save-html download uses appName and exportTimestamp` | Verifies that save-html download uses appName and exportTimestamp. |
 | `includes line numbers in copied text when lnMode is on` | Verifies that includes line numbers in copied text when lnMode is on. |
@@ -1683,7 +1711,10 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | --- | --- |
 | `renders active-run CPU and memory telemetry when available` | Verifies that the Run Monitor renders CPU and memory meters from active-run resource telemetry. |
 | `renders unavailable telemetry chips when backend stats are absent` | Verifies that the Run Monitor still shows CPU and memory meter placeholders when backend resource telemetry is not available. |
+| `warms CPU samples while closed so first open can show a percent` | Verifies that a background warmup sample pair can populate CPU percentage before the drawer is opened. |
+| `does a quick follow-up refresh after opening on a baseline-only CPU sample` | Verifies that opening the Run Monitor schedules a quick second poll when CPU telemetry only has a baseline sample. |
 | `opens as a header-only drawer when there are no active runs` | Verifies that the Run Monitor opens to a header-only `0 active runs` drawer when no commands are running. |
+| `uses mobile sheet chrome and shared sheet binding on mobile` | Verifies that the mobile Run Monitor opens with sheet chrome and shared mobile-sheet dismissal behavior. |
 | `calculates CPU from cumulative samples, keeps the last value, and caps display at 100%` | Verifies that the Run Monitor derives CPU percentage from adjacent cumulative CPU samples, preserves the last value when a later poll lacks CPU data, and display-caps at 100%. |
 | `adds the running status affordance and pulses it once per session` | Verifies that the STATUS HUD cell gets the Run Monitor expansion affordance while running and only pulses once per browser session. |
 
@@ -1776,9 +1807,20 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `clears the token only after answering yes to the terminal confirmation` | Verifies that `session-token clear` removes the active token only after an explicit `yes` answer. |
 | `leaves the session token untouched when the user answers no` | Verifies that answering `no` leaves the active session token unchanged. |
 | `treats Ctrl+C as no and cancels the clear confirmation` | Verifies that `Ctrl+C` cancels the terminal clear-confirm prompt and leaves the token untouched. |
+| `treats the empty workspace cwd as root for pwd, cd, and mkdir` | Verifies that the empty tab workspace cwd displays as `/` and resolves relative folder commands from the workspace root. |
+| `tracks a workspace current directory per tab and resolves relative file commands` | Verifies that `cd`, `pwd`, and relative file commands use a tab-scoped workspace current directory. |
+| `resolves nested cd commands from the current workspace folder` | Verifies that `cd <child>` navigates relative to the tab's current workspace folder. |
+| `does not double-prefix a root-relative autocomplete path from a workspace folder` | Verifies that stale root-relative folder suggestions do not get prefixed with the current folder twice. |
+| `lists the current workspace folder non-recursively on one short line` | Verifies that `ls` shows only direct current-folder entries in compact terminal-style output. |
+| `lists workspace folders recursively only when -R is present with flags in any order` | Verifies that recursive workspace listings require `-R` and support combined list flags in any order. |
+| `lists workspace folders in long format with ll` | Verifies that `ll` shows the long workspace listing with aligned metadata columns. |
+| `creates workspace directories with mkdir and file add-dir` | Verifies that `mkdir` and `file add-dir` create folders through the workspace directory route. |
+| `runs standalone pipe helpers against workspace files` | Verifies that `grep`, `wc -l`, `sort`, and `uniq` can run directly against workspace files. |
 | `does not intercept workspace delete aliases when Files are disabled` | Verifies that the browser does not run the client-side workspace delete confirmation path when Files are disabled. |
+| `shows usage for bare rm and file delete commands` | Verifies that bare delete aliases are handled locally and return usage text instead of falling through as disallowed commands. |
 | `opens a terminal yes/no confirmation before deleting a workspace file` | Verifies that `file rm <file>` opens a transcript-owned confirmation prompt instead of deleting immediately. |
-| `opens a warning terminal confirmation before deleting a workspace folder with files` | Verifies that `file rm <folder>` warns with a file count before recursively deleting a non-empty session folder. |
+| `requires recursive rm flags before deleting a workspace folder` | Verifies that folder deletion refuses to open a confirmation unless `-r` or `-rf` is provided. |
+| `opens a warning terminal confirmation before recursively deleting a workspace folder with files` | Verifies that recursive folder deletion warns with a file count before deleting a non-empty session folder. |
 | `does not prompt before deleting a missing workspace file or folder` | Verifies that `file rm <path>` checks that the session file or folder exists before opening the confirmation prompt. |
 | `deletes the workspace file only after answering yes` | Verifies that `rm <file>` deletes through the workspace route only after an explicit `yes` answer. |
 | `deletes the workspace folder only after answering yes` | Verifies that `file rm <folder>` deletes through the workspace route only after an explicit `yes` answer. |
@@ -1826,12 +1868,14 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `treats nslookup answer rows as findings when the server marks them` | Verifies that server-tagged `nslookup` answer sections count as findings while the untagged resolver header does not. |
 | `clearSearch resets scoped search back to text mode` | Verifies that closing search clears any active findings/warnings/errors/summaries scope and returns to plain text mode. |
 | `updates the search button and scope labels with scoped counts` | Verifies that the tabbar search affordance and scoped buttons expose live signal counts. |
+| `uses cached signal counts without scanning large output buffers` | Verifies that discoverability counts can use the per-tab signal cache without scanning rendered output rows. |
 | `renders signal summary chips with DOM APIs instead of parsing markup` | Verifies that compact signal chips render unsafe-looking values as text instead of parsing them as HTML. |
 | `clears the discoverability pulse when the active output has no findings` | Verifies that a stale findings pulse is removed when the active tab changes to output with no findings. |
 | `signal chips are clickable and route to the matching scope` | Verifies that F/W/E/S chips open search in the matching scope. |
 | `disables summarize when there are no signals` | Verifies that summarize stays disabled until the current tab has at least one finding, warning, error, or summary line. |
 | `uses server-provided signal metadata for scoped counts and highlights` | Verifies that server-provided line signals drive scoped search counts and highlight navigation. |
 | `does not classify plain text without server-provided signal metadata` | Verifies that untagged transcript text is treated as signal-unavailable instead of being reclassified by browser heuristics. |
+| `does not infer command roots for lines without signal metadata` | Verifies that untagged transcript rows do not walk backward through prior output while computing signal scopes. |
 | `opens normal search in text mode even when findings are available` | Verifies that the standard search button path preserves keyboard-first text search while still showing signal availability. |
 | `scopes to summary lines and ignores detail rows` | Verifies that summaries mode targets roll-up lines without re-matching the detailed output underneath them. |
 | `does not count user-killed runs as errors` | Verifies that `[killed by user ...]` lines stay out of the error count and error scope. |
@@ -1903,6 +1947,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `activateTab does not save draft for a running tab` | Verifies that activateTab does not save draft for a running tab. |
 | `activateTab clears acFiltered so stale suggestions from a previous tab do not persist` | Verifies that activateTab clears acFiltered so stale suggestions from a previous tab do not persist. |
 | `closeTab resets the last remaining tab instead of removing it` | Verifies that closeTab resets the last remaining tab instead of removing it. |
+| `closeTab resets the preserved last tab line counter before the next command output` | Verifies that closing the only tab clears preserved tab state so the next command starts line numbering from the fresh prompt. |
 | `clearTab preserves a running tab state when asked to keep the run active` | Verifies that clearTab preserves a running tab state when asked to keep the run active. |
 | `clearTab clears the active un-ran composer input along with the tab output` | Verifies that clearTab clears the active un-ran composer input along with the tab output. |
 | `closing a running tab kills it and activates a neighboring tab` | Verifies that closing a running tab kills it and activates a neighboring tab. |
@@ -2229,6 +2274,10 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `refreshes the currently viewed file when the files list is refreshed` | Verifies that Refresh updates both the file browser and the currently open read-only viewer. |
 | `runs edit download and delete actions from the viewer header for the viewed file` | Verifies that viewer-header actions operate on the currently viewed workspace file. |
 | `formats obvious JSON files in the read-only viewer` | Verifies that JSON-looking workspace files render as pretty-printed JSON in the read-only viewer. |
+| `renders CSV and TSV files as preview tables with raw text available` | Verifies that delimited workspace outputs render in a table preview while retaining a raw text mode. |
+| `formats XML and falls back cleanly for malformed XML` | Verifies that XML workspace outputs are formatted when valid and fall back to raw text with a notice when malformed. |
+| `renders HTTP responses with status, headers, and body sections` | Verifies that raw HTTP response files render status, headers, and body in separate preview sections. |
+| `uses a bounded line-aware preview for large text files` | Verifies that large text files render with line numbers, terminal-style search controls, jump-to-line, and a bounded first chunk rather than dumping the entire file into the viewer. |
 | `serves current workspace files as autocomplete hints after the file list is loaded` | Verifies that the workspace file cache exposes file names as autocomplete hints. |
 | `refreshes from the workspace route` | Verifies that the modal refresh path calls `/workspace/files` and renders the returned file list. |
 | `saves editor contents through the workspace route` | Verifies that saving posts the file name and text content to `/workspace/files` and refreshes the visible state. |

@@ -28,6 +28,8 @@ function loadAutocompleteFns() {
     acExpandSharedPrefix,
     getAutocompleteMatches,
     limitAutocompleteMatchesForDisplay,
+    rememberRecentDomainsFromCommand,
+    _readRecentDomains,
     _getAutocompleteSharedPrefix,
     _setAcIndex: (value) => { acIndex = value; },
   }`,
@@ -43,6 +45,7 @@ describe('autocomplete helpers', () => {
       <input id="mobile-cmd" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" />
     `
     document.body.className = ''
+    sessionStorage.clear()
   })
 
   it('hides the dropdown when there are no suggestions', () => {
@@ -730,6 +733,292 @@ describe('autocomplete helpers', () => {
     )
 
     expect(getAutocompleteMatches('amass viz -o ', 13).map(item => item.value)).toEqual(['amass-viz'])
+  })
+
+  it('tracks recent domains from structured flag and positional slots, capped per session', () => {
+    const { rememberRecentDomainsFromCommand, _readRecentDomains } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        SESSION_ID: 'session-a',
+        acSuggestions: [],
+        acContextRegistry: {
+          dig: {
+            flags: [
+              { value: 'MX', description: 'Mail exchanger lookup' },
+              { value: '@8.8.8.8', description: 'Resolver' },
+            ],
+            expects_value: [],
+            arg_hints: { __positional__: [{ value: '<domain>', value_type: 'domain', description: 'Domain name to query' }] },
+          },
+          subfinder: {
+            flags: [{ value: '-d', description: 'Target domain' }],
+            expects_value: ['-d'],
+            arg_hints: { '-d': [{ value: '<domain>', value_type: 'domain', description: 'Target domain to enumerate' }] },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      rememberRecentDomainsFromCommand,
+      _readRecentDomains,
+    }`,
+    )
+
+    rememberRecentDomainsFromCommand('subfinder -d Alpha.example.com -silent')
+    rememberRecentDomainsFromCommand('dig MX beta.example.org +short')
+    rememberRecentDomainsFromCommand('dig @8.8.8.8 gamma.example.net')
+    rememberRecentDomainsFromCommand('curl https://not-a-domain-slot.example')
+    for (let i = 0; i < 10; i += 1) {
+      rememberRecentDomainsFromCommand(`subfinder -d d${i}.example.com`)
+    }
+    rememberRecentDomainsFromCommand('subfinder -d beta.example.org')
+
+    expect(_readRecentDomains()).toEqual([
+      'beta.example.org',
+      'd9.example.com',
+      'd8.example.com',
+      'd7.example.com',
+      'd6.example.com',
+      'd5.example.com',
+      'd4.example.com',
+      'd3.example.com',
+      'd2.example.com',
+      'd1.example.com',
+    ])
+  })
+
+  it('keeps recent domains isolated by session id', () => {
+    const makeFns = (sessionId) => fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        SESSION_ID: sessionId,
+        acSuggestions: [],
+        acContextRegistry: {
+          dig: {
+            flags: [],
+            expects_value: [],
+            arg_hints: { __positional__: [{ value: '<domain>', value_type: 'domain', description: 'Domain name to query' }] },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      rememberRecentDomainsFromCommand,
+      _readRecentDomains,
+    }`,
+    )
+
+    const a = makeFns('session-a')
+    a.rememberRecentDomainsFromCommand('dig alpha.example.com')
+    const b = makeFns('session-b')
+
+    expect(a._readRecentDomains()).toEqual(['alpha.example.com'])
+    expect(b._readRecentDomains()).toEqual([])
+  })
+
+  it('suggests recent domains only inside known domain value slots', () => {
+    const { getAutocompleteMatches, rememberRecentDomainsFromCommand } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        SESSION_ID: 'session-a',
+        acSuggestions: [],
+        acContextRegistry: {
+          subfinder: {
+            flags: [
+              { value: '-d', description: 'Target domain' },
+              { value: '-o', description: 'Output file' },
+            ],
+            expects_value: ['-d', '-o'],
+            arg_hints: {
+              '-d': [{ value: '<domain>', value_type: 'domain', description: 'Target domain to enumerate' }],
+              '-o': [{ value: 'subdomains.txt', description: 'Save results' }],
+            },
+          },
+          dig: {
+            flags: [{ value: 'MX', description: 'Mail exchanger lookup' }],
+            expects_value: [],
+            arg_hints: { __positional__: [{ value: '<domain>', value_type: 'domain', description: 'Domain name to query' }] },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+      rememberRecentDomainsFromCommand,
+    }`,
+    )
+
+    rememberRecentDomainsFromCommand('subfinder -d alpha.example.com')
+    rememberRecentDomainsFromCommand('dig beta.example.org')
+
+    expect(getAutocompleteMatches('subfinder -d ', 13).map(item => item.value)).toEqual([
+      'beta.example.org',
+      'alpha.example.com',
+      '<domain>',
+    ])
+    expect(getAutocompleteMatches('dig MX b', 8).map(item => item.value)).toEqual(['beta.example.org', '<domain>'])
+    expect(getAutocompleteMatches('subfinder -o ', 13).map(item => item.value)).toEqual(['subdomains.txt'])
+  })
+
+  it('does not infer recent-domain slots from placeholder text without value_type metadata', () => {
+    const { getAutocompleteMatches, rememberRecentDomainsFromCommand, _readRecentDomains } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        SESSION_ID: 'session-a',
+        acSuggestions: [],
+        acContextRegistry: {
+          legacydig: {
+            flags: [],
+            expects_value: [],
+            arg_hints: { __positional__: [{ value: '<domain>', description: 'Domain name to query' }] },
+          },
+          dig: {
+            flags: [],
+            expects_value: [],
+            arg_hints: { __positional__: [{ value: '<domain>', value_type: 'domain', description: 'Domain name to query' }] },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+      rememberRecentDomainsFromCommand,
+      _readRecentDomains,
+    }`,
+    )
+
+    rememberRecentDomainsFromCommand('legacydig ignored.example.com')
+    rememberRecentDomainsFromCommand('dig alpha.example.com')
+
+    expect(_readRecentDomains()).toEqual(['alpha.example.com'])
+    expect(getAutocompleteMatches('legacydig a', 11).map(item => item.value)).toEqual(['<domain>'])
+    expect(getAutocompleteMatches('dig a', 5).map(item => item.value)).toEqual(['alpha.example.com', '<domain>'])
+  })
+
+  it('suggests installed wordlists only inside marked wordlist slots', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        acSuggestions: [],
+        acWordlists: [
+          {
+            value: '/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt',
+            label: 'Discovery/DNS/subdomains-top1million-5000.txt',
+            description: 'DNS wordlist',
+            wordlist_category: 'dns',
+          },
+          {
+            value: '/usr/share/wordlists/seclists/Discovery/Web-Content/common.txt',
+            label: 'Discovery/Web-Content/common.txt',
+            description: 'Web Content wordlist',
+            wordlist_category: 'web-content',
+          },
+        ],
+        acContextRegistry: {
+          dnsx: {
+            flags: [{ value: '-w', description: 'Wordlist' }],
+            expects_value: ['-w'],
+            arg_hints: {
+              '-w': [{ value: '<wordlist>', value_type: 'wordlist', wordlist_category: 'dns' }],
+            },
+          },
+          legacy: {
+            flags: [{ value: '-w', description: 'Wordlist' }],
+            expects_value: ['-w'],
+            arg_hints: { '-w': [{ value: '<wordlist>', description: 'Wordlist path' }] },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('dnsx -w sub', 11).map(item => item.value)).toEqual([
+      '/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt',
+      '<wordlist>',
+    ])
+    expect(getAutocompleteMatches('legacy -w sub', 13).map(item => item.value)).toEqual(['<wordlist>'])
+  })
+
+  it('keeps workspace file hints while adding installed wordlists for wordlist slots', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getWorkspaceAutocompleteFileHints: () => [{ value: 'wordlist.txt', description: 'Session file' }],
+        acSuggestions: [],
+        acWordlists: [
+          {
+            value: '/usr/share/wordlists/seclists/Discovery/Web-Content/common.txt',
+            label: 'Discovery/Web-Content/common.txt',
+            description: 'Web Content wordlist',
+            wordlist_category: 'web-content',
+          },
+        ],
+        acContextRegistry: {
+          gobuster: {
+            flags: [{ value: '-w', description: 'Wordlist' }],
+            workspace_file_flags: ['-w'],
+            expects_value: ['-w'],
+            arg_hints: {
+              '-w': [{ value: '<wordlist>', value_type: 'wordlist', wordlist_category: 'web-content' }],
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('gobuster -w ', 12).map(item => item.value)).toEqual([
+      '/usr/share/wordlists/seclists/Discovery/Web-Content/common.txt',
+      'wordlist.txt',
+    ])
   })
 
   it('prefers runtime autocomplete suggestions for client-side commands', () => {

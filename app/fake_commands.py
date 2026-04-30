@@ -49,6 +49,7 @@ from workspace import (
     workspace_settings,
     workspace_usage,
 )
+from wordlists import filter_wordlists, find_wordlist, load_wordlist_catalog
 
 
 _STARTED_AT = datetime.now(timezone.utc)
@@ -186,6 +187,7 @@ _BACKSPACE_RE = re.compile(r".\x08")
 _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "banner", "description": "Print the configured banner art without replaying welcome.", "root": "banner"},
     {"name": "cat <file>", "description": "Show a session file.", "root": "cat"},
+    {"name": "cd [folder]", "description": "Change the current workspace folder for this tab.", "root": "cd"},
     {"name": "clear", "description": "Clear the current terminal tab output.", "root": "clear"},
     {"name": "commands", "description": "List built-in and allowed external commands.", "root": "commands"},
     {"name": "config", "description": "Show or update user options from the terminal.", "root": "config"},
@@ -197,6 +199,8 @@ _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "fortune", "description": "Print a short operator-themed one-liner.", "root": "fortune"},
     {"name": "free -h", "description": "Show a compact memory summary.", "root": "free"},
     {"name": "groups", "description": "Show the shell group membership.", "root": "groups"},
+    {"name": "grep <search> <file>", "description": "Filter a session file.", "root": "grep"},
+    {"name": "head [-n N] <file>", "description": "Show the first lines of a session file.", "root": "head"},
     {"name": "help", "description": "Show guidance for README, FAQ, shortcuts, and command discovery.", "root": "help"},
     {"name": "history", "description": "List recent commands from this session.", "root": "history"},
     {"name": "hostname", "description": "Show the configured shell instance name.", "root": "hostname"},
@@ -205,8 +209,10 @@ _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "jobs", "description": "Alias for `runs`.", "root": "jobs"},
     {"name": "last", "description": "Show recent completed runs with timestamps and exit codes.", "root": "last"},
     {"name": "limits", "description": "Show configured runtime, history, and retention limits.", "root": "limits"},
+    {"name": "ll", "description": "Long-list session files.", "root": "ll"},
     {"name": "ls", "description": "List session files.", "root": "ls"},
     {"name": "man <cmd>", "description": "Show the real man page for an allowed command.", "root": "man"},
+    {"name": "mkdir <folder>", "description": "Create a session folder.", "root": "mkdir"},
     {"name": "ps", "description": "Show the current shell process view plus recent session commands.", "root": "ps"},
     {"name": "pwd", "description": "Show the session files path.", "root": "pwd"},
     {"name": "retention", "description": "Show retention and persisted-output settings.", "root": "retention"},
@@ -217,24 +223,29 @@ _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "shortcuts", "description": "Show current keyboard shortcuts.", "root": "shortcuts"},
     {"name": "stats", "description": "Show session activity totals and command-root breakdowns.", "root": "stats"},
     {"name": "status", "description": "Show the current session summary, limits, and backend health.", "root": "status"},
+    {"name": "sort [-r|-n|-u] <file>", "description": "Sort a session file.", "root": "sort"},
+    {"name": "tail [-n N] <file>", "description": "Show the last lines of a session file.", "root": "tail"},
     {"name": "theme", "description": "Show or apply the active shell theme from the terminal.", "root": "theme"},
     {"name": "tty", "description": "Show the web terminal device path.", "root": "tty"},
     {"name": "type <cmd>", "description": "Describe whether a command is built in, installed, or missing.", "root": "type"},
     {"name": "uname [-a]", "description": "Show the shell platform string.", "root": "uname"},
     {"name": "uptime", "description": "Show app uptime since process start.", "root": "uptime"},
+    {"name": "uniq [-c] <file>", "description": "Collapse adjacent duplicate lines in a session file.", "root": "uniq"},
     {"name": "var", "description": "Set, list, or unset session command variables.", "root": "var"},
     {"name": "version", "description": "Show shell, app, Flask, and Python version details.", "root": "version"},
     {"name": "file", "description": "List, view, create, edit, download, or remove session files.", "root": "file"},
     {"name": "which <cmd>", "description": "Locate a built-in command or allowed runtime command.", "root": "which"},
     {"name": "who", "description": "Show the current shell user and session.", "root": "who"},
     {"name": "whoami", "description": "Describe this shell and link to the project README.", "root": "whoami"},
+    {"name": "wc -l <file>", "description": "Count lines in a session file.", "root": "wc"},
+    {"name": "wordlist", "description": "List and search installed SecLists wordlists.", "root": "wordlist"},
 ]
 _FAKE_COMMAND_HELP = [(entry["name"], entry["description"]) for entry in _DOCUMENTED_FAKE_COMMANDS]
 _DOCUMENTED_FAKE_COMMAND_ROOTS = {entry["root"] for entry in _DOCUMENTED_FAKE_COMMANDS if "root" in entry}
 _FAKE_COMMANDS = _DOCUMENTED_FAKE_COMMAND_ROOTS | {"reboot", "sudo"}
-_WORKSPACE_ALIAS_ROOTS = {"cat", "ls", "rm"}
+_WORKSPACE_ALIAS_ROOTS = {"cat", "cd", "grep", "head", "ll", "ls", "mkdir", "rm", "sort", "tail", "uniq", "wc"}
 _WORKSPACE_FAKE_ROOTS = _WORKSPACE_ALIAS_ROOTS | {"file"}
-_SYNTHETIC_MAN_EXCLUDED_ROOTS = {"cat", "ls", "rm"}
+_SYNTHETIC_MAN_EXCLUDED_ROOTS = {"cat", "ll", "ls", "rm"}
 
 
 def _workspace_feature_enabled() -> bool:
@@ -284,8 +295,11 @@ def _resolve_workspace_alias_command(parts: list[str]) -> str | None:
     if not parts:
         return None
     root = parts[0].lower()
-    if root == "ls":
-        return "ls" if len(parts) == 1 else None
+    if root in {"ls", "ll"}:
+        _long, _recursive, target, usage_error = _parse_workspace_list_command(parts)
+        if usage_error:
+            return None
+        return root if not target or _safe_workspace_alias_path(target) else None
     if root in {"cat", "rm"}:
         return root if len(parts) == 2 and _safe_workspace_alias_path(parts[1]) else None
     return None
@@ -335,6 +349,7 @@ def get_fake_command_roots() -> list[str]:
 _FAKE_COMMAND_DISPATCH = {
     "banner":    lambda cmd, sid: _run_fake_banner(),
     "cat":       lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
+    "cd":        lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
     "clear":     lambda cmd, sid: _run_fake_clear(),
     "commands":  lambda cmd, sid: _run_fake_commands(cmd),
     "config":    lambda cmd, sid: _run_fake_client_side_command("config"),
@@ -343,6 +358,8 @@ _FAKE_COMMAND_DISPATCH = {
     "faq":       lambda cmd, sid: _run_fake_faq(),
     "fortune":   lambda cmd, sid: _run_fake_fortune(),
     "groups":    lambda cmd, sid: _run_fake_groups(),
+    "grep":      lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
+    "head":      lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
     "help":      lambda cmd, sid: _run_fake_help(),
     "history":   lambda cmd, sid: _run_fake_history(sid),
     "hostname":  lambda cmd, sid: _run_fake_hostname(),
@@ -351,7 +368,9 @@ _FAKE_COMMAND_DISPATCH = {
     "jobs":      lambda cmd, sid: _run_fake_runs(cmd, sid),
     "last":      lambda cmd, sid: _run_fake_last(sid),
     "limits":    lambda cmd, sid: _run_fake_limits(),
+    "ll":        lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
     "ls":        lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
+    "mkdir":     lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
     "man":       lambda cmd, sid: _run_fake_man(cmd),
     "ps":        lambda cmd, sid: _run_fake_ps(sid, cmd),
     "pwd":       lambda cmd, sid: _run_fake_pwd(),
@@ -364,8 +383,10 @@ _FAKE_COMMAND_DISPATCH = {
     "runs":      lambda cmd, sid: _run_fake_runs(cmd, sid),
     "session-token": lambda cmd, sid: _run_fake_session_token(cmd, sid),
     "shortcuts": lambda cmd, sid: _run_fake_shortcuts(),
+    "sort":      lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
     "stats":     lambda cmd, sid: _run_fake_stats(sid),
     "status":    lambda cmd, sid: _run_fake_status(sid),
+    "tail":      lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
     "sudo":      lambda cmd, sid: _run_fake_sudo(cmd),
     "su_shell":  lambda cmd, sid: _run_fake_su(cmd),
     "theme":     lambda cmd, sid: _run_fake_client_side_command("theme"),
@@ -373,12 +394,15 @@ _FAKE_COMMAND_DISPATCH = {
     "type":      lambda cmd, sid: _run_fake_type(cmd),
     "uname":     lambda cmd, sid: _run_fake_uname(cmd),
     "uptime":    lambda cmd, sid: _run_fake_uptime(),
+    "uniq":      lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
     "var":       lambda cmd, sid: _run_fake_var(cmd, sid),
     "version":   lambda cmd, sid: _run_fake_version(),
     "file":      lambda cmd, sid: _run_fake_workspace(cmd, sid),
+    "wc":        lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
     "which":     lambda cmd, sid: _run_fake_which(cmd),
     "who":       lambda cmd, sid: _run_fake_who(sid),
     "whoami":    lambda cmd, sid: _run_fake_whoami(),
+    "wordlist":  lambda cmd, sid: _run_fake_wordlist(cmd),
     "xyzzy":     lambda cmd, sid: _run_fake_xyzzy(),
     "coffee":    lambda cmd, sid: _run_fake_coffee(),
     "fork_bomb": lambda cmd, sid: _run_fake_fork_bomb(),
@@ -732,6 +756,87 @@ def _run_fake_commands(command: str) -> list[dict[str, str]]:
                 lines.pop()
 
     return lines
+
+
+def _wordlist_usage() -> list[dict[str, str]]:
+    return [
+        _output_line("Usage: wordlist [list [category] | search <term> | path <name-or-path> | --all]", "fake-note"),
+        _output_line("  wordlist", "fake-help-row"),
+        _output_line("  wordlist list dns", "fake-help-row"),
+        _output_line("  wordlist search raft", "fake-help-row"),
+        _output_line("  wordlist path common.txt", "fake-help-row"),
+    ]
+
+
+def _wordlist_rows(items: list[dict], *, heading: str) -> list[dict[str, str]]:
+    if not items:
+        return [_output_line("No matching wordlists found.", "fake-note")]
+    widths = {
+        "category": max(len("category"), *(len(str(item.get("category") or "")) for item in items)),
+        "name": max(len("name"), *(len(str(item.get("name") or "")) for item in items)),
+    }
+    lines = [
+        _output_line(heading, "fake-section"),
+        _output_line(
+            f"  {'category':<{widths['category']}}  {'name':<{widths['name']}}  path",
+            "fake-help-row",
+        ),
+    ]
+    for item in items:
+        category = str(item.get("category") or "")
+        name = str(item.get("name") or "")
+        path = str(item.get("path") or "")
+        lines.append(_output_line(f"  {category:<{widths['category']}}  {name:<{widths['name']}}  {path}", "fake-help-row"))
+    return lines
+
+
+def _run_fake_wordlist(command: str) -> list[dict[str, str]]:
+    parts = _split_command(command)
+    args = parts[1:]
+    catalog = load_wordlist_catalog(include_all="--all" in args)
+    curated_items = catalog.get("items") or []
+    all_items = catalog.get("all_items") or []
+    root = str(catalog.get("root") or "")
+    category_keys = {str(item.get("key") or "") for item in catalog.get("categories") or []}
+
+    if not curated_items and not all_items:
+        return [
+            _output_line("Installed SecLists wordlists were not found.", "fake-note"),
+            _output_line(f"Expected path: {root}", "fake-help-row"),
+        ]
+
+    if not args or args == ["list"]:
+        return _wordlist_rows(curated_items, heading="Curated wordlists:")
+    if args == ["--all"]:
+        return _wordlist_rows(all_items, heading="All installed SecLists files:")
+
+    subcommand = args[0].lower()
+    if subcommand == "list":
+        if len(args) > 2:
+            return _wordlist_usage()
+        category = args[1].lower() if len(args) == 2 else ""
+        if category and category not in category_keys:
+            return [_output_line(f"Unknown wordlist category: {category}", "fake-note")] + _wordlist_usage()
+        items = filter_wordlists(curated_items, category=category or None)
+        heading = f"Curated {category} wordlists:" if category else "Curated wordlists:"
+        return _wordlist_rows(items, heading=heading)
+
+    if subcommand == "search":
+        if len(args) < 2:
+            return _wordlist_usage()
+        term = " ".join(args[1:])
+        items = filter_wordlists(curated_items, search=term)
+        return _wordlist_rows(items, heading=f"Wordlist search: {term}")
+
+    if subcommand == "path":
+        if len(args) != 2:
+            return _wordlist_usage()
+        item = find_wordlist(args[1], curated_items)
+        if not item:
+            return [_output_line(f"Wordlist not found: {args[1]}", "fake-note")]
+        return [_output_line(str(item.get("path") or ""), "fake-plain")]
+
+    return _wordlist_usage()
 
 
 def _mask_session_token(token: str) -> str:
@@ -1538,6 +1643,8 @@ def _run_fake_ps(session_id: str, command: str) -> list[dict[str, str]]:
 
 
 def _run_fake_pwd() -> list[dict[str, str]]:
+    if CFG.get("workspace_enabled"):
+        return [{"type": "output", "text": "/"}]
     return [{"type": "output", "text": f"/app/{CFG['app_name']}/bin"}]
 
 
@@ -1556,33 +1663,65 @@ def _workspace_command_error(exc: Exception) -> list[dict[str, str]]:
 def _workspace_list_rows(
     files: list[dict[str, object]],
     directories: list[dict[str, object]],
+    *,
+    recursive: bool = False,
+    target: str = "",
 ) -> list[dict[str, object]]:
+    normalized_target = "/".join(part for part in str(target or "").split("/") if part)
+    target_prefix = f"{normalized_target}/" if normalized_target else ""
+
+    def in_target(path: str) -> bool:
+        return not normalized_target or path.startswith(target_prefix)
+
+    def relative_path(path: str) -> str:
+        if target_prefix and path.startswith(target_prefix):
+            return path[len(target_prefix):]
+        return path
+
     by_parent: dict[str, list[dict[str, object]]] = {}
-    directory_paths = {str(item["path"]) for item in directories}
-    root_files: list[dict[str, object]] = []
+    directory_paths = {
+        str(item["path"]) for item in directories
+        if str(item["path"]) != normalized_target and in_target(str(item["path"]))
+    }
 
     for item in files:
         path = str(item["path"])
+        if not in_target(path):
+            continue
         parent = path.rpartition("/")[0]
         if parent:
             by_parent.setdefault(parent, []).append(item)
-        else:
-            root_files.append(item)
 
         while parent:
-            directory_paths.add(parent)
+            if parent != normalized_target and in_target(parent):
+                directory_paths.add(parent)
             parent = parent.rpartition("/")[0]
 
     rows: list[dict[str, object]] = []
-    for item in sorted(root_files, key=lambda candidate: str(candidate["path"])):
-        rows.append({"kind": "file", "path": str(item["path"]), "item": item})
+    if not recursive:
+        direct_directories: set[str] = set()
+        for path in directory_paths:
+            relative = relative_path(path)
+            if "/" not in relative:
+                direct_directories.add(relative)
+        for item in files:
+            path = str(item["path"])
+            if not in_target(path):
+                continue
+            relative = relative_path(path)
+            if "/" not in relative:
+                rows.append({"kind": "file", "path": relative, "item": item})
+        for relative in sorted(direct_directories):
+            rows.append({"kind": "directory", "path": relative, "display": f"{relative}/"})
+        return sorted(rows, key=lambda candidate: str(candidate.get("display") or candidate["path"]))
 
     def add_directory(path: str) -> None:
-        depth = path.count("/")
+        display_path = relative_path(path)
+        depth = display_path.count("/")
         rows.append({
             "kind": "directory",
             "path": path,
-            "display": f"{'  ' * depth}{path}/",
+            "display": f"{'  ' * depth}{display_path}/",
         })
 
         for item in sorted(by_parent.get(path, []), key=lambda candidate: str(candidate["path"])):
@@ -1602,10 +1741,47 @@ def _workspace_list_rows(
         for child in child_directories:
             add_directory(child)
 
-    for directory in sorted(path for path in directory_paths if "/" not in path):
+    root_directories = sorted(
+        path for path in directory_paths
+        if "/" not in relative_path(path)
+    )
+    for directory in root_directories:
         add_directory(directory)
 
+    for item in sorted(by_parent.get(normalized_target, []), key=lambda candidate: str(candidate["path"])):
+        rows.append({"kind": "file", "path": str(item["path"]), "item": item})
     return rows
+
+
+def _parse_workspace_list_command(parts: list[str]) -> tuple[bool, bool, str, str | None]:
+    root = parts[0].lower() if parts else ""
+    if root == "file":
+        if len(parts) < 2 or parts[1].lower() not in {"list", "ls"}:
+            return False, False, "", "Usage: file list [-lR] [folder]"
+        args = parts[2:]
+        usage = "Usage: file list [-lR] [folder]"
+    elif root == "ls":
+        args = parts[1:]
+        usage = "Usage: ls [-lR] [folder]"
+    elif root == "ll":
+        args = parts[1:]
+        usage = "Usage: ll [-R] [folder]"
+    else:
+        return False, False, "", "Usage: file list [-lR] [folder]"
+    long = root == "ll"
+    recursive = False
+    targets: list[str] = []
+    for arg in args:
+        if re.fullmatch(r"-[lR]+", arg):
+            long = long or "l" in arg
+            recursive = recursive or "R" in arg
+        elif arg.startswith("-"):
+            return False, False, "", usage
+        else:
+            targets.append(arg)
+    if len(targets) > 1:
+        return False, False, "", usage
+    return long, recursive, targets[0] if targets else "", None
 
 
 def _workspace_item_size(item: dict[str, object]) -> int:
@@ -1631,7 +1807,8 @@ def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
     if subcommand in {"help", "--help", "-h"}:
         return [
             _output_line("Session file commands:", "fake-section"),
-            _output_line("  file list", "fake-help-row"),
+            _output_line("  file list [-lR] [folder]", "fake-help-row"),
+            _output_line("  file ls [-lR] [folder]", "fake-help-row"),
             _output_line("  file show <file>", "fake-help-row"),
             _output_line("  file add [file]", "fake-help-row"),
             _output_line("  file edit <file>", "fake-help-row"),
@@ -1639,7 +1816,8 @@ def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
             _output_line("  file rm <file-or-folder>", "fake-help-row"),
             _output_line("", "fake-spacer"),
             _output_line("Aliases:", "fake-section"),
-            _output_line("  ls          -> file list", "fake-help-row"),
+            _output_line("  ls [-lR]    -> file list [-lR]", "fake-help-row"),
+            _output_line("  ll [-R]     -> file list -l [-R]", "fake-help-row"),
             _output_line("  cat <file>  -> file show <file>", "fake-help-row"),
             _output_line("  rm <file-or-folder>   -> file rm <file-or-folder>", "fake-help-row"),
             _output_line("", "fake-spacer"),
@@ -1650,6 +1828,9 @@ def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
         ]
 
     if subcommand in {"list", "ls"}:
+        long, recursive, target, usage_error = _parse_workspace_list_command(parts)
+        if usage_error:
+            return [_output_line(usage_error)]
         try:
             settings = workspace_settings(CFG)
             files = list_workspace_files(session_id, CFG)
@@ -1672,9 +1853,14 @@ def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
             ),
             _output_line(_format_native_record("remaining", _format_bytes(remaining_bytes), 11), "fake-kv"),
         ]
-        rows = _workspace_list_rows(files, directories)
+        rows = _workspace_list_rows(files, directories, recursive=recursive, target=target)
         if not rows:
             lines.append(_output_line("  No session files yet.", "fake-note"))
+            return lines
+
+        if not long:
+            names = [str(row.get("display") or row["path"]).strip() for row in rows]
+            lines.append(_output_line(" ".join(name for name in names if name), "fake-help-row"))
             return lines
 
         width = max((len(str(item.get("display") or item["path"])) for item in rows), default=4)
@@ -1742,9 +1928,9 @@ def _run_fake_workspace_alias(command: str, session_id: str) -> list[dict[str, s
     parts = _split_command(command)
     root = parts[0].lower() if parts else ""
     if root == "ls":
-        if len(parts) != 1:
-            return [_output_line("Usage: ls")]
-        return _run_fake_workspace("file list", session_id)
+        return _run_fake_workspace("file list " + " ".join(parts[1:]), session_id)
+    if root == "ll":
+        return _run_fake_workspace("file list -l " + " ".join(parts[1:]), session_id)
     if root == "cat":
         if len(parts) != 2:
             return [_output_line("Usage: cat <file>")]
@@ -1753,6 +1939,8 @@ def _run_fake_workspace_alias(command: str, session_id: str) -> list[dict[str, s
         if len(parts) != 2:
             return [_output_line("Usage: rm <file-or-folder>")]
         return _run_fake_workspace(f"file rm {parts[1]}", session_id)
+    if root in {"cd", "grep", "head", "mkdir", "sort", "tail", "uniq", "wc"}:
+        return [_output_line(f"{root}: handled in the browser workspace terminal")]
     return [_output_line(
         "Usage: file [list | show <file> | add <file> | edit <file> | "
         "download <file> | rm <file-or-folder> | help]"

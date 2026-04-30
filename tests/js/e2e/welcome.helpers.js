@@ -45,7 +45,7 @@ export async function setupWelcomePage(page) {
         '|  | |\\/| || (_) | (_) | (_) | (_) | (_) |     |',
         '|  |_|  |_| \\___/ \\___/ \\___/ \\___/ \\___/      |',
         '|                                              |',
-        "'----[ status: ready ]----[ prompt: anon@darklab:~$ ]----'",
+        "'----[ status: ready ]----[ prompt: anon@darklab:~ $ ]----'",
       ].join('\n'),
     })
   })

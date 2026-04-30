@@ -28,7 +28,7 @@ const MOBILE_CHROME_SRC = readFileSync(
   'utf8',
 )
 
-function buildHarness() {
+function buildHarness({ includePeek = false } = {}) {
   document.body.innerHTML = `
     <div id="mobile-shell"></div>
     <div class="terminal-bar">
@@ -36,6 +36,14 @@ function buildHarness() {
       <span id="status"></span>
       <span id="run-timer"></span>
     </div>
+    ${includePeek ? `
+      <div id="mobile-recent-peek" class="recent-peek nav-item u-hidden" role="button" tabindex="0" aria-label="Show recent commands">
+        <span class="recent-peek-handle" aria-hidden="true"></span>
+        <span class="recent-peek-label">Recent</span>
+        <span class="recent-peek-count" id="mobile-recent-peek-count">0</span>
+        <span class="recent-peek-preview" id="mobile-recent-peek-preview"></span>
+      </div>
+    ` : ''}
   `
 }
 
@@ -60,8 +68,12 @@ function mountModule({
   activeTabId = null,
   locationSearch = '',
   activateTab = vi.fn(),
+  includePeek = false,
+  recentPreviewHistory = [],
+  openRunMonitor = vi.fn(() => Promise.resolve(true)),
+  reducedMotion = false,
 } = {}) {
-  buildHarness()
+  buildHarness({ includePeek })
   if (mobileMode) document.body.classList.add('mobile-terminal-mode')
   else document.body.classList.remove('mobile-terminal-mode')
   setLocationSearch(locationSearch)
@@ -73,7 +85,24 @@ function mountModule({
   const injectedGlobal = window
   injectedGlobal.getTabs = () => tabs
   injectedGlobal.getActiveTabId = () => activeTabId
+  injectedGlobal.getActiveTab = () => tabs.find(tab => tab.id === activeTabId) || null
   injectedGlobal.activateTab = activateTab
+  injectedGlobal.recentPreviewHistory = recentPreviewHistory
+  injectedGlobal.openRunMonitor = openRunMonitor
+  const origMatchMedia = window.matchMedia
+  window.matchMedia = vi.fn((query) => ({
+    matches: reducedMotion && String(query).includes('prefers-reduced-motion'),
+    media: String(query || ''),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }))
+  const origBindPressable = globalThis.bindPressable
+  globalThis.bindPressable = (el, options = {}) => {
+    el.addEventListener('click', (event) => options.onActivate && options.onActivate(event))
+  }
   injectedGlobal.onUiEvent = (name, handler, options) => {
     document.addEventListener(name, handler, options)
     return () => document.removeEventListener(name, handler, options)
@@ -93,9 +122,13 @@ function mountModule({
 
   return {
     activateTab,
+    openRunMonitor,
     tabs,
     restore() {
       window.requestAnimationFrame = origRaf
+      window.matchMedia = origMatchMedia
+      if (origBindPressable === undefined) delete globalThis.bindPressable
+      else globalThis.bindPressable = origBindPressable
     },
   }
 }
@@ -200,6 +233,95 @@ describe('mobile running-state indicator', () => {
     expect(chip.classList.contains('u-hidden')).toBe(false)
     // tab-b is the active tab: count drops from 3 to 2.
     expect(chip.querySelector('.mobile-running-count').textContent).toBe('2')
+  })
+
+  it('replaces the mobile recents peek with Run Monitor while the active tab is running', () => {
+    ctx = mountModule({
+      includePeek: true,
+      recentPreviewHistory: ['hostname'],
+      tabs: [
+        { id: 'tab-a', st: 'running', command: 'sleep 30' },
+      ],
+      activeTabId: 'tab-a',
+    })
+
+    const peek = document.getElementById('mobile-recent-peek')
+    expect(peek.classList.contains('u-hidden')).toBe(false)
+    expect(peek.dataset.peekMode).toBe('run-monitor')
+    expect(document.getElementById('mobile-recent-peek-count').textContent).toBe('live')
+    expect(document.querySelector('.recent-peek-label').textContent).toBe('Run Monitor')
+    expect(document.getElementById('mobile-recent-peek-preview').textContent).toBe('sleep 30')
+    expect(peek.classList.contains('recent-peek-run-monitor-wiggle')).toBe(true)
+  })
+
+  it('opens Run Monitor from the running peek instead of the recents sheet', () => {
+    const openRunMonitor = vi.fn(() => Promise.resolve(true))
+    ctx = mountModule({
+      includePeek: true,
+      openRunMonitor,
+      tabs: [{ id: 'tab-a', st: 'running', command: 'sleep 30' }],
+      activeTabId: 'tab-a',
+    })
+
+    document.getElementById('mobile-recent-peek').click()
+
+    expect(openRunMonitor).toHaveBeenCalledWith({ source: 'mobile-peek' })
+  })
+
+  it('shows elapsed time for the active mobile Run Monitor peek when runStart is known', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-01-01T00:00:05Z'))
+    ctx = mountModule({
+      includePeek: true,
+      tabs: [
+        {
+          id: 'tab-a',
+          st: 'running',
+          command: 'sleep 30',
+          runStart: new Date('2026-01-01T00:00:00Z').getTime(),
+        },
+      ],
+      activeTabId: 'tab-a',
+    })
+
+    expect(document.getElementById('mobile-recent-peek-count').textContent).toBe('0:05')
+
+    vi.useRealTimers()
+  })
+
+  it('suppresses the mobile Run Monitor peek wiggle for reduced motion', () => {
+    ctx = mountModule({
+      includePeek: true,
+      reducedMotion: true,
+      tabs: [{ id: 'tab-a', st: 'running', command: 'sleep 30' }],
+      activeTabId: 'tab-a',
+    })
+
+    expect(document.getElementById('mobile-recent-peek').classList.contains('recent-peek-run-monitor-wiggle')).toBe(false)
+  })
+
+  it('returns the peek to recents after the active run finalization hold expires', () => {
+    vi.useFakeTimers()
+    ctx = mountModule({
+      includePeek: true,
+      recentPreviewHistory: ['hostname'],
+      tabs: [{ id: 'tab-a', st: 'running', command: 'sleep 30' }],
+      activeTabId: 'tab-a',
+    })
+
+    ctx.tabs[0].st = 'ok'
+    document.dispatchEvent(new CustomEvent('app:tab-status-changed', {
+      detail: { id: 'tab-a', status: 'ok', activeTabId: 'tab-a' },
+    }))
+
+    expect(document.getElementById('mobile-recent-peek').dataset.peekMode).toBe('run-monitor')
+
+    vi.advanceTimersByTime(2600)
+
+    expect(document.getElementById('mobile-recent-peek').dataset.peekMode).toBe('recents')
+    expect(document.querySelector('.recent-peek-label').textContent).toBe('Recent')
+    expect(document.getElementById('mobile-recent-peek-count').textContent).toBe('1')
+    vi.useRealTimers()
   })
 
   it('activates the edge glow when a running non-active tab is only partially clipped off-screen', () => {

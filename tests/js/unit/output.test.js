@@ -25,9 +25,12 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {} } = {}) {
     },
     `{
     appendLine,
+    appendLines,
     _restoreOutputTailAfterLayout,
     _setTsMode,
     _setLnMode,
+    buildPromptLabel,
+    currentPromptWorkspacePath,
     _getTabs: () => tabs,
   }`,
     'setTabs(tabs); setActiveTabId(activeTabId);',
@@ -67,6 +70,22 @@ describe('appendLine', () => {
 
     const line = document.querySelector('.line')
     expect(line.innerHTML).toContain('<em>hello</em>')
+  })
+
+  it('renders shell as a normal workspace folder in the prompt', () => {
+    const { buildPromptLabel, currentPromptWorkspacePath } = loadOutputFns({
+      appConfig: { workspace_enabled: true, prompt_prefix: 'anon@darklab:~$' },
+      extraGlobals: {
+        _workspaceCwd: () => 'shell',
+        workspaceDisplayPath: path => {
+          const normalized = String(path || '').split('/').filter(Boolean).join('/')
+          return normalized ? `/${normalized}` : '/'
+        },
+      },
+    })
+
+    expect(currentPromptWorkspacePath()).toBe('/shell')
+    expect(buildPromptLabel()).toBe('anon@darklab:/shell $')
   })
 
   it('falls back to plain-text rendering when AnsiUp is unavailable', () => {
@@ -138,7 +157,7 @@ describe('appendLine', () => {
     expect(lines[1].textContent).toContain('three')
   })
 
-  it('keeps line-number appends incremental after max-line trimming', () => {
+  it('keeps absolute line numbers after max-line trimming', () => {
     const { appendLine, _setLnMode } = loadOutputFns()
     const out = document.getElementById('out')
 
@@ -153,6 +172,22 @@ describe('appendLine', () => {
 
     const lines = out.getElementsByClassName('line')
     expect(lines).toHaveLength(2)
+    expect(lines[0].dataset.lineNumber).toBe('2')
+    expect(lines[1].dataset.lineNumber).toBe('3')
+    expect(document.getElementById('shell-prompt-wrap')?.dataset.lineNumber).toBe('4')
+  })
+
+  it('preserves absolute line numbers when line-number mode is enabled later', () => {
+    const { appendLine, _setLnMode } = loadOutputFns()
+
+    appendLine('one', '', 'tab-1')
+    appendLine('two', '', 'tab-1')
+    appendLine('three', '', 'tab-1')
+    _setLnMode('on')
+
+    const lines = document.getElementById('out').getElementsByClassName('line')
+    expect(lines).toHaveLength(2)
+    expect(lines[0].textContent).toContain('two')
     expect(lines[0].dataset.lineNumber).toBe('2')
     expect(lines[1].dataset.lineNumber).toBe('3')
     expect(document.getElementById('shell-prompt-wrap')?.dataset.lineNumber).toBe('4')
@@ -174,6 +209,7 @@ describe('appendLine', () => {
     appendLine('443/tcp open https', '', 'tab-1', {
       signals: ['findings'],
       line_index: 7,
+      line_number: 1,
       command_root: 'nmap',
       target: 'ip.darklab.sh',
     })
@@ -188,8 +224,31 @@ describe('appendLine', () => {
       text: '443/tcp open https',
       signals: ['findings'],
       line_index: 7,
+      line_number: 1,
       command_root: 'nmap',
       target: 'ip.darklab.sh',
+    })
+    expect(_getTabs()[0]._outputSignalCounts).toEqual({
+      findings: 1,
+      warnings: 0,
+      errors: 0,
+      summaries: 0,
+    })
+    expect(_getTabs()[0]._outputSignalCountsValid).toBe(true)
+  })
+
+  it('keeps cached signal counts in sync when old lines are trimmed', () => {
+    const { appendLine, _getTabs } = loadOutputFns({ appConfig: { max_output_lines: 2 } })
+
+    appendLine('old finding', '', 'tab-1', { signals: ['findings'], command_root: 'nmap' })
+    appendLine('warning', 'notice', 'tab-1', { signals: ['warnings'], command_root: 'nmap' })
+    appendLine('plain', '', 'tab-1')
+
+    expect(_getTabs()[0]._outputSignalCounts).toEqual({
+      findings: 0,
+      warnings: 1,
+      errors: 0,
+      summaries: 0,
     })
   })
 
@@ -353,6 +412,25 @@ describe('appendLine', () => {
     expect(lines).toHaveLength(65)
     expect(lines[0].textContent).toContain('line 1')
     expect(lines[64].textContent).toContain('line 65')
+  })
+
+  it('queues multi-line appends in chunks and updates raw lines once flushed', async () => {
+    const { appendLines, _getTabs } = loadOutputFns({ appConfig: { max_output_lines: 100 } })
+
+    await appendLines(Array.from({ length: 65 }, (_, index) => ({
+      text: `line ${index + 1}`,
+      cls: '',
+    })), 'tab-1')
+
+    expect(document.querySelectorAll('.line')).toHaveLength(0)
+
+    await new Promise((resolve) => setTimeout(resolve, 25))
+
+    const lines = document.querySelectorAll('.line')
+    expect(lines).toHaveLength(65)
+    expect(lines[0].textContent).toContain('line 1')
+    expect(lines[64].textContent).toContain('line 65')
+    expect(_getTabs()[0].rawLines).toHaveLength(65)
   })
 
   it('uses delayed tail restore for large mobile output bursts', () => {

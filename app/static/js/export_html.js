@@ -71,6 +71,7 @@
         cls: String(line.cls || ''),
         tsC: String(line.tsC || ''),
         tsE: String(line.tsE || ''),
+        line_number: Number.isInteger(line.line_number) ? line.line_number : undefined,
       };
     }
     return null;

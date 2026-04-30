@@ -7,6 +7,11 @@ let _workspaceDirs = [];
 let _workspaceLoaded = false;
 let _workspaceCurrentDir = '';
 let _workspaceViewedPath = '';
+let _workspaceViewerPayloadCache = null;
+let _workspaceViewerSearchController = null;
+
+const WORKSPACE_PREVIEW_LINE_LIMIT = 10000;
+const WORKSPACE_PREVIEW_TABLE_LIMIT = 250;
 
 function isWorkspaceEnabled() {
   return !!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true);
@@ -53,33 +58,426 @@ function _showWorkspaceToast(message, tone = 'error') {
 
 function hideWorkspaceEditor() {
   if (workspaceEditor) workspaceEditor.classList.add('u-hidden');
+  if (workspacePathInput) {
+    workspacePathInput.readOnly = false;
+    workspacePathInput.classList.remove('workspace-path-readonly');
+  }
+  if (typeof workspaceEditorOverlay !== 'undefined' && workspaceEditorOverlay) {
+    workspaceEditorOverlay.classList.add('u-hidden');
+    workspaceEditorOverlay.classList.remove('open');
+  }
 }
 
 function hideWorkspaceViewer() {
   if (workspaceViewer) workspaceViewer.classList.add('u-hidden');
+  if (typeof workspaceViewerOverlay !== 'undefined' && workspaceViewerOverlay) {
+    workspaceViewerOverlay.classList.add('u-hidden');
+    workspaceViewerOverlay.classList.remove('open');
+  }
+  if (_workspaceViewerSearchController) _workspaceViewerSearchController.clear();
+  _workspaceViewerSearchController = null;
+  if (typeof workspaceViewerControls !== 'undefined' && workspaceViewerControls) {
+    workspaceViewerControls.replaceChildren();
+  }
   _workspaceViewedPath = '';
+  _workspaceViewerPayloadCache = null;
+}
+
+function _workspaceFileExt(path = '') {
+  const name = String(path || '').split('/').filter(Boolean).pop() || '';
+  const match = name.match(/\.([a-z0-9]+)$/i);
+  return match ? match[1].toLowerCase() : '';
+}
+
+function _workspaceLooksLikeHttpResponse(text = '') {
+  const raw = String(text || '').replace(/^\uFEFF/, '');
+  return /^HTTP\/\d(?:\.\d)?\s+\d{3}/i.test(raw.trimStart());
+}
+
+function _workspaceParseDelimitedLine(line = '', delimiter = ',') {
+  const cells = [];
+  let cell = '';
+  let quoted = false;
+  const text = String(line || '');
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"') {
+      if (quoted && text[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === delimiter && !quoted) {
+      cells.push(cell);
+      cell = '';
+    } else {
+      cell += char;
+    }
+  }
+  cells.push(cell);
+  return cells;
+}
+
+function _workspaceParseDelimited(text = '', delimiter = ',') {
+  const rows = String(text || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .filter(line => line.length > 0)
+    .slice(0, WORKSPACE_PREVIEW_TABLE_LIMIT + 1)
+    .map(line => _workspaceParseDelimitedLine(line, delimiter));
+  const width = Math.max(0, ...rows.map(row => row.length));
+  if (rows.length < 2 || width < 2) return null;
+  return rows.map(row => {
+    const next = row.slice();
+    while (next.length < width) next.push('');
+    return next;
+  });
+}
+
+function _workspaceFormatXml(text = '') {
+  const raw = String(text || '').trim();
+  if (!raw || !/^<[\s\S]*>$/.test(raw)) return null;
+  if (typeof DOMParser !== 'undefined') {
+    try {
+      const parsed = new DOMParser().parseFromString(raw, 'application/xml');
+      if (parsed.querySelector('parsererror')) return null;
+    } catch (_) {
+      return null;
+    }
+  }
+  const lines = raw
+    .replace(/>\s*</g, '>\n<')
+    .split('\n');
+  let depth = 0;
+  return lines.map(line => {
+    const trimmed = line.trim();
+    if (/^<\//.test(trimmed)) depth = Math.max(0, depth - 1);
+    const formatted = `${'  '.repeat(depth)}${trimmed}`;
+    if (/^<[^!?/][^>]*[^/]>\s*$/.test(trimmed) && !/^<([^>\s]+)[^>]*>.*<\/\1>$/.test(trimmed)) {
+      depth += 1;
+    }
+    return formatted;
+  }).join('\n');
+}
+
+function _workspaceParseHttpResponse(text = '') {
+  const normalized = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const [head = '', ...bodyParts] = normalized.split(/\n\n/);
+  const lines = head.split('\n').filter(Boolean);
+  if (!lines.length || !/^HTTP\/\d(?:\.\d)?\s+\d{3}/i.test(lines[0])) return null;
+  return {
+    status: lines[0],
+    headers: lines.slice(1).map(line => {
+      const index = line.indexOf(':');
+      return index >= 0
+        ? { name: line.slice(0, index).trim(), value: line.slice(index + 1).trim() }
+        : { name: line.trim(), value: '' };
+    }),
+    body: bodyParts.join('\n\n'),
+  };
 }
 
 function _workspaceViewerPayload(path = '', text = '') {
   const rawText = String(text || '');
   const trimmed = rawText.trim();
-  const looksJson = /\.json$/i.test(String(path || '')) || /^[{[]/.test(trimmed);
-  if (!looksJson) return { text: rawText, format: '' };
-  try {
-    return {
-      text: JSON.stringify(JSON.parse(trimmed), null, 2),
-      format: 'json',
-    };
-  } catch (_) {
-    return { text: rawText, format: '' };
+  const ext = _workspaceFileExt(path);
+  const http = _workspaceLooksLikeHttpResponse(rawText) ? _workspaceParseHttpResponse(rawText) : null;
+  if (http) return { text: rawText, format: 'http', http };
+  const looksJson = ext === 'json' || /^[{[]/.test(trimmed);
+  if (looksJson) {
+    try {
+      return {
+        text: JSON.stringify(JSON.parse(trimmed), null, 2),
+        rawText,
+        format: 'json',
+      };
+    } catch (_) {
+      if (ext === 'json') return { text: rawText, format: 'text', notice: 'Malformed JSON; showing raw text.' };
+    }
+  }
+  if (ext === 'csv' || ext === 'tsv') {
+    const table = _workspaceParseDelimited(rawText, ext === 'tsv' ? '\t' : ',');
+    if (table) return { text: rawText, format: ext, table };
+  }
+  if (ext === 'xml' || /^<\?xml/.test(trimmed)) {
+    const xml = _workspaceFormatXml(rawText);
+    if (xml) return { text: xml, rawText, format: 'xml' };
+    if (ext === 'xml') return { text: rawText, format: 'text', notice: 'Malformed XML; showing raw text.' };
+  }
+  return { text: rawText, format: 'text' };
+}
+
+function _workspaceViewerRawText(payload) {
+  return String(payload?.rawText ?? payload?.text ?? '');
+}
+
+function _workspaceRenderViewerSearchControls(wrap, lineCount) {
+  if (typeof workspaceViewerControls !== 'undefined' && workspaceViewerControls) {
+    workspaceViewerControls.replaceChildren();
+  }
+  const controls = document.createElement('div');
+  controls.className = 'workspace-viewer-search search-bar';
+  const search = document.createElement('input');
+  search.type = 'text';
+  search.className = 'form-control form-control-compact form-control-quiet';
+  search.placeholder = 'Search file...';
+  search.setAttribute('aria-label', 'Search file preview');
+  if (typeof applyMobileTextInputDefaults === 'function') applyMobileTextInputDefaults(search);
+
+  const toggles = document.createElement('div');
+  toggles.className = 'search-toggles';
+  const caseBtn = document.createElement('button');
+  caseBtn.type = 'button';
+  caseBtn.className = 'toggle-btn';
+  caseBtn.title = 'Case sensitive (Aa)';
+  caseBtn.setAttribute('aria-label', 'Case sensitive');
+  caseBtn.setAttribute('aria-pressed', 'false');
+  caseBtn.textContent = 'Aa';
+  const regexBtn = document.createElement('button');
+  regexBtn.type = 'button';
+  regexBtn.className = 'toggle-btn';
+  regexBtn.title = 'Regular expression (.*)';
+  regexBtn.setAttribute('aria-label', 'Regular expression');
+  regexBtn.setAttribute('aria-pressed', 'false');
+  regexBtn.textContent = '.*';
+  toggles.append(caseBtn, regexBtn);
+
+  const count = document.createElement('span');
+  count.className = 'search-count';
+  const nav = document.createElement('div');
+  nav.className = 'search-nav';
+  const prevBtn = document.createElement('button');
+  prevBtn.type = 'button';
+  prevBtn.className = 'btn btn-ghost btn-icon-only btn-compact';
+  prevBtn.setAttribute('aria-label', 'Previous match');
+  prevBtn.title = 'Previous match (Shift+Enter)';
+  prevBtn.textContent = '↑';
+  const nextBtn = document.createElement('button');
+  nextBtn.type = 'button';
+  nextBtn.className = 'btn btn-ghost btn-icon-only btn-compact';
+  nextBtn.setAttribute('aria-label', 'Next match');
+  nextBtn.title = 'Next match (Enter)';
+  nextBtn.textContent = '↓';
+  nav.append(prevBtn, nextBtn);
+
+  const jumpWrap = document.createElement('div');
+  jumpWrap.className = 'workspace-line-jump';
+  const jump = document.createElement('input');
+  jump.type = 'text';
+  jump.inputMode = 'numeric';
+  jump.pattern = '[0-9]*';
+  jump.placeholder = 'line';
+  jump.dataset.workspaceLineJump = 'true';
+  jump.setAttribute('aria-label', 'Jump to line');
+  if (typeof applyMobileTextInputDefaults === 'function') applyMobileTextInputDefaults(jump);
+  jump.setAttribute('inputmode', 'numeric');
+  const jumpBtn = document.createElement('button');
+  jumpBtn.type = 'button';
+  jumpBtn.className = 'btn btn-secondary btn-compact';
+  jumpBtn.textContent = 'Jump';
+  jumpWrap.append(jump, jumpBtn);
+
+  controls.append(search, toggles, count, nav, jumpWrap);
+  jumpBtn.addEventListener('click', () => {
+    const target = Math.max(1, Math.min(lineCount || 1, Number(jump.value) || 1));
+    const row = wrap.querySelector(`.workspace-line-row[data-line-number="${target}"]`);
+    wrap.querySelectorAll('.workspace-line-jump-target').forEach(node => {
+      node.classList.remove('workspace-line-jump-target');
+    });
+    if (row && typeof row.scrollIntoView === 'function') row.scrollIntoView({ block: 'center' });
+    if (row) row.classList.add('workspace-line-jump-target');
+  });
+
+  if (typeof createTextSearchController === 'function') {
+    _workspaceViewerSearchController = createTextSearchController({
+      root: wrap,
+      input: search,
+      countEl: count,
+      caseBtn,
+      regexBtn,
+      prevBtn,
+      nextBtn,
+      lineSelector: '.workspace-line-row',
+    });
+  }
+  if (typeof workspaceViewerControls !== 'undefined' && workspaceViewerControls) {
+    workspaceViewerControls.appendChild(controls);
+  }
+  return controls;
+}
+
+function _workspaceRenderTextPreview(payload, { raw = false } = {}) {
+  const text = raw ? _workspaceViewerRawText(payload) : String(payload?.text || '');
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const shown = lines.slice(0, WORKSPACE_PREVIEW_LINE_LIMIT);
+  const wrap = document.createElement('div');
+  wrap.className = 'workspace-line-preview';
+  _workspaceRenderViewerSearchControls(wrap, shown.length);
+  if (payload?.notice && !raw) {
+    const notice = document.createElement('div');
+    notice.className = 'workspace-preview-notice';
+    notice.textContent = payload.notice;
+    wrap.appendChild(notice);
+  }
+  shown.forEach((line, index) => {
+    const row = document.createElement('div');
+    row.className = 'workspace-line-row';
+    row.dataset.lineNumber = String(index + 1);
+    const number = document.createElement('span');
+    number.className = 'workspace-line-number';
+    number.textContent = String(index + 1);
+    const body = document.createElement('span');
+    body.className = 'workspace-line-text';
+    body.textContent = line;
+    row.append(number, body);
+    wrap.appendChild(row);
+  });
+  if (lines.length > shown.length) {
+    const notice = document.createElement('div');
+    notice.className = 'workspace-preview-notice';
+    notice.textContent = `Showing first ${shown.length} of ${lines.length} lines. Download or edit to inspect the full file.`;
+    wrap.appendChild(notice);
+  }
+  return wrap;
+}
+
+function _workspaceRenderTablePreview(payload) {
+  const rows = Array.isArray(payload?.table) ? payload.table : [];
+  const table = document.createElement('table');
+  table.className = 'workspace-preview-table';
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  (rows[0] || []).forEach(cell => {
+    const th = document.createElement('th');
+    th.textContent = cell;
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  rows.slice(1).forEach(row => {
+    const tr = document.createElement('tr');
+    row.forEach(cell => {
+      const td = document.createElement('td');
+      td.textContent = cell;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  const wrap = document.createElement('div');
+  wrap.className = 'workspace-table-preview';
+  wrap.appendChild(table);
+  if (String(payload?.text || '').split(/\r\n|\r|\n/).filter(Boolean).length > WORKSPACE_PREVIEW_TABLE_LIMIT + 1) {
+    const notice = document.createElement('div');
+    notice.className = 'workspace-preview-notice';
+    notice.textContent = `Showing first ${WORKSPACE_PREVIEW_TABLE_LIMIT} rows. Download or edit to inspect the full file.`;
+    wrap.appendChild(notice);
+  }
+  return wrap;
+}
+
+function _workspaceRenderHttpPreview(payload) {
+  const data = payload?.http || {};
+  const wrap = document.createElement('div');
+  wrap.className = 'workspace-http-preview';
+  const status = document.createElement('div');
+  status.className = 'workspace-http-status';
+  status.textContent = data.status || 'HTTP response';
+  wrap.appendChild(status);
+  const headers = document.createElement('dl');
+  headers.className = 'workspace-http-headers';
+  (Array.isArray(data.headers) ? data.headers : []).forEach(header => {
+    const dt = document.createElement('dt');
+    dt.textContent = header.name;
+    const dd = document.createElement('dd');
+    dd.textContent = header.value;
+    headers.append(dt, dd);
+  });
+  wrap.appendChild(headers);
+  if (data.body) {
+    const bodyLabel = document.createElement('div');
+    bodyLabel.className = 'workspace-preview-subtitle';
+    bodyLabel.textContent = 'Body';
+    wrap.appendChild(bodyLabel);
+    wrap.appendChild(_workspaceRenderTextPreview({ text: data.body }));
+  }
+  return wrap;
+}
+
+function _workspaceRenderViewerPayload(payload, { raw = false } = {}) {
+  if (!workspaceViewerText) return;
+  if (_workspaceViewerSearchController) _workspaceViewerSearchController.clear();
+  _workspaceViewerSearchController = null;
+  if (typeof workspaceViewerControls !== 'undefined' && workspaceViewerControls) {
+    workspaceViewerControls.replaceChildren();
+  }
+  workspaceViewerText.replaceChildren();
+  const format = raw ? 'raw' : (payload?.format || 'text');
+  workspaceViewerText.className = 'workspace-viewer-text nice-scroll';
+  workspaceViewerText.classList.toggle('workspace-viewer-json', format === 'json' || format === 'xml');
+  workspaceViewerText.classList.toggle('workspace-viewer-table-wrap', !raw && (format === 'csv' || format === 'tsv'));
+  if (!raw && (format === 'csv' || format === 'tsv') && payload?.table) {
+    workspaceViewerText.appendChild(_workspaceRenderTablePreview(payload));
+  } else if (!raw && format === 'http' && payload?.http) {
+    workspaceViewerText.appendChild(_workspaceRenderHttpPreview(payload));
+  } else {
+    workspaceViewerText.appendChild(_workspaceRenderTextPreview(payload, { raw }));
+  }
+  workspaceViewerText.scrollTop = 0;
+  if (workspaceViewer) {
+    workspaceViewer.dataset.viewMode = raw ? 'raw' : 'preview';
+    workspaceViewer.querySelectorAll('[data-workspace-preview-mode]').forEach((btn) => {
+      const active = btn.dataset.workspacePreviewMode === workspaceViewer.dataset.viewMode;
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
   }
 }
 
-function showWorkspaceEditor(path = '', text = '') {
+function _workspaceRenderViewerModeControls(payload) {
+  if (!workspaceViewer || !payload) return;
+  workspaceViewer.querySelector('.workspace-viewer-mode-controls')?.remove();
+  if (payload.format === 'text') return;
+  const controls = document.createElement('div');
+  controls.className = 'workspace-viewer-mode-controls';
+  const label = document.createElement('span');
+  label.className = 'workspace-preview-kind';
+  label.textContent = `${payload.format || 'plain'} preview`;
+  const preview = document.createElement('button');
+  preview.type = 'button';
+  preview.className = 'toggle-btn';
+  preview.dataset.workspacePreviewMode = 'preview';
+  preview.setAttribute('aria-pressed', 'true');
+  preview.textContent = 'Preview';
+  const raw = document.createElement('button');
+  raw.type = 'button';
+  raw.className = 'toggle-btn';
+  raw.dataset.workspacePreviewMode = 'raw';
+  raw.setAttribute('aria-pressed', 'false');
+  raw.textContent = 'Raw';
+  controls.append(label, preview, raw);
+  const header = workspaceViewer.querySelector('.workspace-viewer-header');
+  if (header && header.parentNode) header.parentNode.insertBefore(controls, header.nextSibling);
+}
+
+function showWorkspaceEditor(path = '', text = '', { readOnlyPath = false } = {}) {
   if (!workspaceEditor) return;
   hideWorkspaceViewer();
   workspaceEditor.classList.remove('u-hidden');
-  if (workspacePathInput) workspacePathInput.value = path;
+  if (typeof workspaceEditorOverlay !== 'undefined' && workspaceEditorOverlay) {
+    workspaceEditorOverlay.classList.remove('u-hidden');
+    workspaceEditorOverlay.classList.add('open');
+  }
+  if (typeof workspaceEditorTitle !== 'undefined' && workspaceEditorTitle) {
+    workspaceEditorTitle.textContent = path ? `Editing ${path}` : 'New file';
+  }
+  if (workspacePathInput) {
+    workspacePathInput.value = path;
+    workspacePathInput.readOnly = !!readOnlyPath;
+    workspacePathInput.classList.toggle('workspace-path-readonly', !!readOnlyPath);
+  }
   if (workspaceTextInput) workspaceTextInput.value = text;
   setTimeout(() => {
     if (workspacePathInput && !path) workspacePathInput.focus();
@@ -91,24 +489,51 @@ function showWorkspaceViewer(path = '', text = '') {
   hideWorkspaceEditor();
   _workspaceViewedPath = String(path || '').trim();
   const payload = _workspaceViewerPayload(path, text);
+  _workspaceViewerPayloadCache = payload;
   if (workspaceViewerTitle) workspaceViewerTitle.textContent = path;
-  if (workspaceViewerText) {
-    workspaceViewerText.textContent = payload.text;
-    workspaceViewerText.classList.toggle('workspace-viewer-json', payload.format === 'json');
-    workspaceViewerText.scrollTop = 0;
-  }
+  _workspaceRenderViewerModeControls(payload);
+  _workspaceRenderViewerPayload(payload, { raw: false });
   if (workspaceViewer) {
     workspaceViewer.dataset.format = payload.format;
     workspaceViewer.classList.remove('u-hidden');
     workspaceViewer.scrollTop = 0;
-    if (typeof workspaceViewer.scrollIntoView === 'function') {
-      workspaceViewer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (typeof workspaceViewerOverlay !== 'undefined' && workspaceViewerOverlay) {
+      workspaceViewerOverlay.classList.remove('u-hidden');
+      workspaceViewerOverlay.classList.add('open');
     }
   }
 }
 
 function _normalizeWorkspaceDir(path = '') {
-  return String(path || '').split('/').map(part => part.trim()).filter(Boolean).join('/');
+  const parts = String(path || '').split('/').map(part => part.trim()).filter(Boolean);
+  return parts.join('/');
+}
+
+function normalizeWorkspaceCommandPath(path = '', cwd = '') {
+  const raw = String(path ?? '').trim();
+  const baseParts = raw.startsWith('/') ? [] : _normalizeWorkspaceDir(cwd).split('/').filter(Boolean);
+  const rawParts = raw.split('/').filter(part => part !== '');
+  for (const part of rawParts) {
+    const trimmed = String(part || '').trim();
+    if (!trimmed || trimmed === '.') continue;
+    if (trimmed === '..') {
+      if (baseParts.length) {
+        baseParts.pop();
+        continue;
+      }
+      throw new Error('path escapes the session workspace');
+    }
+    if (trimmed.includes('\\') || trimmed.includes('\x00')) {
+      throw new Error('file name contains unsupported characters');
+    }
+    baseParts.push(trimmed);
+  }
+  return baseParts.join('/');
+}
+
+function workspaceDisplayPath(path = '') {
+  const normalized = _normalizeWorkspaceDir(path);
+  return normalized ? `/${normalized}` : '/';
 }
 
 function _workspaceParentDir(path = '') {
@@ -427,6 +852,21 @@ function getWorkspaceAutocompleteFileHints() {
   }).filter(item => item.value);
 }
 
+function getWorkspaceAutocompleteDirectoryHints() {
+  if (!_workspaceLoaded || !Array.isArray(_workspaceDirs) || !_workspaceDirs.length) return [];
+  return _workspaceDirs.map(directory => {
+    const path = String(directory.path || '').trim();
+    return {
+      value: path,
+      description: 'session folder',
+    };
+  }).filter(item => item.value);
+}
+
+function getWorkspaceDirectoryEntries(path = '') {
+  return _workspaceDirectEntries(path);
+}
+
 async function saveWorkspaceFile(path, text) {
   const resp = await apiFetch('/workspace/files', {
     method: 'POST',
@@ -600,9 +1040,9 @@ async function openWorkspaceEditorFromCommand(action = 'add', path = '') {
   if (String(action || '').toLowerCase() === 'edit' && fileName) {
     try {
       const data = await readWorkspaceFile(fileName);
-      showWorkspaceEditor(data.path || fileName, data.text || '');
+      showWorkspaceEditor(data.path || fileName, data.text || '', { readOnlyPath: true });
     } catch (err) {
-      showWorkspaceEditor(fileName, '');
+      showWorkspaceEditor(fileName, '', { readOnlyPath: true });
       setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to load session file'), 'error');
     }
     return true;
@@ -630,7 +1070,7 @@ async function handleWorkspaceFileAction(action, path) {
       showWorkspaceViewer(data.path || path, data.text || '');
     } else if (action === 'edit') {
       const data = await readWorkspaceFile(path);
-      showWorkspaceEditor(data.path || path, data.text || '');
+      showWorkspaceEditor(data.path || path, data.text || '', { readOnlyPath: true });
     } else if (action === 'download') {
       await downloadWorkspaceFile(path);
     } else if (action === 'delete') {
@@ -680,6 +1120,11 @@ workspaceBreadcrumbs?.addEventListener('click', event => {
   renderWorkspaceBrowser();
 });
 workspaceViewer?.addEventListener('click', event => {
+  const modeBtn = event.target && event.target.closest ? event.target.closest('[data-workspace-preview-mode]') : null;
+  if (modeBtn && _workspaceViewerPayloadCache) {
+    _workspaceRenderViewerPayload(_workspaceViewerPayloadCache, { raw: modeBtn.dataset.workspacePreviewMode === 'raw' });
+    return;
+  }
   const btn = event.target && event.target.closest ? event.target.closest('[data-workspace-viewer-action]') : null;
   if (!btn || !_workspaceViewedPath) return;
   handleWorkspaceFileAction(btn.dataset.workspaceViewerAction, _workspaceViewedPath);

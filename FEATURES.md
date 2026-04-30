@@ -287,13 +287,13 @@ amass:
 
 Practical authoring guidance:
 
-- use `context` when the next useful suggestion depends on the command root or the preceding flag/subcommand
+- use nested `flags`, `arguments`, and `subcommands` when the next useful suggestion depends on the command root or the preceding flag/subcommand
 - use `argument_limit` for commands such as `man`, `which`, or `type` where the shell should stop suggesting additional positional operands after one topic/command has already been provided
 - group related behavior together: root `examples` for broadly useful top-level invocations, subcommand `examples` for complete mode-specific invocations, flag value hints under the flag, and subcommand-specific flags under `subcommands`
 - use `arguments` for unflagged inputs like hosts, URLs, domains, files, or CIDR targets
 - use `placeholder: "<...>"` when the hint is explanatory and should persist while typing
 - use `value: "..."` when the suggestion should be inserted and prefix-filtered normally
-- use `pipe.enabled: true` when that context entry should also appear after `command |`
+- use `pipe_helpers` entries with `autocomplete.pipe.enabled: true` when a helper should appear after `command |`
 
 The shipped file is intentionally small and focused. Add entries only for commands where token-aware guidance is clearly more useful than the flat whole-command list.
 
@@ -678,7 +678,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Limits:** retained for `permalink_retention_days` only; the `./data` directory is the only writable path in an otherwise read-only container (created automatically on first run).
 
-**Configuration:** `permalink_retention_days` in `config.yaml` (default 30).
+**Configuration:** `permalink_retention_days` in `config.yaml` (default 365).
 
 **Related files:** `app/blueprints/history.py` (share + permalink routes), `app/permalinks.py` (ID generation + storage), `app/run_output_store.py` (full-output artifact lookup), `app/templates/permalink.html` (rendered share/permalink page).
 
@@ -721,7 +721,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** no mobile-specific config keys beyond `diagnostics_allowed_cidrs`; layout activates automatically on touch viewports.
 
-**Related files:** `app/static/js/mobile_chrome.js` (mobile shell bootstrap + composer + menu), `app/static/css/mobile-shell.css` (mobile layout + composer + bottom-sheet styles), `app/templates/index.html` (mobile-shell mount points).
+**Related files:** `app/static/js/mobile_chrome.js` (mobile shell bootstrap + composer + menu), `app/static/css/mobile.css` (mobile layout + composer + bottom-sheet styles), `app/static/css/mobile-chrome.css` (shared mobile sheet chrome), `app/templates/index.html` (mobile-shell mount points).
 
 ---
 
@@ -736,17 +736,18 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Utility commands**
 
-- `help`, `commands`, `history`, `last`, `limits`, `retention`, `status`, `runs`, `jobs`, `stats`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `fortune`, `shortcuts`, `clear`, `version`, and `whoami` are available in every session.
+- `help`, `commands`, `history`, `last`, `limits`, `retention`, `status`, `runs`, `jobs`, `stats`, `config`, `theme`, `which`, `type`, `wordlist`, `faq`, `banner`, `fortune`, `shortcuts`, `clear`, `version`, and `whoami` are available in every session.
 - `status` prints a compact session summary: masked active session ID, session type, run count, snapshot count, starred-command count, whether saved Options exist for the session, session-variable count, active-run count, compact session file usage when Files are enabled, and the current instance-level save/retention limits.
 - `runs` prints app-native active-run metadata for the current session, including CPU percent derived from cumulative CPU seconds over run elapsed time, RSS-memory snapshot, and a hint that the desktop `STATUS` HUD pill opens real-time monitoring; `jobs` is a compatibility alias for the same terminal output. `runs -v` also prints full run IDs, started timestamps, cumulative CPU time, and active-run metadata source, while `runs --json` prints the active-run snapshot in JSON for debugging or automation. On desktop, the `STATUS`, `LAST EXIT`, and `TABS` HUD pills open the Run Monitor drawer, and `Option+R` / `Alt+R` opens the same surface. The drawer rises from the HUD, keeps a header-only `0 active runs` state when idle, lists active commands as divided rows, and shows best-effort CPU and RSS memory telemetry as circular meters with memory fill normalized against 1 GB when backend process stats are available.
 - `stats` prints session activity totals and external-tool command-root breakdowns: runs, snapshots, starred commands, active runs, success rate, average duration, and the top non-built-in command roots by run count.
-- `file list`, `file show <file>`, `file add [file]`, `file edit <file>`, `file download <file>`, and confirmed `file rm <file>`, plus the convenience aliases `ls`, `cat <file>`, and confirmed `rm <file>`, expose keyboard-first access to the current session files when workspace storage is enabled. `file add` opens a blank file editor, `file add <file>` opens the same editor with the file name prefilled, and `file download <file>` starts a browser download. `file list` reports current file count, used quota, and remaining quota before listing files.
+- `cd [folder]`, `pwd`, `file list [-l] [folder]`, `file show <file>`, `file add [file]`, `file add-dir <folder>`, `file edit <file>`, `file download <file>`, and confirmed `file delete [-r|-f|-rf] <file-or-folder>` / `file rm [-r|-f|-rf] <file-or-folder>`, plus the convenience aliases `ls [-l] [folder]`, `cat <file>`, `mkdir <folder>`, and confirmed `rm [-r|-f|-rf] <file-or-folder>`, expose keyboard-first access to the current session files when workspace storage is enabled. `cd` is tab-local and treats the session workspace root as `/`; relative file commands resolve from that tab's current workspace folder. `file add` opens a blank file editor, `file add <file>` opens the same editor with the file name prefilled, `file add-dir` / `mkdir` creates a folder, and `file download <file>` starts a browser download. `file list` / `ls` list the current folder non-recursively in short form by default; `file list -l` / `ls -l` show the long listing with type, size, and modified columns.
+- `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq` also work as standalone workspace-file commands, for example `grep -i admin targets.txt`, `head -n 20 output.txt`, `wc -l urls.txt`, and `sort -u names.txt`. They reuse the same constrained helper implementation as built-in pipe stages and never expose arbitrary shell piping or host filesystem access.
 - `theme` lists and applies runtime theme variants from the terminal. `config` lists, reads, and updates user options such as line numbers, timestamps, welcome behavior, share redaction defaults, run notifications, and HUD clock mode.
 - `ps` lists currently running processes for the session (PID, TTY, STAT, START, CMD columns), or shows a `no running processes` notice when idle.
 
 **Shell identity commands**
 
-- `env`, `pwd`, `uname`, `uname -a`, `id`, `groups`, `hostname`, `date`, `tty`, `who`, `uptime`, `ip a`, `route`, `df -h`, and `free -h` return stable shell-style information without exposing host internals.
+- `env`, `pwd`, `uname`, `uname -a`, `id`, `groups`, `hostname`, `date`, `tty`, `who`, `uptime`, `ip a`, `route`, `df -h`, and `free -h` return stable shell-style information without exposing host internals. When Files are enabled, `pwd` is handled by the workspace layer and prints the active tab's workspace path.
 
 **Guardrail commands**
 
@@ -798,10 +799,10 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Workspace access updates the hashed session directory activity timestamp. Periodic cleanup removes inactive `sess_*` directories after `workspace_inactivity_ttl_hours`; it does not delete individual files solely because their file timestamps are old.
 - File names are relative and display-friendly; absolute paths, traversal, backslashes, hidden names, symlinks, and paths outside the session root are rejected. Text reads and downloads also use final-component no-follow opens where supported, so the app keeps the same session-root boundary even if a path is swapped after validation.
 - The Files panel can create, view, edit, download, and delete text files owned by the current session; obvious JSON files are pretty-printed in the read-only viewer.
-- The `file` built-in provides terminal access to the same file model through `file list`, `file show <file>`, `file add [file]`, `file edit <file>`, `file download <file>`, and confirmed `file rm <file>`; `file add` opens a blank file editor unless a filename is provided, `file download <file>` starts the same browser download path as the Files panel, and `file list` reports file count, used quota, and remaining quota before listing files.
-- The `ls`, `cat <file>`, and `rm <file>` aliases map to file list/show/remove operations only; they do not expose arbitrary host/container filesystem access.
-- `file rm <file>` and `rm <file>` first verify the file exists, then require the same transcript-owned yes/no confirmation model as other destructive terminal-native actions.
-- Loaded workspace file names feed autocomplete for `file show`, `file edit`, `file download`, `file rm`, and `cat`.
+- The `file` built-in provides terminal access to the same file model through `cd [folder]`, `pwd`, `file list [-l] [folder]`, `file show <file>`, `file add [file]`, `file add-dir <folder>`, `file edit <file>`, `file download <file>`, and confirmed `file delete [-r|-f|-rf] <file-or-folder>` / `file rm [-r|-f|-rf] <file-or-folder>`; `file add` opens a blank file editor unless a filename is provided, `file add-dir` creates a folder, and `file download <file>` starts the same browser download path as the Files panel. `cd` is tracked per tab, treats the session workspace root as `/`, and causes relative commands such as `ls`, `cat`, `rm`, and `file show` to resolve from the tab's current workspace folder.
+- The `ls [-l] [folder]`, `cat <file>`, `mkdir <folder>`, `rm [-r|-f|-rf] <file-or-folder>`, `grep <pattern> <file>`, `head [-n N] <file>`, `tail [-n N] <file>`, `wc -l <file>`, `sort [-r|-n|-u] <file>`, and `uniq [-c] <file>` aliases map to app-native workspace operations only; they do not expose arbitrary host/container filesystem access.
+- `file delete <file>`, `file rm <file>`, and `rm <file>` first verify the target exists, then require the same transcript-owned yes/no confirmation model as other destructive terminal-native actions. Folder deletion requires `-r` or `-rf` before the confirmation is shown.
+- Loaded workspace file and folder names feed autocomplete for `file show`, `file edit`, `file download`, `file delete`, `file rm`, `cat`, `ls`, and `rm`.
 - Workspace-only external-tool examples and flags in `commands.yaml` are hidden from autocomplete unless Files are enabled, so operators can add discoverable file workflows without exposing unusable suggestions on instances that keep Files disabled.
 - Selected command flags declared in `commands.yaml` can consume or write session files. At execution time, user-facing names such as `targets.txt` are validated and rewritten to the session workspace path passed to the subprocess.
 - Shell navigation and redirection remain blocked; all file access must go through the Files panel, workspace routes, the `file` built-in, or explicitly declared command flags.
@@ -865,19 +866,28 @@ wget -q -O /dev/null --server-response https://example.com
 
 ## Wordlists
 
-**Purpose:** pre-installed SecLists corpus available to any allowlisted tool that accepts a `-w` flag, so common discovery and fuzzing tasks run without a separate setup step.
+**Purpose:** pre-installed SecLists corpus available to allowlisted tools, plus a curated app catalog so users can discover useful wordlists without memorizing the SecLists directory tree.
 
 **Behavior:**
 
 - The full [SecLists](https://github.com/danielmiessler/SecLists) collection is installed inside the container at `/usr/share/wordlists/seclists/`.
-- Any allowlisted tool that accepts a `-w` flag (gobuster, ffuf, dnsenum, fierce, etc.) can reference files under this path directly.
+- The built-in `wordlist` command lists and searches curated installed wordlists:
+  - `wordlist` / `wordlist list` prints the curated catalog.
+  - `wordlist list dns` filters to one category.
+  - `wordlist search raft` searches names, paths, descriptions, aliases, and categories.
+  - `wordlist path common.txt` prints a single copy-friendly path.
+  - `wordlist --all` lists the full installed SecLists file corpus for deeper browsing.
+- Autocomplete suggests installed wordlists only when command metadata explicitly marks a value slot with `value_type: wordlist`.
+- `wordlist_category` filters autocomplete to relevant categories such as `dns`, `web-content`, `api`, `cms`, `fuzzing`, `passwords`, `usernames`, and `user-agents`.
+- Workspace file hints stay separate from installed SecLists suggestions. A tool flag such as `gobuster dir -w` can suggest both session files and installed web-content wordlists without treating every file path as a SecLists entry.
+- Any allowlisted tool can still reference files under the SecLists path directly when the command policy permits that path.
 - The list is installed at container build time; no runtime fetch is required.
 
-**Limits:** wordlists are read-only inside the container. The corpus is not updated between builds — rebuild the image to pick up a new SecLists release.
+**Limits:** wordlists are read-only inside the container. Normal command output and autocomplete use the curated catalog instead of exposing every file under SecLists; use `wordlist --all` for the full scanned tree. The corpus is not updated between builds — rebuild the image to pick up a new SecLists release.
 
-**Configuration:** no operator-facing config; the install path (`/usr/share/wordlists/seclists/`) is fixed.
+**Configuration:** `app/conf/wordlists.yaml` defines curated category globs under the fixed install path. External command value slots opt into installed-wordlist autocomplete through `value_type: wordlist` and `wordlist_category` in `app/conf/commands.yaml`.
 
-**Related files:** `Dockerfile` (SecLists install step), `app/conf/commands.yaml` (tools that accept `-w`).
+**Related files:** `Dockerfile` (SecLists install step), `app/conf/wordlists.yaml` (curated catalog), `app/wordlists.py` (catalog loader), `app/conf/commands.yaml` (typed wordlist slots), `app/static/js/autocomplete.js` (slot-aware suggestions).
 
 **Layout reference:**
 
@@ -994,7 +1004,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Configuration:** theme variants live under `app/conf/themes/`; see [THEME.md](THEME.md) for authoring details (variable names, fallbacks, and how a new variant is registered).
 
-**Related files:** `app/conf/themes/` (theme variant files), `app/static/js/app.js` (selector modal, terminal command, and preference persistence), `app/static/css/theme-core.css` (variable surface), `THEME.md` (authoring guide).
+**Related files:** `app/conf/themes/` (theme variant files), `app/static/js/app.js` (selector modal, terminal command, and preference persistence), `app/static/css/base.css` (runtime theme variable surface), `app/templates/theme_vars_style.html` and `app/templates/theme_vars_script.html` (server-rendered theme metadata), `THEME.md` (authoring guide).
 
 ---
 
@@ -1028,7 +1038,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Terminal option keys:** `line-numbers`, `timestamps`, `welcome`, `share-redaction`, `run-notifications`, `hud-clock`.
 
-**Related files:** `app/static/js/app.js` (Options modal state, terminal command, and session preference persistence), `app/static/js/shell_chrome.js` (desktop options navigation), `app/static/js/mobile_chrome.js` (mobile menu wiring), `app/static/js/notifications.js` (permission + notification dispatch).
+**Related files:** `app/static/js/app.js` (Options modal state, terminal command, notification preference, and session preference persistence), `app/static/js/runner.js` (run-completion notification dispatch), `app/static/js/shell_chrome.js` (desktop options navigation), `app/static/js/mobile_chrome.js` (mobile menu wiring).
 
 ---
 
@@ -1047,7 +1057,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Configuration:** `permalink_retention_days` in `config.yaml` (default 365; `0` disables pruning).
 
-**Related files:** `app/database.py` (schema + migrations + FTS5 wiring), `app/run_output_store.py` (compressed artifact writer + reader), `app/retention.py` (startup pruning), `app/blueprints/history.py` (reads + writes through the persistence layer). See [ARCHITECTURE.md](ARCHITECTURE.md) for full schema.
+**Related files:** `app/database.py` (schema, migrations, FTS5 wiring, and startup pruning), `app/run_output_store.py` (compressed artifact writer + reader), `app/blueprints/history.py` (reads + writes through the persistence layer). See [ARCHITECTURE.md](ARCHITECTURE.md) for full schema.
 
 **Useful direct checks:**
 
@@ -1128,7 +1138,7 @@ If a session has run history or workspace files, the terminal `generate` and `se
 - `diagnostics_allowed_cidrs` in `config.yaml` — CIDRs permitted to reach `/diag`.
 - `docker-compose.yml` — `read_only: true`, `init: true`, `user` directives, and the port-egress guard.
 
-**Related files:** `app/command_policy.py` (metacharacter + loopback validation), `app/runner.py` (subprocess spawn as `scanner`), `app/kill.py` (Redis PID tracking), `docker-compose.yml` (filesystem + user isolation). See [ARCHITECTURE.md](ARCHITECTURE.md) for cross-worker signalling, the Redis-backed multi-worker kill path, and the `nmap` capability model.
+**Related files:** `app/commands.py` (metacharacter, loopback, allow/deny, and rewrite validation), `app/blueprints/run.py` (subprocess spawn and `/kill` route), `app/process.py` (Redis PID tracking), `docker-compose.yml` (filesystem + user isolation). See [ARCHITECTURE.md](ARCHITECTURE.md) for cross-worker signalling, the Redis-backed multi-worker kill path, and the `nmap` capability model.
 
 ---
 
@@ -1200,7 +1210,7 @@ curl http://localhost:8888/diag?format=json
 
 **Configuration:** `diagnostics_allowed_cidrs` in `config.yaml`; access resolution also depends on `trusted_proxy_cidrs` when the app is behind a proxy.
 
-**Related files:** `app/blueprints/history.py` (`/diag` HTML + JSON responses), `app/static/css/diag.css` (page styling + mobile breakpoint behavior), `app/templates/diag.html` (diagnostics page markup), `README.md` (operator-facing config reference), `ARCHITECTURE.md` (diagnostics and logging runtime details).
+**Related files:** `app/blueprints/assets.py` (`/diag` HTML + JSON responses), `app/static/css/diag.css` (page styling + mobile breakpoint behavior), `app/templates/diag.html` (diagnostics page markup), `README.md` (operator-facing config reference), `ARCHITECTURE.md` (diagnostics and logging runtime details).
 
 ---
 

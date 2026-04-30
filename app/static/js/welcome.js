@@ -7,7 +7,9 @@
 // animation immediately; runner.js also calls clearTab to wipe partial output.
 
 const _welcomeWaiters = new Set();
-const _welcomePrompt = (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.prompt_prefix) || 'anon@darklab:~$';
+const _welcomePrompt = typeof buildPromptLabel === 'function'
+  ? buildPromptLabel()
+  : 'anon@darklab:~ $';
 const _welcomeGroupOrder = ['basics', 'dns', 'web', 'recon', 'advanced'];
 const _welcomeStatusFrames = ['initializing /', 'initializing -', 'initializing \\', 'initializing |'];
 const _welcomeStatusPendingText = 'initializing...';

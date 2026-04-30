@@ -58,6 +58,9 @@
   const show = (el) => el && el.classList && el.classList.remove('u-hidden');
   const hide = (el) => el && el.classList && el.classList.add('u-hidden');
   const isRunning = () => !!(statusPillEl && statusPillEl.classList && statusPillEl.classList.contains('running'));
+  const RUN_MONITOR_PEEK_PULSE_KEY = 'run_monitor_mobile_peek_seen';
+  let _runMonitorPeekHoldUntil = 0;
+  let _runMonitorPeekTimer = 0;
 
   // ── 2A+2B: Status-driven progress bar and composer ring ─────────
   function syncRunState() {
@@ -404,8 +407,75 @@
     const h = global.recentPreviewHistory;
     return Array.isArray(h) ? h : [];
   }
+  function _prefersReducedMotion() {
+    try {
+      return !!(global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch (_) {
+      return false;
+    }
+  }
+  function _formatPeekElapsed(runStart) {
+    const start = Number(runStart);
+    if (!Number.isFinite(start) || start <= 0) return '';
+    const seconds = Math.max(0, Math.floor((Date.now() - start) / 1000));
+    const minutes = Math.floor(seconds / 60);
+    const remainder = String(seconds % 60).padStart(2, '0');
+    return `${minutes}:${remainder}`;
+  }
+  function _syncRunMonitorPeekTimer(activeRunning) {
+    if (activeRunning) {
+      if (!_runMonitorPeekTimer) {
+        _runMonitorPeekTimer = window.setInterval(() => {
+          try { renderRecentPeek(); } catch (_) { /* non-critical */ }
+        }, 1000);
+      }
+      return;
+    }
+    if (_runMonitorPeekTimer) {
+      window.clearInterval(_runMonitorPeekTimer);
+      _runMonitorPeekTimer = 0;
+    }
+  }
   function renderRecentPeek() {
     if (!recentPeek) return;
+    const activeTab = typeof global.getActiveTab === 'function' ? global.getActiveTab() : null;
+    const activeRunning = !!(activeTab && activeTab.st === 'running');
+    _syncRunMonitorPeekTimer(activeRunning);
+    const holdRunMonitor = !activeRunning && _runMonitorPeekHoldUntil && Date.now() < _runMonitorPeekHoldUntil;
+    if (activeRunning || holdRunMonitor) {
+      recentPeek.dataset.peekMode = 'run-monitor';
+      recentPeek.setAttribute('aria-label', 'Open Run Monitor');
+      const elapsed = activeRunning ? _formatPeekElapsed(activeTab.runStart) : '';
+      if (recentPeekCount) recentPeekCount.textContent = activeRunning ? (elapsed || 'live') : 'done';
+      if (recentPeekPreview) {
+        recentPeekPreview.textContent = activeRunning
+          ? String(activeTab.command || 'active command')
+          : 'final state available';
+      }
+      const label = recentPeek.querySelector('.recent-peek-label');
+      if (label) label.textContent = 'Run Monitor';
+      show(recentPeek);
+      if (activeRunning && !_prefersReducedMotion()) {
+        try {
+          if (sessionStorage.getItem(RUN_MONITOR_PEEK_PULSE_KEY) !== '1') {
+            sessionStorage.setItem(RUN_MONITOR_PEEK_PULSE_KEY, '1');
+            recentPeek.classList.add('recent-peek-run-monitor-wiggle');
+            window.setTimeout(() => recentPeek.classList.remove('recent-peek-run-monitor-wiggle'), 1900);
+          }
+        } catch (_) {
+          if (recentPeek.dataset.runMonitorWiggled !== '1') {
+            recentPeek.dataset.runMonitorWiggled = '1';
+            recentPeek.classList.add('recent-peek-run-monitor-wiggle');
+            window.setTimeout(() => recentPeek.classList.remove('recent-peek-run-monitor-wiggle'), 1900);
+          }
+        }
+      }
+      return;
+    }
+    recentPeek.dataset.peekMode = 'recents';
+    recentPeek.setAttribute('aria-label', 'Show recent commands');
+    const label = recentPeek.querySelector('.recent-peek-label');
+    if (label) label.textContent = 'Recent';
     const items = readCmdHistory();
     if (!items.length) { hide(recentPeek); return; }
     if (recentPeekCount) recentPeekCount.textContent = String(items.length);
@@ -419,6 +489,9 @@
   // the composer; per-row actions reuse the existing history.js helpers.
   let _recentsItems = [];
   let _recentsSearchQuery = '';
+  let _recentsLoaded = false;
+  let _recentsFetchInFlight = null;
+  let _recentsRequestSeq = 0;
   const _recentsFilterState = { type: 'all', root: '', exit: 'all', date: 'all', starred: false };
   const _recentsPaging = {
     page: 1,
@@ -704,11 +777,27 @@
     });
     _recentsRenderPagination(_recentsItems.length);
   }
-  function _recentsRefresh() {
+  function _recentsRenderLoading() {
+    if (!recentsSheetList) return;
+    recentsSheetList.replaceChildren();
+    const loading = document.createElement('div');
+    loading.className = 'sheet-item chrome-row';
+    loading.style.color = 'var(--muted)';
+    loading.style.opacity = '0.7';
+    loading.style.justifyContent = 'center';
+    loading.style.alignItems = 'center';
+    loading.textContent = 'loading history...';
+    recentsSheetList.appendChild(loading);
+    _recentsRenderPagination(0);
+  }
+  function _recentsRefresh({ render = true } = {}) {
     if (typeof global.apiFetch !== 'function') return Promise.resolve([]);
-    return global.apiFetch(_recentsBuildHistoryRequestUrl())
+    const requestUrl = _recentsBuildHistoryRequestUrl();
+    const requestSeq = ++_recentsRequestSeq;
+    const request = global.apiFetch(requestUrl)
       .then(r => r.json())
       .then(data => {
+        if (requestSeq !== _recentsRequestSeq) return _recentsItems;
         _recentsPaging.page = Math.max(1, Number(data.page) || _recentsPaging.page || 1);
         _recentsPaging.pageSize = Math.max(1, Number(data.page_size) || _recentsPaging.pageSize || 1);
         _recentsPaging.totalCount = Math.max(0, Number(data.total_count ?? data.items?.length ?? data.runs?.length ?? 0) || 0);
@@ -716,18 +805,29 @@
         _recentsPaging.hasPrev = !!data.has_prev;
         _recentsPaging.hasNext = !!data.has_next;
         _recentsItems = Array.isArray(data.items) ? data.items : (Array.isArray(data.runs) ? data.runs : []);
-        _recentsRenderList();
+        _recentsLoaded = true;
+        if (render || isRecentsSheetOpen()) _recentsRenderList();
         return _recentsItems;
       })
       .catch(() => {
+        if (requestSeq !== _recentsRequestSeq) return _recentsItems;
         _recentsItems = [];
+        _recentsLoaded = false;
         _recentsPaging.totalCount = 0;
         _recentsPaging.pageCount = 0;
         _recentsPaging.hasPrev = false;
         _recentsPaging.hasNext = false;
-        _recentsRenderList();
+        if (render || isRecentsSheetOpen()) _recentsRenderList();
         return [];
       });
+    _recentsFetchInFlight = request.finally(() => {
+      if (_recentsFetchInFlight === request && requestSeq === _recentsRequestSeq) _recentsFetchInFlight = null;
+    });
+    return _recentsFetchInFlight;
+  }
+  function _recentsPrefetch() {
+    if (_recentsLoaded || _recentsFetchInFlight) return _recentsFetchInFlight || Promise.resolve(_recentsItems);
+    return _recentsRefresh({ render: false });
   }
   function showRecentsSheet() {
     if (!recentsSheet) return;
@@ -746,6 +846,7 @@
     if (recentsFiltersToggle) recentsFiltersToggle.setAttribute('aria-expanded', 'false');
     if (recentsFiltersExpanded) recentsFiltersExpanded.classList.add('u-hidden');
     _recentsSyncFilterUI();
+    _recentsRenderLoading();
     show(recentsSheetScrim);
     show(recentsSheet);
     _recentsRefresh();
@@ -787,6 +888,7 @@
       if (isRecentsSheetOpen()) _recentsRefresh();
     });
   }
+  _recentsPrefetch();
 
   let _recentsSearchTimer = null;
   recentsSheetSearch?.addEventListener('input', (e) => {
@@ -1034,7 +1136,13 @@
   // other surface.
 
   // Peek: tap opens the sheet; vertical swipe-up also opens it.
-  function openRecentsFromPeek() { showRecentsSheet(); }
+  function openPeekSurface() {
+    if (recentPeek && recentPeek.dataset.peekMode === 'run-monitor') {
+      if (typeof global.openRunMonitor === 'function') void global.openRunMonitor({ source: 'mobile-peek' });
+      return;
+    }
+    showRecentsSheet();
+  }
   if (recentPeek) {
     // role="button" div — Enter/Space handled by bindPressable; opt into
     // clearPressStyle so the :hover/:active residue on touch doesn't stick
@@ -1042,7 +1150,7 @@
     bindPressable(recentPeek, {
       refocusComposer: false,
       clearPressStyle: true,
-      onActivate: openRecentsFromPeek,
+      onActivate: openPeekSurface,
     });
   }
 
@@ -1054,7 +1162,7 @@
       const dy = peekStartY - e.clientY;
       if (dy > 8) {
         peekStartY = null;
-        openRecentsFromPeek();
+        openPeekSurface();
       }
     });
     const endPeekDrag = () => { peekStartY = null; };
@@ -1064,6 +1172,21 @@
 
   if (typeof onUiEvent === 'function') {
     onUiEvent('app:history-rendered', () => {
+      try { renderRecentPeek(); } catch (_) { /* non-critical */ }
+    });
+    onUiEvent('app:tab-status-changed', (e) => {
+      const activeId = typeof global.getActiveTabId === 'function' ? global.getActiveTabId() : null;
+      const detail = e && e.detail ? e.detail : {};
+      if (detail.id === activeId && detail.status && detail.status !== 'running') {
+        _runMonitorPeekHoldUntil = Date.now() + 2500;
+        window.setTimeout(() => {
+          try { renderRecentPeek(); } catch (_) { /* non-critical */ }
+        }, 2550);
+      }
+      try { renderRecentPeek(); } catch (_) { /* non-critical */ }
+    });
+    onUiEvent('app:tab-activated', () => {
+      _runMonitorPeekHoldUntil = 0;
       try { renderRecentPeek(); } catch (_) { /* non-critical */ }
     });
   }

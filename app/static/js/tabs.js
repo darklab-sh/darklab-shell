@@ -738,6 +738,7 @@ function createTab(label) {
     pendingKill: false,
     st: 'idle',
     renamed: false,
+    workspaceCwd: '',
     draftInput: '',
     commandHistory: [],
     historyNavIndex: -1,
@@ -804,6 +805,7 @@ function activateTab(id, { focusComposer = true } = {}) {
   if (typeof syncActiveRunTimer === 'function') syncActiveRunTimer(id);
   if (focusComposer) refocusComposerAfterAction({ preventScroll: true });
   if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
+  if (typeof _applyComposerPromptMode === 'function') _applyComposerPromptMode();
   updateOutputFollowButton(id);
   if (typeof scheduleSearchDiscoverabilityRefresh === 'function') scheduleSearchDiscoverabilityRefresh();
   else if (typeof refreshSearchDiscoverabilityUi === 'function') refreshSearchDiscoverabilityUi();
@@ -811,6 +813,36 @@ function activateTab(id, { focusComposer = true } = {}) {
   if (typeof emitUiEvent === 'function') {
     emitUiEvent('app:tab-activated', { id, prevId, activeTabId });
   }
+}
+
+function _resetPreservedSingleTabState(tab) {
+  if (!tab) return;
+  tab.command = '';
+  tab.runId = null;
+  tab.historyRunId = null;
+  tab.reconnectedRun = false;
+  tab.runStart = null;
+  tab.currentRunStartIndex = null;
+  tab.exitCode = null;
+  tab.previewTruncated = false;
+  tab.fullOutputAvailable = false;
+  tab.fullOutputLoaded = false;
+  tab.followOutput = true;
+  tab.outputUserScrollUntil = 0;
+  tab.suppressOutputScrollTracking = false;
+  tab.deferPromptMount = false;
+  tab.closing = false;
+  tab.killed = false;
+  tab.pendingKill = false;
+  tab.renamed = false;
+  tab.workspaceCwd = '';
+  tab.draftInput = '';
+  tab.commandHistory = [];
+  tab.historyNavIndex = -1;
+  tab.historyNavDraft = '';
+  tab._outputLineCounter = 0;
+  _clearTabRunningLabelTimer(tab);
+  tab.runningLabel = '';
 }
 
 function closeTab(id) {
@@ -843,18 +875,9 @@ function closeTab(id) {
   }
   if (tabs.length === 1) {
     // Last tab: reset to blank instead of closing
+    _resetPreservedSingleTabState(tabs[0]);
     clearTab(id);
     setTabLabel(id, createDefaultTabLabel(1));
-    const t = tabs[0];
-    t.runId = null;
-    t.runStart = null;
-    t.exitCode = null;
-    t.command = '';
-    _clearTabRunningLabelTimer(t);
-    t.runningLabel = '';
-    t.renamed = false;
-    t.killed = false;
-    t.pendingKill = false;
     if (typeof useMobileTerminalViewportMode === 'function'
       && useMobileTerminalViewportMode()
       && typeof blurVisibleComposerInputIfMobile === 'function') {
@@ -962,14 +985,19 @@ function getOutput(id) {
 function clearTab(id, { preserveRunState = false } = {}) {
   if (typeof _cancelPendingOutputBatch === 'function') _cancelPendingOutputBatch(id);
   const out = getOutput(id);
-  if (out) out.innerHTML = '';
+  if (out) {
+    out.innerHTML = '';
+    out.dataset.outputLineCounter = '0';
+  }
   const t = getTab(id);
   const wasRunning = !!(t && t.st === 'running');
   if (t) {
     t._outputFollowToken = (t._outputFollowToken || 0) + 1;
+    t._outputLineCounter = 0;
     t.suppressOutputScrollTracking = false;
     t.deferPromptMount = false;
     t.rawLines = [];
+    if (typeof _resetTabOutputSignalCounts === 'function') _resetTabOutputSignalCounts(t);
     t.followOutput = true;
     t.suppressOutputScrollTracking = false;
     t.deferPromptMount = false;
@@ -1023,13 +1051,9 @@ function finalizeClosingTab(id) {
   if (!tab || !tab.closing) return false;
 
   if (tabs.length === 1) {
-    tab.closing = false;
+    _resetPreservedSingleTabState(tab);
     clearTab(id);
     setTabLabel(id, createDefaultTabLabel(1));
-    tab.command = '';
-    _clearTabRunningLabelTimer(tab);
-    tab.runningLabel = '';
-    tab.renamed = false;
     if (typeof document !== 'undefined'
       && document.body
       && document.body.classList
@@ -1127,7 +1151,10 @@ function saveTab(id) {
 // toggles so exports match what the user sees in the terminal.
 function _exportPrefix(line, zeroBasedIndex) {
   const parts = [];
-  if (typeof lnMode !== 'undefined' && lnMode === 'on') parts.push(String(zeroBasedIndex + 1));
+  if (typeof lnMode !== 'undefined' && lnMode === 'on') {
+    const absoluteLineNumber = Number(line && line.line_number || 0);
+    parts.push(String(absoluteLineNumber > 0 ? absoluteLineNumber : zeroBasedIndex + 1));
+  }
   if (typeof tsMode !== 'undefined') {
     if (tsMode === 'clock' && line.tsC) parts.push(line.tsC);
     else if (tsMode === 'elapsed' && line.tsE) parts.push(line.tsE);
@@ -1148,6 +1175,7 @@ function _normalizeTabTranscriptLine(line) {
       cls: String(line.cls || ''),
       tsC: String(line.tsC || ''),
       tsE: String(line.tsE || ''),
+      line_number: Number.isInteger(line.line_number) ? line.line_number : undefined,
     };
   }
   return null;

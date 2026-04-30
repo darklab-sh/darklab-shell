@@ -10,9 +10,9 @@ chmod 700 /data 2>/dev/null || true
 # workspace files need their shared appuser/scanner group restored here.
 WORKSPACE_ROOT="${WORKSPACE_ROOT:-/tmp/darklab_shell-workspaces}"
 mkdir -p "$WORKSPACE_ROOT" 2>/dev/null || true
-chown -R appuser:appuser "$WORKSPACE_ROOT" 2>/dev/null || true
+chown appuser:appuser "$WORKSPACE_ROOT" 2>/dev/null || true
 chmod 730 "$WORKSPACE_ROOT" 2>/dev/null || true
-find "$WORKSPACE_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'sess_*' -exec chmod 3730 {} \; 2>/dev/null || true
+find "$WORKSPACE_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'sess_*' -exec chown appuser:appuser {} \; -exec chmod 3730 {} \; 2>/dev/null || true
 # shellcheck disable=SC2156  # session dirs are passed as sh -c positional parameters via {} +
 find "$WORKSPACE_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'sess_*' -exec sh -c '
     for session_dir do

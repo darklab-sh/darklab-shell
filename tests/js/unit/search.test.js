@@ -393,6 +393,32 @@ describe('search helpers', () => {
       .toContain('btn btn-ghost btn-compact search-signal-chip')
   })
 
+  it('uses cached signal counts without scanning large output buffers', () => {
+    const tab = {
+      id: 'tab-1',
+      command: 'nmap -sV ip.darklab.sh',
+      _outputSignalCountsValid: true,
+      _outputSignalCounts: {
+        findings: 2,
+        warnings: 1,
+        errors: 0,
+        summaries: 1,
+      },
+    }
+    const { refreshSearchDiscoverabilityUi } = loadSearchFns({ tab })
+    const out = document.getElementById('out')
+    out.querySelectorAll = () => {
+      throw new Error('cached signal counts should avoid output scans')
+    }
+
+    const counts = refreshSearchDiscoverabilityUi()
+
+    expect(counts).toEqual({ findings: 2, warnings: 1, errors: 0, summaries: 1 })
+    expect(document.querySelector('[data-search-scope="findings"]').textContent).toBe('findings (2)')
+    expect(document.querySelector('[data-search-scope="warnings"]').textContent).toBe('warnings (1)')
+    expect(document.querySelector('[data-search-scope="summaries"]').textContent).toBe('summaries (1)')
+  })
+
   it('renders signal summary chips with DOM APIs instead of parsing markup', () => {
     const { _renderCompactSignalSummary } = loadSearchFns()
     const summary = document.getElementById('searchSignalSummary')
@@ -489,6 +515,28 @@ describe('search helpers', () => {
     runSearch()
 
     expect(document.querySelectorAll('.search-signal-hl')).toHaveLength(0)
+  })
+
+  it('does not infer command roots for lines without signal metadata', () => {
+    const { refreshSearchDiscoverabilityUi, setSearchScope } = loadSearchFns()
+    document.getElementById('out').innerHTML = [
+      '<span class="line prompt-echo">$ cat huge.txt</span>',
+      '<span class="line" id="plain-large-output">443/tcp open https</span>',
+      '<span class="line" data-signals="findings" data-command-root="nmap">real finding</span>',
+    ].join('')
+    const plainLine = document.getElementById('plain-large-output')
+    Object.defineProperty(plainLine, 'previousElementSibling', {
+      configurable: true,
+      get() {
+        throw new Error('plain output should not walk command context')
+      },
+    })
+
+    expect(() => refreshSearchDiscoverabilityUi()).not.toThrow()
+    expect(() => setSearchScope('findings')).not.toThrow()
+
+    expect(document.querySelector('[data-search-scope="findings"]').textContent).toBe('findings (1)')
+    expect(document.querySelectorAll('.search-signal-hl')).toHaveLength(1)
   })
 
   it('opens normal search in text mode even when findings are available', () => {

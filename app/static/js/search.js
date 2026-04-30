@@ -115,6 +115,8 @@ function _lineServerSignals(line) {
 
 function _lineMatchesSearchScopeForRoot(line, scope, root = null) {
   if (!(line instanceof Element) || scope === 'text') return false;
+  const serverSignals = _lineServerSignals(line);
+  if (!serverSignals.includes(scope)) return false;
   if (
     line.classList.contains('fake-signal-summary-header')
     || line.classList.contains('fake-signal-summary-section')
@@ -127,11 +129,27 @@ function _lineMatchesSearchScopeForRoot(line, scope, root = null) {
   const metadataRoot = String(line.dataset?.commandRoot || '').trim();
   const useRoot = metadataRoot || (root === null ? _lineCommandRoot(line) : root);
   if (_isBuiltinCommandRoot(useRoot)) return false;
-  const serverSignals = _lineServerSignals(line);
-  return serverSignals.includes(scope);
+  return true;
+}
+
+function _normalizeSearchSignalCounts(counts) {
+  return {
+    findings: Math.max(0, Number(counts?.findings || 0)),
+    warnings: Math.max(0, Number(counts?.warnings || 0)),
+    errors: Math.max(0, Number(counts?.errors || 0)),
+    summaries: Math.max(0, Number(counts?.summaries || 0)),
+  };
+}
+
+function _getCachedSearchSignalCounts() {
+  const tab = typeof getTab === 'function' ? getTab(activeTabId) : null;
+  if (!tab || tab._outputSignalCountsValid !== true || !tab._outputSignalCounts) return null;
+  return _normalizeSearchSignalCounts(tab._outputSignalCounts);
 }
 
 function _getSearchSignalCounts(out) {
+  const cached = _getCachedSearchSignalCounts();
+  if (cached) return cached;
   const counts = { findings: 0, warnings: 0, errors: 0, summaries: 0 };
   if (!(out instanceof Element)) return counts;
   const lines = Array.from(out.querySelectorAll('.line'));
@@ -364,6 +382,146 @@ function _highlightSearchLine(line, re, startMatchIdx) {
 
 function _lineMatchesSearchScope(line, scope) {
   return _lineMatchesSearchScopeForRoot(line, scope, null);
+}
+
+function _clearTextSearchHighlights(root) {
+  if (!(root instanceof Element)) return;
+  const touched = new Set();
+  root.querySelectorAll('mark.search-hl').forEach((m) => {
+    const line = m.closest('.line, .workspace-line-row');
+    if (line) touched.add(line);
+    m.replaceWith(document.createTextNode(m.textContent));
+  });
+  touched.forEach(line => line.normalize());
+}
+
+function _collectTextSearchMatches(root, query, {
+  caseSensitive = false,
+  regexMode = false,
+  lineSelector = '.line',
+} = {}) {
+  if (!(root instanceof Element) || !query) return { matches: [], error: '' };
+  const flags = caseSensitive ? 'g' : 'gi';
+  const pattern = regexMode ? query : escapeRegex(query);
+  let re;
+  try {
+    re = new RegExp(pattern, flags);
+  } catch (_) {
+    return { matches: [], error: 'invalid regex' };
+  }
+  let globalMatchIdx = 0;
+  root.querySelectorAll(lineSelector).forEach((line) => {
+    globalMatchIdx += _highlightSearchLine(line, re, globalMatchIdx);
+  });
+  const groups = new Map();
+  root.querySelectorAll('mark.search-hl').forEach((mark) => {
+    const idx = Number(mark.dataset.searchMatch);
+    if (!groups.has(idx)) groups.set(idx, []);
+    groups.get(idx).push(mark);
+  });
+  return { matches: Array.from(groups.values()), error: '' };
+}
+
+function createTextSearchController({
+  root,
+  input,
+  countEl,
+  caseBtn = null,
+  regexBtn = null,
+  prevBtn = null,
+  nextBtn = null,
+  lineSelector = '.line',
+  getRoot = null,
+} = {}) {
+  let matches = [];
+  let matchIdx = -1;
+  let caseSensitive = false;
+  let regexMode = false;
+  const currentRoot = () => (typeof getRoot === 'function' ? getRoot() : root);
+  const setCount = text => { if (countEl) countEl.textContent = text; };
+  const highlight = () => {
+    matches.forEach((group, i) => {
+      group.forEach((node) => node.classList.toggle('current', i === matchIdx));
+    });
+    const current = matches[matchIdx]?.[0];
+    if (current && typeof current.scrollIntoView === 'function') {
+      current.scrollIntoView({ block: 'center' });
+    }
+  };
+  const run = () => {
+    const targetRoot = currentRoot();
+    _clearTextSearchHighlights(targetRoot);
+    matches = [];
+    matchIdx = -1;
+    const query = String(input?.value || '');
+    if (!query) {
+      setCount('');
+      return matches;
+    }
+    const result = _collectTextSearchMatches(targetRoot, query, { caseSensitive, regexMode, lineSelector });
+    if (result.error) {
+      setCount(result.error);
+      return matches;
+    }
+    matches = result.matches;
+    setCount(matches.length ? `1 / ${matches.length}` : 'no matches');
+    if (matches.length) {
+      matchIdx = 0;
+      highlight();
+    }
+    return matches;
+  };
+  const navigate = (dir) => {
+    if (!matches.length) return;
+    matchIdx = (matchIdx + dir + matches.length) % matches.length;
+    setCount(`${matchIdx + 1} / ${matches.length}`);
+    highlight();
+  };
+  const clear = () => {
+    _clearTextSearchHighlights(currentRoot());
+    matches = [];
+    matchIdx = -1;
+    setCount('');
+    if (input) input.value = '';
+  };
+  input?.addEventListener('input', run);
+  input?.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      event.stopPropagation();
+      navigate(event.shiftKey ? -1 : 1);
+      if (input && document.activeElement !== input && typeof input.focus === 'function') {
+        input.focus({ preventScroll: true });
+      }
+    }
+  });
+  prevBtn?.addEventListener('click', () => navigate(-1));
+  nextBtn?.addEventListener('click', () => navigate(1));
+  caseBtn?.addEventListener('click', () => {
+    caseSensitive = !caseSensitive;
+    caseBtn.setAttribute('aria-pressed', caseSensitive ? 'true' : 'false');
+    run();
+  });
+  regexBtn?.addEventListener('click', () => {
+    regexMode = !regexMode;
+    regexBtn.setAttribute('aria-pressed', regexMode ? 'true' : 'false');
+    run();
+  });
+  return {
+    run,
+    navigate,
+    clear,
+    get matches() { return matches; },
+    get matchIdx() { return matchIdx; },
+    setCaseSensitive(value) {
+      caseSensitive = !!value;
+      caseBtn?.setAttribute('aria-pressed', caseSensitive ? 'true' : 'false');
+    },
+    setRegexMode(value) {
+      regexMode = !!value;
+      regexBtn?.setAttribute('aria-pressed', regexMode ? 'true' : 'false');
+    },
+  };
 }
 
 function _promptEchoCommandText(line) {
@@ -707,30 +865,16 @@ function runSearch() {
     _setSearchCount('');
     return;
   }
-  const lines = out.querySelectorAll('.line');
-  const flags = searchCaseSensitive ? 'g' : 'gi';
-  const pattern = searchRegexMode ? q : escapeRegex(q);
-  let re;
-  try {
-    re = new RegExp(pattern, flags);
-  } catch (e) {
-    _setSearchCount('invalid regex');
+  const result = _collectTextSearchMatches(out, q, {
+    caseSensitive: searchCaseSensitive,
+    regexMode: searchRegexMode,
+    lineSelector: '.line',
+  });
+  if (result.error) {
+    _setSearchCount(result.error);
     return;
   }
-  let globalMatchIdx = 0;
-  lines.forEach((line) => {
-    globalMatchIdx += _highlightSearchLine(line, re, globalMatchIdx);
-  });
-  // Group marks by logical match — a single match that crossed an inline
-  // boundary produces multiple marks with the same data-search-match, and
-  // nav/highlight should treat them as one.
-  const groups = new Map();
-  out.querySelectorAll('mark.search-hl').forEach((mark) => {
-    const idx = Number(mark.dataset.searchMatch);
-    if (!groups.has(idx)) groups.set(idx, []);
-    groups.get(idx).push(mark);
-  });
-  searchMatches = Array.from(groups.values());
+  searchMatches = result.matches;
   _setSearchCount(searchMatches.length ? `1 / ${searchMatches.length}` : 'no matches');
   if (searchMatches.length) {
     searchMatchIdx = 0;
@@ -749,25 +893,19 @@ function highlightCurrent() {
   searchMatches.forEach((group, i) => {
     group.forEach((node) => node.classList.toggle('current', i === searchMatchIdx));
   });
-  searchMatches[searchMatchIdx]?.[0]?.scrollIntoView({ block: 'center' });
+  const current = searchMatches[searchMatchIdx]?.[0];
+  if (current && typeof current.scrollIntoView === 'function') {
+    current.scrollIntoView({ block: 'center' });
+  }
 }
 
 function clearHighlights() {
   const out = getOutput(activeTabId);
   if (!out) return;
-  const touched = new Set();
-  out.querySelectorAll('mark.search-hl').forEach((m) => {
-    const line = m.closest('.line');
-    if (line) touched.add(line);
-    m.replaceWith(document.createTextNode(m.textContent));
-  });
+  _clearTextSearchHighlights(out);
   out.querySelectorAll('.line.search-signal-hl').forEach((line) => {
     line.classList.remove('search-signal-hl', 'current');
   });
-  // Re-merge adjacent text nodes on every touched line so the next search
-  // walks a clean DOM instead of an accumulation of single-character
-  // fragments left behind by prior highlight cycles.
-  touched.forEach(line => line.normalize());
 }
 
 function clearSearch() {
