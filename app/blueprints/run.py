@@ -41,7 +41,7 @@ from fake_commands import (
     resolves_exact_special_fake_command,
 )
 from helpers import get_client_ip, get_log_session_id, get_session_id
-from process import active_run_register, active_run_remove, pid_pop, pid_register
+from process import active_run_register, active_run_remove, pid_pop, pid_pop_for_session, pid_register
 from run_output_store import RunOutputCapture, load_full_output_entries
 from output_signals import OutputSignalClassifier
 from session_variables import SessionVariableError, expand_session_variables
@@ -1098,11 +1098,15 @@ def kill_command():
     client_ip = get_client_ip()
     if not isinstance(run_id, str):
         return jsonify({"error": "run_id must be a string"}), 400
-    pid       = pid_pop(run_id)
+    session_id = get_session_id()
+    pid       = pid_pop_for_session(run_id, session_id)
     if not pid:
-        log.debug("KILL_MISS", extra={"ip": client_ip, "run_id": run_id})
+        log.debug("KILL_MISS", extra={
+            "ip": client_ip,
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+        })
         return jsonify({"error": "No such process"}), 404
-    active_run_remove(run_id)
     try:
         # Subprocesses call os.setsid() during child setup, which makes PGID
         # == PID at creation time. Use the stored PID directly as the
@@ -1124,7 +1128,13 @@ def kill_command():
         else:
             # Local dev — same user, can kill directly
             os.killpg(pgid, signal.SIGTERM)
-        log.info("RUN_KILL", extra={"run_id": run_id, "ip": client_ip, "pid": pid, "pgid": pgid})
+        log.info("RUN_KILL", extra={
+            "run_id": run_id,
+            "ip": client_ip,
+            "session": get_log_session_id(session_id),
+            "pid": pid,
+            "pgid": pgid,
+        })
     except (ProcessLookupError, subprocess.TimeoutExpired, OSError) as e:
         log.warning("KILL_FAILED", extra={
             "run_id": run_id, "ip": client_ip, "pid": pid, "error": str(e),

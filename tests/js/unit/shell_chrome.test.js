@@ -10,21 +10,24 @@ function tick() {
   return new Promise(resolve => setTimeout(resolve, 0))
 }
 
-function loadShellChrome({ fetch }) {
+function loadShellChrome({ fetch, preferences = {} } = {}) {
   document.body.innerHTML = `
     <aside id="rail">
       <button id="rail-collapse-btn"></button>
       <div id="rail-resize-handle"></div>
-      <div id="rail-split-area"></div>
-      <div id="rail-splitter"></div>
-      <section id="rail-section-recent"></section>
-      <div id="rail-recent-list"></div>
-      <span id="rail-recent-count"></span>
-      <button id="rail-recent-header"></button>
-      <section id="rail-section-workflows"></section>
-      <div id="rail-workflows-list"></div>
-      <button id="rail-workflows-header"></button>
-      <span id="rail-workflows-count"></span>
+      <div id="rail-split-area">
+        <section id="rail-section-recent">
+          <button id="rail-recent-header"></button>
+          <div id="rail-recent-list"></div>
+          <span id="rail-recent-count"></span>
+        </section>
+        <div id="rail-splitter"></div>
+        <section id="rail-section-workflows">
+          <button id="rail-workflows-header"></button>
+          <div id="rail-workflows-list"></div>
+          <span id="rail-workflows-count"></span>
+        </section>
+      </div>
       <nav id="rail-nav"></nav>
     </aside>
     <footer id="hud">
@@ -90,16 +93,27 @@ function loadShellChrome({ fetch }) {
     document,
     window,
     performance,
-    fetch,
+    fetch || vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ uptime: 1, db: 'ok', redis: 'ok' }),
+    }),
     localStorage,
     (fn) => {
       intervalCallbacks.push(fn)
       return 1
     },
     () => {},
-    () => '',
-    () => {},
-    () => {},
+    name => preferences[name] || '',
+    (name, value) => { preferences[name] = String(value) },
+    (el, options) => {
+      let open = !!options.initialOpen
+      el.setAttribute('aria-expanded', open ? 'true' : 'false')
+      el.addEventListener('click', () => {
+        open = !open
+        el.setAttribute('aria-expanded', open ? 'true' : 'false')
+        options.onToggle?.(open)
+      })
+    },
     (el, options) => el.addEventListener('click', options.onActivate),
     () => {},
     () => {},
@@ -123,8 +137,54 @@ function loadShellChrome({ fetch }) {
     runPoll: () => intervalCallbacks[0](),
     db: document.getElementById('hud-db'),
     redis: document.getElementById('hud-redis'),
+    railSplitArea: document.getElementById('rail-split-area'),
+    railSplitter: document.getElementById('rail-splitter'),
+    railWorkflowsHeader: document.getElementById('rail-workflows-header'),
+    railSectionWorkflows: document.getElementById('rail-section-workflows'),
+    preferences,
   }
 }
+
+describe('shell chrome rail sections', () => {
+  it('keeps the default split when workflows is closed and reopened before resizing', async () => {
+    const shell = loadShellChrome()
+
+    expect(shell.railSplitArea.classList.contains('recent-fixed')).toBe(false)
+    expect(shell.railSplitArea.style.getPropertyValue('--recent-h')).toBe('')
+
+    shell.railWorkflowsHeader.click()
+    expect(shell.railSectionWorkflows.classList.contains('closed')).toBe(true)
+
+    shell.railWorkflowsHeader.click()
+    await tick()
+
+    expect(shell.railSectionWorkflows.classList.contains('closed')).toBe(false)
+    expect(shell.railSplitArea.classList.contains('recent-fixed')).toBe(false)
+    expect(shell.railSplitArea.style.getPropertyValue('--recent-h')).toBe('')
+  })
+
+  it('restores the last split height when workflows is closed and reopened', async () => {
+    const shell = loadShellChrome()
+    Object.defineProperty(shell.railSplitArea, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({ top: 0, height: 420 }),
+    })
+
+    shell.railSplitter.dispatchEvent(new MouseEvent('mousedown', { clientY: 0, bubbles: true }))
+    window.dispatchEvent(new MouseEvent('mousemove', { clientY: 170, bubbles: true }))
+    window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+
+    expect(shell.railSplitArea.style.getPropertyValue('--recent-h')).toBe('170px')
+
+    shell.railWorkflowsHeader.click()
+    expect(shell.railSectionWorkflows.classList.contains('closed')).toBe(true)
+
+    shell.railWorkflowsHeader.click()
+    expect(shell.railSectionWorkflows.classList.contains('closed')).toBe(false)
+    expect(shell.railSplitArea.classList.contains('recent-fixed')).toBe(true)
+    expect(shell.railSplitArea.style.getPropertyValue('--recent-h')).toBe('170px')
+  })
+})
 
 describe('shell chrome HUD status', () => {
   it('marks Redis offline when the status poll cannot reach the server', async () => {

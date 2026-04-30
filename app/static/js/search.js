@@ -9,10 +9,18 @@ const _SEARCH_SCOPE_LABELS = {
 };
 
 const _SEARCH_SUMMARY_LIMIT = 25;
+const _TERMINAL_SEARCH_DELAY_MS = 200;
+const _TERMINAL_LARGE_SEARCH_DELAY_MS = 600;
+const _TERMINAL_LARGE_SEARCH_LINE_THRESHOLD = 2000;
+const _TERMINAL_LARGE_SEARCH_CHAR_THRESHOLD = 500000;
+const _TERMINAL_LARGE_SEARCH_MIN_CHARS = 3;
 
 let _searchTogglePulseTimer = null;
 let _searchDiscoverabilityRefreshTimer = null;
 let _searchDiscoverabilityRefreshTimerType = '';
+let _terminalSearchTimer = null;
+let _terminalLazyHighlightedMatch = null;
+let _terminalSearchLazyMode = false;
 
 function _getSearchScope() {
   return typeof searchScope === 'string' ? searchScope : 'text';
@@ -422,6 +430,80 @@ function _collectTextSearchMatches(root, query, {
   return { matches: Array.from(groups.values()), error: '' };
 }
 
+function _collectLazyTextSearchMatches(root, query, {
+  caseSensitive = false,
+  regexMode = false,
+  lineSelector = '.line',
+  lineTextSelector = null,
+  preserveDom = false,
+} = {}) {
+  if (!(root instanceof Element) || !query) return { matches: [], error: '' };
+  const flags = caseSensitive ? 'g' : 'gi';
+  const pattern = regexMode ? query : escapeRegex(query);
+  let re;
+  try {
+    re = new RegExp(pattern, flags);
+  } catch (_) {
+    return { matches: [], error: 'invalid regex' };
+  }
+  const matches = [];
+  root.querySelectorAll(lineSelector).forEach((line) => {
+    if (!(line instanceof Element)) return;
+    const textEl = lineTextSelector ? line.querySelector(lineTextSelector) : line;
+    if (!(textEl instanceof Element)) return;
+    const text = textEl.textContent || '';
+    re.lastIndex = 0;
+    let match;
+    while ((match = re.exec(text)) !== null) {
+      if (!match[0]) {
+        re.lastIndex += 1;
+        continue;
+      }
+      matches.push({
+        line,
+        textEl,
+        text,
+        start: match.index,
+        end: match.index + match[0].length,
+        preserveDom,
+      });
+    }
+  });
+  return { matches, error: '' };
+}
+
+function _clearLazySearchHighlight(match) {
+  const textEl = match?.textEl;
+  if (!(textEl instanceof Element)) return;
+  if (match?.preserveDom && Array.isArray(match.originalChildNodes)) {
+    textEl.replaceChildren(...match.originalChildNodes.map(node => node.cloneNode(true)));
+    match.originalChildNodes = null;
+    return;
+  }
+  textEl.textContent = String(match?.text || textEl.textContent || '');
+}
+
+function _highlightLazySearchMatch(match, index) {
+  const textEl = match?.textEl;
+  if (!(textEl instanceof Element)) return null;
+  const text = String(match?.text || '');
+  const start = Math.max(0, Number(match?.start) || 0);
+  const end = Math.max(start, Number(match?.end) || start);
+  const frag = document.createDocumentFragment();
+  frag.appendChild(document.createTextNode(text.slice(0, start)));
+  const mark = document.createElement('mark');
+  mark.className = 'search-hl current';
+  mark.dataset.searchMatch = String(index);
+  mark.textContent = text.slice(start, end);
+  frag.appendChild(mark);
+  frag.appendChild(document.createTextNode(text.slice(end)));
+  if (match?.preserveDom && !Array.isArray(match.originalChildNodes)) {
+    match.originalChildNodes = Array.from(textEl.childNodes).map(node => node.cloneNode(true));
+  }
+  textEl.replaceChildren(frag);
+  return mark;
+}
+
 function createTextSearchController({
   root,
   input,
@@ -432,14 +514,41 @@ function createTextSearchController({
   nextBtn = null,
   lineSelector = '.line',
   getRoot = null,
+  searchDelayMs = 0,
+  minQueryLength = 0,
+  minQueryMessage = '',
+  lazyHighlight = false,
+  lineTextSelector = null,
 } = {}) {
   let matches = [];
   let matchIdx = -1;
   let caseSensitive = false;
   let regexMode = false;
+  let pendingSearchTimer = null;
+  let lazyHighlightedMatch = null;
   const currentRoot = () => (typeof getRoot === 'function' ? getRoot() : root);
   const setCount = text => { if (countEl) countEl.textContent = text; };
+  const cancelPendingSearch = () => {
+    if (pendingSearchTimer !== null) {
+      clearTimeout(pendingSearchTimer);
+      pendingSearchTimer = null;
+    }
+  };
+  const clearLazyHighlight = () => {
+    _clearLazySearchHighlight(lazyHighlightedMatch);
+    lazyHighlightedMatch = null;
+  };
   const highlight = () => {
+    if (lazyHighlight) {
+      clearLazyHighlight();
+      const currentMatch = matches[matchIdx];
+      const current = _highlightLazySearchMatch(currentMatch, matchIdx);
+      lazyHighlightedMatch = currentMatch || null;
+      if (current && typeof current.scrollIntoView === 'function') {
+        current.scrollIntoView({ block: 'center' });
+      }
+      return;
+    }
     matches.forEach((group, i) => {
       group.forEach((node) => node.classList.toggle('current', i === matchIdx));
     });
@@ -449,8 +558,10 @@ function createTextSearchController({
     }
   };
   const run = () => {
+    cancelPendingSearch();
     const targetRoot = currentRoot();
-    _clearTextSearchHighlights(targetRoot);
+    if (lazyHighlight) clearLazyHighlight();
+    else _clearTextSearchHighlights(targetRoot);
     matches = [];
     matchIdx = -1;
     const query = String(input?.value || '');
@@ -458,7 +569,13 @@ function createTextSearchController({
       setCount('');
       return matches;
     }
-    const result = _collectTextSearchMatches(targetRoot, query, { caseSensitive, regexMode, lineSelector });
+    if (minQueryLength > 0 && query.length < minQueryLength) {
+      setCount(minQueryMessage || `type ${minQueryLength}+ chars`);
+      return matches;
+    }
+    const result = lazyHighlight
+      ? _collectLazyTextSearchMatches(targetRoot, query, { caseSensitive, regexMode, lineSelector, lineTextSelector })
+      : _collectTextSearchMatches(targetRoot, query, { caseSensitive, regexMode, lineSelector });
     if (result.error) {
       setCount(result.error);
       return matches;
@@ -471,6 +588,23 @@ function createTextSearchController({
     }
     return matches;
   };
+  const scheduleRun = () => {
+    cancelPendingSearch();
+    const query = String(input?.value || '');
+    if (minQueryLength > 0 && query.length < minQueryLength) {
+      run();
+      return;
+    }
+    if (!searchDelayMs || !query) {
+      run();
+      return;
+    }
+    setCount('searching...');
+    pendingSearchTimer = setTimeout(() => {
+      pendingSearchTimer = null;
+      run();
+    }, searchDelayMs);
+  };
   const navigate = (dir) => {
     if (!matches.length) return;
     matchIdx = (matchIdx + dir + matches.length) % matches.length;
@@ -478,17 +612,20 @@ function createTextSearchController({
     highlight();
   };
   const clear = () => {
-    _clearTextSearchHighlights(currentRoot());
+    cancelPendingSearch();
+    if (lazyHighlight) clearLazyHighlight();
+    else _clearTextSearchHighlights(currentRoot());
     matches = [];
     matchIdx = -1;
     setCount('');
     if (input) input.value = '';
   };
-  input?.addEventListener('input', run);
+  input?.addEventListener('input', scheduleRun);
   input?.addEventListener('keydown', event => {
     if (event.key === 'Enter') {
       event.preventDefault();
       event.stopPropagation();
+      if (pendingSearchTimer !== null) run();
       navigate(event.shiftKey ? -1 : 1);
       if (input && document.activeElement !== input && typeof input.focus === 'function') {
         input.focus({ preventScroll: true });
@@ -841,10 +978,62 @@ function _collectScopedSearchMatches(out, scope) {
   return matches;
 }
 
+function _clearTerminalSearchTimer() {
+  if (_terminalSearchTimer !== null) {
+    clearTimeout(_terminalSearchTimer);
+    _terminalSearchTimer = null;
+  }
+}
+
+function _clearTerminalLazyHighlight() {
+  _clearLazySearchHighlight(_terminalLazyHighlightedMatch);
+  _terminalLazyHighlightedMatch = null;
+}
+
+function _terminalOutputSearchStats(out) {
+  let lineCount = 0;
+  let charCount = 0;
+  if (!(out instanceof Element)) return { lineCount, charCount };
+  out.querySelectorAll('.line').forEach((line) => {
+    lineCount += 1;
+    charCount += (line.textContent || '').length;
+  });
+  return { lineCount, charCount };
+}
+
+function _terminalUsesLargeSearchMode(out) {
+  const { lineCount, charCount } = _terminalOutputSearchStats(out);
+  return (
+    lineCount >= _TERMINAL_LARGE_SEARCH_LINE_THRESHOLD ||
+    charCount >= _TERMINAL_LARGE_SEARCH_CHAR_THRESHOLD
+  );
+}
+
+function _scrollTerminalLazySearchMatchIntoView(match, mark) {
+  const out = getOutput(activeTabId);
+  const line = match?.line;
+  if (out instanceof Element && line instanceof Element && out.contains(line)) {
+    const outRect = out.getBoundingClientRect();
+    const lineRect = line.getBoundingClientRect();
+    const targetTop = Number(lineRect.top) - Number(outRect.top);
+    const lineHeight = Number(lineRect.height) || 0;
+    const outHeight = Number(out.clientHeight) || Number(outRect.height) || 0;
+    if (Number.isFinite(targetTop) && outHeight > 0) {
+      out.scrollTop += targetTop - (outHeight / 2) + (lineHeight / 2);
+      return;
+    }
+  }
+  if (mark && typeof mark.scrollIntoView === 'function') {
+    mark.scrollIntoView({ block: 'center' });
+  }
+}
+
 function runSearch() {
+  _clearTerminalSearchTimer();
   clearHighlights();
   searchMatches = [];
   searchMatchIdx = -1;
+  _terminalSearchLazyMode = false;
   const out = getOutput(activeTabId);
   if (!out) return;
   refreshSearchDiscoverabilityUi();
@@ -865,13 +1054,27 @@ function runSearch() {
     _setSearchCount('');
     return;
   }
-  const result = _collectTextSearchMatches(out, q, {
-    caseSensitive: searchCaseSensitive,
-    regexMode: searchRegexMode,
-    lineSelector: '.line',
-  });
+  const useLargeSearch = _terminalUsesLargeSearchMode(out);
+  if (useLargeSearch && q.length < _TERMINAL_LARGE_SEARCH_MIN_CHARS) {
+    _setSearchCount(`type ${_TERMINAL_LARGE_SEARCH_MIN_CHARS}+ chars`);
+    return;
+  }
+  _terminalSearchLazyMode = useLargeSearch;
+  const result = useLargeSearch
+    ? _collectLazyTextSearchMatches(out, q, {
+      caseSensitive: searchCaseSensitive,
+      regexMode: searchRegexMode,
+      lineSelector: '.line',
+      preserveDom: true,
+    })
+    : _collectTextSearchMatches(out, q, {
+      caseSensitive: searchCaseSensitive,
+      regexMode: searchRegexMode,
+      lineSelector: '.line',
+    });
   if (result.error) {
     _setSearchCount(result.error);
+    _terminalSearchLazyMode = false;
     return;
   }
   searchMatches = result.matches;
@@ -882,7 +1085,24 @@ function runSearch() {
   }
 }
 
+function scheduleRunSearch() {
+  _clearTerminalSearchTimer();
+  const out = getOutput(activeTabId);
+  const query = String(searchInput?.value || '');
+  const useLargeSearch = _terminalUsesLargeSearchMode(out);
+  if (!query || (useLargeSearch && query.length < _TERMINAL_LARGE_SEARCH_MIN_CHARS)) {
+    runSearch();
+    return;
+  }
+  _setSearchCount('searching...');
+  _terminalSearchTimer = setTimeout(() => {
+    _terminalSearchTimer = null;
+    runSearch();
+  }, useLargeSearch ? _TERMINAL_LARGE_SEARCH_DELAY_MS : _TERMINAL_SEARCH_DELAY_MS);
+}
+
 function navigateSearch(dir) {
+  if (_terminalSearchTimer !== null) runSearch();
   if (!searchMatches.length) return;
   searchMatchIdx = (searchMatchIdx + dir + searchMatches.length) % searchMatches.length;
   _setSearchCount(`${searchMatchIdx + 1} / ${searchMatches.length}`);
@@ -890,6 +1110,14 @@ function navigateSearch(dir) {
 }
 
 function highlightCurrent() {
+  if (_terminalSearchLazyMode) {
+    _clearTerminalLazyHighlight();
+    const currentMatch = searchMatches[searchMatchIdx];
+    const current = _highlightLazySearchMatch(currentMatch, searchMatchIdx);
+    _terminalLazyHighlightedMatch = currentMatch || null;
+    _scrollTerminalLazySearchMatchIntoView(currentMatch, current);
+    return;
+  }
   searchMatches.forEach((group, i) => {
     group.forEach((node) => node.classList.toggle('current', i === searchMatchIdx));
   });
@@ -902,6 +1130,7 @@ function highlightCurrent() {
 function clearHighlights() {
   const out = getOutput(activeTabId);
   if (!out) return;
+  _clearTerminalLazyHighlight();
   _clearTextSearchHighlights(out);
   out.querySelectorAll('.line.search-signal-hl').forEach((line) => {
     line.classList.remove('search-signal-hl', 'current');
@@ -909,9 +1138,11 @@ function clearHighlights() {
 }
 
 function clearSearch() {
+  _clearTerminalSearchTimer();
   clearHighlights();
   searchMatches = [];
   searchMatchIdx = -1;
+  _terminalSearchLazyMode = false;
   _setSearchCount('');
   if (typeof searchInput !== 'undefined' && searchInput) searchInput.value = '';
   searchScope = 'text';

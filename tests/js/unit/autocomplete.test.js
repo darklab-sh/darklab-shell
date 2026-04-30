@@ -67,6 +67,11 @@ describe('autocomplete helpers', () => {
     expect(item).not.toBeNull()
     expect(item.innerHTML).toContain('<span class="ac-match">pi</span>')
     expect(document.getElementById('ac').style.display).toBe('block')
+
+    document.getElementById('cmd').value = 'np'
+    acShow(['nmap'])
+    expect(document.querySelector('.ac-item')?.innerHTML).toContain('<span class="ac-match">n</span>')
+    expect(document.querySelector('.ac-item')?.innerHTML).toContain('<span class="ac-match">p</span>')
   })
 
   it('renders suggestions from the shared composer value accessor when present', () => {
@@ -386,6 +391,7 @@ describe('autocomplete helpers', () => {
     )
 
     expect(getAutocompleteMatches('amass ', 6).map(item => item.value)).toEqual(['-h', 'enum', 'subs'])
+    expect(getAutocompleteMatches('amass nm', 8).map(item => item.value)).toEqual(['enum'])
   })
 
   it('shows root and subcommand examples while a unique command root is being typed', () => {
@@ -478,6 +484,10 @@ describe('autocomplete helpers', () => {
     )
 
     expect(getAutocompleteMatches('open', 4).map(item => item.value)).toEqual([
+      'openssl s_client -connect ip.darklab.sh:443',
+      'openssl ciphers -v',
+    ])
+    expect(getAutocompleteMatches('ssl', 3).map(item => item.value)).toEqual([
       'openssl s_client -connect ip.darklab.sh:443',
       'openssl ciphers -v',
     ])
@@ -974,6 +984,10 @@ describe('autocomplete helpers', () => {
       '/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt',
       '<wordlist>',
     ])
+    expect(getAutocompleteMatches('dnsx -w sdm', 11).map(item => item.value)).toEqual([
+      '/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt',
+      '<wordlist>',
+    ])
     expect(getAutocompleteMatches('legacy -w sub', 13).map(item => item.value)).toEqual(['<wordlist>'])
   })
 
@@ -1016,6 +1030,10 @@ describe('autocomplete helpers', () => {
     )
 
     expect(getAutocompleteMatches('gobuster -w ', 12).map(item => item.value)).toEqual([
+      '/usr/share/wordlists/seclists/Discovery/Web-Content/common.txt',
+      'wordlist.txt',
+    ])
+    expect(getAutocompleteMatches('gobuster -w txt', 15).map(item => item.value)).toEqual([
       '/usr/share/wordlists/seclists/Discovery/Web-Content/common.txt',
       'wordlist.txt',
     ])

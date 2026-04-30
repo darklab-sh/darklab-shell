@@ -57,11 +57,13 @@ projects become another session-scoped persistence layer.
 
 ### P0.1 Clarify Session And Permalink Boundaries
 
-- Decide whether `/history/<run_id>` is private session history or an implicit
-  bearer permalink.
-- If private, enforce session ownership checks for run permalink access.
-- If shareable, document that run IDs are bearer secrets and consider moving
-  sharing toward explicit snapshot/package creation.
+- Keep `/history/<run_id>` as an implicit bearer permalink for the current
+  history/share model; a user with the copied run URL can view that run without
+  the original session identity.
+- Treat run IDs in copied links as bearer secrets and consider moving future
+  sharing toward explicit snapshot/package creation when project export exists.
+- Preserve session ownership checks for history listing, deletion, active-run
+  recovery, and kill actions.
 - Validate anonymous session IDs server-side instead of accepting arbitrary
   non-`tok_` strings.
 - Review `/kill` ownership checks so a run ID alone is not the only authorization

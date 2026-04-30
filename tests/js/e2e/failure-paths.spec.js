@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, openHistoryWithEntries, makeTestIp } from './helpers.js'
+import { runCommand, openHistoryWithEntries, waitForHistoryRuns, makeTestIp } from './helpers.js'
 
 const CMD = 'hostname'
 const TEST_IP = makeTestIp(42)
@@ -117,7 +117,7 @@ test.describe('failure paths', () => {
     })
 
     await runCommand(page, CMD)
-    await page.waitForTimeout(1200)
+    await waitForHistoryRuns(page, 1)
     await runCommand(page, 'date')
     await page.locator('.rail-nav [data-action="history"]').click()
     await page.locator('#history-list > *').first().waitFor({ state: 'visible' })

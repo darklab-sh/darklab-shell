@@ -183,22 +183,7 @@
   function onWorkflowsToggle(open) {
     ui.workflowsOpen = open;
     writePref(PREF_WORKFLOWS, open ? '1' : '0');
-    if (!open) ui.recentHeight = null; // reset auto-size next open
     applySectionsState();
-    if (open && ui.recentOpen && ui.recentHeight == null) {
-      // Auto-size Recent: measure Workflows natural height and leave Recent ≥120px.
-      requestAnimationFrame(() => {
-        if (!railSplitArea || !railWorkflowsBody) return;
-        const areaH = railSplitArea.getBoundingClientRect().height;
-        const wfH = railWorkflowsBody.scrollHeight || 180;
-        const HEADER_H = 28;
-        const SPLITTER_H = 6;
-        const desiredWorkflowsH = Math.min(wfH + HEADER_H, Math.max(MIN_SECTION_H, areaH - 120));
-        const nextRecentH = Math.max(120, areaH - desiredWorkflowsH - SPLITTER_H);
-        ui.recentHeight = clampRecentHeight(nextRecentH);
-        applySectionsState();
-      });
-    }
   }
 
   if (railRecentHeader) {

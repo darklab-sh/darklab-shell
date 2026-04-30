@@ -35,8 +35,14 @@ Part 5 — release-draft docs:
   Temporary release-branch merge-request and release-note drafts live under
   docs/release-drafts/ while a version branch is active. If that directory
   exists, the docs must carry the convention and the draft set must be paired.
+
+Part 6 — operator configuration docs:
+  Operator-facing defaults from app/config.py's load_config() defaults must
+  be represented in the checked-in app/conf/config.yaml reference and the
+  README.md "## Configuration" table.
 """
 
+import ast
 import re
 import shutil
 import subprocess
@@ -52,6 +58,8 @@ _CONTRIBUTING = _REPO_ROOT / "CONTRIBUTING.md"
 _ARCHITECTURE = _REPO_ROOT / "ARCHITECTURE.md"
 _DOCS_STANDARDS = _REPO_ROOT / "DOCS_STANDARDS.md"
 _README = _REPO_ROOT / "README.md"
+_CONFIG_PY = _REPO_ROOT / "app" / "config.py"
+_DEFAULT_CONFIG_YAML = _REPO_ROOT / "app" / "conf" / "config.yaml"
 _RELEASE_DRAFTS_DIR = _REPO_ROOT / "docs" / "release-drafts"
 
 # This file lives in tests/py/ but has no appendix section of its own;
@@ -251,11 +259,14 @@ def _parse_appendix_rows(suffixes: tuple[str, ...]) -> dict[str, list[str]]:
 
 def _ordered_test_files_from_git(actual_by_file: dict[str, list[str]], directory: str) -> list[str]:
     actual = set(actual_by_file)
-    return [
+    tracked_files = [
         Path(path).name
         for path in _git_tracked_files()
         if path.startswith(directory + "/") and Path(path).name in actual
     ]
+    if len(tracked_files) == len(actual):
+        return tracked_files
+    return sorted(set(tracked_files) | (actual - set(tracked_files)))
 
 
 def _extract_pytest_total(text: str) -> int | None:
@@ -288,6 +299,50 @@ def _extract_combined_total(text: str) -> int | None:
         if m:
             return int(m.group(1).replace(",", ""))
     return None
+
+
+def _config_default_keys() -> list[str]:
+    """Return app/config.py load_config() default keys in source order."""
+    tree = ast.parse(_CONFIG_PY.read_text())
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef) or node.name != "load_config":
+            continue
+        for child in ast.walk(node):
+            if not isinstance(child, ast.Assign):
+                continue
+            if not any(isinstance(target, ast.Name) and target.id == "defaults"
+                       for target in child.targets):
+                continue
+            if not isinstance(child.value, ast.Dict):
+                continue
+            keys: list[str] = []
+            for key_node in child.value.keys:
+                if key_node is None:
+                    continue
+                key = ast.literal_eval(key_node)
+                if isinstance(key, str):
+                    keys.append(key)
+            return keys
+    raise AssertionError("Could not find load_config() defaults dict in app/config.py")
+
+
+def _documented_default_config_keys() -> set[str]:
+    """Return top-level config keys represented in app/conf/config.yaml."""
+    keys = set()
+    for line in _DEFAULT_CONFIG_YAML.read_text().splitlines():
+        match = re.match(r"^#?\s*([A-Za-z_][A-Za-z0-9_]*):(?:\s|$)", line)
+        if match:
+            keys.add(match.group(1))
+    return keys
+
+
+def _readme_configuration_table_keys() -> set[str]:
+    """Return setting names from the README.md '## Configuration' settings table."""
+    text = _README.read_text()
+    match = re.search(r"^## Configuration\n(?P<body>.*?)(?:^### Config file reload behavior\n)",
+                      text, re.M | re.S)
+    assert match, "Could not find README.md '## Configuration' settings table"
+    return set(re.findall(r"^\|\s+`([^`]+)`\s+\|", match.group("body"), re.M))
 
 
 # ── Shared fixtures ───────────────────────────────────────────────────────────
@@ -963,4 +1018,29 @@ class TestReleaseDraftDocs:
             "Release draft files must be paired as "
             "vX.Y-merge-request.md and vX.Y-release-notes.md:\n"
             + "\n".join([*(f"  malformed: {name}" for name in malformed), *missing])
+        )
+
+
+# ── Part 6: operator configuration docs ──────────────────────────────────────
+
+class TestOperatorConfigurationDocs:
+    """Operator-facing config defaults must stay represented in both the
+    checked-in config reference and the README settings table."""
+
+    def test_config_yaml_represents_app_defaults(self):
+        expected = _config_default_keys()
+        documented = _documented_default_config_keys()
+        missing = [key for key in expected if key not in documented]
+        assert not missing, (
+            "app/conf/config.yaml is missing app/config.py default keys:\n"
+            + "\n".join(f"  {key}" for key in missing)
+        )
+
+    def test_readme_configuration_represents_app_defaults(self):
+        expected = _config_default_keys()
+        documented = _readme_configuration_table_keys()
+        missing = [key for key in expected if key not in documented]
+        assert not missing, (
+            "README.md '## Configuration' table is missing app/config.py default keys:\n"
+            + "\n".join(f"  {key}" for key in missing)
         )

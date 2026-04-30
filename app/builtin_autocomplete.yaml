@@ -470,6 +470,27 @@ commands:
       flags:
         - value: --all
           description: "List every installed SecLists file"
+  - root: workflow
+    description: "built-in: list, inspect, and run guided workflows"
+    autocomplete:
+      subcommands:
+        - value: list
+          description: "List workflows"
+          closes: true
+        - value: show
+          description: "Show workflow steps"
+          takes_value: true
+          insert: "show "
+          value_hint:
+            value: "<workflow>"
+            description: "Workflow name"
+        - value: run
+          description: "Run a workflow"
+          takes_value: true
+          insert: "run "
+          value_hint:
+            value: "<workflow>"
+            description: "Workflow name"
   - root: who
     description: "built-in: show the current shell user and session"
     autocomplete:

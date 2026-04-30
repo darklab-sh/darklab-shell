@@ -291,6 +291,34 @@ def pid_pop(run_id: str) -> int | None:
             return _pid_map.pop(run_id, None)
 
 
+def pid_pop_for_session(run_id: str, session_id: str) -> int | None:
+    """Remove and return a PID only when the active run belongs to session_id."""
+    if not run_id or not session_id:
+        return None
+
+    if redis_client:
+        raw = redis_client.get(f"procmeta:{run_id}")
+        payload = _load_active_run_payload(raw)
+        if not payload or str(payload.get("session_id", "")) != session_id:
+            return None
+        pid = pid_pop(run_id)
+        if pid is not None:
+            active_run_remove(run_id)
+        return pid
+
+    with _pid_lock:
+        meta = _active_run_meta.get(run_id)
+        if not meta or str(meta.get("session_id", "")) != session_id:
+            return None
+        pid = _pid_map.pop(run_id, None)
+        if pid is not None:
+            _active_run_meta.pop(run_id, None)
+            _session_run_ids.get(session_id, set()).discard(run_id)
+            if session_id in _session_run_ids and not _session_run_ids[session_id]:
+                _session_run_ids.pop(session_id, None)
+        return pid
+
+
 def active_run_register(run_id: str, pid: int, session_id: str, command: str, started: str) -> None:
     """Register the metadata needed to restore an in-flight run after reload."""
     payload = {

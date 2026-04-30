@@ -1829,12 +1829,14 @@ class TestActiveRunMetadata:
         self._patcher = mock.patch.object(process, "redis_client", None)
         self._patcher.start()
         with process._pid_lock:
+            process._pid_map.clear()
             process._active_run_meta.clear()
             process._session_run_ids.clear()
 
     def teardown_method(self):
         self._patcher.stop()
         with process._pid_lock:
+            process._pid_map.clear()
             process._active_run_meta.clear()
             process._session_run_ids.clear()
 
@@ -1899,6 +1901,22 @@ class TestActiveRunMetadata:
             assert fake_redis.get("procmeta:run-reused") is None
             assert fake_redis.get("proc:run-reused") is None
             assert fake_redis.smembers("sessionprocs:session-1") == set()
+
+    def test_pid_pop_for_session_requires_matching_session(self):
+        with mock.patch.object(process, "_pid_start_time", return_value=None):
+            process.pid_register("run-owned", 12345)
+            process.active_run_register(
+                "run-owned",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+            )
+
+        assert process.pid_pop_for_session("run-owned", "session-2") is None
+        assert process.pid_pop_for_session("run-owned", "session-1") == 12345
+        assert process.pid_pop("run-owned") is None
+        assert process.active_runs_for_session("session-1") == []
 
     def test_active_runs_for_session_prunes_redis_legacy_metadata_on_linux(self):
         fake_redis = process._FakeRedisClient()

@@ -148,6 +148,17 @@ class TestOutputSearch:
         assert run_ps in ids
         assert run_ls not in ids
 
+    def test_short_default_query_matches_output_text_via_like(self):
+        # Drawer/default history search promises command+output matching. Short
+        # output-only terms like "OK" cannot use trigram FTS, so they need the
+        # same LIKE fallback against output_search_text.
+        run_ok = _insert_run(SESSION_A, "curl https://example.com", ["HTTP/2 200", "OK"])
+        _insert_run(SESSION_A, "date", ["Wed Apr 29"])
+        client = get_client(SESSION_A)
+        resp = client.get("/history?q=OK")
+        ids = [r["id"] for r in resp.get_json()["runs"]]
+        assert run_ok in ids
+
     def test_partial_typing_narrows_progressively(self):
         # Reverse-i-search expectation: every keystroke runs a search and the
         # result set narrows. `p` -> matches both ping/ps; `pi` -> ping only;
@@ -244,11 +255,11 @@ class TestOutputSearch:
         ids = [r["id"] for r in data["runs"]]
         assert run_id in ids, "FTS must find content from beyond the preview window"
 
-    def test_fts_failure_falls_back_to_command_like(self, monkeypatch, tmp_path):
-        """When runs_fts is absent, history search falls back to command LIKE without 500.
+    def test_fts_failure_falls_back_to_command_and_output_like(self, monkeypatch, tmp_path):
+        """When runs_fts is absent, history search falls back to LIKE without 500.
 
-        Verifies: command-text queries still return results; output-only queries
-        return empty (not an error); the response is always 200.
+        Verifies: command-text and output-only queries still return results and
+        the response is always 200.
         """
         # Replace the current isolated DB with a minimal schema that has no FTS table.
         no_fts_path = str(tmp_path / "nofts.db")
@@ -278,7 +289,8 @@ class TestOutputSearch:
         assert resp.status_code == 200
         ids = [r["id"] for r in resp.get_json()["runs"]]
         assert run_id in ids, "LIKE fallback must find the run by command text"
-        # Output-only queries return empty (no FTS), not a 500.
+        # Output-only queries use output_search_text LIKE, not FTS.
         resp2 = client.get("/history?q=93.184.216.34")
         assert resp2.status_code == 200
-        assert resp2.get_json()["runs"] == []
+        ids2 = [r["id"] for r in resp2.get_json()["runs"]]
+        assert run_id in ids2

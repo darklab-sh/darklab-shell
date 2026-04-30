@@ -702,10 +702,10 @@ test.describe('mobile menu', () => {
       'banner chip-overflow-test-4',
     ]
 
-    for (const [index, command] of commands.entries()) {
+    for (const command of commands) {
       await runCommandMobile(page, command)
-      if (index < commands.length - 1) await page.waitForTimeout(250)
     }
+    await waitForHistoryRuns(page, commands.length)
 
     const peek = page.locator('#mobile-recent-peek')
     await expect(peek).toBeVisible()
@@ -721,9 +721,8 @@ test.describe('mobile menu', () => {
   test('mobile recents sheet injects the tapped command into the composer and closes', async ({ page }) => {
     const commands = ['hostname', 'date', 'uptime']
 
-    for (const [index, command] of commands.entries()) {
+    for (const command of commands) {
       await runCommandMobile(page, command)
-      if (index < commands.length - 1) await page.waitForTimeout(250)
     }
     await waitForHistoryRuns(page, commands.length)
     await expect(page.locator('#mobile-recent-peek')).toHaveAttribute('data-peek-mode', 'recents', { timeout: 5_000 })

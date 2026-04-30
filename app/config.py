@@ -63,7 +63,7 @@ def load_config(conf_dir=None):
     """
     defaults = {
         "app_name":                   "darklab_shell",
-        "prompt_prefix":              "anon@darklab",
+        "prompt_prefix":              "anon@darklab.sh",
         "motd":                       "",
         "default_theme":              "darklab_obsidian.yaml",
         "history_panel_limit":        50,

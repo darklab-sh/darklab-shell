@@ -1400,6 +1400,11 @@ def _normalize_workflow_entry(entry):
     return normalized
 
 
+def normalize_workflow_entry(entry):
+    """Return a normalized workflow entry or None when the payload is invalid."""
+    return _normalize_workflow_entry(entry)
+
+
 def _workflow_entry_enabled(entry, cfg=None):
     return _suggestion_enabled_for_features(entry, cfg)
 
@@ -1417,15 +1422,28 @@ def load_workflows():
     return result
 
 
+def _workflow_slug(title: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", str(title or "").strip().lower()).strip("-")
+    return slug or "workflow"
+
+
+def _workflow_with_catalog_metadata(entry, source, index):
+    item = dict(entry)
+    item["source"] = source
+    item.setdefault("id", f"{source}:{_workflow_slug(item.get('title', 'workflow'))}-{index + 1}")
+    return item
+
+
 def load_all_workflows(cfg=None):
     """Return the built-in workflows followed by any custom workflows.yaml entries."""
     builtins = []
-    for entry in _builtin_workflows():
+    for idx, entry in enumerate(_builtin_workflows()):
         normalized = _normalize_workflow_entry(entry)
         if normalized and _workflow_entry_enabled(normalized, cfg):
-            builtins.append(normalized)
+            builtins.append(_workflow_with_catalog_metadata(normalized, "builtin", idx))
     custom = [
-        workflow for workflow in load_workflows()
+        _workflow_with_catalog_metadata(workflow, "config", idx)
+        for idx, workflow in enumerate(load_workflows())
         if _workflow_entry_enabled(workflow, cfg)
     ]
     return [*builtins, *custom]

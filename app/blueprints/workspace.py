@@ -143,7 +143,8 @@ def workspace_files_read():
     path = _path_from_request()
     try:
         text = read_workspace_text_file(str(session_id), path)
-        return jsonify({"path": path, "text": text})
+        info = workspace_path_info(str(session_id), path)
+        return jsonify({"path": path, "text": text, "size": info.get("size")})
     except Exception as exc:
         return _workspace_error_response(exc)
 

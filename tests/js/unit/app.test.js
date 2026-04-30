@@ -561,6 +561,9 @@ async function loadAppFns({
     syncOptionsControls,
     handleThemeCommand,
     handleConfigCommand,
+    renderWorkflowItems,
+    reloadWorkflowCatalog,
+    handleWorkflowTerminalCommand,
     getRuntimeAutocompleteContext,
     getRuntimeAutocompleteItems,
     openOptions,
@@ -731,6 +734,20 @@ function builtInAutocompleteBase() {
           hint('rotate', 'Generate a new token and migrate all history to it'),
           hint('list', 'Show the active session token and its creation date'),
           hint('revoke <token>', 'Permanently invalidate a tok_ token on this server', 'revoke '),
+        ],
+      },
+    },
+    workflow: {
+      ...emptyBuiltIn('built-in: list, inspect, and run guided workflows'),
+      expects_value: ['show', 'run'],
+      arg_hints: {
+        list: [],
+        show: [],
+        run: [],
+        __positional__: [
+          hint('list', 'List workflows'),
+          hint('show', 'Show workflow steps', 'show '),
+          hint('run', 'Run a workflow', 'run '),
         ],
       },
     },
@@ -1487,6 +1504,87 @@ describe('app helpers', () => {
     expect(context.var.sequence_arg_hints['set host'].map(item => item.value)).toEqual(['<value>'])
     expect(context.var.sequence_arg_hints['unset host']).toEqual([])
     expect(context.var.close_after).toEqual({ list: 0, set: 2, unset: 1 })
+  })
+
+  it('serves workflow names and variable flags in runtime autocomplete context', async () => {
+    const { getRuntimeAutocompleteContext, renderWorkflowItems } = await loadAppFns()
+    renderWorkflowItems([
+      {
+        id: 'usr_abcd',
+        source: 'user',
+        title: 'DNS Check',
+        description: 'Custom DNS workflow',
+        inputs: [{ id: 'domain', label: 'Domain', type: 'domain', required: true, placeholder: 'example.com', default: '', help: '' }],
+        steps: [{ cmd: 'dig {{domain}} A', note: '' }],
+      },
+    ], { emitCatalogEvent: false })
+
+    const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
+
+    expect(context.workflow.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'show', 'run'])
+    expect(context.workflow.arg_hints.run.map(item => item.value)).toEqual(['dns-check'])
+    expect(context.workflow.sequence_arg_hints['run dns-check'].map(item => item.value)).toEqual(['--domain'])
+    expect(context.workflow.arg_hints['--domain'][0].value_type).toBe('domain')
+  })
+
+  it('renders user workflows above built-ins with edit actions', async () => {
+    const { renderWorkflowItems } = await loadAppFns()
+    document.getElementById('workflows-overlay').innerHTML = '<div class="workflows-body"></div>'
+
+    renderWorkflowItems([
+      {
+        id: 'usr_saved',
+        source: 'user',
+        title: 'Saved Recon',
+        description: '',
+        inputs: [],
+        steps: [{ cmd: 'whois darklab.sh', note: '' }],
+      },
+      {
+        id: 'builtin:dns',
+        source: 'builtin',
+        title: 'DNS Troubleshooting',
+        description: '',
+        inputs: [],
+        steps: [{ cmd: 'dig darklab.sh A', note: '' }],
+      },
+    ], { emitCatalogEvent: false })
+
+    const labels = [...document.querySelectorAll('.workflow-section-label')].map(el => el.textContent)
+    const titles = [...document.querySelectorAll('.workflow-title')].map(el => el.textContent)
+    expect(labels).toEqual(['My workflows', 'Built-ins'])
+    expect(titles).toEqual(['Saved Recon', 'DNS Troubleshooting'])
+    expect(document.querySelector('.is-user-workflow .workflow-edit-btn')).toBeTruthy()
+  })
+
+  it('runs a workflow from the terminal command with flag-provided inputs', async () => {
+    const submitComposerCommand = vi.fn()
+    const workflow = {
+      id: 'builtin:dns',
+      source: 'builtin',
+      title: 'DNS Troubleshooting',
+      description: '',
+      inputs: [{ id: 'domain', label: 'Domain', type: 'domain', required: true, placeholder: 'example.com', default: '', help: '' }],
+      steps: [{ cmd: 'dig {{domain}} A', note: '' }],
+    }
+    const { renderWorkflowItems, handleWorkflowTerminalCommand, appendCommandEcho } = await loadAppFns({
+      submitComposerCommand,
+      apiFetch: (url) => {
+        if (url === '/workflows') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [workflow] }) })
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+      },
+    })
+    renderWorkflowItems([workflow], { emitCatalogEvent: false })
+
+    await handleWorkflowTerminalCommand('workflow run dns-troubleshooting --domain darklab.sh', 'tab-1')
+
+    expect(appendCommandEcho).toHaveBeenCalledWith(
+      'workflow run dns-troubleshooting --domain darklab.sh',
+      'tab-1',
+    )
+    expect(document.body.textContent).toContain('[workflow] DNS Troubleshooting: 1 step(s) queued.')
   })
 
   it('serves runtime autocomplete context for built-in command lookup helpers', async () => {

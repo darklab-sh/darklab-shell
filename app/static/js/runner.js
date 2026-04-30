@@ -1077,11 +1077,12 @@ function _persistSessionTokenRun(command, lineItems, statusValue = 'ok') {
   _persistClientSideRun(command, lineItems, statusValue);
 }
 
-function _sessionMigrationCountLabel(runCount = 0, workspaceFileCount = 0) {
+function _sessionMigrationCountLabel(runCount = 0, workspaceFileCount = 0, workflowCount = 0) {
   const parts = [];
   if (runCount > 0) parts.push(`${runCount} run(s)`);
   if (workspaceFileCount > 0) parts.push(`${workspaceFileCount} workspace file(s)`);
-  if (!parts.length) return 'no runs or workspace files';
+  if (workflowCount > 0) parts.push(`${workflowCount} workflow(s)`);
+  if (!parts.length) return 'no runs, workspace files, or workflows';
   if (parts.length === 1) return parts[0];
   return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
@@ -1098,7 +1099,8 @@ function _sessionMigrationResultText(data = {}) {
   if (skippedWorkspaceFiles > 0) workspaceParts.push(`${skippedWorkspaceFiles} workspace file(s) skipped`);
   if (skippedWorkspaceDirs > 0) workspaceParts.push(`${skippedWorkspaceDirs} folder(s) skipped`);
   return `migrated — ${data.migrated_runs} run(s), ${data.migrated_snapshots} snapshot(s), `
-    + `${data.migrated_stars ?? 0} starred command(s), ${workspaceParts.join(', ')}, `
+    + `${data.migrated_stars ?? 0} starred command(s), ${data.migrated_workflows ?? 0} workflow(s), `
+    + `${workspaceParts.join(', ')}, `
     + 'and saved user options when the destination had none';
 }
 
@@ -1198,6 +1200,14 @@ function cancelPendingTerminalConfirm(tabId = activeTabId) {
   const cancelHandler = typeof pending.onCancel === 'function'
     ? pending.onCancel
     : (typeof pending.onNo === 'function' ? pending.onNo : null);
+  if (pending.kind === 'text') {
+    Promise.resolve(typeof cancelHandler === 'function' ? cancelHandler() : undefined).catch((err) => {
+      appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
+      setStatus('fail');
+    });
+    refocusComposerAfterAction();
+    return true;
+  }
   _runPendingTerminalConfirmHandler(promptTabId, cancelHandler).catch((err) => {
     appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
     setStatus('fail');
@@ -1223,6 +1233,7 @@ async function _activateSessionTokenIdentity(token) {
   if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
   if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
   else if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache().catch(() => {});
+  if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
 }
 
 async function _sessionTokenGenerate(tabId) {
@@ -1241,12 +1252,14 @@ async function _sessionTokenGenerate(tabId) {
     // Check run/workspace counts on old session before switching identity.
     let runCount = 0;
     let workspaceFileCount = 0;
+    let workflowCount = 0;
     try {
       const countResp = await apiFetch('/session/run-count');
       if (countResp.ok) {
         const countData = await countResp.json();
         runCount = countData.count || 0;
         workspaceFileCount = countData.workspace_files || 0;
+        workflowCount = countData.workflow_count || 0;
       }
     } catch (_) {}
 
@@ -1255,12 +1268,12 @@ async function _sessionTokenGenerate(tabId) {
     appendLine('use session-token set <value> on another device to continue your session', '', tabId);
     appendLine('warning: your session token grants full access to your session history — treat it like a password', 'notice', tabId);
 
-    if (runCount > 0 || workspaceFileCount > 0) {
+    if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0) {
       // Defer identity switch until the user answers the migration prompt so a
       // failed /session/migrate does not strand runs on the old session while
       // the active identity is already the new token.
       appendLine(
-        `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount)} in your previous session. migrate history and files to your new session token?`,
+        `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount, workflowCount)} in your previous session. migrate history, files, and workflows to your new session token?`,
         '',
         tabId
       );
@@ -1273,6 +1286,7 @@ async function _sessionTokenGenerate(tabId) {
             updateSessionId(newToken);
             await _seedLocalStorageStarsToServer();
             if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+            if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
             _recordSuccessfulLocalCommand('session-token generate');
             _persistSessionTokenRun('session-token generate', [
               { text: `session token generated:  ${maskSessionToken(newToken)}` },
@@ -1286,6 +1300,7 @@ async function _sessionTokenGenerate(tabId) {
           updateSessionId(newToken);
           await _seedLocalStorageStarsToServer();
           if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+          if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
           _recordSuccessfulLocalCommand('session-token generate');
           appendLine('History and file migration skipped.', '', tabId);
           _persistSessionTokenRun('session-token generate', [
@@ -1362,21 +1377,23 @@ async function _sessionTokenSet(value, tabId) {
   // Check current session's run/workspace counts before switching identity.
   let runCount = 0;
   let workspaceFileCount = 0;
+  let workflowCount = 0;
   try {
     const countResp = await apiFetch('/session/run-count');
     if (countResp.ok) {
       const countData = await countResp.json();
       runCount = countData.count || 0;
       workspaceFileCount = countData.workspace_files || 0;
+      workflowCount = countData.workflow_count || 0;
     }
   } catch (_) {}
 
-  if (runCount > 0 || workspaceFileCount > 0) {
+  if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0) {
     // Defer identity switch until the user answers the migration prompt so a
     // failed /session/migrate does not strand runs on the old session while
     // the active identity is already the new token.
     appendLine(
-      `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount)} in your current session. migrate history and files to this session token?`,
+      `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount, workflowCount)} in your current session. migrate history, files, and workflows to this session token?`,
       '',
       tabId
     );
@@ -1464,6 +1481,7 @@ async function _sessionTokenClear(tabId) {
       updateSessionId(uuid);
       _clearVisibleSessionHistoryState();
       if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+      if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
       appendLine(`session token cleared — reverted to anonymous session (${maskSessionToken(uuid)})`, '', tabId);
       appendLine('your session token data remains in the server database', '', tabId);
       _recordSuccessfulLocalCommand('session-token clear');
@@ -1517,6 +1535,7 @@ async function _sessionTokenRotate(tabId) {
     if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
     if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
     else if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache().catch(() => {});
+    if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
 
     appendLine(`session token rotated: ${maskSessionToken(newToken)}`, '', tabId);
     appendLine(_sessionMigrationResultText(migrateData), '', tabId);
@@ -2032,9 +2051,9 @@ async function _handleWorkspaceEditorCommand(cmd, tabId) {
       : '';
     await openWorkspaceEditorFromCommand(parsed.action, target);
     const targetLabel = target ? ` ${target}` : '';
-    appendLine(`file: opened${targetLabel} in the Files panel`, '', tabId);
+    appendLine(`file: opened${targetLabel} in the file editor`, '', tabId);
     _recordSuccessfulLocalCommand(cmd);
-    _persistClientSideRun(cmd, [{ text: `file: opened${targetLabel} in the Files panel` }], 'ok');
+    _persistClientSideRun(cmd, [{ text: `file: opened${targetLabel} in the file editor` }], 'ok');
     setStatus('ok');
   } catch (err) {
     appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
@@ -2151,10 +2170,18 @@ function submitCommand(rawCmd) {
 
   // Intercept yes/no answer to a pending terminal confirmation prompt.
   if (_pendingTerminalConfirm) {
-    const answer = cmd.trim().toLowerCase();
     const pending = _pendingTerminalConfirm;
     const promptTabId = pending.tabId || activeTabId;
     appendCommandEcho(cmd, promptTabId);
+    if (pending.kind === 'text') {
+      _setPendingTerminalConfirm(null);
+      Promise.resolve(typeof pending.onAnswer === 'function' ? pending.onAnswer(cmd) : undefined).catch((err) => {
+        appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
+        setStatus('fail');
+      });
+      return true;
+    }
+    const answer = cmd.trim().toLowerCase();
     if (answer !== 'yes' && answer !== 'y' && answer !== 'no' && answer !== 'n') {
       appendLine('please answer yes or no', 'notice', promptTabId);
       return true;
@@ -2251,6 +2278,17 @@ function submitCommand(rawCmd) {
     void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
       _handleWorkspaceDownloadCommand(baseCommand, activeTabId)
     ));
+    return true;
+  }
+
+  if (String(cmd || '').trim().toLowerCase().split(/\s+/, 1)[0] === 'workflow') {
+    if (typeof handleWorkflowTerminalCommand === 'function') {
+      void handleWorkflowTerminalCommand(cmd, activeTabId);
+      return true;
+    }
+    appendCommandEcho(cmd);
+    appendLine('[error] workflow command is not ready — reload the page and try again', 'exit-fail', activeTabId);
+    setStatus('fail');
     return true;
   }
 

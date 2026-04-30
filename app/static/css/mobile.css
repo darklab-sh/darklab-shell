@@ -587,7 +587,8 @@
      height so max-height on the modal actually constrains it; -webkit-overflow-
      scrolling enables inertia scroll on iOS Safari. */
   body.mobile-terminal-mode .faq-body,
-  body.mobile-terminal-mode .workflows-body {
+  body.mobile-terminal-mode .workflows-body,
+  body.mobile-terminal-mode .workflow-editor-body {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
@@ -597,6 +598,15 @@
   body.mobile-terminal-mode .workflows-body {
     gap: 10px;
     padding: 14px;
+  }
+  body.mobile-terminal-mode .workflow-header-actions {
+    margin-left: auto;
+  }
+  body.mobile-terminal-mode .workflow-editor {
+    min-height: 68svh;
+  }
+  body.mobile-terminal-mode .workflow-editor-footer {
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0));
   }
   body.mobile-terminal-mode .workflow-card {
     padding: 0;

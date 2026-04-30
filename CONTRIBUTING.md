@@ -75,10 +75,11 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
    git config core.hooksPath scripts/hooks
    ```
 
-Use the virtual environment for all local Python work:
+Keep the virtual environment installed for all local Python work. The npm pytest
+scripts pick `.venv/bin/pytest` automatically when it exists, while direct app,
+lint, and debugging commands should still run from the virtualenv:
 
 - app runs
-- `npm run test` which runs pytest
 - `npm run lint` which runs flake8
 - ad hoc backend debugging
 
@@ -155,11 +156,12 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1088 pytest + 906 Vitest + 222 Playwright = 2,216 tests**.
+Current totals: **1102 pytest + 920 Vitest + 229 Playwright = 2,251 tests**.
+That total includes 2,221 behavior tests plus 30 docs/inventory meta-tests.
 
 Playwright notes:
 
-- `npm run test:e2e` uses the parallel config and currently balances the browser suite across 5 isolated Chromium projects
+- `npm run test:e2e` delegates to `bash scripts/run_playwright.sh`, which keeps quiet local Playwright output by default, clears the configured e2e ports, and currently balances the browser suite across 5 isolated Chromium projects. Add `--debug-logs` when app/server logs are needed, `--ci` for CI-style retries, or `--force-color` when color must be forced through non-TTY output.
 - plain `npx playwright test` uses the default single-project config, which is the intended path for VS Code Test Explorer and focused local debugging
 - the parallel projects each get their own Flask server port and isolated local app state so history, run-output artifacts, and limiter/process state do not collide between workers
 

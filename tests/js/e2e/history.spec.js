@@ -106,7 +106,7 @@ test.describe('history drawer', () => {
 
   test('clear all history removes all chips including starred ones', async ({ page }) => {
     await runCommand(page, CMD_A)
-    await page.waitForTimeout(1200)
+    await waitForHistoryRuns(page, 1)
     await runCommand(page, CMD_B)
     await waitForHistoryRuns(page, 2)
 
@@ -156,7 +156,7 @@ test.describe('history drawer', () => {
 
   test('Delete Non-Favorites keeps starred runs and removes the rest', async ({ page }) => {
     await runCommand(page, CMD_A)
-    await page.waitForTimeout(1200)
+    await waitForHistoryRuns(page, 1)
     await runCommand(page, CMD_B)
     await waitForHistoryRuns(page, 2)
 

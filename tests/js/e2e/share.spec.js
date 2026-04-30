@@ -172,7 +172,7 @@ test.describe('permalink / share', () => {
   }) => {
     await runCommand(page, CMD)
 
-    const shareResp = await createShareSnapshot(page)
+    const shareResp = await createShareSnapshot(page, { choice: 'raw' })
     const data = await shareResp.json()
 
     await page.goto(data.url)
@@ -246,7 +246,7 @@ test.describe('permalink / share', () => {
   }) => {
     await runCommand(page, CMD)
 
-    const shareResp = await createShareSnapshot(page)
+    const shareResp = await createShareSnapshot(page, { choice: 'raw' })
     const data = await shareResp.json()
 
     await page.goto(data.url)
@@ -263,8 +263,8 @@ test.describe('permalink / share', () => {
     for await (const chunk of txtStream) txtChunks.push(chunk)
     const txt = Buffer.concat(txtChunks).toString('utf8')
 
-    expect(txt).toContain('anon@darklab:/ $ hostname')
-    expect(txt).toMatch(/1\s+\+0\.0s\s+anon@darklab:\/ \$ hostname/)
+    expect(txt).toContain('anon@darklab.sh:/ $ hostname')
+    expect(txt).toMatch(/1\s+\+0\.0s\s+anon@darklab\.sh:\/ \$ hostname/)
     expect(txt).toContain('+')
 
     await page.locator('#perm-save-btn').click()

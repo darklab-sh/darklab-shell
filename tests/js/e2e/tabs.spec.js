@@ -522,7 +522,7 @@ test.describe('tab strip interactions', () => {
       },
     )
 
-    await page.waitForTimeout(220)
+    await expect(thirdTab).toHaveClass(/tab-touch-dragging/)
 
     await page.evaluate(
       ({ moveX, moveY }) => {

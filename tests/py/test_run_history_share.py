@@ -186,7 +186,7 @@ class TestRunStreaming:
 
         hist = client.get("/history", headers={"X-Session-ID": "sess-signal-history"})
         run_id = json.loads(hist.data)["runs"][0]["id"]
-        restored = client.get(f"/history/{run_id}?json&preview=1")
+        restored = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "sess-signal-history"})
         data = json.loads(restored.data)
         entry = data["output_entries"][0]
 
@@ -369,7 +369,7 @@ class TestRunStreaming:
         data = json.loads(hist.data)
         assert data["runs"][0]["command"] == "ping darklab.sh | grep ttl"
         run_id = data["runs"][0]["id"]
-        preview_resp = client.get(f"/history/{run_id}?json&preview=1")
+        preview_resp = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "sess-grep"})
         preview = json.loads(preview_resp.data)
         texts = [entry["text"] for entry in preview["output_entries"]]
         assert texts == ["ttl=54", "ttl=55"]
@@ -420,7 +420,7 @@ class TestRunStreaming:
         hist = client.get("/history", headers={"X-Session-ID": "sess-head"})
         data = json.loads(hist.data)
         run_id = data["runs"][0]["id"]
-        preview_resp = client.get(f"/history/{run_id}?json&preview=1")
+        preview_resp = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "sess-head"})
         preview = json.loads(preview_resp.data)
         texts = [entry["text"] for entry in preview["output_entries"]]
         assert texts == ["one", "two"]
@@ -450,7 +450,7 @@ class TestRunStreaming:
         hist = client.get("/history", headers={"X-Session-ID": "sess-tail"})
         data = json.loads(hist.data)
         run_id = data["runs"][0]["id"]
-        preview_resp = client.get(f"/history/{run_id}?json&preview=1")
+        preview_resp = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "sess-tail"})
         preview = json.loads(preview_resp.data)
         texts = [entry["text"] for entry in preview["output_entries"]]
         assert texts == ["two", "three"]
@@ -481,7 +481,7 @@ class TestRunStreaming:
         hist = client.get("/history", headers={"X-Session-ID": "sess-wc"})
         data = json.loads(hist.data)
         run_id = data["runs"][0]["id"]
-        preview_resp = client.get(f"/history/{run_id}?json&preview=1")
+        preview_resp = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "sess-wc"})
         preview = json.loads(preview_resp.data)
         texts = [entry["text"] for entry in preview["output_entries"]]
         assert texts == ["3"]
@@ -516,7 +516,7 @@ class TestRunStreaming:
         hist = client.get("/history", headers={"X-Session-ID": "sess-chain"})
         data = json.loads(hist.data)
         run_id = data["runs"][0]["id"]
-        preview_resp = client.get(f"/history/{run_id}?json&preview=1")
+        preview_resp = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "sess-chain"})
         preview = json.loads(preview_resp.data)
         texts = [entry["text"] for entry in preview["output_entries"]]
         assert texts == ["2"]

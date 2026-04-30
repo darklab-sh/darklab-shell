@@ -475,6 +475,22 @@ describe('client-side UI command pipe helpers', () => {
     })
   })
 
+  it('routes workflow commands to the client-side workflow handler', async () => {
+    const handleWorkflowTerminalCommand = vi.fn(() => Promise.resolve(true))
+    const appendCommandEcho = vi.fn()
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      handleWorkflowTerminalCommand,
+      appendCommandEcho,
+    })
+
+    submitCommand('workflow list')
+    await vi.waitFor(() =>
+      expect(handleWorkflowTerminalCommand).toHaveBeenCalledWith('workflow list', 'tab-1'),
+    )
+    expect(appendCommandEcho).not.toHaveBeenCalled()
+  })
+
   it('clears stale failed tab and HUD state after a successful client-side built-in', async () => {
     const appendLine = vi.fn()
     const { submitCommand, tabs, status } = loadRunnerFns({
@@ -532,6 +548,7 @@ function loadRunnerFns({
   Notification: NotificationOverride = undefined,
   handleThemeCommand: handleThemeCommandOverride = undefined,
   handleConfigCommand: handleConfigCommandOverride = undefined,
+  handleWorkflowTerminalCommand: handleWorkflowTerminalCommandOverride = undefined,
   refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride = undefined,
   openWorkspaceEditorFromCommand: openWorkspaceEditorFromCommandOverride = undefined,
   downloadWorkspaceFile: downloadWorkspaceFileOverride = undefined,
@@ -687,6 +704,9 @@ function loadRunnerFns({
       getRunNotifyPreference: getRunNotifyPreferenceOverride,
       ...(handleThemeCommandOverride ? { handleThemeCommand: handleThemeCommandOverride } : {}),
       ...(handleConfigCommandOverride ? { handleConfigCommand: handleConfigCommandOverride } : {}),
+      ...(handleWorkflowTerminalCommandOverride
+        ? { handleWorkflowTerminalCommand: handleWorkflowTerminalCommandOverride }
+        : {}),
       ...(refreshWorkspaceFileCacheOverride ? { refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride } : {}),
       ...(openWorkspaceEditorFromCommandOverride
         ? { openWorkspaceEditorFromCommand: openWorkspaceEditorFromCommandOverride }
@@ -1976,7 +1996,7 @@ describe('_sessionTokenSet verify failure behavior', () => {
     await _sessionTokenSet('tok_abcd1234efgh5678ijkl9012mnop3456', 'tab-1')
 
     expect(appendLine).toHaveBeenCalledWith(
-      'you have 1 run(s) in your current session. migrate history and files to this session token?',
+      'you have 1 run(s) in your current session. migrate history, files, and workflows to this session token?',
       '',
       'tab-1',
     )
@@ -2681,9 +2701,9 @@ describe('workspace file delete confirmation', () => {
 
     expect(openWorkspaceEditorFromCommand).toHaveBeenCalledWith('add', 'targets.txt')
     await vi.waitFor(() => expect(openWorkspaceEditorFromCommand).toHaveBeenCalledWith('edit', 'response.html'))
-    expect(appendLine).toHaveBeenCalledWith('file: opened in the Files panel', '', 'tab-1')
-    expect(appendLine).toHaveBeenCalledWith('file: opened targets.txt in the Files panel', '', 'tab-1')
-    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('file: opened response.html in the Files panel', '', 'tab-1'))
+    expect(appendLine).toHaveBeenCalledWith('file: opened in the file editor', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('file: opened targets.txt in the file editor', '', 'tab-1')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('file: opened response.html in the file editor', '', 'tab-1'))
     expect(status.className).toBe('status-pill ok')
   })
 
@@ -2853,7 +2873,7 @@ describe('session-token set pending prompt', () => {
     await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 1 run(s) in your current session. migrate history and files to this session token?',
+        'you have 1 run(s) in your current session. migrate history, files, and workflows to this session token?',
         '',
         'tab-1',
       ),
@@ -2867,7 +2887,7 @@ describe('session-token set pending prompt', () => {
     )
     expect(appendLine).toHaveBeenNthCalledWith(
       2,
-      'you have 1 run(s) in your current session. migrate history and files to this session token?',
+      'you have 1 run(s) in your current session. migrate history, files, and workflows to this session token?',
       '',
       'tab-1',
     )
@@ -2928,7 +2948,7 @@ describe('session-token set pending prompt', () => {
     await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 1 run(s) in your current session. migrate history and files to this session token?',
+        'you have 1 run(s) in your current session. migrate history, files, and workflows to this session token?',
         '',
         'tab-1',
       ),
@@ -2972,7 +2992,7 @@ describe('session-token set pending prompt', () => {
     await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 1 run(s) in your current session. migrate history and files to this session token?',
+        'you have 1 run(s) in your current session. migrate history, files, and workflows to this session token?',
         '',
         'tab-1',
       ),
@@ -3010,7 +3030,7 @@ describe('session-token set pending prompt', () => {
 
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 73 run(s) in your current session. migrate history and files to this session token?',
+        'you have 73 run(s) in your current session. migrate history, files, and workflows to this session token?',
         '',
         'tab-1',
       ),
@@ -3038,7 +3058,7 @@ describe('session-token set pending prompt', () => {
 
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 2 workspace file(s) in your current session. migrate history and files to this session token?',
+        'you have 2 workspace file(s) in your current session. migrate history, files, and workflows to this session token?',
         '',
         'tab-1',
       ),

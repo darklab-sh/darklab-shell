@@ -61,8 +61,20 @@ class TestRequestHelpers:
             assert shell_app.get_client_ip() == "127.0.0.1"
 
     def test_get_session_id_strips_whitespace(self):
-        with shell_app.app.test_request_context("/", headers={"X-Session-ID": "  abc123  "}):
-            assert shell_app.get_session_id() == "abc123"
+        session_id = str(uuid.uuid4())
+        with shell_app.app.test_request_context("/", headers={"X-Session-ID": f"  {session_id}  "}):
+            assert shell_app.get_session_id() == session_id
+
+    def test_get_session_id_rejects_invalid_anonymous_session_id(self):
+        previous = shell_app.app.config.get("TESTING")
+        shell_app.app.config["TESTING"] = False
+        try:
+            with shell_app.app.test_request_context("/", headers={"X-Session-ID": "abc123"}):
+                assert shell_app.get_session_id() == ""
+            with shell_app.app.test_request_context("/", headers={"X-Session-ID": "../other-session"}):
+                assert shell_app.get_session_id() == ""
+        finally:
+            shell_app.app.config["TESTING"] = previous
 
 
 # ── /kill ─────────────────────────────────────────────────────────────────────
@@ -71,17 +83,30 @@ class TestKillRoute:
     def test_kill_returns_404_when_run_missing(self):
         client = get_client()
 
-        with mock.patch("blueprints.run.pid_pop", return_value=None):
+        with mock.patch("blueprints.run.pid_pop_for_session", return_value=None):
             resp = client.post("/kill", json={"run_id": "missing-run"})
 
         assert resp.status_code == 404
         data = json.loads(resp.data)
         assert data["error"] == "No such process"
 
+    def test_kill_scopes_pid_lookup_to_request_session(self):
+        client = get_client()
+
+        with mock.patch("blueprints.run.pid_pop_for_session", return_value=None) as pid_pop:
+            resp = client.post(
+                "/kill",
+                json={"run_id": "run-123"},
+                headers={"X-Session-ID": "owner-session"},
+            )
+
+        assert resp.status_code == 404
+        pid_pop.assert_called_once_with("run-123", "owner-session")
+
     def test_kill_sends_sigterm_to_process_group(self):
         client = get_client()
 
-        with mock.patch("blueprints.run.pid_pop", return_value=1234), \
+        with mock.patch("blueprints.run.pid_pop_for_session", return_value=1234), \
              mock.patch("blueprints.run.os.getpgid", return_value=1234), \
              mock.patch("blueprints.run.os.killpg") as killpg:
             resp = client.post("/kill", json={"run_id": "run-123"})
@@ -94,7 +119,7 @@ class TestKillRoute:
     def test_kill_still_returns_true_when_process_lookup_fails(self):
         client = get_client()
 
-        with mock.patch("blueprints.run.pid_pop", return_value=1234), \
+        with mock.patch("blueprints.run.pid_pop_for_session", return_value=1234), \
              mock.patch("blueprints.run.os.getpgid", side_effect=ProcessLookupError):
             resp = client.post("/kill", json={"run_id": "run-404"})
 
@@ -105,7 +130,7 @@ class TestKillRoute:
     def test_kill_uses_scanner_sudo_path_when_configured(self):
         client = get_client()
 
-        with mock.patch("blueprints.run.pid_pop", return_value=1234), \
+        with mock.patch("blueprints.run.pid_pop_for_session", return_value=1234), \
              mock.patch("blueprints.run.SCANNER_PREFIX", ["sudo", "-u", "scanner", "env", "HOME=/tmp"]), \
              mock.patch("blueprints.run.subprocess.run") as run_cmd, \
              mock.patch("blueprints.run.os.killpg") as killpg:

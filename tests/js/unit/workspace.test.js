@@ -25,6 +25,14 @@ function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     <div id="workspace-viewer-overlay" class="u-hidden">
     <section id="workspace-viewer" class="u-hidden">
       <div id="workspace-viewer-title"></div>
+      <button type="button" id="workspace-viewer-refresh-btn" data-workspace-viewer-refresh>
+        <span class="workspace-refresh-glyph"></span>
+        <span>Refresh</span>
+      </button>
+      <button type="button" id="workspace-viewer-auto-refresh-toggle" data-workspace-viewer-auto-refresh aria-pressed="false">
+        <span class="workspace-auto-refresh-glyph"></span>
+        <span id="workspace-viewer-auto-refresh-label">Auto - off</span>
+      </button>
       <button type="button" data-workspace-viewer-action="edit"></button>
       <button type="button" data-workspace-viewer-action="download"></button>
       <button type="button" data-workspace-viewer-action="delete"></button>
@@ -47,9 +55,14 @@ function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     <button id="workspace-cancel-edit-btn" type="button"></button>
     <button id="workspace-close-viewer-btn" type="button"></button>
   `
+  const testWindow = Object.create(window)
+  testWindow.requestAnimationFrame = (fn) => {
+    if (typeof fn === 'function') fn()
+    return 1
+  }
   const globals = {
     document,
-    window,
+    window: testWindow,
     URL,
     Blob,
     APP_CONFIG: { workspace_enabled: true },
@@ -90,6 +103,9 @@ function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
       if (typeof fn === 'function') fn()
       return 0
     },
+    clearTimeout: vi.fn(),
+    setInterval: vi.fn(() => 0),
+    clearInterval: vi.fn(),
     workspaceSummary: document.getElementById('workspace-summary'),
     workspaceMessage: document.getElementById('workspace-message'),
     workspaceBreadcrumbs: document.getElementById('workspace-breadcrumbs'),
@@ -99,6 +115,9 @@ function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     workspaceViewerTitle: document.getElementById('workspace-viewer-title'),
     workspaceViewerControls: document.getElementById('workspace-viewer-controls'),
     workspaceViewerText: document.getElementById('workspace-viewer-text'),
+    workspaceViewerRefreshBtn: document.getElementById('workspace-viewer-refresh-btn'),
+    workspaceViewerAutoRefreshToggle: document.getElementById('workspace-viewer-auto-refresh-toggle'),
+    workspaceViewerAutoRefreshLabel: document.getElementById('workspace-viewer-auto-refresh-label'),
     workspaceEditorOverlay: document.getElementById('workspace-editor-overlay'),
     workspaceEditor: document.getElementById('workspace-editor'),
     workspaceEditorTitle: document.getElementById('workspace-editor-title'),
@@ -134,6 +153,7 @@ function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
       openWorkspaceEditorFromCommand,
       getWorkspaceAutocompleteFileHints,
       handleWorkspaceFileAction,
+      showWorkspaceViewerLoading,
       promptWorkspaceFolderName,
     };
   `
@@ -378,18 +398,32 @@ describe('workspace UI helpers', () => {
   })
 
   it('opens the editor with a prefilled file name from terminal commands', async () => {
-    const apiFetch = vi.fn(() => Promise.resolve(new Response(JSON.stringify({
-      files: [],
-      usage: { bytes_used: 0, file_count: 0 },
-      limits: { max_files: 10, quota_bytes: 1024 },
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
-    const { openWorkspaceEditorFromCommand } = setupWorkspace(apiFetch)
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/workspace/files/read')) {
+        return Promise.resolve(responseJson({ path: 'response.html', text: '<html></html>\n' }))
+      }
+      return Promise.resolve(responseJson({}))
+    })
+    const { openWorkspaceEditorFromCommand, globals } = setupWorkspace(apiFetch)
 
     await openWorkspaceEditorFromCommand('add', 'targets.txt')
 
+    expect(globals.showWorkspaceOverlay).not.toHaveBeenCalled()
+    expect(globals.hideWorkspaceOverlay).toHaveBeenCalled()
     expect(document.getElementById('workspace-editor-overlay').classList.contains('u-hidden')).toBe(false)
     expect(document.getElementById('workspace-editor').classList.contains('u-hidden')).toBe(false)
     expect(document.getElementById('workspace-path-input').value).toBe('targets.txt')
+
+    await openWorkspaceEditorFromCommand('edit', 'response.html')
+
+    expect(globals.showWorkspaceOverlay).not.toHaveBeenCalled()
+    expect(globals.hideWorkspaceOverlay).toHaveBeenCalledTimes(2)
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/read?path=response.html')
+    expect(document.getElementById('workspace-editor-overlay').classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('workspace-editor').classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('workspace-path-input').readOnly).toBe(true)
+    expect(document.getElementById('workspace-path-input').value).toBe('response.html')
+    expect(document.getElementById('workspace-text-input').value).toBe('<html></html>\n')
   })
 
   it('shows file contents in a read-only viewer and keeps edit mode separate', async () => {
@@ -435,6 +469,45 @@ describe('workspace UI helpers', () => {
     expect(globals.showToast).toHaveBeenCalledWith('file appears to be binary; download it instead', 'error')
   })
 
+  it('opens the viewer with a loading preview while a file read is pending', async () => {
+    let resolveRead
+    let afterPaint
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/workspace/files/read')) {
+        return new Promise(resolve => {
+          resolveRead = () => resolve(responseJson({ path: 'big.jsonl', text: '{"id":1}\n{"id":2}\n' }))
+        })
+      }
+      return Promise.resolve(responseJson({}))
+    })
+    const { handleWorkspaceFileAction } = setupWorkspace(apiFetch, {
+      window: {
+        ...window,
+        requestAnimationFrame: vi.fn((fn) => {
+          afterPaint = fn
+          return 1
+        }),
+      },
+    })
+
+    const pending = handleWorkspaceFileAction('view', 'big.jsonl')
+    await flushWorkspacePromises()
+
+    expect(document.getElementById('workspace-viewer-overlay').classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('workspace-viewer-title').textContent).toBe('big.jsonl')
+    expect(document.getElementById('workspace-viewer').dataset.format).toBe('loading')
+    expect(document.getElementById('workspace-viewer-text').textContent).toContain('Loading preview...')
+
+    afterPaint()
+    await flushWorkspacePromises()
+    resolveRead()
+    await pending
+    await flushWorkspacePromises()
+
+    expect(document.getElementById('workspace-viewer').dataset.format).toBe('jsonl')
+    expect(document.getElementById('workspace-viewer-text').textContent).toContain('"id": 2')
+  })
+
   it('refreshes the currently viewed file when the files list is refreshed', async () => {
     const apiFetch = vi.fn((url) => {
       if (String(url) === '/workspace/files') {
@@ -461,6 +534,105 @@ describe('workspace UI helpers', () => {
     expect(document.getElementById('workspace-viewer-title').textContent).toBe('targets.txt')
     expect(document.getElementById('workspace-viewer-text').textContent).toContain('updated target')
     expect(document.getElementById('workspace-summary').textContent).toBe('1 / 10 files · 18 B / 1 KB')
+  })
+
+  it('refreshes the viewer directly and keeps following when scrolled to the bottom', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/workspace/files/read')) {
+        return Promise.resolve(responseJson({ path: 'targets.txt', text: 'line 1\nline 2\nline 3\n' }))
+      }
+      return Promise.resolve(responseJson({}))
+    })
+    const { showWorkspaceViewer } = setupWorkspace(apiFetch, {
+      window: {
+        ...window,
+        requestAnimationFrame: vi.fn((fn) => {
+          if (typeof fn === 'function') fn()
+          return 1
+        }),
+      },
+    })
+    const viewerText = document.getElementById('workspace-viewer-text')
+    Object.defineProperty(viewerText, 'clientHeight', { configurable: true, value: 100 })
+    Object.defineProperty(viewerText, 'scrollHeight', { configurable: true, value: 500 })
+
+    showWorkspaceViewer('targets.txt', 'old\n')
+    viewerText.scrollTop = 400
+    document.getElementById('workspace-viewer-refresh-btn').click()
+    await flushWorkspacePromises()
+
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/read?path=targets.txt')
+    expect(viewerText.textContent).toContain('line 3')
+    expect(viewerText.scrollTop).toBe(400)
+  })
+
+  it('keeps auto-refresh off by default and refreshes only after opt-in', async () => {
+    const intervals = []
+    const spinnerTimers = []
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/workspace/files/read')) {
+        return Promise.resolve(responseJson({ path: 'live.txt', text: 'fresh content\n' }))
+      }
+      return Promise.resolve(responseJson({}))
+    })
+    const clearInterval = vi.fn()
+    const { showWorkspaceViewer } = setupWorkspace(apiFetch, {
+      setInterval: vi.fn((fn, ms) => {
+        intervals.push({ fn, ms })
+        return intervals.length
+      }),
+      clearInterval,
+      setTimeout: vi.fn((fn) => {
+        spinnerTimers.push(fn)
+        return spinnerTimers.length
+      }),
+    })
+
+    showWorkspaceViewer('live.txt', 'stale content\n')
+    expect(intervals).toHaveLength(0)
+    expect(document.getElementById('workspace-viewer-auto-refresh-toggle').getAttribute('aria-pressed')).toBe('false')
+    expect(document.getElementById('workspace-viewer-auto-refresh-label').textContent).toBe('Auto - off')
+
+    document.getElementById('workspace-viewer-auto-refresh-toggle').click()
+    expect(intervals).toHaveLength(1)
+    expect(intervals[0].ms).toBe(1000)
+    expect(document.getElementById('workspace-viewer-auto-refresh-toggle').getAttribute('aria-pressed')).toBe('true')
+    expect(document.getElementById('workspace-viewer-auto-refresh-label').textContent).toBe('Auto - 5s')
+
+    for (let i = 0; i < 5; i += 1) {
+      await intervals[0].fn()
+      await flushWorkspacePromises()
+    }
+    await flushWorkspacePromises()
+    expect(document.getElementById('workspace-viewer-text').textContent).toContain('fresh content')
+    expect(document.getElementById('workspace-viewer-auto-refresh-toggle').classList.contains('is-refreshing')).toBe(true)
+    expect(document.getElementById('workspace-viewer-auto-refresh-label').textContent).toBe('Auto - 5s')
+
+    document.getElementById('workspace-viewer-auto-refresh-toggle').click()
+    expect(document.getElementById('workspace-viewer-auto-refresh-toggle').getAttribute('aria-pressed')).toBe('false')
+    expect(document.getElementById('workspace-viewer-auto-refresh-label').textContent).toBe('Auto - off')
+    expect(document.getElementById('workspace-viewer-auto-refresh-toggle').classList.contains('is-refreshing')).toBe(false)
+    expect(clearInterval).toHaveBeenCalledWith(1)
+  })
+
+  it('disables auto-refresh for large files with an explanatory tooltip', () => {
+    const { renderWorkspaceFiles, showWorkspaceViewer } = setupWorkspace()
+
+    renderWorkspaceFiles({
+      files: [{ path: 'large.jsonl', size: 1024 * 1024 + 1 }],
+      usage: { bytes_used: 1024 * 1024 + 1, file_count: 1 },
+      limits: { quota_bytes: 5 * 1024 * 1024, max_files: 10 },
+    })
+    showWorkspaceViewer('large.jsonl', '{"id":1}\n{"id":2}\n')
+
+    const auto = document.getElementById('workspace-viewer-auto-refresh-toggle')
+    expect(auto.getAttribute('aria-disabled')).toBe('true')
+    expect(auto.getAttribute('aria-pressed')).toBe('false')
+    expect(auto.title).toContain('disabled for files larger than 1 MB')
+
+    auto.click()
+
+    expect(auto.getAttribute('aria-pressed')).toBe('false')
   })
 
   it('runs edit download and delete actions from the viewer header for the viewed file', async () => {
@@ -524,7 +696,7 @@ describe('workspace UI helpers', () => {
     )
   })
 
-  it('formats obvious JSON files in the read-only viewer', () => {
+  it('formats obvious JSON files in the read-only viewer', async () => {
     const { showWorkspaceViewer } = setupWorkspace()
 
     showWorkspaceViewer('ffuf.json', '{"url":"https://ip.darklab.sh","status":200}')
@@ -537,6 +709,7 @@ describe('workspace UI helpers', () => {
     expect(document.querySelector('[data-workspace-preview-mode="raw"]').getAttribute('aria-pressed')).toBe('false')
 
     document.querySelector('[data-workspace-preview-mode="raw"]').click()
+    await flushWorkspacePromises()
 
     expect(document.getElementById('workspace-viewer').dataset.viewMode).toBe('raw')
     expect(document.querySelector('[data-workspace-preview-mode="preview"]').getAttribute('aria-pressed')).toBe('false')
@@ -545,7 +718,72 @@ describe('workspace UI helpers', () => {
       .toContain('{"url":"https://ip.darklab.sh","status":200}')
   })
 
-  it('renders CSV and TSV files as preview tables with raw text available', () => {
+  it('shows loading feedback while switching between preview and raw modes', async () => {
+    let afterPaint
+    const { showWorkspaceViewer } = setupWorkspace(vi.fn(), {
+      window: {
+        ...window,
+        requestAnimationFrame: vi.fn((fn) => {
+          afterPaint = fn
+          return 1
+        }),
+      },
+    })
+
+    showWorkspaceViewer('ffuf.json', '{"url":"https://ip.darklab.sh","status":200}')
+    document.querySelector('[data-workspace-preview-mode="raw"]').click()
+    await flushWorkspacePromises()
+
+    expect(document.getElementById('workspace-viewer-text').textContent).toContain('Loading raw view...')
+
+    afterPaint()
+    await flushWorkspacePromises()
+
+    expect(document.getElementById('workspace-viewer').dataset.viewMode).toBe('raw')
+    expect(document.getElementById('workspace-viewer-text').textContent)
+      .toContain('{"url":"https://ip.darklab.sh","status":200}')
+  })
+
+  it('formats JSONL files record-by-record with raw text available', async () => {
+    const { showWorkspaceViewer } = setupWorkspace()
+
+    showWorkspaceViewer(
+      'httpx-results.jsonl',
+      '{"url":"https://one.darklab.sh","status_code":200}\n{"url":"https://two.darklab.sh","status_code":404}\n',
+    )
+
+    expect(document.getElementById('workspace-viewer').dataset.format).toBe('jsonl')
+    expect(document.getElementById('workspace-viewer-text').classList.contains('workspace-viewer-json')).toBe(true)
+    expect(document.getElementById('workspace-viewer-text').textContent)
+      .toContain('"url": "https://one.darklab.sh"')
+    expect(document.getElementById('workspace-viewer-text').textContent)
+      .toContain('"status_code": 404')
+    expect(document.querySelector('.workspace-preview-kind')?.textContent).toBe('jsonl preview')
+
+    document.querySelector('[data-workspace-preview-mode="raw"]').click()
+    await flushWorkspacePromises()
+
+    expect(document.getElementById('workspace-viewer').dataset.viewMode).toBe('raw')
+    expect(document.getElementById('workspace-viewer-text').textContent)
+      .toContain('{"url":"https://one.darklab.sh","status_code":200}')
+
+    showWorkspaceViewer(
+      'httpx-results.json',
+      '{"url":"https://one.darklab.sh","status_code":200}\n{"url":"https://two.darklab.sh","status_code":404}\n',
+    )
+
+    expect(document.getElementById('workspace-viewer').dataset.format).toBe('jsonl')
+    expect(document.getElementById('workspace-viewer-text').textContent)
+      .toContain('"url": "https://two.darklab.sh"')
+
+    showWorkspaceViewer('broken.jsonl', '{"url":"ok"}\n{"url":')
+
+    expect(document.getElementById('workspace-viewer').dataset.format).toBe('text')
+    expect(document.getElementById('workspace-viewer-text').textContent)
+      .toContain('Malformed JSONL; showing raw text.')
+  })
+
+  it('renders CSV and TSV files as preview tables with raw text available', async () => {
     const { showWorkspaceViewer } = setupWorkspace()
 
     showWorkspaceViewer('dnsrecon-results.csv', 'host,type,value\n"www.darklab.sh",A,127.0.0.1\n')
@@ -556,6 +794,7 @@ describe('workspace UI helpers', () => {
       .toContain('www.darklab.sh')
 
     document.querySelector('[data-workspace-preview-mode="raw"]').click()
+    await flushWorkspacePromises()
 
     expect(document.getElementById('workspace-viewer').dataset.viewMode).toBe('raw')
     expect(document.getElementById('workspace-viewer-text').textContent).toContain('host,type,value')
@@ -592,7 +831,24 @@ describe('workspace UI helpers', () => {
   })
 
   it('uses a bounded line-aware preview for large text files', () => {
-    const { showWorkspaceViewer } = setupWorkspace()
+    const searchTimers = []
+    const { showWorkspaceViewer } = setupWorkspace(vi.fn(), {
+      setTimeout: vi.fn((fn, ms) => {
+        const id = searchTimers.length + 1
+        searchTimers.push({ id, fn, ms, cleared: false, ran: false })
+        return id
+      }),
+      clearTimeout: vi.fn((id) => {
+        const timer = searchTimers.find(item => item.id === id)
+        if (timer) timer.cleared = true
+      }),
+    })
+    const runPendingSearch = () => {
+      const timer = searchTimers.find(item => !item.cleared && !item.ran && item.ms === 600)
+      expect(timer?.ms).toBe(600)
+      timer.ran = true
+      timer.fn()
+    }
     const text = Array.from({ length: 10005 }, (_, index) => `line ${index + 1}`).join('\n')
 
     showWorkspaceViewer('large.txt', text)
@@ -600,6 +856,8 @@ describe('workspace UI helpers', () => {
     expect(document.getElementById('workspace-viewer').dataset.format).toBe('text')
     expect(document.querySelector('[data-workspace-preview-mode]')).toBeNull()
     expect(document.querySelectorAll('.workspace-line-row')).toHaveLength(10000)
+    expect(document.querySelector('.workspace-line-preview').style.getPropertyValue('--workspace-line-number-width'))
+      .toBe('6ch')
     expect(document.getElementById('workspace-viewer-text').textContent)
       .toContain('Showing first 10000 of 10005 lines')
     expect(document.getElementById('workspace-viewer-controls').contains(
@@ -610,34 +868,93 @@ describe('workspace UI helpers', () => {
     )).toBe(false)
 
     const search = document.querySelector('.workspace-viewer-search input[type="text"]')
+    search.value = 'de'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('type 3+ chars')
+    expect(document.querySelectorAll('mark.search-hl')).toHaveLength(0)
+
     search.value = 'line 10000'
     search.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('searching...')
+    runPendingSearch()
     expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('1 / 1')
     expect(document.querySelector('[data-line-number="10000"] mark.search-hl')?.textContent).toBe('line 10000')
 
     search.value = 'LINE 10000'
     search.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('searching...')
+    runPendingSearch()
     expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('1 / 1')
     document.querySelector('.workspace-viewer-search [aria-label="Case sensitive"]').click()
     expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('no matches')
     document.querySelector('.workspace-viewer-search [aria-label="Regular expression"]').click()
     search.value = '^999[89]line 999[89]$'
     search.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('searching...')
+    runPendingSearch()
+    expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('no matches')
+    search.value = '^line 999[89]$'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('searching...')
+    runPendingSearch()
     expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('1 / 2')
+    expect(document.querySelectorAll('mark.search-hl')).toHaveLength(1)
+    expect(document.querySelector('[data-line-number="9998"] mark.search-hl')?.textContent).toBe('line 9998')
     search.focus()
     search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('2 / 2')
+    expect(document.querySelectorAll('mark.search-hl')).toHaveLength(1)
+    expect(document.querySelector('[data-line-number="9999"] mark.search-hl')?.textContent).toBe('line 9999')
     expect(document.activeElement).toBe(search)
     document.querySelector('.workspace-viewer-search [aria-label="Previous match"]').click()
     expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('1 / 2')
+    expect(document.querySelectorAll('mark.search-hl')).toHaveLength(1)
+    expect(document.querySelector('[data-line-number="9998"] mark.search-hl')?.textContent).toBe('line 9998')
 
-    const target = document.querySelector('[data-line-number="500"]')
-    target.scrollIntoView = vi.fn()
-    const jump = document.querySelector('[data-workspace-line-jump]')
-    expect(jump.type).toBe('text')
-    jump.value = '500'
-    document.querySelector('.workspace-line-jump button').click()
-    expect(target.scrollIntoView).toHaveBeenCalledWith({ block: 'center' })
+    search.value = ''
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('')
+    expect(document.querySelectorAll('mark.search-hl')).toHaveLength(0)
+
+    expect(document.querySelector('[data-workspace-line-jump]')).toBeNull()
+  })
+
+  it('uses large-search mode for short files with very long lines', () => {
+    const searchTimers = []
+    const { showWorkspaceViewer } = setupWorkspace(vi.fn(), {
+      setTimeout: vi.fn((fn, ms) => {
+        const id = searchTimers.length + 1
+        searchTimers.push({ id, fn, ms, cleared: false, ran: false })
+        return id
+      }),
+      clearTimeout: vi.fn((id) => {
+        const timer = searchTimers.find(item => item.id === id)
+        if (timer) timer.cleared = true
+      }),
+    })
+    const runPendingSearch = () => {
+      const timer = searchTimers.find(item => !item.cleared && !item.ran && item.ms === 600)
+      expect(timer?.ms).toBe(600)
+      timer.ran = true
+      timer.fn()
+    }
+    const largeLine = `${'x'.repeat(500000)}detected target`
+
+    showWorkspaceViewer('large-raw.jsonl', largeLine, { size: 1024 * 1024 })
+
+    expect(document.querySelectorAll('.workspace-line-row')).toHaveLength(1)
+    const search = document.querySelector('.workspace-viewer-search input[type="text"]')
+    search.value = 'de'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('type 3+ chars')
+
+    search.value = 'detected'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('searching...')
+    runPendingSearch()
+    expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('1 / 1')
+    expect(document.querySelectorAll('mark.search-hl')).toHaveLength(1)
+    expect(document.querySelector('mark.search-hl')?.textContent).toBe('detected')
   })
 
   it('serves current workspace files as autocomplete hints after the file list is loaded', () => {

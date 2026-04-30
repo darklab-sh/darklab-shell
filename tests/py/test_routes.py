@@ -878,6 +878,37 @@ class TestWorkflowsRoute:
             "nuclei -l crawled-urls.txt -severity high,critical -o nuclei-findings.txt"
         )
 
+    def test_user_workflows_are_returned_before_builtins(self):
+        client = get_client()
+        session_id = "workflow-route-" + __import__("uuid").uuid4().hex[:8]
+        resp = client.post(
+            "/session/workflows",
+            headers={"X-Session-ID": session_id},
+            json={
+                "title": "Saved DNS",
+                "description": "custom sequence",
+                "inputs": [
+                    {
+                        "id": "domain",
+                        "label": "Domain",
+                        "type": "domain",
+                        "required": True,
+                        "placeholder": "example.com",
+                        "default": "",
+                        "help": "",
+                    },
+                ],
+                "steps": [{"cmd": "dig {{domain}} A", "note": "resolve apex"}],
+            },
+        )
+        assert resp.status_code == 201
+
+        data = json.loads(client.get("/workflows", headers={"X-Session-ID": session_id}).data)
+
+        assert data["items"][0]["title"] == "Saved DNS"
+        assert data["items"][0]["source"] == "user"
+        assert data["items"][1]["source"] == "builtin"
+
 
 # ── /shortcuts ────────────────────────────────────────────────────────────────
 
@@ -1055,7 +1086,11 @@ class TestWorkspaceRoutes:
                 "/workspace/files/read?path=targets.txt",
                 headers={"X-Session-ID": session},
             )
-            assert json.loads(read.data) == {"path": "targets.txt", "text": "darklab.sh\n"}
+            assert json.loads(read.data) == {
+                "path": "targets.txt",
+                "text": "darklab.sh\n",
+                "size": 11,
+            }
 
             binary_path = resolve_workspace_path(session, "asset.db", config.CFG, ensure_parent=True)
             binary_path.write_bytes(b"SQLite format 3\x00binary")
@@ -1384,7 +1419,12 @@ class TestRunRoute:
             assert history["total_count"] == 1
 
             run_id = history["runs"][0]["id"]
-            detail = json.loads(client.get(f"/history/{run_id}?json&preview=1").data)
+            detail = json.loads(
+                client.get(
+                    f"/history/{run_id}?json&preview=1",
+                    headers={"X-Session-ID": session},
+                ).data
+            )
             assert detail["command"] == "theme list"
             assert detail["output"] == ["Available themes:", "Dark themes:"]
         finally:
@@ -2344,7 +2384,7 @@ class TestRunPermalinkRoute:
         run_id = "permalink-html-test-run"
         self._insert_run(run_id, "ping google.com", ["64 bytes"])
         try:
-            resp = get_client().get(f"/history/{run_id}")
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
             assert resp.status_code == 200
             assert b"<html" in resp.data.lower()
         finally:
@@ -2354,7 +2394,7 @@ class TestRunPermalinkRoute:
         run_id = "permalink-cmd-test-run"
         self._insert_run(run_id, "nmap -sV 10.0.0.1")
         try:
-            resp = get_client().get(f"/history/{run_id}")
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
             assert b"nmap -sV 10.0.0.1" in resp.data
         finally:
             self._delete_run(run_id)
@@ -2363,7 +2403,27 @@ class TestRunPermalinkRoute:
         run_id = "permalink-json-test-run"
         self._insert_run(run_id, "dig google.com", ["answer section"])
         try:
-            data = json.loads(get_client().get(f"/history/{run_id}?json").data)
+            data = json.loads(
+                get_client().get(
+                    f"/history/{run_id}?json",
+                    headers={"X-Session-ID": "test-session"},
+                ).data
+            )
+            assert data["command"] == "dig google.com"
+            assert "answer section" in data["output"]
+        finally:
+            self._delete_run(run_id)
+
+    def test_json_view_is_a_bearer_permalink_across_sessions(self):
+        run_id = "permalink-other-session-test-run"
+        self._insert_run(run_id, "dig google.com", ["answer section"])
+        try:
+            data = json.loads(
+                get_client().get(
+                    f"/history/{run_id}?json",
+                    headers={"X-Session-ID": "other-session"},
+                ).data
+            )
             assert data["command"] == "dig google.com"
             assert "answer section" in data["output"]
         finally:
@@ -2379,7 +2439,12 @@ class TestRunPermalinkRoute:
             full_output_lines=["full line 1", "full line 2"],
         )
         try:
-            data = json.loads(get_client().get(f"/history/{run_id}?json").data)
+            data = json.loads(
+                get_client().get(
+                    f"/history/{run_id}?json",
+                    headers={"X-Session-ID": "test-session"},
+                ).data
+            )
             assert data["command"] == "man curl"
             assert data["output"] == ["full line 1", "full line 2"]
         finally:
@@ -2396,7 +2461,12 @@ class TestRunPermalinkRoute:
             full_output_lines=["full line 1", "full line 2"],
         )
         try:
-            data = json.loads(get_client().get(f"/history/{run_id}?json&preview=1").data)
+            data = json.loads(
+                get_client().get(
+                    f"/history/{run_id}?json&preview=1",
+                    headers={"X-Session-ID": "test-session"},
+                ).data
+            )
             assert data["command"] == "man curl"
             assert data["output"] == ["preview line"]
             assert (
@@ -2411,7 +2481,7 @@ class TestRunPermalinkRoute:
         run_id = "permalink-ct-test-run"
         self._insert_run(run_id, "ping test")
         try:
-            resp = get_client().get(f"/history/{run_id}")
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
             assert "text/html" in resp.content_type
         finally:
             self._delete_run(run_id)
@@ -2426,7 +2496,7 @@ class TestRunPermalinkRoute:
             full_output_lines=["full line 1", "full line 2"],
         )
         try:
-            resp = get_client().get(f"/history/{run_id}")
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
             assert b"full line 1" in resp.data
             assert b"preview line" not in resp.data
         finally:
@@ -2436,7 +2506,7 @@ class TestRunPermalinkRoute:
         run_id = "permalink-preview-truncated-test-run"
         self._insert_run(run_id, "nmap -sV 10.0.0.1", ["preview"], preview_truncated=1, full_output_available=0)
         try:
-            resp = get_client().get(f"/history/{run_id}")
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
             assert b"preview truncated" in resp.data
         finally:
             self._delete_run(run_id)
@@ -2445,7 +2515,7 @@ class TestRunPermalinkRoute:
         run_id = "permalink-toggle-test-run"
         self._insert_run(run_id, "ping google.com", ["64 bytes"])
         try:
-            resp = get_client().get(f"/history/{run_id}")
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
             body = resp.get_data(as_text=True)
             assert 'id="toggle-ln"' in body
             assert 'id="toggle-ts" disabled' in body
@@ -2460,7 +2530,7 @@ class TestRunPermalinkRoute:
         ]
         self._insert_run(run_id, "ping google.com", structured_preview)
         try:
-            resp = get_client().get(f"/history/{run_id}")
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
             body = resp.get_data(as_text=True)
             assert "$ ping google.com" in body
             assert 'id="toggle-ts"' in body
@@ -2490,7 +2560,10 @@ class TestRunPermalinkRoute:
             ["HTTP/1.1 200 OK"],
         )
         try:
-            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            body = get_client().get(
+                f"/history/{run_id}",
+                headers={"X-Session-ID": "test-session"},
+            ).get_data(as_text=True)
             assert "exit 0" in body
             assert "meta-badge-ok" in body
         finally:
@@ -2504,7 +2577,10 @@ class TestRunPermalinkRoute:
             ["curl: (6) Could not resolve host"],
         )
         try:
-            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            body = get_client().get(
+                f"/history/{run_id}",
+                headers={"X-Session-ID": "test-session"},
+            ).get_data(as_text=True)
             assert "exit 6" in body
             assert "meta-badge-fail" in body
         finally:
@@ -2518,7 +2594,10 @@ class TestRunPermalinkRoute:
             ["Nmap done"],
         )
         try:
-            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            body = get_client().get(
+                f"/history/{run_id}",
+                headers={"X-Session-ID": "test-session"},
+            ).get_data(as_text=True)
             assert "1m 30s" in body
         finally:
             self._delete_run(run_id)
@@ -2531,7 +2610,10 @@ class TestRunPermalinkRoute:
             ["line1", "line2", "line3"],
         )
         try:
-            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            body = get_client().get(
+                f"/history/{run_id}",
+                headers={"X-Session-ID": "test-session"},
+            ).get_data(as_text=True)
             # 3 output lines + 2 injected (prompt-echo + blank) = 5, or just check "lines" present
             assert "lines" in body
         finally:
@@ -2545,7 +2627,10 @@ class TestRunPermalinkRoute:
             "2026-04-10T10:00:00", "2026-04-10T10:00:00.1",
         )
         try:
-            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            body = get_client().get(
+                f"/history/{run_id}",
+                headers={"X-Session-ID": "test-session"},
+            ).get_data(as_text=True)
             assert f"v{APP_VERSION}" in body
         finally:
             self._delete_run(run_id)
@@ -2589,7 +2674,12 @@ class TestRunFullOutputRoute:
         run_id = "permalink-full-json-test-run"
         self._insert_run(run_id, "nmap -sV 10.0.0.1")
         try:
-            data = json.loads(get_client().get(f"/history/{run_id}/full?json").data)
+            data = json.loads(
+                get_client().get(
+                    f"/history/{run_id}/full?json",
+                    headers={"X-Session-ID": "test-session"},
+                ).data
+            )
             assert data["command"] == "nmap -sV 10.0.0.1"
             assert data["output"] == ["line 1", "line 2"]
         finally:
@@ -2599,7 +2689,7 @@ class TestRunFullOutputRoute:
         run_id = "permalink-full-html-test-run"
         self._insert_run(run_id, "nmap -sV 10.0.0.1")
         try:
-            resp = get_client().get(f"/history/{run_id}/full")
+            resp = get_client().get(f"/history/{run_id}/full", headers={"X-Session-ID": "test-session"})
             assert resp.status_code == 200
             assert b"line 1" in resp.data
         finally:
@@ -2616,7 +2706,7 @@ class TestRunFullOutputRoute:
         conn.commit()
         conn.close()
         try:
-            resp = get_client().get(f"/history/{run_id}/full")
+            resp = get_client().get(f"/history/{run_id}/full", headers={"X-Session-ID": "test-session"})
             assert resp.status_code == 200
             assert b"nmap -sV 10.0.0.1" in resp.data
         finally:

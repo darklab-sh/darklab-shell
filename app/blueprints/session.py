@@ -10,8 +10,16 @@ from datetime import datetime, timezone
 from flask import Blueprint, jsonify, request
 
 from database import db_connect
-from helpers import get_client_ip, get_log_session_id, get_session_id
+from helpers import get_client_ip, get_log_session_id, get_session_id, is_valid_anonymous_session_id
 from session_variables import list_session_variables
+from user_workflows import (
+    UserWorkflowError,
+    create_user_workflow,
+    delete_user_workflow,
+    get_user_workflow,
+    list_user_workflows,
+    update_user_workflow,
+)
 from workspace import InvalidWorkspacePath, migrate_session_workspace, workspace_usage
 
 log = logging.getLogger("shell")
@@ -171,6 +179,8 @@ def session_token_verify():
     if not token:
         return jsonify({"error": "token is required"}), 400
     if not token.startswith("tok_"):
+        if not is_valid_anonymous_session_id(token):
+            return jsonify({"error": "invalid anonymous session id"}), 400
         # Anonymous UUID sessions — no server-side issuance record needed.
         return jsonify({"ok": True, "exists": True})
     with db_connect() as conn:
@@ -263,6 +273,10 @@ def session_migrate():
             "SELECT ?, name, value, updated FROM session_variables WHERE session_id = ?",
             (to_session_id, from_session_id),
         )
+        workflows_result = conn.execute(
+            "UPDATE user_workflows SET session_id = ? WHERE session_id = ?",
+            (to_session_id, from_session_id),
+        )
         conn.execute(
             "DELETE FROM starred_commands WHERE session_id = ?",
             (from_session_id,),
@@ -275,6 +289,10 @@ def session_migrate():
             "DELETE FROM session_variables WHERE session_id = ?",
             (from_session_id,),
         )
+        conn.execute(
+            "DELETE FROM user_workflows WHERE session_id = ?",
+            (from_session_id,),
+        )
         conn.commit()
 
     migrated_runs = runs_result.rowcount
@@ -285,6 +303,7 @@ def session_migrate():
     migrated_stars = stars_insert.rowcount
     migrated_preferences = prefs_insert.rowcount
     migrated_variables = vars_insert.rowcount
+    migrated_workflows = workflows_result.rowcount
 
     log.info("SESSION_MIGRATED", extra={
         "ip": get_client_ip(),
@@ -296,6 +315,7 @@ def session_migrate():
         "migrated_stars": migrated_stars,
         "migrated_preferences": migrated_preferences,
         "migrated_variables": migrated_variables,
+        "migrated_workflows": migrated_workflows,
         "migrated_workspace_files": workspace_migration.migrated_files,
         "skipped_workspace_files": workspace_migration.skipped_files,
         "migrated_workspace_directories": workspace_migration.migrated_directories,
@@ -308,6 +328,7 @@ def session_migrate():
         "migrated_stars": migrated_stars,
         "migrated_preferences": migrated_preferences,
         "migrated_variables": migrated_variables,
+        "migrated_workflows": migrated_workflows,
         "migrated_workspace_files": workspace_migration.migrated_files,
         "skipped_workspace_files": workspace_migration.skipped_files,
         "migrated_workspace_directories": workspace_migration.migrated_directories,
@@ -380,6 +401,81 @@ def session_variables_list():
     })
 
 
+@session_bp.route("/session/workflows")
+def session_workflows_list():
+    """Return user-created workflows for the current session."""
+    session_id = get_session_id()
+    workflows = list_user_workflows(session_id)
+    log.debug("USER_WORKFLOWS_VIEWED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "session_kind": _session_kind(session_id),
+        "count": len(workflows),
+    })
+    return jsonify({"items": workflows})
+
+
+@session_bp.route("/session/workflows", methods=["POST"])
+def session_workflows_create():
+    """Create a user workflow for the current session."""
+    session_id = get_session_id()
+    try:
+        workflow = create_user_workflow(session_id, request.get_json(silent=True) or {})
+    except UserWorkflowError as exc:
+        return jsonify({"error": str(exc)}), 400
+    log.info("USER_WORKFLOW_CREATED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "session_kind": _session_kind(session_id),
+        "workflow_id": workflow["id"] if workflow else "",
+    })
+    return jsonify({"ok": True, "workflow": workflow}), 201
+
+
+@session_bp.route("/session/workflows/<workflow_id>", methods=["GET"])
+def session_workflows_get(workflow_id):
+    """Return one user workflow for the current session."""
+    session_id = get_session_id()
+    workflow = get_user_workflow(session_id, workflow_id)
+    if not workflow:
+        return jsonify({"error": "workflow not found"}), 404
+    return jsonify({"workflow": workflow})
+
+
+@session_bp.route("/session/workflows/<workflow_id>", methods=["PUT"])
+def session_workflows_update(workflow_id):
+    """Update a user workflow for the current session."""
+    session_id = get_session_id()
+    try:
+        workflow = update_user_workflow(session_id, workflow_id, request.get_json(silent=True) or {})
+    except UserWorkflowError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if not workflow:
+        return jsonify({"error": "workflow not found"}), 404
+    log.info("USER_WORKFLOW_UPDATED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "session_kind": _session_kind(session_id),
+        "workflow_id": workflow_id,
+    })
+    return jsonify({"ok": True, "workflow": workflow})
+
+
+@session_bp.route("/session/workflows/<workflow_id>", methods=["DELETE"])
+def session_workflows_delete(workflow_id):
+    """Delete a user workflow for the current session."""
+    session_id = get_session_id()
+    if not delete_user_workflow(session_id, workflow_id):
+        return jsonify({"error": "workflow not found"}), 404
+    log.info("USER_WORKFLOW_DELETED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "session_kind": _session_kind(session_id),
+        "workflow_id": workflow_id,
+    })
+    return jsonify({"ok": True})
+
+
 @session_bp.route("/session/run-count")
 def session_run_count():
     """Return the total run count for the current session, uncapped.
@@ -395,7 +491,12 @@ def session_run_count():
             "SELECT COUNT(*) AS n FROM runs WHERE session_id = ?",
             (session_id,),
         ).fetchone()
+        workflow_row = conn.execute(
+            "SELECT COUNT(*) AS n FROM user_workflows WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
     count = int(row["n"] if row else 0)
+    workflow_count = int(workflow_row["n"] if workflow_row else 0)
     workspace_files = 0
     try:
         workspace_files = workspace_usage(session_id).file_count
@@ -407,8 +508,9 @@ def session_run_count():
         "session_kind": _session_kind(session_id),
         "count": count,
         "workspace_files": workspace_files,
+        "workflow_count": workflow_count,
     })
-    return jsonify({"count": count, "workspace_files": workspace_files})
+    return jsonify({"count": count, "workspace_files": workspace_files, "workflow_count": workflow_count})
 
 
 @session_bp.route("/session/starred")

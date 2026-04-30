@@ -88,8 +88,9 @@ Full per-feature reference for darklab_shell. See the [README](README.md) for th
 
 **Behavior:**
 
-- Tool suggestions load from the structured command registry at page load and match what the user types; the matched portion is highlighted in green.
+- Tool suggestions load from the structured command registry at page load and use ranked exact, prefix, token-boundary, substring, and fuzzy matching; matched spans or fuzzy characters are highlighted in green.
 - App-owned built-in commands complete from a runtime context that uses the same matching engine as YAML-backed tools.
+- Workspace file paths and installed wordlist paths match by useful path segments and filename substrings, so users can type the part they remember instead of the beginning of the path.
 - The dropdown opens below the prompt when there is room and flips above when space is tight, preserving top-to-bottom keyboard navigation order.
 - `Tab` expands to the longest shared prefix, then cycles matches; `Shift+Tab` cycles backward; `Enter` accepts the highlighted match or runs the command if none is selected.
 - While typing a command root, a unique root match shows real example invocations for discoverability. For commands with scoped subcommands, this includes both root-level examples and subcommand examples.
@@ -99,7 +100,7 @@ Full per-feature reference for darklab_shell. See the [README](README.md) for th
 - After `|`, autocomplete switches into the built-in pipe stage (`grep`, `head`, `tail`, `wc -l`, `sort`, `uniq`).
 - Already-used singleton-style flags are suppressed from contextual suggestions.
 
-**Limits:** external-tool completions come from the static command-registry YAML, while app-owned built-ins come from the browser runtime. There is no shell introspection, no `--help` parsing, and no fuzzy matching beyond prefix + expand.
+**Limits:** external-tool completions come from the static command-registry YAML, while app-owned built-ins come from the browser runtime. There is no shell introspection and no `--help` parsing.
 
 **Configuration:** external-tool suggestions use `conf/commands.yaml` (plus optional `conf/commands.local.yaml`). App-owned built-ins use `app/builtin_autocomplete.yaml`, which is packaged with the application rather than treated as operator config. YAML changes reload on the next page load — no server restart needed.
 
@@ -629,39 +630,53 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 ## Guided Workflows
 
-**Purpose:** curated multi-step diagnostic sequences that load one command at a time into the prompt so the operator can run and inspect each step in turn.
+**Purpose:** curated and user-saved multi-step diagnostic sequences that turn repeat checks into reviewable command playbooks.
 
 **Behavior:**
 
-- Workflows are listed in the **Workflows** panel on desktop and behind the mobile ☰ menu; opening one reveals its individual command steps.
-- Clicking a step pre-fills the prompt with its `cmd` — nothing runs automatically, so the operator inspects and edits each step before pressing Run.
+- Workflows are listed in the **Workflows** panel on desktop and behind the mobile ☰ menu; user-created workflows appear above the built-in catalog under **My workflows**.
+- Clicking a step pre-fills the prompt with its `cmd`; each step can also be run directly, and `Run all` queues the rendered steps sequentially in the active tab.
+- The **New** workflow editor saves session-scoped workflows with a title, description, ordered command steps, optional notes, and `{{variables}}` inferred from the commands.
+- The terminal-native `workflow` command supports `workflow list`, `workflow show <name>`, and `workflow run <name> [--variable value ...]`; missing required variables are prompted transcript-style before the run is queued.
 - Each step can show a short `note` explaining what the command checks.
+- User-created workflows are stored with the active session and migrate with session tokens.
 - Built-in workflows cover DNS troubleshooting, TLS/HTTPS checks, HTTP triage, quick reachability, email server checks, passive domain recon, subdomain enumeration and validation, web directory discovery, SSL/TLS deep dives, CDN/edge behavior checks, API recon, network path analysis, fast port/service triage, and Files-backed chained recon such as subdomain HTTP triage and crawl-and-scan.
 - Custom workflows can be added to `conf/workflows.yaml`; the file is re-read on every request so edits take effect without a restart.
 - Workflows that depend on Files can declare `feature_required: workspace`; those entries are hidden when `workspace_enabled` is off.
 
 **Limits:** step commands still run through the command policy — a workflow step is only usable if its `cmd` is permitted by `commands.yaml`.
 
-**Configuration:** `conf/workflows.yaml` — list of entries with the following fields:
+**Configuration:** `conf/workflows.yaml` — operator-defined workflow entries use the same normalized shape as saved user workflows. User-created workflows store that shape in the session database, while `conf/workflows.yaml` keeps deployment-wide entries in YAML.
 
 ```yaml
 - title: "My Custom Check"
   description: "A brief description shown in the workflow panel."
+  inputs:
+    - id: domain
+      label: "Domain"
+      type: domain
+      required: true
+      placeholder: "example.com"
+      default: "darklab.sh"
   steps:
-    - cmd: "ping -c 4 example.com"
+    - cmd: "ping -c 4 {{domain}}"
       note: "Is the host reachable?"
-    - cmd: "nmap -F example.com"
+    - cmd: "nmap -F {{domain}}"
       note: "What ports are open?"
 ```
 
 - `title` — required; workflow heading.
 - `description` — optional; shown below the title.
+- `inputs` — optional list of template variables that can be referenced as `{{id}}` inside step commands and notes.
+- `id` — required per input; lowercase letters, numbers, and underscores.
+- `type` — optional per input; accepted values are `text`, `domain`, `host`, `url`, `port`, and `path`.
+- `required`, `placeholder`, `default`, and `help` — optional per input; used by the Workflows panel, `workflow run` prompting, and runtime autocomplete.
 - `steps` — required list; each step needs at least a `cmd`.
-- `cmd` — required; loaded into the prompt when the step is clicked.
+- `cmd` — required; loaded into the prompt when the step is clicked and rendered with workflow inputs when variables are present.
 - `note` — optional; helper text shown alongside the command.
 - `feature_required` — optional feature gate such as `workspace`; hides the workflow when the required app feature is disabled.
 
-**Related files:** `app/conf/workflows.yaml` (workflow definitions), `app/static/js/shell_chrome.js` (Workflows panel rendering), `app/blueprints/content.py` (workflows API endpoint).
+**Related files:** `app/conf/workflows.yaml` (operator workflow definitions), `app/user_workflows.py` (session workflow storage), `app/static/js/app.js` (workflow editor and CLI), `app/static/js/shell_chrome.js` (Workflows panel rendering), `app/blueprints/content.py` and `app/blueprints/session.py` (workflow API endpoints).
 
 ---
 
@@ -798,7 +813,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Production session file storage uses a host bind mount by default. The current image uses `appuser` `995:995` and `scanner` `994:994`; bind-mount roots should be pre-owned by `995:995`, with the workspace root set to `0730`, session directories set to `3730`, app-created files set to `0640`, and command-created writable outputs allowed as `0660`.
 - Workspace access updates the hashed session directory activity timestamp. Periodic cleanup removes inactive `sess_*` directories after `workspace_inactivity_ttl_hours`; it does not delete individual files solely because their file timestamps are old.
 - File names are relative and display-friendly; absolute paths, traversal, backslashes, hidden names, symlinks, and paths outside the session root are rejected. Text reads and downloads also use final-component no-follow opens where supported, so the app keeps the same session-root boundary even if a path is swapped after validation.
-- The Files panel can create, view, edit, download, and delete text files owned by the current session; obvious JSON files are pretty-printed in the read-only viewer.
+- The Files panel can create, view, edit, download, and delete text files owned by the current session; JSON and JSONL/NDJSON files are pretty-printed in the read-only viewer, and open file previews can be refreshed manually or opt into auto-refresh while following appended output at the bottom.
 - The `file` built-in provides terminal access to the same file model through `cd [folder]`, `pwd`, `file list [-l] [folder]`, `file show <file>`, `file add [file]`, `file add-dir <folder>`, `file edit <file>`, `file download <file>`, and confirmed `file delete [-r|-f|-rf] <file-or-folder>` / `file rm [-r|-f|-rf] <file-or-folder>`; `file add` opens a blank file editor unless a filename is provided, `file add-dir` creates a folder, and `file download <file>` starts the same browser download path as the Files panel. `cd` is tracked per tab, treats the session workspace root as `/`, and causes relative commands such as `ls`, `cat`, `rm`, and `file show` to resolve from the tab's current workspace folder.
 - The `ls [-l] [folder]`, `cat <file>`, `mkdir <folder>`, `rm [-r|-f|-rf] <file-or-folder>`, `grep <pattern> <file>`, `head [-n N] <file>`, `tail [-n N] <file>`, `wc -l <file>`, `sort [-r|-n|-u] <file>`, and `uniq [-c] <file>` aliases map to app-native workspace operations only; they do not expose arbitrary host/container filesystem access.
 - `file delete <file>`, `file rm <file>`, and `rm <file>` first verify the target exists, then require the same transcript-owned yes/no confirmation model as other destructive terminal-native actions. Folder deletion requires `-r` or `-rf` before the confirmation is shown.

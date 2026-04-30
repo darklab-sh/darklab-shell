@@ -18,10 +18,12 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 1088
-- `vitest`: 906
-- `playwright`: 222
-- total: 2,216
+- behavior tests: 2,221
+- docs/inventory meta-tests: 30
+- `pytest`: 1102 (1072 behavior + 30 meta)
+- `vitest`: 920
+- `playwright`: 229
+- total: 2,251
 
 This document is organized in two parts:
 
@@ -84,7 +86,8 @@ npx playwright install
 
 Notes:
 
-- keep the Python virtualenv active for all local `pytest`, lint, and backend debugging work
+- `npm run test:pytest` uses `.venv/bin/pytest` automatically when the repo virtualenv exists
+- keep the Python virtualenv active for lint and backend debugging work
 - `Vitest` and `Playwright` use the repo-local npm dependencies; do not rely on global installs
 - most day-to-day test work does not require Docker
 - the container smoke test is slower and is intended for Dockerfile, dependency, and toolchain validation rather than the normal fast iteration loop
@@ -104,14 +107,15 @@ npm run test:e2e
 Run focused slices while iterating:
 
 ```bash
-pytest -c config/pytest.ini --rootdir=. tests/py/test_routes.py -v
+bash scripts/run_pytest.sh -c config/pytest.ini --rootdir=. tests/py/test_routes.py -v
 npm run test:unit -- tests/js/unit/history.test.js tests/js/unit/runner.test.js
 npm run test:e2e -- tests/js/e2e/failure-paths.spec.js
+bash scripts/run_playwright.sh tests/js/e2e/failure-paths.spec.js --grep "history"
 ```
 
 Playwright notes:
 
-- `npm run test:e2e` uses [config/playwright.parallel.config.js](../config/playwright.parallel.config.js), which currently fans out across 5 isolated Chromium projects
+- `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps quiet local Playwright output by default, and uses [config/playwright.parallel.config.js](../config/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when app/server logs are needed, `--ci` for CI-style retries, or `--force-color` when color must be forced through non-TTY output.
 - plain `npx playwright test` uses [config/playwright.config.js](../config/playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
 - each parallel project gets its own Flask server port plus isolated `APP_DATA_DIR` state, so SQLite history, run-output artifacts, and limiter/process state do not leak between workers
 
@@ -292,7 +296,7 @@ Practical note:
 - For tests that need isolated rate-limit buckets, use `makeTestIp()` to get a deterministic `198.18.x.x` test-network address in `X-Forwarded-For`. Prefer per-test hashing rather than one fixed IP per file so repeated suite runs do not collide in the same limiter bucket.
 - For browser tests that need a long-running command without hitting the backend limiter, prefer a browser-side `window.fetch` mock that returns an open SSE stream, like the kill-spec coverage.
 - When a browser test needs to exercise a `.catch(...)` branch, prefer aborting the request or rejecting the promise rather than returning a 500 response.
-- Keep this appendix and the README project tree in stable file-listing order. `tests/py/test_docs.py` checks appendix section order against `git ls-files --cached`, row order against each collector's test listing, and the README `## Project Structure` tree against the tracked-file listing with parent directories inserted before children.
+- Keep this appendix, README project tree, and README configuration table in stable file-listing/config-default order. `tests/py/test_docs.py` checks appendix section order against `git ls-files --cached`, row order against each collector's test listing, the README `## Project Structure` tree against the tracked-file listing with parent directories inserted before children, and operator-facing defaults from `app/config.py` against both `app/conf/config.yaml` and README `## Configuration`.
 
 ---
 
@@ -417,6 +421,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestActiveRunMetadata.test_active_runs_for_session_preserves_pid` | Checks that active-run metadata exposes the PID through session-scoped active-run listings. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_dead_pid` | Checks that active-run metadata is pruned when the stored process no longer exists. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_pid_reuse` | Checks that Redis-backed active-run metadata is pruned when a PID has been reused by a different process. |
+| `TestActiveRunMetadata.test_pid_pop_for_session_requires_matching_session` | Verifies that active-run PID lookup only pops processes owned by the requesting session. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_legacy_metadata_on_linux` | Checks that legacy Redis metadata without PID start-time tracking is pruned on Linux instead of trusting a reused PID. |
 | `TestActiveRunMetadata.test_active_run_resource_usage_reports_cumulative_cpu_and_memory` | Verifies that active-run resource telemetry reports process-tree CPU seconds and RSS memory for Run Monitor display. |
 | `TestFormatRetention.test_zero_returns_unlimited` | Checks zero returns unlimited handling. |
@@ -531,19 +536,19 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 
 #### `test_docs.py`
 
-Meta-tests that verify documentation stays in sync with the test suite. Runs `pytest --collect-only`, `npx vitest list`, and `npx playwright test --list` as subprocesses (once per module via shared fixtures) and compares results against the appendix tables and documented totals for all three runtimes.
+Meta-tests that verify documentation stays in sync with the test suite and operator-facing inventories. Runs `pytest --collect-only`, `npx vitest list`, and `npx playwright test --list` as subprocesses (once per module via shared fixtures) and compares results against the appendix tables and documented totals for all three runtimes. Also checks README project-structure coverage, Flask route inventory coverage, release-draft conventions, and app configuration default coverage in `app/conf/config.yaml` plus README `## Configuration`.
 
 | Test | Description |
 | --- | --- |
 | `TestPytestAppendixDrift.test_documented_files_match_actual` | Checks that each pytest file's row count in the tests/README.md appendix matches the number of unique test function names collected by pytest (parameterised variants collapsed to a single entry). |
 | `TestPytestAppendixDrift.test_all_test_files_have_appendix_sections` | Checks that every `test_*.py` file collected by pytest has a corresponding appendix section in tests/README.md. |
-| `TestPytestAppendixDrift.test_appendix_order_matches_collection_order` | Checks that pytest appendix sections follow tracked-file order and rows follow pytest collection order. |
+| `TestPytestAppendixDrift.test_appendix_order_matches_collection_order` | Checks that pytest appendix sections follow tracked-file order (with newly collected untracked files sorted in until they are added to git) and rows follow pytest collection order. |
 | `TestVitestAppendixDrift.test_documented_files_match_actual` | Checks that each Vitest `*.test.js` file's row count in the tests/README.md appendix matches the number of unique test names returned by `npx vitest list`. |
 | `TestVitestAppendixDrift.test_all_test_files_have_appendix_sections` | Checks that every `*.test.js` file listed by Vitest has a corresponding appendix section in tests/README.md. |
-| `TestVitestAppendixDrift.test_appendix_order_matches_listing_order` | Checks that Vitest appendix sections follow tracked-file order and rows follow `npx vitest list` order. |
+| `TestVitestAppendixDrift.test_appendix_order_matches_listing_order` | Checks that Vitest appendix sections follow tracked-file order (with newly collected untracked files sorted in until they are added to git) and rows follow `npx vitest list` order. |
 | `TestPlaywrightAppendixDrift.test_documented_files_match_actual` | Checks that each Playwright `*.spec.js` and standalone `*.capture.js` file's row count in the tests/README.md appendix matches the number of unique test names returned by the normal suite plus the dedicated demo/capture `--list` configs. |
 | `TestPlaywrightAppendixDrift.test_all_test_files_have_appendix_sections` | Checks that every Playwright `*.spec.js` and standalone `*.capture.js` file listed by the normal suite or the dedicated demo/capture configs has a corresponding appendix section in tests/README.md. |
-| `TestPlaywrightAppendixDrift.test_appendix_order_matches_listing_order` | Checks that Playwright appendix sections follow tracked-file order and rows follow the combined Playwright listing order. |
+| `TestPlaywrightAppendixDrift.test_appendix_order_matches_listing_order` | Checks that Playwright appendix sections follow tracked-file order (with newly collected untracked files sorted in until they are added to git) and rows follow the combined Playwright listing order. |
 | `TestDocumentedPytestTotals.test_tests_readme` | Checks that the `pytest` total recorded in tests/README.md matches the actual collected test count (all parameterised variants included). |
 | `TestDocumentedPytestTotals.test_contributing` | Checks that the `pytest` total recorded in CONTRIBUTING.md matches the actual collected test count. |
 | `TestDocumentedPytestTotals.test_architecture` | Checks that the `pytest` total recorded in ARCHITECTURE.md matches the actual collected test count. |
@@ -563,6 +568,8 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `TestArchitectureRouteInventory.test_route_inventory_matches_flask_url_map` | Checks that ARCHITECTURE.md `## HTTP Route Inventory` lists the same method/route pairs registered in Flask's URL map, without enforcing documentation order. |
 | `TestReleaseDraftDocs.test_release_draft_convention_is_documented_when_drafts_exist` | Checks that release-draft branch docs are documented when `docs/release-drafts/` exists. |
 | `TestReleaseDraftDocs.test_release_drafts_are_paired_by_version` | Checks that each release draft version has both merge-request and release-notes files. |
+| `TestOperatorConfigurationDocs.test_config_yaml_represents_app_defaults` | Checks that every operator-facing default key from `app/config.py` is represented in the checked-in `app/conf/config.yaml` reference. |
+| `TestOperatorConfigurationDocs.test_readme_configuration_represents_app_defaults` | Checks that every operator-facing default key from `app/config.py` is represented in README.md `## Configuration`. |
 
 #### `test_logging.py`
 
@@ -721,7 +728,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 
 #### `test_output_search.py`
 
-SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code path (when `runs_fts` is available) and the graceful fallback to `LOWER(command) LIKE` when the FTS table is absent.
+SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code path (when `runs_fts` is available) and the graceful fallback to `LOWER(command)` / `LOWER(output_search_text)` `LIKE` matching when the FTS table is absent.
 
 | Test | Description |
 | --- | --- |
@@ -735,10 +742,11 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestOutputSearch.test_multiword_query_restricts_results` | Verifies that a multi-word query performs an AND search — only runs containing all terms are returned. |
 | `TestOutputSearch.test_partial_substring_match_via_trigram` | Verifies that compound tokens like `443/tcp` do not crash the search endpoint regardless of whether the trigram tokenizer is available. |
 | `TestOutputSearch.test_short_query_under_trigram_threshold_matches_via_like` | Regression: a 2-char command-scoped query (e.g. `ps`) must still match the `ps aux` run even though the trigram tokenizer can't index <3-char terms; `_build_fts_query` returns None for short terms and the endpoint falls back to LIKE on `r.command`. |
+| `TestOutputSearch.test_short_default_query_matches_output_text_via_like` | Regression: short default-scope queries like `OK` still match output-only text via `output_search_text` LIKE when trigram FTS cannot be used. |
 | `TestOutputSearch.test_partial_typing_narrows_progressively` | Regression for reverse-i-search: every keystroke from 1 character upward (`p`, `pi`, `pin`, `ping`) narrows the result set via LIKE/FTS without a silent empty intermediate; matches bash i-search expectations. |
 | `TestOutputSearch.test_scope_command_ignores_output_matches` | Reverse-i-search must only match typed command text, not output text. Verifies `scope=command` suppresses the FTS path so a term that appears only in `output_search_text` is not surfaced, while the default scope still returns it for the drawer's full-text search. |
 | `TestOutputSearch.test_full_output_text_beyond_preview_window_is_searchable` | Verifies that `output_search_text` can index content from beyond the capped preview window — simulates a truncated run whose full artifact text contains terms absent from `output_preview`, and asserts they are found. |
-| `TestOutputSearch.test_fts_failure_falls_back_to_command_like` | Verifies graceful degradation when the `runs_fts` table does not exist: command-text queries succeed via `LIKE` fallback and return HTTP 200; output-only queries return an empty list rather than a 500 error. |
+| `TestOutputSearch.test_fts_failure_falls_back_to_command_and_output_like` | Verifies graceful degradation when the `runs_fts` table does not exist: command-text and output-only queries succeed via `LIKE` fallback and return HTTP 200. |
 
 #### `test_request_kill_and_commands.py`
 
@@ -748,7 +756,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRequestHelpers.test_uses_last_untrusted_forwarded_for_when_multiple` | Uses last untrusted forwarded for when multiple. |
 | `TestRequestHelpers.test_invalid_forwarded_for_falls_back` | Checks that invalid forwarded for falls back. |
 | `TestRequestHelpers.test_get_session_id_strips_whitespace` | Checks that get session id strips whitespace. |
+| `TestRequestHelpers.test_get_session_id_rejects_invalid_anonymous_session_id` | Verifies that production session parsing rejects arbitrary non-UUID anonymous IDs. |
 | `TestKillRoute.test_kill_returns_404_when_run_missing` | Checks that kill returns 404 when run missing. |
+| `TestKillRoute.test_kill_scopes_pid_lookup_to_request_session` | Verifies that `/kill` looks up active PIDs within the caller's session namespace. |
 | `TestKillRoute.test_kill_sends_sigterm_to_process_group` | Checks that kill sends sigterm to process group. |
 | `TestKillRoute.test_kill_still_returns_true_when_process_lookup_fails` | Checks that kill still returns true when process lookup fails. |
 | `TestKillRoute.test_kill_uses_scanner_sudo_path_when_configured` | Checks that kill uses scanner sudo path when configured. |
@@ -862,6 +872,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestWorkflowsRoute.test_payload_steps_are_prompt_fillable` | Verifies that every workflow step exposes a prompt-fill command and note text. |
 | `TestWorkflowsRoute.test_payload_includes_input_driven_workflows` | Verifies that `/workflows` includes workflows with declared inputs so the client can render prefilled, user-editable workflow forms. |
 | `TestWorkflowsRoute.test_workspace_required_workflows_follow_files_feature_flag` | Verifies that workspace-required workflows are omitted from `/workflows` when Files are disabled and returned when Files are enabled. |
+| `TestWorkflowsRoute.test_user_workflows_are_returned_before_builtins` | Verifies that current-session user-created workflows are returned before built-in workflows. |
 | `TestShortcutsRoute.test_returns_200` | Checks `/shortcuts` returns 200. |
 | `TestShortcutsRoute.test_payload_shape` | Verifies `sections[].title`, `sections[].items[]`, and `note` schema. |
 | `TestShortcutsRoute.test_sections_cover_terminal_tabs_and_ui` | Confirms the three canonical section titles (`Terminal`, `Tabs`, `UI`) are present in order. |
@@ -953,6 +964,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunPermalinkRoute.test_html_view_returns_200` | Checks that HTML view returns 200. |
 | `TestRunPermalinkRoute.test_html_view_contains_command` | Checks that HTML view contains command. |
 | `TestRunPermalinkRoute.test_json_view_returns_command` | Checks that JSON view returns command. |
+| `TestRunPermalinkRoute.test_json_view_is_a_bearer_permalink_across_sessions` | Verifies that a copied run permalink URL is an implicit bearer link and can render JSON without the original session identity. |
 | `TestRunPermalinkRoute.test_json_view_returns_full_output_when_artifact_exists` | Checks that JSON view returns full output when artifact exists. |
 | `TestRunPermalinkRoute.test_json_preview_view_returns_preview_when_requested` | Checks that JSON preview view returns preview when requested. |
 | `TestRunPermalinkRoute.test_html_content_type` | Checks HTML content type handling. |
@@ -1083,6 +1095,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestSessionTokenVerify.test_verify_returns_true_for_issued_token` | Checks that `/session/token/verify` returns `exists: true` for a freshly issued token. |
 | `TestSessionTokenVerify.test_verify_returns_false_for_unknown_tok_token` | Checks that a `tok_`-prefixed token never stored in the DB returns `exists: false`. |
 | `TestSessionTokenVerify.test_verify_returns_true_for_uuid` | Checks that UUID anonymous sessions are always considered valid (return `exists: true`) even without a DB entry. |
+| `TestSessionTokenVerify.test_verify_rejects_invalid_anonymous_session_id` | Checks that `/session/token/verify` rejects arbitrary non-UUID anonymous IDs. |
 | `TestSessionTokenVerify.test_verify_requires_token_field` | Checks that a 400 is returned when the `token` field is absent from the verify request. |
 | `TestSessionMigrate.test_returns_200_with_valid_request` | Checks that `/session/migrate` returns HTTP 200 when `from_session_id` matches the `X-Session-ID` header. |
 | `TestSessionMigrate.test_rejects_mismatched_from_session_id` | Checks that a 403 is returned when `from_session_id` does not match `X-Session-ID`. |
@@ -1101,15 +1114,20 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestSessionMigrate.test_migrate_returns_only_newly_inserted_star_count` | Checks that `migrated_stars` reflects INSERT rowcount (newly written rows) rather than DELETE rowcount — so overlapping stars in the destination do not inflate the reported count. |
 | `TestSessionMigrate.test_migrates_session_preferences_when_destination_has_none` | Checks that a source session's saved preference snapshot moves to the destination session when the destination has no saved preferences yet. |
 | `TestSessionMigrate.test_migrates_session_variables` | Checks that session command variables move to the destination identity and are returned by `/session/variables`. |
+| `TestSessionMigrate.test_migrates_user_workflows` | Checks that session-owned user workflows move to the destination identity during migration. |
 | `TestSessionMigrate.test_migrate_keeps_existing_destination_session_preferences` | Checks that migration does not overwrite a destination session's existing saved preference snapshot. |
 | `TestSessionMigrate.test_migrate_workspace_returns_zero_without_source_workspace` | Checks that workspace migration reports zero file movement when the source session has no workspace directory. |
 | `TestSessionMigrate.test_migrates_source_workspace_files_to_destination` | Checks that source workspace files and empty folders move to the destination session during migration. |
 | `TestSessionMigrate.test_migrate_workspace_keeps_destination_only_files` | Checks that destination-only workspace files remain available when the source has no workspace files. |
 | `TestSessionMigrate.test_migrate_workspace_skips_conflicting_files_without_overwrite` | Checks that conflicting workspace files are skipped without overwriting destination contents while non-conflicting files still move. |
+| `TestSessionWorkflows.test_create_lists_and_returns_normalized_workflow` | Checks that creating a session workflow stores normalized workflow data and returns it through the list endpoint. |
+| `TestSessionWorkflows.test_rejects_undeclared_workflow_variables` | Checks that workflow steps cannot reference undeclared template variables. |
+| `TestSessionWorkflows.test_update_and_delete_are_session_scoped` | Checks that workflow update and delete operations are scoped to the owning session. |
 | `TestSessionRunCount.test_returns_zero_for_empty_session` | Checks that `/session/run-count` reports zero runs for a session with no run history. |
 | `TestSessionRunCount.test_returns_true_count` | Checks that the endpoint returns the exact number of seeded run rows for the session. |
 | `TestSessionRunCount.test_is_uncapped_beyond_history_panel_limit` | Checks that 75 seeded runs are all counted — confirming the endpoint is not capped by `history_panel_limit` (50). |
 | `TestSessionRunCount.test_is_scoped_to_session` | Checks that the count only includes runs belonging to the requesting `X-Session-ID`. |
+| `TestSessionRunCount.test_returns_user_workflow_count` | Checks that `/session/run-count` reports the session's saved workflow count for migration prompts. |
 | `TestSessionStarred.test_get_returns_empty_list_for_new_session` | Checks that `GET /session/starred` returns an empty list for a new session. |
 | `TestSessionStarred.test_get_returns_starred_commands` | Checks that starred commands are included in the GET response. |
 | `TestSessionStarred.test_get_is_scoped_to_session` | Checks that GET only returns stars belonging to the requesting session. |
@@ -1265,6 +1283,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `requires explicit set before updating user options from the terminal config command` | Verifies that `config <option> <value>` is rejected and only `config set <option> <value>` applies terminal-native option changes. |
 | `keeps config command output pinned to the tail when the tab is already following` | Verifies that terminal-native `config set` output preserves tail-follow state after async preference application. |
 | `serves runtime autocomplete context for theme and config values` | Verifies that theme slugs, config keys, and config values are generated into the shared autocomplete context instead of duplicated static lists. |
+| `serves workflow names and variable flags in runtime autocomplete context` | Verifies that saved workflow names and workflow input flags are exposed through runtime autocomplete. |
+| `renders user workflows above built-ins with edit actions` | Verifies that session-owned workflows render before built-ins and expose edit controls. |
+| `runs a workflow from the terminal command with flag-provided inputs` | Verifies that `workflow run` resolves a workflow, applies flag values, and queues its rendered commands. |
 | `serves runtime autocomplete context for built-in command lookup helpers` | Verifies that runtime built-in context covers `session-token`, simple built-ins, and dynamic `man` / `which` / `type` lookup suggestions. |
 | `serves loaded workspace files as file command autocomplete values` | Verifies that loaded session files are offered as autocomplete values for `file show`, `file edit`, `file download`, `file rm`, and `cat`. |
 | `serves workspace autocomplete values relative to the active workspace folder` | Verifies that workspace autocomplete offers current-folder file and folder names instead of root-relative paths. |
@@ -1750,6 +1771,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `filters terminal-native theme output through the same pipe helpers as older built-ins` | Verifies that terminal-native `theme` output supports the same pipe helpers as server-side fake built-ins. |
 | `filters terminal-native config output through chained pipe helpers` | Verifies that terminal-native `config` output supports chained pipe helpers before rendering. |
 | `persists terminal-native built-ins to server-backed history` | Verifies that terminal-native built-ins post their rendered output to `/run/client` so recents and history survive reload. |
+| `routes workflow commands to the client-side workflow handler` | Verifies that `workflow` terminal commands are handled by the client workflow runtime. |
 | `clears stale failed tab and HUD state after a successful client-side built-in` | Verifies that successful client-side built-ins reset stale failed tab indicators, tab exit codes, and HUD state. |
 | `setStatus shows RUNNING only while running and IDLE otherwise` | Verifies that setStatus shows RUNNING only while running and IDLE otherwise. |
 | `doKill sends /kill immediately when runId is already known` | Verifies that doKill sends /kill immediately when runId is already known. |
@@ -1863,6 +1885,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `highlights mixed-content lines without flattening helper markup` | Verifies that highlights mixed-content lines without flattening helper markup. |
 | `merges adjacent text nodes between searches so a fragmented line is not re-split per fragment` | Verifies that merges adjacent text nodes between searches so a fragmented line is not re-split per fragment. |
 | `navigates by logical match across inline-element boundaries` | Verifies that navigates by logical match across inline-element boundaries. |
+| `uses debounced lazy current-match highlighting for large terminal output` | Verifies that large terminal output uses debounced searching, a short-query guard, and lazy current-match highlighting without permanently flattening terminal line markup. |
 | `scopes to warning lines and navigates between them` | Verifies that the warning scope filters down to warning lines and cycles through them independently of plain-text matches. |
 | `scopes to finding lines using server-provided signal metadata` | Verifies that findings mode matches server-tagged high-signal scanner, DNS, and service-result rows rather than untagged banners and boilerplate. |
 | `treats nslookup answer rows as findings when the server marks them` | Verifies that server-tagged `nslookup` answer sections count as findings while the untagged resolver header does not. |
@@ -1923,6 +1946,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 
 | Test | Description |
 | --- | --- |
+| `keeps the default split when workflows is closed and reopened before resizing` | Verifies that the desktop rail preserves the default Recents/Workflows split when Workflows is collapsed before the user drags the splitter. |
+| `restores the last split height when workflows is closed and reopened` | Verifies that the desktop rail preserves the user-sized Recents/Workflows split when the Workflows section is collapsed and reopened. |
 | `marks Redis offline when the status poll cannot reach the server` | Verifies that a failed HUD status poll clears a previously online Redis pill instead of leaving stale state visible. |
 | `keeps Redis as N/A on a failed poll when Redis was not configured` | Verifies that an unreachable server does not turn an already unconfigured Redis pill into a false configured-offline state. |
 
@@ -2271,13 +2296,20 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `keeps the editor hidden until the user starts or closes an edit` | Verifies that the workspace editor stays collapsed until New File or edit mode opens it, and closes cleanly afterward. |
 | `opens the editor with a prefilled file name from terminal commands` | Verifies that terminal-native file add/edit flows can open the Files editor with a prefilled file name. |
 | `shows file contents in a read-only viewer and keeps edit mode separate` | Verifies that View opens a read-only file display at the top of the file without exposing the larger edit form. |
+| `opens the viewer with a loading preview while a file read is pending` | Verifies that clicking View opens the viewer immediately with loading feedback before the file read and preview rendering finish. |
 | `refreshes the currently viewed file when the files list is refreshed` | Verifies that Refresh updates both the file browser and the currently open read-only viewer. |
+| `refreshes the viewer directly and keeps following when scrolled to the bottom` | Verifies that the viewer Refresh button reloads the active file, keeps bottom-following scroll behavior, and shows the refresh spinner. |
+| `keeps auto-refresh off by default and refreshes only after opt-in` | Verifies that open viewer files do not poll by default, and that the Auto control starts the five-second poll only after the user enables it. |
+| `disables auto-refresh for large files with an explanatory tooltip` | Verifies that files larger than 1 MB gray out Auto refresh and explain why the poll is unavailable. |
 | `runs edit download and delete actions from the viewer header for the viewed file` | Verifies that viewer-header actions operate on the currently viewed workspace file. |
 | `formats obvious JSON files in the read-only viewer` | Verifies that JSON-looking workspace files render as pretty-printed JSON in the read-only viewer. |
+| `shows loading feedback while switching between preview and raw modes` | Verifies that expensive Preview/Raw mode changes show loading feedback before re-rendering the viewer content. |
+| `formats JSONL files record-by-record with raw text available` | Verifies that JSONL workspace outputs parse each line as JSON, pretty-print valid records, keep raw text available, and fall back cleanly when a record is malformed. |
 | `renders CSV and TSV files as preview tables with raw text available` | Verifies that delimited workspace outputs render in a table preview while retaining a raw text mode. |
 | `formats XML and falls back cleanly for malformed XML` | Verifies that XML workspace outputs are formatted when valid and fall back to raw text with a notice when malformed. |
 | `renders HTTP responses with status, headers, and body sections` | Verifies that raw HTTP response files render status, headers, and body in separate preview sections. |
-| `uses a bounded line-aware preview for large text files` | Verifies that large text files render with line numbers, terminal-style search controls, jump-to-line, and a bounded first chunk rather than dumping the entire file into the viewer. |
+| `uses a bounded line-aware preview for large text files` | Verifies that large text files render with line numbers, large-preview search guards, debounced terminal-style search controls, lazy current-match highlighting, and a bounded first chunk rather than dumping the entire file into the viewer. |
+| `uses large-search mode for short files with very long lines` | Verifies that large-search protections also apply when a workspace file is large by byte/character size even if it has few rendered lines. |
 | `serves current workspace files as autocomplete hints after the file list is loaded` | Verifies that the workspace file cache exposes file names as autocomplete hints. |
 | `refreshes from the workspace route` | Verifies that the modal refresh path calls `/workspace/files` and renders the returned file list. |
 | `saves editor contents through the workspace route` | Verifies that saving posts the file name and text content to `/workspace/files` and refreshes the visible state. |
@@ -2480,6 +2512,16 @@ Desktop demo recording spec. Drives a tightened README-first interaction sequenc
 | `case-sensitive mode filters out lowercase matches for uppercase queries` | Verifies that case-sensitive mode filters out lowercase matches for uppercase queries. |
 | `regex mode reports invalid patterns instead of throwing` | Verifies that regex mode reports invalid patterns instead of throwing. |
 
+#### `session-token.spec.js`
+
+| Test | Description |
+| --- | --- |
+| `generate persists the token across reload and clear returns to anonymous` | Verifies that terminal-driven token generation stores the active token, survives a reload, and `session-token clear` returns the browser to its anonymous session after confirmation. |
+| `set can skip migration without moving anonymous history` | Verifies that setting an issued token can explicitly skip migration and does not carry the prior anonymous run history into the token session. |
+| `set migration carries history, starred commands, and workspace files` | Verifies that the browser migration path moves run history, starred commands, and app-mediated workspace files to the selected session token. |
+| `set rejects unknown tok tokens before switching identity` | Verifies that unknown `tok_` values fail verification and leave the browser on the original anonymous session. |
+| `revoke active token clears browser storage and reverts to anonymous` | Verifies that revoking the active token removes browser token storage and switches back to the anonymous session after confirmation. |
+
 #### `share.spec.js`
 
 | Test | Description |
@@ -2612,6 +2654,8 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | `editing workflow inputs rerenders steps and step run submits the rendered command` | Verifies that editing workflow inputs rerenders the displayed commands and that the per-step run button submits the interpolated command. |
 | `rendered workflow chips load interpolated commands into the prompt` | Verifies that workflow chips load the rendered command text, not the raw template, into the active prompt. |
 | `workflow inputs persist when the workflow modal is reopened` | Verifies that workflow form values persist across closing and reopening the workflows modal. |
+| `creates and edits a user workflow from the workflows modal` | Verifies that the workflows modal can create and edit a current-session user workflow through the browser UI. |
+| `rail workflow plus opens the new workflow editor without toggling the section` | Verifies that the desktop rail workflow `+` button opens the new workflow editor without collapsing the Workflows rail section. |
 | `run all executes rendered workflow steps sequentially in the same tab` | Verifies that `Run all` executes the rendered workflow commands sequentially in the active tab instead of opening separate tabs. |
 | `clicking a rail workflow opens the scoped modal without collapsing the rail list` | Verifies that clicking a workflow entry in the desktop rail opens a one-workflow modal view without replacing the full rail workflow list. |
 | `persists theme, timestamps, line number, and HUD clock preferences across reload` | Verifies that persists theme, timestamps, line number, and HUD clock preferences across reload. |

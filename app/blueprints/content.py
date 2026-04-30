@@ -19,7 +19,8 @@ from commands import (
     load_welcome_hints,
 )
 from fake_commands import get_current_shortcuts, get_fake_command_roots, get_special_command_keys
-from helpers import get_client_ip, get_log_session_id, ip_is_in_cidrs, resolve_theme
+from helpers import get_client_ip, get_log_session_id, get_session_id, ip_is_in_cidrs, resolve_theme
+from user_workflows import list_user_workflows
 from wordlists import wordlist_autocomplete_items
 
 log = logging.getLogger("shell")
@@ -223,8 +224,8 @@ def faq():
 
 @content_bp.route("/workflows")
 def workflows():
-    """Return built-in workflow entries plus any custom workflows.yaml entries."""
-    items = load_all_workflows(_config.CFG)
+    """Return user-created, built-in, and custom workflows.yaml entries."""
+    items = [*list_user_workflows(get_session_id()), *load_all_workflows(_config.CFG)]
     _log_content_view("/workflows", count=len(items))
     return jsonify({"items": items})
 

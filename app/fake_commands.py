@@ -239,6 +239,7 @@ _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "whoami", "description": "Describe this shell and link to the project README.", "root": "whoami"},
     {"name": "wc -l <file>", "description": "Count lines in a session file.", "root": "wc"},
     {"name": "wordlist", "description": "List and search installed SecLists wordlists.", "root": "wordlist"},
+    {"name": "workflow", "description": "List, inspect, and run guided workflows from the terminal.", "root": "workflow"},
 ]
 _FAKE_COMMAND_HELP = [(entry["name"], entry["description"]) for entry in _DOCUMENTED_FAKE_COMMANDS]
 _DOCUMENTED_FAKE_COMMAND_ROOTS = {entry["root"] for entry in _DOCUMENTED_FAKE_COMMANDS if "root" in entry}
@@ -403,6 +404,7 @@ _FAKE_COMMAND_DISPATCH = {
     "who":       lambda cmd, sid: _run_fake_who(sid),
     "whoami":    lambda cmd, sid: _run_fake_whoami(),
     "wordlist":  lambda cmd, sid: _run_fake_wordlist(cmd),
+    "workflow":  lambda cmd, sid: _run_fake_client_side_command("workflow"),
     "xyzzy":     lambda cmd, sid: _run_fake_xyzzy(),
     "coffee":    lambda cmd, sid: _run_fake_coffee(),
     "fork_bomb": lambda cmd, sid: _run_fake_fork_bomb(),

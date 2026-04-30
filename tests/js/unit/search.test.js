@@ -2,7 +2,10 @@ import { fromDomScripts } from './helpers/extract.js'
 
 const originalScrollIntoView = Element.prototype.scrollIntoView
 
-function loadSearchFns({ tab = { id: 'tab-1', command: 'nmap -sV ip.darklab.sh' } } = {}) {
+function loadSearchFns({
+  tab = { id: 'tab-1', command: 'nmap -sV ip.darklab.sh' },
+  overrides = {},
+} = {}) {
   const appendLine = (text, cls = '') => {
     const out = document.getElementById('out')
     if (!out) return
@@ -32,9 +35,11 @@ function loadSearchFns({ tab = { id: 'tab-1', command: 'nmap -sV ip.darklab.sh' 
       searchDiscoverabilityPrompted: false,
       acBuiltinCommandRoots: ['commands', 'status'],
       appendLine,
+      ...overrides,
     },
     `{
     runSearch,
+    scheduleRunSearch,
     navigateSearch,
     clearHighlights,
     clearSearch,
@@ -273,6 +278,73 @@ describe('search helpers', () => {
 
     navigateSearch(-1)
     expect(document.getElementById('searchCount').textContent).toBe('2 / 2')
+  })
+
+  it('uses debounced lazy current-match highlighting for large terminal output', () => {
+    const timers = []
+    const { scheduleRunSearch, navigateSearch, clearSearch } = loadSearchFns({
+      overrides: {
+        setTimeout: (fn, ms) => {
+          const id = timers.length + 1
+          timers.push({ id, fn, ms, cleared: false, ran: false })
+          return id
+        },
+        clearTimeout: (id) => {
+          const timer = timers.find(item => item.id === id)
+          if (timer) timer.cleared = true
+        },
+      },
+    })
+    const out = document.getElementById('out')
+    out.innerHTML = ''
+    for (let index = 0; index < 2001; index += 1) {
+      const line = document.createElement('span')
+      line.className = 'line'
+      line.innerHTML = `<span class="line-prefix">$</span>detected-${index}`
+      out.appendChild(line)
+    }
+    const input = document.getElementById('searchInput')
+
+    input.value = 'de'
+    scheduleRunSearch()
+    expect(document.getElementById('searchCount').textContent).toBe('type 3+ chars')
+    expect(document.querySelectorAll('mark.search-hl')).toHaveLength(0)
+
+    input.value = 'detected-1999'
+    scheduleRunSearch()
+    expect(document.getElementById('searchCount').textContent).toBe('searching...')
+    const timer = timers.find(item => !item.cleared && !item.ran && item.ms === 600)
+    expect(timer).toBeTruthy()
+    timer.ran = true
+    timer.fn()
+
+    expect(document.getElementById('searchCount').textContent).toBe('1 / 1')
+    expect(document.querySelectorAll('mark.search-hl')).toHaveLength(1)
+    expect(document.querySelector('mark.search-hl')?.textContent).toBe('detected-1999')
+
+    clearSearch()
+
+    expect(document.querySelectorAll('mark.search-hl')).toHaveLength(0)
+    expect(out.querySelector('.line .line-prefix')).not.toBeNull()
+    expect(input.value).toBe('')
+
+    input.value = 'detected-200'
+    scheduleRunSearch()
+    const nextTimer = timers.find(item => !item.cleared && !item.ran && item.ms === 600)
+    nextTimer.ran = true
+    nextTimer.fn()
+    expect(document.getElementById('searchCount').textContent).toBe('1 / 2')
+    Object.defineProperty(out, 'clientHeight', { configurable: true, value: 100 })
+    out.scrollTop = 0
+    out.getBoundingClientRect = () => ({ top: 0, height: 100 })
+    const laterLine = Array.from(out.querySelectorAll('.line'))
+      .find(line => line.textContent.includes('detected-2000'))
+    laterLine.getBoundingClientRect = () => ({ top: 500, height: 20 })
+    navigateSearch(1)
+    expect(document.getElementById('searchCount').textContent).toBe('2 / 2')
+    expect(out.scrollTop).toBe(460)
+    expect(document.querySelectorAll('mark.search-hl')).toHaveLength(1)
+    expect(out.querySelector('.line .line-prefix')).not.toBeNull()
   })
 
   it('scopes to warning lines and navigates between them', () => {

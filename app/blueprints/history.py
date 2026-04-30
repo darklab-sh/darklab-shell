@@ -134,7 +134,14 @@ def _history_match_clause(query, scope, force_like=False):
             [fts_q],
             fts_q,
         )
-    return " AND LOWER(r.command) LIKE ?", [f"%{query.lower()}%"], None
+    like_query = f"%{query.lower()}%"
+    if scope == "command":
+        return " AND LOWER(r.command) LIKE ?", [like_query], None
+    return (
+        " AND (LOWER(r.command) LIKE ? OR LOWER(COALESCE(r.output_search_text, '')) LIKE ?)",
+        [like_query, like_query],
+        None,
+    )
 
 
 def _history_base_clause(
@@ -449,6 +456,7 @@ def get_active_history_runs():
 @history_bp.route("/history/<run_id>")
 def get_run(run_id):
     """Serve a styled HTML permalink page for a single run, or JSON if ?json is passed."""
+    session_id = get_session_id()
     with db_connect() as conn:
         row = conn.execute(
             "SELECT runs.*, art.rel_path "
@@ -457,7 +465,11 @@ def get_run(run_id):
             (run_id,),
         ).fetchone()
     if not row:
-        log.warning("RUN_NOT_FOUND", extra={"ip": get_client_ip(), "run_id": run_id})
+        log.warning("RUN_NOT_FOUND", extra={
+            "ip": get_client_ip(),
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+        })
         return _permalink_error_page("run")
     run = dict(row)
     run["preview_truncated"] = bool(run.get("preview_truncated"))
@@ -485,6 +497,8 @@ def get_run(run_id):
     run["preview_notice"] = _preview_notice(run) if not is_full_view else None
     log.info("RUN_VIEWED", extra={
         "ip": get_client_ip(), "run_id": run_id,
+        "session": get_log_session_id(session_id),
+        "run_session": get_log_session_id(run.get("session_id")),
         "cmd": run["command"], "full_output": is_full_view,
     })
 

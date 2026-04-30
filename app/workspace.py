@@ -579,7 +579,7 @@ def workspace_path_info(
     if stat.S_ISLNK(path_stat.st_mode):
         raise InvalidWorkspacePath("session file symlinks are not allowed")
     if stat.S_ISREG(path_stat.st_mode):
-        return {"path": normalized, "kind": "file", "file_count": 1}
+        return {"path": normalized, "kind": "file", "file_count": 1, "size": path_stat.st_size}
     if stat.S_ISDIR(path_stat.st_mode):
         return {
             "path": normalized,

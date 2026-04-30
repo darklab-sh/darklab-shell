@@ -330,6 +330,50 @@ test.describe('workflows modal', () => {
     await expect(page.locator('.workflow-card').first().locator('.workflow-step').first().locator('.workflow-step-cmd')).toContainText('dig persist.example A')
   })
 
+  test('creates and edits a user workflow from the workflows modal', async ({ page }) => {
+    await openWorkflowsModal(page)
+
+    await expect(page.locator('#workflow-new-btn')).toHaveText('New Workflow')
+    await page.locator('#workflow-new-btn').click()
+    await expect(page.locator('#workflow-editor-overlay')).toHaveClass(/\bopen\b/)
+    await page.locator('#workflow-editor-title-input').fill('Saved Whois')
+    await page.locator('.workflow-editor-step-command').first().fill('whois {{domain}}')
+    await page.locator('.workflow-editor-step-note').first().fill('Lookup registration')
+    await page.locator('#workflow-editor-save-btn').click()
+
+    await expect(page.locator('#workflow-editor-overlay')).not.toHaveClass(/\bopen\b/)
+    const userCard = page.locator('.workflow-card').first()
+    await expect(userCard).toHaveClass(/\bis-user-workflow\b/)
+    await expect(userCard.locator('.workflow-title')).toHaveText('Saved Whois')
+    await expect(userCard.locator('.workflow-edit-btn')).toBeVisible()
+    await expect(userCard.locator('.workflow-step-cmd').first()).toContainText('whois {{domain}}')
+
+    await userCard.locator('.workflow-edit-btn').click()
+    await expect(page.locator('#workflow-editor-title')).toHaveText('EDIT WORKFLOW')
+    await page.locator('.workflow-editor-step-command').first().fill('dig {{domain}} A')
+    await page.locator('#workflow-editor-save-btn').click()
+
+    await expect(page.locator('#workflow-editor-overlay')).not.toHaveClass(/\bopen\b/)
+    await expect(page.locator('.workflow-card').first().locator('.workflow-step-cmd').first()).toContainText('dig {{domain}} A')
+  })
+
+  test('rail workflow plus opens the new workflow editor without toggling the section', async ({ page }) => {
+    const section = page.locator('#rail-section-workflows')
+    if (await section.evaluate((node) => node.classList.contains('closed'))) {
+      await page.locator('#rail-workflows-header').click()
+    }
+    await expect(section).not.toHaveClass(/\bclosed\b/)
+
+    const newBtn = page.locator('#rail-workflow-new-btn')
+    await expect(newBtn).toBeVisible()
+    await expect(newBtn).toHaveText('+')
+    await newBtn.click()
+
+    await expect(page.locator('#workflow-editor-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#workflow-editor-title')).toHaveText('NEW WORKFLOW')
+    await expect(section).not.toHaveClass(/\bclosed\b/)
+  })
+
   test('run all executes rendered workflow steps sequentially in the same tab', async ({ page }) => {
     const postedCommands = []
     await page.route('**/run', async (route) => {

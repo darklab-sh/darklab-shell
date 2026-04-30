@@ -185,7 +185,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/themes` | Returns the active theme plus the complete theme registry used by the Options modal. |
 | `GET` | `/allowed-commands` | Returns the allowed command prefixes grouped from `commands.yaml` for command reference surfaces. |
 | `GET` | `/faq` | Returns built-in FAQ entries plus custom `faq.yaml` entries. |
-| `GET` | `/workflows` | Returns built-in workflow entries plus custom `workflows.yaml` entries, filtered by feature gates such as Files/workspace support. |
+| `GET` | `/workflows` | Returns current-session user workflows followed by built-in and custom `workflows.yaml` entries, filtered by feature gates such as Files/workspace support. |
 | `GET` | `/shortcuts` | Returns the keyboard shortcut reference used by the `shortcuts` built-in and the browser overlay. |
 | `GET` | `/autocomplete` | Returns merged external-command and app-owned built-in autocomplete context, built-in command roots, and special command keys. |
 | `GET` | `/welcome` | Returns welcome command samples from `welcome.yaml`. |
@@ -210,7 +210,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `DELETE` | `/history` | Deletes all run history for the current session and removes matching full-output artifacts. |
 | `GET` | `/history/commands` | Returns newest distinct command strings for prompt history, desktop recents, and mobile recents. |
 | `GET` | `/history/active` | Returns active-run metadata and telemetry for reload recovery and the Run Monitor drawer. |
-| `GET` | `/history/<run_id>` | Serves a styled run permalink, or raw JSON with `?json`; uses full-output artifacts when available unless `?preview=1` is set. |
+| `GET` | `/history/<run_id>` | Serves an implicit-bearer styled run permalink, or raw JSON with `?json`; uses full-output artifacts when available unless `?preview=1` is set. |
 | `DELETE` | `/history/<run_id>` | Deletes one current-session run and its matching full-output artifact. |
 | `GET` | `/history/<run_id>/full` | Backward-compatible alias for `/history/<run_id>`. |
 | `POST` | `/share` | Saves a tab snapshot, optionally applies share redaction, and returns a snapshot permalink URL. |
@@ -225,11 +225,16 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/session/token/info` | Returns the active named token and creation timestamp, or null fields for anonymous sessions. |
 | `POST` | `/session/token/revoke` | Revokes a named token so future requests with that token fall back to anonymous session handling. |
 | `POST` | `/session/token/verify` | Checks whether a supplied `tok_...` token was issued by this server. |
-| `POST` | `/session/migrate` | Migrates runs, snapshots, starred commands, preferences, command variables, and non-conflicting workspace paths between session IDs. |
+| `POST` | `/session/migrate` | Migrates runs, snapshots, starred commands, preferences, command variables, user workflows, and non-conflicting workspace paths between session IDs. |
 | `GET` | `/session/preferences` | Returns the current session's normalized saved Options snapshot. |
 | `POST` | `/session/preferences` | Persists the current session's normalized saved Options snapshot. |
 | `GET` | `/session/variables` | Returns current session command-variable names and values for autocomplete and runtime refresh. |
-| `GET` | `/session/run-count` | Returns uncapped run count plus workspace file count for migration confirmation. |
+| `GET` | `/session/workflows` | Returns current-session user-created workflows. |
+| `POST` | `/session/workflows` | Creates a current-session user workflow. |
+| `GET` | `/session/workflows/<workflow_id>` | Returns one current-session user workflow. |
+| `PUT` | `/session/workflows/<workflow_id>` | Updates one current-session user workflow. |
+| `DELETE` | `/session/workflows/<workflow_id>` | Deletes one current-session user workflow. |
+| `GET` | `/session/run-count` | Returns uncapped run count plus workspace file count and user workflow count for migration confirmation. |
 | `GET` | `/session/starred` | Returns the current session's starred command list. |
 | `POST` | `/session/starred` | Adds one command to the current session's starred list. |
 | `DELETE` | `/session/starred` | Removes one command, or clears the whole starred list, for the current session. |
@@ -311,7 +316,7 @@ This is still a classic-script frontend, not an ES-module app. The architecture 
 
 Prompt ownership lives in `composerState`, not in whichever DOM input happened to update last.
 
-The options modal is part of that same browser-owned layer. It does not change backend config; it owns user-specific UX preferences (timestamp/line-number quick toggles, welcome-intro behavior, snapshot redaction defaults, run-notification state, HUD clock timezone mode) and feeds them back into the classic-script runtime during boot and session changes. The terminal-native `config` command calls the same preference application path as the modal, so terminal and modal changes stay equivalent. Browser-owned terminal commands (`theme`, `config`, and `session-token`) render locally, then persist their masked command and transcript output through `/run/client` so history, recents, and reload hydration use the same server-backed run model as `/run`. Those preferences now persist server-side per session through the session-token model, while browser cookies/local storage remain the local cache and anonymous-session fallback layer. On mobile, that same shared Options surface hides the desktop-only `HUD Clock` and `Run Notifications` rows even though the underlying preference set remains shared with desktop.
+The options modal is part of that same browser-owned layer. It does not change backend config; it owns user-specific UX preferences (timestamp/line-number quick toggles, welcome-intro behavior, snapshot redaction defaults, run-notification state, HUD clock timezone mode) and feeds them back into the classic-script runtime during boot and session changes. The terminal-native `config` command calls the same preference application path as the modal, so terminal and modal changes stay equivalent. Browser-owned terminal commands (`theme`, `config`, `workflow`, and `session-token`) render locally, then persist their masked command and transcript output through `/run/client` so history, recents, and reload hydration use the same server-backed run model as `/run`. `workflow run` uses that local command path for catalog lookup, input prompting, and queue setup, then submits the rendered workflow steps through the normal `/run` execution path. Those preferences now persist server-side per session through the session-token model, while browser cookies/local storage remain the local cache and anonymous-session fallback layer. On mobile, that same shared Options surface hides the desktop-only `HUD Clock` and `Run Notifications` rows even though the underlying preference set remains shared with desktop.
 
 ### Browser Runtime
 
@@ -411,12 +416,12 @@ The detailed user-visible welcome behavior belongs in the README. Here, the impo
 
 Command editing is split into separate state machines rather than one overloaded dropdown path:
 
-- normal autocomplete consumes structured external-tool and app-owned built-in `context` hints from `/autocomplete`, then overlays only dynamic runtime suggestions such as loaded Files, session variables, theme names, config values, and command lookup targets before passing everything through the same token-aware matcher
+- normal autocomplete consumes structured external-tool and app-owned built-in `context` hints from `/autocomplete`, then overlays only dynamic runtime suggestions such as loaded Files, session variables, workflow names, theme names, config values, and command lookup targets before passing everything through the same token-aware ranked matcher
 - reverse-history search owns its own pre-draft, query, selection, and exit paths
 - `controller.js` routes keyboard events into the appropriate mode before the normal submit/edit handlers run
 - navigation semantics stay consistent regardless of whether a dropdown opens above or below the prompt
 
-The structured autocomplete path is intentionally token-aware rather than shell-aware. It inspects command root, current token, and prior tokens to decide whether a suggestion should replace the whole input or only the active token. Examples act as discovery suggestions: a unique root prefix can flatten root and subcommand examples into full-command replacements, while a selected subcommand switches the matcher to subcommand-scoped flags and value hints. Ambiguous subcommand prefixes remain token suggestions until only one subcommand matches. That preserves the classic-shell feel for long scanner commands without turning the frontend into a general shell parser.
+The structured autocomplete path is intentionally token-aware rather than shell-aware. It inspects command root, current token, and prior tokens to decide whether a suggestion should replace the whole input or only the active token. Examples act as discovery suggestions: a unique root or fuzzy root match can flatten root and subcommand examples into full-command replacements, while a selected subcommand switches the matcher to subcommand-scoped flags and value hints. Ambiguous subcommand matches remain token suggestions until only one subcommand matches. The matcher ranks exact matches, prefixes, token-boundary/camel-ish hits, substrings, and fuzzy character matches in that order, while preserving authored example order once an example is eligible. That preserves the classic-shell feel for long scanner commands without turning the frontend into a general shell parser.
 
 Synthetic post-filters also sit on a distinct path before the normal shell-operator denial logic. `parse_synthetic_postfilter()` in `commands.py` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the `/run` stream applies the selected helper before lines are emitted or persisted. That keeps shell-like helpers app-native without reopening general shell piping or chaining.
 
@@ -503,7 +508,7 @@ The contract:
 - **One at a time.** A second `showConfirm()` call while another is open is rejected. The shell never stacks confirms.
 - **Role-based action ids.** Each action carries `role: 'primary' | 'secondary' | 'ghost' | 'cancel'` and an optional `tone: 'danger' | 'warning'`. `role` drives the button primitive class (`btn-primary` / `btn-secondary` / `btn-ghost`); `tone` adds the destructive overlay. Callers receive the id of the activated action, or `null` for cancel.
 - **Default focus on cancel.** For confirmations, the cancel action is focused on open so browser native Enter-activates-focused-button makes `Enter === cancel`. Callers with a form input in the `content` slot can override via `defaultFocus`.
-- **Focus is trapped inside the card.** `bindFocusTrap` in `app/static/js/ui_focus_trap.js` keeps Tab / Shift+Tab cycling between the card's focusable descendants so keyboard focus cannot fall through to the rail, tabs, or HUD behind the backdrop while a modal is open. Every modal surface in the shell uses this helper: `#confirm-host` binds per-open because its card content changes between shows, and the app-level modals (`#options-modal`, `#theme-modal`, `#faq-modal`, `#workspace-modal`, `#workflows-modal`) bind once at startup via `setupModalFocusTraps()` in `controller.js` because their DOM is persistent.
+- **Focus is trapped inside the card.** `bindFocusTrap` in `app/static/js/ui_focus_trap.js` keeps Tab / Shift+Tab cycling between the card's focusable descendants so keyboard focus cannot fall through to the rail, tabs, or HUD behind the backdrop while a modal is open. Every modal surface in the shell uses this helper: `#confirm-host` binds per-open because its card content changes between shows, and the app-level modals (`#options-modal`, `#theme-modal`, `#faq-modal`, `#workspace-modal`, `#workflows-modal`, `#workflow-editor-form`) bind once at startup via `setupModalFocusTraps()` in `controller.js` because their DOM is persistent.
 - **Dismissal is layered.** `bindDismissible` at `level: 'modal'` owns Escape + backdrop click. `bindMobileSheet` owns the drag-down-to-close handle on mobile. Both resolve the promise with `null` so callers cannot accidentally treat dismissal as confirmation.
 - **Actions stack at narrow widths.** The action row adds `.modal-actions-stacked` when the viewport is ≤480px or the action count is ≥3. A `matchMedia` listener keeps the class reactive to resize while the modal is open.
 - **Gate via `onActivate`.** An action can supply `onActivate` to run validation before close. Returning a falsy value (or a Promise resolving to one) keeps the modal open so form errors stay on screen; any truthy return closes and resolves with the action id.
@@ -690,6 +695,7 @@ That split is what allows the app to keep the interactive shell fast while still
 - `session_preferences` — one row per session ID `(session_id TEXT PRIMARY KEY, preferences TEXT, updated TEXT)`. Stores the normalized Options snapshot that follows a named session token across browsers while still allowing browser-local UUID sessions to keep independent defaults.
 - `starred_commands` — one row per starred command per session `(session_id, command)`. Backs the `/session/starred` endpoints and follows session tokens across devices via the migration path.
 - `session_variables` — one row per session command variable `(session_id, name, value, updated)`. Backs the `var` built-in, `/session/variables`, and app-mediated command expansion before validation.
+- `user_workflows` — one row per saved workflow `(id, session_id, title, description, inputs, steps, created, updated)`. Backs the Workflows panel's **My workflows** section, the `workflow` terminal command, and session-token migration.
 - Redis-backed active-run metadata plus browser `sessionStorage` form a second persistence layer for reload continuity:
   - `/history/active` covers in-flight runs owned by the server/session
   - browser `sessionStorage` covers non-running tabs, transcript previews, status, draft input, and active-tab selection
@@ -918,10 +924,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 1088
-- `vitest`: 906
-- `playwright`: 222
-- total: 2,216
+- behavior tests: 2,221
+- docs/inventory meta-tests: 30
+- `pytest`: 1102 (1072 behavior + 30 meta)
+- `vitest`: 920
+- `playwright`: 229
+- total: 2,251
 
 ### Testing Architecture
 

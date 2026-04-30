@@ -77,10 +77,16 @@ class TestSessionTokenVerify:
     def test_verify_returns_true_for_uuid(self):
         """UUID anonymous sessions are never in session_tokens but are always valid."""
         client = get_client()
-        uuid = __import__("uuid").uuid4().hex[:8] + "-" + "x" * 4 + "-" + "x" * 4 + "-" + "x" * 4 + "-" + "x" * 12
-        resp = client.post("/session/token/verify", json={"token": uuid})
+        session_id = "a1b2c3d4-0000-4000-8000-000000000001"
+        resp = client.post("/session/token/verify", json={"token": session_id})
         assert resp.status_code == 200
         assert json.loads(resp.data)["exists"] is True
+
+    def test_verify_rejects_invalid_anonymous_session_id(self):
+        client = get_client()
+        resp = client.post("/session/token/verify", json={"token": "abc123"})
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "invalid anonymous session id"
 
     def test_verify_requires_token_field(self):
         client = get_client()
@@ -139,6 +145,33 @@ class TestSessionMigrate:
                 "INSERT OR REPLACE INTO session_variables (session_id, name, value, updated) "
                 "VALUES (?, ?, ?, datetime('now'))",
                 (session_id, name, value),
+            )
+            conn.commit()
+
+    def _seed_workflow(self, session_id, workflow_id="usr_test_workflow"):
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO user_workflows "
+                "(id, session_id, title, description, inputs, steps, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
+                (
+                    workflow_id,
+                    session_id,
+                    "Saved DNS",
+                    "custom workflow",
+                    json.dumps([
+                        {
+                            "id": "domain",
+                            "label": "Domain",
+                            "type": "domain",
+                            "required": True,
+                            "placeholder": "example.com",
+                            "default": "",
+                            "help": "",
+                        },
+                    ]),
+                    json.dumps([{"cmd": "dig {{domain}} A", "note": "resolve apex"}]),
+                ),
             )
             conn.commit()
 
@@ -414,6 +447,24 @@ class TestSessionMigrate:
         vars_data = json.loads(vars_resp.data)
         assert vars_data["variables"] == [{"name": "HOST", "value": "ip.darklab.sh"}]
 
+    def test_migrates_user_workflows(self):
+        client = get_client()
+        from_id = "migrate-workflows-from-" + __import__("uuid").uuid4().hex[:8]
+        to_id = str(__import__("uuid").uuid4())
+        self._seed_workflow(from_id, "usr_migrate_test")
+
+        resp = client.post(
+            "/session/migrate",
+            json={"from_session_id": from_id, "to_session_id": to_id},
+            headers={"X-Session-ID": from_id},
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["migrated_workflows"] == 1
+        assert self._count_rows("user_workflows", from_id) == 0
+        assert self._count_rows("user_workflows", to_id) == 1
+
     def test_migrate_keeps_existing_destination_session_preferences(self):
         client = get_client()
         from_id = "migrate-prefs-src-" + __import__("uuid").uuid4().hex[:8]
@@ -519,6 +570,94 @@ class TestSessionMigrate:
         assert workspace.read_workspace_text_file(from_id, "shared.txt", cfg) == "source\n"
 
 
+# ── /session/workflows ────────────────────────────────────────────────────────
+
+class TestSessionWorkflows:
+    def _payload(self, title="Saved DNS"):
+        return {
+            "title": title,
+            "description": "custom workflow",
+            "inputs": [
+                {
+                    "id": "domain",
+                    "label": "Domain",
+                    "type": "domain",
+                    "required": True,
+                    "placeholder": "example.com",
+                    "default": "",
+                    "help": "",
+                },
+            ],
+            "steps": [{"cmd": "dig {{domain}} A", "note": "resolve apex"}],
+        }
+
+    def test_create_lists_and_returns_normalized_workflow(self):
+        client = get_client()
+        session_id = "workflow-create-" + __import__("uuid").uuid4().hex[:8]
+
+        create_resp = client.post(
+            "/session/workflows",
+            json=self._payload(),
+            headers={"X-Session-ID": session_id},
+        )
+        list_resp = client.get("/session/workflows", headers={"X-Session-ID": session_id})
+        created = json.loads(create_resp.data)["workflow"]
+        listed = json.loads(list_resp.data)["items"]
+
+        assert create_resp.status_code == 201
+        assert created["source"] == "user"
+        assert created["inputs"][0]["id"] == "domain"
+        assert listed[0]["id"] == created["id"]
+
+    def test_rejects_undeclared_workflow_variables(self):
+        client = get_client()
+        session_id = "workflow-invalid-" + __import__("uuid").uuid4().hex[:8]
+        payload = self._payload()
+        payload["inputs"] = []
+
+        resp = client.post(
+            "/session/workflows",
+            json=payload,
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert resp.status_code == 400
+        assert "variables" in json.loads(resp.data)["error"]
+
+    def test_update_and_delete_are_session_scoped(self):
+        client = get_client()
+        session_id = "workflow-update-" + __import__("uuid").uuid4().hex[:8]
+        other_session_id = "workflow-other-" + __import__("uuid").uuid4().hex[:8]
+        created = json.loads(client.post(
+            "/session/workflows",
+            json=self._payload(),
+            headers={"X-Session-ID": session_id},
+        ).data)["workflow"]
+
+        denied = client.put(
+            f"/session/workflows/{created['id']}",
+            json=self._payload("Other Edit"),
+            headers={"X-Session-ID": other_session_id},
+        )
+        updated = client.put(
+            f"/session/workflows/{created['id']}",
+            json=self._payload("Updated DNS"),
+            headers={"X-Session-ID": session_id},
+        )
+        deleted = client.delete(
+            f"/session/workflows/{created['id']}",
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert denied.status_code == 404
+        assert json.loads(updated.data)["workflow"]["title"] == "Updated DNS"
+        assert deleted.status_code == 200
+        assert json.loads(client.get(
+            "/session/workflows",
+            headers={"X-Session-ID": session_id},
+        ).data)["items"] == []
+
+
 # ── /session/run-count ────────────────────────────────────────────────────────
 
 class TestSessionRunCount:
@@ -541,6 +680,7 @@ class TestSessionRunCount:
         resp = client.get("/session/run-count", headers={"X-Session-ID": session_id})
         assert resp.status_code == 200
         assert json.loads(resp.data)["count"] == 0
+        assert json.loads(resp.data)["workflow_count"] == 0
 
     def test_returns_true_count(self):
         client = get_client()
@@ -565,6 +705,19 @@ class TestSessionRunCount:
         self._seed_runs(session_b, count=5)
         resp = client.get("/session/run-count", headers={"X-Session-ID": session_a})
         assert json.loads(resp.data)["count"] == 3
+
+    def test_returns_user_workflow_count(self):
+        client = get_client()
+        session_id = "run-count-workflows-" + __import__("uuid").uuid4().hex[:8]
+        client.post(
+            "/session/workflows",
+            headers={"X-Session-ID": session_id},
+            json=TestSessionWorkflows()._payload(),
+        )
+
+        resp = client.get("/session/run-count", headers={"X-Session-ID": session_id})
+
+        assert json.loads(resp.data)["workflow_count"] == 1
 
 
 # ── /session/starred ──────────────────────────────────────────────────────────

@@ -20,8 +20,8 @@
 # Prompt identity shown at the start of the terminal prompt and welcome samples.
 # The UI appends ":~ $" when workspaces are disabled and ":<workspace path> $"
 # when workspaces are enabled.
-# Server default if unset: "anon@darklab"
-# prompt_prefix: "anon@darklab"
+# Server default if unset: "anon@darklab.sh"
+# prompt_prefix: "anon@darklab.sh"
 
 # Optional message shown at the top of the terminal on page load.
 # Leave empty to disable.

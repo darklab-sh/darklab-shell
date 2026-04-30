@@ -670,7 +670,7 @@ class TestRunLifecycleEvents:
         client = get_client()
 
         with mock.patch.object(shell_app.log, "info") as mock_info, \
-             mock.patch("blueprints.run.pid_pop", return_value=1234), \
+             mock.patch("blueprints.run.pid_pop_for_session", return_value=1234), \
              mock.patch("blueprints.run.os.getpgid", return_value=4321), \
              mock.patch("blueprints.run.os.killpg"):
             resp = client.post("/kill", json={"run_id": "run-123"})
@@ -683,7 +683,7 @@ class TestRunLifecycleEvents:
         client = get_client()
 
         with mock.patch.object(shell_app.log, "debug") as mock_debug, \
-             mock.patch("blueprints.run.pid_pop", return_value=None):
+             mock.patch("blueprints.run.pid_pop_for_session", return_value=None):
             resp = client.post("/kill", json={"run_id": "missing-run"})
 
         assert resp.status_code == 404
@@ -987,8 +987,8 @@ class TestKillFailedEvent:
 
     def test_kill_failed_emits_warning_on_os_error(self):
         client = get_client()
-        with mock.patch("blueprints.run.pid_pop", return_value=99999):
-            with mock.patch("os.getpgid", side_effect=ProcessLookupError("no such process")):
+        with mock.patch("blueprints.run.pid_pop_for_session", return_value=99999):
+            with mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError("no such process")):
                 with mock.patch.object(shell_app.log, "warning") as mock_warn:
                     client.post("/kill", json={"run_id": "fake-run-id"})
         kill_failed = [c for c in mock_warn.call_args_list if c[0][0] == "KILL_FAILED"]
@@ -996,8 +996,8 @@ class TestKillFailedEvent:
 
     def test_kill_failed_extra_has_run_id(self):
         client = get_client()
-        with mock.patch("blueprints.run.pid_pop", return_value=99999):
-            with mock.patch("os.getpgid", side_effect=ProcessLookupError("no such process")):
+        with mock.patch("blueprints.run.pid_pop_for_session", return_value=99999):
+            with mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError("no such process")):
                 with mock.patch.object(shell_app.log, "warning") as mock_warn:
                     client.post("/kill", json={"run_id": "test-run-xyz"})
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "KILL_FAILED")
@@ -1073,7 +1073,7 @@ class TestRunViewedEvent:
         self._insert_run(run_id, "ping test")
         try:
             with mock.patch.object(shell_app.log, "info") as mock_info:
-                get_client().get(f"/history/{run_id}")
+                get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "rv-session"})
             viewed = [c for c in mock_info.call_args_list if c[0][0] == "RUN_VIEWED"]
             assert len(viewed) == 1
         finally:
@@ -1084,7 +1084,7 @@ class TestRunViewedEvent:
         self._insert_run(run_id, "ping test")
         try:
             with mock.patch.object(shell_app.log, "info") as mock_info:
-                get_client().get(f"/history/{run_id}")
+                get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "rv-session"})
             call = next(c for c in mock_info.call_args_list if c[0][0] == "RUN_VIEWED")
             assert call.kwargs["extra"]["run_id"] == run_id
         finally:
@@ -1095,7 +1095,7 @@ class TestRunViewedEvent:
         self._insert_run(run_id, "nmap 8.8.8.8")
         try:
             with mock.patch.object(shell_app.log, "info") as mock_info:
-                get_client().get(f"/history/{run_id}")
+                get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "rv-session"})
             call = next(c for c in mock_info.call_args_list if c[0][0] == "RUN_VIEWED")
             assert call.kwargs["extra"]["cmd"] == "nmap 8.8.8.8"
         finally:
@@ -1420,7 +1420,7 @@ class TestNotFoundEvents:
             conn.commit()
         try:
             with mock.patch.object(shell_app.log, "warning") as mock_warn:
-                get_client().get(f"/history/{run_id}")
+                get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "pnf-session"})
             calls = [c for c in mock_warn.call_args_list if c[0][0] == "RUN_NOT_FOUND"]
             assert len(calls) == 0
         finally:

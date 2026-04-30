@@ -137,8 +137,96 @@ function _buildAutocompleteItem({ value, description = '', replaceStart, replace
   };
 }
 
-function _filterAutocompleteItems(items, query) {
+function _autocompleteSearchFields(item) {
+  const fields = [_acItemInsertValue(item), _acItemText(item)]
+    .map(value => String(value || '').trim())
+    .filter(Boolean);
+  return fields.filter((value, index) => fields.indexOf(value) === index);
+}
+
+function _autocompleteBoundaryIndex(value, query) {
+  const text = String(value || '');
+  const lower = text.toLowerCase();
   const q = String(query || '').toLowerCase();
+  if (!text || !q) return -1;
+  let index = lower.indexOf(q, 1);
+  while (index >= 0) {
+    const previous = text[index - 1];
+    const current = text[index];
+    const startsSegment = /[\s/\\._:@=-]/.test(previous || '');
+    const startsCamel = /[a-z0-9]/.test(previous || '') && /[A-Z]/.test(current || '');
+    if (startsSegment || startsCamel) return index;
+    index = lower.indexOf(q, index + 1);
+  }
+  return -1;
+}
+
+function _autocompleteFuzzyMatchIndexes(value, query) {
+  const text = String(value || '');
+  const q = String(query || '').toLowerCase();
+  if (!text || q.length < 2) return null;
+  const lower = text.toLowerCase();
+  const indexes = [];
+  let from = 0;
+  for (let index = 0; index < q.length; index += 1) {
+    const found = lower.indexOf(q[index], from);
+    if (found < 0) return null;
+    indexes.push(found);
+    from = found + 1;
+  }
+  return indexes;
+}
+
+function _scoreAutocompleteField(value, query) {
+  const text = String(value || '').trim();
+  const lower = text.toLowerCase();
+  const q = String(query || '').toLowerCase();
+  if (!text || !q) return null;
+  if (lower === q) return 0;
+  if (lower.startsWith(q)) return 100;
+
+  const boundaryIndex = _autocompleteBoundaryIndex(text, q);
+  if (boundaryIndex >= 0) {
+    return 200 + boundaryIndex + Math.max(0, text.length - q.length) / 100;
+  }
+
+  const substringIndex = lower.indexOf(q);
+  if (substringIndex >= 0) {
+    return 300 + substringIndex + Math.max(0, text.length - q.length) / 100;
+  }
+
+  const fuzzyIndexes = _autocompleteFuzzyMatchIndexes(text, q);
+  if (!fuzzyIndexes) return null;
+  const first = fuzzyIndexes[0];
+  const last = fuzzyIndexes[fuzzyIndexes.length - 1];
+  const span = last - first + 1;
+  const gapPenalty = Math.max(0, span - q.length);
+  return 400 + first + (gapPenalty * 2) + Math.max(0, text.length - q.length) / 100;
+}
+
+function _scoreAutocompleteItem(item, query, originalIndex) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return {
+    item,
+    score: originalIndex,
+    index: originalIndex,
+  };
+  const fieldScores = _autocompleteSearchFields(item)
+    .map((field, fieldIndex) => {
+      const score = _scoreAutocompleteField(field, q);
+      return score === null ? null : score + (fieldIndex * 0.5);
+    })
+    .filter(score => score !== null);
+  if (!fieldScores.length) return null;
+  return {
+    item,
+    score: Math.min(...fieldScores),
+    index: originalIndex,
+  };
+}
+
+function _filterAutocompleteItems(items, query) {
+  const q = String(query || '').trim().toLowerCase();
   if (!q) return items.slice();
   const concrete = [];
   const hintOnly = [];
@@ -146,7 +234,11 @@ function _filterAutocompleteItems(items, query) {
     if (item && typeof item === 'object' && item.hintOnly) hintOnly.push(item);
     else concrete.push(item);
   });
-  const filteredConcrete = concrete.filter(item => _acItemInsertValue(item).toLowerCase().startsWith(q));
+  const filteredConcrete = concrete
+    .map((item, index) => _scoreAutocompleteItem(item, q, index))
+    .filter(Boolean)
+    .sort((left, right) => left.score - right.score || left.index - right.index)
+    .map(result => result.item);
   return filteredConcrete.concat(hintOnly);
 }
 
@@ -329,28 +421,20 @@ function _recentDomainAutocompleteItems(ctx) {
 
 function _wordlistAutocompleteItems(ctx, categories = []) {
   const categorySet = new Set(_normalizeWordlistCategories(categories));
-  const query = String(ctx && ctx.currentToken || '').trim().toLowerCase();
   const source = (typeof acWordlists !== 'undefined' && Array.isArray(acWordlists)) ? acWordlists : [];
   const filtered = source.filter((item) => {
     if (!categorySet.size) return true;
     const itemCategories = _normalizeWordlistCategories(item && (item.wordlist_category || item.category));
     return itemCategories.some(category => categorySet.has(category));
-  }).filter((item) => {
-    if (!query) return true;
-    const haystack = [
-      item && item.value,
-      item && item.label,
-      item && item.name,
-    ].map(value => String(value || '').toLowerCase());
-    return haystack.some(value => value.includes(query));
   });
-  return filtered.map(item => _buildAutocompleteItem({
+  const items = filtered.map(item => _buildAutocompleteItem({
     value: String(item && item.value || ''),
     label: String(item && (item.label || item.value) || ''),
     description: String(item && item.description || 'Installed wordlist'),
     replaceStart: ctx.tokenStart,
     replaceEnd: ctx.tokenEnd,
   })).filter(item => item.value);
+  return _filterAutocompleteItems(items, ctx && ctx.currentToken);
 }
 
 function _withRecentDomainSuggestions(ctx, baseItems) {
@@ -605,9 +689,9 @@ function _collectAutocompleteExamples(spec) {
 }
 
 function _filterExampleAutocompleteItems(items, typedPrefix) {
-  const q = String(typedPrefix || '').trim().toLowerCase();
-  if (!q) return items.slice();
-  return items.filter(item => _acItemInsertValue(item).toLowerCase().startsWith(q));
+  const filtered = _filterAutocompleteItems(items, typedPrefix);
+  const matched = new Set(filtered);
+  return items.filter(item => matched.has(item));
 }
 
 function _buildUniqueSubcommandExampleAutocomplete(ctx, rootSpec) {
@@ -619,8 +703,7 @@ function _buildUniqueSubcommandExampleAutocomplete(ctx, rootSpec) {
   const secondToken = ctx.tokens[1];
   if (!secondToken || secondToken.start !== ctx.tokenStart || secondToken.end !== ctx.tokenEnd) return [];
 
-  const q = ctx.currentToken.toLowerCase();
-  const matches = Object.keys(subcommands).filter(name => name.toLowerCase().startsWith(q));
+  const matches = _filterAutocompleteItems(Object.keys(subcommands), ctx.currentToken);
   if (matches.length !== 1) return [];
 
   const subcommand = matches[0];
@@ -648,15 +731,14 @@ function _buildContextAutocomplete(ctx) {
     // Unknown command root — suggest matching command roots from the registry
     // while the user is still typing the first token (no trailing space yet).
     if (ctx.tokens.length <= 1 && !ctx.atWhitespace && ctx.commandRoot) {
-      const q = ctx.commandRoot.toLowerCase();
-      const matchingRoots = Object.keys(registry).filter(root => root.toLowerCase().startsWith(q));
+      const matchingRoots = _filterAutocompleteItems(Object.keys(registry), ctx.commandRoot);
       // If exactly one command matches and it has examples, show those directly
       // so the user sees full invocation patterns while still typing the root.
       if (matchingRoots.length === 1) {
         const matchedSpec = registry[matchingRoots[0]];
         const examples = _collectAutocompleteExamples(matchedSpec);
         if (examples.length) {
-          return _filterAutocompleteItems(
+          return _filterExampleAutocompleteItems(
             _buildExampleAutocompleteItems(examples, {
               replaceStart: ctx.tokenStart,
               replaceEnd: ctx.tokenEnd,
@@ -681,7 +763,7 @@ function _buildContextAutocomplete(ctx) {
   if (ctx.tokens.length === 1 && !ctx.atWhitespace) {
     const examples = _collectAutocompleteExamples(spec);
     if (!examples.length) return [];
-    return _filterAutocompleteItems(
+    return _filterExampleAutocompleteItems(
       _buildExampleAutocompleteItems(examples, {
         replaceStart: ctx.tokenStart,
         replaceEnd: ctx.tokenEnd,
@@ -862,11 +944,9 @@ function _buildPipeAutocomplete(ctx) {
 }
 
 function _buildFlatAutocomplete(value) {
-  const q = String(value || '').trim().toLowerCase();
+  const q = String(value || '').trim();
   if (!q) return [];
-  return ((typeof acSuggestions !== 'undefined' && acSuggestions) || [])
-    .filter(s => String(s || '').toLowerCase().startsWith(q))
-    .slice(0, 24);
+  return _filterAutocompleteItems(((typeof acSuggestions !== 'undefined' && acSuggestions) || []), q).slice(0, 24);
 }
 
 function getAutocompleteMatches(value, cursorPos) {
@@ -917,6 +997,31 @@ function limitAutocompleteMatchesForDisplay(items, maxItems = 12) {
   if (!firstHiddenHint) return visible;
 
   return visible.slice(0, limit - 1).concat(firstHiddenHint);
+}
+
+function _autocompleteHighlightedLabel(label, query) {
+  const text = String(label || '');
+  const q = String(query || '');
+  if (!text || !q) return escapeHtml(text);
+
+  const lower = text.toLowerCase();
+  const lowerQuery = q.toLowerCase();
+  const substringIndex = lower.indexOf(lowerQuery);
+  if (substringIndex >= 0) {
+    return escapeHtml(text.slice(0, substringIndex))
+      + '<span class="ac-match">' + escapeHtml(text.slice(substringIndex, substringIndex + q.length)) + '</span>'
+      + escapeHtml(text.slice(substringIndex + q.length));
+  }
+
+  const fuzzyIndexes = _autocompleteFuzzyMatchIndexes(text, q);
+  if (!fuzzyIndexes) return escapeHtml(text);
+  const matched = new Set(fuzzyIndexes);
+  let html = '';
+  for (let index = 0; index < text.length; index += 1) {
+    const char = escapeHtml(text[index]);
+    html += matched.has(index) ? `<span class="ac-match">${char}</span>` : char;
+  }
+  return html;
 }
 
 function _positionAutocomplete(itemsCount) {
@@ -1048,17 +1153,10 @@ function acShow(items) {
     const label = _acItemText(s);
     const description = _acItemDescription(s);
     const val = String(matchValue || '');
-    const idx = val ? label.toLowerCase().indexOf(val.toLowerCase()) : -1;
     const main = document.createElement('span');
     main.className = 'ac-item-main';
     if (s && s.isExample && maxExampleLabelLen > 0) main.style.minWidth = maxExampleLabelLen + 'ch';
-    if (idx >= 0 && val) {
-      main.innerHTML = escapeHtml(label.slice(0, idx))
-        + '<span class="ac-match">' + escapeHtml(label.slice(idx, idx + val.length)) + '</span>'
-        + escapeHtml(label.slice(idx + val.length));
-    } else {
-      main.textContent = label;
-    }
+    main.innerHTML = _autocompleteHighlightedLabel(label, val);
     div.appendChild(main);
     if (description) {
       const desc = document.createElement('span');

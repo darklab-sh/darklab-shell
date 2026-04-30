@@ -255,13 +255,18 @@
       <div class="rail-splitter" id="rail-splitter"{% if not (initial_rail.recent_open and initial_rail.workflows_open) %} hidden{% endif %}></div>
 
       <div class="rail-section rail-section-workflows{% if not initial_rail.workflows_open %} closed{% endif %}" id="rail-section-workflows">
-        <button class="rail-section-header nav-item" id="rail-workflows-header" type="button" title="Toggle Workflows section" aria-label="Toggle Workflows">
-          <span class="rail-section-header-left">
-            <span class="disclosure-chev" aria-hidden="true">▸</span>
-            <span>Workflows</span>
+        <div class="rail-section-header-row">
+          <button class="rail-section-header nav-item" id="rail-workflows-header" type="button" title="Toggle Workflows section" aria-label="Toggle Workflows">
+            <span class="rail-section-header-left">
+              <span class="disclosure-chev" aria-hidden="true">▸</span>
+              <span>Workflows</span>
+            </span>
+          </button>
+          <span class="rail-section-header-meta">
+            <button class="rail-section-header-action btn btn-ghost btn-icon-only btn-compact" id="rail-workflow-new-btn" type="button" title="New workflow" aria-label="New workflow">+</button>
+            <span class="rail-section-count" id="rail-workflows-count">0</span>
           </span>
-          <span class="rail-section-count" id="rail-workflows-count">0</span>
-        </button>
+        </div>
         <div class="rail-section-body nice-scroll" id="rail-workflows-list"></div>
       </div>
     </div>
@@ -532,6 +537,14 @@
         <div id="workspace-viewer-title" class="workspace-file-name"></div>
       </div>
       <div class="workspace-viewer-actions">
+        <button type="button" class="btn btn-secondary btn-compact workspace-viewer-refresh-btn" id="workspace-viewer-refresh-btn" data-workspace-viewer-refresh aria-label="Refresh viewed file" title="Refresh viewed file">
+          <span class="workspace-refresh-glyph" aria-hidden="true">⟳</span>
+          <span>Refresh</span>
+        </button>
+        <button type="button" class="btn btn-ghost btn-compact workspace-viewer-auto-refresh-toggle" id="workspace-viewer-auto-refresh-toggle" data-workspace-viewer-auto-refresh aria-pressed="false" title="Enable viewer auto refresh">
+          <span class="workspace-auto-refresh-glyph" aria-hidden="true">⟳</span>
+          <span id="workspace-viewer-auto-refresh-label">Auto - off</span>
+        </button>
         <button type="button" class="btn btn-secondary btn-compact" data-workspace-viewer-action="edit">Edit</button>
         <button type="button" class="btn btn-secondary btn-compact" data-workspace-viewer-action="download">Download</button>
         <button type="button" class="btn btn-secondary btn-compact" data-workspace-viewer-action="delete">Delete</button>
@@ -548,10 +561,40 @@
   <div id="workflows-modal" class="mobile-sheet-surface">
     <div class="faq-header">
       <span class="faq-title">WORKFLOWS</span>
-      <button type="button" class="close-btn workflows-close" aria-label="Close workflows">✕</button>
+      <div class="workflow-header-actions">
+        <button type="button" class="btn btn-secondary btn-compact" id="workflow-new-btn">New Workflow</button>
+        <button type="button" class="close-btn workflows-close" aria-label="Close workflows">✕</button>
+      </div>
     </div>
     <div class="workflows-body nice-scroll"></div>
   </div>
+</div>
+
+<div id="workflow-editor-overlay" class="modal-overlay mobile-sheet-overlay u-hidden">
+  <form id="workflow-editor-form" class="workflow-editor mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="workflow-editor-title">
+    <div class="faq-header">
+      <span class="faq-title" id="workflow-editor-title">NEW WORKFLOW</span>
+      <button type="button" class="close-btn workflow-editor-close" aria-label="Close workflow editor">✕</button>
+    </div>
+    <div class="workflow-editor-body nice-scroll">
+      <label class="workflow-editor-field">
+        <span class="workflow-input-label">Name</span>
+        <input id="workflow-editor-title-input" class="options-token-input" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" maxlength="120" required>
+      </label>
+      <label class="workflow-editor-field">
+        <span class="workflow-input-label">Description</span>
+        <input id="workflow-editor-description-input" class="options-token-input" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" maxlength="1000">
+      </label>
+      <div class="workflow-editor-help">Put {{variables}} in commands for values you want to fill in later, like {{domain}}. Each variable becomes a required input when the workflow runs.</div>
+      <div id="workflow-editor-steps" class="workflow-editor-steps"></div>
+      <button type="button" class="btn btn-ghost btn-compact workflow-editor-add-step" id="workflow-editor-add-step">+ step</button>
+      <div id="workflow-editor-msg" class="workflow-editor-msg" aria-live="polite"></div>
+    </div>
+    <div class="workflow-editor-footer">
+      <button type="button" class="btn btn-ghost btn-compact workflow-editor-close">Cancel</button>
+      <button type="submit" class="btn btn-primary btn-compact" id="workflow-editor-save-btn">Save workflow</button>
+    </div>
+  </form>
 </div>
 
 <!-- FAQ Modal -->

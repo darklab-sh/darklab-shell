@@ -106,11 +106,13 @@ function setupMobileSheetDragClose() {
   const optionsModal = document.getElementById('options-modal');
   const workspaceModal = document.getElementById('workspace-modal');
   const workflowsModal = document.getElementById('workflows-modal');
+  const workflowEditor = document.getElementById('workflow-editor-form');
 
   bindMobileSheet(mobileMenu,         { onClose: () => hideMobileMenu() });
   bindMobileSheet(historyPanel,       { onClose: () => hideHistoryPanel() });
   bindMobileSheet(workflowsModal,     { onClose: () => closeWorkflows() });
   bindMobileSheet(workspaceModal,     { onClose: () => { if (typeof closeWorkspace === 'function') closeWorkspace(); } });
+  bindMobileSheet(workflowEditor,     { onClose: () => { if (typeof closeWorkflowEditor === 'function') closeWorkflowEditor(); } });
   bindMobileSheet(faqModal,           { onClose: () => closeFaq() });
   bindMobileSheet(optionsModal,       { onClose: () => closeOptions() });
 }
@@ -125,6 +127,8 @@ function setupDismissibleOverlays() {
   if (typeof bindDismissible !== 'function') return;
   const shortcutsOverlayEl = document.getElementById('shortcuts-overlay');
   const shortcutsCloseBtn = shortcutsOverlayEl?.querySelector('.shortcuts-close');
+  const workflowEditorOverlay = document.getElementById('workflow-editor-overlay');
+  const workflowEditorCloseBtns = workflowEditorOverlay?.querySelectorAll('.workflow-editor-close');
 
   bindDismissible(_uiOverlayRefs.workflowsOverlay, {
     level: 'panel',
@@ -157,6 +161,12 @@ function setupDismissibleOverlays() {
     ),
     onClose: () => { if (typeof hideWorkspaceEditor === 'function') hideWorkspaceEditor(); },
     closeButtons: typeof workspaceCancelEditBtn !== 'undefined' ? workspaceCancelEditBtn : null,
+  });
+  bindDismissible(workflowEditorOverlay, {
+    level: 'modal',
+    isOpen: () => !!(workflowEditorOverlay && !workflowEditorOverlay.classList.contains('u-hidden')),
+    onClose: () => { if (typeof closeWorkflowEditor === 'function') closeWorkflowEditor(); },
+    closeButtons: workflowEditorCloseBtns,
   });
   bindDismissible(_uiOverlayRefs.faqOverlay, {
     level: 'panel',
@@ -207,7 +217,7 @@ function setupModalFocusTraps() {
   // hidden (display: none on the overlay wrapper), so the listener is only
   // reachable while the modal is open.
   if (typeof bindFocusTrap !== 'function') return;
-  const ids = ['options-modal', 'theme-modal', 'faq-modal', 'workspace-modal', 'workflows-modal'];
+  const ids = ['options-modal', 'theme-modal', 'faq-modal', 'workspace-modal', 'workflows-modal', 'workflow-editor-form'];
   ids.forEach((id) => {
     const card = document.getElementById(id);
     if (card) bindFocusTrap(card);
@@ -453,11 +463,12 @@ async function _waitForMigrateChoice(msg) {
   });
 }
 
-function _optionsMigrationCountLabel(runCount = 0, workspaceFileCount = 0) {
+function _optionsMigrationCountLabel(runCount = 0, workspaceFileCount = 0, workflowCount = 0) {
   const parts = [];
   if (runCount > 0) parts.push(`${runCount} run(s)`);
   if (workspaceFileCount > 0) parts.push(`${workspaceFileCount} workspace file(s)`);
-  if (!parts.length) return 'no runs or workspace files';
+  if (workflowCount > 0) parts.push(`${workflowCount} workflow(s)`);
+  if (!parts.length) return 'no runs, workspace files, or workflows';
   if (parts.length === 1) return parts[0];
   return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
@@ -472,7 +483,8 @@ function _optionsMigrationResultText(data = {}) {
   if (skippedWorkspaceFiles > 0) workspaceParts.push(`${skippedWorkspaceFiles} workspace file(s) skipped`);
   if (skippedWorkspaceDirs > 0) workspaceParts.push(`${skippedWorkspaceDirs} folder(s) skipped`);
   return `Migrated ${data.migrated_runs} run(s), ${data.migrated_snapshots} snapshot(s), `
-    + `${data.migrated_stars ?? 0} starred command(s), ${workspaceParts.join(', ')}, `
+    + `${data.migrated_stars ?? 0} starred command(s), ${data.migrated_workflows ?? 0} workflow(s), `
+    + `${workspaceParts.join(', ')}, `
     + 'and saved user options when the destination had none.';
 }
 
@@ -482,6 +494,7 @@ async function _clearActiveSessionToken() {
   updateSessionId(uuid);
   if (typeof hydrateCmdHistory === 'function') hydrateCmdHistory([]);
   if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+  if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
   _updateOptionsSessionTokenStatus();
   return uuid;
 }
@@ -549,20 +562,22 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
     // Count runs/files on OLD session before switching identity.
     let runCount = 0;
     let workspaceFileCount = 0;
+    let workflowCount = 0;
     try {
       const countResp = await apiFetch('/session/run-count');
       if (countResp.ok) {
         const countData = await countResp.json();
         runCount = countData.count || 0;
         workspaceFileCount = countData.workspace_files || 0;
+        workflowCount = countData.workflow_count || 0;
       }
     } catch (_) {}
 
     // Migrate BEFORE switching identity so a failed /session/migrate does not
     // leave the user on the new token with their runs still on the old session.
-    if (runCount > 0 || workspaceFileCount > 0) {
+    if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0) {
       const migrateChoice = await _waitForMigrateChoice(
-        `You have ${_optionsMigrationCountLabel(runCount, workspaceFileCount)} in your previous session. Migrate history and files to the new token?`
+        `You have ${_optionsMigrationCountLabel(runCount, workspaceFileCount, workflowCount)} in your previous session. Migrate history, files, and workflows to the new token?`
       );
       if (migrateChoice !== 'skip' && migrateChoice !== 'yes') return;
       if (migrateChoice === 'yes') {
@@ -585,6 +600,7 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
     updateSessionId(newToken);
     if (typeof _seedLocalStorageStarsToServer === 'function') await _seedLocalStorageStarsToServer();
     if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+    if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
     _updateOptionsSessionTokenStatus();
     if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
     copyTextToClipboard(newToken)
@@ -698,20 +714,22 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
   try {
     let runCount = 0;
     let workspaceFileCount = 0;
+    let workflowCount = 0;
     try {
       const countResp = await apiFetch('/session/run-count');
       if (countResp.ok) {
         const countData = await countResp.json();
         runCount = countData.count || 0;
         workspaceFileCount = countData.workspace_files || 0;
+        workflowCount = countData.workflow_count || 0;
       }
     } catch (_) {}
 
     // Migrate BEFORE switching identity so a failed /session/migrate does not
     // leave the user on the new token with their runs still on the old session.
-    if (runCount > 0 || workspaceFileCount > 0) {
+    if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0) {
       const migrateChoice = await _waitForMigrateChoice(
-        `You have ${_optionsMigrationCountLabel(runCount, workspaceFileCount)} in your current session. Migrate history and files to this token?`
+        `You have ${_optionsMigrationCountLabel(runCount, workspaceFileCount, workflowCount)} in your current session. Migrate history, files, and workflows to this token?`
       );
       if (migrateChoice !== 'skip' && migrateChoice !== 'yes') return;
       if (migrateChoice === 'yes') {
@@ -734,6 +752,7 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
     updateSessionId(value);
     if (typeof _seedLocalStorageStarsToServer === 'function') await _seedLocalStorageStarsToServer();
     if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+    if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
     _updateOptionsSessionTokenStatus();
     if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
     showToast('Session token applied');
@@ -773,6 +792,7 @@ document.getElementById('options-session-token-rotate-btn')?.addEventListener('c
     localStorage.setItem('session_token', newToken);
     updateSessionId(newToken);
     if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+    if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
 
     _updateOptionsSessionTokenStatus();
     if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
@@ -810,10 +830,13 @@ apiFetch('/shortcuts').then(r => r.json()).then(data => {
   logClientError('failed to load /shortcuts', err);
 });
 
-apiFetch('/workflows').then(r => r.json()).then(data => {
-  const items = data.items || [];
-  renderWorkflowItems(items);
-}).catch(err => {
+const workflowsLoad = typeof reloadWorkflowCatalog === 'function'
+  ? reloadWorkflowCatalog()
+  : apiFetch('/workflows').then(r => r.json()).then(data => {
+      const items = data.items || [];
+      renderWorkflowItems(items);
+    });
+workflowsLoad.catch(err => {
   logClientError('failed to load /workflows', err);
 });
 
@@ -924,7 +947,10 @@ if (typeof searchSummaryBtn !== 'undefined' && searchSummaryBtn) {
   });
 }
 
-searchInput.addEventListener('input', runSearch);
+searchInput.addEventListener('input', () => {
+  if (typeof scheduleRunSearch === 'function') scheduleRunSearch();
+  else runSearch();
+});
 searchPrevBtn.addEventListener('click', () => navigateSearch(-1));
 searchNextBtn.addEventListener('click', () => navigateSearch(1));
 if (typeof searchScopeButtons !== 'undefined' && Array.isArray(searchScopeButtons)) {
@@ -941,7 +967,10 @@ searchCloseBtn?.addEventListener('click', () => {
   clearSearch();
 });
 searchInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter') navigateSearch(e.shiftKey ? -1 : 1);
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    navigateSearch(e.shiftKey ? -1 : 1);
+  }
   if (e.key === 'Escape') {
     hideSearchBar();
     clearSearch();
