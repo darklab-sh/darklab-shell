@@ -867,20 +867,23 @@ describe('workspace UI helpers', () => {
       document.querySelector('.workspace-viewer-search'),
     )).toBe(false)
 
+    const searchableText = Array.from({ length: 2005 }, (_, index) => `line ${index + 1}`).join('\n')
+    showWorkspaceViewer('searchable-large.txt', searchableText)
+
     const search = document.querySelector('.workspace-viewer-search input[type="text"]')
     search.value = 'de'
     search.dispatchEvent(new Event('input', { bubbles: true }))
     expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('type 3+ chars')
     expect(document.querySelectorAll('mark.search-hl')).toHaveLength(0)
 
-    search.value = 'line 10000'
+    search.value = 'line 2000'
     search.dispatchEvent(new Event('input', { bubbles: true }))
     expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('searching...')
     runPendingSearch()
     expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('1 / 1')
-    expect(document.querySelector('[data-line-number="10000"] mark.search-hl')?.textContent).toBe('line 10000')
+    expect(document.querySelector('[data-line-number="2000"] mark.search-hl')?.textContent).toBe('line 2000')
 
-    search.value = 'LINE 10000'
+    search.value = 'LINE 2000'
     search.dispatchEvent(new Event('input', { bubbles: true }))
     expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('searching...')
     runPendingSearch()
@@ -888,28 +891,28 @@ describe('workspace UI helpers', () => {
     document.querySelector('.workspace-viewer-search [aria-label="Case sensitive"]').click()
     expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('no matches')
     document.querySelector('.workspace-viewer-search [aria-label="Regular expression"]').click()
-    search.value = '^999[89]line 999[89]$'
+    search.value = '^199[89]line 199[89]$'
     search.dispatchEvent(new Event('input', { bubbles: true }))
     expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('searching...')
     runPendingSearch()
     expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('no matches')
-    search.value = '^line 999[89]$'
+    search.value = '^line 199[89]$'
     search.dispatchEvent(new Event('input', { bubbles: true }))
     expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('searching...')
     runPendingSearch()
     expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('1 / 2')
     expect(document.querySelectorAll('mark.search-hl')).toHaveLength(1)
-    expect(document.querySelector('[data-line-number="9998"] mark.search-hl')?.textContent).toBe('line 9998')
+    expect(document.querySelector('[data-line-number="1998"] mark.search-hl')?.textContent).toBe('line 1998')
     search.focus()
     search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('2 / 2')
     expect(document.querySelectorAll('mark.search-hl')).toHaveLength(1)
-    expect(document.querySelector('[data-line-number="9999"] mark.search-hl')?.textContent).toBe('line 9999')
+    expect(document.querySelector('[data-line-number="1999"] mark.search-hl')?.textContent).toBe('line 1999')
     expect(document.activeElement).toBe(search)
     document.querySelector('.workspace-viewer-search [aria-label="Previous match"]').click()
     expect(document.querySelector('.workspace-viewer-search .search-count').textContent).toBe('1 / 2')
     expect(document.querySelectorAll('mark.search-hl')).toHaveLength(1)
-    expect(document.querySelector('[data-line-number="9998"] mark.search-hl')?.textContent).toBe('line 9998')
+    expect(document.querySelector('[data-line-number="1998"] mark.search-hl')?.textContent).toBe('line 1998')
 
     search.value = ''
     search.dispatchEvent(new Event('input', { bubbles: true }))
