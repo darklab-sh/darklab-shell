@@ -18,12 +18,12 @@ The suites are intentionally layered:
 
 Current totals:
 
-- behavior tests: 2,233
+- behavior tests: 2,237
 - docs/inventory meta-tests: 30
-- `pytest`: 1108 (1078 behavior + 30 meta)
-- `vitest`: 926
+- `pytest`: 1111 (1081 behavior + 30 meta)
+- `vitest`: 927
 - `playwright`: 229
-- total: 2,263
+- total: 2,267
 
 This document is organized in two parts:
 
@@ -366,6 +366,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDerivedCommandRegistry.test_amass_runtime_environment_quotes_rewritten_workspace_paths` | Verifies that the Amass managed-directory runtime environment wrapper quotes rewritten workspace paths safely. |
 | `TestDerivedCommandRegistry.test_autocomplete_context_filters_workspace_feature_hints` | Verifies that workspace-only autocomplete examples, flags, and value hints are hidden unless Files are enabled. |
 | `TestDerivedCommandRegistry.test_command_policy_can_be_derived_from_commands_registry` | Verifies that command-policy allow and deny prefixes are derived from `commands.yaml` policy entries. |
+| `TestDerivedCommandRegistry.test_allow_grouping_flags_can_be_derived_from_commands_registry` | Verifies that `allow_grouping` command metadata is normalized into policy-only short-flag grouping data. |
+| `TestDerivedCommandRegistry.test_allow_grouping_flags_match_short_flag_bundles` | Verifies that grouped short flags can satisfy allow-prefix policy without treating unrelated multi-character flags as grouped aliases. |
 | `TestLoadFaq.test_missing_file_returns_empty_list` | Checks that missing file returns empty list. |
 | `TestLoadFaq.test_valid_entries_returned` | Checks valid entries returned handling. |
 | `TestLoadFaq.test_markdown_style_markup_renders_to_answer_html` | Checks that markdown style markup renders to answer HTML. |
@@ -868,6 +870,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestAllowedCommandsRoute.test_unrestricted_when_no_file` | Checks that unrestricted when no file. |
 | `TestAllowedCommandsRoute.test_restricted_when_file_present` | Checks that restricted when file present. |
 | `TestAllowedCommandsRoute.test_returns_grouped_commands_when_restricted` | Returns grouped commands when restricted. |
+| `TestAllowedCommandsRoute.test_returns_root_commands_for_prefixed_policy_entries` | Verifies that the FAQ-facing allowed-command payload collapses prefixed allow policy entries to unique command roots. |
 | `TestAutocompleteWorkspaceRoute.test_workspace_roots_follow_workspace_config` | Verifies that file built-in roots are included in autocomplete only when Files are enabled. |
 | `TestAutocompleteWorkspaceRoute.test_workspace_autocomplete_examples_follow_workspace_config` | Verifies that workspace-only command examples and file flags are hidden from `/autocomplete` until Files are enabled. |
 | `TestFaqRoute.test_returns_200` | Checks returns 200 handling. |
@@ -1409,6 +1412,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `persists options changes through cookies and syncs quick-toggle state` | Verifies that option changes update cookies, quick-toggle UI, and the persisted `/session/preferences` snapshot together. |
 | `renders backend-driven FAQ items with HTML answers and dynamic sections` | Verifies that renders backend-driven FAQ items with HTML answers and dynamic sections. |
 | `loads FAQ command chips into the visible mobile composer and refocuses it` | Verifies that loads FAQ command chips into the visible mobile composer and refocuses it. |
+| `opens autocomplete after loading an FAQ command chip` | Verifies that FAQ command chips trigger the normal composer autocomplete flow after loading the command into the prompt. |
 | `loads custom FAQ chips into the prompt with the same command-chip behavior` | Verifies that loads custom FAQ chips into the prompt with the same command-chip behavior. |
 | `returns off when no cookie is set` | Verifies that returns off when no cookie is set. |
 | `returns on when cookie is set to on` | Verifies that returns on when cookie is set to on. |

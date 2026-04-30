@@ -741,6 +741,27 @@ class TestAllowedCommandsRoute:
         assert data["restricted"] is True
         assert data["groups"] == groups
 
+    def test_returns_root_commands_for_prefixed_policy_entries(self):
+        client = get_client()
+        with mock.patch("blueprints.content.load_commands_registry", return_value={
+            "commands": [
+                {"root": "nc", "category": "Networking", "policy": {"allow": ["nc -z"], "deny": []}},
+                {
+                    "root": "openssl",
+                    "category": "TLS",
+                    "policy": {"allow": ["openssl s_client", "openssl ciphers"], "deny": []},
+                },
+            ],
+            "pipe_helpers": [],
+        }):
+            data = json.loads(client.get("/allowed-commands").data)
+
+        assert data["commands"] == ["nc", "openssl"]
+        assert data["groups"] == [
+            {"name": "Networking", "commands": ["nc"]},
+            {"name": "TLS", "commands": ["openssl"]},
+        ]
+
 
 class TestAutocompleteWorkspaceRoute:
     def test_workspace_roots_follow_workspace_config(self):

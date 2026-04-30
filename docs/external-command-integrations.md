@@ -56,6 +56,33 @@ This covers normal file input/output tools such as `nmap -iL`, `nmap -oN`, `curl
 
 ---
 
+## Grouped Short Flags
+
+Command policy can allow POSIX-style grouped short flags only when the individual flags are explicitly marked in `app/conf/commands.yaml`:
+
+```yaml
+autocomplete:
+  flags:
+    - value: -z
+      allow_grouping: true
+    - value: -v
+      allow_grouping: true
+```
+
+Validation treats grouped tokens such as `-zv` and `-vz` as equivalent to those declared single-letter flags only for that command root. Flags that take values and multi-character flags such as `-sV` are not grouped unless represented by separate one-letter flags with `allow_grouping: true`.
+
+`nc` uses this to keep policy compact:
+
+```yaml
+policy:
+  allow:
+    - nc -z
+```
+
+That allows `nc -zv`, `nc -vz`, and `nc -zvn` without listing every ordering, while deny entries such as `nc -e` and `nc -c` still take precedence.
+
+---
+
 ## Amass
 
 Amass needs special handling because the useful result set lives in its database, not only in stdout.

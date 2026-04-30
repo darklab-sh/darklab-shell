@@ -178,14 +178,7 @@ commands:
     category: Network Diagnostics
     policy:
       allow:
-        - nc -zv
-        - nc -vz
-        - nc -zvn
-        - nc -znv
-        - nc -vzn
-        - nc -vnz
-        - nc -nzv
-        - nc -nvz
+        - nc -z
       deny:
         - nc -e
         - nc -c
@@ -198,8 +191,13 @@ commands:
       flags:
         - value: -z
           description: Zero-I/O mode for port scanning
+          allow_grouping: true
         - value: -v
           description: Verbose connection results
+          allow_grouping: true
+        - value: -n
+          description: Skip DNS lookups
+          allow_grouping: true
         - value: -w
           description: Timeout before giving up
           takes_value: true

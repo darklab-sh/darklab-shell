@@ -199,14 +199,19 @@ def allowed_commands():
         allowed = [str(item) for item in policy.get("allow", []) if str(item).strip()]
         if not allowed:
             continue
-        prefixes.extend(allowed)
+        root = str(entry.get("root") or "").strip().lower()
+        if not root:
+            continue
+        if root not in prefixes:
+            prefixes.append(root)
         category = str(entry.get("category") or "Allowed commands")
         group = group_map.get(category)
         if group is None:
             group = {"name": category, "commands": []}
             group_map[category] = group
             groups.append(group)
-        group["commands"].extend(allowed)
+        if root not in group["commands"]:
+            group["commands"].append(root)
     if not prefixes:
         _log_content_view("/allowed-commands", restricted=False, count=0)
         return jsonify({"restricted": False, "commands": [], "groups": []})

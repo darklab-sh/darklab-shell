@@ -4892,6 +4892,64 @@ describe('app helpers', () => {
     expect(mobileCmdInput.focus).not.toHaveBeenCalled()
   })
 
+  it('opens autocomplete after loading an FAQ command chip', async () => {
+    const acShow = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/config') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              app_name: 'darklab_shell',
+              prompt_prefix: 'anon@darklab:~$',
+              version: '9.9',
+              default_theme: 'darklab_obsidian.yaml',
+              motd: '',
+              command_timeout_seconds: 120,
+              max_output_lines: 5000,
+              permalink_retention_days: 365,
+            }),
+        })
+      }
+      if (url === '/allowed-commands') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              restricted: true,
+              commands: ['nc'],
+              groups: [{ name: 'Network', commands: ['nc'] }],
+            }),
+        })
+      }
+      if (url === '/faq') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              items: [{ question: 'Allowed?', answer: 'allowlist', ui_kind: 'allowed_commands' }],
+            }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+
+    await loadAppFns({
+      apiFetch,
+      getAutocompleteMatches: (value, cursor) => (
+        value === 'nc ' && cursor === 3
+          ? [{ value: '-z', description: 'Zero-I/O mode', replaceStart: 3, replaceEnd: 3 }]
+          : []
+      ),
+      acShow,
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+
+    document.querySelector('.allowed-chip').click()
+
+    expect(document.getElementById('mobile-cmd').value).toBe('nc ')
+    expect(acShow).toHaveBeenCalledWith([
+      { value: '-z', description: 'Zero-I/O mode', replaceStart: 3, replaceEnd: 3 },
+    ])
+  })
+
   it('loads custom FAQ chips into the prompt with the same command-chip behavior', async () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/config') {

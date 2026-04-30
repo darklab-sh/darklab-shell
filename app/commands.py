@@ -702,6 +702,24 @@ def _normalize_workspace_flags(items) -> list[dict[str, object]]:
     return result
 
 
+def _normalize_allow_grouping_flags(raw_entry: dict) -> list[str]:
+    result: list[str] = []
+    seen = set()
+    autocomplete = raw_entry.get("autocomplete")
+    raw_flags = autocomplete.get("flags", []) if isinstance(autocomplete, dict) else []
+    for raw_flag in raw_flags or []:
+        if not isinstance(raw_flag, dict) or not raw_flag.get("allow_grouping") or raw_flag.get("takes_value"):
+            continue
+        value = str(raw_flag.get("value") or "").strip()
+        if not re.fullmatch(r"-[A-Za-z]", value):
+            continue
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
+
+
 def _normalize_registry_autocomplete(root: str, raw_spec) -> dict:
     if not isinstance(raw_spec, dict) or not raw_spec:
         return {}
@@ -741,6 +759,7 @@ def _normalize_commands_registry_entry(raw_entry, *, pipe_helper: bool = False) 
         "deny": _normalize_policy_list(raw_policy.get("deny"), lowercase=False),
     }
     entry["workspace_flags"] = _normalize_workspace_flags(raw_entry.get("workspace_flags"))
+    entry["allow_grouping_flags"] = _normalize_allow_grouping_flags(raw_entry)
     return entry
 
 
@@ -775,6 +794,10 @@ def _merge_command_registry_entries(base_entry: dict, overlay_entry: dict, *, pi
         for deny in overlay_entry.get("policy", {}).get("deny", []) or []:
             if deny not in policy.setdefault("deny", []):
                 policy["deny"].append(deny)
+        allow_grouping_flags = merged.setdefault("allow_grouping_flags", [])
+        for flag in overlay_entry.get("allow_grouping_flags", []) or []:
+            if flag not in allow_grouping_flags:
+                allow_grouping_flags.append(flag)
         workspace_flags = merged.setdefault("workspace_flags", [])
         existing_workspace_flags = {
             (
@@ -871,6 +894,26 @@ def load_command_policy():
     allow_prefixes = _dedupe_preserve_order(allow_prefixes)
     deny_prefixes = _dedupe_preserve_order(deny_prefixes)
     return (allow_prefixes if allow_prefixes else None), deny_prefixes
+
+
+def load_allow_grouping_flags() -> dict[str, set[str]]:
+    """Return short flags that may be grouped for allow-prefix matching."""
+    registry = load_commands_registry()
+    grouped: dict[str, set[str]] = {}
+    for entry in registry.get("commands", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        root = str(entry.get("root") or "").strip().lower()
+        if not root:
+            continue
+        flags = {
+            str(flag)
+            for flag in entry.get("allow_grouping_flags", []) or []
+            if re.fullmatch(r"-[A-Za-z]", str(flag))
+        }
+        if flags:
+            grouped.setdefault(root, set()).update(flags)
+    return grouped
 
 
 def autocomplete_context_from_commands_registry(registry: dict, cfg=None) -> dict:
@@ -2215,6 +2258,59 @@ def _flag_matches_token(flag: str, token: str) -> bool:
     return token == flag
 
 
+def _grouped_short_flag_members(token: str, allow_grouping_flags: set[str]) -> set[str] | None:
+    if not token.startswith("-") or token.startswith("--") or len(token) < 2:
+        return None
+    if not token[1:].isalpha():
+        return None
+    members = {f"-{char}" for char in token[1:]}
+    if not members or not members.issubset(allow_grouping_flags):
+        return None
+    return members
+
+
+def _allowed_prefix_matches_with_grouping(
+    command_tokens: list[str],
+    prefix_tokens: list[str],
+    allow_grouping_flags: set[str],
+) -> bool:
+    if not command_tokens or not prefix_tokens or not allow_grouping_flags:
+        return False
+    if command_tokens[0].lower() != prefix_tokens[0].lower():
+        return False
+
+    required_grouped_flags = set()
+    for token in prefix_tokens[1:]:
+        if token in allow_grouping_flags:
+            required_grouped_flags.add(token)
+            continue
+        # Keep non-groupable prefixes on the original exact-prefix path.
+        return False
+    if not required_grouped_flags:
+        return False
+
+    command_grouped_flags = set()
+    for token in command_tokens[1:]:
+        members = _grouped_short_flag_members(token, allow_grouping_flags)
+        if members is None:
+            break
+        command_grouped_flags.update(members)
+
+    return required_grouped_flags.issubset(command_grouped_flags)
+
+
+def _is_allowed_by_policy(command_tokens: list[str], allowed: list[str], allow_grouping: dict[str, set[str]]) -> bool:
+    cmd_lower = shlex.join(command_tokens).lower()
+    for prefix in allowed:
+        if cmd_lower == prefix or cmd_lower.startswith(prefix + " "):
+            return True
+        prefix_tokens = split_command_argv(prefix)
+        root = prefix_tokens[0].lower() if prefix_tokens else ""
+        if _allowed_prefix_matches_with_grouping(command_tokens, prefix_tokens, allow_grouping.get(root, set())):
+            return True
+    return False
+
+
 def _workspace_flag_specs_by_root() -> dict[str, list[dict[str, object]]]:
     registry = load_commands_registry()
     specs: dict[str, list[dict[str, object]]] = {}
@@ -2745,6 +2841,7 @@ def validate_command(
     """
     cfg = cfg or app_config.CFG
     allowed, denied = load_command_policy()
+    allow_grouping = load_allow_grouping_flags()
     if allowed is None:
         return CommandValidationResult(True, display_command=command, exec_command=command)
 
@@ -2809,7 +2906,7 @@ def validate_command(
             exec_command=command_to_validate,
         )
 
-    cmd_lower = command_to_validate.strip().lower()
+    command_tokens = split_command_argv(command_to_validate.strip())
 
     # Deny prefixes take priority — checked before allow list
     if denied and _is_denied(command_to_validate.strip(), denied, exempt_flags=exempt_flags):
@@ -2820,8 +2917,7 @@ def validate_command(
             exec_command=command_to_validate,
         )
 
-    if not any(cmd_lower == prefix or cmd_lower.startswith(prefix + " ")
-               for prefix in allowed):
+    if not _is_allowed_by_policy(command_tokens, allowed, allow_grouping):
         return CommandValidationResult(
             False,
             f"Command not allowed: '{command.strip()}'",

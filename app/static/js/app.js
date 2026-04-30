@@ -2734,11 +2734,34 @@ function renderFaqLimits(cfg) {
   limitsEl.replaceChildren(_buildFaqLimitsContent(cfg));
 }
 
+function openAutocompleteForVisibleComposer() {
+  const input = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
+  if (!input || typeof input.value !== 'string') return false;
+  const value = input.value;
+  const cursor = typeof input.selectionStart === 'number' ? input.selectionStart : value.length;
+  if (!value.trim() || typeof getAutocompleteMatches !== 'function') return false;
+  const matches = getAutocompleteMatches(value, cursor);
+  acFiltered = typeof limitAutocompleteMatchesForDisplay === 'function'
+    ? limitAutocompleteMatchesForDisplay(matches, 12)
+    : matches.slice(0, 12);
+  acIndex = -1;
+  if (!acFiltered.length) {
+    if (typeof acHide === 'function') acHide();
+    return false;
+  }
+  if (typeof acShow === 'function') acShow(acFiltered);
+  return true;
+}
+
 function activateFaqCommandChip(cmd) {
   if (!cmd) return;
-  setComposerValue(cmd + ' ');
+  const next = `${cmd} `;
+  setComposerValue(next, next.length, next.length, { dispatch: false });
   _closeMajorOverlays();
   refocusComposerAfterAction({ defer: true });
+  setTimeout(() => {
+    openAutocompleteForVisibleComposer();
+  }, 0);
 }
 
 function wireFaqCommandChips(root = faqBody) {

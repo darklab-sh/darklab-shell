@@ -42,7 +42,7 @@ from commands import (
     load_welcome, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
     load_mobile_welcome_hints, autocomplete_context_from_commands_registry,
     load_autocomplete_context_from_commands_registry, load_command_policy, load_container_smoke_test_commands,
-    load_commands_registry, load_workflows,
+    load_allow_grouping_flags, load_commands_registry, load_workflows,
     is_command_allowed, rewrite_command,
 )
 from permalinks import _format_retention, _expiry_note, _permalink_error_page, _normalize_permalink_lines, _prompt_echo_text
@@ -570,6 +570,9 @@ class TestDerivedCommandRegistry:
                       suggest:
                         - value: "4"
                           description: Four probes
+                    - value: -v
+                      description: Verbose
+                      allow_grouping: true
                     - value: -d
                       description: Target domain
                       takes_value: true
@@ -609,13 +612,15 @@ class TestDerivedCommandRegistry:
         assert ping["category"] == "Network"
         assert ping["policy"]["allow"] == ["ping"]
         assert ping["policy"]["deny"] == ["ping -f"]
+        assert ping["allow_grouping_flags"] == ["-v"]
         assert ping["workspace_flags"] == [
             {"flag": "-iL", "mode": "read", "value": "separate", "format": "text"},
             {"flag": "-oN", "mode": "write", "value": "separate_or_attached", "format": "text"},
         ]
         assert ping["autocomplete"]["flags"][0] == {"value": "-c", "description": "Count"}
-        assert ping["autocomplete"]["flags"][1] == {"value": "-d", "description": "Target domain", "value_type": "domain"}
-        assert ping["autocomplete"]["flags"][2] == {
+        assert ping["autocomplete"]["flags"][1] == {"value": "-v", "description": "Verbose"}
+        assert ping["autocomplete"]["flags"][2] == {"value": "-d", "description": "Target domain", "value_type": "domain"}
+        assert ping["autocomplete"]["flags"][3] == {
             "value": "-w",
             "description": "DNS wordlist",
             "value_type": "wordlist",
@@ -1144,6 +1149,85 @@ class TestDerivedCommandRegistry:
 
         assert allow == ["curl", "nmap"]
         assert deny == ["curl -K", "nmap -sU"]
+
+    def test_allow_grouping_flags_can_be_derived_from_commands_registry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(
+                textwrap.dedent(
+                    """
+                    version: 1
+                    commands:
+                    - root: nc
+                      policy:
+                        allow:
+                        - nc -z
+                        deny: []
+                      autocomplete:
+                        flags:
+                        - value: -z
+                          allow_grouping: true
+                        - value: -v
+                          allow_grouping: true
+                        - value: -n
+                          allow_grouping: true
+                        - value: -w
+                          allow_grouping: true
+                          takes_value: true
+                        - value: --help
+                          allow_grouping: true
+                    """
+                )
+            )
+
+            with mock.patch("commands.COMMANDS_REGISTRY_FILE", str(path)):
+                grouped = load_allow_grouping_flags()
+
+        assert grouped == {"nc": {"-z", "-v", "-n"}}
+
+    def test_allow_grouping_flags_match_short_flag_bundles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(
+                textwrap.dedent(
+                    """
+                    version: 1
+                    commands:
+                    - root: nc
+                      policy:
+                        allow:
+                        - nc -z
+                        deny:
+                        - nc -e
+                      autocomplete:
+                        flags:
+                        - value: -z
+                          allow_grouping: true
+                        - value: -v
+                          allow_grouping: true
+                        - value: -n
+                          allow_grouping: true
+                    - root: nmap
+                      policy:
+                        allow:
+                        - nmap -sV
+                        deny: []
+                      autocomplete:
+                        flags:
+                        - value: -sV
+                          description: Service detection
+                    """
+                )
+            )
+
+            with mock.patch("commands.COMMANDS_REGISTRY_FILE", str(path)):
+                assert is_command_allowed("nc -zv darklab.sh 80")[0]
+                assert is_command_allowed("nc -vz darklab.sh 80")[0]
+                assert is_command_allowed("nc -n -v -z darklab.sh 80")[0]
+                assert not is_command_allowed("nc -nv darklab.sh 80")[0]
+                assert not is_command_allowed("nc -zve darklab.sh 80")[0]
+                assert is_command_allowed("nmap -sV darklab.sh")[0]
+                assert not is_command_allowed("nmap -Vs darklab.sh")[0]
 
 
 # ── load_faq ──────────────────────────────────────────────────────────────────
