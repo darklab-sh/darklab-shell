@@ -1527,6 +1527,31 @@ describe('app helpers', () => {
     expect(context.workflow.arg_hints['--domain'][0].value_type).toBe('domain')
   })
 
+  it('deduplicates workflow subcommands that share runtime insert text', async () => {
+    const { getRuntimeAutocompleteContext, renderWorkflowItems } = await loadAppFns()
+    renderWorkflowItems([
+      {
+        id: 'usr_abcd',
+        source: 'user',
+        title: 'DNS Check',
+        description: 'Custom DNS workflow',
+        inputs: [],
+        steps: [{ cmd: 'dig darklab.sh A', note: '' }],
+      },
+    ], { emitCatalogEvent: false })
+    const registry = builtInAutocompleteBase()
+    registry.workflow.arg_hints.__positional__ = [
+      { value: 'list', description: 'List workflows' },
+      { value: 'show <workflow>', description: 'Show workflow steps', insertValue: 'show ' },
+      { value: 'run <workflow>', description: 'Run a workflow', insertValue: 'run ' },
+    ]
+
+    const context = getRuntimeAutocompleteContext(registry)
+
+    expect(context.workflow.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'show', 'run'])
+    expect(context.workflow.arg_hints.run.map(item => item.value)).toEqual(['dns-check'])
+  })
+
   it('renders user workflows above built-ins with edit actions', async () => {
     const { renderWorkflowItems } = await loadAppFns()
     document.getElementById('workflows-overlay').innerHTML = '<div class="workflows-body"></div>'

@@ -2401,6 +2401,38 @@ describe('workspace file delete confirmation', () => {
     expect(appendLine).toHaveBeenCalledWith('a.txt    file  1 B   now', '', 'tab-1')
   })
 
+  it('pipes short ls output to grep as one workspace entry per line', async () => {
+    const appendLine = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: '' }],
+      appendLine,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [{ value: 'reports', description: 'session folder' }],
+      getWorkspaceAutocompleteFileHints: () => [
+        { value: 'alpha.txt', description: 'session file · 1 B' },
+        { value: 'beta.log', description: 'session file · 2 B' },
+        { value: 'notes.txt', description: 'session file · 3 B' },
+      ],
+      getWorkspaceDirectoryEntries: () => ({
+        folders: [{ name: 'reports', path: 'reports' }],
+        files: [
+          { name: 'alpha.txt', path: 'alpha.txt', size: 1, mtime: 'now' },
+          { name: 'beta.log', path: 'beta.log', size: 2, mtime: 'now' },
+          { name: 'notes.txt', path: 'notes.txt', size: 3, mtime: 'now' },
+        ],
+      }),
+    })
+
+    await submitCommand('ls | grep txt')
+
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('alpha.txt', '', 'tab-1'))
+    expect(appendLine).toHaveBeenCalledWith('notes.txt', '', 'tab-1')
+    expect(appendLine).not.toHaveBeenCalledWith('reports/ alpha.txt beta.log notes.txt', '', 'tab-1')
+  })
+
   it('creates workspace directories with mkdir and file add-dir', async () => {
     const appendLine = vi.fn()
     const createWorkspaceDirectory = vi.fn(path => Promise.resolve({ directory: { path } }))

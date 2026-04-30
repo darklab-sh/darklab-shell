@@ -2244,11 +2244,27 @@ function _runtimeMergeHints(baseHints = {}, overlayHints = {}) {
   Object.entries(overlayHints || {}).forEach(([trigger, hints]) => {
     const bucket = Array.isArray(merged[trigger]) ? merged[trigger].slice() : [];
     const seen = new Set(bucket.map(item => String(item && item.value || '').toLowerCase()));
+    const seenInserts = new Map();
+    bucket.forEach((item, index) => {
+      const insertValue = String(item && item.insertValue || '').toLowerCase();
+      if (insertValue && !seenInserts.has(insertValue)) seenInserts.set(insertValue, index);
+    });
     (hints || []).forEach((hint) => {
       const value = String(hint && hint.value || '');
       const key = value.toLowerCase();
+      const insertValue = String(hint && hint.insertValue || '').toLowerCase();
       if (!value || seen.has(key)) return;
+      if (insertValue && seenInserts.has(insertValue)) {
+        const existingIndex = seenInserts.get(insertValue);
+        const existing = bucket[existingIndex];
+        const existingKey = String(existing && existing.value || '').toLowerCase();
+        seen.delete(existingKey);
+        seen.add(key);
+        bucket[existingIndex] = hint;
+        return;
+      }
       seen.add(key);
+      if (insertValue) seenInserts.set(insertValue, bucket.length);
       bucket.push(hint);
     });
     merged[trigger] = bucket;

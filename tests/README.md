@@ -18,12 +18,12 @@ The suites are intentionally layered:
 
 Current totals:
 
-- behavior tests: 2,230
+- behavior tests: 2,233
 - docs/inventory meta-tests: 30
 - `pytest`: 1108 (1078 behavior + 30 meta)
-- `vitest`: 923
+- `vitest`: 926
 - `playwright`: 229
-- total: 2,260
+- total: 2,263
 
 This document is organized in two parts:
 
@@ -1290,6 +1290,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `keeps config command output pinned to the tail when the tab is already following` | Verifies that terminal-native `config set` output preserves tail-follow state after async preference application. |
 | `serves runtime autocomplete context for theme and config values` | Verifies that theme slugs, config keys, and config values are generated into the shared autocomplete context instead of duplicated static lists. |
 | `serves workflow names and variable flags in runtime autocomplete context` | Verifies that saved workflow names and workflow input flags are exposed through runtime autocomplete. |
+| `deduplicates workflow subcommands that share runtime insert text` | Verifies that runtime workflow subcommands replace placeholder-decorated static hints when both insert the same command text. |
 | `renders user workflows above built-ins with edit actions` | Verifies that session-owned workflows render before built-ins and expose edit controls. |
 | `runs a workflow from the terminal command with flag-provided inputs` | Verifies that `workflow run` resolves a workflow, applies flag values, and queues its rendered commands. |
 | `serves runtime autocomplete context for built-in command lookup helpers` | Verifies that runtime built-in context covers `session-token`, simple built-ins, and dynamic `man` / `which` / `type` lookup suggestions. |
@@ -1429,6 +1430,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `renders suggestions from the shared composer value accessor when present` | Verifies that renders suggestions from the shared composer value accessor when present. |
 | `applies the active class to the indexed suggestion` | Verifies that applies the active class to the indexed suggestion. |
 | `renders contextual suggestions with descriptions` | Verifies that contextual suggestions can render a separate description alongside the inserted value. |
+| `does not highlight typed text inside hint-only placeholders` | Verifies that visible placeholder guidance remains unhighlighted even when the typed token appears inside the placeholder text. |
 | `acAccept updates the input, hides the dropdown, and refocuses the input` | Verifies that acAccept updates the input, hides the dropdown, and refocuses the input. |
 | `acAccept keeps focus on the visible mobile composer when mobile mode is active` | Verifies that acAccept keeps focus on the visible mobile composer when mobile mode is active. |
 | `acAccept replaces only the current token for contextual suggestions` | Verifies that accepting a contextual suggestion replaces only the active token instead of rewriting the full command. |
@@ -1845,6 +1847,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `lists the current workspace folder non-recursively on one short line` | Verifies that `ls` shows only direct current-folder entries in compact terminal-style output. |
 | `lists workspace folders recursively only when -R is present with flags in any order` | Verifies that recursive workspace listings require `-R` and support combined list flags in any order. |
 | `lists workspace folders in long format with ll` | Verifies that `ll` shows the long workspace listing with aligned metadata columns. |
+| `pipes short ls output to grep as one workspace entry per line` | Verifies that compact `ls` display output feeds pipe helpers as one logical workspace entry per line. |
 | `creates workspace directories with mkdir and file add-dir` | Verifies that `mkdir` and `file add-dir` create folders through the workspace directory route. |
 | `runs standalone pipe helpers against workspace files` | Verifies that `grep`, `wc -l`, `sort`, and `uniq` can run directly against workspace files. |
 | `does not intercept workspace delete aliases when Files are disabled` | Verifies that the browser does not run the client-side workspace delete confirmation path when Files are disabled. |

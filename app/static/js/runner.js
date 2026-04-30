@@ -1734,6 +1734,19 @@ function _workspaceShortListLines(entries) {
   return [_workspacePlainLine(names.join(' '))];
 }
 
+function _workspaceListNames(entries) {
+  const names = [];
+  (entries.folders || []).forEach(folder => {
+    const name = String(folder && folder.name || folder && folder.path || '').replace(/\/+$/, '');
+    if (name) names.push(`${name}/`);
+  });
+  (entries.files || []).forEach(file => {
+    const name = String(file && file.name || file && file.path || '');
+    if (name) names.push(name);
+  });
+  return names;
+}
+
 function _workspaceRelativeListName(path = '', base = '', isDirectory = false) {
   const normalized = String(path || '').split('/').filter(Boolean).join('/');
   const normalizedBase = String(base || '').split('/').filter(Boolean).join('/');
@@ -1884,6 +1897,38 @@ async function _runWorkspaceListCommand(parts, tabId) {
   if (!directoryExists) throw new Error(`folder not found: ${_workspaceDisplayPath(target)}`);
   const listingEntries = parsed.recursive ? _workspaceRecursiveEntries(target) : _workspaceDirectListEntries(entries, target);
   return parsed.long ? _workspaceListLines(listingEntries, target) : _workspaceShortListLines(listingEntries);
+}
+
+function _workspacePipeInputLinesForCommand(baseCommand, capturedLines, tabId) {
+  const parts = _workspaceCommandTokens(baseCommand);
+  const root = (parts[0] || '').toLowerCase();
+  const action = (parts[1] || '').toLowerCase();
+  if (!(root === 'ls' || root === 'll' || (root === 'file' && ['list', 'ls'].includes(action)))) {
+    return capturedLines;
+  }
+  const parsed = _workspaceListCommand(parts);
+  if (!parsed || parsed.invalid || parsed.long) return capturedLines;
+  try {
+    const rawTarget = parsed.target;
+    const target = _resolveExistingWorkspaceCommandPath(rawTarget, {
+      cwd: _workspaceCwd(tabId),
+      kind: 'directory',
+      defaultToCwd: true,
+    });
+    const isRoot = !target;
+    const directoryExists = isRoot || _workspacePathExists(target, 'directory');
+    const fileHints = typeof getWorkspaceAutocompleteFileHints === 'function' ? getWorkspaceAutocompleteFileHints() : [];
+    const file = fileHints.find(item => String(item.value || '') === target);
+    if (!directoryExists || file) return capturedLines;
+    const entries = typeof getWorkspaceDirectoryEntries === 'function'
+      ? getWorkspaceDirectoryEntries(target)
+      : { folders: [], files: [] };
+    const listingEntries = parsed.recursive ? _workspaceRecursiveEntries(target) : _workspaceDirectListEntries(entries, target);
+    const names = _workspaceListNames(listingEntries);
+    return names.length ? names.map(name => _workspacePlainLine(name)) : capturedLines;
+  } catch (_) {
+    return capturedLines;
+  }
 }
 
 async function _handleWorkspaceTerminalCommand(cmd, tabId) {
@@ -2142,7 +2187,8 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
     setStatus = originalSetStatus;
   }
 
-  const outputLines = spec ? _applySyntheticPostFilterLines(capturedLines, spec) : capturedLines;
+  const pipeInputLines = spec ? _workspacePipeInputLinesForCommand(baseCommand, capturedLines, tabId) : capturedLines;
+  const outputLines = spec ? _applySyntheticPostFilterLines(pipeInputLines, spec) : capturedLines;
   if (originalAppendLines) await originalAppendLines(outputLines, tabId);
   else {
     outputLines.forEach((line) => {

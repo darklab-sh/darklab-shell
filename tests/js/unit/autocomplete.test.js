@@ -126,6 +126,42 @@ describe('autocomplete helpers', () => {
     expect(item?.querySelector('.ac-item-desc')?.textContent).toBe('Service detection')
   })
 
+  it('does not highlight typed text inside hint-only placeholders', () => {
+    const input = document.getElementById('cmd')
+    input.value = 'workflow run work'
+    input.selectionStart = input.selectionEnd = input.value.length
+    const { acShow } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: input,
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => input.value,
+        getComposerState: () => ({ selectionStart: input.selectionStart }),
+        acSuggestions: [],
+        acContextRegistry: {},
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      acShow,
+    }`,
+    )
+
+    acShow([
+      { value: 'workflow-network-check', description: 'Network workflow' },
+      { value: '<workflow>', description: 'Workflow name', hintOnly: true },
+    ])
+
+    const items = [...document.querySelectorAll('.ac-item')]
+    expect(items[0].innerHTML).toContain('<span class="ac-match">work</span>')
+    expect(items[1].querySelector('.ac-item-main')?.textContent).toBe('<workflow>')
+    expect(items[1].innerHTML).not.toContain('ac-match')
+  })
+
   it('acAccept updates the input, hides the dropdown, and refocuses the input', () => {
     const { acAccept } = loadAutocompleteFns()
     const input = document.getElementById('cmd')

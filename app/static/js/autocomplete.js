@@ -1156,7 +1156,9 @@ function acShow(items) {
     const main = document.createElement('span');
     main.className = 'ac-item-main';
     if (s && s.isExample && maxExampleLabelLen > 0) main.style.minWidth = maxExampleLabelLen + 'ch';
-    main.innerHTML = _autocompleteHighlightedLabel(label, val);
+    main.innerHTML = s && s.hintOnly
+      ? escapeHtml(label)
+      : _autocompleteHighlightedLabel(label, val);
     div.appendChild(main);
     if (description) {
       const desc = document.createElement('span');
