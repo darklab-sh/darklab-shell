@@ -302,6 +302,9 @@
       elapsed.textContent = _formatElapsed(run?.started);
       meta.append(runId, document.createTextNode(' · '), pid, document.createTextNode(' · '), elapsed);
       if (tabLabel) meta.append(document.createTextNode(' · '), document.createTextNode(tabLabel));
+      else if (run?.has_live_owner && !run?.owned_by_this_client) {
+        meta.append(document.createTextNode(' · '), document.createTextNode('another browser'));
+      }
 
       const details = document.createElement('div');
       details.className = 'run-monitor-details';

@@ -32,6 +32,7 @@ function loadSession({
     maskSessionToken,
     updateSessionId,
     _getSessionId: () => SESSION_ID,
+    _getClientId: () => CLIENT_ID,
   }`,
   )
 
@@ -81,9 +82,9 @@ describe('session.js', () => {
     expect(storage.getItem('session_id')).toBe(sessionId)
   })
 
-  it('apiFetch injects the X-Session-ID header', async () => {
+  it('apiFetch injects the X-Session-ID and X-Client-ID headers', async () => {
     const { apiFetch, fetchCalls } = loadSession({
-      storageData: { session_id: 'session-123' },
+      storageData: { session_id: 'session-123', client_id: 'client-123' },
     })
 
     await apiFetch('/config')
@@ -91,11 +92,12 @@ describe('session.js', () => {
     expect(fetchCalls).toHaveLength(1)
     expect(fetchCalls[0][0]).toBe('/config')
     expect(fetchCalls[0][1].headers['X-Session-ID']).toBe('session-123')
+    expect(fetchCalls[0][1].headers['X-Client-ID']).toBe('client-123')
   })
 
   it('apiFetch preserves existing headers while adding the session header', async () => {
     const { apiFetch, fetchCalls } = loadSession({
-      storageData: { session_id: 'session-abc' },
+      storageData: { session_id: 'session-abc', client_id: 'client-abc' },
     })
 
     await apiFetch('/run', {
@@ -106,6 +108,7 @@ describe('session.js', () => {
     expect(fetchCalls[0][1].headers).toEqual({
       'Content-Type': 'application/json',
       'X-Session-ID': 'session-abc',
+      'X-Client-ID': 'client-abc',
     })
   })
 

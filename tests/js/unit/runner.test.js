@@ -841,6 +841,61 @@ describe('runner helpers', () => {
     vi.useRealTimers()
   })
 
+  it('restoreActiveRunsAfterReload skips runs owned by another live client', () => {
+    const appendLine = vi.fn()
+    const createTab = vi.fn(() => 'tab-2')
+    const { restoreActiveRunsAfterReload, tabs, status } = loadRunnerFns({
+      tabs: [
+        { id: 'tab-1', st: 'idle', runId: null, rawLines: [], pendingKill: false, killed: false },
+      ],
+      appendLine,
+      createTab,
+    })
+
+    const restored = restoreActiveRunsAfterReload([
+      {
+        run_id: 'run-1',
+        command: 'ping darklab.sh',
+        started: '2026-01-01T00:00:00Z',
+        owned_by_this_client: false,
+        has_live_owner: true,
+        owner_stale: false,
+      },
+    ])
+
+    expect(restored).toBe(false)
+    expect(createTab).not.toHaveBeenCalled()
+    expect(appendLine).not.toHaveBeenCalled()
+    expect(tabs[0].st).toBe('idle')
+    expect(status.className).toBe('')
+  })
+
+  it('restoreActiveRunsAfterReload restores stale-owner runs', () => {
+    const appendLine = vi.fn()
+    const { restoreActiveRunsAfterReload, tabs } = loadRunnerFns({
+      tabs: [
+        { id: 'tab-1', st: 'idle', runId: null, rawLines: [], pendingKill: false, killed: false },
+      ],
+      appendLine,
+    })
+
+    restoreActiveRunsAfterReload([
+      {
+        run_id: 'run-1',
+        command: 'ping darklab.sh',
+        started: '2026-01-01T00:00:00Z',
+        owned_by_this_client: false,
+        has_live_owner: false,
+        owner_stale: true,
+      },
+    ])
+
+    expect(tabs[0].historyRunId).toBe('run-1')
+    expect(tabs[0].reconnectedRun).toBe(true)
+    expect(tabs[0].st).toBe('running')
+    expect(appendLine).toHaveBeenCalledWith('ping darklab.sh', 'prompt-echo', 'tab-1')
+  })
+
   it('restoreActiveRunsAfterReload does not overwrite a restored non-running tab', () => {
     const appendLine = vi.fn()
     const createTab = vi.fn(() => 'tab-2')
@@ -1699,7 +1754,7 @@ describe('submitCommand return contract', () => {
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: 'curl darklab.sh' }),
+        body: JSON.stringify({ command: 'curl darklab.sh', tab_id: 'tab-1' }),
       }),
     )
   })
@@ -1722,7 +1777,7 @@ describe('submitCommand return contract', () => {
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: 'curl explicit.sh' }),
+        body: JSON.stringify({ command: 'curl explicit.sh', tab_id: 'tab-1' }),
       }),
     )
   })

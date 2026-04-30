@@ -182,6 +182,24 @@
 # diagnostics_allowed_cidrs:
 #   - 172.16.0.0/12
 
+# ── Restricted Command Inputs ────────────────────────────────────────────────
+
+# IPs or CIDR ranges that should be rejected when supplied as command targets.
+# This applies only to command slots explicitly marked with host/domain/IP/CIDR
+# value metadata in commands.yaml, including inspectable workspace input files
+# passed through declared read flags. Domain names are not DNS-resolved here;
+# this policy blocks literal IP/CIDR values and literal IPs embedded in URLs or
+# host:port values.
+#
+# Typical values:
+#   169.254.169.254/32 — cloud metadata service
+#   127.0.0.0/8        — IPv4 loopback range
+#   ::1/128            — IPv6 loopback address
+#
+# Server default if unset: [] (disabled)
+# restricted_command_input_cidrs:
+#   - 169.254.169.254/32
+
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 
 # Whether the /run rate limiter is active at all. Set to false for test-only or

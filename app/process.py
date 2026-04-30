@@ -160,6 +160,7 @@ _pid_lock = threading.Lock()
 # PID entries expire after 4 hours as a safety net for orphaned entries
 # left behind if a worker crashes mid-stream.
 _PID_TTL = 14400
+_ACTIVE_RUN_OWNER_STALE_SECONDS = 75
 
 
 def _load_active_run_payload(raw: object) -> dict[str, Any] | None:
@@ -258,6 +259,32 @@ def _active_run_is_alive(payload: dict[str, Any]) -> bool:
     return current_start is None or str(current_start) == str(expected_start)
 
 
+def _active_run_owner_last_seen(payload: dict[str, Any]) -> float | None:
+    try:
+        value = float(payload.get("owner_last_seen", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _active_run_owner_state(payload: dict[str, Any], client_id: str = "") -> dict[str, object]:
+    owner_client_id = str(payload.get("owner_client_id", "") or "")
+    owner_tab_id = str(payload.get("owner_tab_id", "") or "")
+    owner_last_seen = _active_run_owner_last_seen(payload)
+    owner_age_seconds = (time.time() - owner_last_seen) if owner_last_seen else None
+    owner_stale = owner_age_seconds is None or owner_age_seconds > _ACTIVE_RUN_OWNER_STALE_SECONDS
+    has_live_owner = bool(owner_client_id and not owner_stale)
+    return {
+        "owner_client_id": owner_client_id,
+        "owner_tab_id": owner_tab_id,
+        "owner_last_seen": owner_last_seen,
+        "owner_age_seconds": round(owner_age_seconds, 3) if owner_age_seconds is not None else None,
+        "owner_stale": owner_stale,
+        "has_live_owner": has_live_owner,
+        "owned_by_this_client": bool(client_id and owner_client_id and client_id == owner_client_id),
+    }
+
+
 def _redis_smembers_strings(key: str) -> list[str]:
     """Return a normalized list of Redis set members as strings."""
     if not redis_client:
@@ -319,7 +346,15 @@ def pid_pop_for_session(run_id: str, session_id: str) -> int | None:
         return pid
 
 
-def active_run_register(run_id: str, pid: int, session_id: str, command: str, started: str) -> None:
+def active_run_register(
+    run_id: str,
+    pid: int,
+    session_id: str,
+    command: str,
+    started: str,
+    owner_client_id: str = "",
+    owner_tab_id: str = "",
+) -> None:
     """Register the metadata needed to restore an in-flight run after reload."""
     payload = {
         "run_id": run_id,
@@ -328,6 +363,9 @@ def active_run_register(run_id: str, pid: int, session_id: str, command: str, st
         "session_id": session_id,
         "command": command,
         "started": started,
+        "owner_client_id": owner_client_id,
+        "owner_tab_id": owner_tab_id,
+        "owner_last_seen": time.time() if owner_client_id else None,
     }
     if redis_client:
         meta_key = f"procmeta:{run_id}"
@@ -339,6 +377,40 @@ def active_run_register(run_id: str, pid: int, session_id: str, command: str, st
         with _pid_lock:
             _active_run_meta[run_id] = payload
             _session_run_ids.setdefault(session_id, set()).add(run_id)
+
+
+def active_run_touch_owner(run_id: str, owner_client_id: str = "", owner_tab_id: str = "") -> bool:
+    """Refresh active-run owner liveness while the owning SSE stream is alive."""
+    if not run_id or not owner_client_id:
+        return False
+
+    if redis_client:
+        meta_key = f"procmeta:{run_id}"
+        raw = redis_client.get(meta_key)
+        payload = _load_active_run_payload(raw)
+        if not payload:
+            return False
+        if str(payload.get("owner_client_id", "") or "") != owner_client_id:
+            return False
+        if owner_tab_id and str(payload.get("owner_tab_id", "") or "") != owner_tab_id:
+            return False
+        payload["owner_last_seen"] = time.time()
+        redis_client.set(meta_key, json.dumps(payload), ex=_PID_TTL)
+        session_id = str(payload.get("session_id", "") or "")
+        if session_id:
+            redis_client.expire(f"sessionprocs:{session_id}", _PID_TTL)
+        return True
+
+    with _pid_lock:
+        payload = _active_run_meta.get(run_id)
+        if not payload:
+            return False
+        if str(payload.get("owner_client_id", "") or "") != owner_client_id:
+            return False
+        if owner_tab_id and str(payload.get("owner_tab_id", "") or "") != owner_tab_id:
+            return False
+        payload["owner_last_seen"] = time.time()
+        return True
 
 
 def active_run_remove(run_id: str) -> None:
@@ -363,7 +435,7 @@ def active_run_remove(run_id: str) -> None:
                 _session_run_ids.pop(session_id, None)
 
 
-def _active_run_public_item(item: dict[str, Any], source: str) -> dict[str, object]:
+def _active_run_public_item(item: dict[str, Any], source: str, client_id: str = "") -> dict[str, object]:
     pid = int(item.get("pid", 0) or 0)
     run_id = str(item.get("run_id", ""))
     public_item: dict[str, object] = {
@@ -373,6 +445,7 @@ def _active_run_public_item(item: dict[str, Any], source: str) -> dict[str, obje
         "started": str(item.get("started", "")),
         "source": source,
     }
+    public_item.update(_active_run_owner_state(item, client_id=client_id))
     usage = _active_run_resource_usage(run_id, pid)
     if usage is not None:
         public_item["resource_usage"] = usage
@@ -383,7 +456,7 @@ def _active_run_started_sort_key(item: dict[str, object]) -> str:
     return str(item.get("started", ""))
 
 
-def active_runs_for_session(session_id: str) -> list[dict]:
+def active_runs_for_session(session_id: str, client_id: str = "") -> list[dict]:
     """Return in-flight runs for one session, ordered oldest-first by start time."""
     if not session_id:
         return []
@@ -413,7 +486,7 @@ def active_runs_for_session(session_id: str) -> list[dict]:
         if stale:
             redis_client.srem(session_key, *stale)
         public_items = [
-            _active_run_public_item(item, "redis")
+            _active_run_public_item(item, "redis", client_id=client_id)
             for item in items
             if item.get("run_id") and item.get("command") and item.get("started")
         ]
@@ -431,7 +504,7 @@ def active_runs_for_session(session_id: str) -> list[dict]:
             if not _active_run_is_alive(item):
                 stale.append(run_id)
                 continue
-            items.append(_active_run_public_item(item, "memory"))
+            items.append(_active_run_public_item(item, "memory", client_id=client_id))
         for run_id in stale:
             _active_run_meta.pop(run_id, None)
             if session_id in _session_run_ids:

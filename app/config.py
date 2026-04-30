@@ -74,6 +74,7 @@ def load_config(conf_dir=None):
         "log_format":                 "text",
         "trusted_proxy_cidrs":        ["127.0.0.1/32", "::1/128"],
         "diagnostics_allowed_cidrs":  [],
+        "restricted_command_input_cidrs": [],
         "share_redaction_enabled":    True,
         "share_redaction_rules":      [],
         "rate_limit_enabled":         True,

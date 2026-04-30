@@ -464,6 +464,130 @@ class TestIsCommandAllowedEdges:
         assert not denied.allowed
         assert "Command not allowed" in denied.reason
 
+    def test_restricted_command_input_cidrs_block_inline_literal_targets(self):
+        registry = {
+            "commands": [
+                {
+                    "root": "probe",
+                    "category": "Testing",
+                    "policy": {"allow": ["probe"], "deny": []},
+                    "autocomplete": {
+                        "flags": [
+                            {
+                                "value": "-u",
+                                "takes_value": True,
+                                "value_hint": {
+                                    "placeholder": "<url>",
+                                    "value_type": "url",
+                                },
+                            },
+                        ],
+                        "arguments": [
+                            {
+                                "placeholder": "<target>",
+                                "value_type": "domain",
+                            },
+                        ],
+                    },
+                },
+            ],
+            "pipe_helpers": [],
+        }
+        cfg = {
+            "restricted_command_input_cidrs": ["10.0.0.0/8", "169.254.169.254/32"],
+            "workspace_enabled": False,
+        }
+        with mock.patch("commands.load_commands_registry", return_value=registry):
+            ip_result = validate_command("probe 10.1.2.3", cfg=cfg)
+            url_result = validate_command("probe -u http://169.254.169.254/latest", cfg=cfg)
+            domain_result = validate_command("probe darklab.sh", cfg=cfg)
+
+        assert not ip_result.allowed
+        assert "restricted IP/CIDR value: 10.1.2.3" in ip_result.reason
+        assert not url_result.allowed
+        assert "restricted IP/CIDR value: 169.254.169.254" in url_result.reason
+        assert domain_result.allowed
+
+    def test_restricted_command_input_cidrs_block_overlapping_cidr_targets(self):
+        registry = {
+            "commands": [
+                {
+                    "root": "scan",
+                    "category": "Testing",
+                    "policy": {"allow": ["scan"], "deny": []},
+                    "autocomplete": {
+                        "arguments": [
+                            {
+                                "placeholder": "<target>",
+                                "value_type": "cidr",
+                            },
+                        ],
+                    },
+                },
+            ],
+            "pipe_helpers": [],
+        }
+        cfg = {
+            "restricted_command_input_cidrs": ["10.0.0.0/8"],
+            "workspace_enabled": False,
+        }
+        with mock.patch("commands.load_commands_registry", return_value=registry):
+            result = validate_command("scan 10.2.0.0/16", cfg=cfg)
+
+        assert not result.allowed
+        assert "restricted IP/CIDR value: 10.2.0.0/16" in result.reason
+
+    def test_restricted_command_input_cidrs_inspect_workspace_target_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+                "restricted_command_input_cidrs": ["10.0.0.0/8"],
+            }
+            registry = {
+                "commands": [
+                    {
+                        "root": "scan",
+                        "category": "Testing",
+                        "policy": {"allow": ["scan"], "deny": ["scan -iL"]},
+                        "workspace_flags": [
+                            {"flag": "-iL", "mode": "read", "value": "separate"},
+                        ],
+                        "autocomplete": {
+                            "flags": [
+                                {
+                                    "value": "-iL",
+                                    "takes_value": True,
+                                    "feature_required": "workspace",
+                                    "value_hint": {
+                                        "placeholder": "<target-file>",
+                                        "value_type": "target",
+                                    },
+                                },
+                            ],
+                        },
+                    },
+                ],
+                "pipe_helpers": [],
+            }
+            from workspace import write_workspace_text_file
+            write_workspace_text_file("session-1", "targets.txt", "darklab.sh\n10.9.8.7\n", cfg)
+
+            with mock.patch("commands.load_commands_registry", return_value=registry):
+                result = validate_command(
+                    "scan -iL targets.txt",
+                    session_id="session-1",
+                    cfg=cfg,
+                )
+
+        assert not result.allowed
+        assert "Session file targets.txt contains restricted IP/CIDR value: 10.9.8.7" in result.reason
+
 
 class TestFakeCommandResolution:
     def test_documented_fake_commands_are_backed_by_runtime_dispatch(self):

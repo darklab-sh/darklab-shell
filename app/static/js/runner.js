@@ -228,8 +228,15 @@ function _activeRunReconnectNotice(run) {
   ];
 }
 
+function _shouldAutoRestoreActiveRun(run) {
+  if (!run || typeof run !== 'object') return false;
+  if (run.owned_by_this_client) return true;
+  if (run.owner_stale) return true;
+  return !run.has_live_owner;
+}
+
 function restoreActiveRunsAfterReload(runs) {
-  const items = Array.isArray(runs) ? runs : [];
+  const items = (Array.isArray(runs) ? runs : []).filter(_shouldAutoRestoreActiveRun);
   if (!items.length) {
     stopPollingActiveRunsAfterReload();
     return false;
@@ -2345,7 +2352,7 @@ function submitCommand(rawCmd) {
   apiFetch('/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ command: cmd })
+    body: JSON.stringify({ command: cmd, tab_id: tabId })
   }).then(res => {
     if (res.status === 403) {
       return res.json().then(data => {

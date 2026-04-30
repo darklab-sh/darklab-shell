@@ -810,6 +810,37 @@ class TestDerivedCommandRegistry:
             "dns",
         ]
 
+    def test_real_registry_restricted_input_metadata_covers_known_target_slots(self):
+        context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
+
+        expectations = [
+            ("curl", "__positional__", "url"),
+            ("wget", "-i", "url"),
+            ("subfinder", "-dL", "domain"),
+            ("amass", "enum:-df", "domain"),
+            ("amass", "enum:-nf", "host"),
+            ("dnsx", "-l", "host"),
+            ("pd-httpx", "-l", "url"),
+            ("gobuster", "dir:-u", "url"),
+            ("gobuster", "tftp:-s", "host"),
+            ("ffuf", "-u", "url"),
+            ("naabu", "-l", "host"),
+            ("katana", "-list", "url"),
+            ("wafw00f", "-i", "url"),
+            ("masscan", "-iL", "target"),
+            ("rustscan", "__positional__", "domain"),
+            ("nmap", "-iL", "target"),
+            ("testssl", "__positional__", "url"),
+            ("wpscan", "--url", "url"),
+            ("nuclei", "-l", "target"),
+        ]
+        for root, trigger, value_type in expectations:
+            spec = context[root]
+            if ":" in trigger:
+                subcommand, trigger = trigger.split(":", 1)
+                spec = spec["subcommands"][subcommand]
+            assert spec["arg_hints"][trigger][0]["value_type"] == value_type
+
     def test_autocomplete_context_can_be_derived_from_commands_registry(self):
         context = autocomplete_context_from_commands_registry({
             "commands": [
@@ -1860,8 +1891,74 @@ class TestActiveRunMetadata:
                     "command": "ping darklab.sh",
                     "started": "2026-01-01T00:00:00Z",
                     "source": "memory",
+                    "owner_client_id": "",
+                    "owner_tab_id": "",
+                    "owner_last_seen": None,
+                    "owner_age_seconds": None,
+                    "owner_stale": True,
+                    "has_live_owner": False,
+                    "owned_by_this_client": False,
                 }
             ]
+
+    def test_active_runs_for_session_reports_owner_liveness_for_client(self):
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process, "_pid_start_time", return_value=None),
+            mock.patch.object(process.time, "time", return_value=1000.0),
+        ):
+            process.active_run_register(
+                "run-owned",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+                owner_client_id="client-1",
+                owner_tab_id="tab-1",
+            )
+
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process.time, "time", return_value=1030.0),
+        ):
+            owned = process.active_runs_for_session("session-1", client_id="client-1")[0]
+            other = process.active_runs_for_session("session-1", client_id="client-2")[0]
+
+        assert owned["owned_by_this_client"] is True
+        assert owned["has_live_owner"] is True
+        assert owned["owner_stale"] is False
+        assert owned["owner_tab_id"] == "tab-1"
+        assert other["owned_by_this_client"] is False
+        assert other["has_live_owner"] is True
+
+    def test_active_run_touch_owner_refreshes_liveness(self):
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process, "_pid_start_time", return_value=None),
+            mock.patch.object(process.time, "time", return_value=1000.0),
+        ):
+            process.active_run_register(
+                "run-owned",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+                owner_client_id="client-1",
+                owner_tab_id="tab-1",
+            )
+
+        with mock.patch.object(process.time, "time", return_value=1100.0):
+            assert process.active_run_touch_owner("run-owned", "client-2", "tab-1") is False
+            assert process.active_run_touch_owner("run-owned", "client-1", "tab-1") is True
+
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process.time, "time", return_value=1101.0),
+        ):
+            run = process.active_runs_for_session("session-1", client_id="client-1")[0]
+
+        assert run["owner_last_seen"] == 1100.0
+        assert run["owner_stale"] is False
 
     def test_active_runs_for_session_prunes_dead_pid(self):
         with mock.patch.object(process, "_pid_start_time", return_value=None):

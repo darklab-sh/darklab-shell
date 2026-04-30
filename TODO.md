@@ -22,42 +22,13 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Open TODOs
 
-- **Client-aware active-run recovery**
-  - Prevent a second browser using the same session token from automatically restoring or attaching to a long-running command that is already owned by another live browser.
-  - Preserve the good reload/crash-recovery behavior for the original browser, but treat other browsers as observers unless the original owner is stale or the user explicitly chooses to attach.
-  - Add a stable browser/client identity layer.
-    - Generate a persistent `client_id` per browser install/profile and store it in local storage.
-    - Keep existing per-tab ids for terminal tabs, and include both `client_id` and `tab_id` when starting a run.
-    - Avoid tying ownership to session token alone; the same named token can legitimately be open on a laptop, phone, and secondary browser.
-  - Track active-run ownership and liveness.
-    - Store `owner_client_id`, `owner_tab_id`, and `owner_last_seen` in active-run metadata when `/run` starts.
-    - Send periodic owner heartbeats while the owning tab has an active SSE stream.
-    - Mark ownership stale after a short grace window if heartbeats stop, the browser closes, the laptop sleeps, or the network drops.
-    - Keep server cleanup separate from owner staleness: a stale owner means another browser may recover/attach, not that the command should be killed.
-  - Change active-run boot/recovery behavior.
-    - On page load, `/history/active` should return active runs with ownership fields such as `owned_by_this_client`, `has_live_owner`, `owner_stale`, and enough command/tab metadata to render status.
-    - If `owned_by_this_client` is true, restore/reconnect automatically as today.
-    - If the owner is a different live client, show the run in Run Monitor/history as active but do not create a terminal tab or auto-attach SSE.
-    - If the owner is stale, recover automatically only when the current browser has matching local tab/session state; otherwise offer an explicit attach/take-over action.
-  - Add explicit user actions for cross-client visibility.
-    - `Monitor only`: show active-run status, command, elapsed time, CPU/RSS telemetry, and completion state without claiming ownership or injecting transcript output.
-    - `Attach here`: start following the live output in a new/restored tab while leaving the original owner intact if the backend supports multi-consumer streaming.
-    - `Take over`: claim ownership when the original owner is stale; clearly label the action so users understand the stream moved to this browser.
-    - Do not auto-open tabs on mobile just because a laptop-owned command exists; mobile should surface the run through the Run Monitor peek/sheet.
-  - Decide whether duplicate SSE consumers are allowed.
-    - Prefer a UX ownership model over a hard one-consumer backend lock unless duplicate streams create real resource or correctness problems.
-    - If multi-consumer SSE is already safe, make cross-client attach explicit and keep ownership metadata for recovery decisions.
-    - If one-consumer streaming is required, reject non-owner auto-attach and show a clear `running in another browser` state with monitor-only telemetry.
-  - Testing expectations:
-    - Backend tests for active-run metadata including owner fields, heartbeat updates, and stale-owner detection.
-    - Backend tests that active runs are not marked complete or killed merely because an owner becomes stale.
-    - Browser unit tests for boot recovery decisions: same client auto-restores, different live client monitors only, stale owner offers recovery/takeover.
-    - Playwright coverage using two browser contexts with the same session token: laptop starts a long command, phone loads the app and sees Run Monitor state without auto-restored transcript tab.
-    - Mobile Playwright coverage that a laptop-owned active run appears in the active-run peek/sheet without stealing focus from the mobile composer.
-  - Documentation expectations:
-    - Update `ARCHITECTURE.md` active-run/reload continuity docs with the distinction between session identity, client identity, tab identity, and run ownership.
-    - Update `FEATURES.md` and README user-facing Run Monitor/session-token notes to explain that other browsers can monitor active runs without automatically taking them over.
-    - Update CHANGELOG and release drafts with the safer multi-browser session-token behavior.
+- **Active-run explicit attach/takeover actions**
+  - Build on client-aware active-run ownership so non-owning browsers can do more than monitor.
+  - Add explicit Run Monitor actions for cross-client active runs:
+    - `Attach here`: follow live output in a new/restored tab if the backend supports safe multi-consumer streaming.
+    - `Take over`: claim ownership when the original owner is stale, with clear copy that the stream is moving to this browser.
+  - Decide whether the first implementation should be multi-consumer SSE fan-out or a stricter one-owner stream transfer.
+  - Add two-browser Playwright coverage for same session token, different client ids, monitor-only default state, stale-owner takeover, and no mobile focus theft.
 
 - **Workflow provenance and promotion follow-ups**
   - Link generated runs back to the workflow id/name and step index.
@@ -94,37 +65,6 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
   - Phase 3: tool-aware diffs for common outputs such as `nmap` ports/services, URL/status/title lists, subdomain lists, and TLS certificate changes.
   - Add tests for best-previous-run selection, manual picker filtering, raw added/removed diff output, empty/no-match states, large output handling, and later finding-aware diffs.
 
-- **ProjectDiscovery session-scoped runtime state and output path surfacing**
-  - Make ProjectDiscovery tools write useful config, resume, and generated artifact state into the active session workspace instead of anonymous `/tmp/.config/...` paths.
-    - Start with `nuclei`, `subfinder`, `pd-httpx`, `katana`, and `naabu`.
-    - Keep the existing `amass` managed `-dir amass` behavior as the model for command-specific state that should persist across related commands in one session.
-    - Treat ProjectDiscovery tools as a shared family because their Go helpers generally resolve config paths through `$XDG_CONFIG_HOME` when set, falling back to `$HOME/.config`.
-  - Add a command-runtime environment layer for tool-owned state.
-    - For these tools, set `XDG_CONFIG_HOME=<session workspace>` when workspace storage is enabled so default paths become session-visible folders such as `katana/`, `subfinder/`, `httpx/`, `naabu/`, and `nuclei/`.
-    - Preserve the current `nuclei -ud /tmp/nuclei-templates` injection so large template caches stay tmpfs-backed unless we deliberately decide templates should become workspace artifacts.
-    - Keep `HOME=/tmp` in the scanner wrapper for generic tool scratch behavior.
-    - Do not make provider/API-key config files public by accident. Audit share/export package behavior before including generated ProjectDiscovery config directories.
-  - Surface container paths as user-facing workspace paths.
-    - Add a run-output postfilter that rewrites absolute paths under the current session workspace root to `/relative/path`.
-    - Example: `Creating resume file: /workspaces/sess_<hash>/katana/resume-abc.cfg` should display as `Creating resume file: /katana/resume-abc.cfg`.
-    - Keep the stored full-output artifact aligned with the user-facing transcript so restored history and share pages do not expose hashed session paths.
-  - Expand workspace-aware flags for generated directories and secondary outputs.
-    - `katana`: support `-store-response-dir` / `-srd`, `-store-field-dir` / `-sfd`, and validate whether `-resume` should autocomplete from session files.
-    - `pd-httpx`: support `-store-response-dir` / `-srd`, screenshot / response-store output directories where applicable, and config-file reads if useful.
-    - `nuclei`: review resume, trace/error log, headless artifact, and config/template related paths; keep template cache policy explicit.
-    - `subfinder`: review `-config` and provider config behavior carefully because those files can contain API keys.
-    - `naabu`: review config, input/output, nmap integration output, and metrics behavior.
-  - Testing expectations:
-    - Backend tests for command validation wrapping each selected root with `XDG_CONFIG_HOME=<session workspace>` only when workspaces are enabled.
-    - Backend tests that `nuclei` keeps `-ud /tmp/nuclei-templates` while also receiving the ProjectDiscovery config env.
-    - Route/streaming tests for rewriting current-session absolute workspace paths in output lines.
-    - Command-registry tests for any newly declared workspace directory flags.
-    - Container smoke coverage for at least `katana` resume output and one `pd-httpx` or `katana` stored-response directory.
-  - Documentation expectations:
-    - Update `docs/external-command-integrations.md` with a ProjectDiscovery section before or after the Amass section.
-    - Update README tool notes for any visible behavior changes.
-    - Update CHANGELOG and release drafts with the user-facing path behavior and the security note around provider configs.
-
 - **Declarative command runtime adaptations in `commands.yaml`**
   - Move command-specific runtime rewrites and environment tweaks out of app-owned Python branches and into the command registry.
     - Current hardcoded examples to migrate include:
@@ -158,30 +98,36 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
     - Update `ARCHITECTURE.md` command execution details so special command behavior points at `commands.yaml` instead of Python branches.
     - Update README tool notes only where user-visible behavior changes or becomes more clearly explained.
 
-- **Configurable restricted IP/CIDR command inputs**
-  - Add operator-facing configuration for IP addresses, CIDR ranges, and possibly reserved network classes that should be rejected as command inputs.
-    - Support explicit IPs such as `169.254.169.254`, CIDRs such as `10.0.0.0/8`, and named presets for common sensitive ranges if that keeps configuration readable.
-    - Default policy should be conservative and clearly documented; decide whether private/reserved ranges are blocked by default or only through opt-in presets.
-    - Include separate allow/override mechanics only if there is a clear operator need, because exceptions can make command safety harder to explain.
-  - Apply the restriction during command validation before subprocess launch.
-    - Inspect command arguments that are known to accept hosts, IPs, URLs, domains, or CIDRs.
-    - Reuse and extend existing `commands.yaml` value metadata where possible, likely with `value_type: ip`, `value_type: cidr`, `value_type: host`, or URL-aware validation rather than blanket string scanning.
-    - Parse URLs and host:port values so blocked IPs are caught when embedded in `http://10.0.0.1:8080/`, `[::1]:8000`, or similar forms.
-    - Account for command input files as well as inline arguments. Flags such as target-list, URL-list, host-list, or CIDR-list inputs should either be parsed and checked before launch when the file is app-managed/readable, or be denied/handled with a clear policy when the app cannot inspect the referenced file.
-    - Resolve whether domain-to-IP DNS lookups are in scope. Initial implementation can avoid network resolution and document that this blocks literal IP/CIDR inputs only.
-  - Return clear user-facing denial messages.
-    - Name the blocked value and policy source without leaking overly broad internal config details.
-    - Keep messages consistent with existing denied-command output and non-zero exit behavior.
+- **ProjectDiscovery session-scoped runtime state and output path surfacing**
+  - Make ProjectDiscovery tools write useful config, resume, and generated artifact state into the active session workspace instead of anonymous `/tmp/.config/...` paths.
+    - Start with `nuclei`, `subfinder`, `pd-httpx`, `katana`, and `naabu`.
+    - Keep the existing `amass` managed `-dir amass` behavior as the model for command-specific state that should persist across related commands in one session.
+    - Treat ProjectDiscovery tools as a shared family because their Go helpers generally resolve config paths through `$XDG_CONFIG_HOME` when set, falling back to `$HOME/.config`.
+  - Add a command-runtime environment layer for tool-owned state.
+    - For these tools, set `XDG_CONFIG_HOME=<session workspace>` when workspace storage is enabled so default paths become session-visible folders such as `katana/`, `subfinder/`, `httpx/`, `naabu/`, and `nuclei/`.
+    - Preserve the current `nuclei -ud /tmp/nuclei-templates` injection so large template caches stay tmpfs-backed unless we deliberately decide templates should become workspace artifacts.
+    - Keep `HOME=/tmp` in the scanner wrapper for generic tool scratch behavior.
+    - Do not make provider/API-key config files public by accident. Audit share/export package behavior before including generated ProjectDiscovery config directories.
+  - Surface container paths as user-facing workspace paths.
+    - Add a run-output postfilter that rewrites absolute paths under the current session workspace root to `/relative/path`.
+    - Example: `Creating resume file: /workspaces/sess_<hash>/katana/resume-abc.cfg` should display as `Creating resume file: /katana/resume-abc.cfg`.
+    - Keep the stored full-output artifact aligned with the user-facing transcript so restored history and share pages do not expose hashed session paths.
+  - Expand workspace-aware flags for generated directories and secondary outputs.
+    - `katana`: support `-store-response-dir` / `-srd`, `-store-field-dir` / `-sfd`, and validate whether `-resume` should autocomplete from session files.
+    - `pd-httpx`: support `-store-response-dir` / `-srd`, screenshot / response-store output directories where applicable, and config-file reads if useful.
+    - `nuclei`: review resume, trace/error log, headless artifact, and config/template related paths; keep template cache policy explicit.
+    - `subfinder`: review `-config` and provider config behavior carefully because those files can contain API keys.
+    - `naabu`: review config, input/output, nmap integration output, and metrics behavior.
   - Testing expectations:
-    - Config parsing tests for valid/invalid IPs, CIDRs, IPv6 ranges, empty lists, and preset names if presets are added.
-    - Command-validation tests showing blocked literal IP, CIDR, URL host, and host:port values are denied before launch.
-    - Input-file validation tests for workspace target lists containing restricted IPs/CIDRs and for unreadable/non-workspace input-file references.
-    - Negative tests showing domains and non-restricted public IPs still pass when command metadata allows them.
-    - Metadata tests for commands/flags that accept IP/CIDR values after extending `commands.yaml`.
+    - Backend tests for command validation wrapping each selected root with `XDG_CONFIG_HOME=<session workspace>` only when workspaces are enabled.
+    - Backend tests that `nuclei` keeps `-ud /tmp/nuclei-templates` while also receiving the ProjectDiscovery config env.
+    - Route/streaming tests for rewriting current-session absolute workspace paths in output lines.
+    - Command-registry tests for any newly declared workspace directory flags.
+    - Container smoke coverage for at least `katana` resume output and one `pd-httpx` or `katana` stored-response directory.
   - Documentation expectations:
-    - Update README `## Configuration` and `app/conf/config.yaml` with the new restriction settings.
-    - Update `ARCHITECTURE.md` command validation flow and any external-command integration docs that describe value metadata.
-    - Update CHANGELOG and release drafts when implemented.
+    - Update `docs/external-command-integrations.md` with a ProjectDiscovery section before or after the Amass section.
+    - Update README tool notes for any visible behavior changes.
+    - Update CHANGELOG and release drafts with the user-facing path behavior and the security note around provider configs.
 
 ## Research
 

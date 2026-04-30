@@ -8,11 +8,13 @@ imported and tested in isolation.
 from copy import deepcopy
 from dataclasses import dataclass, field
 import html
+import ipaddress
 import os
 import re
 import shlex
 import shutil
 import yaml
+from urllib.parse import urlparse
 
 import config as app_config
 from workspace import (
@@ -21,6 +23,7 @@ from workspace import (
     WorkspaceFileNotFound,
     prepare_workspace_directory_for_command,
     prepare_workspace_file_for_command,
+    read_workspace_text_file,
     resolve_workspace_path,
 )
 
@@ -37,6 +40,7 @@ APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
 APP_HINTS_MOBILE_FILE = os.path.join(_CONF, "app_hints_mobile.txt")
 AMASS_DEFAULT_WORKSPACE_DIR = "amass"
 AMASS_MANAGED_DATABASE_SUBCOMMANDS = {"enum", "subs", "track", "viz"}
+RESTRICTABLE_VALUE_TYPES = {"cidr", "domain", "host", "ip", "target", "url"}
 
 
 @dataclass(frozen=True)
@@ -2267,6 +2271,268 @@ def _workspace_flag_value(tokens: list[str], index: int, spec: dict[str, object]
     return None, None, None
 
 
+def _restricted_command_networks(cfg: dict | None = None) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+    active_cfg = cfg or app_config.CFG
+    raw_values = active_cfg.get("restricted_command_input_cidrs") or []
+    if isinstance(raw_values, str):
+        raw_values = [raw_values]
+    networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    for raw_value in raw_values if isinstance(raw_values, list) else []:
+        value = str(raw_value or "").strip()
+        if not value:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(value, strict=False))
+        except ValueError:
+            continue
+    return networks
+
+
+def _value_type_is_restrictable(value_type: str) -> bool:
+    return str(value_type or "").strip().lower() in RESTRICTABLE_VALUE_TYPES
+
+
+def _dict_value(data: dict[str, object], key: str) -> dict:
+    value = data.get(key)
+    return value if isinstance(value, dict) else {}
+
+
+def _list_value(data: dict[str, object], key: str) -> list:
+    value = data.get(key)
+    return value if isinstance(value, list) else []
+
+
+def _autocomplete_value_type_from_hint(spec: dict[str, object], trigger: str) -> str:
+    hints = _dict_value(spec, "arg_hints").get(trigger) or []
+    for hint in hints:
+        if not isinstance(hint, dict):
+            continue
+        value_type = str(hint.get("value_type") or "").strip().lower()
+        if value_type:
+            return value_type
+    return ""
+
+
+def _autocomplete_flag_value_types(spec: dict[str, object]) -> dict[str, str]:
+    value_types: dict[str, str] = {}
+    for flag in _list_value(spec, "flags"):
+        if not isinstance(flag, dict):
+            continue
+        token = str(flag.get("value") or "").strip()
+        if not token:
+            continue
+        value_type = str(flag.get("value_type") or "").strip().lower()
+        if not value_type:
+            value_type = _autocomplete_value_type_from_hint(spec, token)
+        if value_type:
+            value_types[token] = value_type
+    for trigger in _dict_value(spec, "arg_hints"):
+        token = str(trigger or "").strip()
+        if token and token != "__positional__" and token not in value_types:
+            value_type = _autocomplete_value_type_from_hint(spec, token)
+            if value_type:
+                value_types[token] = value_type
+    return value_types
+
+
+def _autocomplete_positional_value_types(spec: dict[str, object]) -> list[str]:
+    value_types = []
+    for hint in _dict_value(spec, "arg_hints").get("__positional__", []) or []:
+        if not isinstance(hint, dict):
+            continue
+        value_type = str(hint.get("value_type") or "").strip().lower()
+        if _value_type_is_restrictable(value_type):
+            value_types.append(value_type)
+    return _dedupe_preserve_order(value_types)
+
+
+def _autocomplete_spec_needs_normalization(spec: dict[str, object]) -> bool:
+    if "arg_hints" not in spec or "arguments" in spec:
+        return True
+    return any(
+        isinstance(flag, dict) and ("takes_value" in flag or "value_hint" in flag)
+        for flag in _list_value(spec, "flags")
+    )
+
+
+def _autocomplete_spec_for_tokens(tokens: list[str], cfg: dict | None = None) -> tuple[dict[str, object], int]:
+    if not tokens:
+        return {}, 1
+    context = load_autocomplete_context_from_commands_registry(cfg=cfg)
+    spec = context.get(tokens[0].lower()) or {}
+    if isinstance(spec, dict) and _autocomplete_spec_needs_normalization(spec):
+        spec = _normalize_single_autocomplete_spec(spec)
+    start_index = 1
+    subcommands = spec.get("subcommands") if isinstance(spec, dict) else None
+    if isinstance(subcommands, dict) and len(tokens) > 1:
+        sub_spec = subcommands.get(tokens[1].lower())
+        if isinstance(sub_spec, dict):
+            if _autocomplete_spec_needs_normalization(sub_spec):
+                sub_spec = _normalize_single_autocomplete_spec(sub_spec, include_pipe=False)
+            return sub_spec, 2
+    return (spec if isinstance(spec, dict) else {}), start_index
+
+
+def _flag_value_from_token(tokens: list[str], index: int, flag: str) -> tuple[str | None, int | None]:
+    token = tokens[index]
+    if token == flag:
+        if index + 1 >= len(tokens) or tokens[index + 1].startswith("-"):
+            return None, None
+        return tokens[index + 1], index + 1
+    if flag.startswith("--") and token.startswith(f"{flag}="):
+        return token[len(flag) + 1:], index
+    if not flag.startswith("--") and token.startswith(flag) and token != flag:
+        return token[len(flag):], index
+    return None, None
+
+
+def _candidate_host_tokens(value: str) -> list[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+    candidates = [raw.strip("[]")]
+    if "://" in raw:
+        parsed = urlparse(raw)
+        if parsed.hostname:
+            candidates.append(parsed.hostname)
+    elif raw.startswith("//"):
+        parsed = urlparse(f"scheme:{raw}")
+        if parsed.hostname:
+            candidates.append(parsed.hostname)
+    if raw.startswith("[") and "]" in raw:
+        candidates.append(raw[1:raw.index("]")])
+    elif raw.count(":") == 1 and "/" not in raw:
+        host, port = raw.rsplit(":", 1)
+        if host and port.isdigit():
+            candidates.append(host)
+    return _dedupe_preserve_order([item.strip("[]") for item in candidates if item.strip("[]")])
+
+
+def _restricted_value_match(value: str, networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network]) -> str | None:
+    if not networks:
+        return None
+    for candidate in _candidate_host_tokens(value):
+        try:
+            if "/" in candidate:
+                candidate_network = ipaddress.ip_network(candidate, strict=False)
+                if any(candidate_network.overlaps(network) for network in networks):
+                    return candidate
+            else:
+                candidate_ip = ipaddress.ip_address(candidate)
+                if any(candidate_ip in network for network in networks):
+                    return candidate
+        except ValueError:
+            continue
+    return None
+
+
+def _restricted_input_reason(value: str) -> str:
+    return f"Command input targets restricted IP/CIDR value: {value}"
+
+
+def _restricted_inline_input_reason(command: str, cfg: dict | None = None) -> str:
+    networks = _restricted_command_networks(cfg)
+    if not networks:
+        return ""
+    tokens = split_command_argv(command)
+    if not tokens:
+        return ""
+    spec, start_index = _autocomplete_spec_for_tokens(tokens, cfg=cfg)
+    if not spec:
+        return ""
+    flag_value_types = _autocomplete_flag_value_types(spec)
+    positional_types = _autocomplete_positional_value_types(spec)
+    consumed: set[int] = set(range(start_index))
+    positional_index = 0
+
+    index = start_index
+    while index < len(tokens):
+        token = tokens[index]
+        matched_flag = None
+        matched_value_index = None
+        for flag, value_type in flag_value_types.items():
+            value, value_index = _flag_value_from_token(tokens, index, flag)
+            if value is None or value_index is None:
+                continue
+            matched_flag = flag
+            matched_value_index = value_index
+            if _value_type_is_restrictable(value_type):
+                blocked = _restricted_value_match(value, networks)
+                if blocked:
+                    return _restricted_input_reason(blocked)
+            break
+        if matched_flag is not None:
+            consumed.add(index)
+            if matched_value_index is not None:
+                consumed.add(matched_value_index)
+            index = (matched_value_index + 1) if matched_value_index is not None else index + 1
+            continue
+        if token.startswith("-"):
+            consumed.add(index)
+            index += 1
+            continue
+        if index not in consumed and positional_types:
+            value_type = positional_types[min(positional_index, len(positional_types) - 1)]
+            positional_index += 1
+            if _value_type_is_restrictable(value_type):
+                blocked = _restricted_value_match(token, networks)
+                if blocked:
+                    return _restricted_input_reason(blocked)
+        index += 1
+    return ""
+
+
+def _workspace_read_file_restriction_reason(
+    command: str,
+    session_id: str,
+    cfg: dict | None = None,
+) -> str:
+    networks = _restricted_command_networks(cfg)
+    if not networks or not session_id:
+        return ""
+    tokens = split_command_argv(command)
+    if not tokens:
+        return ""
+    specs = [
+        spec for spec in _workspace_flag_specs_by_root().get(tokens[0].lower(), [])
+        if _workspace_flag_applies_to_command(spec, tokens)
+        and spec.get("mode") in {"read", "read_write"}
+        and spec.get("kind") != "directory"
+    ]
+    if not specs:
+        return ""
+    autocomplete_spec, _ = _autocomplete_spec_for_tokens(tokens, cfg=cfg)
+    flag_value_types = _autocomplete_flag_value_types(autocomplete_spec)
+    index = 1
+    while index < len(tokens):
+        matched_spec = next((spec for spec in specs if _workspace_flag_matches_token(tokens[index], spec)), None)
+        if not matched_spec:
+            index += 1
+            continue
+        flag = str(matched_spec.get("flag") or "")
+        value_type = flag_value_types.get(flag, "")
+        user_value, value_index, _ = _workspace_flag_value(tokens, index, matched_spec)
+        if (
+            user_value
+            and value_index is not None
+            and not os.path.isabs(user_value)
+            and _value_type_is_restrictable(value_type)
+        ):
+            try:
+                text = read_workspace_text_file(session_id, user_value, cfg)
+            except (InvalidWorkspacePath, WorkspaceDisabled, WorkspaceFileNotFound, OSError):
+                text = ""
+            for raw_line in text.splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                blocked = _restricted_value_match(line, networks)
+                if blocked:
+                    return f"Session file {user_value} contains restricted IP/CIDR value: {blocked}"
+        index = (value_index + 1) if value_index is not None else index + 1
+    return ""
+
+
 def _rewrite_workspace_file_flags(
     command: str,
     session_id: str,
@@ -2512,6 +2778,15 @@ def validate_command(
             display_command=command, exec_command=command_to_validate,
         )
 
+    restricted_reason = _restricted_inline_input_reason(command_to_validate, cfg)
+    if restricted_reason:
+        return CommandValidationResult(
+            False,
+            restricted_reason,
+            display_command=command,
+            exec_command=command_to_validate,
+        )
+
     exec_command, exempt_flags, reads, writes, exec_paths, workspace_error = _rewrite_workspace_file_flags(
         command_to_validate,
         session_id,
@@ -2521,6 +2796,15 @@ def validate_command(
         return CommandValidationResult(
             False,
             workspace_error,
+            display_command=command,
+            exec_command=command_to_validate,
+        )
+
+    restricted_file_reason = _workspace_read_file_restriction_reason(command_to_validate, session_id, cfg)
+    if restricted_file_reason:
+        return CommandValidationResult(
+            False,
+            restricted_file_reason,
             display_command=command,
             exec_command=command_to_validate,
         )

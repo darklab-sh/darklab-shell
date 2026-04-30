@@ -446,7 +446,8 @@ def get_history_commands():
 def get_active_history_runs():
     """Return currently running commands for this session."""
     session_id = get_session_id()
-    runs = active_runs_for_session(session_id)
+    client_id = str(request.headers.get("X-Client-ID", "") or "").strip()[:128]
+    runs = active_runs_for_session(session_id, client_id=client_id)
     log.debug("ACTIVE_RUNS_VIEWED", extra={
         "ip": get_client_ip(), "session": get_log_session_id(session_id), "count": len(runs),
     })

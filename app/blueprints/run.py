@@ -41,7 +41,14 @@ from fake_commands import (
     resolves_exact_special_fake_command,
 )
 from helpers import get_client_ip, get_log_session_id, get_session_id
-from process import active_run_register, active_run_remove, pid_pop, pid_pop_for_session, pid_register
+from process import (
+    active_run_register,
+    active_run_remove,
+    active_run_touch_owner,
+    pid_pop,
+    pid_pop_for_session,
+    pid_register,
+)
 from run_output_store import RunOutputCapture, load_full_output_entries
 from output_signals import OutputSignalClassifier
 from session_variables import SessionVariableError, expand_session_variables
@@ -49,6 +56,10 @@ from session_variables import SessionVariableError, expand_session_variables
 log = logging.getLogger("shell")
 
 run_bp = Blueprint("run", __name__)
+
+
+def _active_run_owner_value(value: object) -> str:
+    return str(value or "").strip()[:128]
 
 
 def _validate_command_for_run(command: str, session_id: str) -> CommandValidationResult:
@@ -685,6 +696,8 @@ def run_command():
     original_command = data.get("command", "")
     session_id       = get_session_id()
     client_ip        = get_client_ip()
+    owner_client_id  = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
+    owner_tab_id     = _active_run_owner_value(data.get("tab_id", ""))
     if not isinstance(original_command, str):
         return jsonify({"error": "Command must be a string"}), 400
     original_command = original_command.strip()
@@ -801,7 +814,15 @@ def run_command():
         return jsonify({"error": str(e)}), 500
 
     pid_register(run_id, proc.pid)
-    active_run_register(run_id, proc.pid, session_id, original_command, run_started)
+    active_run_register(
+        run_id,
+        proc.pid,
+        session_id,
+        original_command,
+        run_started,
+        owner_client_id=owner_client_id,
+        owner_tab_id=owner_tab_id,
+    )
     log.info("RUN_START", extra={
         "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
         "pid": proc.pid, "cmd": original_command, "cmd_type": "real",
@@ -811,6 +832,17 @@ def run_command():
     # nginx and browser idle timeouts when a command produces no output
     HEARTBEAT_INTERVAL = CFG["heartbeat_interval_seconds"]
     COMMAND_TIMEOUT    = CFG["command_timeout_seconds"] or None  # None = no timeout
+    owner_last_touched = 0.0
+
+    def _touch_active_owner(force: bool = False) -> None:
+        nonlocal owner_last_touched
+        if not owner_client_id:
+            return
+        now = time.time()
+        if not force and now - owner_last_touched < 10:
+            return
+        active_run_touch_owner(run_id, owner_client_id, owner_tab_id)
+        owner_last_touched = now
 
     def _continue_run_detached():
         try:
@@ -920,6 +952,7 @@ def run_command():
         detached = False
         try:
             # Send the run_id first so the client can call /kill
+            _touch_active_owner(force=True)
             yield f"data: {json.dumps({'type': 'started', 'run_id': run_id})}\n\n"
             run_started_dt = datetime.fromisoformat(run_started)
 
@@ -1009,6 +1042,7 @@ def run_command():
                         # stall timer fed while preserving the buffered partial line.
                         if proc.poll() is not None:
                             break
+                        _touch_active_owner(force=True)
                         yield ": heartbeat\n\n"
                         continue
                     for line in lines:
@@ -1022,12 +1056,14 @@ def run_command():
                                 ts_clock=line_dt.strftime("%H:%M:%S"),
                                 ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
                             )
+                            _touch_active_owner()
                             yield _sse_output_event("output", filtered_line, metadata=metadata)
                 else:
                     # No output within the interval — send a heartbeat comment
                     # to keep nginx and the browser from treating the connection as idle
                     if proc.poll() is not None:
                         break
+                    _touch_active_owner(force=True)
                     yield ": heartbeat\n\n"
 
             trailing_lines, _ = _read_available_stream_lines(stream_reader, finalize=True)
@@ -1042,6 +1078,7 @@ def run_command():
                         ts_clock=line_dt.strftime("%H:%M:%S"),
                         ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
                     )
+                    _touch_active_owner()
                     yield _sse_output_event("output", filtered_line, metadata=metadata)
             for filtered_line in postfilter.finalize_output_lines():
                 line_dt = datetime.now(timezone.utc)

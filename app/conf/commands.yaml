@@ -477,6 +477,7 @@ commands:
               description: Ten-second transfer limit
       arguments:
         - placeholder: <url>
+          value_type: url
           description: Target URL to request
   - root: wget
     category: Network Diagnostics
@@ -547,6 +548,10 @@ commands:
           description: Read URLs from a session file
           takes_value: true
           feature_required: workspace
+          value_hint:
+            placeholder: <url-file>
+            value_type: url
+            description: Session file containing one URL per line
           suggest:
             - value: urls.txt
               description: Session file containing one URL per line
@@ -554,6 +559,10 @@ commands:
           description: Read URLs from a session file
           takes_value: true
           feature_required: workspace
+          value_hint:
+            placeholder: <url-file>
+            value_type: url
+            description: Session file containing one URL per line
           suggest:
             - value: urls.txt
               description: Session file containing one URL per line
@@ -575,6 +584,7 @@ commands:
           description: Skip TLS certificate validation
       arguments:
         - placeholder: <url>
+          value_type: url
           description: Target URL to download or probe
   - root: openssl
     category: TLS / Certificates
@@ -802,6 +812,10 @@ commands:
           description: Read TLS targets from a session file
           takes_value: true
           feature_required: workspace
+          value_hint:
+            placeholder: <target-file>
+            value_type: target
+            description: Session file containing one TLS target per line
           suggest:
             - value: tls-targets.txt
               description: Session file containing host or host:port entries
@@ -995,6 +1009,10 @@ commands:
           description: Read domains from a session file
           takes_value: true
           feature_required: workspace
+          value_hint:
+            placeholder: <domain-file>
+            value_type: domain
+            description: Session file containing one domain per line
           suggest:
             - value: domains.txt
               description: Session file containing one domain per line
@@ -1002,6 +1020,10 @@ commands:
           description: Read domains from a session file
           takes_value: true
           feature_required: workspace
+          value_hint:
+            placeholder: <domain-file>
+            value_type: domain
+            description: Session file containing one domain per line
           suggest:
             - value: domains.txt
               description: Session file containing one domain per line
@@ -1123,6 +1145,10 @@ commands:
               description: Read target domains from a session file
               takes_value: true
               feature_required: workspace
+              value_hint:
+                placeholder: <domain-file>
+                value_type: domain
+                description: Session file containing one domain per line
               suggest:
                 - value: domains.txt
                   description: Session file containing one domain per line
@@ -1137,6 +1163,10 @@ commands:
               description: Read known subdomain names from a session file
               takes_value: true
               feature_required: workspace
+              value_hint:
+                placeholder: <host-file>
+                value_type: host
+                description: Session file containing known names
               suggest:
                 - value: known-subdomains.txt
                   description: Session file containing known names
@@ -1224,6 +1254,10 @@ commands:
               description: Read target domains from a session file
               takes_value: true
               feature_required: workspace
+              value_hint:
+                placeholder: <domain-file>
+                value_type: domain
+                description: Session file containing one domain per line
               suggest:
                 - value: domains.txt
                   description: Session file containing one domain per line
@@ -1267,6 +1301,10 @@ commands:
               description: Read target domains from a session file
               takes_value: true
               feature_required: workspace
+              value_hint:
+                placeholder: <domain-file>
+                value_type: domain
+                description: Session file containing one domain per line
               suggest:
                 - value: domains.txt
                   description: Session file containing one domain per line
@@ -1353,6 +1391,10 @@ commands:
           description: Read hostnames from a session file
           takes_value: true
           feature_required: workspace
+          value_hint:
+            placeholder: <host-file>
+            value_type: host
+            description: Session file containing one hostname per line
           suggest:
             - value: subdomains.txt
               description: Session file containing one hostname per line
@@ -1437,6 +1479,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <url>
+            value_type: url
             description: Target URL to probe
           suggest:
             - value: https://
@@ -1455,6 +1498,10 @@ commands:
           description: File with URLs to probe
           takes_value: true
           feature_required: workspace
+          value_hint:
+            placeholder: <url-file>
+            value_type: url
+            description: Session file containing one URL per line
           suggest:
             - value: urls.txt
               description: Session file containing one URL per line
@@ -1611,6 +1658,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <url>
+                value_type: url
                 description: Target base URL
               suggest:
                 - value: https://
@@ -1726,6 +1774,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <url>
+                value_type: url
                 description: Target base URL
               suggest:
                 - value: https://
@@ -1775,6 +1824,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <url-with-FUZZ>
+                value_type: url
                 description: URL, query, or path containing FUZZ
             - value: -w
               description: Wordlist path
@@ -1859,6 +1909,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <host>
+                value_type: host
                 description: TFTP server host or IP
             - value: -w
               description: File-name wordlist path
@@ -1917,6 +1968,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <url-with-FUZZ>
+            value_type: url
             description: Target URL including FUZZ
         - value: -w
           description: Wordlist path
@@ -1951,6 +2003,7 @@ commands:
               description: Save machine-readable fuzzing results
       arguments:
         - placeholder: <target-url>
+          value_type: url
           description: Usually provided through -u
   - root: naabu
     category: Network Reconnaissance
@@ -2032,6 +2085,10 @@ commands:
           description: File with hosts to scan
           takes_value: true
           feature_required: workspace
+          value_hint:
+            placeholder: <host-file>
+            value_type: host
+            description: Session file containing one host/IP per line
           suggest:
             - value: targets.txt
               description: Session file containing one host per line
@@ -2047,6 +2104,7 @@ commands:
           takes_value: true
       arguments:
         - placeholder: <target>
+          value_type: domain
           description: Usually provided through -host
   - root: katana
     category: Network Reconnaissance
@@ -2091,6 +2149,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <url>
+            value_type: url
             description: Target URL to start crawling from
           suggest:
             - value: https://
@@ -2127,6 +2186,10 @@ commands:
           description: File with URLs to crawl
           takes_value: true
           feature_required: workspace
+          value_hint:
+            placeholder: <url-file>
+            value_type: url
+            description: Session file containing seed URLs
           suggest:
             - value: urls.txt
               description: Session file containing seed URLs
@@ -2139,6 +2202,7 @@ commands:
               description: Save crawled URLs
       arguments:
         - placeholder: <target>
+          value_type: url
           description: Usually provided through -u
   - root: wafw00f
     category: Network Reconnaissance
@@ -2199,6 +2263,10 @@ commands:
           description: Read URLs from a session file
           takes_value: true
           feature_required: workspace
+          value_hint:
+            placeholder: <url-file>
+            value_type: url
+            description: Session file containing one URL per line
           suggest:
             - value: urls.txt
               description: Session file containing one URL per line
@@ -2206,6 +2274,10 @@ commands:
           description: Read URLs from a session file
           takes_value: true
           feature_required: workspace
+          value_hint:
+            placeholder: <url-file>
+            value_type: url
+            description: Session file containing one URL per line
           suggest:
             - value: urls.txt
               description: Session file containing one URL per line
@@ -2225,6 +2297,7 @@ commands:
               description: Save WAF fingerprint results
       arguments:
         - placeholder: <url>
+          value_type: url
           description: Target URL to fingerprint
   - root: masscan
     category: Vulnerability Scanning
@@ -2312,6 +2385,10 @@ commands:
           description: Read targets from a session file
           takes_value: true
           feature_required: workspace
+          value_hint:
+            placeholder: <target-file>
+            value_type: target
+            description: Session file containing one IP/CIDR target per line
           suggest:
             - value: targets.txt
               description: Session file containing one target per line
@@ -2345,6 +2422,7 @@ commands:
               description: Save scan results
       arguments:
         - placeholder: <target>
+          value_type: cidr
           description: IP address or CIDR range
   - root: rustscan
     category: Vulnerability Scanning
@@ -2403,6 +2481,7 @@ commands:
               description: 1.5 second per-port timeout
       arguments:
         - placeholder: <target>
+          value_type: domain
           description: Usually provided through -a
   - root: nmap
     category: Vulnerability Scanning
@@ -2511,6 +2590,10 @@ commands:
           description: Read targets from a session file
           takes_value: true
           feature_required: workspace
+          value_hint:
+            placeholder: <target-file>
+            value_type: target
+            description: Session file containing one host/IP/CIDR per line
           suggest:
             - value: targets.txt
               description: Session file containing one target per line
@@ -2655,6 +2738,7 @@ commands:
               description: Save HTML TLS findings
       arguments:
         - placeholder: <url>
+          value_type: url
           description: HTTPS target URL
   - root: nikto
     category: Vulnerability Scanning
@@ -2767,6 +2851,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <url>
+            value_type: url
             description: Target WordPress URL
           suggest:
             - value: https://
@@ -2849,10 +2934,18 @@ commands:
         - value: -u
           description: Single target URL
           takes_value: true
+          value_hint:
+            placeholder: <url>
+            value_type: url
+            description: Target URL to scan
         - value: -l
           description: File with targets
           takes_value: true
           feature_required: workspace
+          value_hint:
+            placeholder: <target-file>
+            value_type: target
+            description: Session file containing one URL or host per line
           suggest:
             - value: urls.txt
               description: Session file containing one URL per line
@@ -2880,6 +2973,7 @@ commands:
               description: Save nuclei findings
       arguments:
         - placeholder: <target>
+          value_type: target
           description: Usually provided through -u or -l
 pipe_helpers:
   - root: grep

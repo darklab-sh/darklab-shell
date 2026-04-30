@@ -164,7 +164,7 @@ There are three core request classes:
 - run/kill lifecycle
 - history/share/diagnostic reads
 
-`/history/active` is part of that third class. It exposes only the current session's in-flight run metadata so the browser can rebuild running tabs after a reload, keep kill available, render the submitted command as a normal prompt line, and then hand those tabs back to the normal `/history/<run_id>` restore path once the run completes. Non-running tabs and drafts are restored separately from browser `sessionStorage`, which keeps the reload path split cleanly between browser-owned idle state and server-owned active-run state.
+`/history/active` is part of that third class. It exposes only the current session's in-flight run metadata so the browser can rebuild running tabs after a reload, keep kill available, render the submitted command as a normal prompt line, and then hand those tabs back to the normal `/history/<run_id>` restore path once the run completes. Active-run metadata includes a browser-level owner identity (`owner_client_id`), the owning terminal tab id (`owner_tab_id`), and `owner_last_seen` liveness so the same session token can be open on a laptop and phone without the second browser automatically stealing a live command. If the owner is another live client, the run remains visible in Run Monitor as monitor-only; if the owner is stale or belongs to this browser, reload recovery can rebuild the running placeholder tab. Non-running tabs and drafts are restored separately from browser `sessionStorage`, which keeps the reload path split cleanly between browser-owned idle state and server-owned active-run state.
 
 That split is reflected directly in the blueprint structure.
 
@@ -599,6 +599,7 @@ The run path applies policy before any subprocess launch:
 - command validation blocks filesystem references to `/data` and `/tmp` before subprocess launch
 - loopback targets such as `localhost`, `127.0.0.1`, `0.0.0.0`, and `[::1]` are blocked at both the client and server
 - when the allowlist is active, shell operators such as `&&`, `||`, `|`, `;`, redirection, and command substitution stay blocked so users cannot chain into disallowed commands
+- optional `restricted_command_input_cidrs` settings reject literal IP/CIDR values in metadata-known target slots before launch, including URL hosts, host:port values, overlapping CIDR arguments, and app-readable workspace input files supplied through declared read flags
 
 These rewrites happen in `rewrite_command()` silently (no user-visible notice unless specified):
 
@@ -612,7 +613,7 @@ These rewrites happen in `rewrite_command()` silently (no user-visible notice un
 
 Session command variables are expanded inside the app before command policy validation and execution. `app/session_variables.py` owns the `[A-Z][A-Z0-9_]{0,31}` name rules, SQLite storage, and `$NAME` / `${NAME}` replacement. `/run` keeps `var` itself unexpanded so `var set HOST ...` is data management, expands other commands before synthetic post-filter parsing, validates the expanded command, and still persists the typed command in history while emitting a transcript notice with the expanded form.
 
-Workspace-aware validation also rewrites declared file and directory flags from `app/conf/commands.yaml` into the active session workspace. Rewritten token lists are reassembled with shell-safe quoting before they cross the existing `sh -c` subprocess boundary, so app-injected workspace paths cannot accidentally change shell parsing when a valid session file or folder name contains spaces or shell metacharacters. Amass uses an additional runtime environment override: database-backed subcommands such as `amass enum`, `amass subs`, `amass track`, and `amass viz` get a managed `-dir amass` workspace directory and `XDG_CONFIG_HOME` is pointed at the session workspace so `amass engine` and the CLI share the same per-session database path. See [External Command Integrations](docs/external-command-integrations.md) for the command-specific integration contracts.
+Workspace-aware validation also rewrites declared file and directory flags from `app/conf/commands.yaml` into the active session workspace. Rewritten token lists are reassembled with shell-safe quoting before they cross the existing `sh -c` subprocess boundary, so app-injected workspace paths cannot accidentally change shell parsing when a valid session file or folder name contains spaces or shell metacharacters. The same command metadata drives target-value restrictions: flags and positional arguments declared with target-like `value_type` values (`domain`, `host`, `ip`, `cidr`, `target`, or `url`) can be checked against configured restricted networks without blanket string scanning. Amass uses an additional runtime environment override: database-backed subcommands such as `amass enum`, `amass subs`, `amass track`, and `amass viz` get a managed `-dir amass` workspace directory and `XDG_CONFIG_HOME` is pointed at the session workspace so `amass engine` and the CLI share the same per-session database path. See [External Command Integrations](docs/external-command-integrations.md) for the command-specific integration contracts.
 
 Synthetic post-filters also sit on this run-lifecycle boundary rather than on the shell-parser path. `parse_synthetic_postfilter()` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the `/run` stream applies the selected helper before lines are emitted or persisted.
 
@@ -624,7 +625,7 @@ Fast output bursts are rendered in small batches instead of forcing a full DOM u
 
 The `/run` generator keeps the transport alive with heartbeat comments during idle periods, and the subprocess stdout reader now uses a nonblocking buffered path rather than `select()` followed by `readline()`. That matters for tools that emit partial progress lines: partial output no longer wedges the generator waiting for a newline and starving the heartbeat stream. If a platform refuses nonblocking setup, the server warning-logs the fallback so a deployment that could stall on partial-line output leaves an operator-visible trail. When the browser disconnects from a still-running command, the detached drain thread keeps recording output only up to the configured command timeout plus a short grace window; after that ceiling it terminates the process group and clears PID/active-run metadata so one non-closing scanner cannot pin a worker thread forever. On the browser side, `runner.js` treats 45 seconds of browser-visible silence as a potentially stalled stream, then checks `/history/active` before changing tab state. If the run is still active, the tab stays `RUNNING`, Kill remains available, and the warning copy says the process is still alive; only inactive runs fall back to the history/final-result recovery path. The async recovery path captures the tab/run generation before it awaits backend state and re-checks that generation before applying status, which prevents stale timeout promises from overwriting a newer run after rapid tab switches, kills, or restarts. If the same stream later resumes, the runner prints an explicit recovery notice and keeps the tab/HUD in the running state instead of leaving the UI failed-looking while output silently continues.
 
-Active-run metadata is also the source for the Run Monitor. `/history/active` returns the current run IDs, PIDs, commands, start times, metadata source, and best-effort `psutil` resource telemetry when available. The backend reports summed RSS bytes and cumulative process-tree CPU seconds for the tracked process plus recursive children. The desktop Run Monitor is a HUD-attached drawer that can open even when idle, rendering a header-only `0 active runs` state; mobile uses the same data in a sheet. The monitor calculates the displayed CPU percentage from adjacent poll samples in the browser and caps the display at 100%, which avoids per-worker CPU sample caches and keeps multi-worker deployments from flickering when successive polls land on different workers. Memory fill is normalized client-side against a 1 GB scale while the label continues to show the actual RSS value. Telemetry failures are intentionally non-fatal and omitted from the response rather than breaking reload recovery, stall checks, or the terminal `runs` command.
+Active-run metadata is also the source for the Run Monitor. `/history/active` returns the current run IDs, PIDs, commands, start times, metadata source, owner fields, and best-effort `psutil` resource telemetry when available. The backend reports summed RSS bytes and cumulative process-tree CPU seconds for the tracked process plus recursive children. The desktop Run Monitor is a HUD-attached drawer that can open even when idle, rendering a header-only `0 active runs` state; mobile uses the same data in a sheet. Runs owned by another live browser are still listed, but they do not create terminal tabs or inject transcript output in the observer browser. The monitor calculates the displayed CPU percentage from adjacent poll samples in the browser and caps the display at 100%, which avoids per-worker CPU sample caches and keeps multi-worker deployments from flickering when successive polls land on different workers. Memory fill is normalized client-side against a 1 GB scale while the label continues to show the actual RSS value. Telemetry failures are intentionally non-fatal and omitted from the response rather than breaking reload recovery, stall checks, or the terminal `runs` command.
 
 ### Output Prefixes And Follow State
 
@@ -924,12 +925,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,221
+- behavior tests: 2,230
 - docs/inventory meta-tests: 30
-- `pytest`: 1102 (1072 behavior + 30 meta)
-- `vitest`: 920
+- `pytest`: 1108 (1078 behavior + 30 meta)
+- `vitest`: 923
 - `playwright`: 229
-- total: 2,251
+- total: 2,260
 
 ### Testing Architecture
 

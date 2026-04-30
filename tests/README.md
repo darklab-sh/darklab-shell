@@ -18,12 +18,12 @@ The suites are intentionally layered:
 
 Current totals:
 
-- behavior tests: 2,221
+- behavior tests: 2,230
 - docs/inventory meta-tests: 30
-- `pytest`: 1102 (1072 behavior + 30 meta)
-- `vitest`: 920
+- `pytest`: 1108 (1078 behavior + 30 meta)
+- `vitest`: 923
 - `playwright`: 229
-- total: 2,251
+- total: 2,260
 
 This document is organized in two parts:
 
@@ -357,6 +357,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDerivedCommandRegistry.test_real_registry_openssl_uses_subcommand_scoped_autocomplete` | Verifies that OpenSSL autocomplete exposes allowlisted subcommands and keeps `s_client` and `ciphers` flags scoped to the matching subcommand. |
 | `TestDerivedCommandRegistry.test_real_registry_gobuster_uses_subcommand_scoped_autocomplete` | Verifies that Gobuster autocomplete exposes mode subcommands and keeps mode-specific flags scoped to the matching subcommand. |
 | `TestDerivedCommandRegistry.test_real_registry_wordlist_metadata_covers_known_wordlist_flags` | Verifies that known wordlist-consuming command slots declare `value_type: wordlist` and the expected wordlist categories. |
+| `TestDerivedCommandRegistry.test_real_registry_restricted_input_metadata_covers_known_target_slots` | Verifies that known target-consuming command slots declare value metadata used by restricted command-input checks. |
 | `TestDerivedCommandRegistry.test_autocomplete_context_can_be_derived_from_commands_registry` | Verifies that browser autocomplete context can be derived from command and pipe-helper registry entries. |
 | `TestDerivedCommandRegistry.test_builtin_autocomplete_registry_uses_app_owned_yaml` | Verifies that built-in autocomplete grammar is loaded from the app-owned YAML registry and normalized into the browser context shape. |
 | `TestDerivedCommandRegistry.test_builtin_autocomplete_workspace_roots_follow_feature_flag` | Verifies that Files-only built-in autocomplete roots are hidden unless workspace support is enabled. |
@@ -419,6 +420,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPidMap.test_double_pop_returns_none_second_time` | Checks that double pop returns none second time. |
 | `TestPidMap.test_multiple_runs_isolated` | Checks multiple runs isolated handling. |
 | `TestActiveRunMetadata.test_active_runs_for_session_preserves_pid` | Checks that active-run metadata exposes the PID through session-scoped active-run listings. |
+| `TestActiveRunMetadata.test_active_runs_for_session_reports_owner_liveness_for_client` | Verifies that active-run metadata reports owner client, tab, liveness, and same-client state. |
+| `TestActiveRunMetadata.test_active_run_touch_owner_refreshes_liveness` | Verifies that owner heartbeats refresh liveness only for the owning client and tab. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_dead_pid` | Checks that active-run metadata is pruned when the stored process no longer exists. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_pid_reuse` | Checks that Redis-backed active-run metadata is pruned when a PID has been reused by a different process. |
 | `TestActiveRunMetadata.test_pid_pop_for_session_requires_matching_session` | Verifies that active-run PID lookup only pops processes owned by the requesting session. |
@@ -778,6 +781,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestIsCommandAllowedEdges.test_workspace_read_flags_rewrite_relative_files_but_keep_packaged_wordlists` | Verifies that workspace-aware read flags rewrite relative session file names while preserving allowed packaged absolute wordlists. |
 | `TestIsCommandAllowedEdges.test_workspace_write_flags_keep_dev_null_exception` | Verifies that workspace-aware write flags do not break the existing `/dev/null` output exception. |
 | `TestIsCommandAllowedEdges.test_workspace_flags_cover_common_list_wordlist_and_output_tools` | Verifies workspace read/write flag rewrites for `pd-httpx`, `gobuster`, `naabu`, and `katana` using the real command registry metadata. |
+| `TestIsCommandAllowedEdges.test_restricted_command_input_cidrs_block_inline_literal_targets` | Verifies configured restricted networks block literal IP and URL-host command inputs in metadata-known target slots while allowing ordinary domains. |
+| `TestIsCommandAllowedEdges.test_restricted_command_input_cidrs_block_overlapping_cidr_targets` | Verifies configured restricted networks block overlapping CIDR command inputs in metadata-known target slots. |
+| `TestIsCommandAllowedEdges.test_restricted_command_input_cidrs_inspect_workspace_target_files` | Verifies configured restricted networks are enforced for app-readable workspace target files passed through declared read flags. |
 | `TestFakeCommandResolution.test_documented_fake_commands_are_backed_by_runtime_dispatch` | Checks that every entry in `_DOCUMENTED_FAKE_COMMANDS` has a corresponding runtime dispatch handler. |
 | `TestFakeCommandResolution.test_resolves_supported_fake_commands` | Checks that resolves supported fake commands. |
 | `TestFakeCommandResolution.test_workspace_fake_commands_are_hidden_when_disabled` | Verifies that file built-ins and aliases stop resolving when Files are disabled. |
@@ -1732,6 +1738,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | --- | --- |
 | `renders active-run CPU and memory telemetry when available` | Verifies that the Run Monitor renders CPU and memory meters from active-run resource telemetry. |
 | `renders unavailable telemetry chips when backend stats are absent` | Verifies that the Run Monitor still shows CPU and memory meter placeholders when backend resource telemetry is not available. |
+| `labels active runs owned by another live browser as monitor-only` | Verifies that active runs owned by another live browser render as monitor-only instead of tab-owned rows. |
 | `warms CPU samples while closed so first open can show a percent` | Verifies that a background warmup sample pair can populate CPU percentage before the drawer is opened. |
 | `does a quick follow-up refresh after opening on a baseline-only CPU sample` | Verifies that opening the Run Monitor schedules a quick second poll when CPU telemetry only has a baseline sample. |
 | `opens as a header-only drawer when there are no active runs` | Verifies that the Run Monitor opens to a header-only `0 active runs` drawer when no commands are running. |
@@ -1776,6 +1783,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `setStatus shows RUNNING only while running and IDLE otherwise` | Verifies that setStatus shows RUNNING only while running and IDLE otherwise. |
 | `doKill sends /kill immediately when runId is already known` | Verifies that doKill sends /kill immediately when runId is already known. |
 | `restoreActiveRunsAfterReload marks restored tabs as running placeholders` | Verifies that reload continuity restores running placeholder tabs with preserved run IDs and command labels. |
+| `restoreActiveRunsAfterReload skips runs owned by another live client` | Verifies that reload continuity does not auto-create terminal tabs for active runs owned by another live browser. |
+| `restoreActiveRunsAfterReload restores stale-owner runs` | Verifies that reload continuity can recover active runs once the previous owner is stale. |
 | `restoreActiveRunsAfterReload does not overwrite a restored non-running tab` | Verifies that active-run reconnect creates a separate tab instead of clobbering an already-restored idle tab. |
 | `pollActiveRunsAfterReload restores a completed reconnected run through history` | Verifies that a reconnected placeholder tab swaps into the saved history view when the active run disappears. |
 | `pollActiveRunsAfterReload fails a missing reconnected run with no saved history` | Verifies that reconnect placeholders fail visibly instead of waiting forever when a run disappears after an app restart. |
@@ -1922,7 +1931,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `generates and persists a session id when one does not exist` | Verifies that generates and persists a session id when one does not exist. |
 | `treats a blank stored session id as missing and generates a new one` | Verifies that treats a blank stored session id as missing and generates a new one. |
 | `falls back to getRandomValues UUID generation when randomUUID throws (insecure HTTP context)` | Verifies that `_generateUUID` falls back to `crypto.getRandomValues` and produces a valid UUID v4 when `crypto.randomUUID()` throws (e.g. Safari iOS on http://). |
-| `apiFetch injects the X-Session-ID header` | Verifies that apiFetch injects the X-Session-ID header. |
+| `apiFetch injects the X-Session-ID and X-Client-ID headers` | Verifies that apiFetch injects the session and browser-client headers. |
 | `apiFetch preserves existing headers while adding the session header` | Verifies that apiFetch preserves existing headers while adding the session header. |
 | `describeFetchError returns a friendly offline message for network failures` | Verifies that describeFetchError returns a friendly offline message for network failures. |
 | `describeFetchError preserves non-network error details` | Verifies that describeFetchError preserves non-network error details. |

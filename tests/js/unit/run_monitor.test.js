@@ -99,6 +99,27 @@ describe('Run Monitor', () => {
     closeRunMonitor()
   })
 
+  it('labels active runs owned by another live browser as monitor-only', async () => {
+    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({
+      runs: [
+        {
+          run_id: 'run-other-client',
+          pid: 1234,
+          command: 'sleep 60',
+          started: new Date().toISOString(),
+          has_live_owner: true,
+          owned_by_this_client: false,
+        },
+      ],
+    })
+
+    await openRunMonitor({ source: 'test' })
+
+    expect(document.querySelector('.run-monitor-meta')?.textContent).toContain('another browser')
+
+    closeRunMonitor()
+  })
+
   it('warms CPU samples while closed so first open can show a percent', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))

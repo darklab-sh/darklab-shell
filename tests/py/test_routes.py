@@ -1801,11 +1801,14 @@ class TestHistoryRoute:
         ]
 
         with mock.patch("blueprints.history.active_runs_for_session", return_value=active_runs) as active_mock:
-            resp = client.get("/history/active", headers={"X-Session-ID": session})
+            resp = client.get(
+                "/history/active",
+                headers={"X-Session-ID": session, "X-Client-ID": "client-1"},
+            )
 
         assert resp.status_code == 200
         assert json.loads(resp.data) == {"runs": active_runs}
-        active_mock.assert_called_once_with(session)
+        active_mock.assert_called_once_with(session, client_id="client-1")
 
 
 # ── /share ────────────────────────────────────────────────────────────────────

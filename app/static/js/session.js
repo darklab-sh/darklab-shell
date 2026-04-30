@@ -24,6 +24,12 @@ if (!_sessionUuid) {
   localStorage.setItem('session_id', _sessionUuid);
 }
 
+let CLIENT_ID = localStorage.getItem('client_id');
+if (!CLIENT_ID) {
+  CLIENT_ID = _generateUUID();
+  localStorage.setItem('client_id', CLIENT_ID);
+}
+
 let SESSION_ID = localStorage.getItem('session_token') || _sessionUuid;
 
 // Update SESSION_ID at runtime after a session token is set, changed, or
@@ -67,7 +73,8 @@ function maskSessionToken(token) {
 // request stays scoped to the same anonymous browser session.
 function apiFetch(url, options = {}) {
   options.headers = Object.assign({}, options.headers || {}, {
-    'X-Session-ID': SESSION_ID
+    'X-Session-ID': SESSION_ID,
+    'X-Client-ID': CLIENT_ID
   });
   return fetch(url, options);
 }
