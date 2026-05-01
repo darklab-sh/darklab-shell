@@ -1872,7 +1872,7 @@ class TestRunStreaming:
         client.environ_base["HTTP_X_FORWARDED_FOR"] = "2001:db8:ffff:eeee:dddd:cccc:bbbb:aaaa"
 
         with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch("blueprints.run.rewrite_command", return_value=("nmap --privileged -sV darklab.sh", None)), \
+             mock.patch("blueprints.run.rewrite_command", return_value=("nmap -sT -sV darklab.sh", None)), \
              mock.patch("blueprints.run.runtime_missing_command_name", return_value="nmap"), \
              mock.patch("blueprints.run.subprocess.Popen") as popen:
             resp = client.post("/run", json={"command": "nmap -sV darklab.sh"})
@@ -1934,7 +1934,8 @@ class TestRunStreaming:
         shell_command = launched[-1]
         assert str(workspace_dir / "targets.txt") in shell_command
         assert str(workspace_dir / "scan.txt") in shell_command
-        assert "nmap --privileged" in shell_command
+        assert "nmap -sT" in shell_command
+        assert "--privileged" not in shell_command
         assert "nmap -iL targets.txt -oN scan.txt" not in shell_command
         assert "[workspace] reading targets.txt" in body
         assert "[workspace] writing scan.txt" in body

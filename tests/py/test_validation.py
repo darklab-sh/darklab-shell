@@ -350,6 +350,9 @@ class TestDenyPrefix:
     def test_deny_takes_priority(self):
         ok, _ = _check("nmap -sU 10.0.0.1", allow=["nmap"], deny=["nmap -sU"])
         assert not ok
+        raw_ok, raw_reason = _check("nmap -sSV 10.0.0.1", allow=["nmap"], deny=[])
+        assert not raw_ok
+        assert "-sS" in raw_reason
 
     def test_allow_still_works_without_denied_flag(self):
         ok, _ = _check("nmap -sT 10.0.0.1", allow=["nmap"], deny=["nmap -sU"])
@@ -471,14 +474,15 @@ class TestRewrites:
         assert "--report-wide" not in cmd
         assert notice is None
 
-    def test_nmap_adds_privileged(self):
+    def test_nmap_adds_connect_scan(self):
         cmd, notice = rewrite_command("nmap -sV 10.0.0.1")
-        assert "--privileged" in cmd
+        assert "-sT" in cmd
+        assert "--privileged" not in cmd
         assert notice is None  # silent rewrite
 
-    def test_nmap_no_double_privileged(self):
-        cmd, _ = rewrite_command("nmap --privileged -sV 10.0.0.1")
-        assert cmd.count("--privileged") == 1
+    def test_nmap_no_double_connect_scan(self):
+        cmd, _ = rewrite_command("nmap -sT -sV 10.0.0.1")
+        assert cmd.count("-sT") == 1
 
     def test_nuclei_adds_template_dir(self):
         cmd, notice = rewrite_command("nuclei -u https://darklab.sh")

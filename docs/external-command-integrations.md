@@ -32,7 +32,7 @@ Session workspace files are app-mediated. Users can name relative files such as 
 | Tool | App adaptation | Why |
 | ---- | -------------- | --- |
 | `mtr` | Adds `--report-wide` when no report mode flag is present. | Interactive `mtr` expects a real TTY and redraws in place; report mode streams clean text over SSE. |
-| `nmap` | Adds `--privileged` when absent. | The container grants raw-socket capabilities to the binary; this flag tells `nmap` to use them while still running as `scanner`. |
+| `nmap` | Adds `-sT` when no scan mode is explicit. | TCP connect scans work reliably as the unprivileged `scanner` user; raw SYN scans (`-sS`) and explicit `--privileged` mode are blocked. |
 | `nuclei` | Adds `-ud /tmp/nuclei-templates` when no update-directory flag is present. | Template storage must be writable under the read-only container filesystem. |
 | `wapiti` | Adds `-f txt -o /dev/stdout` when no output path is present. | Wapiti writes reports to files by default; stdout keeps results visible in the terminal transcript. |
 | `naabu` | Adds `-scan-type c` when no scan type is present. | TCP connect scanning works reliably inside container runtimes where raw SYN scanning via libpcap may fail. |
@@ -158,7 +158,7 @@ The first command should show files under the active `sess_*` workspace. The sec
 
 ## Nmap
 
-`nmap` needs raw-socket-related Linux capabilities for SYN scans, OS fingerprinting, and similar features.
+`nmap` can use raw-socket-related Linux capabilities for SYN scans, OS fingerprinting, and similar features.
 
 Container setup applies file capabilities:
 
@@ -166,9 +166,9 @@ Container setup applies file capabilities:
 setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
 ```
 
-The app then injects `--privileged` into `nmap` commands so the binary uses its available capability set while the subprocess still runs as `scanner`.
+Those raw-socket features are not reliable for the app's unprivileged `scanner` execution path across Docker hosts and security profiles, so the app standardizes on TCP connect scans. `rewrite_command()` injects `-sT` when an `nmap` command does not already specify a scan mode, and command validation blocks `-sS` plus explicit `--privileged` mode before launch.
 
-Workspace integration is separate from the privilege rewrite:
+Workspace integration is separate from the scan-mode rewrite:
 
 - `-iL` and script-args file flags can read session files.
 - output flags such as `-oN`, `-oX`, `-oG`, `-oA`, and `-oS` can write session files.

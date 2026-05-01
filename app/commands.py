@@ -41,6 +41,13 @@ APP_HINTS_MOBILE_FILE = os.path.join(_CONF, "app_hints_mobile.txt")
 AMASS_DEFAULT_WORKSPACE_DIR = "amass"
 AMASS_MANAGED_DATABASE_SUBCOMMANDS = {"enum", "subs", "track", "viz"}
 RESTRICTABLE_VALUE_TYPES = {"cidr", "domain", "host", "ip", "target", "url"}
+NMAP_CONNECT_SCAN_FLAG = "-sT"
+NMAP_DENIED_RAW_FLAGS = {"-sS"}
+NMAP_SCAN_MODE_FLAGS = {
+    "-sA", "-sF", "-sI", "-sL", "-sM", "-sN", "-sO", "-sS",
+    "-sT", "-sU", "-sW", "-sX", "-sY", "-sZ", "-sn",
+}
+NMAP_NO_PORT_SCAN_FLAGS = {"-h", "--help", "-V", "--version"}
 
 
 @dataclass(frozen=True)
@@ -2207,6 +2214,39 @@ def command_root(command: str) -> str | None:
     return parts[0].strip().lower() or None
 
 
+def _nmap_scan_mode_from_token(token: str) -> str | None:
+    for flag in NMAP_SCAN_MODE_FLAGS:
+        if token == flag or token.startswith(f"{flag}="):
+            return flag
+        if token.startswith(flag) and token.startswith("-s") and len(token) > len(flag):
+            return flag
+    return None
+
+
+def _nmap_raw_scan_restriction_reason(command: str) -> str:
+    tokens = split_command_argv(command)
+    if not tokens or tokens[0].lower() != "nmap":
+        return ""
+    if "--privileged" in tokens:
+        return "nmap raw-socket mode is not supported; use TCP connect scans with -sT."
+    for token in tokens[1:]:
+        if _nmap_scan_mode_from_token(token) in NMAP_DENIED_RAW_FLAGS:
+            return "nmap SYN scans (-sS) are not supported; use TCP connect scans with -sT."
+    return ""
+
+
+def _nmap_needs_connect_scan(command: str) -> bool:
+    tokens = split_command_argv(command)
+    if not tokens or tokens[0].lower() != "nmap":
+        return False
+    for token in tokens[1:]:
+        if token in NMAP_NO_PORT_SCAN_FLAGS:
+            return False
+        if _nmap_scan_mode_from_token(token):
+            return False
+    return True
+
+
 def resolve_runtime_command(command_name: str) -> str | None:
     """Return the absolute path to command_name if installed on this instance."""
     return shutil.which(command_name)
@@ -2875,6 +2915,15 @@ def validate_command(
             display_command=command, exec_command=command_to_validate,
         )
 
+    nmap_raw_reason = _nmap_raw_scan_restriction_reason(command_to_validate)
+    if nmap_raw_reason:
+        return CommandValidationResult(
+            False,
+            nmap_raw_reason,
+            display_command=command,
+            exec_command=command_to_validate,
+        )
+
     restricted_reason = _restricted_inline_input_reason(command_to_validate, cfg)
     if restricted_reason:
         return CommandValidationResult(
@@ -2956,11 +3005,11 @@ def rewrite_command(command: str) -> tuple[str, str | None]:
             rewritten = re.sub(r'^mtr\b', 'mtr --report-wide', stripped, flags=re.IGNORECASE)
             return rewritten, "Note: mtr has been run in --report-wide mode (non-interactive). See FAQ for details."
 
-    # nmap: inject --privileged so raw socket features work for the scanner user
-    # (the nmap binary has cap_net_raw,cap_net_admin via setcap in the Dockerfile)
+    # nmap: force TCP connect scans when no scan mode is explicit. Raw SYN
+    # scans are unreliable for the unprivileged scanner user inside containers.
     if re.match(r'^nmap\b', stripped, re.IGNORECASE):
-        if not re.search(r'--privileged\b', stripped):
-            return re.sub(r'^nmap\b', 'nmap --privileged', stripped, flags=re.IGNORECASE), None
+        if _nmap_needs_connect_scan(stripped):
+            return re.sub(r'^nmap\b', f'nmap {NMAP_CONNECT_SCAN_FLAG}', stripped, flags=re.IGNORECASE), None
 
     # nuclei: force -ud /tmp/nuclei-templates so it writes to tmpfs, not the read-only fs
     if re.match(r'^nuclei\b', stripped, re.IGNORECASE):

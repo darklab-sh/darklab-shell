@@ -8,7 +8,9 @@ import math
 import re
 import sqlite3
 import uuid
+from collections import Counter
 from datetime import datetime, timedelta, timezone
+from difflib import SequenceMatcher
 from typing import Any
 
 from flask import Blueprint, jsonify, request
@@ -16,6 +18,7 @@ from flask import Blueprint, jsonify, request
 import config as _config
 from database import db_connect, delete_run_artifacts
 from helpers import get_client_ip, get_log_session_id, get_session_id
+from output_signals import classify_line, command_root as output_command_root, extract_target
 from permalinks import _format_duration, _permalink_error_page, _permalink_page
 from process import active_runs_for_session
 from redaction import redact_line_entries
@@ -27,6 +30,11 @@ CFG = _config.CFG
 log = logging.getLogger("shell")
 
 history_bp = Blueprint("history", __name__)
+
+COMPARE_MAX_LINES = 20_000
+COMPARE_MAX_BYTES = 3 * 1024 * 1024
+COMPARE_MAX_CHANGED_LINES = 500
+COMPARE_CHANGED_LINE_SIMILARITY = 0.72
 
 
 def _normalize_history_filter_text(value):
@@ -238,6 +246,297 @@ def _preview_notice(run):
         f"but the full output had {total} lines. "
         "Full output persistence is disabled or unavailable]"
     )
+
+
+# ── Run comparison helpers ────────────────────────────────────────────────────
+
+def _normalize_compare_command(command):
+    return re.sub(r"\s+", " ", str(command or "").strip())
+
+
+def _parse_iso_datetime(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _run_duration_seconds(run):
+    started = _parse_iso_datetime(run.get("started"))
+    finished = _parse_iso_datetime(run.get("finished"))
+    if not started or not finished:
+        return None
+    return max(0.0, (finished - started).total_seconds())
+
+
+def _compare_run_root(run):
+    return output_command_root(str(run.get("command") or ""))
+
+
+def _compare_run_target(run):
+    target = extract_target(str(run.get("command") or ""))
+    return target or ""
+
+
+def _compare_run_summary(run):
+    duration = _run_duration_seconds(run)
+    command = str(run.get("command") or "")
+    root = _compare_run_root(run)
+    target = _compare_run_target(run)
+    return {
+        "id": run.get("id"),
+        "command": command,
+        "command_root": root,
+        "target": target,
+        "started": run.get("started"),
+        "finished": run.get("finished"),
+        "exit_code": run.get("exit_code"),
+        "duration_seconds": duration,
+        "output_line_count": int(run.get("output_line_count") or 0),
+        "preview_truncated": bool(run.get("preview_truncated")),
+        "full_output_available": bool(run.get("full_output_available")),
+        "full_output_truncated": bool(run.get("full_output_truncated")),
+    }
+
+
+def _candidate_confidence(source, candidate):
+    source_command = _normalize_compare_command(source.get("command")).lower()
+    candidate_command = _normalize_compare_command(candidate.get("command")).lower()
+    if source_command and source_command == candidate_command:
+        return 3, "exact_command", "Exact command"
+    source_root = _compare_run_root(source)
+    candidate_root = _compare_run_root(candidate)
+    source_target = _compare_run_target(source)
+    candidate_target = _compare_run_target(candidate)
+    if source_root and source_root == candidate_root and source_target and source_target == candidate_target:
+        return 2, "same_target", "Same target"
+    if source_root and source_root == candidate_root:
+        return 1, "same_command", "Same command only"
+    return 0, "", ""
+
+
+def _run_candidate_payload(row, source):
+    run = dict(row)
+    score, confidence, label = _candidate_confidence(source, run)
+    payload = _compare_run_summary(run)
+    payload.update({
+        "confidence": confidence,
+        "confidence_label": label,
+        "score": score,
+    })
+    return payload
+
+
+def _compare_full_output_entries(run):
+    if run.get("full_output_available") and run.get("rel_path"):
+        return load_full_output_entries(run["rel_path"]), "full", bool(run.get("full_output_truncated"))
+    return _preview_output_entries_from_run(run), "preview", bool(run.get("preview_truncated"))
+
+
+def _is_compare_chrome_line(entry, text):
+    cls = str(entry.get("cls", "")) if isinstance(entry, dict) else ""
+    stripped = str(text or "").strip()
+    if not stripped:
+        return True
+    if cls == "prompt-echo":
+        return True
+    if re.match(r"^\[(?:process exited with code|history\s+—\s+exit)\b", stripped, re.I):
+        return True
+    return False
+
+
+def _line_entry_text(entry):
+    if isinstance(entry, dict):
+        return str(entry.get("text", ""))
+    return str(entry or "")
+
+
+def _compare_entries_for_diff(run):
+    entries, source, partial = _compare_full_output_entries(run)
+    compared = []
+    byte_count = 0
+    truncated_by_limit = False
+    for entry in entries:
+        text = _line_entry_text(entry).rstrip("\n")
+        if _is_compare_chrome_line(entry, text):
+            continue
+        encoded_len = len(text.encode("utf-8", errors="replace"))
+        if len(compared) >= COMPARE_MAX_LINES or byte_count + encoded_len > COMPARE_MAX_BYTES:
+            truncated_by_limit = True
+            break
+        compared.append({
+            "text": text,
+            "line_index": entry.get("line_index") if isinstance(entry, dict) else None,
+            "signals": entry.get("signals", []) if isinstance(entry, dict) else [],
+        })
+        byte_count += encoded_len
+    return compared, {
+        "source": source,
+        "partial": partial or truncated_by_limit,
+        "truncated_by_limit": truncated_by_limit,
+        "compared_lines": len(compared),
+        "max_lines": COMPARE_MAX_LINES,
+        "max_bytes": COMPARE_MAX_BYTES,
+    }
+
+
+def _finding_count_for_entries(run, entries):
+    root = _compare_run_root(run)
+    command = str(run.get("command") or "")
+    count = 0
+    previous_text = ""
+    for entry in entries:
+        text = str(entry.get("text") or "")
+        signals = entry.get("signals")
+        if isinstance(signals, list):
+            scopes = [str(signal) for signal in signals]
+        else:
+            scopes = classify_line(text, command=command, root=root, previous_text=previous_text)
+        if "findings" in scopes:
+            count += 1
+        previous_text = text.strip()
+    return count
+
+
+def _bounded_multiset_line_diff(left_entries, right_entries):
+    left_counts = Counter(entry["text"] for entry in left_entries)
+    right_counts = Counter(entry["text"] for entry in right_entries)
+    added_remaining = right_counts - left_counts
+    removed_remaining = left_counts - right_counts
+
+    def _collect(source_entries, remaining):
+        rows = []
+        omitted = 0
+        seen = Counter()
+        for entry in source_entries:
+            text = entry["text"]
+            if remaining[text] <= seen[text]:
+                continue
+            seen[text] += 1
+            if len(rows) >= COMPARE_MAX_CHANGED_LINES:
+                omitted += 1
+                continue
+            rows.append({
+                "text": text,
+                "line_index": entry.get("line_index"),
+                "count": 1,
+            })
+        return rows, omitted
+
+    added, added_omitted = _collect(right_entries, added_remaining)
+    removed, removed_omitted = _collect(left_entries, removed_remaining)
+    changed, added, removed = _pair_similar_changed_lines(added, removed)
+    return {
+        "changed": changed,
+        "added": added,
+        "removed": removed,
+        "added_omitted": added_omitted,
+        "removed_omitted": removed_omitted,
+        "max_changed_lines": COMPARE_MAX_CHANGED_LINES,
+    }
+
+
+def _changed_line_segments(left_text, right_text):
+    matcher = SequenceMatcher(None, left_text, right_text, autojunk=False)
+    left_segments = []
+    right_segments = []
+    for tag, left_start, left_end, right_start, right_end in matcher.get_opcodes():
+        left_chunk = left_text[left_start:left_end]
+        right_chunk = right_text[right_start:right_end]
+        changed = tag != "equal"
+        if left_chunk:
+            left_segments.append({"text": left_chunk, "changed": changed})
+        if right_chunk:
+            right_segments.append({"text": right_chunk, "changed": changed})
+    return left_segments, right_segments
+
+
+def _paired_line_similarity(added_text, removed_text):
+    if not added_text or not removed_text:
+        return 0
+    if added_text == removed_text:
+        return 1
+    return SequenceMatcher(None, added_text, removed_text, autojunk=False).ratio()
+
+
+def _pair_similar_changed_lines(added, removed):
+    if not added or not removed:
+        return [], added, removed
+
+    unmatched_added = set(range(len(added)))
+    unmatched_removed = set(range(len(removed)))
+    candidates = []
+    for removed_index, removed_line in enumerate(removed):
+        removed_text = str(removed_line.get("text") or "")
+        for added_index, added_line in enumerate(added):
+            added_text = str(added_line.get("text") or "")
+            similarity = _paired_line_similarity(added_text, removed_text)
+            if similarity < COMPARE_CHANGED_LINE_SIMILARITY:
+                continue
+            distance_penalty = abs(added_index - removed_index) * 0.001
+            candidates.append((similarity - distance_penalty, similarity, removed_index, added_index))
+
+    changed = []
+    for _, similarity, removed_index, added_index in sorted(candidates, reverse=True):
+        if removed_index not in unmatched_removed or added_index not in unmatched_added:
+            continue
+        unmatched_removed.remove(removed_index)
+        unmatched_added.remove(added_index)
+        removed_line = removed[removed_index]
+        added_line = added[added_index]
+        removed_segments, added_segments = _changed_line_segments(
+            str(removed_line.get("text") or ""),
+            str(added_line.get("text") or ""),
+        )
+        changed.append({
+            "removed": {
+                **removed_line,
+                "segments": removed_segments,
+            },
+            "added": {
+                **added_line,
+                "segments": added_segments,
+            },
+            "similarity": round(similarity, 3),
+        })
+
+    changed.sort(key=lambda item: (
+        item["removed"].get("line_index") is None,
+        item["removed"].get("line_index") if item["removed"].get("line_index") is not None else 0,
+    ))
+    return (
+        changed,
+        [line for index, line in enumerate(added) if index in unmatched_added],
+        [line for index, line in enumerate(removed) if index in unmatched_removed],
+    )
+
+
+def _compare_deltas(left_run, right_run, left_finding_count, right_finding_count):
+    left_duration = _run_duration_seconds(left_run)
+    right_duration = _run_duration_seconds(right_run)
+    left_lines = int(left_run.get("output_line_count") or 0)
+    right_lines = int(right_run.get("output_line_count") or 0)
+    return {
+        "exit_code_changed": left_run.get("exit_code") != right_run.get("exit_code"),
+        "exit_code": {"left": left_run.get("exit_code"), "right": right_run.get("exit_code")},
+        "duration_seconds": {
+            "left": left_duration,
+            "right": right_duration,
+            "delta": None if left_duration is None or right_duration is None else right_duration - left_duration,
+        },
+        "output_lines": {
+            "left": left_lines,
+            "right": right_lines,
+            "delta": right_lines - left_lines,
+        },
+        "findings": {
+            "left": left_finding_count,
+            "right": right_finding_count,
+            "delta": right_finding_count - left_finding_count,
+        },
+    }
 
 
 # Routes
@@ -452,6 +751,103 @@ def get_active_history_runs():
         "ip": get_client_ip(), "session": get_log_session_id(session_id), "count": len(runs),
     })
     return jsonify({"runs": runs})
+
+
+@history_bp.route("/history/<run_id>/compare-candidates")
+def get_run_compare_candidates(run_id):
+    """Return ranked previous runs that are plausible comparisons for a run."""
+    session_id = get_session_id()
+    limit = _parse_history_int(request.args.get("limit"), 5, maximum=20)
+    with db_connect() as conn:
+        source_row = conn.execute(
+            "SELECT runs.*, art.rel_path "
+            "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
+            "WHERE runs.id = ? AND runs.session_id = ?",
+            (run_id, session_id),
+        ).fetchone()
+        if not source_row:
+            return jsonify({"error": "Run not found"}), 404
+        source = dict(source_row)
+        source_started = str(source.get("started") or "")
+        rows = conn.execute(
+            "SELECT runs.*, art.rel_path "
+            "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
+            "WHERE runs.session_id = ? AND runs.id != ? AND runs.started < ? "
+            "ORDER BY runs.started DESC "
+            "LIMIT 200",
+            (session_id, run_id, source_started),
+        ).fetchall()
+
+    candidates = []
+    for row in rows:
+        payload = _run_candidate_payload(row, source)
+        if payload["score"] > 0:
+            candidates.append(payload)
+    candidates.sort(key=lambda item: (int(item["score"]), str(item.get("started") or "")), reverse=True)
+    candidates = candidates[:limit]
+    return jsonify({
+        "source": _compare_run_summary(source),
+        "candidates": candidates,
+        "suggested": candidates[0] if candidates else None,
+    })
+
+
+@history_bp.route("/history/compare")
+def compare_history_runs():
+    """Compare two completed runs from the current session."""
+    session_id = get_session_id()
+    left_id = _normalize_history_filter_text(request.args.get("left"))
+    right_id = _normalize_history_filter_text(request.args.get("right"))
+    if not left_id or not right_id:
+        return jsonify({"error": "left and right run ids are required"}), 400
+    if left_id == right_id:
+        return jsonify({"error": "Choose two different runs to compare"}), 400
+
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT runs.*, art.rel_path "
+            "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
+            "WHERE runs.session_id = ? AND runs.id IN (?, ?)",
+            (session_id, left_id, right_id),
+        ).fetchall()
+    by_id = {str(row["id"]): dict(row) for row in rows}
+    left_run = by_id.get(left_id)
+    right_run = by_id.get(right_id)
+    if not left_run or not right_run:
+        return jsonify({"error": "Run not found"}), 404
+
+    left_entries, left_output = _compare_entries_for_diff(left_run)
+    right_entries, right_output = _compare_entries_for_diff(right_run)
+    left_finding_count = _finding_count_for_entries(left_run, left_entries)
+    right_finding_count = _finding_count_for_entries(right_run, right_entries)
+    diff = _bounded_multiset_line_diff(left_entries, right_entries)
+
+    return jsonify({
+        "left": {
+            **_compare_run_summary(left_run),
+            "finding_count": left_finding_count,
+            "output_source": left_output,
+        },
+        "right": {
+            **_compare_run_summary(right_run),
+            "finding_count": right_finding_count,
+            "output_source": right_output,
+        },
+        "deltas": _compare_deltas(left_run, right_run, left_finding_count, right_finding_count),
+        "sections": {
+            "changed": diff["changed"],
+            "added": diff["added"],
+            "removed": diff["removed"],
+            "added_omitted": diff["added_omitted"],
+            "removed_omitted": diff["removed_omitted"],
+            "max_changed_lines": diff["max_changed_lines"],
+        },
+        "truncated": {
+            "left": bool(left_output["partial"]),
+            "right": bool(right_output["partial"]),
+            "changed_lines": bool(diff["added_omitted"] or diff["removed_omitted"]),
+        },
+    })
 
 
 @history_bp.route("/history/<run_id>")

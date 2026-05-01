@@ -8,6 +8,10 @@ All notable changes to darklab_shell are documented here.
 
 ### Added
 
+- **History rows can compare completed runs** — operators can inspect changed output between a selected run and a previous/manual run without opening a side-by-side editor.
+  - **Why:** repeated scans often need a quick answer to "what changed?" across ports, URLs, subdomains, status lines, or findings-like output.
+  - **What:** added current-session comparison candidate and compare routes, a History row `compare` action, a suggested/manual compare launcher with command-scoped search, day-grouped results, and `Load More` pagination for older runs, and a focused comparison modal/sheet that shows Run A / Run B metadata, exit/duration/line/finding deltas, conservatively paired changed lines with inline value highlighting, bounded added lines, bounded removed lines, restore actions for either source run or both runs into fresh tabs, and copyable summaries. The first pass uses conservative candidate ranking and a bounded multiset line diff that strips terminal chrome before comparing.
+  - **Tests:** added route coverage for candidate ranking and added/removed output, plus History UI unit coverage for opening the launcher and rendering comparison results.
 - **Configuration docs now have drift tests against app defaults** — README configuration coverage and the default config reference are checked against `app/config.py`.
   - **Why:** `README.md`'s `## Configuration` table had fallen slightly behind the operator-facing defaults, including the `/run` rate-limit enable switch and the current prompt prefix default.
   - **What:** refreshed the README configuration table for the current `prompt_prefix` default and documented `rate_limit_enabled`. Added docs meta-tests that parse the `load_config()` defaults dictionary from `app/config.py` and assert every default key is represented in both `app/conf/config.yaml` and README `## Configuration`.
@@ -103,6 +107,10 @@ All notable changes to darklab_shell are documented here.
 
 ### Changed
 
+- **nmap now defaults to TCP connect scans instead of raw-socket mode** — container nmap runs stay useful under the unprivileged `scanner` user.
+  - **Before:** `rewrite_command()` injected `--privileged` so nmap attempted raw-socket behavior, but non-root Docker execution could still fail with `sendto ... Operation not permitted` despite file capabilities and `cap_add`.
+  - **After:** nmap commands without an explicit scan mode are rewritten with `-sT`, examples and smoke fixtures use TCP connect scans, and validation blocks raw SYN scans (`-sS`) plus explicit `--privileged` mode before launch.
+  - **Tests:** updated command rewrite, validation, run-launch, logging, autocomplete route, and smoke expectation coverage for the supported connect-scan path.
 - **Large terminal output stays responsive after repeated workspace reads** — the frontend now avoids whole-transcript signal rescans for plain output, replays client-side multi-line output through chunked batches, and uses large-output search protections.
   - **Before:** repeated `cat <large_file>` runs in a full terminal could freeze scrolling and delay later commands because signal discovery walked old plain-output rows and client-side command replay called the single-line append path thousands of times. Searching large terminal buffers could also pause typing or clearing while every match was painted into the DOM.
   - **After:** signal scope checks return immediately for rows without backend signal metadata, per-tab signal counts are maintained incrementally for the search affordance, client-side command output uses a chunked `appendLines()` replay path, and line numbers preserve the true emitted transcript count after max-line trimming. Text search now debounces typing, applies large-output guards for very large line/character counts, and lazily highlights only the current match in large terminal buffers while restoring original line markup when search changes or clears.

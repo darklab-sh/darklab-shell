@@ -6,7 +6,7 @@
       "setup_files": {
         "targets.txt": "ip.darklab.sh\n"
       },
-      "command": "nmap -iL targets.txt -p 80,443 --open -oN nmap-web.txt",
+      "command": "nmap -sT -iL targets.txt -p 80,443 --open -oN nmap-web.txt",
       "expected_text": [
         "80/tcp",
         "open"

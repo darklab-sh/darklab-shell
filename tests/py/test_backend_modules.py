@@ -1889,7 +1889,8 @@ class TestRewriteCaseInsensitive:
 
     def test_nmap_uppercase(self):
         cmd, _ = rewrite_command("NMAP -sV 10.0.0.1")
-        assert "--privileged" in cmd
+        assert "-sT" in cmd
+        assert "--privileged" not in cmd
 
     def test_nuclei_uppercase(self):
         cmd, _ = rewrite_command("NUCLEI -u https://darklab.sh")
@@ -2738,7 +2739,7 @@ class TestAutocompleteContextLoading:
             "nmap": {
                 "examples": [
                     {
-                        "value": "nmap -iL targets.txt -p 80,443 --open -oN nmap-web.txt",
+                        "value": "nmap -sT -iL targets.txt -p 80,443 --open -oN nmap-web.txt",
                         "description": "Workspace targets",
                         "feature_required": "workspace",
                     },
@@ -3016,9 +3017,9 @@ class TestRewriteIdempotent:
         assert "--report-wide" not in cmd
         assert notice is None
 
-    def test_nmap_already_privileged_unchanged(self):
-        cmd, _ = rewrite_command("nmap --privileged -sV 10.0.0.1")
-        assert cmd.count("--privileged") == 1
+    def test_nmap_already_connect_scan_unchanged(self):
+        cmd, _ = rewrite_command("nmap -sT -sV 10.0.0.1")
+        assert cmd.count("-sT") == 1
 
     def test_nuclei_already_ud_unchanged(self):
         cmd, _ = rewrite_command("nuclei -ud /my/templates -u https://darklab.sh")

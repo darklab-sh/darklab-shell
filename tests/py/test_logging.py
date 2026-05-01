@@ -593,14 +593,15 @@ class TestCmdRewriteEvent:
         call = next(c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE")
         assert call.kwargs["extra"]["original"] == "nmap 8.8.8.8"
 
-    def test_nmap_rewrite_extra_has_privileged_flag(self):
+    def test_nmap_rewrite_extra_has_connect_scan_flag(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "info") as mock_info:
             with mock.patch("commands.load_command_policy", return_value=(None, [])):
                 with mock.patch("subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "nmap 8.8.8.8")
         call = next(c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE")
-        assert "--privileged" in call.kwargs["extra"]["rewritten"]
+        assert "-sT" in call.kwargs["extra"]["rewritten"]
+        assert "--privileged" not in call.kwargs["extra"]["rewritten"]
 
     def test_unrewritten_command_does_not_emit_cmd_rewrite(self):
         # A plain allowed command (ping) is not rewritten — no CMD_REWRITE log

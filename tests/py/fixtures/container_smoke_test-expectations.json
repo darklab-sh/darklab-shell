@@ -548,7 +548,7 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "nmap -sV -p 80,443 ip.darklab.sh",
+      "command": "nmap -sT -sV -p 80,443 ip.darklab.sh",
       "any_of": [
         { "expected_text": ["Starting Nmap"] },
         { "expected_text": ["Nmap scan report"] }
@@ -557,7 +557,7 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "nmap -A -T4 ip.darklab.sh",
+      "command": "nmap -sT -A -T4 ip.darklab.sh",
       "expected_text": [
         "Starting Nmap"
       ]
@@ -565,7 +565,7 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "nmap -Pn --top-ports 100 ip.darklab.sh",
+      "command": "nmap -sT -Pn --top-ports 100 ip.darklab.sh",
       "expected_text": [
         "Starting Nmap"
       ]

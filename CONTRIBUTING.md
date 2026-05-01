@@ -10,6 +10,7 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
 
 - [Local Setup](#local-setup)
 - [Branch Workflow](#branch-workflow)
+- [Release Branch Merge Checklist](#release-branch-merge-checklist)
 - [Code Style](#code-style)
 - [Running Tests](#running-tests)
 - [Linting and Security Scanning](#linting-and-security-scanning)
@@ -134,6 +135,24 @@ Release branches may carry temporary merge-request and release-note drafts under
 
 ---
 
+## Release Branch Merge Checklist
+
+Before merging a version branch back to `main`:
+
+- Confirm the branch is current with the target `main` branch, or intentionally document why it is not.
+- Ensure the new version is updated in [app/config.py](app/config.py) and [package.json](package.json).
+- If the version bump changes tracked browser dependencies, regenerate and verify committed vendor assets with `npm run vendor:sync` and `npm run vendor:check`.
+- Ensure the matching [CHANGELOG.md](CHANGELOG.md) version section is marked released with the release date instead of `Unreleased`.
+- Ensure `docs/release-drafts/` draft files are removed from git unless the project intentionally keeps that release's draft artifacts.
+- Ensure all project docs are up to date with the released version section from [CHANGELOG.md](CHANGELOG.md), including README, FEATURES, ARCHITECTURE, CONTRIBUTING, tests docs, external-command notes, and any decision docs touched by the release.
+- Ensure generated screenshots, demo media, smoke fixtures, vendor files, and docs inventories are refreshed when the release changed those surfaces.
+- Ensure all test suites, linting, and audit tools are passing locally, or document the exact narrower validation used and why it is sufficient.
+- Run container smoke validation when the release changes packaged tools, Dockerfile/base images, command examples, workspace file handling, or workflow command steps.
+- Ensure GitLab CI jobs are passing, including test, lint, audit, and build stages.
+- Review the final diff for temporary debug code, local-only config, stale TODO completions, unchecked review docs, and files that should not merge to `main`.
+
+---
+
 ## Code Style
 
 **Python** — `flake8` enforces style and syntax. Configuration lives in [`.flake8`](.flake8). The main rules are: max line length 120, with per-file ignores for test files and generated content. Run `flake8 app/ tests/py/` before every commit.
@@ -156,8 +175,8 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1111 pytest + 927 Vitest + 229 Playwright = 2,267 tests**.
-That total includes 2,237 behavior tests plus 30 docs/inventory meta-tests.
+Current totals: **1114 pytest + 930 Vitest + 229 Playwright = 2,273 tests**.
+That total includes 2,243 behavior tests plus 30 docs/inventory meta-tests.
 
 Playwright notes:
 

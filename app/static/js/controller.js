@@ -1027,6 +1027,7 @@ function isAnyPanelOverlayOpen() {
   return (typeof isFaqOverlayOpen === 'function' && isFaqOverlayOpen())
     || (typeof isWorkflowsOverlayOpen === 'function' && isWorkflowsOverlayOpen())
     || (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen())
+    || (typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
     || (typeof isOptionsOverlayOpen === 'function' && isOptionsOverlayOpen())
     || (typeof isThemeOverlayOpen === 'function' && isThemeOverlayOpen());
 }
@@ -1044,7 +1045,14 @@ document.addEventListener('keydown', e => {
   // don't dispatch behind the overlay. Chrome shortcuts (Alt+H, Alt+G,
   // Alt+, etc.) still fire so the opening chord can also close the
   // surface.
-  if (isFaqOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen() || isWorkflowsOverlayOpen() || isHistoryPanelOpen()) {
+  if (
+    isFaqOverlayOpen()
+    || isOptionsOverlayOpen()
+    || isThemeOverlayOpen()
+    || isWorkflowsOverlayOpen()
+    || isHistoryPanelOpen()
+    || (typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
+  ) {
     if (handleChromeShortcut(e)) return;
     return;
   }
@@ -1143,6 +1151,7 @@ document.addEventListener('keydown', e => {
     && !(e.target && e.target.closest && e.target.closest('button, a, select'))
     && cmdInput
     && !isFaqOverlayOpen() && !isWorkflowsOverlayOpen() && !isOptionsOverlayOpen() && !isThemeOverlayOpen()
+    && !(typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
     && !(typeof isConfirmOpen === 'function' && isConfirmOpen())
   ) {
     e.preventDefault();
@@ -1222,6 +1231,7 @@ function _isMajorSurfaceOpenForPromptPaste() {
     || isThemeOverlayOpen()
     || isWorkflowsOverlayOpen()
     || (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen())
+    || (typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
     || isHistoryPanelOpen()
     || (typeof isConfirmOpen === 'function' && isConfirmOpen())
   );
@@ -1257,7 +1267,7 @@ if (historyPanel && typeof bindOutsideClickClose === 'function') {
     triggers: null,
     isOpen: isHistoryPanelOpen,
     onClose: hideHistoryPanel,
-    exemptSelectors: ['.hist-chip-overflow', '[data-action="history"]'],
+    exemptSelectors: ['.hist-chip-overflow', '[data-action="history"]', '#history-compare-overlay'],
   });
 }
 if (typeof bindOutsideClickClose === 'function' && typeof shellPromptWrap !== 'undefined' && shellPromptWrap) {

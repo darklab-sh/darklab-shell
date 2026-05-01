@@ -78,6 +78,19 @@ let _historyPaging = {
   hasPrev: false,
   hasNext: false,
 };
+let _historyCompareState = {
+  source: null,
+  candidates: [],
+  manualCandidates: [],
+  manualLoaded: false,
+  manualRequestId: 0,
+  manualPage: 1,
+  manualHasNext: false,
+  manualLoading: false,
+  manualCollapsedGroups: new Set(),
+  selected: null,
+  manualQuery: '',
+};
 
 function _normalizeHistoryFilterValue(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -821,6 +834,13 @@ function _createHistoryEntry(run, isStarred) {
   permalinkBtn.textContent = 'permalink';
   actions.appendChild(permalinkBtn);
 
+  const compareBtn = document.createElement('button');
+  compareBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+  compareBtn.type = 'button';
+  compareBtn.dataset.action = 'compare';
+  compareBtn.textContent = 'compare';
+  actions.appendChild(compareBtn);
+
   const deleteBtn = document.createElement('button');
   deleteBtn.className = 'history-action-btn btn btn-secondary btn-compact';
   deleteBtn.type = 'button';
@@ -899,9 +919,681 @@ function openSnapshotLink(snapshot) {
 
 function _historyActionKeepsPanelOpen(action) {
   if (action === 'star') return true;
+  if (action === 'compare') return true;
   const mobileMode = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
   if (!mobileMode) return false;
   return action === 'permalink';
+}
+
+function _compareFormatDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString();
+}
+
+function _compareDateGroupLabel(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Undated';
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const dateStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const ageDays = Math.round((todayStart.getTime() - dateStart.getTime()) / 86400000);
+  if (ageDays === 0) return 'Today';
+  if (ageDays === 1) return 'Yesterday';
+  return date.toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: date.getFullYear() === today.getFullYear() ? undefined : 'numeric',
+  });
+}
+
+function _compareFormatDuration(seconds) {
+  if (seconds === null || seconds === undefined || Number.isNaN(Number(seconds))) return 'n/a';
+  const value = Number(seconds);
+  if (value < 1) return `${Math.round(value * 1000)}ms`;
+  if (value < 60) return `${value.toFixed(value < 10 ? 1 : 0)}s`;
+  return `${Math.floor(value / 60)}m ${Math.round(value % 60)}s`;
+}
+
+function _compareFormatDelta(value, suffix = '') {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number === 0) return `0${suffix}`;
+  return `${number > 0 ? '+' : ''}${number}${suffix}`;
+}
+
+function _ensureHistoryCompareOverlay() {
+  let overlay = document.getElementById('history-compare-overlay');
+  if (overlay) return overlay;
+
+  overlay = document.createElement('div');
+  overlay.id = 'history-compare-overlay';
+  overlay.className = 'modal-overlay mobile-sheet-overlay u-hidden history-compare-overlay';
+  overlay.innerHTML = `
+    <section id="history-compare-modal" class="history-compare-modal mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="history-compare-title">
+      <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close run comparison"></div>
+      <div class="history-compare-header surface-header">
+        <div>
+          <div id="history-compare-title" class="history-compare-title">COMPARE RUNS</div>
+          <div id="history-compare-subtitle" class="history-compare-subtitle"></div>
+        </div>
+        <button type="button" class="close-btn history-compare-close" aria-label="Close run comparison">✕</button>
+      </div>
+      <div id="history-compare-body" class="history-compare-body surface-body nice-scroll"></div>
+    </section>
+  `;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) closeHistoryCompareOverlay();
+  });
+  overlay.querySelectorAll('.history-compare-close, .sheet-grab').forEach(el => {
+    el.addEventListener('click', () => closeHistoryCompareOverlay());
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        closeHistoryCompareOverlay();
+      }
+    });
+  });
+  if (typeof bindDismissible === 'function') {
+    bindDismissible(overlay, {
+      level: 'modal',
+      isOpen: () => overlay.classList.contains('open'),
+      onClose: closeHistoryCompareOverlay,
+      closeButtons: overlay.querySelectorAll('.history-compare-close, .sheet-grab'),
+    });
+  }
+  return overlay;
+}
+
+function closeHistoryCompareOverlay() {
+  const overlay = document.getElementById('history-compare-overlay');
+  if (!overlay) return;
+  overlay.classList.remove('open');
+  overlay.classList.add('u-hidden');
+  overlay.setAttribute('aria-hidden', 'true');
+  if (typeof refocusComposerAfterAction === 'function') {
+    refocusComposerAfterAction({ preventScroll: true });
+  }
+}
+
+function _openHistoryCompareOverlay() {
+  const overlay = _ensureHistoryCompareOverlay();
+  overlay.classList.remove('u-hidden');
+  overlay.classList.add('open');
+  overlay.setAttribute('aria-hidden', 'false');
+}
+
+function isHistoryCompareOverlayOpen() {
+  const overlay = document.getElementById('history-compare-overlay');
+  return !!(overlay && overlay.classList.contains('open'));
+}
+
+function _historyCompareRunCard(run, label, extra = '') {
+  const card = document.createElement('div');
+  card.className = 'history-compare-run-card';
+  const eyebrow = document.createElement('div');
+  eyebrow.className = 'history-compare-run-eyebrow';
+  eyebrow.textContent = label;
+  card.appendChild(eyebrow);
+  const command = document.createElement('div');
+  command.className = 'history-compare-run-command';
+  command.textContent = run && run.command ? run.command : 'unknown command';
+  card.appendChild(command);
+  const meta = document.createElement('div');
+  meta.className = 'history-compare-run-meta';
+  const parts = [];
+  if (run && run.started) parts.push(_compareFormatDate(run.started));
+  if (run && run.exit_code !== undefined && run.exit_code !== null) parts.push(`exit ${run.exit_code}`);
+  if (run && Number.isFinite(Number(run.output_line_count))) parts.push(`${Number(run.output_line_count).toLocaleString()} lines`);
+  if (extra) parts.push(extra);
+  meta.textContent = parts.join(' · ');
+  card.appendChild(meta);
+  return card;
+}
+
+function _renderHistoryCompareLauncher() {
+  const overlay = _ensureHistoryCompareOverlay();
+  const body = overlay.querySelector('#history-compare-body');
+  const subtitle = overlay.querySelector('#history-compare-subtitle');
+  if (!body) return;
+  body.replaceChildren();
+  const source = _historyCompareState.source;
+  subtitle.textContent = source && source.command ? source.command : 'Choose two completed runs to compare';
+
+  if (!source) {
+    const empty = document.createElement('div');
+    empty.className = 'history-compare-empty';
+    empty.textContent = 'Choose a source run from history first.';
+    body.appendChild(empty);
+    return;
+  }
+
+  const sourceCard = _historyCompareRunCard(source, 'Run A');
+  body.appendChild(sourceCard);
+
+  const suggested = _historyCompareState.selected || _historyCompareState.candidates[0] || null;
+  const suggestedWrap = document.createElement('div');
+  suggestedWrap.className = 'history-compare-section';
+  const suggestedTitle = document.createElement('div');
+  suggestedTitle.className = 'history-compare-section-title';
+  suggestedTitle.textContent = 'Suggested match';
+  suggestedWrap.appendChild(suggestedTitle);
+  if (suggested) {
+    suggestedWrap.appendChild(_historyCompareRunCard(
+      suggested,
+      'Run B',
+      suggested.confidence_label || '',
+    ));
+    const primary = document.createElement('button');
+    primary.type = 'button';
+    primary.className = 'btn btn-primary btn-compact history-compare-primary';
+    primary.textContent = 'Compare with suggested run';
+    primary.addEventListener('click', () => fetchAndRenderHistoryComparison(source.id, suggested.id));
+    suggestedWrap.appendChild(primary);
+  } else {
+    const empty = document.createElement('div');
+    empty.className = 'history-compare-empty';
+    empty.textContent = 'No earlier similar run found. Choose a run manually.';
+    suggestedWrap.appendChild(empty);
+  }
+  body.appendChild(suggestedWrap);
+
+  const manual = document.createElement('div');
+  manual.className = 'history-compare-section';
+  const manualTitle = document.createElement('div');
+  manualTitle.className = 'history-compare-section-title';
+  manualTitle.textContent = 'Choose another run';
+  manual.appendChild(manualTitle);
+  const search = document.createElement('input');
+  search.className = 'form-control history-compare-search';
+  search.type = 'text';
+  search.placeholder = 'search history';
+  search.value = _historyCompareState.manualQuery || '';
+  search.autocomplete = 'off';
+  search.spellcheck = false;
+  search.addEventListener('input', e => {
+    _historyCompareState.manualQuery = e.target.value;
+    _loadHistoryCompareManualCandidates(source, e.target.value);
+  });
+  manual.appendChild(search);
+  const list = document.createElement('div');
+  list.className = 'history-compare-candidate-list';
+  list.dataset.compareCandidateList = '1';
+  manual.appendChild(list);
+  body.appendChild(manual);
+  _renderHistoryCompareCandidateList();
+}
+
+let _historyCompareManualTimer = null;
+
+function _loadHistoryCompareManualCandidates(source, query = '') {
+  if (_historyCompareManualTimer) clearTimeout(_historyCompareManualTimer);
+  _historyCompareState.manualPage = 1;
+  _historyCompareState.manualHasNext = false;
+  _historyCompareState.manualLoading = false;
+  _historyCompareState.manualCollapsedGroups = new Set();
+  const requestId = (_historyCompareState.manualRequestId || 0) + 1;
+  _historyCompareState.manualRequestId = requestId;
+  _historyCompareManualTimer = setTimeout(() => {
+    _historyCompareManualTimer = null;
+    _fetchHistoryCompareManualCandidates(source, query, { requestId, page: 1, append: false });
+  }, 120);
+}
+
+function _fetchHistoryCompareManualCandidates(source, query = '', { requestId = null, page = 1, append = false } = {}) {
+  if (!source || !source.id || _historyCompareState.manualLoading) return;
+  const activeRequestId = requestId || _historyCompareState.manualRequestId || 0;
+  _historyCompareState.manualLoading = true;
+  _renderHistoryCompareCandidateList();
+  const params = new URLSearchParams();
+  params.set('type', 'runs');
+  params.set('page_size', '20');
+  params.set('include_total', '1');
+  params.set('page', String(page));
+  const trimmed = String(query || '').trim();
+  if (trimmed) {
+    params.set('scope', 'command');
+    params.set('q', trimmed);
+  }
+  else if (source && source.command_root) params.set('command_root', source.command_root);
+  apiFetch(`/history?${params.toString()}`)
+    .then(resp => resp.json())
+    .then(data => {
+      if (_historyCompareState.manualRequestId !== activeRequestId) return;
+      const items = Array.isArray(data.items) ? data.items : (Array.isArray(data.runs) ? data.runs : []);
+      const ranked = _historyCompareState.candidates || [];
+      const seenRanked = new Set(ranked.map(item => item.id));
+      const existing = append ? new Set((_historyCompareState.manualCandidates || []).map(item => item.id)) : new Set();
+      const manualItems = items
+        .filter(item => item && item.type !== 'snapshot' && item.id && item.id !== source.id && !existing.has(item.id))
+        .map(item => ({
+          ...item,
+          confidence_label: seenRanked.has(item.id) ? ((ranked.find(candidate => candidate.id === item.id) || {}).confidence_label || '') : '',
+        }));
+      _historyCompareState.manualCandidates = append
+        ? [...(_historyCompareState.manualCandidates || []), ...manualItems]
+        : manualItems;
+      _historyCompareState.manualLoaded = true;
+      _historyCompareState.manualPage = Number(data.page) || page;
+      _historyCompareState.manualHasNext = !!data.has_next;
+      _historyCompareState.manualLoading = false;
+      _renderHistoryCompareCandidateList();
+    })
+    .catch(() => {
+      if (_historyCompareState.manualRequestId === activeRequestId) {
+        _historyCompareState.manualLoading = false;
+        _renderHistoryCompareCandidateList();
+      }
+      showToast('Failed to load comparison choices', 'error');
+    });
+}
+
+function _renderHistoryCompareCandidateList() {
+  const list = document.querySelector('[data-compare-candidate-list="1"]');
+  const source = _historyCompareState.source;
+  if (!list || !source) return;
+  const search = document.querySelector('.history-compare-search');
+  const searchWasFocused = search && document.activeElement === search;
+  list.replaceChildren();
+  const sourceCandidates = _historyCompareState.manualLoaded
+    ? (_historyCompareState.manualCandidates || [])
+    : (_historyCompareState.candidates || []);
+  const candidates = sourceCandidates
+    .filter(item => item && item.id && item.id !== source.id);
+  if (!candidates.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-compare-empty';
+    empty.textContent = _historyCompareState.manualLoading ? 'Loading runs...' : 'No runs found for the current search.';
+    list.appendChild(empty);
+    if (searchWasFocused && typeof search.focus === 'function') {
+      search.focus({ preventScroll: true });
+    }
+    return;
+  }
+  const groups = [];
+  const groupByLabel = new Map();
+  candidates.forEach(candidate => {
+    const groupLabel = _compareDateGroupLabel(candidate.started || candidate.created);
+    let group = groupByLabel.get(groupLabel);
+    if (!group) {
+      group = { label: groupLabel, items: [] };
+      groupByLabel.set(groupLabel, group);
+      groups.push(group);
+    }
+    group.items.push(candidate);
+  });
+  groups.forEach(group => {
+    const collapsed = _historyCompareState.manualCollapsedGroups.has(group.label);
+    const groupEl = document.createElement('div');
+    groupEl.className = 'history-compare-candidate-group';
+
+    const headerBtn = document.createElement('button');
+    headerBtn.type = 'button';
+    headerBtn.className = 'history-compare-candidate-day';
+    headerBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    const icon = document.createElement('span');
+    icon.className = 'history-compare-candidate-day-icon disclosure-chev';
+    icon.textContent = '▸';
+    headerBtn.appendChild(icon);
+    const label = document.createElement('span');
+    label.className = 'history-compare-candidate-day-label';
+    label.textContent = group.label;
+    headerBtn.appendChild(label);
+    const count = document.createElement('span');
+    count.className = 'history-compare-candidate-day-count';
+    count.textContent = String(group.items.length);
+    headerBtn.appendChild(count);
+    groupEl.appendChild(headerBtn);
+
+    const rows = document.createElement('div');
+    rows.className = 'history-compare-candidate-group-rows';
+    rows.hidden = collapsed;
+    group.items.forEach(candidate => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'history-compare-candidate history-entry chrome-row chrome-row-clickable';
+      row.dataset.runId = candidate.id;
+      const rowHeader = document.createElement('span');
+      rowHeader.className = 'history-entry-header';
+      const cmd = document.createElement('span');
+      cmd.className = 'history-entry-cmd history-compare-candidate-command';
+      cmd.textContent = candidate.command || '';
+      rowHeader.appendChild(cmd);
+      row.appendChild(rowHeader);
+      const meta = document.createElement('span');
+      meta.className = 'history-entry-meta history-compare-candidate-meta';
+      meta.textContent = [
+        candidate.confidence_label || '',
+        candidate.started ? _compareFormatDate(candidate.started) : '',
+        candidate.exit_code !== undefined && candidate.exit_code !== null ? `exit ${candidate.exit_code}` : '',
+      ].filter(Boolean).join(' · ');
+      row.appendChild(meta);
+      row.addEventListener('click', () => fetchAndRenderHistoryComparison(source.id, candidate.id));
+      rows.appendChild(row);
+    });
+    headerBtn.addEventListener('click', () => {
+      const nextCollapsed = !rows.hidden;
+      rows.hidden = nextCollapsed;
+      headerBtn.setAttribute('aria-expanded', nextCollapsed ? 'false' : 'true');
+      if (nextCollapsed) _historyCompareState.manualCollapsedGroups.add(group.label);
+      else _historyCompareState.manualCollapsedGroups.delete(group.label);
+    });
+    groupEl.appendChild(rows);
+    list.appendChild(groupEl);
+  });
+  if (_historyCompareState.manualLoaded && (_historyCompareState.manualHasNext || _historyCompareState.manualLoading)) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'btn btn-secondary btn-compact history-compare-load-more';
+    more.disabled = !!_historyCompareState.manualLoading;
+    more.textContent = _historyCompareState.manualLoading ? 'Loading...' : 'Load More';
+    more.addEventListener('click', () => {
+      _fetchHistoryCompareManualCandidates(source, _historyCompareState.manualQuery, {
+        requestId: _historyCompareState.manualRequestId,
+        page: (_historyCompareState.manualPage || 1) + 1,
+        append: true,
+      });
+    });
+    list.appendChild(more);
+  }
+  if (searchWasFocused && typeof search.focus === 'function') {
+    search.focus({ preventScroll: true });
+  }
+}
+
+function openHistoryCompareLauncher(run) {
+  if (!run || !run.id) return;
+  _historyCompareState = {
+    source: {
+      ...run,
+      command_root: (run.command || '').trim().split(/\s+/, 1)[0] || '',
+    },
+    candidates: [],
+    manualCandidates: [],
+    manualLoaded: false,
+    manualRequestId: 0,
+    manualPage: 1,
+    manualHasNext: false,
+    manualLoading: false,
+    manualCollapsedGroups: new Set(),
+    selected: null,
+    manualQuery: '',
+  };
+  _openHistoryCompareOverlay();
+  const body = document.querySelector('#history-compare-body');
+  if (body) {
+    body.replaceChildren();
+    const loading = document.createElement('div');
+    loading.className = 'history-compare-empty';
+    loading.textContent = 'Finding comparable runs...';
+    body.appendChild(loading);
+  }
+  apiFetch(`/history/${encodeURIComponent(run.id)}/compare-candidates`)
+    .then(resp => resp.json())
+    .then(data => {
+      if (data.error) throw new Error(data.error);
+      _historyCompareState.source = data.source || _historyCompareState.source;
+      _historyCompareState.candidates = Array.isArray(data.candidates) ? data.candidates : [];
+      _historyCompareState.selected = data.suggested || _historyCompareState.candidates[0] || null;
+      _renderHistoryCompareLauncher();
+      _loadHistoryCompareManualCandidates(_historyCompareState.source, '');
+    })
+    .catch(() => {
+      _historyCompareState.candidates = [];
+      _historyCompareState.selected = null;
+      _renderHistoryCompareLauncher();
+      showToast('Failed to load comparison choices', 'error');
+    });
+}
+
+function _compareMetricCell(label, value, tone = '') {
+  const cell = document.createElement('div');
+  cell.className = `history-compare-metric${tone ? ` ${tone}` : ''}`;
+  const labelEl = document.createElement('div');
+  labelEl.className = 'history-compare-metric-label';
+  labelEl.textContent = label;
+  const valueEl = document.createElement('div');
+  valueEl.className = 'history-compare-metric-value';
+  valueEl.textContent = value;
+  cell.appendChild(labelEl);
+  cell.appendChild(valueEl);
+  return cell;
+}
+
+function _renderHistoryCompareLines(title, lines, omitted, sign) {
+  const section = document.createElement('details');
+  section.className = 'history-compare-lines';
+  section.open = true;
+  const summary = document.createElement('summary');
+  summary.textContent = `${title} (${lines.length}${omitted ? `+${omitted}` : ''})`;
+  section.appendChild(summary);
+  if (!lines.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-compare-empty';
+    empty.textContent = `No ${title.toLowerCase()}.`;
+    section.appendChild(empty);
+    return section;
+  }
+  const list = document.createElement('div');
+  list.className = 'history-compare-line-list';
+  lines.forEach(line => {
+    const row = document.createElement('div');
+    row.className = 'history-compare-line';
+    const mark = document.createElement('span');
+    mark.className = sign === '+' ? 'history-compare-line-added' : 'history-compare-line-removed';
+    mark.textContent = sign;
+    row.appendChild(mark);
+    const text = document.createElement('code');
+    text.textContent = line.text || '';
+    row.appendChild(text);
+    list.appendChild(row);
+  });
+  section.appendChild(list);
+  if (omitted) {
+    const note = document.createElement('div');
+    note.className = 'history-compare-truncation';
+    note.textContent = `${omitted.toLocaleString()} additional changed line(s) omitted.`;
+    section.appendChild(note);
+  }
+  return section;
+}
+
+function _appendHistoryCompareSegments(parent, segments, fallbackText) {
+  const safeSegments = Array.isArray(segments) ? segments : [];
+  if (!safeSegments.length) {
+    parent.textContent = fallbackText || '';
+    return;
+  }
+  safeSegments.forEach(segment => {
+    const span = document.createElement('span');
+    span.textContent = segment && typeof segment.text === 'string' ? segment.text : '';
+    if (segment && segment.changed) span.className = 'history-compare-line-delta';
+    parent.appendChild(span);
+  });
+}
+
+function _renderHistoryCompareChangedLines(lines) {
+  const section = document.createElement('details');
+  section.className = 'history-compare-lines history-compare-changed-lines';
+  section.open = true;
+  const summary = document.createElement('summary');
+  summary.textContent = `Changed lines (${lines.length})`;
+  section.appendChild(summary);
+  if (!lines.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-compare-empty';
+    empty.textContent = 'No changed lines.';
+    section.appendChild(empty);
+    return section;
+  }
+  const list = document.createElement('div');
+  list.className = 'history-compare-line-list history-compare-changed-list';
+  lines.forEach(line => {
+    const pair = document.createElement('div');
+    pair.className = 'history-compare-changed-pair';
+
+    const removed = line && line.removed ? line.removed : {};
+    const added = line && line.added ? line.added : {};
+    [
+      { label: 'A', cls: 'history-compare-line-removed', line: removed },
+      { label: 'B', cls: 'history-compare-line-added', line: added },
+    ].forEach(item => {
+      const row = document.createElement('div');
+      row.className = 'history-compare-line';
+      const mark = document.createElement('span');
+      mark.className = item.cls;
+      mark.textContent = item.label;
+      row.appendChild(mark);
+      const text = document.createElement('code');
+      _appendHistoryCompareSegments(text, item.line.segments, item.line.text || '');
+      row.appendChild(text);
+      pair.appendChild(row);
+    });
+
+    list.appendChild(pair);
+  });
+  section.appendChild(list);
+  return section;
+}
+
+function _restoreBothHistoryCompareRuns(left, right) {
+  if (!left || !right) return Promise.reject(new Error('missing comparison runs'));
+  const leftTabId = createTab(`A: ${left.command || 'run'}`);
+  if (!leftTabId) return Promise.reject(new Error('failed to create Run A tab'));
+  const rightTabId = createTab(`B: ${right.command || 'run'}`);
+  if (!rightTabId) return Promise.reject(new Error('failed to create Run B tab'));
+  return Promise.all([
+    restoreHistoryRunIntoTab(left, { targetTabId: leftTabId, hidePanelOnSuccess: false }),
+    restoreHistoryRunIntoTab(right, { targetTabId: rightTabId, hidePanelOnSuccess: false }),
+  ]).then(() => {
+    if (typeof activateTab === 'function') activateTab(rightTabId, { focusComposer: false });
+    return [leftTabId, rightTabId];
+  });
+}
+
+function _renderHistoryComparison(data) {
+  const overlay = _ensureHistoryCompareOverlay();
+  const body = overlay.querySelector('#history-compare-body');
+  const subtitle = overlay.querySelector('#history-compare-subtitle');
+  if (!body) return;
+  body.replaceChildren();
+  subtitle.textContent = 'Changed output only';
+
+  const runs = document.createElement('div');
+  runs.className = 'history-compare-run-grid';
+  runs.appendChild(_historyCompareRunCard(data.left, 'Run A'));
+  runs.appendChild(_historyCompareRunCard(data.right, 'Run B'));
+  body.appendChild(runs);
+
+  const deltas = data.deltas || {};
+  const metrics = document.createElement('div');
+  metrics.className = 'history-compare-metrics';
+  metrics.appendChild(_compareMetricCell('Exit', deltas.exit_code_changed ? `${deltas.exit_code.left} -> ${deltas.exit_code.right}` : `unchanged · ${deltas.exit_code?.right ?? 'n/a'}`, deltas.exit_code_changed ? 'is-changed' : ''));
+  metrics.appendChild(_compareMetricCell('Duration', _compareFormatDelta((deltas.duration_seconds && deltas.duration_seconds.delta) || 0, 's')));
+  metrics.appendChild(_compareMetricCell('Lines', _compareFormatDelta((deltas.output_lines && deltas.output_lines.delta) || 0)));
+  metrics.appendChild(_compareMetricCell('Findings', _compareFormatDelta((deltas.findings && deltas.findings.delta) || 0)));
+  body.appendChild(metrics);
+
+  if (data.truncated && (data.truncated.left || data.truncated.right || data.truncated.changed_lines)) {
+    const note = document.createElement('div');
+    note.className = 'history-compare-truncation';
+    note.textContent = 'Comparison is partial because one or both outputs were truncated or the changed-line list hit its display limit.';
+    body.appendChild(note);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'history-compare-actions';
+  const restoreA = document.createElement('button');
+  restoreA.type = 'button';
+  restoreA.className = 'btn btn-secondary btn-compact';
+  restoreA.textContent = 'Restore A';
+  restoreA.addEventListener('click', () => restoreHistoryRunIntoTab(data.left, { hidePanelOnSuccess: false }).then(() => closeHistoryCompareOverlay()).catch(() => showToast('Failed to restore run', 'error')));
+  actions.appendChild(restoreA);
+  const restoreB = document.createElement('button');
+  restoreB.type = 'button';
+  restoreB.className = 'btn btn-secondary btn-compact';
+  restoreB.textContent = 'Restore B';
+  restoreB.addEventListener('click', () => restoreHistoryRunIntoTab(data.right, { hidePanelOnSuccess: false }).then(() => closeHistoryCompareOverlay()).catch(() => showToast('Failed to restore run', 'error')));
+  actions.appendChild(restoreB);
+  const restoreBoth = document.createElement('button');
+  restoreBoth.type = 'button';
+  restoreBoth.className = 'btn btn-secondary btn-compact';
+  restoreBoth.textContent = 'Restore Both';
+  restoreBoth.addEventListener('click', () => {
+    restoreBoth.disabled = true;
+    _restoreBothHistoryCompareRuns(data.left, data.right)
+      .then(() => closeHistoryCompareOverlay())
+      .catch(() => {
+        restoreBoth.disabled = false;
+        showToast('Failed to restore both runs', 'error');
+      });
+  });
+  actions.appendChild(restoreBoth);
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'btn btn-secondary btn-compact';
+  copy.textContent = 'Copy summary';
+  copy.addEventListener('click', () => {
+    const summary = [
+      `Compare: ${data.left.command} -> ${data.right.command}`,
+      `Exit: ${deltas.exit_code?.left ?? 'n/a'} -> ${deltas.exit_code?.right ?? 'n/a'}`,
+      `Lines: ${_compareFormatDelta(deltas.output_lines?.delta || 0)}`,
+      `Findings: ${_compareFormatDelta(deltas.findings?.delta || 0)}`,
+      `Changed: ${(data.sections?.changed || []).length}`,
+      `Added: ${(data.sections?.added || []).length}`,
+      `Removed: ${(data.sections?.removed || []).length}`,
+    ].join('\n');
+    copyTextToClipboard(summary)
+      .then(() => showToast('Comparison summary copied'))
+      .catch(() => showToast('Failed to copy summary', 'error'));
+  });
+  actions.appendChild(copy);
+  body.appendChild(actions);
+
+  const sections = data.sections || {};
+  const changedLines = sections.changed || [];
+  const addedLines = sections.added || [];
+  const removedLines = sections.removed || [];
+  const addedOmitted = sections.added_omitted || 0;
+  const removedOmitted = sections.removed_omitted || 0;
+  if (changedLines.length) {
+    body.appendChild(_renderHistoryCompareChangedLines(changedLines));
+  }
+  if (addedLines.length || addedOmitted) {
+    body.appendChild(_renderHistoryCompareLines('Added lines', addedLines, addedOmitted, '+'));
+  }
+  if (removedLines.length || removedOmitted) {
+    body.appendChild(_renderHistoryCompareLines('Removed lines', removedLines, removedOmitted, '-'));
+  }
+  if (!changedLines.length && !addedLines.length && !removedLines.length && !addedOmitted && !removedOmitted) {
+    const empty = document.createElement('div');
+    empty.className = 'history-compare-empty';
+    empty.textContent = 'No changed output.';
+    body.appendChild(empty);
+  }
+}
+
+function fetchAndRenderHistoryComparison(leftId, rightId) {
+  if (!leftId || !rightId) return;
+  const body = document.querySelector('#history-compare-body');
+  if (body) {
+    body.replaceChildren();
+    const loading = document.createElement('div');
+    loading.className = 'history-compare-empty';
+    loading.textContent = 'Comparing runs...';
+    body.appendChild(loading);
+  }
+  apiFetch(`/history/compare?left=${encodeURIComponent(leftId)}&right=${encodeURIComponent(rightId)}`)
+    .then(resp => resp.json())
+    .then(data => {
+      if (data.error) throw new Error(data.error);
+      _renderHistoryComparison(data);
+    })
+    .catch(() => {
+      _renderHistoryCompareLauncher();
+      showToast('Failed to compare runs', 'error');
+    });
 }
 
 
@@ -1167,6 +1859,13 @@ function refreshHistoryPanel() {
           const url = `${location.origin}/history/${run.id}`;
           shareUrl(url).catch(() => showToast('Failed to copy link', 'error'));
           if (!_historyActionKeepsPanelOpen('permalink')) hideHistoryPanel();
+        },
+      });
+      bindPressable(entry.querySelector('[data-action="compare"]'), {
+        refocusComposer: false,
+        onActivate: () => {
+          openHistoryCompareLauncher(run);
+          if (!_historyActionKeepsPanelOpen('compare')) hideHistoryPanel();
         },
       });
       bindPressable(entry.querySelector('[data-action="delete"]'), {

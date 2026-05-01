@@ -38,32 +38,29 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
   - Consider command metadata such as `risky`, `slow`, or `high-output` before adding stronger Run all confirmations.
 
 - **Run comparison**
-  - Promote run comparison from a broad idea into a concrete history-centered feature.
-  - Add a `compare` action to run rows in the history drawer.
-    - If a plausible previous similar run exists, offer `Compare with previous similar run` as the primary/default path.
-    - Also offer a manual picker so the user can search/select a second run.
-    - Prefill the manual picker with filters based on the selected source run: command root, inferred target when available, and project later.
-  - Define "previous similar run" conservatively for the first version.
-    - Best match: same normalized command.
-    - Next best: same command root and same inferred target metadata.
-    - Fallback: same command root only, shown with weaker confidence copy.
-    - Do not over-normalize commands until the matching behavior is easy to explain.
-  - Build the first compare view as a focused modal/drawer rather than a full side-by-side editor.
-    - Show run A / run B commands, timestamps, exit codes, elapsed times, and output line counts.
-    - Show summary deltas: exit code changed, duration changed, finding count changed, output grew/shrank.
-    - Show collapsible `Added lines` and `Removed lines` sections.
-    - Hide unchanged lines by default.
-    - Include actions to open/restore each source run.
-  - Add follow-up entry points after the history-row version works.
-    - Active tab `compare` action for restored/completed runs.
-    - Findings strip action such as `compare findings with previous run`.
+  - Future-state enhancements after the v1 history-row comparison flow has real use.
+    - Finding-level diffs using persisted signal/finding metadata:
+      - New findings.
+      - Disappeared findings.
+      - Unchanged findings.
+      - Changed severity or changed metadata.
+    - Tool-aware diffs for common scanner outputs:
+      - `nmap`: ports, protocols, services, versions, and state changes.
+      - URL/status/title lists: new URLs, disappeared URLs, status changes, title changes.
+      - Subdomain lists: new and disappeared names.
+      - TLS/certificate output: issuer, subject, SAN, validity, and fingerprint changes.
+    - Keep tool-aware parsers additive; raw changed/added/removed output should remain the fallback.
+  - Future entry points and packaging:
+    - Active tab `Compare` action for restored/completed runs.
+    - Findings strip action such as `Compare findings with previous run`.
+    - Workflow provenance in comparison summaries once workflow-linked runs exist.
     - Project baseline compare once projects exist.
-    - Snapshot/permalink compare later if the run-vs-run model proves useful.
-  - Phase the diff intelligence.
-    - Phase 1: raw text added/removed lines plus run metadata deltas.
-    - Phase 2: finding-level diff using signal/finding metadata: new, disappeared, unchanged, and changed-severity findings.
-  - Phase 3: tool-aware diffs for common outputs such as `nmap` ports/services, URL/status/title lists, subdomain lists, and TLS certificate changes.
-  - Add tests for best-previous-run selection, manual picker filtering, raw added/removed diff output, empty/no-match states, large output handling, and later finding-aware diffs.
+    - Snapshot/permalink compare if the run-vs-run model continues to work well.
+    - `Export comparison` once share/export packages have a stable artifact model.
+  - Future UX/testing:
+    - Consider date-range filters in the manual compare picker if day grouping plus `Load More` is not enough for deep history.
+    - Add Playwright coverage for the compare launcher/result flow on desktop and mobile after the UI settles.
+    - Add focused large/noisy comparison regression coverage if real-world outputs expose performance issues beyond current backend and unit coverage.
 
 - **Declarative command runtime adaptations in `commands.yaml`**
   - Move command-specific runtime rewrites and environment tweaks out of app-owned Python branches and into the command registry.

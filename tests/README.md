@@ -18,12 +18,12 @@ The suites are intentionally layered:
 
 Current totals:
 
-- behavior tests: 2,237
+- behavior tests: 2,243
 - docs/inventory meta-tests: 30
-- `pytest`: 1111 (1081 behavior + 30 meta)
-- `vitest`: 927
+- `pytest`: 1114 (1084 behavior + 30 meta)
+- `vitest`: 930
 - `playwright`: 229
-- total: 2,267
+- total: 2,273
 
 This document is organized in two parts:
 
@@ -490,7 +490,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSeedHistoryFixtures.test_seed_runs_avoids_adjacent_duplicate_commands` | Verifies that seeded history avoids back-to-back duplicate commands even when the overall run set still includes repeats. |
 | `TestRewriteIdempotent.test_mtr_already_report_wide_unchanged` | Checks that mtr already report wide unchanged. |
 | `TestRewriteIdempotent.test_mtr_report_flag_unchanged` | Checks that mtr report flag unchanged. |
-| `TestRewriteIdempotent.test_nmap_already_privileged_unchanged` | Checks that nmap already privileged unchanged. |
+| `TestRewriteIdempotent.test_nmap_already_connect_scan_unchanged` | Checks that nmap already connect scan unchanged. |
 | `TestRewriteIdempotent.test_nuclei_already_ud_unchanged` | Checks that nuclei already ud unchanged. |
 | `TestRewriteIdempotent.test_wapiti_already_output_unchanged` | Checks that wapiti already output unchanged. |
 | `TestExpiryNote.test_returns_empty_when_retention_zero` | Returns empty when retention zero. |
@@ -652,7 +652,7 @@ Meta-tests that verify documentation stays in sync with the test suite and opera
 | `TestShareCreatedEvent.test_share_created_extra_has_share_id` | Checks that share created extra has share id. |
 | `TestCmdRewriteEvent.test_nmap_rewrite_emits_info` | Checks that nmap rewrite emits info. |
 | `TestCmdRewriteEvent.test_nmap_rewrite_extra_has_original` | Checks that nmap rewrite extra has original. |
-| `TestCmdRewriteEvent.test_nmap_rewrite_extra_has_privileged_flag` | Checks that nmap rewrite extra has privileged flag. |
+| `TestCmdRewriteEvent.test_nmap_rewrite_extra_has_connect_scan_flag` | Checks that nmap rewrite extra has connect scan flag. |
 | `TestCmdRewriteEvent.test_unrewritten_command_does_not_emit_cmd_rewrite` | Checks that unrewritten command does not emit command rewrite. |
 | `TestRunLifecycleEvents.test_run_start_emits_info` | Checks that run start emits info. |
 | `TestRunLifecycleEvents.test_run_start_masks_token_session_id` | Checks that run lifecycle logs mask token-backed session identifiers. |
@@ -931,9 +931,12 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestHistoryRoute.test_history_applies_starred_only_server_side` | Checks that starred-only history filtering is applied server-side and reflected in totals. |
 | `TestHistoryRoute.test_history_can_return_snapshot_items` | Checks that `/history?type=snapshots` returns snapshot items through the mixed history payload while leaving the run subset empty. |
 | `TestHistoryRoute.test_history_search_filters_by_command_text` | Checks that `/history` command-text search narrows the returned runs. |
+| `TestHistoryRoute.test_history_command_scope_excludes_output_matches` | Verifies command-scoped history search excludes runs that only match through saved output text. |
 | `TestHistoryRoute.test_history_filters_by_command_root` | Checks that `/history` command-root filtering returns matching runs and exposes the session root list. |
 | `TestHistoryRoute.test_history_filters_by_exit_code_and_recent_date_range` | Checks that `/history` exit-code and recent-date filters can be combined. |
 | `TestHistoryRoute.test_active_history_returns_running_runs_for_this_session` | Checks that `/history/active` returns the current session's in-flight run metadata. |
+| `TestHistoryRoute.test_compare_candidates_rank_exact_command_before_same_target` | Verifies that run comparison candidates prefer exact command matches before same-target and same-command-only matches. |
+| `TestHistoryRoute.test_compare_history_runs_returns_metadata_and_changed_lines` | Verifies that run comparison returns metadata deltas, changed-line pairs, and added/removed output while ignoring terminal chrome. |
 | `TestShareRoute.test_post_creates_snapshot` | Checks post creates snapshot handling. |
 | `TestShareRoute.test_post_rejects_non_string_label` | Checks that post rejects non string label. |
 | `TestShareRoute.test_post_rejects_non_list_content` | Checks that post rejects non list content. |
@@ -1249,8 +1252,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRewrites.test_mtr_no_rewrite_if_report_flag_present` | Checks that mtr no rewrite if report flag present. |
 | `TestRewrites.test_mtr_no_rewrite_if_report_wide_present` | Checks that mtr no rewrite if report wide present. |
 | `TestRewrites.test_mtr_short_flag_no_rewrite` | Checks that mtr short flag no rewrite. |
-| `TestRewrites.test_nmap_adds_privileged` | Checks nmap adds privileged handling. |
-| `TestRewrites.test_nmap_no_double_privileged` | Checks that nmap no double privileged. |
+| `TestRewrites.test_nmap_adds_connect_scan` | Checks nmap adds connect scan handling. |
+| `TestRewrites.test_nmap_no_double_connect_scan` | Checks that nmap no double connect scan. |
 | `TestRewrites.test_nuclei_adds_template_dir` | Checks that nuclei adds template dir. |
 | `TestRewrites.test_nuclei_no_rewrite_if_ud_present` | Checks that nuclei no rewrite if ud present. |
 | `TestRewrites.test_wapiti_adds_stdout_redirect` | Checks that wapiti adds stdout redirect. |
@@ -1593,6 +1596,9 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `closes the history panel for permalink but keeps it open for star and delete` | Verifies permalink closes the desktop drawer while star and delete keep it open so the row stays in context under the confirm modal. |
 | `keeps the history panel open on mobile for every row action (confirm modal overlays it)` | Verifies the mobile drawer no longer auto-closes on the delete row — the confirm modal overlays the drawer and ui_confirm owns refocus on resolve. |
 | `refreshHistoryPanel labels the history permalink action as permalink` | Verifies that the history drawer permalink action keeps the expected label. |
+| `opens the run comparison launcher from a history row` | Verifies that the history row compare action opens the comparison launcher with the suggested previous run. |
+| `replaces manual comparison choices when searching the compare launcher` | Verifies that compare launcher search replaces the manual candidate list instead of merging stale suggested runs into the search results. |
+| `renders changed added and removed lines after choosing a comparison candidate` | Verifies that choosing a comparison candidate renders paired changed lines plus added/removed output. |
 | `includes the history type filter in the request URL when snapshots are selected` | Verifies that switching the desktop history surface to snapshots adds the `type=snapshots` filter to the `/history` request. |
 | `renders snapshot rows with open and copy-link actions` | Verifies that snapshot-only history responses render the `SNAPSHOT` row treatment and expose the snapshot action set. |
 | `shows a date in history metadata when the run is not from today` | Verifies that older history entries include a date token in their metadata row. |

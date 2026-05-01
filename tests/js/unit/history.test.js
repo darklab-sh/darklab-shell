@@ -568,10 +568,18 @@ describe('history panel actions', () => {
 
     const clipboard = clipboardImpl || { writeText: () => Promise.resolve() }
     const showToast = vi.fn()
-    const createTab = vi.fn(() => 'tab-2')
+    let createdTabSeq = 1
+    const createTab = vi.fn((label = '') => {
+      createdTabSeq += 1
+      const id = `tab-${createdTabSeq}`
+      tabs.push({ id, command: '', rawLines: [], st: 'idle', label })
+      return id
+    })
     const activateTab = vi.fn()
     const appendLine = vi.fn()
     const appendCommandEcho = vi.fn()
+    const bindDismissible = vi.fn()
+    const refocusComposerAfterAction = vi.fn(() => false)
     const setTabStatus = vi.fn((id, st) => {
       const tab = tabs.find((t) => t.id === id)
       if (tab) tab.st = st
@@ -622,14 +630,15 @@ describe('history panel actions', () => {
           historyDateFilter,
           historyStarredToggle,
           historyClearFiltersBtn,
-        historyActiveFilters,
-        historyPagination,
-        historyPaginationSummary,
-        historyPaginationControls,
-        histRow: document.createElement('div'),
-        showConfirm: vi.fn(() => Promise.resolve(null)),
-        cmdInput,
+          historyActiveFilters,
+          historyPagination,
+          historyPaginationSummary,
+          historyPaginationControls,
+          histRow: document.createElement('div'),
+          showConfirm: vi.fn(() => Promise.resolve(null)),
+          cmdInput,
           tabs,
+          getTab: id => tabs.find(t => t.id === id),
           activateTab,
           createTab,
           appendLine,
@@ -646,13 +655,14 @@ describe('history panel actions', () => {
           }),
           confirmHistAction: () => {},
           executeHistAction: () => {},
+          bindDismissible,
           useMobileTerminalViewportMode: () => mobileMode,
           setComposerValue: (val, start = null, end = null) => {
             cmdInput.value = String(val ?? '')
             if (typeof start === 'number') cmdInput.selectionStart = start
             if (typeof end === 'number') cmdInput.selectionEnd = end
           },
-          refocusComposerAfterAction: vi.fn(() => false),
+          refocusComposerAfterAction,
         },
       `{
         refreshHistoryPanel,
@@ -671,11 +681,15 @@ describe('history panel actions', () => {
       apiFetch,
       clipboard,
       windowOpen,
+      createTab,
+      activateTab,
       appendLine,
       appendCommandEcho,
       setTabStatus,
       hideTabKillBtn,
       showToast,
+      bindDismissible,
+      refocusComposerAfterAction,
     }
   }
 
@@ -788,6 +802,350 @@ describe('history panel actions', () => {
 
     const btn = document.querySelector('#history-list .history-entry [data-action="permalink"]')
     expect(btn.textContent).toBe('permalink')
+  })
+
+  it('opens the run comparison launcher from a history row', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              roots: ['nmap'],
+              items: [
+                {
+                  id: 'run-new',
+                  type: 'run',
+                  command: 'nmap darklab.sh',
+                  started: '2026-01-01T00:00:04Z',
+                  exit_code: 0,
+                  output_line_count: 2,
+                },
+              ],
+              runs: [
+                {
+                  id: 'run-new',
+                  command: 'nmap darklab.sh',
+                  started: '2026-01-01T00:00:04Z',
+                  exit_code: 0,
+                  output_line_count: 2,
+                },
+              ],
+            }),
+        })
+      }
+      if (url === '/history/run-new/compare-candidates') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              source: {
+                id: 'run-new',
+                command: 'nmap darklab.sh',
+                command_root: 'nmap',
+                started: '2026-01-01T00:00:04Z',
+                exit_code: 0,
+                output_line_count: 2,
+              },
+              suggested: {
+                id: 'run-old',
+                command: 'nmap darklab.sh',
+                started: '2026-01-01T00:00:01Z',
+                exit_code: 0,
+                output_line_count: 1,
+                confidence_label: 'Exact command',
+              },
+              candidates: [
+                {
+                  id: 'run-old',
+                  command: 'nmap darklab.sh',
+                  started: '2026-01-01T00:00:01Z',
+                  exit_code: 0,
+                  output_line_count: 1,
+                  confidence_label: 'Exact command',
+                },
+              ],
+            }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({ items: [], runs: [] }) })
+    })
+    const { refreshHistoryPanel, bindDismissible, refocusComposerAfterAction } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+    document
+      .querySelector('#history-list .history-entry [data-action="compare"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(apiFetch).toHaveBeenCalledWith('/history/run-new/compare-candidates')
+    expect(document.getElementById('history-compare-overlay').classList.contains('open')).toBe(true)
+    expect(bindDismissible).toHaveBeenCalledWith(
+      document.getElementById('history-compare-overlay'),
+      expect.objectContaining({ level: 'modal' }),
+    )
+    expect(refocusComposerAfterAction).not.toHaveBeenCalled()
+    expect(document.querySelector('.history-compare-primary')?.textContent).toBe(
+      'Compare with suggested run',
+    )
+    expect(document.querySelector('.history-compare-run-card')?.textContent).toContain('nmap darklab.sh')
+    bindDismissible.mock.calls[0][1].onClose()
+    expect(document.getElementById('history-compare-overlay').classList.contains('open')).toBe(false)
+  })
+
+  it('replaces manual comparison choices when searching the compare launcher', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (
+        typeof url === 'string'
+        && (url === '/history' || (url.startsWith('/history?') && !url.includes('page_size=20')))
+      ) {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              roots: ['nmap'],
+              items: [
+                {
+                  id: 'run-new',
+                  type: 'run',
+                  command: 'nmap darklab.sh',
+                  started: '2026-01-01T00:00:04Z',
+                  exit_code: 0,
+                },
+              ],
+              runs: [],
+            }),
+        })
+      }
+      if (url === '/history/run-new/compare-candidates') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              source: { id: 'run-new', command: 'nmap darklab.sh', command_root: 'nmap' },
+              suggested: { id: 'run-old', command: 'nmap darklab.sh', confidence_label: 'Exact command' },
+              candidates: [{ id: 'run-old', command: 'nmap darklab.sh', confidence_label: 'Exact command' }],
+            }),
+        })
+      }
+      if (typeof url === 'string' && url.includes('/history?') && url.includes('q=ssl') && url.includes('page=2')) {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              items: [
+                {
+                  id: 'run-ssl-old',
+                  type: 'run',
+                  command: 'sslscan old.darklab.sh',
+                  started: '2025-12-31T12:00:02Z',
+                  exit_code: 0,
+                },
+              ],
+              page: 2,
+              has_next: false,
+            }),
+        })
+      }
+      if (typeof url === 'string' && url.includes('/history?') && url.includes('q=ssl')) {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              items: [
+                {
+                  id: 'run-ssl',
+                  type: 'run',
+                  command: 'sslscan darklab.sh',
+                  started: '2026-01-01T12:00:02Z',
+                  exit_code: 0,
+                },
+              ],
+              page: 1,
+              has_next: true,
+              runs: [],
+            }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({ items: [], runs: [] }) })
+    })
+    const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+    document
+      .querySelector('#history-list .history-entry [data-action="compare"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const search = document.querySelector('.history-compare-search')
+    search.focus()
+    search.value = 'ssl'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const listText = document.querySelector('[data-compare-candidate-list="1"]')?.textContent || ''
+    expect(apiFetch).toHaveBeenCalledWith('/history?type=runs&page_size=20&include_total=1&page=1&scope=command&q=ssl')
+    expect(listText).toContain('sslscan darklab.sh')
+    expect(listText).not.toContain('nmap darklab.sh')
+    expect(document.querySelector('.history-compare-candidate-day')?.textContent).toBeTruthy()
+    expect(document.activeElement).toBe(search)
+
+    const dayToggle = document.querySelector('.history-compare-candidate-day')
+    const dayRows = document.querySelector('.history-compare-candidate-group-rows')
+    expect(dayToggle.getAttribute('aria-expanded')).toBe('true')
+    expect(dayRows.hidden).toBe(false)
+    dayToggle.click()
+    expect(dayToggle.getAttribute('aria-expanded')).toBe('false')
+    expect(dayRows.hidden).toBe(true)
+    dayToggle.click()
+    expect(dayRows.hidden).toBe(false)
+
+    document.querySelector('.history-compare-load-more').click()
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(apiFetch).toHaveBeenCalledWith('/history?type=runs&page_size=20&include_total=1&page=2&scope=command&q=ssl')
+    expect(document.querySelector('[data-compare-candidate-list="1"]')?.textContent || '').toContain(
+      'sslscan old.darklab.sh',
+    )
+  })
+
+  it('renders changed added and removed lines after choosing a comparison candidate', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              roots: ['nmap'],
+              items: [
+                {
+                  id: 'run-new',
+                  type: 'run',
+                  command: 'nmap darklab.sh',
+                  started: '2026-01-01T00:00:04Z',
+                  exit_code: 0,
+                },
+              ],
+              runs: [],
+            }),
+        })
+      }
+      if (url === '/history/run-new/compare-candidates') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              source: { id: 'run-new', command: 'nmap darklab.sh', command_root: 'nmap' },
+              suggested: { id: 'run-old', command: 'nmap darklab.sh', confidence_label: 'Exact command' },
+              candidates: [{ id: 'run-old', command: 'nmap darklab.sh', confidence_label: 'Exact command' }],
+            }),
+        })
+      }
+      if (url === '/history/compare?left=run-new&right=run-old') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              left: { id: 'run-new', command: 'nmap darklab.sh', exit_code: 0, output_line_count: 2 },
+              right: { id: 'run-old', command: 'nmap darklab.sh', exit_code: 0, output_line_count: 2 },
+              deltas: {
+                exit_code_changed: false,
+                exit_code: { left: 0, right: 0 },
+                duration_seconds: { delta: 0 },
+                output_lines: { delta: 0 },
+                findings: { delta: 0 },
+              },
+              sections: {
+                changed: [
+                  {
+                    removed: {
+                      text: 'Starting Nmap at 2026-04-30 23:22 UTC',
+                      segments: [
+                        { text: 'Starting Nmap at 2026-04-30 23:' },
+                        { text: '22', changed: true },
+                        { text: ' UTC' },
+                      ],
+                    },
+                    added: {
+                      text: 'Starting Nmap at 2026-04-30 23:21 UTC',
+                      segments: [
+                        { text: 'Starting Nmap at 2026-04-30 23:' },
+                        { text: '21', changed: true },
+                        { text: ' UTC' },
+                      ],
+                    },
+                  },
+                ],
+                added: [{ text: '443/tcp open https' }],
+                removed: [{ text: '8080/tcp open http-proxy' }],
+              },
+              truncated: {},
+            }),
+        })
+      }
+      if (url === '/history/run-new?json&preview=1') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              id: 'run-new',
+              command: 'nmap darklab.sh',
+              output: ['new output'],
+              exit_code: 0,
+            }),
+        })
+      }
+      if (url === '/history/run-old?json&preview=1') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              id: 'run-old',
+              command: 'nmap darklab.sh',
+              output: ['old output'],
+              exit_code: 0,
+            }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({ items: [], runs: [] }) })
+    })
+    const { refreshHistoryPanel, createTab, appendCommandEcho, appendLine, activateTab } =
+      loadHistoryPanel({ apiFetchImpl: apiFetch })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+    document
+      .querySelector('#history-list .history-entry [data-action="compare"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+    document.querySelector('.history-compare-primary').click()
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('Changed lines (1)')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('23:22 UTC')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('23:21 UTC')
+    expect(document.querySelectorAll('.history-compare-line-delta')).toHaveLength(2)
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('443/tcp open https')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('8080/tcp open http-proxy')
+
+    const restoreBoth = [...document.querySelectorAll('.history-compare-actions button')]
+      .find(button => button.textContent === 'Restore Both')
+    restoreBoth.click()
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(createTab).toHaveBeenCalledWith('A: nmap darklab.sh')
+    expect(createTab).toHaveBeenCalledWith('B: nmap darklab.sh')
+    expect(appendCommandEcho).toHaveBeenCalledWith('nmap darklab.sh', 'tab-2')
+    expect(appendCommandEcho).toHaveBeenCalledWith('nmap darklab.sh', 'tab-3')
+    expect(appendLine).toHaveBeenCalledWith('new output', '', 'tab-2')
+    expect(appendLine).toHaveBeenCalledWith('old output', '', 'tab-3')
+    expect(activateTab).toHaveBeenCalledWith('tab-3', { focusComposer: false })
+    expect(document.getElementById('history-compare-overlay').classList.contains('open')).toBe(false)
   })
 
   it('includes the history type filter in the request URL when snapshots are selected', () => {

@@ -785,11 +785,11 @@ class TestAutocompleteWorkspaceRoute:
 
         disabled_nmap = disabled["context"]["nmap"]
         enabled_nmap = enabled["context"]["nmap"]
-        assert "nmap -iL targets.txt -p 80,443 --open -oN nmap-web.txt" not in {
+        assert "nmap -sT -iL targets.txt -p 80,443 --open -oN nmap-web.txt" not in {
             item["value"] for item in disabled_nmap["examples"]
         }
         assert "-iL" not in {item["value"] for item in disabled_nmap["flags"]}
-        assert "nmap -iL targets.txt -p 80,443 --open -oN nmap-web.txt" in {
+        assert "nmap -sT -iL targets.txt -p 80,443 --open -oN nmap-web.txt" in {
             item["value"] for item in enabled_nmap["examples"]
         }
         assert "-iL" in {item["value"] for item in enabled_nmap["flags"]}
@@ -1723,6 +1723,52 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
+    def test_history_command_scope_excludes_output_matches(self):
+        client = get_client()
+        session = "history-command-scope-session"
+        run_ids = ["command-scope-1", "command-scope-2"]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_search_text) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run_ids[0],
+                    session,
+                    "file list",
+                    "2026-01-01T00:00:01",
+                    "2026-01-01T00:00:02",
+                    0,
+                    "[]",
+                    "amass results.txt",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_search_text) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run_ids[1],
+                    session,
+                    "amass enum -d darklab.sh",
+                    "2026-01-01T00:00:03",
+                    "2026-01-01T00:00:04",
+                    0,
+                    "[]",
+                    "",
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get("/history?type=runs&scope=command&q=amass", headers={"X-Session-ID": session})
+            data = json.loads(resp.data)
+            assert [r["command"] for r in data["runs"]] == ["amass enum -d darklab.sh"]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+            conn.commit()
+            conn.close()
+
     def test_history_filters_by_command_root(self):
         client = get_client()
         session = "history-root-session"
@@ -1830,6 +1876,154 @@ class TestHistoryRoute:
         assert resp.status_code == 200
         assert json.loads(resp.data) == {"runs": active_runs}
         active_mock.assert_called_once_with(session, client_id="client-1")
+
+    def test_compare_candidates_rank_exact_command_before_same_target(self):
+        client = get_client()
+        session = "compare-candidates-" + uuid.uuid4().hex[:8]
+        rows = [
+            (
+                "cmp-source",
+                session,
+                "nmap -sV darklab.sh",
+                "2026-01-01T00:00:04",
+                "2026-01-01T00:00:06",
+                0,
+                "[]",
+            ),
+            (
+                "cmp-exact",
+                session,
+                "nmap -sV darklab.sh",
+                "2026-01-01T00:00:03",
+                "2026-01-01T00:00:05",
+                0,
+                "[]",
+            ),
+            (
+                "cmp-target",
+                session,
+                "nmap -Pn darklab.sh",
+                "2026-01-01T00:00:02",
+                "2026-01-01T00:00:04",
+                0,
+                "[]",
+            ),
+            (
+                "cmp-root",
+                session,
+                "nmap scanme.nmap.org",
+                "2026-01-01T00:00:01",
+                "2026-01-01T00:00:03",
+                0,
+                "[]",
+            ),
+        ]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                "/history/cmp-source/compare-candidates",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+
+            assert resp.status_code == 200
+            assert [item["id"] for item in data["candidates"][:3]] == [
+                "cmp-exact",
+                "cmp-target",
+                "cmp-root",
+            ]
+            assert data["candidates"][0]["confidence"] == "exact_command"
+            assert data["candidates"][1]["confidence"] == "same_target"
+            assert data["candidates"][2]["confidence"] == "same_command"
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
+
+    def test_compare_history_runs_returns_metadata_and_changed_lines(self):
+        client = get_client()
+        session = "compare-runs-" + uuid.uuid4().hex[:8]
+        left_output = json.dumps([
+            {"text": "anon@darklab:/ $ nmap darklab.sh", "cls": "prompt-echo"},
+            {"text": "Starting Nmap 7.95 ( https://nmap.org ) at 2026-04-30 23:22 UTC", "cls": ""},
+            {"text": "80/tcp open http", "cls": "", "signals": ["findings"], "line_index": 0},
+            {"text": "8080/tcp open http-proxy", "cls": "", "signals": ["findings"], "line_index": 1},
+            {"text": "[process exited with code 0]", "cls": "exit-ok"},
+        ])
+        right_output = json.dumps([
+            {"text": "anon@darklab:/ $ nmap darklab.sh", "cls": "prompt-echo"},
+            {"text": "Starting Nmap 7.95 ( https://nmap.org ) at 2026-04-30 23:21 UTC", "cls": ""},
+            {"text": "80/tcp open http", "cls": "", "signals": ["findings"], "line_index": 0},
+            {"text": "443/tcp open https", "cls": "", "signals": ["findings"], "line_index": 1},
+            {"text": "[process exited with code 0]", "cls": "exit-ok"},
+        ])
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+                "output_preview, output_line_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "cmp-left",
+                    session,
+                    "nmap darklab.sh",
+                    "2026-01-01T00:00:01",
+                    "2026-01-01T00:00:03",
+                    0,
+                    left_output,
+                    4,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+                "output_preview, output_line_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "cmp-right",
+                    session,
+                    "nmap darklab.sh",
+                    "2026-01-01T00:00:04",
+                    "2026-01-01T00:00:09",
+                    0,
+                    right_output,
+                    4,
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                "/history/compare?left=cmp-left&right=cmp-right",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+
+            assert resp.status_code == 200
+            assert data["left"]["command"] == "nmap darklab.sh"
+            assert data["right"]["duration_seconds"] == 5
+            assert data["deltas"]["duration_seconds"]["delta"] == 3
+            assert data["deltas"]["findings"]["delta"] == 0
+            assert len(data["sections"]["changed"]) == 1
+            changed = data["sections"]["changed"][0]
+            assert changed["removed"]["text"].endswith("23:22 UTC")
+            assert changed["added"]["text"].endswith("23:21 UTC")
+            assert any(segment["changed"] for segment in changed["removed"]["segments"])
+            assert any(segment["changed"] for segment in changed["added"]["segments"])
+            assert [line["text"] for line in data["sections"]["added"]] == ["443/tcp open https"]
+            assert [line["text"] for line in data["sections"]["removed"]] == ["8080/tcp open http-proxy"]
+            assert all("process exited" not in line["text"] for line in data["sections"]["added"])
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
 
 
 # ── /share ────────────────────────────────────────────────────────────────────

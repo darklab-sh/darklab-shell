@@ -58,6 +58,11 @@ UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 TIME_RE = re.compile(r"\b\d{2}:\d{2}:\d{2}\b")
 
 
+def _new_smoke_session_id() -> str:
+    """Return a production-valid anonymous session id for smoke HTTP calls."""
+    return str(uuid.uuid4())
+
+
 def _require_docker() -> None:
     if shutil.which("docker") is None:
         pytest.skip("docker CLI is required for the container smoke test")
@@ -283,7 +288,7 @@ def test_post_run_kills_early_when_stop_text_is_seen(monkeypatch: pytest.MonkeyP
                 return b""
             return self._lines.pop(0)
 
-    killed: list[tuple[str, str]] = []
+    killed: list[tuple[str, str, str]] = []
 
     def _fake_urlopen(req, timeout=0):
         del timeout
@@ -298,7 +303,7 @@ def test_post_run_kills_early_when_stop_text_is_seen(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(
         sys.modules[__name__],
         "_post_kill",
-        lambda base_url, run_id: killed.append((base_url, run_id)),
+        lambda base_url, session_id, run_id: killed.append((base_url, session_id, run_id)),
     )
     waited: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
@@ -317,7 +322,7 @@ def test_post_run_kills_early_when_stop_text_is_seen(monkeypatch: pytest.MonkeyP
 
     assert killed_early is True
     assert [event["type"] for event in events] == ["started", "output"]
-    assert killed == [("http://example.test", "run-123")]
+    assert killed == [("http://example.test", "session-123", "run-123")]
     assert waited == [("http://example.test", "session-123", "run-123")]
 
 
@@ -599,12 +604,15 @@ def _workspace_delete_file(base_url: str, session_id: str, path: str) -> None:
     )
 
 
-def _post_kill(base_url: str, run_id: str) -> None:
+def _post_kill(base_url: str, session_id: str, run_id: str) -> None:
     payload = json.dumps({"run_id": run_id}).encode("utf-8")
     req = urllib.request.Request(
         f"{base_url}/kill",
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "X-Session-ID": session_id,
+        },
         method="POST",
     )
     try:
@@ -714,7 +722,7 @@ def _post_run(
             if (stop_text or stop_patterns) and event.get("type") in {"output", "notice"}:
                 if _is_output_satisfied(events, command, stop_text, stop_patterns):
                     if run_id:
-                        _post_kill(base_url, run_id)
+                        _post_kill(base_url, session_id, run_id)
                         _wait_for_run_to_stop(base_url, session_id, run_id)
                     killed_early = True
                     break
@@ -884,7 +892,7 @@ def container_smoke_test():
 
 @pytest.fixture(scope="module")
 def container_smoke_test_session_id() -> str:
-    return f"container-smoke-test-{uuid.uuid4().hex}"
+    return _new_smoke_session_id()
 
 
 _SELECTED_COMMANDS = _selected_commands_from_env()
@@ -908,7 +916,7 @@ def container_smoke_test_nuclei_templates(container_smoke_test, container_smoke_
     if not _needs_nuclei_template_warmup(SMOKE_TEST_CASES) and not _needs_nuclei_workspace_template_warmup():
         return
 
-    warmup_session_id = f"{container_smoke_test_session_id}-nuclei-warmup"
+    warmup_session_id = _new_smoke_session_id()
     print(
         f"[container-smoke-test] warming nuclei templates: {NUCLEI_TEMPLATE_WARMUP_COMMAND}",
         flush=True,
@@ -1130,7 +1138,7 @@ def test_container_smoke_test_command_matches_expected_output(
         attempt_session_id = (
             container_smoke_test_session_id
             if attempt == 1
-            else f"{container_smoke_test_session_id}-retry-{attempt}-{uuid.uuid4().hex[:8]}"
+            else _new_smoke_session_id()
         )
         print(
             f"[container-smoke-test] running {command}"
@@ -1164,7 +1172,7 @@ def test_container_smoke_test_workspace_file_flags(
 
     max_attempts = max(1, SMOKE_COMMAND_RETRIES + 1)
     for attempt in range(1, max_attempts + 1):
-        session_id = f"container-smoke-workspace-{uuid.uuid4().hex}"
+        session_id = _new_smoke_session_id()
         print(
             f"[container-smoke-test] running workspace case {case['name']}: {command}"
             + (f" (attempt {attempt}/{max_attempts})" if max_attempts > 1 else ""),

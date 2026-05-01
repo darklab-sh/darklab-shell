@@ -210,6 +210,8 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `DELETE` | `/history` | Deletes all run history for the current session and removes matching full-output artifacts. |
 | `GET` | `/history/commands` | Returns newest distinct command strings for prompt history, desktop recents, and mobile recents. |
 | `GET` | `/history/active` | Returns active-run metadata and telemetry for reload recovery and the Run Monitor drawer. |
+| `GET` | `/history/<run_id>/compare-candidates` | Returns ranked previous current-session runs for the History drawer's compare launcher. |
+| `GET` | `/history/compare` | Compares two current-session runs and returns metadata deltas plus bounded added/removed output lines. |
 | `GET` | `/history/<run_id>` | Serves an implicit-bearer styled run permalink, or raw JSON with `?json`; uses full-output artifacts when available unless `?preview=1` is set. |
 | `DELETE` | `/history/<run_id>` | Deletes one current-session run and its matching full-output artifact. |
 | `GET` | `/history/<run_id>/full` | Backward-compatible alias for `/history/<run_id>`. |
@@ -606,7 +608,7 @@ These rewrites happen in `rewrite_command()` silently (no user-visible notice un
 | Command | Rewrite | Reason |
 | --------- | --------- | -------- |
 | `mtr` | Adds `--report-wide` | mtr requires a TTY for interactive mode; report mode works without one. User is shown a notice. |
-| `nmap` | Adds `--privileged` | Required for raw socket features with setcap. Silent. |
+| `nmap` | Adds `-sT` when no scan mode is explicit | Uses TCP connect scanning for reliable non-root container execution; `-sS` and `--privileged` are blocked. Silent. |
 | `nuclei` | Adds `-ud /tmp/nuclei-templates` | Redirects template storage to tmpfs. Silent. |
 | `wapiti` | Adds `-f txt -o /dev/stdout` | wapiti writes reports to file by default; this streams to terminal. Silent. |
 | `naabu` | Adds `-scan-type c` | Uses TCP connect scanning instead of raw SYN mode for container reliability. Silent. |
@@ -889,15 +891,15 @@ Workspace cleanup is request-driven rather than a separate daemon. Each worker c
 - session identity is isolation, not authentication; the actual session model lives in **State And Persistence**
 - cross-worker kill relies on Redis-backed PID lookup and a user-bound signal path, as described in **Run Lifecycle**
 
-### nmap Capability Model
+### nmap Scan Mode Model
 
-`nmap` needs raw-socket-related Linux capabilities for SYN scans, OS fingerprinting, and similar features. Those are applied directly to the binary with file capabilities:
+`nmap` can use raw-socket-related Linux capabilities for SYN scans, OS fingerprinting, and similar features. In practice, those capabilities are not reliable for the app's unprivileged `scanner` execution path across Docker hosts and security profiles, even when the binary has file capabilities:
 
 ```bash
 setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
 ```
 
-The app also injects `--privileged` into `nmap` commands during rewrite so the binary uses its available capability set. At the container layer, `docker-compose.yml` adds `NET_RAW` and `NET_ADMIN` so the kernel makes those capabilities available inside the container in the first place.
+For predictable behavior, the app treats TCP connect scans as the supported `nmap` mode. `rewrite_command()` injects `-sT` when an `nmap` command does not already specify a scan mode. Command validation blocks `-sS` and explicit `--privileged` so users do not get confusing raw-socket `Operation not permitted` failures after launch.
 
 ---
 
@@ -925,12 +927,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,237
+- behavior tests: 2,243
 - docs/inventory meta-tests: 30
-- `pytest`: 1111 (1081 behavior + 30 meta)
-- `vitest`: 927
+- `pytest`: 1114 (1084 behavior + 30 meta)
+- `vitest`: 930
 - `playwright`: 229
-- total: 2,267
+- total: 2,273
 
 ### Testing Architecture
 
