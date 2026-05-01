@@ -1906,6 +1906,16 @@ class TestRunStreaming:
                         {"flag": "-iL", "mode": "read", "value": "separate"},
                         {"flag": "-oN", "mode": "write", "value": "separate"},
                     ],
+                    "runtime_adaptations": {
+                        "inject_flags": [
+                            {
+                                "flags": ["-sT"],
+                                "position": "prepend",
+                                "unless_any": ["-h", "--help", "-V", "--version"],
+                                "unless_any_regex": ["^-s[AFILMNOSTUWXYZn]"],
+                            },
+                        ],
+                    },
                 },
             ],
             "pipe_helpers": [],
@@ -1944,6 +1954,65 @@ class TestRunStreaming:
         data = json.loads(hist.data)
         assert data["runs"][0]["command"] == "nmap -iL targets.txt -oN scan.txt"
 
+    def test_run_injects_projectdiscovery_workspace_state_and_surfaces_paths(self, tmp_path):
+        client = get_client()
+        session_id = "sess-projectdiscovery-run"
+        cfg = {
+            "workspace_enabled": True,
+            "workspace_backend": "tmpfs",
+            "workspace_root": str(tmp_path),
+            "workspace_quota_mb": 1,
+            "workspace_max_file_mb": 1,
+            "workspace_max_files": 10,
+            "workspace_inactivity_ttl_hours": 1,
+        }
+        from workspace import session_workspace_name
+        workspace_dir = tmp_path / session_workspace_name(session_id)
+        resume_path = workspace_dir / "katana" / "resume-abcd.cfg"
+        fake_proc = _FakeProc(lines=[f"Creating resume file: {resume_path}\n", ""])
+        registry = {
+            "commands": [
+                {
+                    "root": "katana",
+                    "category": "Network Reconnaissance",
+                    "policy": {"allow": ["katana"], "deny": []},
+                    "runtime_adaptations": {
+                        "inject_flags": [
+                            {
+                                "flags": ["env", "XDG_CONFIG_HOME={session_workspace}"],
+                                "position": "command_prefix",
+                                "requires_workspace": True,
+                            },
+                        ],
+                    },
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("config.CFG", {**shell_app.CFG, **cfg}), \
+             mock.patch("blueprints.run.CFG", {**shell_app.CFG, **cfg}), \
+             mock.patch("commands.load_commands_registry", return_value=registry), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = client.post(
+                "/run",
+                json={"command": "katana -u https://ip.darklab.sh -d 1"},
+                headers={"X-Session-ID": session_id},
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        launched = popen.call_args.args[0]
+        shell_command = launched[-1]
+        assert f"XDG_CONFIG_HOME={workspace_dir}" in shell_command
+        assert "katana -u https://ip.darklab.sh -d 1" in shell_command
+        assert str(workspace_dir) not in body
+        assert "Creating resume file: /katana/resume-abcd.cfg" in body
+
     def test_session_variables_expand_before_validation_and_preserve_typed_history(self):
         client = get_client()
         session_id = "sess-vars-run"
@@ -1956,7 +2025,7 @@ class TestRunStreaming:
 
         fake_proc = _FakeProc(lines=["scan complete\n", ""])
         with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch("blueprints.run.rewrite_command", side_effect=lambda command: (command, None)), \
+             mock.patch("blueprints.run.rewrite_command", side_effect=lambda command, **_: (command, None)), \
              mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
              mock.patch("blueprints.run.pid_register"), \

@@ -41,7 +41,7 @@ darklab_shell is a full-stack, self-hosted web terminal for running network diag
 - **Guided workflows** — built-in diagnostic sequences for DNS, TLS/HTTPS, HTTP, reachability, email, passive domain recon, subdomain validation, directory discovery, CDN/edge checks, API recon, network path analysis, fast port/service triage, and workspace-native recon chains that pass generated Files between tools with reusable target inputs, per-step prompt fills, and sequential `Run all`; users can save session-scoped workflows with `{{variables}}`, edit/delete them in the Workflows panel above the built-ins, and run them from the terminal with `workflow list/show/run`
 - **Security and operations** — registry-backed command policy with deny-prefix lists for loopback and path blocking, shell metacharacter blocking, Redis-backed rate limiting and PID tracking, structured logging with `text` and `gelf` format support, and an IP-gated `/diag` page showing app health, database and Redis status, activity stats, top commands, and per-tool availability
 - **Pre-installed security tooling** — nmap, rustscan, naabu, masscan, nuclei, ffuf, gobuster, katana, amass, wafw00f, sslscan, sslyze, openssl, and more, all sandboxed under a dedicated `scanner` user with enforced allowlists and the full [SecLists](https://github.com/danielmiessler/SecLists) collection pre-installed at `/usr/share/wordlists/seclists/`; the built-in `wordlist` command and typed autocomplete catalog surface high-signal SecLists entries without dumping the whole corpus into suggestions
-- **Operator customization** — context-aware external-tool command metadata surfaced from `conf/commands.yaml`, custom FAQ entries via `conf/faq.yaml`, welcome animation with custom ASCII art and sampled commands via `conf/welcome.yaml`, all reloaded live without a server restart
+- **Operator customization** — context-aware external-tool command metadata and runtime adaptations surfaced from `conf/commands.yaml`, custom FAQ entries via `conf/faq.yaml`, welcome animation with custom ASCII art and sampled commands via `conf/welcome.yaml`, all reloaded live without a server restart
 - **Configurable deployment** — Docker-first runtime, non-Docker local mode, YAML-driven config and theme overlays, SQLite persistence for history, previews, snapshots, and artifacts, and configurable retention pruning via `permalink_retention_days`
 
 See [FEATURES.md](FEATURES.md) for the full grouped capability reference.
@@ -246,12 +246,11 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `testssl` / `testssl.sh` | TLS/SSL vulnerability scanning |
 | `dnsrecon` | DNS enumeration and zone transfer testing |
 | `nikto` | Web server vulnerability scanning |
-| `wapiti` | Web application vulnerability scanning |
 | `wpscan` | WordPress vulnerability scanning |
 | `nuclei` | Fast CVE/misconfiguration scanner using community templates |
 | `subfinder` | Passive subdomain enumeration (ProjectDiscovery) |
 | `amass` | OWASP subdomain enumeration, asset discovery, tracking, and visualization |
-| `pd-httpx` | HTTP/HTTPS probing — status codes, titles, tech detection (ProjectDiscovery). Renamed from `httpx` to avoid conflict with the Python `httpx` library pulled in by wapiti3 |
+| `pd-httpx` | HTTP/HTTPS probing — status codes, titles, tech detection (ProjectDiscovery). Renamed from `httpx` to avoid conflict with the Python `httpx` library |
 | `dnsx` | Fast DNS resolution and record querying (ProjectDiscovery) |
 | `gobuster` | Directory, file, DNS, and vhost brute-forcing. Wordlists installed at `/usr/share/wordlists/seclists/` |
 | `fping` | Fast parallel ICMP ping — sweep multiple hosts or a CIDR range simultaneously |
@@ -296,13 +295,11 @@ naabu defaults to raw SYN packet scanning via libpcap/gopacket, which requires p
 
 masscan is a raw-packet-only scanner with no TCP connect fallback. It requires `CAP_NET_RAW`/`CAP_NET_ADMIN` and libpcap access. These are granted via `setcap` in the Dockerfile and `cap_add` in `docker-compose.yml`, but deep packet injection may still be restricted by the host kernel or container runtime. If masscan fails with an interface error, `rustscan` is a good alternative — it uses TCP connect scanning and works without raw socket access.
 
-#### wapiti
-
-By default wapiti writes its report to a file in `/tmp`, which isn't accessible from the browser. The app automatically appends `-f txt -o /dev/stdout` to any `wapiti` command that doesn't already specify an output path, redirecting the report to the terminal so results appear inline with the scan output. If you want to specify your own output format or path, include `-o` in your command and the rewrite won't fire.
-
 #### nuclei
 
-`nuclei` stores its template library and cache in `$HOME` by default. The app runs nuclei as the `scanner` user with `HOME=/tmp` so all nuclei writes go to the tmpfs mount. The `-ud /tmp/nuclei-templates` flag is automatically injected if not already present so templates are stored and reused across runs within the same container session. Templates are lost on container restart and re-downloaded on the first nuclei run, which takes 30–60 seconds.
+`nuclei` stores its template library and cache in `$HOME` by default. The app runs nuclei as the `scanner` user with `HOME=/tmp` so generic scratch writes go to the tmpfs mount. The `-ud /tmp/nuclei-templates` flag is automatically injected if not already present so templates are stored and reused across runs within the same container session. Templates are lost on container restart and re-downloaded on the first nuclei run, which takes 30–60 seconds.
+
+When Files are enabled, ProjectDiscovery tools (`nuclei`, `subfinder`, `pd-httpx`, `katana`, and `naabu`) are also launched with `XDG_CONFIG_HOME` pointed at the active session workspace. Tool-owned config, resume, and generated state paths therefore appear in Files under folders such as `/katana`, `/subfinder`, `/httpx`, `/naabu`, and `/nuclei` instead of disappearing into `/tmp/.config`. Terminal output rewrites absolute session-workspace paths back to user-facing paths such as `/katana/resume.cfg`.
 
 ---
 
@@ -573,13 +570,13 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── session.py          # /session/token/*, /session/preferences, /session/variables, /session/workflows*, /session/migrate, /session/starred*
 │   │   └── workspace.py        # /workspace/files* app-mediated session file routes
 │   ├── builtin_autocomplete.yaml # App-owned built-in command autocomplete grammar (not operator config)
-│   ├── commands.py             # Command loading, validation (is_command_allowed), and rewrites
+│   ├── commands.py             # Command loading, validation (is_command_allowed), and registry-driven rewrites
 │   ├── conf/                   # Operator-configurable files — edit these to customize the deployment
 │   │   ├── app_hints.txt           # Rotating footer hints for the welcome animation (optional)
 │   │   ├── app_hints_mobile.txt    # Mobile rotating footer hints for the welcome animation (optional)
 │   │   ├── ascii.txt               # Decorative ASCII banner shown during the welcome animation (optional)
 │   │   ├── ascii_mobile.txt        # Mobile ASCII banner shown during the mobile welcome animation (optional)
-│   │   ├── commands.yaml           # Structured command registry for catalog grouping, autocomplete hints, and smoke-test examples
+│   │   ├── commands.yaml           # Structured command registry for catalog grouping, autocomplete hints, runtime adaptations, and smoke-test examples
 │   │   ├── config.local.yaml       # Optional untracked deployment overrides loaded after config.yaml; sibling *.local.* overlays are also supported
 │   │   ├── config.yaml             # Application configuration (see Configuration section)
 │   │   ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)

@@ -118,7 +118,7 @@ Full per-feature reference for darklab_shell. See the [README](README.md) for th
 
 **Structured context format**
 
-`conf/commands.yaml` stores each external command under `commands`, with root-aware flag, argument, subcommand, and example hints under that command's `autocomplete` block:
+`conf/commands.yaml` stores each external command under `commands`, with policy, runtime adaptations, workspace file flags, and root-aware flag, argument, subcommand, and example hints:
 
 ```yaml
 commands:
@@ -129,6 +129,11 @@ commands:
         - nmap
       deny:
         - nmap -sU
+    runtime_adaptations:
+      inject_flags:
+        - flags: [-sT]
+          position: prepend
+          unless_any_regex: ["^-s[AFILMNOSTUWXYZn]"]
     autocomplete:
       flags:
         - value: -sV
@@ -843,6 +848,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Tool names and subcommand prefixes are matched **case-insensitively**; flag names are matched **with exact case** (so `!curl -K` blocks `-K` without blocking `-k`).
 - `/dev/null` exception: denied output flags (`-o`, `-O`) are permitted when their argument is `/dev/null`, allowing patterns like `curl -o /dev/null -w "%{http_code}"`.
 - Operators can set `restricted_command_input_cidrs` to reject literal IP/CIDR targets in command slots declared with target-like `value_type` metadata (`domain`, `host`, `ip`, `cidr`, `target`, or `url`). The check catches literal IPs, overlapping CIDR arguments, URL hosts, host:port values, and app-readable workspace input files passed through declared read flags.
+- Command-specific runtime adaptations are also declared in the registry. `inject_flags` handles safe default flags such as `nmap -sT`, `nuclei -ud /tmp/nuclei-templates`, `naabu -scan-type c`, and `mtr --report-wide`; managed workspace directories and environment wrappers handle Amass' session-scoped database path.
 
 **Limits:** prefix matching is deliberately coarse — operators must be explicit with deny entries to block flag combinations on otherwise-allowed tools. Deny matching only applies once the tool prefix matches (e.g., `!nmap -sU` only affects `nmap` commands). Restricted command inputs only inspect literal values in metadata-known target slots; domain names are not DNS-resolved.
 

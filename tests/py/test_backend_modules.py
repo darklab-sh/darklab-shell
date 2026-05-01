@@ -562,6 +562,30 @@ class TestDerivedCommandRegistry:
                     format: text
                   - flag: ""
                     mode: write
+                runtime_adaptations:
+                  inject_flags:
+                    - flags:
+                        - -sT
+                      position: prepend
+                      unless_any:
+                        - -h
+                      unless_any_regex:
+                        - "^-s[A-Z]"
+                    - flags:
+                        - env
+                        - XDG_CONFIG_HOME={session_workspace}
+                      position: command_prefix
+                      requires_workspace: true
+                  managed_workspace_directory:
+                    flag: -dir
+                    directory: ping-db
+                    subcommands:
+                      - stats
+                    reject_message: ping stats uses the managed ping-db session directory.
+                  environment:
+                    - name: XDG_CONFIG_HOME
+                      value: "{managed_workspace_parent}"
+                      managed_directory_flag: -dir
                 autocomplete:
                   flags:
                     - value: -c
@@ -617,6 +641,28 @@ class TestDerivedCommandRegistry:
             {"flag": "-iL", "mode": "read", "value": "separate", "format": "text"},
             {"flag": "-oN", "mode": "write", "value": "separate_or_attached", "format": "text"},
         ]
+        assert ping["runtime_adaptations"]["inject_flags"] == [
+            {
+                "flags": ["-sT"],
+                "position": "prepend",
+                "unless_any": ["-h"],
+                "unless_any_regex": ["^-s[A-Z]"],
+            },
+            {
+                "flags": ["env", "XDG_CONFIG_HOME={session_workspace}"],
+                "position": "command_prefix",
+                "unless_any": [],
+                "unless_any_regex": [],
+                "requires_workspace": True,
+            },
+        ]
+        assert ping["runtime_adaptations"]["managed_workspace_directory"]["flag"] == "-dir"
+        assert ping["runtime_adaptations"]["managed_workspace_directory"]["directory"] == "ping-db"
+        assert ping["runtime_adaptations"]["environment"] == [{
+            "name": "XDG_CONFIG_HOME",
+            "value": "{managed_workspace_parent}",
+            "managed_directory_flag": "-dir",
+        }]
         assert ping["autocomplete"]["flags"][0] == {"value": "-c", "description": "Count"}
         assert ping["autocomplete"]["flags"][1] == {"value": "-v", "description": "Verbose"}
         assert ping["autocomplete"]["flags"][2] == {"value": "-d", "description": "Target domain", "value_type": "domain"}
@@ -1896,12 +1942,6 @@ class TestRewriteCaseInsensitive:
         cmd, _ = rewrite_command("NUCLEI -u https://darklab.sh")
         assert "-ud /tmp/nuclei-templates" in cmd
 
-    def test_wapiti_uppercase(self):
-        cmd, notice = rewrite_command("WAPITI http://darklab.sh")
-        assert "/dev/stdout" in cmd
-        assert notice is not None
-
-
 # ── pid_register / pid_pop (in-process mode) ─────────────────────────────────
 
 class TestPidMap:
@@ -3024,12 +3064,6 @@ class TestRewriteIdempotent:
     def test_nuclei_already_ud_unchanged(self):
         cmd, _ = rewrite_command("nuclei -ud /my/templates -u https://darklab.sh")
         assert cmd.count("-ud") == 1
-
-    def test_wapiti_already_output_unchanged(self):
-        cmd, notice = rewrite_command("wapiti -u http://darklab.sh -o /tmp/report")
-        assert "/dev/stdout" not in cmd
-        assert notice is None
-
 
 # ── _expiry_note ──────────────────────────────────────────────────────────────
 

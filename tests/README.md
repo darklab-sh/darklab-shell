@@ -18,12 +18,12 @@ The suites are intentionally layered:
 
 Current totals:
 
-- behavior tests: 2,243
+- behavior tests: 2,241
 - docs/inventory meta-tests: 30
-- `pytest`: 1114 (1084 behavior + 30 meta)
+- `pytest`: 1112 (1082 behavior + 30 meta)
 - `vitest`: 930
 - `playwright`: 229
-- total: 2,273
+- total: 2,271
 
 This document is organized in two parts:
 
@@ -416,7 +416,6 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRewriteCaseInsensitive.test_mtr_uppercase` | Checks mtr uppercase handling. |
 | `TestRewriteCaseInsensitive.test_nmap_uppercase` | Checks nmap uppercase handling. |
 | `TestRewriteCaseInsensitive.test_nuclei_uppercase` | Checks nuclei uppercase handling. |
-| `TestRewriteCaseInsensitive.test_wapiti_uppercase` | Checks wapiti uppercase handling. |
 | `TestPidMap.test_register_and_pop_returns_pid` | Checks that register and pop returns pid. |
 | `TestPidMap.test_pop_unknown_run_id_returns_none` | Checks that pop unknown run id returns none. |
 | `TestPidMap.test_double_pop_returns_none_second_time` | Checks that double pop returns none second time. |
@@ -492,7 +491,6 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRewriteIdempotent.test_mtr_report_flag_unchanged` | Checks that mtr report flag unchanged. |
 | `TestRewriteIdempotent.test_nmap_already_connect_scan_unchanged` | Checks that nmap already connect scan unchanged. |
 | `TestRewriteIdempotent.test_nuclei_already_ud_unchanged` | Checks that nuclei already ud unchanged. |
-| `TestRewriteIdempotent.test_wapiti_already_output_unchanged` | Checks that wapiti already output unchanged. |
 | `TestExpiryNote.test_returns_empty_when_retention_zero` | Returns empty when retention zero. |
 | `TestExpiryNote.test_returns_expiry_text_when_not_expired` | Returns expiry text when not expired. |
 | `TestExpiryNote.test_returns_expires_today_when_less_than_24h` | Returns expires today when less than 24h. |
@@ -1085,6 +1083,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunStreaming.test_run_reports_missing_allowlisted_command_without_spawning` | Checks that run reports missing allowlisted command without spawning. |
 | `TestRunStreaming.test_run_checks_missing_binary_after_rewrite` | Checks that run checks missing binary after rewrite. |
 | `TestRunStreaming.test_run_rewrites_workspace_file_flags_and_emits_notices` | Verifies that `/run` executes workspace-aware file flags with rewritten session paths, emits friendly workspace read/write notices, and preserves the original command in history. |
+| `TestRunStreaming.test_run_injects_projectdiscovery_workspace_state_and_surfaces_paths` | Verifies that ProjectDiscovery tools receive session-scoped runtime state and display generated workspace paths as user-facing paths. |
 | `TestRunStreaming.test_session_variables_expand_before_validation_and_preserve_typed_history` | Verifies that `/run` expands session variables before launch, emits the expanded-command notice, and keeps typed command history. |
 | `TestRunStreaming.test_session_variables_reject_undefined_reference_before_spawn` | Verifies that undefined session-variable references fail before spawning a process. |
 | `TestRunStreaming.test_session_variables_validate_policy_after_expansion` | Verifies that command policy receives the expanded command rather than the typed variable reference. |
@@ -1256,14 +1255,13 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRewrites.test_nmap_no_double_connect_scan` | Checks that nmap no double connect scan. |
 | `TestRewrites.test_nuclei_adds_template_dir` | Checks that nuclei adds template dir. |
 | `TestRewrites.test_nuclei_no_rewrite_if_ud_present` | Checks that nuclei no rewrite if ud present. |
-| `TestRewrites.test_wapiti_adds_stdout_redirect` | Checks that wapiti adds stdout redirect. |
-| `TestRewrites.test_wapiti_no_rewrite_if_output_set` | Checks that wapiti no rewrite if output set. |
 | `TestRewrites.test_no_rewrite_for_other_commands` | Checks that no rewrite for other commands. |
 | `TestRuntimeCommandHelpers.test_split_command_argv_uses_shell_like_tokenization` | Checks that split command argv uses shell like tokenization. |
 | `TestRuntimeCommandHelpers.test_command_root_returns_lowercased_first_token` | Checks that command root returns lowercased first token. |
 | `TestRuntimeCommandHelpers.test_command_root_returns_none_for_blank_input` | Checks that command root returns none for blank input. |
 | `TestRuntimeCommandHelpers.test_runtime_missing_command_name_returns_none_when_installed` | Checks that runtime missing command name returns none when installed. |
 | `TestRuntimeCommandHelpers.test_runtime_missing_command_name_returns_root_when_missing` | Checks that runtime missing command name returns root when missing. |
+| `TestRuntimeCommandHelpers.test_runtime_missing_command_name_skips_env_assignments` | Checks that missing-command detection looks through simple `env NAME=value` wrappers. |
 | `TestRuntimeCommandHelpers.test_runtime_missing_command_message_is_stable` | Checks that runtime missing command message is stable. |
 
 ### Vitest

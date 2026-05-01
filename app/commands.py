@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 
 import config as app_config
 from workspace import (
+    ensure_session_workspace,
     InvalidWorkspacePath,
     WorkspaceDisabled,
     WorkspaceFileNotFound,
@@ -39,15 +40,12 @@ ASCII_MOBILE_FILE     = os.path.join(_CONF, "ascii_mobile.txt")
 APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
 APP_HINTS_MOBILE_FILE = os.path.join(_CONF, "app_hints_mobile.txt")
 AMASS_DEFAULT_WORKSPACE_DIR = "amass"
-AMASS_MANAGED_DATABASE_SUBCOMMANDS = {"enum", "subs", "track", "viz"}
 RESTRICTABLE_VALUE_TYPES = {"cidr", "domain", "host", "ip", "target", "url"}
-NMAP_CONNECT_SCAN_FLAG = "-sT"
 NMAP_DENIED_RAW_FLAGS = {"-sS"}
 NMAP_SCAN_MODE_FLAGS = {
     "-sA", "-sF", "-sI", "-sL", "-sM", "-sN", "-sO", "-sS",
     "-sT", "-sU", "-sW", "-sX", "-sY", "-sZ", "-sn",
 }
-NMAP_NO_PORT_SCAN_FLAGS = {"-h", "--help", "-V", "--version"}
 
 
 @dataclass(frozen=True)
@@ -727,6 +725,114 @@ def _normalize_allow_grouping_flags(raw_entry: dict) -> list[str]:
     return result
 
 
+def _normalize_runtime_inject_flags(items) -> list[dict[str, object]]:
+    result: list[dict[str, object]] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        raw_flags = item.get("flags") or item.get("tokens") or []
+        flags = [
+            str(flag).strip()
+            for flag in raw_flags
+            if str(flag).strip()
+        ] if isinstance(raw_flags, list) else []
+        if not flags:
+            continue
+        position = str(item.get("position") or "prepend").strip().lower()
+        if position == "prefix":
+            position = "command_prefix"
+        if position not in {"prepend", "append", "command_prefix"}:
+            position = "prepend"
+        unless_any = [
+            str(token).strip()
+            for token in item.get("unless_any", []) or []
+            if str(token).strip()
+        ]
+        unless_any_regex = [
+            str(pattern).strip()
+            for pattern in item.get("unless_any_regex", []) or []
+            if str(pattern).strip()
+        ]
+        normalized: dict[str, object] = {
+            "flags": flags,
+            "position": position,
+            "unless_any": unless_any,
+            "unless_any_regex": unless_any_regex,
+        }
+        notice = str(item.get("notice") or item.get("output_notice") or "").strip()
+        if notice:
+            normalized["notice"] = notice
+        if item.get("requires_workspace"):
+            normalized["requires_workspace"] = True
+        result.append(normalized)
+    return result
+
+
+def _normalize_runtime_managed_workspace_directory(item) -> dict[str, object]:
+    if not isinstance(item, dict):
+        return {}
+    flag = str(item.get("flag") or "").strip()
+    directory = str(item.get("directory") or item.get("path") or "").strip().strip("/")
+    if not flag or not directory:
+        return {}
+    subcommands = [
+        str(subcommand).strip().lower()
+        for subcommand in item.get("subcommands", []) or []
+        if str(subcommand).strip()
+    ]
+    skip_if_any = [
+        str(token).strip()
+        for token in item.get("skip_if_any", []) or []
+        if str(token).strip()
+    ]
+    result: dict[str, object] = {
+        "flag": flag,
+        "directory": directory,
+        "subcommands": _dedupe_preserve_order(subcommands),
+        "skip_if_any": _dedupe_preserve_order(skip_if_any),
+        "reject_alternate": bool(item.get("reject_alternate", True)),
+        "counts_as_workspace_write": bool(item.get("counts_as_workspace_write", True)),
+    }
+    reject_message = str(item.get("reject_message") or "").strip()
+    if reject_message:
+        result["reject_message"] = reject_message
+    return result
+
+
+def _normalize_runtime_environment(items) -> list[dict[str, object]]:
+    result: list[dict[str, object]] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        value = str(item.get("value") or "").strip()
+        if not name or not value:
+            continue
+        normalized: dict[str, object] = {"name": name, "value": value}
+        managed_flag = str(item.get("managed_directory_flag") or "").strip()
+        if managed_flag:
+            normalized["managed_directory_flag"] = managed_flag
+        result.append(normalized)
+    return result
+
+
+def _normalize_runtime_adaptations(raw_value) -> dict[str, object]:
+    raw = raw_value if isinstance(raw_value, dict) else {}
+    adaptations: dict[str, object] = {}
+    inject_flags = _normalize_runtime_inject_flags(raw.get("inject_flags"))
+    if inject_flags:
+        adaptations["inject_flags"] = inject_flags
+    managed_directory = _normalize_runtime_managed_workspace_directory(
+        raw.get("managed_workspace_directory")
+    )
+    if managed_directory:
+        adaptations["managed_workspace_directory"] = managed_directory
+    environment = _normalize_runtime_environment(raw.get("environment"))
+    if environment:
+        adaptations["environment"] = environment
+    return adaptations
+
+
 def _normalize_registry_autocomplete(root: str, raw_spec) -> dict:
     if not isinstance(raw_spec, dict) or not raw_spec:
         return {}
@@ -767,6 +873,7 @@ def _normalize_commands_registry_entry(raw_entry, *, pipe_helper: bool = False) 
     }
     entry["workspace_flags"] = _normalize_workspace_flags(raw_entry.get("workspace_flags"))
     entry["allow_grouping_flags"] = _normalize_allow_grouping_flags(raw_entry)
+    entry["runtime_adaptations"] = _normalize_runtime_adaptations(raw_entry.get("runtime_adaptations"))
     return entry
 
 
@@ -827,6 +934,45 @@ def _merge_command_registry_entries(base_entry: dict, overlay_entry: dict, *, pi
             if key not in existing_workspace_flags:
                 workspace_flags.append(deepcopy(workspace_flag))
                 existing_workspace_flags.add(key)
+
+        runtime_adaptations = merged.setdefault("runtime_adaptations", {})
+        overlay_runtime = overlay_entry.get("runtime_adaptations") or {}
+        if overlay_runtime.get("managed_workspace_directory"):
+            runtime_adaptations["managed_workspace_directory"] = deepcopy(
+                overlay_runtime["managed_workspace_directory"]
+            )
+        if overlay_runtime.get("inject_flags"):
+            existing_inject = {
+                (
+                    tuple(item.get("flags", []) or []),
+                    item.get("position"),
+                    tuple(item.get("unless_any", []) or []),
+                    tuple(item.get("unless_any_regex", []) or []),
+                )
+                for item in runtime_adaptations.setdefault("inject_flags", [])
+                if isinstance(item, dict)
+            }
+            for inject in overlay_runtime.get("inject_flags", []) or []:
+                key = (
+                    tuple(inject.get("flags", []) or []),
+                    inject.get("position"),
+                    tuple(inject.get("unless_any", []) or []),
+                    tuple(inject.get("unless_any_regex", []) or []),
+                )
+                if key not in existing_inject:
+                    runtime_adaptations.setdefault("inject_flags", []).append(deepcopy(inject))
+                    existing_inject.add(key)
+        if overlay_runtime.get("environment"):
+            existing_env = {
+                (item.get("name"), item.get("value"), item.get("managed_directory_flag"))
+                for item in runtime_adaptations.setdefault("environment", [])
+                if isinstance(item, dict)
+            }
+            for env_item in overlay_runtime.get("environment", []) or []:
+                key = (env_item.get("name"), env_item.get("value"), env_item.get("managed_directory_flag"))
+                if key not in existing_env:
+                    runtime_adaptations.setdefault("environment", []).append(deepcopy(env_item))
+                    existing_env.add(key)
 
     base_autocomplete = merged.get("autocomplete") or _empty_autocomplete_context_entry()
     overlay_autocomplete = overlay_entry.get("autocomplete") or {}
@@ -2235,16 +2381,100 @@ def _nmap_raw_scan_restriction_reason(command: str) -> str:
     return ""
 
 
-def _nmap_needs_connect_scan(command: str) -> bool:
+def _runtime_injection_blocked(tokens: list[str], inject: dict[str, object]) -> bool:
+    raw_unless_any = inject.get("unless_any")
+    unless_any = [
+        str(item) for item in raw_unless_any
+        if str(item)
+    ] if isinstance(raw_unless_any, list) else []
+    for blocker in unless_any:
+        if any(
+            token == blocker or (blocker.startswith("--") and token.startswith(f"{blocker}="))
+            for token in tokens[1:]
+        ):
+            return True
+    raw_regexes = inject.get("unless_any_regex")
+    regexes = raw_regexes if isinstance(raw_regexes, list) else []
+    for raw_pattern in regexes:
+        pattern = str(raw_pattern)
+        try:
+            if any(re.search(pattern, token) for token in tokens[1:]):
+                return True
+        except re.error:
+            continue
+    return False
+
+
+def _runtime_injection_token(
+    token: str,
+    *,
+    session_id: str = "",
+    cfg: dict | None = None,
+) -> str:
+    if "{session_workspace}" not in token:
+        return token
+    if not session_id:
+        return ""
+    try:
+        workspace_dir = ensure_session_workspace(session_id, cfg)
+    except (InvalidWorkspacePath, WorkspaceDisabled, OSError):
+        return ""
+    return token.replace("{session_workspace}", str(workspace_dir))
+
+
+def _runtime_injection_flags(
+    inject: dict[str, object],
+    *,
+    session_id: str = "",
+    cfg: dict | None = None,
+) -> list[str]:
+    raw_flags = inject.get("flags")
+    if not isinstance(raw_flags, list):
+        return []
+    flags = [
+        _runtime_injection_token(str(flag), session_id=session_id, cfg=cfg).strip()
+        for flag in raw_flags
+    ]
+    return [flag for flag in flags if flag]
+
+
+def _apply_runtime_inject_flags(
+    command: str,
+    *,
+    session_id: str = "",
+    cfg: dict | None = None,
+) -> tuple[str, str | None]:
     tokens = split_command_argv(command)
-    if not tokens or tokens[0].lower() != "nmap":
-        return False
-    for token in tokens[1:]:
-        if token in NMAP_NO_PORT_SCAN_FLAGS:
-            return False
-        if _nmap_scan_mode_from_token(token):
-            return False
-    return True
+    if not tokens:
+        return command.strip(), None
+    adaptations = _runtime_adaptations_by_root().get(tokens[0].lower(), {})
+    inject_flags = adaptations.get("inject_flags") if isinstance(adaptations, dict) else []
+    if not isinstance(inject_flags, list) or not inject_flags:
+        return command.strip(), None
+
+    rewritten = list(tokens)
+    notices: list[str] = []
+    changed = False
+    for inject in inject_flags:
+        if not isinstance(inject, dict):
+            continue
+        if inject.get("requires_workspace") and not (session_id and (cfg or app_config.CFG).get("workspace_enabled")):
+            continue
+        flags = _runtime_injection_flags(inject, session_id=session_id, cfg=cfg)
+        if not flags or _runtime_injection_blocked(rewritten, inject):
+            continue
+        position = str(inject.get("position") or "prepend")
+        if position == "command_prefix":
+            rewritten = flags + rewritten
+        elif position == "append":
+            rewritten.extend(flags)
+        else:
+            rewritten[1:1] = flags
+        notice = str(inject.get("notice") or "").strip()
+        if notice:
+            notices.append(notice)
+        changed = True
+    return (shlex.join(rewritten), notices[0] if notices else None) if changed else (command.strip(), None)
 
 
 def resolve_runtime_command(command_name: str) -> str | None:
@@ -2254,7 +2484,16 @@ def resolve_runtime_command(command_name: str) -> str | None:
 
 def runtime_missing_command_name(command: str) -> str | None:
     """Return the missing root command name for a command string, or None if installed/empty."""
-    root = command_root(command)
+    tokens = split_command_argv(command)
+    root = tokens[0].strip().lower() if tokens else None
+    if root == "env":
+        for token in tokens[1:]:
+            if "=" in token and not token.startswith("-"):
+                continue
+            root = token.strip().lower()
+            break
+        else:
+            root = None
     if not root:
         return None
     return None if resolve_runtime_command(root) else root
@@ -2366,6 +2605,19 @@ def _workspace_flag_specs_by_root() -> dict[str, list[dict[str, object]]]:
     return specs
 
 
+def _runtime_adaptations_by_root() -> dict[str, dict[str, object]]:
+    registry = load_commands_registry()
+    adaptations: dict[str, dict[str, object]] = {}
+    for entry in registry.get("commands", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        root = str(entry.get("root") or "").strip().lower()
+        runtime_adaptations = entry.get("runtime_adaptations")
+        if root and isinstance(runtime_adaptations, dict) and runtime_adaptations:
+            adaptations[root] = runtime_adaptations
+    return adaptations
+
+
 def _workspace_flag_applies_to_command(spec: dict[str, object], tokens: list[str]) -> bool:
     subcommands = spec.get("subcommands")
     if not subcommands:
@@ -2374,6 +2626,33 @@ def _workspace_flag_applies_to_command(spec: dict[str, object], tokens: list[str
         return False
     command_sub = tokens[1].strip().lower()
     return command_sub in {str(item).strip().lower() for item in subcommands}
+
+
+def _managed_workspace_directory_applies(spec: dict[str, object], tokens: list[str]) -> bool:
+    if not spec or not tokens:
+        return False
+    raw_subcommands = spec.get("subcommands")
+    subcommands = raw_subcommands if isinstance(raw_subcommands, list) else []
+    if subcommands:
+        if len(tokens) < 2:
+            return False
+        command_sub = tokens[1].strip().lower()
+        if command_sub not in {str(item).strip().lower() for item in subcommands}:
+            return False
+    raw_skip_if_any = spec.get("skip_if_any")
+    skip_if_any = {
+        str(item) for item in raw_skip_if_any
+        if str(item)
+    } if isinstance(raw_skip_if_any, list) else set()
+    if skip_if_any and any(token in skip_if_any for token in tokens[1:]):
+        return False
+    return True
+
+
+def _managed_workspace_directory_for_root(root: str) -> dict[str, object]:
+    adaptations = _runtime_adaptations_by_root().get(root.lower(), {})
+    managed = adaptations.get("managed_workspace_directory") if isinstance(adaptations, dict) else {}
+    return managed if isinstance(managed, dict) else {}
 
 
 def _workspace_flag_matches_token(token: str, spec: dict[str, object]) -> bool:
@@ -2708,37 +2987,40 @@ def _rewrite_workspace_file_flags(
             index = (value_index + 1) if value_index is not None else index + 1
         return command, set(), [], [], [], ""
 
-    amass_dir_specs = [spec for spec in specs if spec.get("flag") == "-dir"]
-    has_amass_dir = any(
+    root = tokens[0].lower()
+    managed_dir = _managed_workspace_directory_for_root(root)
+    managed_dir_flag = str(managed_dir.get("flag") or "")
+    managed_dir_name = str(managed_dir.get("directory") or "")
+    managed_dir_specs = [spec for spec in specs if spec.get("flag") == managed_dir_flag]
+    has_managed_dir = any(
         _workspace_flag_matches_token(token, spec)
         for token in tokens[1:]
-        for spec in amass_dir_specs
+        for spec in managed_dir_specs
     )
-    is_amass_database_command = (
-        tokens[0].lower() == "amass"
-        and len(tokens) > 1
-        and tokens[1].lower() in AMASS_MANAGED_DATABASE_SUBCOMMANDS
-        and not any(token in {"-h", "-help", "--help"} for token in tokens[1:])
+    managed_dir_applies = (
+        bool(managed_dir_flag and managed_dir_name and managed_dir_specs)
+        and _managed_workspace_directory_applies(managed_dir, tokens)
     )
-    if is_amass_database_command and not has_amass_dir:
-        tokens = tokens + ["-dir", AMASS_DEFAULT_WORKSPACE_DIR]
-    elif is_amass_database_command and has_amass_dir:
+    if managed_dir_applies and not has_managed_dir:
+        tokens = tokens + [managed_dir_flag, managed_dir_name]
+    elif managed_dir_applies and has_managed_dir and managed_dir.get("reject_alternate", True):
         for index, token in enumerate(tokens):
-            matched_spec = next((spec for spec in amass_dir_specs if _workspace_flag_matches_token(token, spec)), None)
+            matched_spec = next((spec for spec in managed_dir_specs if _workspace_flag_matches_token(token, spec)), None)
             if not matched_spec:
                 continue
             user_value, _, error = _workspace_flag_value(tokens, index, matched_spec)
             if error:
                 return command, set(), [], [], [], error
             normalized_value = (user_value or "").rstrip(os.sep)
-            if normalized_value and os.path.basename(normalized_value) != AMASS_DEFAULT_WORKSPACE_DIR:
+            if normalized_value and os.path.basename(normalized_value) != managed_dir_name:
+                reject_message = str(managed_dir.get("reject_message") or "").strip()
                 return (
                     command,
                     set(),
                     [],
                     [],
                     [],
-                    f"Amass database commands use the managed {AMASS_DEFAULT_WORKSPACE_DIR} session directory.",
+                    reject_message or f"{tokens[0]} uses the managed {managed_dir_name} session directory.",
                 )
             break
 
@@ -2801,24 +3083,50 @@ def _rewrite_workspace_file_flags(
     return shlex.join(rewritten_tokens), exempt_flags, reads, writes, exec_paths, ""
 
 
+def _runtime_environment_value(template: str, tokens: list[str], env_spec: dict[str, object]) -> str:
+    managed_flag = str(env_spec.get("managed_directory_flag") or "").strip()
+    managed_directory = ""
+    managed_workspace_parent = ""
+    if managed_flag:
+        for index, token in enumerate(tokens[:-1]):
+            if token != managed_flag:
+                continue
+            directory = tokens[index + 1].rstrip(os.sep)
+            if os.path.isabs(directory):
+                managed_directory = directory
+                managed_workspace_parent = os.path.dirname(directory)
+            break
+    return (
+        template
+        .replace("{managed_workspace_directory}", managed_directory)
+        .replace("{managed_workspace_parent}", managed_workspace_parent)
+    )
+
+
 def _apply_workspace_runtime_environment(command: str) -> str:
     tokens = split_command_argv(command)
-    if not tokens or tokens[0].lower() != "amass":
+    if not tokens:
         return command
 
-    for index, token in enumerate(tokens[:-1]):
-        if token != "-dir":
+    adaptations = _runtime_adaptations_by_root().get(tokens[0].lower(), {})
+    env_specs = adaptations.get("environment") if isinstance(adaptations, dict) else []
+    if not isinstance(env_specs, list) or not env_specs:
+        return command
+
+    env_tokens = []
+    for env_spec in env_specs:
+        if not isinstance(env_spec, dict):
             continue
-        directory = tokens[index + 1].rstrip(os.sep)
-        if not os.path.isabs(directory) or os.path.basename(directory) != AMASS_DEFAULT_WORKSPACE_DIR:
-            return command
+        name = str(env_spec.get("name") or "").strip()
+        template = str(env_spec.get("value") or "").strip()
+        if not name or not template:
+            continue
+        value = _runtime_environment_value(template, tokens, env_spec)
+        if not value:
+            continue
+        env_tokens.append(f"{name}={value}")
 
-        # Amass v5 auto-starts `amass engine`; point its default config dir at
-        # the same parent used by the rewritten `-dir` database path.
-        xdg_config_home = os.path.dirname(directory)
-        return shlex.join(["env", f"XDG_CONFIG_HOME={xdg_config_home}", *tokens])
-
-    return command
+    return shlex.join(["env", *env_tokens, *tokens]) if env_tokens else command
 
 
 def _is_denied(command: str, deny_entries: list[str], *, exempt_flags: set[str] | None = None) -> bool:
@@ -2992,42 +3300,12 @@ def is_command_allowed(command: str) -> tuple[bool, str]:
     return result.allowed, result.reason
 
 
-def rewrite_command(command: str) -> tuple[str, str | None]:
+def rewrite_command(
+    command: str,
+    *,
+    session_id: str = "",
+    cfg: dict | None = None,
+) -> tuple[str, str | None]:
     """Rewrite commands that need a TTY or specific flags into a safe non-interactive equivalent.
     Returns (rewritten_command, notice_message_or_None)."""
-    # Runtime rewrites are kept explicit and side-effect free. The optional note
-    # explains to users/tests why the command was adjusted.
-    stripped = command.strip()
-
-    # mtr: force --report-wide mode if not already using a report flag
-    if re.match(r'^mtr\b', stripped, re.IGNORECASE):
-        if not re.search(r'--report\b|--report-wide\b|-r\b', stripped):
-            rewritten = re.sub(r'^mtr\b', 'mtr --report-wide', stripped, flags=re.IGNORECASE)
-            return rewritten, "Note: mtr has been run in --report-wide mode (non-interactive). See FAQ for details."
-
-    # nmap: force TCP connect scans when no scan mode is explicit. Raw SYN
-    # scans are unreliable for the unprivileged scanner user inside containers.
-    if re.match(r'^nmap\b', stripped, re.IGNORECASE):
-        if _nmap_needs_connect_scan(stripped):
-            return re.sub(r'^nmap\b', f'nmap {NMAP_CONNECT_SCAN_FLAG}', stripped, flags=re.IGNORECASE), None
-
-    # nuclei: force -ud /tmp/nuclei-templates so it writes to tmpfs, not the read-only fs
-    if re.match(r'^nuclei\b', stripped, re.IGNORECASE):
-        if not re.search(r'-ud\b', stripped):
-            return re.sub(r'^nuclei\b', 'nuclei -ud /tmp/nuclei-templates', stripped, flags=re.IGNORECASE), None
-
-    # wapiti: force plain text output to stdout so results appear in the terminal
-    # instead of being written to a report file in /tmp that users can't easily access
-    if re.match(r'^wapiti\b', stripped, re.IGNORECASE):
-        if not re.search(r'\-o\b|--output\b', stripped):
-            notice = "Note: wapiti output is being redirected to the terminal (-f txt -o /dev/stdout)."
-            return stripped + ' -f txt -o /dev/stdout', notice
-
-    # naabu: force connect scan mode so it uses TCP connect() instead of raw SYN packets.
-    # Raw packet scanning via libpcap/gopacket requires elevated privileges that are
-    # not reliably available inside the container; connect mode works like nmap -sT.
-    if re.match(r'^naabu\b', stripped, re.IGNORECASE):
-        if not re.search(r'-scan-type\b|-st\b', stripped):
-            return re.sub(r'^naabu\b', 'naabu -scan-type c', stripped, flags=re.IGNORECASE), None
-
-    return stripped, None
+    return _apply_runtime_inject_flags(command, session_id=session_id, cfg=cfg)

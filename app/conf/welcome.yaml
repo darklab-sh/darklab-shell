@@ -125,10 +125,6 @@
   group: "web"
   out: "run a quick web server vulnerability check"
 
-- cmd: "wapiti -u https://darklab.sh"
-  group: "web"
-  out: "scan a web app for common attack surfaces"
-
 - cmd: "wpscan --url https://darklab.sh"
   group: "advanced"
   out: "probe WordPress targets for known issues"

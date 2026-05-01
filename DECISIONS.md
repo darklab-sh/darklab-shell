@@ -101,7 +101,7 @@ This is what motivated the Redis addition in the first place. Once Redis was a d
 - **`appuser`** — runs Gunicorn, owns `/data` (chmod 700), can write SQLite
 - **`scanner`** — runs all user-submitted commands via `sudo -u scanner env HOME=/tmp`, no write access to `/data`
 
-`HOME=/tmp` is critical. Without it, `sudo` resets HOME to `/home/scanner` which doesn't exist on the read-only filesystem. Tools like nuclei, wapiti, and subfinder all write to `$HOME` at startup and will fail with "read-only filesystem" errors without this.
+`HOME=/tmp` is critical. Without it, `sudo` resets HOME to `/home/scanner` which doesn't exist on the read-only filesystem. Tools like nuclei and subfinder write to `$HOME` at startup and will fail with "read-only filesystem" errors without this.
 
 ### Path Blocking (/data and /tmp)
 
@@ -109,7 +109,7 @@ This is what motivated the Redis addition in the first place. Once Redis was a d
 
 The regex is `(?<![\w:/])/data\b` (and `/tmp`). The negative lookbehind `(?<![\w:/])` prevents false positives on URLs — `https://darklab.sh/data/` won't match because the `/data` segment is immediately preceded by `m` (the last character of `darklab.sh`), which satisfies `\w` in the lookbehind.
 
-Blocking happens at two layers: client-side (immediate feedback) and server-side (authoritative). Internal rewrites (e.g. `nuclei -ud /tmp/nuclei-templates`) are injected by `rewrite_command()` which runs *after* `is_command_allowed()`, so they bypass the check.
+Blocking happens at two layers: client-side (immediate feedback) and server-side (authoritative). Internal rewrites (for example `nuclei -ud /tmp/nuclei-templates` and ProjectDiscovery `XDG_CONFIG_HOME` wrappers) are injected by `rewrite_command()` after command validation, so app-owned runtime tokens can point at trusted internal paths without exposing arbitrary `/tmp` input to users.
 
 ### Loopback Address Blocking
 
@@ -191,7 +191,7 @@ setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
 
 This grants the capabilities to the binary itself — any user who executes nmap gets them for the duration of that process only. `docker-compose.yml` must also have `cap_add: [NET_RAW, NET_ADMIN]` or the host kernel won't make those capabilities available to the container.
 
-The `--privileged` flag (nmap's own flag, not Docker's) is auto-injected by `rewrite_command()` so users don't need to add it. Without it, nmap falls back to limited scan modes even with the capabilities set.
+The app now standardizes on TCP connect scans for nmap. `rewrite_command()` injects `-sT` when no scan mode is explicit, while command validation blocks `-sS` and nmap's own `--privileged` flag so users do not hit confusing raw-socket permission failures after launch.
 
 ### Go Binary Installation
 
@@ -199,7 +199,7 @@ The `--privileged` flag (nmap's own flag, not Docker's) is auto-injected by `rew
 
 All Go tools (`nuclei`, `subfinder`, `httpx`, `dnsx`, `gobuster`) are installed with `ENV GOBIN=/usr/local/bin` in the Dockerfile. This puts binaries directly in `/usr/local/bin` with world-executable permissions, accessible to the `scanner` user. Without this, Go installs to `/root/go/bin` which is root-owned and inaccessible to `scanner`. Previous symlinks from `/root/go/bin/` to `/usr/local/bin/` also fail because symlinks inherit the target's permissions issue.
 
-`httpx` is renamed to `pd-httpx` via `mv` after install to avoid shadowing the Python `httpx` library that `wapiti3` pulls in as a dependency.
+`httpx` is renamed to `pd-httpx` via `mv` after install to avoid shadowing the Python `httpx` library used by the app and other Python tooling.
 
 ### SQLite WAL Mode
 

@@ -148,7 +148,7 @@ function selectCommandTimeoutMs(command, defaultTimeoutMs) {
     return Math.max(defaultTimeoutMs, 900_000)
   }
 
-  if (['masscan', 'wapiti', 'wpscan', 'nikto', 'nuclei'].includes(root)) {
+  if (['masscan', 'wpscan', 'nikto', 'nuclei'].includes(root)) {
     return Math.max(defaultTimeoutMs, 900_000)
   }
 
@@ -167,7 +167,7 @@ function selectCommandSettleMs(command, defaultSettleMs) {
     return Math.max(defaultSettleMs, 5_000)
   }
 
-  if (['nmap', 'masscan', 'wapiti', 'wpscan', 'nikto', 'nuclei'].includes(root)) {
+  if (['nmap', 'masscan', 'wpscan', 'nikto', 'nuclei'].includes(root)) {
     return Math.max(defaultSettleMs, 3_000)
   }
 

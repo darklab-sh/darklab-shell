@@ -8,6 +8,10 @@ All notable changes to darklab_shell are documented here.
 
 ### Added
 
+- **External-tool runtime adaptations are now declared in `commands.yaml`** — command-specific rewrites and environment wrappers share the command registry instead of living as one-off Python branches.
+  - **Why:** command policy, autocomplete, smoke examples, workspace flags, and restricted-input metadata already use `commands.yaml`; keeping runtime rewrites there makes tool behavior easier to audit and extend.
+  - **What:** added normalized `runtime_adaptations` metadata for injected flags, command-prefix wrappers, managed workspace directories, and environment wrappers. `mtr`, `nmap`, `nuclei`, and `naabu` now declare their existing safe default rewrites in the registry, while Amass declares its managed `-dir amass` database directory and `XDG_CONFIG_HOME` wrapper there. ProjectDiscovery tools (`nuclei`, `subfinder`, `pd-httpx`, `katana`, and `naabu`) now declare workspace-required `env XDG_CONFIG_HOME=<session workspace>` command prefixes, and streamed output rewrites absolute session-workspace paths to user-facing paths such as `/katana/resume.cfg`.
+  - **Tests:** extended command-registry normalization coverage and reran rewrite/workspace parity tests for the migrated tools, including ProjectDiscovery session-state injection and output path surfacing.
 - **History rows can compare completed runs** — operators can inspect changed output between a selected run and a previous/manual run without opening a side-by-side editor.
   - **Why:** repeated scans often need a quick answer to "what changed?" across ports, URLs, subdomains, status lines, or findings-like output.
   - **What:** added current-session comparison candidate and compare routes, a History row `compare` action, a suggested/manual compare launcher with command-scoped search, day-grouped results, and `Load More` pagination for older runs, and a focused comparison modal/sheet that shows Run A / Run B metadata, exit/duration/line/finding deltas, conservatively paired changed lines with inline value highlighting, bounded added lines, bounded removed lines, restore actions for either source run or both runs into fresh tabs, and copyable summaries. The first pass uses conservative candidate ranking and a bounded multiset line diff that strips terminal chrome before comparing.
@@ -107,6 +111,10 @@ All notable changes to darklab_shell are documented here.
 
 ### Changed
 
+- **Unsupported Python web-scanner integration was removed from the surfaced toolset** — the image no longer carries command metadata, welcome examples, rewrite tests, docs, or capture timing rules for a scanner package that does not install cleanly on Python 3.14.
+  - **Why:** the package's pinned dependency stack is poorly maintained and currently fails across tested install methods on the Python 3.14 base image.
+  - **What:** removed the registry entry, runtime adaptation, welcome example, README/tool-note coverage, integration docs, stale decision notes, smoke-capture timing hooks, and rewrite tests for the unsupported scanner.
+  - **Tests:** updated the docs/test appendix and reran command-registry, rewrite, and docs drift coverage.
 - **nmap now defaults to TCP connect scans instead of raw-socket mode** — container nmap runs stay useful under the unprivileged `scanner` user.
   - **Before:** `rewrite_command()` injected `--privileged` so nmap attempted raw-socket behavior, but non-root Docker execution could still fail with `sendto ... Operation not permitted` despite file capabilities and `cap_add`.
   - **After:** nmap commands without an explicit scan mode are rewritten with `-sT`, examples and smoke fixtures use TCP connect scans, and validation blocks raw SYN scans (`-sS`) plus explicit `--privileged` mode before launch.
@@ -1710,7 +1718,7 @@ All notable changes to darklab_shell are documented here.
 - **Mobile menu** — hamburger menu exposes search, history, timestamps, theme, and FAQ on small screens
 - **Docker support** — multi-stage Dockerfile; `docker-compose.yml` with Redis sidecar; health checks via `/health` endpoint; read-only root filesystem with tmpfs mounts
 - **GitLab CI pipeline** — lint (flake8) and test (pytest) stages run on every push
-- **Security tools** — nmap, masscan, naabu, httpx, nuclei, subfinder, dnsx, katana, nikto, wapiti3, wpscan, mtr (report mode), dig, host, whois, curl, ffuf, gobuster, feroxbuster and more
+- **Security tools** — nmap, masscan, naabu, httpx, nuclei, subfinder, dnsx, katana, nikto, wpscan, mtr (report mode), dig, host, whois, curl, ffuf, gobuster, feroxbuster and more
 - **SecLists wordlists** — full collection installed at `/usr/share/wordlists/seclists/`
 - **ARCHITECTURE.md** — documents the system design, data flow, module structure, and database schema
 - **Unit test suite** — pytest tests covering command validation, route behavior, rate limiting, and deny-rule logic; lint enforced via flake8

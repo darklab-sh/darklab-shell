@@ -25,6 +25,8 @@ The scanner wrapper sets `HOME=/tmp` so tools that insist on a writable home can
 
 Session workspace files are app-mediated. Users can name relative files such as `targets.txt` or `amass`, and command validation rewrites those values to the active hashed session workspace path before subprocess launch.
 
+Command-specific runtime behavior is declared in `app/conf/commands.yaml` under each command's `runtime_adaptations` section. The registry supports injected flags, managed workspace directories, and environment variables derived from managed workspace paths. Python owns the generic application machinery; the command registry owns the per-tool contract.
+
 ---
 
 ## Integration Matrix
@@ -33,9 +35,9 @@ Session workspace files are app-mediated. Users can name relative files such as 
 | ---- | -------------- | --- |
 | `mtr` | Adds `--report-wide` when no report mode flag is present. | Interactive `mtr` expects a real TTY and redraws in place; report mode streams clean text over SSE. |
 | `nmap` | Adds `-sT` when no scan mode is explicit. | TCP connect scans work reliably as the unprivileged `scanner` user; raw SYN scans (`-sS`) and explicit `--privileged` mode are blocked. |
-| `nuclei` | Adds `-ud /tmp/nuclei-templates` when no update-directory flag is present. | Template storage must be writable under the read-only container filesystem. |
-| `wapiti` | Adds `-f txt -o /dev/stdout` when no output path is present. | Wapiti writes reports to files by default; stdout keeps results visible in the terminal transcript. |
-| `naabu` | Adds `-scan-type c` when no scan type is present. | TCP connect scanning works reliably inside container runtimes where raw SYN scanning via libpcap may fail. |
+| `nuclei` | Adds `-ud /tmp/nuclei-templates` when no update-directory flag is present and wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>` when Files are enabled. | Template storage must be writable under the read-only container filesystem, while useful per-session config/resume state should be visible in Files. |
+| `subfinder` / `pd-httpx` / `katana` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>` when Files are enabled. | ProjectDiscovery tools otherwise fall back to `$HOME/.config` under `/tmp`, hiding useful session artifacts such as config and resume files. |
+| `naabu` | Adds `-scan-type c` when no scan type is present and wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>` when Files are enabled. | TCP connect scanning works reliably inside container runtimes where raw SYN scanning via libpcap may fail; config state should remain session-visible. |
 | `amass enum` / `amass subs` / `amass track` / `amass viz` | Adds managed `-dir amass` when absent, rewrites it to the session workspace, and launches with `XDG_CONFIG_HOME=<session workspace>`. | Amass v5 is database-first and auto-starts `amass engine`; the engine and CLI must use the same per-session database path instead of falling back to `$HOME/.config/amass`. |
 
 ---
@@ -53,6 +55,76 @@ Validation behavior:
 - Directory flags can create and prepare managed session directories.
 
 This covers normal file input/output tools such as `nmap -iL`, `nmap -oN`, `curl -o`, `ffuf -o`, `subfinder -dL`, `naabu -list`, `nuclei -l`, and Amass database directories.
+
+## Runtime Adaptations
+
+Runtime adaptations are declared in `app/conf/commands.yaml`:
+
+```yaml
+runtime_adaptations:
+  inject_flags:
+    - flags: ["--report-wide"]
+      position: prepend
+      unless_any: ["--report", "--report-wide", "-r"]
+      notice: "Note: ..."
+    - flags: ["env", "XDG_CONFIG_HOME={session_workspace}"]
+      position: command_prefix
+      requires_workspace: true
+  managed_workspace_directory:
+    flag: -dir
+    directory: amass
+    subcommands: [enum, subs, track, viz]
+    skip_if_any: [-h, -help, --help]
+    reject_alternate: true
+  environment:
+    - name: XDG_CONFIG_HOME
+      value: "{managed_workspace_parent}"
+      managed_directory_flag: -dir
+```
+
+`inject_flags` rewrites command argv tokens with `shlex.join`, so injected values keep safe quoting when paths contain spaces or shell metacharacters. `position: prepend` inserts tokens after the command root, `position: append` adds trailing tokens, and `position: command_prefix` inserts tokens before the command root for wrappers such as `env NAME=value`. `unless_any` and `unless_any_regex` keep rewrites idempotent and prevent help/version commands from being mutated. `requires_workspace: true` skips the injection unless Files are enabled and a session workspace is available. Injected tokens may use `{session_workspace}` to point at the current session's hashed workspace directory. `notice` is emitted in the terminal for rewrites that need user-facing explanation.
+
+`managed_workspace_directory` is evaluated by workspace-aware validation. When it applies, the declared directory is injected if absent, rewritten through the same workspace directory helper as user-provided directory flags, and optionally rejects alternate user values so tool state does not split across multiple databases.
+
+`environment` wraps the final execution command with `env NAME=value ...` after workspace path rewriting. The current template used by shipped commands is `{managed_workspace_parent}`, which resolves from the declared managed directory flag.
+
+Run output is also filtered before it is captured or streamed: absolute paths under the current session workspace are displayed as user-facing workspace paths. For example:
+
+```text
+Creating resume file: /workspaces/sess_<hash>/katana/resume-abcd.cfg
+```
+
+is shown and stored as:
+
+```text
+Creating resume file: /katana/resume-abcd.cfg
+```
+
+---
+
+## ProjectDiscovery
+
+ProjectDiscovery tools commonly resolve config and resume paths through `XDG_CONFIG_HOME`, falling back to `$HOME/.config` when the variable is absent. Because the scanner wrapper keeps `HOME=/tmp`, those default files would otherwise be written to anonymous tmpfs paths outside the session Files view.
+
+When workspace storage is enabled, `subfinder`, `pd-httpx`, `katana`, `naabu`, and `nuclei` are launched with:
+
+```bash
+env XDG_CONFIG_HOME=/workspaces/sess_<hash> <tool> ...
+```
+
+This keeps useful generated state under session-visible folders such as:
+
+```text
+/katana
+/subfinder
+/httpx
+/naabu
+/nuclei
+```
+
+`nuclei` still receives `-ud /tmp/nuclei-templates` unless the user provides an update directory. Template caches are intentionally left in tmpfs because they are large, reusable container state rather than session evidence.
+
+Security note: ProjectDiscovery provider/config files can contain API keys or other operator secrets. The Files view can show them to the current session owner, but share/export flows should continue to treat generated config directories carefully and avoid publishing provider configs by default.
 
 ---
 

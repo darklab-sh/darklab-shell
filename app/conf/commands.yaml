@@ -214,6 +214,16 @@ commands:
       allow:
         - mtr
       deny: []
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - --report-wide
+          position: prepend
+          unless_any:
+            - --report
+            - --report-wide
+            - -r
+          notice: "Note: mtr has been run in --report-wide mode (non-interactive). See FAQ for details."
     autocomplete:
       examples:
         - value: mtr -h
@@ -972,6 +982,13 @@ commands:
         mode: write
         value: separate_or_attached
         format: text
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - env
+            - XDG_CONFIG_HOME={session_workspace}
+          position: command_prefix
+          requires_workspace: true
     autocomplete:
       examples:
         - value: subfinder -h
@@ -1099,6 +1116,25 @@ commands:
         kind: directory
         subcommands:
           - viz
+    runtime_adaptations:
+      managed_workspace_directory:
+        flag: -dir
+        directory: amass
+        subcommands:
+          - enum
+          - subs
+          - track
+          - viz
+        skip_if_any:
+          - -h
+          - -help
+          - --help
+        reject_alternate: true
+        reject_message: Amass database commands use the managed amass session directory.
+      environment:
+        - name: XDG_CONFIG_HOME
+          value: "{managed_workspace_parent}"
+          managed_directory_flag: -dir
     autocomplete:
       examples:
         - value: amass -h
@@ -1348,6 +1384,13 @@ commands:
         mode: write
         value: separate_or_attached
         format: text
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - env
+            - XDG_CONFIG_HOME={session_workspace}
+          position: command_prefix
+          requires_workspace: true
     autocomplete:
       examples:
         - value: dnsx -h
@@ -2035,6 +2078,20 @@ commands:
         mode: write
         value: separate_or_attached
         format: text
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - -scan-type
+            - c
+          position: prepend
+          unless_any:
+            - -scan-type
+            - -st
+        - flags:
+            - env
+            - XDG_CONFIG_HOME={session_workspace}
+          position: command_prefix
+          requires_workspace: true
     autocomplete:
       examples:
         - value: naabu -help
@@ -2126,6 +2183,13 @@ commands:
         mode: write
         value: separate_or_attached
         format: text
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - env
+            - XDG_CONFIG_HOME={session_workspace}
+          position: command_prefix
+          requires_workspace: true
     autocomplete:
       examples:
         - value: katana -help
@@ -2518,6 +2582,18 @@ commands:
         mode: read
         value: separate_or_attached
         format: text
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - -sT
+          position: prepend
+          unless_any:
+            - -h
+            - --help
+            - -V
+            - --version
+          unless_any_regex:
+            - "^-s[AFILMNOSTUWXYZn]"
     autocomplete:
       examples:
         - value: nmap -h
@@ -2914,6 +2990,19 @@ commands:
         mode: write
         value: separate_or_attached
         format: text
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - -ud
+            - /tmp/nuclei-templates
+          position: prepend
+          unless_any:
+            - -ud
+        - flags:
+            - env
+            - XDG_CONFIG_HOME={session_workspace}
+          position: command_prefix
+          requires_workspace: true
     autocomplete:
       examples:
         - value: nuclei -h

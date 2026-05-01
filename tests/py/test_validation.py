@@ -21,7 +21,7 @@ from commands import (
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-ALLOW = ["ping", "nmap", "dig", "curl", "mtr", "traceroute", "nuclei", "wapiti"]
+ALLOW = ["ping", "nmap", "dig", "curl", "mtr", "traceroute", "nuclei"]
 DENY  = []
 
 
@@ -493,17 +493,6 @@ class TestRewrites:
         cmd, _ = rewrite_command("nuclei -ud /tmp/my-templates -u https://darklab.sh")
         assert cmd.count("-ud") == 1
 
-    def test_wapiti_adds_stdout_redirect(self):
-        cmd, notice = rewrite_command("wapiti http://darklab.sh")
-        assert "-f txt" in cmd
-        assert "/dev/stdout" in cmd
-        assert notice is not None
-
-    def test_wapiti_no_rewrite_if_output_set(self):
-        cmd, notice = rewrite_command("wapiti http://darklab.sh -o /tmp/report.txt")
-        assert "/dev/stdout" not in cmd
-        assert notice is None
-
     def test_no_rewrite_for_other_commands(self):
         cmd, notice = rewrite_command("dig google.com")
         assert cmd == "dig google.com"
@@ -531,6 +520,13 @@ class TestRuntimeCommandHelpers:
     def test_runtime_missing_command_name_returns_root_when_missing(self):
         with mock.patch("commands.resolve_runtime_command", return_value=None):
             assert runtime_missing_command_name("nmap -sV darklab.sh") == "nmap"
+
+    def test_runtime_missing_command_name_skips_env_assignments(self):
+        def fake_resolve(name):
+            return "/usr/bin/env" if name == "env" else None
+
+        with mock.patch("commands.resolve_runtime_command", side_effect=fake_resolve):
+            assert runtime_missing_command_name("env XDG_CONFIG_HOME=/tmp nmap -sV darklab.sh") == "nmap"
 
     def test_runtime_missing_command_message_is_stable(self):
         assert runtime_missing_command_message("nmap") == "Command is not installed on this instance: nmap"

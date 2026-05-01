@@ -1327,8 +1327,9 @@ body #history-panel { background: var(--theme-chrome-bg); }
 
 .history-compare-line-delta {
   border-radius: 3px;
-  background: color-mix(in srgb, var(--amber) 26%, transparent);
-  color: var(--text);
+  background: color-mix(in srgb, var(--amber) 48%, transparent);
+  color: color-mix(in srgb, var(--text) 88%, var(--amber));
+  padding: 0 1px;
 }
 
 .history-compare-line-added {

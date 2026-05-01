@@ -23,7 +23,7 @@ find "$WORKSPACE_ROOT" -mindepth 1 -maxdepth 1 -type d -name 'sess_*' -exec sh -
 ' sh {} + 2>/dev/null || true
 
 # Ensure /tmp is world-writable so the scanner user can write tool cache/config
-# (nuclei templates, wapiti sessions, etc.) to the tmpfs mount
+# (nuclei templates, ProjectDiscovery config, etc.) to the tmpfs mount
 chmod 1777 /tmp 2>/dev/null || true
 
 # Pre-create config/cache dirs owned by scanner so tools don't try to create

@@ -52,6 +52,7 @@ from process import (
 from run_output_store import RunOutputCapture, load_full_output_entries
 from output_signals import OutputSignalClassifier
 from session_variables import SessionVariableError, expand_session_variables
+from workspace import session_workspace_dir, WorkspaceDisabled
 
 log = logging.getLogger("shell")
 
@@ -681,6 +682,30 @@ class _SyntheticPostFilterProcessor:
         return lines
 
 
+class _WorkspacePathOutputFilter:
+    """Display absolute session-workspace paths as user-facing workspace paths."""
+
+    def __init__(self, session_id: str, cfg: dict):
+        self.prefix = ""
+        if not session_id or not cfg.get("workspace_enabled"):
+            return
+        try:
+            self.prefix = str(session_workspace_dir(session_id, cfg).resolve(strict=False)).rstrip(os.sep)
+        except (WorkspaceDisabled, OSError):
+            self.prefix = ""
+
+    def process_output_line(self, line: str) -> str:
+        if not self.prefix:
+            return line
+
+        def _replace(match):
+            suffix = match.group(1).lstrip("/")
+            return f"/{suffix}" if suffix else "/"
+
+        pattern = re.escape(self.prefix) + r"(/[\w@%+=:,./-]*)?"
+        return re.sub(pattern, _replace, line)
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @run_bp.route("/run", methods=["POST"])
@@ -767,7 +792,7 @@ def run_command():
         return jsonify({"error": validation.reason}), 403
     execution_command = validation.exec_command or execution_command
 
-    command, notice = rewrite_command(execution_command)
+    command, notice = rewrite_command(execution_command, session_id=session_id, cfg=CFG)
     if command != execution_command:
         log.info("CMD_REWRITE", extra={
             "ip": client_ip, "original": original_command, "rewritten": command,
@@ -792,6 +817,10 @@ def run_command():
     run_started = datetime.now(timezone.utc).isoformat()
     capture = _run_output_capture(run_id)
     signal_classifier = OutputSignalClassifier(execution_command, cmd_type="real")
+    workspace_path_filter = _WorkspacePathOutputFilter(session_id, CFG)
+
+    def _process_real_output_line(line: str) -> list[str]:
+        return postfilter.process_output_line(workspace_path_filter.process_output_line(line))
 
     # Start the process immediately — before the generator runs — so the PID
     # is registered before any kill request could arrive
@@ -899,7 +928,7 @@ def run_command():
                     if not lines and eof:
                         break
                     for line in lines:
-                        filtered_lines = postfilter.process_output_line(line)
+                        filtered_lines = _process_real_output_line(line)
                         for filtered_line in filtered_lines:
                             line_dt = datetime.now(timezone.utc)
                             _capture_add_line_with_signals(
@@ -915,7 +944,7 @@ def run_command():
 
             trailing_lines, _ = _read_available_stream_lines(stream_reader, finalize=True)
             for line in trailing_lines:
-                filtered_lines = postfilter.process_output_line(line)
+                filtered_lines = _process_real_output_line(line)
                 for filtered_line in filtered_lines:
                     line_dt = datetime.now(timezone.utc)
                     _capture_add_line_with_signals(
@@ -1046,7 +1075,7 @@ def run_command():
                         yield ": heartbeat\n\n"
                         continue
                     for line in lines:
-                        filtered_lines = postfilter.process_output_line(line)
+                        filtered_lines = _process_real_output_line(line)
                         for filtered_line in filtered_lines:
                             line_dt = datetime.now(timezone.utc)
                             metadata = _capture_add_line_with_signals(
@@ -1068,7 +1097,7 @@ def run_command():
 
             trailing_lines, _ = _read_available_stream_lines(stream_reader, finalize=True)
             for line in trailing_lines:
-                filtered_lines = postfilter.process_output_line(line)
+                filtered_lines = _process_real_output_line(line)
                 for filtered_line in filtered_lines:
                     line_dt = datetime.now(timezone.utc)
                     metadata = _capture_add_line_with_signals(

@@ -22,13 +22,84 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Open TODOs
 
-- **Active-run explicit attach/takeover actions**
-  - Build on client-aware active-run ownership so non-owning browsers can do more than monitor.
-  - Add explicit Run Monitor actions for cross-client active runs:
-    - `Attach here`: follow live output in a new/restored tab if the backend supports safe multi-consumer streaming.
-    - `Take over`: claim ownership when the original owner is stale, with clear copy that the stream is moving to this browser.
-  - Decide whether the first implementation should be multi-consumer SSE fan-out or a stricter one-owner stream transfer.
-  - Add two-browser Playwright coverage for same session token, different client ids, monitor-only default state, stale-owner takeover, and no mobile focus theft.
+- **Redis-backed run broker and live-output reattachment**
+  - Replace the current request-owned streaming model with a backend-owned run broker so subprocess stdout is drained exactly once by the backend and any authorized browser can subscribe to the processed event stream.
+  - Current limitation:
+    - `/run` currently starts the subprocess and reads `proc.stdout` inside the request's SSE generator.
+    - Reloaded tabs can detect active PIDs and poll until completion, but they cannot replay missed live output.
+    - Browsers sharing a session token can see owner metadata, but non-owning clients cannot attach to live output because there is no shared stream/buffer to subscribe to.
+  - Target architecture:
+    - Introduce a run broker that owns subprocess launch, stdout drain, timeout handling, signal classification, workspace path surfacing, synthetic post-filters, output capture, and final history persistence.
+    - Store active run events in Redis Streams keyed by `runstream:<run_id>`.
+    - Keep active run state in Redis keys such as `runstate:<run_id>`, `proc:<run_id>`, `procmeta:<run_id>`, and the existing `sessionprocs:<session_id>` set.
+    - Store processed transcript events, not raw stdout bytes, so every subscriber sees the same text, classes, timestamps, signal metadata, workspace path rewrites, and post-filtered output.
+    - Use monotonically ordered stream IDs so clients can reconnect with `after=<last_event_id>`.
+    - Treat Redis as required for production live reattachment in the Docker-first deployment model; local development may use a single-process fallback with clearly limited reconnect behavior.
+  - Configuration plan:
+    - Add the broker settings to `app/config.py`, `app/conf/config.yaml`, README configuration docs, and the configuration drift tests.
+    - Use these initial defaults:
+
+      ```yaml
+      run_broker_enabled: true
+      run_broker_require_redis: true
+      run_broker_active_stream_ttl_seconds: 14400
+      run_broker_completed_stream_ttl_seconds: 3600
+      run_broker_max_replay_bytes: 10485760
+      run_broker_subscriber_block_seconds: 15
+      run_broker_heartbeat_seconds: 20
+      run_broker_owner_stale_seconds: 75
+      ```
+
+    - Do not add a separate `run_broker_max_replay_lines` setting; use the existing `max_output_lines` value for line-bounded replay.
+  - Backend implementation plan:
+    - Add a broker module with a Redis-backed implementation and a single-process in-memory fallback for local dev.
+    - Move the subprocess read loop out of the request SSE generator into a broker worker/thread.
+    - Have the worker append `started`, `notice`, `output`, `error`, `heartbeat`, and `exit` events to the stream.
+    - Continue feeding `RunOutputCapture` from those same processed events so history persistence remains compatible, but write full-output artifacts incrementally during the run instead of waiting until completion.
+    - Make finalization idempotent so duplicate worker cleanup or reconnect races do not save the same run twice.
+    - Preserve current `/kill` behavior by continuing to register PID metadata before any stream subscriber attaches.
+    - Preserve active-run owner metadata, but treat it as UI/control ownership rather than stream ownership.
+    - Preserve synthetic post-filter behavior (`tail`, `sort`, `uniq`, `wc -l`) by streaming the same processed output that the owner sees to every subscriber.
+  - API plan:
+    - Migrate command start to a cleaner `POST /runs` endpoint now that the app is still pre-release.
+    - Retire or thin out `/run` after the frontend has moved to the brokered route; do not preserve old request-owned streaming behavior long term.
+    - Add `GET /runs/<run_id>/stream?after=<event_id>` for direct live subscription and replay.
+    - Add `GET /runs/<run_id>/events?after=<event_id>&limit=<n>` for bounded backfill, tests, and non-SSE clients.
+    - Add `POST /runs/<run_id>/owner` for explicit owner takeover/touch.
+    - Continue using `/history/active` for active run discovery, but include stream attach capability and owner state in the response.
+  - Frontend plan:
+    - Move normal command execution to `POST /runs` plus a shared `subscribeRunStream(runId, { after, mode })` helper.
+    - Store each tab's `lastEventId`, `attachMode`, `runId`, `historyRunId`, and owner state.
+    - On reload, reconnect owned or stale-owner runs from the last known event ID instead of waiting for history completion.
+    - In the Run Monitor, show another-client active runs with honest actions:
+      - `Attach read-only`: subscribe to live output without mutating owner metadata.
+      - `Take over`: claim owner metadata, enable owner controls, and continue subscribing from the selected tab.
+      - `Follow completion`: fallback when broker replay is unavailable.
+    - Hide or disable owner-only controls such as Kill in read-only attached tabs unless the user explicitly takes over.
+    - When ownership moves to another browser, show an app-native notice in the previous owner tab: `Run ownership moved to another browser. This tab is now read-only.`
+  - Replay and retention behavior:
+    - Attach from the beginning by default, bounded by `run_broker_max_replay_bytes` and the existing `max_output_lines`.
+    - Keep the viewport anchored to the current live output when attaching, so the user lands at the bottom while still being able to scroll up through replayed output.
+    - Refresh the active stream TTL while a run is active using `run_broker_active_stream_ttl_seconds`.
+    - Keep completed streams briefly after finalization using `run_broker_completed_stream_ttl_seconds`, then rely on SQLite history/artifacts for completed-run restore.
+    - If replay output has been trimmed, emit a visible transcript notice such as `[live replay starts here; earlier output was trimmed due to size]`.
+  - Failure behavior:
+    - If Redis is required and unavailable, fail command start with an operator-facing configuration error instead of silently falling back.
+    - If Redis is optional in local development, allow the in-memory broker but mark replay/reattach behavior as single-process only.
+    - If the broker worker crashes while the process may still be alive, surface `Live output stream lost. The process may still be running but final history may be incomplete or unavailable.`
+    - Keep finalization idempotent and defensive so partial stream loss does not corrupt existing run history.
+  - Testing expectations:
+    - Backend tests for event ordering, replay from beginning, replay from a saved event ID, multiple simultaneous subscribers, and stream expiration after completion.
+    - Backend tests that the broker finalizes history/artifacts exactly once and preserves existing preview/full-output behavior.
+    - Backend tests for Redis-required startup failures and Redis-unavailable local fallback behavior when `run_broker_require_redis` is false.
+    - Route tests for `/runs/<run_id>/stream`, `/runs/<run_id>/events`, and owner takeover/touch authorization.
+    - Frontend unit tests for reconnecting from `lastEventId`, read-only attach mode, takeover mode, owner-control visibility, and fallback to completed history.
+    - Two-browser Playwright coverage using the same session token with different client IDs: owner reconnect, read-only attach receiving new live output, takeover, and mobile Run Monitor behavior.
+  - Documentation expectations:
+    - Update ARCHITECTURE with the broker lifecycle and Redis stream key model.
+    - Update README configuration notes to document Redis as required for production live reattachment and describe the local fallback limitation.
+    - Update `docs/external-command-integrations.md` only if output filtering or command runtime behavior changes.
+    - Update CHANGELOG and release drafts with the user-visible reliability and reattachment behavior.
 
 - **Workflow provenance and promotion follow-ups**
   - Link generated runs back to the workflow id/name and step index.
@@ -62,69 +133,20 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
     - Add Playwright coverage for the compare launcher/result flow on desktop and mobile after the UI settles.
     - Add focused large/noisy comparison regression coverage if real-world outputs expose performance issues beyond current backend and unit coverage.
 
-- **Declarative command runtime adaptations in `commands.yaml`**
-  - Move command-specific runtime rewrites and environment tweaks out of app-owned Python branches and into the command registry.
-    - Current hardcoded examples to migrate include:
-      - `nmap` injecting `--privileged` when absent.
-      - `nuclei` injecting `-ud /tmp/nuclei-templates` when absent.
-      - `naabu` injecting `-scan-type c` when no scan type is present.
-      - `mtr` injecting `--report-wide` plus the user-facing non-interactive note.
-      - `wapiti` injecting `-f txt -o /dev/stdout` plus the terminal-output note.
-      - `amass` managed database behavior: inject managed `-dir amass`, reject alternate DB dirs for database subcommands, rewrite that directory to the session workspace, and launch with `XDG_CONFIG_HOME=<session workspace>`.
-    - Keep the registry expressive enough for future ProjectDiscovery runtime state handling without adding more per-tool Python conditionals.
-  - Proposed `commands.yaml` model:
-    - `runtime_adaptations.inject_flags`: append or prepend flags when none of a set of equivalent flags is already present.
-    - `runtime_adaptations.managed_workspace_directory`: declare a tool-owned relative directory, applicable subcommands, the flag that receives it, whether alternate user values are rejected, and whether it counts as a workspace write.
-    - `runtime_adaptations.environment`: declare environment variables for subprocess launch, including templated values such as `{workspace_root}`, `{session_workspace}`, and `{managed_workspace_parent}`.
-    - `runtime_adaptations.output_notice`: optional notice text when a rewrite changes user-visible behavior.
-    - `runtime_adaptations.applies_to`: root/subcommand/help-flag guards so help commands are not mutated unexpectedly.
-  - Implementation notes:
-    - Normalize this metadata in the existing command-registry loader, with schema validation and safe defaults.
-    - Apply declarative adaptations after workspace flag rewriting and before deny-prefix evaluation when the injected flags need deny exemptions, or explicitly model the correct phase if some adaptations must happen later.
-    - Keep the final execution command assembled with `shlex.join` so injected paths with spaces/metacharacters stay safe.
-    - Preserve current behavior exactly during migration before adding new behavior.
-    - Do not expose arbitrary environment injection from local config without considering operator/security boundaries; this is command-registry behavior, not a free-form user command escape hatch.
-  - Testing expectations:
-    - Backend registry normalization tests for each adaptation shape.
-    - Migration parity tests proving `nmap`, `nuclei`, `naabu`, `mtr`, `wapiti`, and `amass` produce the same execution commands/notices as before.
-    - Negative tests for Amass alternate DB directories and help commands that should not receive managed directories.
-    - Tests for quoting templated workspace paths containing spaces or shell metacharacters.
-    - Docs drift tests after adding or renaming test cases.
-  - Documentation expectations:
-    - Update `docs/external-command-integrations.md` to describe declarative runtime adaptations as the source of truth.
-    - Update `ARCHITECTURE.md` command execution details so special command behavior points at `commands.yaml` instead of Python branches.
-    - Update README tool notes only where user-visible behavior changes or becomes more clearly explained.
-
-- **ProjectDiscovery session-scoped runtime state and output path surfacing**
-  - Make ProjectDiscovery tools write useful config, resume, and generated artifact state into the active session workspace instead of anonymous `/tmp/.config/...` paths.
-    - Start with `nuclei`, `subfinder`, `pd-httpx`, `katana`, and `naabu`.
-    - Keep the existing `amass` managed `-dir amass` behavior as the model for command-specific state that should persist across related commands in one session.
-    - Treat ProjectDiscovery tools as a shared family because their Go helpers generally resolve config paths through `$XDG_CONFIG_HOME` when set, falling back to `$HOME/.config`.
-  - Add a command-runtime environment layer for tool-owned state.
-    - For these tools, set `XDG_CONFIG_HOME=<session workspace>` when workspace storage is enabled so default paths become session-visible folders such as `katana/`, `subfinder/`, `httpx/`, `naabu/`, and `nuclei/`.
-    - Preserve the current `nuclei -ud /tmp/nuclei-templates` injection so large template caches stay tmpfs-backed unless we deliberately decide templates should become workspace artifacts.
-    - Keep `HOME=/tmp` in the scanner wrapper for generic tool scratch behavior.
+- **ProjectDiscovery secondary workspace outputs**
+  - Follow up on the initial ProjectDiscovery session-state work by expanding workspace-aware flags for generated directories and secondary outputs.
+    - Current baseline: `nuclei`, `subfinder`, `pd-httpx`, `katana`, and `naabu` now receive session-scoped `XDG_CONFIG_HOME` through `commands.yaml` runtime injections when Files are enabled; `nuclei -ud /tmp/nuclei-templates` still keeps large template caches in tmpfs; run output now displays absolute session-workspace paths as `/relative/path`.
     - Do not make provider/API-key config files public by accident. Audit share/export package behavior before including generated ProjectDiscovery config directories.
-  - Surface container paths as user-facing workspace paths.
-    - Add a run-output postfilter that rewrites absolute paths under the current session workspace root to `/relative/path`.
-    - Example: `Creating resume file: /workspaces/sess_<hash>/katana/resume-abc.cfg` should display as `Creating resume file: /katana/resume-abc.cfg`.
-    - Keep the stored full-output artifact aligned with the user-facing transcript so restored history and share pages do not expose hashed session paths.
-  - Expand workspace-aware flags for generated directories and secondary outputs.
     - `katana`: support `-store-response-dir` / `-srd`, `-store-field-dir` / `-sfd`, and validate whether `-resume` should autocomplete from session files.
     - `pd-httpx`: support `-store-response-dir` / `-srd`, screenshot / response-store output directories where applicable, and config-file reads if useful.
     - `nuclei`: review resume, trace/error log, headless artifact, and config/template related paths; keep template cache policy explicit.
     - `subfinder`: review `-config` and provider config behavior carefully because those files can contain API keys.
     - `naabu`: review config, input/output, nmap integration output, and metrics behavior.
   - Testing expectations:
-    - Backend tests for command validation wrapping each selected root with `XDG_CONFIG_HOME=<session workspace>` only when workspaces are enabled.
-    - Backend tests that `nuclei` keeps `-ud /tmp/nuclei-templates` while also receiving the ProjectDiscovery config env.
-    - Route/streaming tests for rewriting current-session absolute workspace paths in output lines.
     - Command-registry tests for any newly declared workspace directory flags.
     - Container smoke coverage for at least `katana` resume output and one `pd-httpx` or `katana` stored-response directory.
   - Documentation expectations:
-    - Update `docs/external-command-integrations.md` with a ProjectDiscovery section before or after the Amass section.
-    - Update README tool notes for any visible behavior changes.
-    - Update CHANGELOG and release drafts with the user-facing path behavior and the security note around provider configs.
+    - Update `docs/external-command-integrations.md`, README tool notes, CHANGELOG, and release drafts for any newly surfaced directory flags or export/security behavior.
 
 ## Research
 
@@ -239,7 +261,7 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
     - collapse long low-signal sections (genuinely complex, lower incremental value)
 
 - **Tool-specific guidance**
-  - Add lightweight inline notes for tools with non-obvious web-shell behavior like `mtr`, `nmap`, `wapiti`, or `nuclei`.
+  - Add lightweight inline notes for tools with non-obvious web-shell behavior like `mtr`, `nmap`, `naabu`, or `nuclei`.
   - Good fit for the existing help / FAQ / welcome surfaces.
   - Merge this with onboarding and command hints into a broader operator-guidance layer:
     - command-specific caveats
