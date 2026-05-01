@@ -126,6 +126,81 @@ class _FakeRedisClient:
                 removed += int(existed)
         return removed
 
+    def xadd(
+        self,
+        key: str,
+        fields: dict[str, Any],
+        id: str = "*",
+        maxlen: int | None = None,
+        approximate: bool = True,
+    ) -> str:
+        del id, approximate
+        with self._lock:
+            self._purge_key(key)
+            bucket = self._values.setdefault(key, [])
+            if not isinstance(bucket, list):
+                bucket = []
+                self._values[key] = bucket
+            event_id = f"{int(time.time() * 1000)}-{len(bucket)}"
+            bucket.append((event_id, {str(k): str(v) for k, v in fields.items()}))
+            if maxlen and len(bucket) > maxlen:
+                del bucket[:len(bucket) - int(maxlen)]
+            self._sets.pop(key, None)
+            return event_id
+
+    def xrange(
+        self,
+        key: str,
+        min: str = "-",
+        max: str = "+",
+        count: int | None = None,
+    ) -> list[tuple[str, dict[str, str]]]:
+        del max
+        with self._lock:
+            self._purge_key(key)
+            bucket = self._values.get(key)
+            if not isinstance(bucket, list):
+                return []
+            rows = [
+                (event_id, dict(fields))
+                for event_id, fields in bucket
+                if min in ("-", "0-0") or _redis_stream_id_after(event_id, min)
+            ]
+            return rows[:count] if count else rows
+
+    def xread(
+        self,
+        streams: dict[str, str],
+        count: int | None = None,
+        block: int | None = None,
+    ) -> list[tuple[str, list[tuple[str, dict[str, str]]]]]:
+        deadline = time.time() + (float(block or 0) / 1000.0)
+        while True:
+            result = []
+            for key, after_id in streams.items():
+                rows = self.xrange(key, min=after_id, count=count)
+                rows = [
+                    (event_id, fields)
+                    for event_id, fields in rows
+                    if _redis_stream_id_after(event_id, after_id)
+                ]
+                if rows:
+                    result.append((key, rows))
+            if result or not block or time.time() >= deadline:
+                return result
+            time.sleep(0.05)
+
+
+def _redis_stream_id_after(left: str, right: str) -> bool:
+    if right in ("-", "0-0"):
+        return True
+    try:
+        left_ms, left_seq = [int(part) for part in str(left).split("-", 1)]
+        right_ms, right_seq = [int(part) for part in str(right).split("-", 1)]
+    except (TypeError, ValueError):
+        return str(left) > str(right)
+    return (left_ms, left_seq) > (right_ms, right_seq)
+
 redis_client = None
 if _FAKE_REDIS_ENABLED:
     REDIS_URL = REDIS_URL or "memory://"
@@ -160,7 +235,10 @@ _pid_lock = threading.Lock()
 # PID entries expire after 4 hours as a safety net for orphaned entries
 # left behind if a worker crashes mid-stream.
 _PID_TTL = 14400
-_ACTIVE_RUN_OWNER_STALE_SECONDS = 75
+
+
+def _active_run_owner_stale_seconds() -> int:
+    return max(1, int(CFG.get("run_broker_owner_stale_seconds", 75) or 75))
 
 
 def _load_active_run_payload(raw: object) -> dict[str, Any] | None:
@@ -272,7 +350,7 @@ def _active_run_owner_state(payload: dict[str, Any], client_id: str = "") -> dic
     owner_tab_id = str(payload.get("owner_tab_id", "") or "")
     owner_last_seen = _active_run_owner_last_seen(payload)
     owner_age_seconds = (time.time() - owner_last_seen) if owner_last_seen else None
-    owner_stale = owner_age_seconds is None or owner_age_seconds > _ACTIVE_RUN_OWNER_STALE_SECONDS
+    owner_stale = owner_age_seconds is None or owner_age_seconds > _active_run_owner_stale_seconds()
     has_live_owner = bool(owner_client_id and not owner_stale)
     return {
         "owner_client_id": owner_client_id,
@@ -411,6 +489,61 @@ def active_run_touch_owner(run_id: str, owner_client_id: str = "", owner_tab_id:
             return False
         payload["owner_last_seen"] = time.time()
         return True
+
+
+def active_run_set_owner(run_id: str, owner_client_id: str = "", owner_tab_id: str = "") -> bool:
+    """Claim active-run UI ownership for a browser client."""
+    if not run_id or not owner_client_id:
+        return False
+
+    if redis_client:
+        meta_key = f"procmeta:{run_id}"
+        raw = redis_client.get(meta_key)
+        payload = _load_active_run_payload(raw)
+        if not payload:
+            return False
+        payload["owner_client_id"] = owner_client_id
+        payload["owner_tab_id"] = owner_tab_id
+        payload["owner_last_seen"] = time.time()
+        redis_client.set(meta_key, json.dumps(payload), ex=_PID_TTL)
+        session_id = str(payload.get("session_id", "") or "")
+        if session_id:
+            redis_client.expire(f"sessionprocs:{session_id}", _PID_TTL)
+        return True
+
+    with _pid_lock:
+        payload = _active_run_meta.get(run_id)
+        if not payload:
+            return False
+        payload["owner_client_id"] = owner_client_id
+        payload["owner_tab_id"] = owner_tab_id
+        payload["owner_last_seen"] = time.time()
+        return True
+
+
+def active_run_control_status(run_id: str, session_id: str, owner_client_id: str = "") -> str:
+    """Return whether a browser client can control an active run.
+
+    Results are:
+      - "allowed": the run has no live owner, the owner is stale, or the client owns it.
+      - "forbidden": another live browser owns the run.
+      - "missing": active-run metadata is absent or belongs to another session.
+    """
+    if not run_id or not session_id:
+        return "missing"
+
+    if redis_client:
+        payload = _load_active_run_payload(redis_client.get(f"procmeta:{run_id}"))
+    else:
+        with _pid_lock:
+            payload = dict(_active_run_meta.get(run_id) or {})
+
+    if not payload or str(payload.get("session_id", "")) != session_id:
+        return "missing"
+    owner_state = _active_run_owner_state(payload, client_id=owner_client_id)
+    if owner_state.get("has_live_owner") and not owner_state.get("owned_by_this_client"):
+        return "forbidden"
+    return "allowed"
 
 
 def active_run_remove(run_id: str) -> None:

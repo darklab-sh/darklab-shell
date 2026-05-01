@@ -33,8 +33,8 @@ darklab_shell is a web-based shell for running network diagnostic and vulnerabil
 At a high level, it works like this:
 
 - A browser-based terminal UI loads a Flask-rendered shell page, then hydrates itself from focused read routes such as `/config`, `/themes`, `/faq`, `/autocomplete`, and `/welcome*`.
-- Command execution flows through `POST /run`, which validates and rewrites commands, resolves any app-native fake commands, starts an isolated scanner subprocess when needed, and streams output back over SSE.
-- `Redis` provides the shared state that must work correctly across multiple Gunicorn workers: rate limiting and active run PID tracking for `/kill`.
+- Command execution flows through brokered `POST /runs` starts plus replayable `/runs/<run_id>/stream` SSE subscriptions, which validate and rewrite commands, resolve app-native fake commands, start isolated scanner subprocesses when needed, and publish output events.
+- `Redis` provides the shared state that must work correctly across multiple Gunicorn workers: rate limiting, active run PID tracking for `/kill`, and production run-broker event replay.
 - `SQLite` persists completed run metadata, preview output, snapshots, and full-output artifact metadata so history, canonical run permalinks, and snapshot permalinks survive restarts.
 - The browser client stays build-step-free. Classic scripts share one global runtime, while browser cookies and storage cover local continuity and cache layers around session identity, session-scoped preferences, and reload restore.
 - The Docker runtime enforces a two-user model: Gunicorn runs as `appuser`, while user-submitted commands run as `scanner` with the shared `appuser` run group. That explicit run group lets validated session workspace files stay group-readable or group-writable without becoming world-readable.
@@ -109,7 +109,7 @@ flowchart TB
   Scanner["Scanner subprocesses"]
 
   Browser -->|HTTP bootstrap reads| Flask
-  Browser -->|HTTP POST /run + SSE stream| Flask
+  Browser -->|HTTP POST /runs + SSE stream| Flask
   Browser -->|HTTP POST /kill| Flask
   Browser -->|HTTP history/share/diag reads| Flask
 
@@ -122,7 +122,7 @@ flowchart TB
 This is the transport/boundary view of the app. It focuses on the stable communication paths rather than the internal modules that implement them.
 
 - browser traffic is plain HTTP plus one-way SSE streaming for live command output
-- Redis is only used for shared worker coordination, not as a general application datastore
+- Redis is used for shared worker coordination and brokered active-run event replay, not as a general application datastore
 - SQLite and artifact files are the durable history/share boundary
 - command execution remains out-of-process, which keeps the Flask worker lifecycle separate from tool execution
 
@@ -134,7 +134,7 @@ This is the transport/boundary view of the app. It focuses on the stable communi
 sequenceDiagram
   participant B as Browser
   participant C as content/history/assets routes
-  participant R as /run + /kill
+  participant R as /runs + /kill
   participant X as Redis
   participant P as scanner process
   participant D as SQLite + artifacts
@@ -142,10 +142,12 @@ sequenceDiagram
   B->>C: GET / + startup content routes
   C-->>B: HTML + config/theme/FAQ/autocomplete/welcome payloads
 
-  B->>R: POST /run
+  B->>R: POST /runs
   R->>X: register run_id -> pid
   R->>P: spawn fake command or real process
-  R-->>B: SSE started/output/exit
+  R->>X: publish started/output/exit events
+  B->>R: GET /runs/<run_id>/stream
+  R-->>B: replay + live SSE events
   R->>D: save preview and metadata
   R->>D: save full artifact when enabled
 
@@ -164,7 +166,7 @@ There are three core request classes:
 - run/kill lifecycle
 - history/share/diagnostic reads
 
-`/history/active` is part of that third class. It exposes only the current session's in-flight run metadata so the browser can rebuild running tabs after a reload, keep kill available, render the submitted command as a normal prompt line, and then hand those tabs back to the normal `/history/<run_id>` restore path once the run completes. Active-run metadata includes a browser-level owner identity (`owner_client_id`), the owning terminal tab id (`owner_tab_id`), and `owner_last_seen` liveness so the same session token can be open on a laptop and phone without the second browser automatically stealing a live command. If the owner is another live client, the run remains visible in Run Monitor as monitor-only; if the owner is stale or belongs to this browser, reload recovery can rebuild the running placeholder tab. Non-running tabs and drafts are restored separately from browser `sessionStorage`, which keeps the reload path split cleanly between browser-owned idle state and server-owned active-run state.
+`/history/active` is part of that third class. It exposes only the current session's in-flight run metadata so the browser can rebuild running tabs after a reload, keep kill available, render the submitted command as a normal prompt line, and subscribe back to `/runs/<run_id>/stream` for replay plus live output. Active-run metadata includes a browser-level owner identity (`owner_client_id`), the owning terminal tab id (`owner_tab_id`), and `owner_last_seen` liveness so the same session token can be open on a laptop and phone without the second browser automatically stealing a live command. If the owner is another live client, Run Monitor can open a read-only attached tab that follows brokered output without exposing owner-only controls, or explicitly take over ownership through `POST /runs/<run_id>/owner`; if the owner is stale or belongs to this browser, reload recovery rebuilds the running tab and follows brokered output. Non-running tabs and drafts are restored separately from browser `sessionStorage`, which keeps the reload path split cleanly between browser-owned idle state and server-owned active-run state.
 
 That split is reflected directly in the blueprint structure.
 
@@ -198,7 +200,10 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 
 | Method | Endpoint | Description |
 | -------- | ---------- | ------------- |
-| `POST` | `/run` | Validates, expands session variables, rewrites, executes, captures, and streams a command over SSE. |
+| `POST` | `/runs` | Validates, expands session variables, rewrites, starts brokered execution, and returns the run id plus stream URL. |
+| `GET` | `/runs/<run_id>/stream` | Replays brokered events and follows live output over SSE for a current-session run. |
+| `GET` | `/runs/<run_id>/events` | Returns bounded brokered event backfill for tests and non-SSE clients. |
+| `POST` | `/runs/<run_id>/owner` | Reassigns active-run UI ownership to the requesting browser client for explicit Run Monitor takeover. |
 | `POST` | `/run/client` | Persists allowlisted browser-owned built-in output, such as client-side theme/session commands, as normal run history. |
 | `POST` | `/kill` | Kills an active process group by `run_id` and clears active-run tracking. |
 
@@ -318,7 +323,7 @@ This is still a classic-script frontend, not an ES-module app. The architecture 
 
 Prompt ownership lives in `composerState`, not in whichever DOM input happened to update last.
 
-The options modal is part of that same browser-owned layer. It does not change backend config; it owns user-specific UX preferences (timestamp/line-number quick toggles, welcome-intro behavior, snapshot redaction defaults, run-notification state, HUD clock timezone mode) and feeds them back into the classic-script runtime during boot and session changes. The terminal-native `config` command calls the same preference application path as the modal, so terminal and modal changes stay equivalent. Browser-owned terminal commands (`theme`, `config`, `workflow`, and `session-token`) render locally, then persist their masked command and transcript output through `/run/client` so history, recents, and reload hydration use the same server-backed run model as `/run`. `workflow run` uses that local command path for catalog lookup, input prompting, and queue setup, then submits the rendered workflow steps through the normal `/run` execution path. Those preferences now persist server-side per session through the session-token model, while browser cookies/local storage remain the local cache and anonymous-session fallback layer. On mobile, that same shared Options surface hides the desktop-only `HUD Clock` and `Run Notifications` rows even though the underlying preference set remains shared with desktop.
+The options modal is part of that same browser-owned layer. It does not change backend config; it owns user-specific UX preferences (timestamp/line-number quick toggles, welcome-intro behavior, snapshot redaction defaults, run-notification state, HUD clock timezone mode) and feeds them back into the classic-script runtime during boot and session changes. The terminal-native `config` command calls the same preference application path as the modal, so terminal and modal changes stay equivalent. Browser-owned terminal commands (`theme`, `config`, `workflow`, and `session-token`) render locally, then persist their masked command and transcript output through `/run/client` so history, recents, and reload hydration use the same server-backed history model as brokered `/runs`. `workflow run` uses that local command path for catalog lookup, input prompting, and queue setup, then submits the rendered workflow steps through the normal `/runs` execution path. Those preferences now persist server-side per session through the session-token model, while browser cookies/local storage remain the local cache and anonymous-session fallback layer. On mobile, that same shared Options surface hides the desktop-only `HUD Clock` and `Run Notifications` rows even though the underlying preference set remains shared with desktop.
 
 ### Browser Runtime
 
@@ -412,7 +417,7 @@ Tab activation is intentionally stateful rather than stateless rendering. `activ
 - the browser fetches narrow typed endpoints such as `/welcome`, `/welcome/ascii`, `/welcome/ascii-mobile`, `/welcome/hints`, and `/config` rather than reading raw files directly
 - the same frontend-owned preference layer that controls timestamps and line numbers also controls welcome-intro behavior
 
-The detailed user-visible welcome behavior belongs in the README. Here, the important distinction is that welcome is a client-owned bootstrap experience built from server-normalized content routes, not a special `/run` transcript.
+The detailed user-visible welcome behavior belongs in the README. Here, the important distinction is that welcome is a client-owned bootstrap experience built from server-normalized content routes, not a special command-execution transcript.
 
 ### Input Modes And Dropdown State Machines
 
@@ -425,7 +430,7 @@ Command editing is split into separate state machines rather than one overloaded
 
 The structured autocomplete path is intentionally token-aware rather than shell-aware. It inspects command root, current token, and prior tokens to decide whether a suggestion should replace the whole input or only the active token. Examples act as discovery suggestions: a unique root or fuzzy root match can flatten root and subcommand examples into full-command replacements, while a selected subcommand switches the matcher to subcommand-scoped flags and value hints. Ambiguous subcommand matches remain token suggestions until only one subcommand matches. The matcher ranks exact matches, prefixes, token-boundary/camel-ish hits, substrings, and fuzzy character matches in that order, while preserving authored example order once an example is eligible. That preserves the classic-shell feel for long scanner commands without turning the frontend into a general shell parser.
 
-Synthetic post-filters also sit on a distinct path before the normal shell-operator denial logic. `parse_synthetic_postfilter()` in `commands.py` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the `/run` stream applies the selected helper before lines are emitted or persisted. That keeps shell-like helpers app-native without reopening general shell piping or chaining.
+Synthetic post-filters also sit on a distinct path before the normal shell-operator denial logic. `parse_synthetic_postfilter()` in `commands.py` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the broker worker applies the selected helper before lines are emitted or persisted. That keeps shell-like helpers app-native without reopening general shell piping or chaining.
 
 ---
 
@@ -612,21 +617,21 @@ These rewrites are declared in `app/conf/commands.yaml` under `runtime_adaptatio
 | `nuclei` | Adds `-ud /tmp/nuclei-templates`; uses session-scoped `XDG_CONFIG_HOME` when Files are enabled | Redirects template storage to tmpfs while keeping useful ProjectDiscovery config/resume state in the session workspace. Silent. |
 | `naabu` | Adds `-scan-type c` | Uses TCP connect scanning instead of raw SYN mode for container reliability. Silent. |
 
-Session command variables are expanded inside the app before command policy validation and execution. `app/session_variables.py` owns the `[A-Z][A-Z0-9_]{0,31}` name rules, SQLite storage, and `$NAME` / `${NAME}` replacement. `/run` keeps `var` itself unexpanded so `var set HOST ...` is data management, expands other commands before synthetic post-filter parsing, validates the expanded command, and still persists the typed command in history while emitting a transcript notice with the expanded form.
+Session command variables are expanded inside the app before command policy validation and execution. `app/session_variables.py` owns the `[A-Z][A-Z0-9_]{0,31}` name rules, SQLite storage, and `$NAME` / `${NAME}` replacement. The run-start path keeps `var` itself unexpanded so `var set HOST ...` is data management, expands other commands before synthetic post-filter parsing, validates the expanded command, and still persists the typed command in history while emitting a transcript notice with the expanded form.
 
 Workspace-aware validation also rewrites declared file and directory flags from `app/conf/commands.yaml` into the active session workspace. Rewritten token lists are reassembled with shell-safe quoting before they cross the existing `sh -c` subprocess boundary, so app-injected workspace paths cannot accidentally change shell parsing when a valid session file or folder name contains spaces or shell metacharacters. The same command metadata drives target-value restrictions: flags and positional arguments declared with target-like `value_type` values (`domain`, `host`, `ip`, `cidr`, `target`, or `url`) can be checked against configured restricted networks without blanket string scanning. Runtime adaptation metadata also owns managed workspace directories, environment wrappers, and command-prefix injections; Amass declares its database-backed subcommands there, so `amass enum`, `amass subs`, `amass track`, and `amass viz` get a managed `-dir amass` workspace directory and `XDG_CONFIG_HOME` is pointed at the session workspace so `amass engine` and the CLI share the same per-session database path. ProjectDiscovery tools declare a workspace-required `env XDG_CONFIG_HOME=<session workspace>` prefix through the same metadata, and run output filters display absolute session-workspace paths as user-facing paths like `/katana/resume.cfg`. See [External Command Integrations](docs/external-command-integrations.md) for the command-specific integration contracts.
 
-Synthetic post-filters also sit on this run-lifecycle boundary rather than on the shell-parser path. `parse_synthetic_postfilter()` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the `/run` stream applies the selected helper before lines are emitted or persisted.
+Synthetic post-filters also sit on this run-lifecycle boundary rather than on the shell-parser path. `parse_synthetic_postfilter()` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the brokered stream applies the selected helper before lines are emitted or persisted.
 
 ### Spawn And Stream
 
-Commands flow through `POST /run`, which validates and rewrites the request, resolves any app-native fake commands, starts an isolated scanner subprocess when needed, and streams output back over SSE.
+Commands flow through `POST /runs`, which validates and rewrites the request, resolves any app-native fake commands, starts brokered execution, and returns a run id plus stream URL. The browser then subscribes to `GET /runs/<run_id>/stream`, which replays available broker events and follows live output over SSE. Production deployments require Redis for cross-worker replay; single-process local development can opt into the in-memory broker fallback.
 
 Fast output bursts are rendered in small batches instead of forcing a full DOM update per line. The batching keeps commands like `man curl` responsive enough for the browser to repaint while output is streaming, and the terminal stays pinned to the bottom only while the user has not scrolled away. If the user scrolls up, live following stops until they return to the tail.
 
-The `/run` generator keeps the transport alive with heartbeat comments during idle periods, and the subprocess stdout reader now uses a nonblocking buffered path rather than `select()` followed by `readline()`. That matters for tools that emit partial progress lines: partial output no longer wedges the generator waiting for a newline and starving the heartbeat stream. If a platform refuses nonblocking setup, the server warning-logs the fallback so a deployment that could stall on partial-line output leaves an operator-visible trail. When the browser disconnects from a still-running command, the detached drain thread keeps recording output only up to the configured command timeout plus a short grace window; after that ceiling it terminates the process group and clears PID/active-run metadata so one non-closing scanner cannot pin a worker thread forever. On the browser side, `runner.js` treats 45 seconds of browser-visible silence as a potentially stalled stream, then checks `/history/active` before changing tab state. If the run is still active, the tab stays `RUNNING`, Kill remains available, and the warning copy says the process is still alive; only inactive runs fall back to the history/final-result recovery path. The async recovery path captures the tab/run generation before it awaits backend state and re-checks that generation before applying status, which prevents stale timeout promises from overwriting a newer run after rapid tab switches, kills, or restarts. If the same stream later resumes, the runner prints an explicit recovery notice and keeps the tab/HUD in the running state instead of leaving the UI failed-looking while output silently continues.
+The brokered stream keeps the transport alive with heartbeat comments during idle periods, while the backend-owned worker drains subprocess stdout exactly once and publishes normalized `started`, `notice`, `output`, `exit`, and `error` events. The subprocess stdout reader uses a nonblocking buffered path rather than `select()` followed by `readline()`. That matters for tools that emit partial progress lines: partial output no longer wedges the drain waiting for a newline and starving the heartbeat stream. If a platform refuses nonblocking setup, the server warning-logs the fallback so a deployment that could stall on partial-line output leaves an operator-visible trail. On the browser side, `runner.js` treats 45 seconds of browser-visible silence as a potentially stalled stream, then checks `/history/active` before changing tab state. If the run is still active, the tab stays `RUNNING`, Kill remains available, and the warning copy says the process is still alive; only inactive runs fall back to the history/final-result recovery path. The async recovery path captures the tab/run generation before it awaits backend state and re-checks that generation before applying status, which prevents stale timeout promises from overwriting a newer run after rapid tab switches, kills, or restarts. If the same stream later resumes, the runner prints an explicit recovery notice and keeps the tab/HUD in the running state instead of leaving the UI failed-looking while output silently continues.
 
-Active-run metadata is also the source for the Run Monitor. `/history/active` returns the current run IDs, PIDs, commands, start times, metadata source, owner fields, and best-effort `psutil` resource telemetry when available. The backend reports summed RSS bytes and cumulative process-tree CPU seconds for the tracked process plus recursive children. The desktop Run Monitor is a HUD-attached drawer that can open even when idle, rendering a header-only `0 active runs` state; mobile uses the same data in a sheet. Runs owned by another live browser are still listed, but they do not create terminal tabs or inject transcript output in the observer browser. The monitor calculates the displayed CPU percentage from adjacent poll samples in the browser and caps the display at 100%, which avoids per-worker CPU sample caches and keeps multi-worker deployments from flickering when successive polls land on different workers. Memory fill is normalized client-side against a 1 GB scale while the label continues to show the actual RSS value. Telemetry failures are intentionally non-fatal and omitted from the response rather than breaking reload recovery, stall checks, or the terminal `runs` command.
+Active-run metadata is also the source for the Run Monitor. `/history/active` returns the current run IDs, PIDs, commands, start times, metadata source, owner fields, and best-effort `psutil` resource telemetry when available. The backend reports summed RSS bytes and cumulative process-tree CPU seconds for the tracked process plus recursive children. The desktop Run Monitor is a HUD-attached drawer that can open even when idle, rendering a header-only `0 active runs` state; mobile uses the same data in a sheet. Runs owned by another live browser stay listed with Attach and Take over actions: Attach opens a read-only subscribed tab with live output but without Kill, while Take over claims owner metadata first and then opens a normal owner-controlled tab. The monitor calculates the displayed CPU percentage from adjacent poll samples in the browser and caps the display at 100%, which avoids per-worker CPU sample caches and keeps multi-worker deployments from flickering when successive polls land on different workers. Memory fill is normalized client-side against a 1 GB scale while the label continues to show the actual RSS value. Telemetry failures are intentionally non-fatal and omitted from the response rather than breaking reload recovery, stall checks, or the terminal `runs` command.
 
 ### Output Prefixes And Follow State
 
@@ -836,7 +841,7 @@ The current event inventory is:
 
 - request/response logging is owned by Flask hooks rather than Werkzeug's default request-line logging
 - run lifecycle logs intentionally carry `ip`, `session`, and `run_id` so start/end/kill/failure events can be correlated without reconstructing request flow from surrounding lines
-- diagnostics, history, permalink, and share routes each emit their own events so operator-visible surfaces remain observable outside the `/run` path
+- diagnostics, history, permalink, and share routes each emit their own events so operator-visible surfaces remain observable outside the command-execution path
 - proxy-aware identity resolution is shared across logging, rate limiting, and diagnostics gating, so the logged `ip` field tracks the same resolved client identity used elsewhere in the runtime
 
 ---
@@ -926,12 +931,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,241
+- behavior tests: 2,267
 - docs/inventory meta-tests: 30
-- `pytest`: 1112 (1082 behavior + 30 meta)
-- `vitest`: 930
+- `pytest`: 1132 (1102 behavior + 30 meta)
+- `vitest`: 936
 - `playwright`: 229
-- total: 2,271
+- total: 2,297
 
 ### Testing Architecture
 

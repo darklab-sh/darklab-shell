@@ -27,13 +27,13 @@ darklab_shell is a full-stack, self-hosted web terminal for running network diag
 
 ## Features
 
-- **Terminal workflow** — real-time SSE streaming, killable long-running commands, a live run timer, optional line numbers and timestamps, output search, signal-aware findings/warnings/errors/summaries review with per-scope navigation and a transcript-native `command findings` recap block, terminal-style prompt flow, bash-like `Tab` completion with ranked prefix/substring/fuzzy matching, context-aware flag/value hints for tools like nmap, curl, dig, ffuf, and nuclei plus runtime suggestions for app-owned commands, `Ctrl+R` reverse-history search, built-in pipe support for chained helper stages like `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq`, a keyboard shortcuts reference panel, selection-safe desktop shortcuts, SSE keep-alive heartbeats for slow scans, a HUD-attached Run Monitor with active-run elapsed time plus best-effort CPU/RSS memory telemetry shown as circular meters, and client-side stall detection that warns on quiet streams and resumes the live run UI automatically if output starts flowing again
+- **Terminal workflow** — real-time SSE streaming, killable long-running commands, a live run timer, optional line numbers and timestamps, output search, signal-aware findings/warnings/errors/summaries review with per-scope navigation and a transcript-native `command findings` recap block, terminal-style prompt flow, bash-like `Tab` completion with ranked prefix/substring/fuzzy matching, context-aware flag/value hints for tools like nmap, curl, dig, ffuf, and nuclei plus runtime suggestions for app-owned commands, `Ctrl+R` reverse-history search, built-in pipe support for chained helper stages like `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq`, a keyboard shortcuts reference panel, selection-safe desktop shortcuts, SSE keep-alive heartbeats for slow scans, a HUD-attached Run Monitor with active-run elapsed time plus best-effort CPU/RSS memory telemetry shown as circular meters, Run Monitor Attach/Take over actions for live runs owned by another browser sharing the session token, and client-side stall detection that warns on quiet streams and resumes the live run UI automatically if output starts flowing again
 - **Mobile shell** — dedicated mobile composer, keyboard helper row with character and word-level cursor movement, stable Firefox-friendly layout, shared desktop/mobile Run-button state, output-follow behavior that keeps the latest lines visible when the keyboard opens, and a mobile history sheet with the same type / command name / exit / date / starred filtering model as desktop
 - **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy and a `save ▾` dropdown (txt / html / pdf), a jump-to-live / jump-to-bottom helper when you scroll away from the tail, and export output that keeps the live header/title/meta treatment aligned across permalink pages, saved HTML, and PDF as closely as the PDF renderer allows
 - **History and sharing** — recent command chips, a persistent history surface on desktop and mobile with full-text search across command text and stored output text (SQLite FTS5), filtering by type / command name / exit code / date range / starred status, starring/favorites, changed-only run comparison from history rows with suggested/manual run selection, client-aware reconnect-to-active-run continuity after reload, session restore for non-running tabs and drafts, canonical run permalinks, snapshot rows with open/copy/delete actions, snapshot permalinks with native share-sheet support, and full-output artifacts for longer runs
 - **Session command variables** — `var set HOST ip.darklab.sh`, `var list`, and `var unset HOST` define per-session target values that can be referenced as `$HOST` or `${HOST}` in later commands; expansion is app-mediated before policy validation, typed history stays readable, and the transcript shows the expanded command that actually ran
 - **Session files** — optional app-mediated per-session file access for tools that need small input/output files, with a Files panel for creating, viewing, editing, downloading, and deleting session-scoped files plus previews for JSON, JSONL/NDJSON, CSV/TSV, XML, HTTP responses, and large text with manual/auto-refresh; strict relative filenames, quota enforcement, hashed session directories, visible file-count/usage/remaining quota in the Files panel, compact session file usage in `status`, terminal-native cwd-aware helpers including `file download <file>` plus `ls` / `cat` / confirmed `rm` aliases, and command-registry metadata that safely rewrites selected file flags without enabling shell navigation or redirection
-- **Session tokens** — generate a persistent `tok_` session token to carry your run history, shell identity, command variables, workspace files, user-created workflows, and saved user options across browsers and devices; live active runs remain browser-owned, so a phone or second browser using the same token can monitor a laptop-owned command without automatically taking it over. `session-token generate/set/copy/clear/rotate/list/revoke` manage the full token lifecycle with optional history/file/workflow migration, atomic rotate with rollback on failure, terminal-native yes/no confirmations for the interactive CLI flows, automatic cross-tab identity sync with session-scoped UI refresh, server-side revocation, masked token arguments in local history, and a destructive clear-confirm in Options that can copy the token before the browser forgets it; the Options modal exposes the common inline actions (`Generate`, `Set`, `Copy`, `Rotate`, `Clear`) without entering commands
+- **Session tokens** — generate a persistent `tok_` session token to carry your run history, shell identity, command variables, workspace files, user-created workflows, and saved user options across browsers and devices; live active runs remain browser-owned, so a phone or second browser using the same token can monitor a laptop-owned command without automatically taking it over, attach read-only from Run Monitor, or explicitly take over ownership when needed. `session-token generate/set/copy/clear/rotate/list/revoke` manage the full token lifecycle with optional history/file/workflow migration, atomic rotate with rollback on failure, terminal-native yes/no confirmations for the interactive CLI flows, automatic cross-tab identity sync with session-scoped UI refresh, server-side revocation, masked token arguments in local history, and a destructive clear-confirm in Options that can copy the token before the browser forgets it; the Options modal exposes the common inline actions (`Generate`, `Set`, `Copy`, `Rotate`, `Clear`) without entering commands
 - **Safer sharing** — a built-in basic redaction baseline can mask common secrets or infrastructure details on snapshot permalinks, with optional operator regex rules appended on top. Permalink creation can choose raw vs redacted sharing per snapshot without changing the stored run history; local `save txt/html/pdf` exports remain raw
 - **Run notifications** — optional browser desktop notifications fire on run completion (any exit code or kill); toggled from the Options panel on desktop and intentionally hidden from the mobile Options sheet; uses only the command root in the notification title to avoid exposing arguments or token values
 - **Themes and presentation** — named theme variants, a terminal-native `theme` command, theme-aware permalink/export rendering, mobile/desktop theme parity, browser-aligned permalink/saved-HTML export styling with best-effort PDF parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), an operator-configurable FAQ modal, and user options for welcome-intro behavior plus default share-snapshot redaction that now follow the active session token instead of staying browser-local
@@ -168,9 +168,9 @@ All application settings live in `app/conf/config.yaml`. The values below are th
 | `recent_commands_limit` | `50` | Number of distinct recent commands hydrated into prompt Up/Down history, desktop rail recents, and the mobile recent peek |
 | `data_dir` | auto | Server-side only. Directory used for SQLite history and compressed full-output artifacts. Leave unset to use `/data` when it is writable, otherwise `/tmp` for local/dev fallback. If set explicitly, the directory must be writable at startup |
 | `permalink_retention_days` | `365` | Delete runs and snapshots older than this many days on startup. `0` = unlimited |
-| `rate_limit_enabled` | `true` | Enables the `/run` rate limiter. Set to `false` only for test-only or maintenance overlays where throttling should be bypassed |
-| `rate_limit_per_minute` | `30` | Max `/run` requests per minute per IP |
-| `rate_limit_per_second` | `5` | Max `/run` requests per second per IP |
+| `rate_limit_enabled` | `true` | Enables the `/runs` rate limiter. Set to `false` only for test-only or maintenance overlays where throttling should be bypassed |
+| `rate_limit_per_minute` | `30` | Max `/runs` requests per minute per IP |
+| `rate_limit_per_second` | `5` | Max `/runs` requests per second per IP |
 | `max_tabs` | `8` | Maximum number of tabs a user can have open at once. `0` = unlimited |
 | `max_output_lines` | `5000` | Max rows retained in the live tab DOM and in the SQLite run preview. Oldest rendered rows are dropped from the top when exceeded, while visible line numbers continue reflecting emitted output order. `0` = unlimited |
 | `persist_full_run_output` | `true` | Server-side only. Persists full output for completed runs as compressed artifacts while the history drawer and normal run permalink keep using the capped SQLite preview |
@@ -184,6 +184,14 @@ All application settings live in `app/conf/config.yaml`. The values below are th
 | `workspace_inactivity_ttl_hours` | `1` | Server-side only. Inactive session workspace cleanup threshold in hours; `0` disables age-based cleanup. Workspace activity touches the hashed session directory, and periodic cleanup removes expired `sess_*` directories rather than aging out individual files |
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` = disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
+| `run_broker_enabled` | `true` | Enables the brokered run model for command start, output replay, and live reattachment |
+| `run_broker_require_redis` | `true` | Requires Redis for brokered live reattachment. Keep enabled for Docker/production deployments; set to `false` only for single-process local development where in-memory replay limitations are acceptable |
+| `run_broker_active_stream_ttl_seconds` | `14400` | Safety TTL for active broker streams, refreshed while a run is active |
+| `run_broker_completed_stream_ttl_seconds` | `3600` | How long completed broker streams remain replayable after history finalization before completed-run restore relies on SQLite/history artifacts |
+| `run_broker_max_replay_bytes` | `10485760` | Maximum replay payload retained per brokered run stream. Replay is also bounded by `max_output_lines`; there is no separate line-limit setting |
+| `run_broker_subscriber_block_seconds` | `15` | How long broker stream subscribers wait for new events before receiving a heartbeat |
+| `run_broker_heartbeat_seconds` | `20` | How often broker workers emit heartbeat events while a process is idle |
+| `run_broker_owner_stale_seconds` | `75` | How long an owner browser can go without touching a run before ownership is considered stale |
 | `welcome_char_ms` | `18` | Base delay between each typed character in the welcome animation (ms). Lower = faster typing |
 | `welcome_jitter_ms` | `12` | Random extra delay added per character (ms). `0` for perfectly even typing; higher for a more organic feel |
 | `welcome_post_cmd_ms` | `650` | Pause after a welcome command finishes typing, before the next visual step begins (ms) |
@@ -566,7 +574,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── assets.py           # /vendor/*, /favicon.ico, /health, /diag (IP-gated operator diagnostics)
 │   │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*
 │   │   ├── history.py          # /history*, /share*; preview/full-output shaping helpers
-│   │   ├── run.py              # /run (rate-limited SSE), /kill; run-output capture helpers
+│   │   ├── run.py              # /runs broker starts/streams, /run/client history persistence, /kill, and run-output capture helpers
 │   │   ├── session.py          # /session/token/*, /session/preferences, /session/variables, /session/workflows*, /session/migrate, /session/starred*
 │   │   └── workspace.py        # /workspace/files* app-mediated session file routes
 │   ├── builtin_autocomplete.yaml # App-owned built-in command autocomplete grammar (not operator config)
@@ -589,7 +597,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── config.py               # load_config(), CFG defaults, SCANNER_PREFIX detection, theme registry
 │   ├── database.py             # SQLite connection, schema init, retention pruning
 │   ├── extensions.py           # Flask-Limiter singleton (init_app deferred to app.py)
-│   ├── fake_commands.py        # Synthetic shell helpers handled through /run before spawn
+│   ├── fake_commands.py        # Synthetic shell helpers handled through the run lifecycle before spawn
 │   ├── favicon.ico             # Site favicon
 │   ├── helpers.py              # Trusted-proxy IP resolver and session-ID extractor (used by all blueprints)
 │   ├── logging_setup.py        # structured logging formatters and logger configuration
@@ -598,6 +606,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── process.py              # Redis setup, pid_register/pid_pop, in-process fallback
 │   ├── redaction.py            # Snapshot-share redaction helpers and built-in rule application
 │   ├── requirements.txt        # Python runtime dependencies
+│   ├── run_broker.py           # Brokered run event storage, replay, and SSE stream helpers
 │   ├── run_output_store.py     # Preview/full-output capture and artifact persistence helpers
 │   ├── session_variables.py    # Per-session command-variable storage and expansion helpers
 │   ├── static/
@@ -700,7 +709,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── capture_output_for_smoke_test.mjs # Browser-driven smoke-test corpus capture helper
 │   ├── capture_ui_screenshots.sh # Drives the UI screenshot capture pipeline (desktop + mobile, all themes or one) — emits PNGs, manifests, and a review index to /tmp/darklab_shell-ui-capture/
 │   ├── check_versions.sh       # Local dependency/version drift helper used by the manual CI job; reports production Docker base image plus CI runner images
-│   ├── container_smoke_test.sh # Builds the container, runs the shared smoke corpus through /run, and checks output against tests/py/fixtures/container_smoke_test-expectations.json
+│   ├── container_smoke_test.sh # Builds the container, runs the shared smoke corpus through /runs, and checks output against tests/py/fixtures/container_smoke_test-expectations.json
 │   ├── generate_theme_examples.py # Regenerates the checked-in dark/light theme example files from app/config.py defaults
 │   ├── hooks/
 │   │   └── pre-commit          # Git pre-commit hook — runs all lint, security, and unit checks (activate with: git config core.hooksPath scripts/hooks)
@@ -722,7 +731,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   │   ├── commands.spec.js # command execution, denial, and status rendering
     │   │   ├── demo.mobile.spec.js # Mobile demo recording with command, history, workflow, and theme scenes (RUN_DEMO=1 only)
     │   │   ├── demo.spec.js    # Desktop demo recording with command, history, workflow, and theme scenes (RUN_DEMO=1 only)
-    │   │   ├── failure-paths.spec.js  # /run denial/rate limit, share/history failure toasts
+    │   │   ├── failure-paths.spec.js  # /runs denial/rate limit, share/history failure toasts
     │   │   ├── fixtures/       # Binary test assets (e.g. ios-keyboard-dark.png used by mobile.spec.js)
     │   │   ├── helpers.js      # runCommand/openHistory helpers
     │   │   ├── history.spec.js # history drawer flows, restore, starring, and chip cleanup
@@ -730,7 +739,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   │   ├── kill.spec.js    # kill confirmation and running-tab stop behavior
     │   │   ├── mobile.spec.js  # mobile composer/menu/layout regressions and touch flows
     │   │   ├── output.spec.js  # copy/clear/save/export behavior
-    │   │   ├── rate-limit.spec.js # per-session /run rate limiting
+    │   │   ├── rate-limit.spec.js # per-session /runs rate limiting
     │   │   ├── runner-stall.spec.js   # SSE stall recovery
     │   │   ├── search.spec.js  # search/highlight/navigation behavior
     │   │   ├── session-token.spec.js # session-token lifecycle, migration, and cross-session persistence
@@ -794,7 +803,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   ├── test_output_search.py # SQLite FTS history-search coverage and fallback behavior
     │   ├── test_request_kill_and_commands.py # /kill, request parsing, loader edges, and built-in command resolution
     │   ├── test_routes.py      # Flask integration tests via test client (all HTTP routes)
-    │   ├── test_run_history_share.py # Higher-value /run, history, share, built-in command, and persistence flows
+    │   ├── test_run_history_share.py # Higher-value /runs, history, share, built-in command, and persistence flows
     │   ├── test_session_routes.py # session-token generation/verify/migrate/revoke/starred/preferences route coverage
     │   └── test_validation.py  # Tests for command validation, rewrites, and runtime availability helpers
     └── ui-capture-scenes.md    # Reviewer hand-off manifest for the UI screenshot capture pack — per-scene "what to check" tables for design review

@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fromDomScripts } from './helpers/extract.js'
 
-function loadRunMonitor({ runs = [], mobile = false, bindMobileSheet = undefined } = {}) {
+function loadRunMonitor({
+  runs = [],
+  mobile = false,
+  bindMobileSheet = undefined,
+  attachActiveRunFromMonitor = undefined,
+  tabs = [],
+} = {}) {
   const responses = Array.isArray(runs[0]) ? runs : [runs]
   let responseIndex = 0
   const apiFetch = vi.fn(() => Promise.resolve({
@@ -20,8 +26,9 @@ function loadRunMonitor({ runs = [], mobile = false, bindMobileSheet = undefined
       window,
       apiFetch,
       showToast: vi.fn(),
-      getTabs: vi.fn(() => []),
+      getTabs: vi.fn(() => tabs),
       activateTab: vi.fn(),
+      ...(attachActiveRunFromMonitor ? { attachActiveRunFromMonitor } : {}),
       ...(bindMobileSheet ? { bindMobileSheet } : {}),
     },
     `{
@@ -118,6 +125,72 @@ describe('Run Monitor', () => {
     expect(document.querySelector('.run-monitor-meta')?.textContent).toContain('another browser')
 
     closeRunMonitor()
+  })
+
+  it('offers attach and takeover actions for runs owned by another live browser', async () => {
+    const attachActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
+    const { openRunMonitor } = loadRunMonitor({
+      attachActiveRunFromMonitor,
+      runs: [
+        {
+          run_id: 'run-other-client',
+          pid: 1234,
+          command: 'sleep 60',
+          started: new Date().toISOString(),
+          has_live_owner: true,
+          owned_by_this_client: false,
+        },
+      ],
+    })
+
+    await openRunMonitor({ source: 'test' })
+
+    const buttons = [...document.querySelectorAll('.run-monitor-action-btn')]
+    expect(buttons.map(button => button.textContent)).toEqual(['Attach', 'Take over'])
+    buttons[0].click()
+    await Promise.resolve()
+    expect(attachActiveRunFromMonitor).toHaveBeenCalledWith(
+      expect.objectContaining({ run_id: 'run-other-client' }),
+      { takeover: false },
+    )
+
+    await openRunMonitor({ source: 'test' })
+    document.querySelectorAll('.run-monitor-action-btn')[1].click()
+    await Promise.resolve()
+    expect(attachActiveRunFromMonitor).toHaveBeenCalledWith(
+      expect.objectContaining({ run_id: 'run-other-client' }),
+      { takeover: true },
+    )
+  })
+
+  it('keeps takeover available when another browser owns a run already attached locally', async () => {
+    const attachActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
+    const { openRunMonitor } = loadRunMonitor({
+      attachActiveRunFromMonitor,
+      tabs: [{ id: 'tab-2', label: 'sleep 60', runId: 'run-other-client', attachMode: 'read-only' }],
+      runs: [
+        {
+          run_id: 'run-other-client',
+          pid: 1234,
+          command: 'sleep 60',
+          started: new Date().toISOString(),
+          has_live_owner: true,
+          owned_by_this_client: false,
+        },
+      ],
+    })
+
+    await openRunMonitor({ source: 'test' })
+
+    expect(document.querySelector('.run-monitor-meta')?.textContent).toContain('controlled elsewhere')
+    const buttons = [...document.querySelectorAll('.run-monitor-action-btn')]
+    expect(buttons.map(button => button.textContent)).toEqual(['Take over'])
+    buttons[0].click()
+    await Promise.resolve()
+    expect(attachActiveRunFromMonitor).toHaveBeenCalledWith(
+      expect.objectContaining({ run_id: 'run-other-client' }),
+      { takeover: true },
+    )
   })
 
   it('warms CPU samples while closed so first open can show a percent', async () => {

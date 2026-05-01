@@ -10,6 +10,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, runtime
 
 - [Runtime and Coordination Decisions](#runtime-and-coordination-decisions)
   - [Real-time Output: SSE over WebSockets](#real-time-output-sse-over-websockets)
+  - [Redis-Backed Run Broker](#redis-backed-run-broker)
   - [Multi-worker Process Killing via Redis](#multi-worker-process-killing-via-redis)
   - [Rate Limiting via Redis](#rate-limiting-via-redis)
 - [Security and Isolation Decisions](#security-and-isolation-decisions)
@@ -56,6 +57,20 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, runtime
 **SSE was chosen over WebSockets for output streaming.**
 
 Server-Sent Events are simpler to implement with Flask, work correctly behind nginx-proxy without additional configuration, and are unidirectional (server → client) which is all that's needed for streaming command output. The frontend reads the SSE stream via `fetch()` + `ReadableStream` rather than the `EventSource` API, because `EventSource` doesn't support custom headers (needed for the session ID).
+
+### Redis-Backed Run Broker
+
+**Command execution is broker-owned instead of request-owned.**
+
+Earlier command streaming tied subprocess stdout draining directly to the browser's HTTP request. That made the first browser connection special: if the page reloaded, another browser opened the same session token, or the request stream failed, the backend had to choose between losing live output, continuing detached work with a separate drain path, or waiting for completed history. Those paths were hard to reason about and became especially awkward once Run Monitor needed read-only attach and explicit takeover semantics.
+
+The current model starts commands with `POST /runs`, records active-run ownership metadata, and has a backend worker drain stdout exactly once. The worker publishes normalized events (`started`, `notice`, `output`, `error`, `exit`) to a run stream. Browsers subscribe with `GET /runs/<run_id>/stream`, optionally replaying from an event id. This makes subscribers replaceable: the owning tab, a reloaded tab, a phone on the same session token, and a read-only attached tab all consume the same processed output stream.
+
+Redis Streams were chosen for production because darklab_shell already relies on Redis for cross-worker rate limiting and process coordination. Gunicorn workers do not share memory, so in-process queues cannot provide reliable live-output replay or attach/takeover behavior across workers. SQLite is the durable history store, but it is a poor fit for high-frequency ephemeral stream events and blocking subscriber reads. Redis Streams provide ordered event ids, bounded replay, blocking reads, TTL-backed cleanup, and cross-worker visibility without turning the history database into a message bus.
+
+The app still includes a single-process in-memory broker fallback for local development, but production live reattachment expects Redis. That split is intentional: local development should remain easy to start, while Docker/Gunicorn deployments need one shared broker so active run state, stream replay, and process control behave consistently no matter which worker handles the next request.
+
+The legacy request-owned `POST /run` execution route was removed rather than kept as a compatibility layer. The app is pre-release, and maintaining two command execution paths would have duplicated lifecycle behavior, increased test burden, and made future active-run features more fragile. `POST /run/client` remains separate because browser-owned built-ins such as `theme`, `config`, and `session-token` need local DOM/storage behavior before their rendered transcript is persisted to normal run history.
 
 ### Multi-worker Process Killing via Redis
 

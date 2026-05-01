@@ -23,11 +23,17 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 ## Open TODOs
 
 - **Redis-backed run broker and live-output reattachment**
-  - Replace the current request-owned streaming model with a backend-owned run broker so subprocess stdout is drained exactly once by the backend and any authorized browser can subscribe to the processed event stream.
-  - Current limitation:
-    - `/run` currently starts the subprocess and reads `proc.stdout` inside the request's SSE generator.
-    - Reloaded tabs can detect active PIDs and poll until completion, but they cannot replay missed live output.
-    - Browsers sharing a session token can see owner metadata, but non-owning clients cannot attach to live output because there is no shared stream/buffer to subscribe to.
+  - Continue hardening the backend-owned run broker so subprocess stdout is drained exactly once by the backend and any authorized browser can subscribe to the processed event stream.
+  - Current state:
+    - Normal browser command starts now use `POST /runs`, then subscribe to `GET /runs/<run_id>/stream`.
+    - The broker has Redis-backed event storage for production and a single-process in-memory fallback for local development.
+    - The legacy request-owned `POST /run` route has been removed; browser-owned built-ins still persist through `POST /run/client`.
+    - Real-process launch, PID registration, active-run registration, stream replay, spawn-error handling, and finalization now flow through the brokered `/runs` path.
+  - Current reattachment behavior:
+    - Reloaded owned/stale-owner tabs now subscribe back to the broker stream and replay available live output.
+    - Browsers sharing a session token can attach read-only to another live browser's active run or explicitly take over ownership from the Run Monitor.
+    - When ownership moves to another browser, the previous owner receives an app-native notice and becomes read-only.
+    - Remaining follow-up work is polish and broader coverage, especially two-browser Playwright coverage.
   - Target architecture:
     - Introduce a run broker that owns subprocess launch, stdout drain, timeout handling, signal classification, workspace path surfacing, synthetic post-filters, output capture, and final history persistence.
     - Store active run events in Redis Streams keyed by `runstream:<run_id>`.
@@ -52,8 +58,7 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
     - Do not add a separate `run_broker_max_replay_lines` setting; use the existing `max_output_lines` value for line-bounded replay.
   - Backend implementation plan:
-    - Add a broker module with a Redis-backed implementation and a single-process in-memory fallback for local dev.
-    - Move the subprocess read loop out of the request SSE generator into a broker worker/thread.
+    - Expand the broker module's Redis-backed implementation and single-process in-memory fallback as needed for attach/takeover behavior.
     - Have the worker append `started`, `notice`, `output`, `error`, `heartbeat`, and `exit` events to the stream.
     - Continue feeding `RunOutputCapture` from those same processed events so history persistence remains compatible, but write full-output artifacts incrementally during the run instead of waiting until completion.
     - Make finalization idempotent so duplicate worker cleanup or reconnect races do not save the same run twice.
@@ -61,16 +66,14 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
     - Preserve active-run owner metadata, but treat it as UI/control ownership rather than stream ownership.
     - Preserve synthetic post-filter behavior (`tail`, `sort`, `uniq`, `wc -l`) by streaming the same processed output that the owner sees to every subscriber.
   - API plan:
-    - Migrate command start to a cleaner `POST /runs` endpoint now that the app is still pre-release.
-    - Retire or thin out `/run` after the frontend has moved to the brokered route; do not preserve old request-owned streaming behavior long term.
-    - Add `GET /runs/<run_id>/stream?after=<event_id>` for direct live subscription and replay.
-    - Add `GET /runs/<run_id>/events?after=<event_id>&limit=<n>` for bounded backfill, tests, and non-SSE clients.
+    - Extend `GET /runs/<run_id>/stream?after=<event_id>` for direct live subscription and replay from stored tab event ids.
+    - Keep `GET /runs/<run_id>/events?after=<event_id>&limit=<n>` as bounded backfill, tests, and non-SSE client support.
     - Add `POST /runs/<run_id>/owner` for explicit owner takeover/touch.
     - Continue using `/history/active` for active run discovery, but include stream attach capability and owner state in the response.
   - Frontend plan:
-    - Move normal command execution to `POST /runs` plus a shared `subscribeRunStream(runId, { after, mode })` helper.
-    - Store each tab's `lastEventId`, `attachMode`, `runId`, `historyRunId`, and owner state.
-    - On reload, reconnect owned or stale-owner runs from the last known event ID instead of waiting for history completion.
+    - Continue evolving the shared broker subscription helper for explicit attach/takeover modes.
+    - Store each tab's `attachMode`, `runId`, `historyRunId`, and owner state. `lastEventId` is tracked for live broker subscriptions; add broader persistence if future attach modes need cross-reload resume from a specific event id instead of replay from the broker's retained beginning.
+    - On reload, owned or stale-owner runs subscribe back to the broker stream instead of waiting for history completion. Continue using history completion restore as the fallback when the broker stream detaches or replay is unavailable.
     - In the Run Monitor, show another-client active runs with honest actions:
       - `Attach read-only`: subscribe to live output without mutating owner metadata.
       - `Take over`: claim owner metadata, enable owner controls, and continue subscribing from the selected tab.
@@ -92,12 +95,12 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
     - Backend tests for event ordering, replay from beginning, replay from a saved event ID, multiple simultaneous subscribers, and stream expiration after completion.
     - Backend tests that the broker finalizes history/artifacts exactly once and preserves existing preview/full-output behavior.
     - Backend tests for Redis-required startup failures and Redis-unavailable local fallback behavior when `run_broker_require_redis` is false.
-    - Route tests for `/runs/<run_id>/stream`, `/runs/<run_id>/events`, and owner takeover/touch authorization.
-    - Frontend unit tests for reconnecting from `lastEventId`, read-only attach mode, takeover mode, owner-control visibility, and fallback to completed history.
+    - Continue expanding route tests for `/runs/<run_id>/stream`, `/runs/<run_id>/events`, and owner takeover/touch authorization.
+    - Continue expanding frontend unit tests for reconnecting from `lastEventId`, read-only attach mode, takeover mode, owner-control visibility, and fallback to completed history as the UI grows.
     - Two-browser Playwright coverage using the same session token with different client IDs: owner reconnect, read-only attach receiving new live output, takeover, and mobile Run Monitor behavior.
   - Documentation expectations:
-    - Update ARCHITECTURE with the broker lifecycle and Redis stream key model.
-    - Update README configuration notes to document Redis as required for production live reattachment and describe the local fallback limitation.
+    - Keep ARCHITECTURE current as the broker lifecycle and Redis stream key model evolve.
+    - Keep README configuration notes current for Redis-required production live reattachment and local fallback limitations.
     - Update `docs/external-command-integrations.md` only if output filtering or command runtime behavior changes.
     - Update CHANGELOG and release drafts with the user-visible reliability and reattachment behavior.
 
@@ -132,6 +135,26 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
     - Consider date-range filters in the manual compare picker if day grouping plus `Load More` is not enough for deep history.
     - Add Playwright coverage for the compare launcher/result flow on desktop and mobile after the UI settles.
     - Add focused large/noisy comparison regression coverage if real-world outputs expose performance issues beyond current backend and unit coverage.
+
+- **Run Monitor access and modal redesign after broker migration**
+  - Promote Run Monitor from a contextual drawer/sheet into a first-class navigation surface once the broker reattachment work is complete.
+  - Problem to solve:
+    - Mobile can currently open Run Monitor only while the active tab has a running process, because the bottom peek swaps from Recents to Run Monitor only in that state.
+    - Desktop can open Run Monitor from HUD/status affordances, but it is still discoverability-led rather than a durable menu destination.
+    - Attach and Take over make Run Monitor useful even when the current tab is idle, so users need a reliable way to reach it from any browser sharing the session token.
+  - Recommended implementation shape:
+    - Add a dedicated Run Monitor entry to the desktop rail/menu area and the mobile menu.
+    - Keep the existing running-state HUD/peek affordances as shortcuts, but treat them as secondary entry points.
+    - Convert desktop Run Monitor from a HUD-attached drawer into a proper app modal using the shared modal/focus/dismiss primitives.
+    - Keep mobile on sheet formatting, but make it reachable from the normal mobile menu even when no active tab is running.
+    - Preserve the running-process peek behavior as a contextual shortcut while a command is active.
+    - Ensure idle, owned, read-only attached, and other-browser-owned runs all render coherently in the new surface.
+    - Make Attach and Take over actions available from the dedicated surface, including when the active tab is idle.
+  - Testing expectations:
+    - Vitest coverage for desktop/mobile entry visibility independent of active-tab running state.
+    - Vitest coverage that Attach/Take over actions remain available in the modal/sheet for other-browser-owned runs.
+    - Playwright coverage for opening Run Monitor from desktop navigation, mobile menu, and existing running-state shortcuts.
+    - Accessibility/focus coverage for Escape/backdrop/close behavior on desktop modal and tap/drag dismissal on mobile sheet.
 
 - **ProjectDiscovery secondary workspace outputs**
   - Follow up on the initial ProjectDiscovery session-state work by expanding workspace-aware flags for generated directories and secondary outputs.
@@ -388,7 +411,7 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
   - Command outcome summaries (see Near-term) are buildable without this foundation, but design them to be retro-fittable once the structured model is in place — the summary parsers should consume structured line events, not re-parse raw text.
 
 - **Unified terminal built-in lifecycle**
-  - Browser-owned built-ins (`theme`, `config`, and `session-token`) need browser execution for DOM state, local storage, clipboard, and transcript-owned confirmations, while server-owned built-ins naturally flow through `/run`.
+  - Browser-owned built-ins (`theme`, `config`, and `session-token`) need browser execution for DOM state, local storage, clipboard, and transcript-owned confirmations, while server-owned built-ins naturally flow through `/runs`.
   - The long-term cleanup target is one terminal-command lifecycle after execution:
     - normalize built-in output into a shared result shape
     - apply pipe helpers against that shape

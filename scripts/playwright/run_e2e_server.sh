@@ -33,6 +33,7 @@ workspace_enabled: true
 workspace_backend: tmpfs
 workspace_root: "$WORKSPACE_DIR"
 workspace_inactivity_ttl_hours: 1
+run_broker_require_redis: false
 EOF
 
 cd "$APP_DIR"

@@ -29,6 +29,7 @@ from pathlib import Path
 import pytest
 import yaml
 import process
+import run_broker
 import database
 import app as shell_app
 import config as app_config
@@ -1942,6 +1943,174 @@ class TestRewriteCaseInsensitive:
         cmd, _ = rewrite_command("NUCLEI -u https://darklab.sh")
         assert "-ud /tmp/nuclei-templates" in cmd
 
+
+# ── run broker event storage ─────────────────────────────────────────────────
+
+class TestRunBrokerMemoryStore:
+    def test_memory_store_replays_events_after_saved_event_id(self):
+        store = run_broker._MemoryRunBrokerStore()
+
+        first = store.publish("run-1", "started", {"run_id": "run-1"})
+        second = store.publish("run-1", "output", {"text": "hello"})
+        third = store.publish("run-1", "exit", {"code": 0})
+
+        all_events = store.events_after("run-1", after_id="0-0", limit=10)
+        replayed = store.events_after("run-1", after_id=first.event_id, limit=10)
+
+        assert [event.event_id for event in all_events] == [
+            first.event_id,
+            second.event_id,
+            third.event_id,
+        ]
+        assert [event.event_id for event in replayed] == [second.event_id, third.event_id]
+        assert replayed[0].payload["type"] == "output"
+        assert replayed[0].payload["text"] == "hello"
+
+    def test_memory_store_marks_trimmed_replay_with_notice(self):
+        store = run_broker._MemoryRunBrokerStore()
+        with mock.patch.dict(run_broker.CFG, {"run_broker_max_replay_bytes": 160}):
+            store.publish("run-1", "output", {"text": "first-" + ("x" * 120)})
+            store.publish("run-1", "output", {"text": "second-" + ("y" * 120)})
+            events = store.events_after("run-1", after_id="0-0", limit=10)
+
+        assert events[0].payload["type"] == "notice"
+        assert events[0].payload["text"] == run_broker.REPLAY_TRIM_NOTICE
+        assert all("first-" not in str(event.payload.get("text", "")) for event in events)
+        assert any("second-" in str(event.payload.get("text", "")) for event in events)
+
+    def test_memory_store_uses_max_output_lines_as_replay_event_bound(self):
+        store = run_broker._MemoryRunBrokerStore()
+        with mock.patch.dict(run_broker.CFG, {"max_output_lines": 2, "run_broker_max_replay_bytes": 0}):
+            store.publish("run-1", "started", {"run_id": "run-1"})
+            store.publish("run-1", "output", {"text": "line 1"})
+            store.publish("run-1", "output", {"text": "line 2"})
+            store.publish("run-1", "output", {"text": "line 3"})
+            events = store.events_after("run-1", after_id="0-0", limit=10)
+
+        visible_text = [str(event.payload.get("text", "")) for event in events]
+        assert events[0].payload["type"] == "notice"
+        assert events[0].payload["text"] == run_broker.REPLAY_TRIM_NOTICE
+        assert "line 1" not in visible_text
+        assert "line 2" in visible_text
+        assert "line 3" in visible_text
+
+    def test_bounded_replay_keeps_latest_output_and_terminal_event(self):
+        events = [
+            run_broker.BrokerEvent("1-0", {"type": "started"}),
+            run_broker.BrokerEvent("2-0", {"type": "output", "text": "line 1"}),
+            run_broker.BrokerEvent("3-0", {"type": "heartbeat"}),
+            run_broker.BrokerEvent("4-0", {"type": "output", "text": "line 2"}),
+            run_broker.BrokerEvent("5-0", {"type": "output", "text": "line 3"}),
+            run_broker.BrokerEvent("6-0", {"type": "exit", "code": 0}),
+        ]
+
+        with mock.patch.dict(run_broker.CFG, {"max_output_lines": 2}):
+            bounded = run_broker._bounded_replay_events(events)
+
+        visible_text = [str(event.payload.get("text", "")) for event in bounded]
+        assert bounded[0].payload["type"] == "notice"
+        assert bounded[0].payload["text"] == run_broker.REPLAY_TRIM_NOTICE
+        assert "line 1" not in visible_text
+        assert "line 2" in visible_text
+        assert "line 3" in visible_text
+        assert bounded[-1].payload == {"type": "exit", "code": 0}
+
+    def test_stream_run_events_replays_snapshot_before_waiting_for_live_events(self):
+        class FakeStore:
+            def __init__(self):
+                self.wait_after_id = ""
+
+            def replay(self, run_id):
+                assert run_id == "run-1"
+                return [run_broker.BrokerEvent("1-0", {"type": "output", "text": "replayed"})]
+
+            def wait_after(self, run_id, after_id, timeout):
+                self.wait_after_id = after_id
+                return [run_broker.BrokerEvent("2-0", {"type": "exit", "code": 0})]
+
+        store = FakeStore()
+        with mock.patch.object(run_broker, "_store", return_value=store):
+            events = list(run_broker.stream_run_events("run-1"))
+
+        assert '"text": "replayed"' in events[0]
+        assert '"type": "exit"' in events[1]
+        assert store.wait_after_id == "1-0"
+
+    def test_decode_payload_accepts_redis_bytes_fields(self):
+        payload = run_broker._decode_payload({b"payload": b'{"type":"output","text":"hello"}'})
+
+        assert payload == {"type": "output", "text": "hello"}
+
+    def test_redis_store_decodes_bytes_event_ids_and_payloads(self):
+        fake_redis = mock.Mock()
+        fake_redis.xrange.return_value = [
+            (b"1-0", {b"payload": b'{"type":"started"}'}),
+            (b"2-0", {b"payload": b'{"type":"output","text":"hello"}'}),
+        ]
+
+        with mock.patch.object(run_broker, "redis_client", fake_redis):
+            events = run_broker._RedisRunBrokerStore().events_after("run-1", after_id="1-0", limit=10)
+
+        assert [(event.event_id, event.payload) for event in events] == [
+            ("2-0", {"type": "output", "text": "hello"}),
+        ]
+
+    def test_redis_replay_marks_tail_fetch_as_trimmed_when_stream_is_longer(self):
+        fake_redis = mock.Mock()
+        fake_redis.xrevrange.return_value = [
+            (b"3-0", {b"payload": b'{"type":"output","text":"line 3"}'}),
+            (b"2-0", {b"payload": b'{"type":"output","text":"line 2"}'}),
+        ]
+        fake_redis.xlen.return_value = 3
+
+        with mock.patch.object(run_broker, "redis_client", fake_redis), \
+             mock.patch.object(run_broker, "_replay_fetch_count", return_value=2):
+            events = run_broker._RedisRunBrokerStore().replay("run-1")
+
+        assert events[0].payload["type"] == "notice"
+        assert events[0].payload["text"] == run_broker.REPLAY_TRIM_NOTICE
+        assert [(event.event_id, event.payload.get("text")) for event in events[1:]] == [
+            ("2-0", "line 2"),
+            ("3-0", "line 3"),
+        ]
+
+    def test_redis_publish_trims_stream_with_replay_derived_maxlen(self):
+        fake_redis = mock.Mock()
+        fake_redis.xadd.return_value = b"1-0"
+
+        with mock.patch.object(run_broker, "redis_client", fake_redis), \
+             mock.patch.object(run_broker, "_redis_stream_maxlen", return_value=1234):
+            event = run_broker._RedisRunBrokerStore().publish("run-1", "output", {"text": "hello"})
+
+        assert event.event_id == "1-0"
+        fake_redis.xtrim.assert_called_once_with(
+            "runstream:run-1",
+            maxlen=1234,
+            approximate=True,
+        )
+
+    def test_broker_requires_redis_when_configured(self):
+        with mock.patch.object(run_broker, "redis_client", None), \
+             mock.patch.dict(run_broker.CFG, {
+                 "run_broker_enabled": True,
+                 "run_broker_require_redis": True,
+             }):
+            assert run_broker.broker_available() is False
+            assert run_broker.broker_unavailable_reason() == (
+                "Run broker requires Redis, but Redis is not available."
+            )
+
+    def test_broker_allows_memory_store_when_redis_is_optional(self):
+        with mock.patch.object(run_broker, "redis_client", None), \
+             mock.patch.dict(run_broker.CFG, {
+                 "run_broker_enabled": True,
+                 "run_broker_require_redis": False,
+             }):
+            assert run_broker.broker_available() is True
+            assert run_broker.broker_unavailable_reason() == ""
+            assert isinstance(run_broker._store(), run_broker._MemoryRunBrokerStore)
+
+
 # ── pid_register / pid_pop (in-process mode) ─────────────────────────────────
 
 class TestPidMap:
@@ -2084,6 +2253,62 @@ class TestActiveRunMetadata:
 
         assert run["owner_last_seen"] == 1100.0
         assert run["owner_stale"] is False
+
+    def test_active_run_set_owner_replaces_owner_metadata(self):
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process, "_pid_start_time", return_value=None),
+            mock.patch.object(process.time, "time", return_value=1000.0),
+        ):
+            process.active_run_register(
+                "run-owned",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+                owner_client_id="client-1",
+                owner_tab_id="tab-1",
+            )
+
+        with mock.patch.object(process.time, "time", return_value=1100.0):
+            assert process.active_run_set_owner("run-owned", "client-2", "tab-2") is True
+
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process.time, "time", return_value=1101.0),
+        ):
+            old_owner = process.active_runs_for_session("session-1", client_id="client-1")[0]
+            new_owner = process.active_runs_for_session("session-1", client_id="client-2")[0]
+
+        assert old_owner["owned_by_this_client"] is False
+        assert new_owner["owned_by_this_client"] is True
+        assert new_owner["owner_client_id"] == "client-2"
+        assert new_owner["owner_tab_id"] == "tab-2"
+        assert new_owner["owner_last_seen"] == 1100.0
+
+    def test_active_run_control_status_requires_live_owner(self):
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process, "_pid_start_time", return_value=None),
+            mock.patch.object(process.time, "time", return_value=1000.0),
+        ):
+            process.active_run_register(
+                "run-owned",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+                owner_client_id="client-1",
+                owner_tab_id="tab-1",
+            )
+
+        with mock.patch.object(process.time, "time", return_value=1030.0):
+            assert process.active_run_control_status("run-owned", "session-1", "client-1") == "allowed"
+            assert process.active_run_control_status("run-owned", "session-1", "client-2") == "forbidden"
+
+        with mock.patch.object(process.time, "time", return_value=1200.0):
+            assert process.active_run_control_status("run-owned", "session-1", "client-2") == "allowed"
+            assert process.active_run_control_status("run-owned", "session-2", "client-1") == "missing"
 
     def test_active_runs_for_session_prunes_dead_pid(self):
         with mock.patch.object(process, "_pid_start_time", return_value=None):

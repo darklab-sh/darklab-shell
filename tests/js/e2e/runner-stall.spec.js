@@ -31,7 +31,16 @@ test.describe('runner stall handling', () => {
 
       window.fetch = async (input, init) => {
         const url = typeof input === 'string' ? input : input.url
-        if (url.endsWith('/run') && init?.method === 'POST') {
+        if (url.endsWith('/runs') && init?.method === 'POST') {
+          return new Response(JSON.stringify({
+            run_id: 'stall-test-run',
+            stream: '/runs/stall-test-run/stream',
+          }), {
+            status: 202,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/runs/stall-test-run/stream')) {
           const body = new ReadableStream({
             start(controller) {
               controller.enqueue(

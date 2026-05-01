@@ -376,15 +376,26 @@ test.describe('workflows modal', () => {
 
   test('run all executes rendered workflow steps sequentially in the same tab', async ({ page }) => {
     const postedCommands = []
-    await page.route('**/run', async (route) => {
+    await page.route('**/runs', async (route) => {
       const payload = JSON.parse(route.request().postData() || '{}')
       const command = String(payload.command || '')
       postedCommands.push(command)
+      const runId = `workflow-${postedCommands.length}`
+      await route.fulfill({
+        status: 202,
+        contentType: 'application/json',
+        body: JSON.stringify({ run_id: runId, stream: `/runs/${runId}/stream` }),
+      })
+    })
+    await page.route('**/runs/workflow-*/stream**', async (route) => {
+      const runId = route.request().url().match(/\/runs\/([^/]+)\/stream/)?.[1] || 'workflow-1'
+      const index = Number(runId.split('-').pop() || '1') - 1
+      const command = postedCommands[index] || ''
       await route.fulfill({
         status: 200,
         contentType: 'text/event-stream',
         body: [
-          `data: {"type":"started","run_id":"workflow-${postedCommands.length}"}\n\n`,
+          `data: {"type":"started","run_id":"${runId}"}\n\n`,
           `data: {"type":"output","text":"mock output for ${command}\\n"}\n\n`,
           'data: {"type":"exit","code":0,"elapsed":0.01}\n\n',
         ].join(''),

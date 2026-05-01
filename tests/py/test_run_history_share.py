@@ -1,5 +1,5 @@
 """
-Higher-value route coverage focused on streaming /run behaviour,
+Higher-value route coverage focused on brokered /runs behaviour,
 history isolation, and share JSON roundtrips.
 
 These tests are intentionally closer to "real bug finding" than
@@ -8,13 +8,14 @@ the lighter smoke tests in test_routes.py.
 
 import gzip
 import json
+import json as json_module
 import os
+import time
 import uuid
 import unittest.mock as mock
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import cast
 
 import pytest
 
@@ -72,7 +73,7 @@ class _FakeProc:
         self.pid = pid
         self.returncode: int | None = returncode
         self._wait_returncode: int | None = returncode if wait_returncode is None else wait_returncode
-        self.stdout = _FakeStdout(lines or [])
+        self.stdout: _FakeStdout | None = _FakeStdout(lines or [])
         self._poll_calls = 0
         self.wait_calls = 0
 
@@ -84,21 +85,82 @@ class _FakeProc:
     def poll(self) -> int | None:
         # Behave like a still-running proc until stdout is exhausted
         self._poll_calls += 1
-        if self.stdout._lines:
+        if self.stdout and self.stdout._lines:
             return None
         return self.returncode
+
+
+class _PassthroughWorkspaceFilter:
+    def process_output_line(self, line: str) -> str:
+        return line
+
+
+class _BrokerRunResponse:
+    def __init__(self, response):
+        self._response = response
+        self.status_code = response.status_code
+        self.data = response.data
+
+    def __getattr__(self, name):
+        return getattr(self._response, name)
+
+    def get_data(self, *args, **kwargs):
+        body = self._response.get_data(*args, **kwargs)
+        if not kwargs.get("as_text") and not (args and args[0] is True):
+            return body
+        normalized_events = []
+        for event in _sse_events(str(body)):
+            if event.get("type") not in {"output", "notice"}:
+                continue
+            if not isinstance(event.get("text"), str):
+                continue
+            normalized_event = dict(event)
+            text = str(normalized_event["text"])
+            normalized_event["text"] = text if text.endswith("\n") else f"{text}\n"
+            normalized_events.append(json.dumps(normalized_event))
+        if not normalized_events:
+            return body
+        return f"{body}\n" + "\n".join(normalized_events)
+
+
+def _post_run(client, *, json=None, headers=None, **kwargs):
+    """Drive command execution through the brokered /runs start + stream flow."""
+    headers = dict(headers or {})
+    headers.setdefault("X-Session-ID", "broker-test-session")
+    with mock.patch("blueprints.run.broker_available", return_value=True):
+        start_resp = client.post("/runs", json=json, headers=headers, **kwargs)
+    if start_resp.status_code != 202:
+        return start_resp
+    data = json_module.loads(start_resp.data)
+    stream_resp = client.get(data["stream"], headers=headers)
+    for _ in range(10):
+        if stream_resp.status_code != 404:
+            return _BrokerRunResponse(stream_resp)
+        time.sleep(0.01)
+        stream_resp = client.get(data["stream"], headers=headers)
+    return _BrokerRunResponse(stream_resp)
 
 
 def _sse_events(body: str) -> list[dict[str, object]]:
     events: list[dict[str, object]] = []
     for chunk in body.split("\n\n"):
-        if not chunk.startswith("data: "):
+        data_lines: list[str] = []
+        event_id = ""
+        for line in chunk.splitlines():
+            if line.startswith("id: "):
+                event_id = line[4:].strip()
+            elif line.startswith("data: "):
+                data_lines.append(line[6:])
+        if not data_lines:
             continue
-        events.append(json.loads(chunk.removeprefix("data: ")))
+        event = json.loads("\n".join(data_lines))
+        if event_id and "event_id" not in event:
+            event["event_id"] = event_id
+        events.append(event)
     return events
 
 
-# ── /run streaming ────────────────────────────────────────────────────────────
+# ── /runs streaming ───────────────────────────────────────────────────────────
 
 class TestRunStreaming:
     @staticmethod
@@ -108,6 +170,166 @@ class TestRunStreaming:
     @staticmethod
     def _local_clock_text(value: str) -> str:
         return datetime.fromisoformat(value).astimezone().strftime("%H:%M:%S")
+
+    def test_brokered_synthetic_run_publishes_events_and_persists_history(self):
+        published = []
+        with mock.patch("blueprints.run.publish_run_event", side_effect=lambda *args: published.append(args)), \
+             mock.patch("blueprints.run.uuid.uuid4", return_value="run-broker-synthetic"):
+            run_id = run_routes._brokered_synthetic_run(
+                "help",
+                "session-synthetic",
+                "203.0.113.10",
+                [
+                    {"type": "output", "text": "first line", "cls": "notice"},
+                    {"type": "clear"},
+                    {"type": "output", "text": "second line"},
+                ],
+                exit_code=3,
+            )
+
+        assert run_id == "run-broker-synthetic"
+        assert [event_type for _, event_type, _ in published] == [
+            "started",
+            "output",
+            "clear",
+            "output",
+            "exit",
+        ]
+        assert published[1][2]["text"] == "first line"
+        assert published[1][2]["cls"] == "notice"
+        assert published[2][2] == {}
+        assert published[3][2]["text"] == "second line"
+        assert published[-1][2]["code"] == 3
+
+        with db_connect() as conn:
+            row = conn.execute(
+                "SELECT command, exit_code, output_preview, output_search_text FROM runs WHERE id = ?",
+                ("run-broker-synthetic",),
+            ).fetchone()
+        assert row is not None
+        assert row["command"] == "help"
+        assert row["exit_code"] == 3
+        assert "first line" in row["output_preview"]
+        assert "second line" in row["output_preview"]
+        assert row["output_search_text"] == "first line\nsecond line"
+
+    def test_broker_worker_publishes_notices_filtered_output_exit_and_cleans_up(self):
+        fake_proc = _FakeProc(lines=["skip this\n", "keep this\n", ""])
+        published = []
+        capture = run_routes._run_output_capture("run-broker-worker")
+        postfilter = run_routes._SyntheticPostFilterProcessor({"kind": "grep", "pattern": "keep"})
+        started = datetime.now(timezone.utc).isoformat()
+
+        with mock.patch("blueprints.run.publish_run_event", side_effect=lambda *args: published.append(args)), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]), \
+             mock.patch("blueprints.run.pid_pop") as pid_pop, \
+             mock.patch("blueprints.run.active_run_remove") as active_remove, \
+             mock.patch("blueprints.run._finalize_completed_run", return_value=0.2) as finalize:
+            run_routes._brokered_real_run_worker(
+                run_id="run-broker-worker",
+                proc=fake_proc,
+                session_id="session-worker",
+                client_ip="203.0.113.10",
+                original_command="printf lines | grep keep",
+                run_started=started,
+                capture=capture,
+                signal_classifier=run_routes.OutputSignalClassifier("printf lines", cmd_type="real"),
+                postfilter=postfilter,
+                workspace_path_filter=_PassthroughWorkspaceFilter(),
+                variable_notice="[var] HOST=darklab.sh",
+                rewrite_notice="rewritten for safety",
+                workspace_notices=["[workspace] writing scan.txt"],
+            )
+        capture.finalize()
+
+        event_types = [event_type for _, event_type, _ in published]
+        assert event_types == ["notice", "notice", "notice", "output", "exit"]
+        assert [payload["text"] for _, event_type, payload in published if event_type == "notice"] == [
+            "[var] HOST=darklab.sh",
+            "[notice] rewritten for safety",
+            "[workspace] writing scan.txt",
+        ]
+        assert [payload["text"] for _, event_type, payload in published if event_type == "output"] == [
+            "keep this\n",
+        ]
+        assert published[-1][2]["code"] == 0
+        assert published[-1][2]["output_line_count"] == 4
+        finalize.assert_called_once()
+        assert fake_proc.stdout is not None
+        assert fake_proc.stdout.closed is True
+        pid_pop.assert_called_once_with("run-broker-worker")
+        active_remove.assert_called_once_with("run-broker-worker")
+
+    def test_broker_worker_times_out_and_publishes_timeout_notice(self):
+        fake_proc = _FakeProc(lines=["late output\n"], returncode=None, wait_returncode=-15)
+        published = []
+        started = (datetime.now(timezone.utc) - timedelta(seconds=2)).isoformat()
+        capture = run_routes._run_output_capture("run-broker-timeout")
+
+        with mock.patch.dict("config.CFG", {"command_timeout_seconds": 1}), \
+             mock.patch.dict("blueprints.run.CFG", {"command_timeout_seconds": 1}), \
+             mock.patch("blueprints.run.publish_run_event", side_effect=lambda *args: published.append(args)), \
+             mock.patch("blueprints.run._terminate_process_group") as terminate, \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run.active_run_remove"), \
+             mock.patch("blueprints.run._finalize_completed_run", return_value=1.0):
+            run_routes._brokered_real_run_worker(
+                run_id="run-broker-timeout",
+                proc=fake_proc,
+                session_id="session-worker",
+                client_ip="203.0.113.10",
+                original_command="sleep 10",
+                run_started=started,
+                capture=capture,
+                signal_classifier=run_routes.OutputSignalClassifier("sleep 10", cmd_type="real"),
+                postfilter=run_routes._SyntheticPostFilterProcessor(None),
+                workspace_path_filter=_PassthroughWorkspaceFilter(),
+                variable_notice="",
+                rewrite_notice="",
+                workspace_notices=[],
+            )
+        capture.finalize()
+
+        terminate.assert_called_once_with(fake_proc)
+        timeout_notices = [
+            payload["text"]
+            for _, event_type, payload in published
+            if event_type == "notice" and payload["text"].startswith("[timeout]")
+        ]
+        assert timeout_notices == ["[timeout] Command exceeded 1s limit and was killed."]
+        assert published[-1][1] == "exit"
+        assert published[-1][2]["code"] == -15
+        assert fake_proc.stdout is not None
+        assert fake_proc.stdout.closed is True
+        assert fake_proc.wait_calls >= 1
+
+    def test_broker_worker_publishes_error_and_cleans_up_when_stdout_is_missing(self):
+        fake_proc = _FakeProc(lines=[])
+        fake_proc.stdout = None
+        published = []
+
+        with mock.patch("blueprints.run.publish_run_event", side_effect=lambda *args: published.append(args)), \
+             mock.patch("blueprints.run.pid_pop") as pid_pop, \
+             mock.patch("blueprints.run.active_run_remove") as active_remove:
+            run_routes._brokered_real_run_worker(
+                run_id="run-broker-error",
+                proc=fake_proc,
+                session_id="session-worker",
+                client_ip="203.0.113.10",
+                original_command="broken",
+                run_started=datetime.now(timezone.utc).isoformat(),
+                capture=run_routes._run_output_capture("run-broker-error"),
+                signal_classifier=run_routes.OutputSignalClassifier("broken", cmd_type="real"),
+                postfilter=run_routes._SyntheticPostFilterProcessor(None),
+                workspace_path_filter=_PassthroughWorkspaceFilter(),
+                variable_notice="",
+                rewrite_notice="",
+                workspace_notices=[],
+            )
+
+        assert published == [("run-broker-error", "error", {"text": "Process stdout pipe was not created"})]
+        pid_pop.assert_called_once_with("run-broker-error")
+        active_remove.assert_called_once_with("run-broker-error")
 
     def test_run_emits_started_notice_output_and_exit(self):
         client = get_client()
@@ -123,7 +345,7 @@ class TestRunStreaming:
                  True,
                  True,
              ]):
-            resp = client.post("/run", json={"command": "echo hello"})
+            resp = _post_run(client, json={"command": "echo hello"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -147,8 +369,8 @@ class TestRunStreaming:
                  True,
                  True,
              ]):
-            resp = client.post(
-                "/run",
+            resp = _post_run(
+                client,
                 json={"command": "host darklab.sh"},
                 headers={"X-Session-ID": "sess-signal-sse"},
             )
@@ -175,8 +397,8 @@ class TestRunStreaming:
                  True,
                  True,
              ]):
-            resp = client.post(
-                "/run",
+            resp = _post_run(
+                client,
                 json={"command": "host darklab.sh"},
                 headers={"X-Session-ID": "sess-signal-history"},
             )
@@ -245,83 +467,12 @@ class TestRunStreaming:
 
         with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
              mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("boom")):
-            resp = client.post("/run", json={"command": "echo hi"})
+            resp = _post_run(client, json={"command": "echo hi"})
 
         assert resp.status_code == 500
         data = json.loads(resp.data)
         assert "error" in data
         assert "boom" in data["error"]
-
-    def test_run_emits_heartbeat_when_silent(self):
-        client = get_client()
-        fake_proc = _FakeProc(lines=[""])
-
-        # First readiness timeout => heartbeat, second => EOF break
-        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("blueprints.run.pid_register"), \
-             mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run._stdout_ready", side_effect=[
-                 False,                  # heartbeat branch
-                 True,  # then EOF
-             ]), \
-             mock.patch.dict("config.CFG", {"heartbeat_interval_seconds": 0}):
-            resp = client.post("/run", json={"command": "sleep 1"})
-            body = resp.get_data(as_text=True)
-
-        assert resp.status_code == 200
-        assert ": heartbeat" in body
-        assert '"type": "started"' in body
-        assert '"type": "exit"' in body
-
-    def test_run_emits_heartbeat_when_readable_stdout_has_only_partial_line(self):
-        client = get_client()
-        read_fd, write_fd = os.pipe()
-        reader = os.fdopen(read_fd, "r", encoding="utf-8", newline="")
-        os.write(write_fd, b"partial progress")
-
-        class _PipeProc:
-            pid = 4321
-            returncode = 0
-            stdout = reader
-
-            def poll(self):
-                return self.returncode if write_fd is None else None
-
-            def wait(self, timeout=None):
-                return self.returncode
-
-        ready_calls = 0
-
-        def ready_with_partial_then_eof(_stream, _timeout):
-            nonlocal ready_calls
-            nonlocal write_fd
-            ready_calls += 1
-            if ready_calls == 2 and write_fd is not None:
-                os.close(write_fd)
-                write_fd = None
-            return True
-
-        try:
-            with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-                 mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
-                 mock.patch("blueprints.run.subprocess.Popen", return_value=_PipeProc()), \
-                 mock.patch("blueprints.run.pid_register"), \
-                 mock.patch("blueprints.run.pid_pop"), \
-                 mock.patch("blueprints.run._stdout_ready", side_effect=ready_with_partial_then_eof), \
-                 mock.patch.dict("config.CFG", {"heartbeat_interval_seconds": 0}):
-                resp = client.post("/run", json={"command": "progress-tool"})
-                body = resp.get_data(as_text=True)
-
-            assert resp.status_code == 200
-            assert ": heartbeat" in body
-            assert '"text": "partial progress"' in body
-            assert body.index(": heartbeat") < body.index('"text": "partial progress"')
-            assert '"type": "exit"' in body
-        finally:
-            if write_fd is not None:
-                os.close(write_fd)
-            reader.close()
 
     def test_run_persists_completed_run_to_history(self):
         client = get_client()
@@ -335,7 +486,7 @@ class TestRunStreaming:
                  True,
                  True,
              ]):
-            resp = client.post("/run", json={"command": "echo saved"}, headers={"X-Session-ID": "sess-save"})
+            resp = _post_run(client, json={"command": "echo saved"}, headers={"X-Session-ID": "sess-save"})
             _ = resp.get_data(as_text=True)
 
         hist = client.get("/history", headers={"X-Session-ID": "sess-save"})
@@ -357,7 +508,7 @@ class TestRunStreaming:
                  True,
                  True,
              ]):
-            resp = client.post("/run", json={"command": "ping darklab.sh | grep ttl"}, headers={"X-Session-ID": "sess-grep"})
+            resp = _post_run(client, json={"command": "ping darklab.sh | grep ttl"}, headers={"X-Session-ID": "sess-grep"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -388,7 +539,7 @@ class TestRunStreaming:
                  True,
                  True,
              ]):
-            resp = client.post("/run", json={"command": "ping darklab.sh | grep -v ttl"})
+            resp = _post_run(client, json={"command": "ping darklab.sh | grep -v ttl"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -409,7 +560,7 @@ class TestRunStreaming:
                  True,
                  True,
              ]):
-            resp = client.post("/run", json={"command": "ping darklab.sh | head -n 2"}, headers={"X-Session-ID": "sess-head"})
+            resp = _post_run(client, json={"command": "ping darklab.sh | head -n 2"}, headers={"X-Session-ID": "sess-head"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -439,7 +590,7 @@ class TestRunStreaming:
                  True,
                  True,
              ]):
-            resp = client.post("/run", json={"command": "ping darklab.sh | tail -n 2"}, headers={"X-Session-ID": "sess-tail"})
+            resp = _post_run(client, json={"command": "ping darklab.sh | tail -n 2"}, headers={"X-Session-ID": "sess-tail"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -469,7 +620,7 @@ class TestRunStreaming:
                  True,
                  True,
              ]):
-            resp = client.post("/run", json={"command": "ping darklab.sh | wc -l"}, headers={"X-Session-ID": "sess-wc"})
+            resp = _post_run(client, json={"command": "ping darklab.sh | wc -l"}, headers={"X-Session-ID": "sess-wc"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -500,8 +651,8 @@ class TestRunStreaming:
                  True,
                  True,
              ]):
-            resp = client.post(
-                "/run",
+            resp = _post_run(
+                client,
                 json={"command": "ping darklab.sh | grep ttl | wc -l"},
                 headers={"X-Session-ID": "sess-chain"},
             )
@@ -524,7 +675,7 @@ class TestRunStreaming:
     def test_run_rejects_invalid_synthetic_grep_regex(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "ping darklab.sh | grep -E '['"})
+        resp = _post_run(client, json={"command": "ping darklab.sh | grep -E '['"})
 
         assert resp.status_code == 403
         data = json.loads(resp.data)
@@ -537,11 +688,14 @@ class TestRunStreaming:
         finish = start + timedelta(seconds=2)
 
         class _FakeDateTime:
-            _now_values = iter([start, finish, finish, finish])
+            _first_now = True
 
             @staticmethod
             def now(_tz=None):
-                return next(_FakeDateTime._now_values)
+                if _FakeDateTime._first_now:
+                    _FakeDateTime._first_now = False
+                    return start
+                return finish
 
             @staticmethod
             def fromisoformat(value):
@@ -555,7 +709,7 @@ class TestRunStreaming:
              mock.patch("blueprints.run.os.getpgid", return_value=4321), \
              mock.patch("blueprints.run.os.killpg") as killpg, \
              mock.patch.dict("config.CFG", {"command_timeout_seconds": 1}):
-            resp = client.post("/run", json={"command": "sleep forever"})
+            resp = _post_run(client, json={"command": "sleep forever"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -576,8 +730,9 @@ class TestRunStreaming:
                  True,
                  True,
              ]), \
+             mock.patch("blueprints.run._run_belongs_to_session", return_value=True), \
              mock.patch("blueprints.run.db_connect", side_effect=Exception("db write failed")):
-            resp = client.post("/run", json={"command": "echo saved"})
+            resp = _post_run(client, json={"command": "echo saved"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -594,7 +749,7 @@ class TestRunStreaming:
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
              mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
-            resp = client.post("/run", json={"command": "echo done"})
+            resp = _post_run(client, json={"command": "echo done"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -610,99 +765,16 @@ class TestRunStreaming:
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._run_belongs_to_session", return_value=True), \
              mock.patch("blueprints.run._stdout_ready", side_effect=RuntimeError("boom")):
-            resp = client.post("/run", json={"command": "echo hi"})
+            resp = _post_run(client, json={"command": "echo hi"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
         assert '"type": "error"' in body
+        assert fake_proc.stdout is not None
         assert fake_proc.stdout.closed is True
         assert fake_proc.wait_calls == 1
-
-    def test_run_disconnect_detaches_and_cleans_up_stdout(self):
-        fake_proc = _FakeProc(lines=["hello\n", ""], returncode=None, wait_returncode=0)
-
-        class _ImmediateThread:
-            def __init__(
-                self,
-                *,
-                target: Callable[[], None],
-                name: str | None = None,
-                daemon: bool | None = None,
-            ):
-                self.target = target
-
-            def start(self) -> None:
-                self.target()
-
-        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("blueprints.run.pid_register"), \
-             mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run.threading.Thread", _ImmediateThread), \
-             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
-            shell_app.app.config["RATELIMIT_ENABLED"] = False
-            from blueprints.run import run_command
-
-            with shell_app.app.test_request_context("/run", method="POST", json={"command": "echo hi"}):
-                resp = run_command()
-                if isinstance(resp, tuple):
-                    pytest.fail(f"Expected streaming Response, got error tuple: {resp!r}")
-                response_iter = cast(Iterator[str], resp.response)
-                next(response_iter)
-                close = getattr(response_iter, "close", None)
-                if close is not None:
-                    close()
-
-        assert fake_proc.stdout.closed is True
-        assert fake_proc.wait_calls == 1
-
-    def test_detached_run_drain_has_hard_ceiling(self):
-        fake_proc = _FakeProc(lines=[], returncode=None, wait_returncode=-15)
-
-        class _ImmediateThread:
-            def __init__(
-                self,
-                *,
-                target: Callable[[], None],
-                name: str | None = None,
-                daemon: bool | None = None,
-            ):
-                self.target = target
-
-            def start(self) -> None:
-                self.target()
-
-        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("blueprints.run.pid_register"), \
-             mock.patch("blueprints.run.pid_pop") as pid_pop, \
-             mock.patch("blueprints.run.active_run_remove") as active_run_remove, \
-             mock.patch("blueprints.run.threading.Thread", _ImmediateThread), \
-             mock.patch("blueprints.run.time.monotonic", side_effect=[0, 2]), \
-             mock.patch("blueprints.run.os.getpgid", return_value=4321), \
-             mock.patch("blueprints.run.os.killpg") as killpg, \
-             mock.patch("blueprints.run.DETACHED_DRAIN_FALLBACK_TIMEOUT_SECONDS", 1), \
-             mock.patch("blueprints.run.DETACHED_DRAIN_GRACE_SECONDS", 0), \
-             mock.patch.dict("config.CFG", {"command_timeout_seconds": 0}):
-            shell_app.app.config["RATELIMIT_ENABLED"] = False
-            from blueprints.run import run_command
-
-            with shell_app.app.test_request_context("/run", method="POST", json={"command": "sleep forever"}):
-                resp = run_command()
-                if isinstance(resp, tuple):
-                    pytest.fail(f"Expected streaming Response, got error tuple: {resp!r}")
-                response_iter = cast(Iterator[str], resp.response)
-                next(response_iter)
-                close = getattr(response_iter, "close", None)
-                if close is not None:
-                    close()
-
-        killpg.assert_called_once_with(4321, shell_app.signal.SIGTERM)
-        assert fake_proc.stdout.closed is True
-        assert fake_proc.wait_calls == 1
-        pid_pop.assert_called_once()
-        active_run_remove.assert_called_once()
 
     def test_fake_commands_streams_grouped_catalog_and_persists_history(self):
         client = get_client()
@@ -714,7 +786,7 @@ class TestRunStreaming:
             ],
             "pipe_helpers": [],
         }):
-            resp = client.post("/run", json={"command": "commands"}, headers={"X-Session-ID": "sess-fake-commands"})
+            resp = _post_run(client, json={"command": "commands"}, headers={"X-Session-ID": "sess-fake-commands"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -734,7 +806,7 @@ class TestRunStreaming:
     def test_fake_clear_emits_clear_event_and_persists_history(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "clear"}, headers={"X-Session-ID": "sess-clear"})
+        resp = _post_run(client, json={"command": "clear"}, headers={"X-Session-ID": "sess-clear"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -749,7 +821,7 @@ class TestRunStreaming:
     def test_fake_env_returns_web_environment(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "env"}, headers={"X-Session-ID": "sess-env"})
+        resp = _post_run(client, json={"command": "env"}, headers={"X-Session-ID": "sess-env"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -762,7 +834,7 @@ class TestRunStreaming:
     def test_fake_help_lists_available_helpers(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "help"})
+        resp = _post_run(client, json={"command": "help"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -785,7 +857,7 @@ class TestRunStreaming:
             ],
             "pipe_helpers": [],
         }):
-            resp = client.post("/run", json={"command": "commands"}, headers={"X-Session-ID": "sess-fake-commands"})
+            resp = _post_run(client, json={"command": "commands"}, headers={"X-Session-ID": "sess-fake-commands"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -806,7 +878,7 @@ class TestRunStreaming:
     def test_fake_commands_supports_built_in_only_filter(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "commands --built-in"})
+        resp = _post_run(client, json={"command": "commands --built-in"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -823,7 +895,7 @@ class TestRunStreaming:
             ],
             "pipe_helpers": [],
         }):
-            resp = client.post("/run", json={"command": "commands --external"})
+            resp = _post_run(client, json={"command": "commands --external"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -853,18 +925,18 @@ class TestRunStreaming:
             "all_items": None,
         }
         with mock.patch("fake_commands.load_wordlist_catalog", return_value=catalog):
-            listed = client.post(
-                "/run",
+            listed = _post_run(
+                client,
                 json={"command": "wordlist list dns"},
                 headers={"X-Session-ID": "sess-wordlist"},
             )
-            searched = client.post(
-                "/run",
+            searched = _post_run(
+                client,
                 json={"command": "wordlist search subdomains"},
                 headers={"X-Session-ID": "sess-wordlist"},
             )
-            path = client.post(
-                "/run",
+            path = _post_run(
+                client,
                 json={"command": "wordlist path subdomains-top1million-5000.txt"},
                 headers={"X-Session-ID": "sess-wordlist"},
             )
@@ -881,8 +953,8 @@ class TestRunStreaming:
             "items": [],
             "all_items": None,
         }):
-            resp = client.post(
-                "/run",
+            resp = _post_run(
+                client,
                 json={"command": "wordlist"},
                 headers={"X-Session-ID": "sess-wordlist-missing"},
             )
@@ -925,23 +997,23 @@ class TestRunStreaming:
                 json={"path": "empty-folder"},
                 headers={"X-Session-ID": session},
             )
-            list_resp = client.post(
-                "/run",
+            list_resp = _post_run(
+                client,
                 json={"command": "file list"},
                 headers={"X-Session-ID": session},
             )
-            list_long_resp = client.post(
-                "/run",
+            list_long_resp = _post_run(
+                client,
                 json={"command": "file ls -l"},
                 headers={"X-Session-ID": session},
             )
-            list_recursive_resp = client.post(
-                "/run",
+            list_recursive_resp = _post_run(
+                client,
                 json={"command": "file ls -Rl"},
                 headers={"X-Session-ID": session},
             )
-            show_resp = client.post(
-                "/run",
+            show_resp = _post_run(
+                client,
                 json={"command": "file show targets.txt"},
                 headers={"X-Session-ID": session},
             )
@@ -1005,18 +1077,18 @@ class TestRunStreaming:
                 json={"path": "urls.txt", "text": "https://ip.darklab.sh\n"},
                 headers={"X-Session-ID": session},
             )
-            ls_resp = client.post(
-                "/run",
+            ls_resp = _post_run(
+                client,
                 json={"command": "ls"},
                 headers={"X-Session-ID": session},
             )
-            cat_resp = client.post(
-                "/run",
+            cat_resp = _post_run(
+                client,
                 json={"command": "cat urls.txt"},
                 headers={"X-Session-ID": session},
             )
-            help_resp = client.post(
-                "/run",
+            help_resp = _post_run(
+                client,
                 json={"command": "file help"},
                 headers={"X-Session-ID": session},
             )
@@ -1061,13 +1133,13 @@ class TestRunStreaming:
                 ensure_parent=True,
             )
             binary_path.write_bytes(b"SQLite format 3\x00binary")
-            show_resp = client.post(
-                "/run",
+            show_resp = _post_run(
+                client,
                 json={"command": "file show amass/asset.db"},
                 headers={"X-Session-ID": session},
             )
-            cat_resp = client.post(
-                "/run",
+            cat_resp = _post_run(
+                client,
                 json={"command": "cat amass/asset.db"},
                 headers={"X-Session-ID": session},
             )
@@ -1087,7 +1159,7 @@ class TestRunStreaming:
     def test_fake_shortcuts_lists_current_shortcuts(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "shortcuts"})
+        resp = _post_run(client, json={"command": "shortcuts"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1108,7 +1180,7 @@ class TestRunStreaming:
             "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
         )
 
-        resp = client.post("/run", json={"command": "shortcuts"})
+        resp = _post_run(client, json={"command": "shortcuts"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1121,7 +1193,7 @@ class TestRunStreaming:
         client = get_client()
 
         with mock.patch("fake_commands.load_ascii_art", return_value="line one\nline two"):
-            resp = client.post("/run", json={"command": "banner"})
+            resp = _post_run(client, json={"command": "banner"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1133,9 +1205,9 @@ class TestRunStreaming:
         client = get_client()
 
         with mock.patch("fake_commands.resolve_runtime_command", return_value="/usr/bin/curl"):
-            which_resp = client.post("/run", json={"command": "which curl"})
+            which_resp = _post_run(client, json={"command": "which curl"})
             which_body = which_resp.get_data(as_text=True)
-            type_resp = client.post("/run", json={"command": "type history"})
+            type_resp = _post_run(client, json={"command": "type history"})
             type_body = type_resp.get_data(as_text=True)
 
         assert which_resp.status_code == 200
@@ -1184,11 +1256,11 @@ class TestRunStreaming:
             "workspace_inactivity_ttl_hours": 90,
             "workspace_root": str(tmp_path / "workspaces"),
         }):
-            limits_resp = client.post("/run", json={"command": "limits"}, headers={"X-Session-ID": "sess-limits"})
+            limits_resp = _post_run(client, json={"command": "limits"}, headers={"X-Session-ID": "sess-limits"})
             limits_body = limits_resp.get_data(as_text=True)
-            status_resp = client.post("/run", json={"command": "status"}, headers={"X-Session-ID": "sess-limits"})
+            status_resp = _post_run(client, json={"command": "status"}, headers={"X-Session-ID": "sess-limits"})
             status_body = status_resp.get_data(as_text=True)
-            stats_resp = client.post("/run", json={"command": "stats"}, headers={"X-Session-ID": "sess-limits"})
+            stats_resp = _post_run(client, json={"command": "stats"}, headers={"X-Session-ID": "sess-limits"})
             stats_body = stats_resp.get_data(as_text=True)
 
         assert limits_resp.status_code == 200
@@ -1241,7 +1313,7 @@ class TestRunStreaming:
             )
             conn.commit()
 
-        resp = client.post("/run", json={"command": "last"}, headers={"X-Session-ID": "sess-last"})
+        resp = _post_run(client, json={"command": "last"}, headers={"X-Session-ID": "sess-last"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1258,13 +1330,13 @@ class TestRunStreaming:
     def test_fake_who_tty_groups_and_version_render_shell_identity(self):
         client = get_client()
 
-        who_resp = client.post("/run", json={"command": "who"}, headers={"X-Session-ID": "sess-who"})
+        who_resp = _post_run(client, json={"command": "who"}, headers={"X-Session-ID": "sess-who"})
         who_body = who_resp.get_data(as_text=True)
-        tty_resp = client.post("/run", json={"command": "tty"})
+        tty_resp = _post_run(client, json={"command": "tty"})
         tty_body = tty_resp.get_data(as_text=True)
-        groups_resp = client.post("/run", json={"command": "groups"})
+        groups_resp = _post_run(client, json={"command": "groups"})
         groups_body = groups_resp.get_data(as_text=True)
-        version_resp = client.post("/run", json={"command": "version"})
+        version_resp = _post_run(client, json={"command": "version"})
         version_body = version_resp.get_data(as_text=True)
 
         assert who_resp.status_code == 200
@@ -1287,7 +1359,7 @@ class TestRunStreaming:
             {"question": "What is this?", "answer": "A browser-based shell."},
             {"question": "How do I stop a command?", "answer": "Use Kill."},
         ]):
-            resp = client.post("/run", json={"command": "faq"})
+            resp = _post_run(client, json={"command": "faq"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1308,7 +1380,7 @@ class TestRunStreaming:
             "persist_full_run_output": True,
             "full_output_max_mb": 5,
         }):
-            resp = client.post("/run", json={"command": "retention"})
+            resp = _post_run(client, json={"command": "retention"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1324,7 +1396,7 @@ class TestRunStreaming:
         client = get_client()
 
         with mock.patch("fake_commands.random.choice", return_value="Trust the output, not the hunch."):
-            resp = client.post("/run", json={"command": "fortune"})
+            resp = _post_run(client, json={"command": "fortune"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1333,7 +1405,7 @@ class TestRunStreaming:
     def test_fake_sudo_reports_web_shell_restriction(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "sudo ping darklab.sh"})
+        resp = _post_run(client, json={"command": "sudo ping darklab.sh"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1354,7 +1426,7 @@ class TestRunStreaming:
     def test_fake_sudo_without_arguments_uses_the_snark_pool(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "sudo"})
+        resp = _post_run(client, json={"command": "sudo"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1374,7 +1446,7 @@ class TestRunStreaming:
     def test_fake_reboot_reports_web_shell_restriction(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "reboot"})
+        resp = _post_run(client, json={"command": "reboot"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1398,7 +1470,7 @@ class TestRunStreaming:
     def test_fake_poweroff_variants_use_poweroff_snark_pool(self, command, prefix):
         client = get_client()
 
-        resp = client.post("/run", json={"command": command})
+        resp = _post_run(client, json={"command": command})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1412,7 +1484,7 @@ class TestRunStreaming:
     def test_fake_su_variants_use_shell_escalation_pool(self, command, prefix):
         client = get_client()
 
-        resp = client.post("/run", json={"command": command})
+        resp = _post_run(client, json={"command": command})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1434,7 +1506,7 @@ class TestRunStreaming:
     def test_fake_rm_root_refuses_exact_root_delete_pattern(self, command):
         client = get_client()
 
-        resp = client.post("/run", json={"command": command})
+        resp = _post_run(client, json={"command": command})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1450,11 +1522,11 @@ class TestRunStreaming:
     def test_fake_date_hostname_and_uptime_render_shell_style_information(self):
         client = get_client()
 
-        date_resp = client.post("/run", json={"command": "date"})
+        date_resp = _post_run(client, json={"command": "date"})
         date_body = date_resp.get_data(as_text=True)
-        host_resp = client.post("/run", json={"command": "hostname"})
+        host_resp = _post_run(client, json={"command": "hostname"})
         host_body = host_resp.get_data(as_text=True)
-        uptime_resp = client.post("/run", json={"command": "uptime"})
+        uptime_resp = _post_run(client, json={"command": "uptime"})
         uptime_body = uptime_resp.get_data(as_text=True)
 
         assert date_resp.status_code == 200
@@ -1467,13 +1539,13 @@ class TestRunStreaming:
     def test_fake_ip_route_df_and_free_render_shell_style_summaries(self):
         client = get_client()
 
-        ip_resp = client.post("/run", json={"command": "ip a"})
+        ip_resp = _post_run(client, json={"command": "ip a"})
         ip_body = ip_resp.get_data(as_text=True)
-        route_resp = client.post("/run", json={"command": "route"})
+        route_resp = _post_run(client, json={"command": "route"})
         route_body = route_resp.get_data(as_text=True)
-        df_resp = client.post("/run", json={"command": "df -h"})
+        df_resp = _post_run(client, json={"command": "df -h"})
         df_body = df_resp.get_data(as_text=True)
-        free_resp = client.post("/run", json={"command": "free -h"})
+        free_resp = _post_run(client, json={"command": "free -h"})
         free_body = free_resp.get_data(as_text=True)
 
         assert ip_resp.status_code == 200
@@ -1510,7 +1582,7 @@ class TestRunStreaming:
                 "started": "2026-01-01T00:00:05+00:00",
             },
         ]):
-            resp = client.post("/run", json={"command": "jobs"}, headers={"X-Session-ID": "sess-jobs"})
+            resp = _post_run(client, json={"command": "jobs"}, headers={"X-Session-ID": "sess-jobs"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1528,7 +1600,7 @@ class TestRunStreaming:
         client = get_client()
 
         with mock.patch("fake_commands.active_runs_for_session", return_value=[]):
-            resp = client.post("/run", json={"command": "jobs"}, headers={"X-Session-ID": "sess-jobs"})
+            resp = _post_run(client, json={"command": "jobs"}, headers={"X-Session-ID": "sess-jobs"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1554,11 +1626,11 @@ class TestRunStreaming:
                 "source": "memory",
             },
         ]):
-            resp = client.post("/run", json={"command": "runs"}, headers={"X-Session-ID": "sess-runs"})
+            resp = _post_run(client, json={"command": "runs"}, headers={"X-Session-ID": "sess-runs"})
             body = resp.get_data(as_text=True)
-            verbose_resp = client.post("/run", json={"command": "runs -v"}, headers={"X-Session-ID": "sess-runs"})
+            verbose_resp = _post_run(client, json={"command": "runs -v"}, headers={"X-Session-ID": "sess-runs"})
             verbose_body = verbose_resp.get_data(as_text=True)
-            json_resp = client.post("/run", json={"command": "runs --json"}, headers={"X-Session-ID": "sess-runs"})
+            json_resp = _post_run(client, json={"command": "runs --json"}, headers={"X-Session-ID": "sess-runs"})
             json_body = json_resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1596,7 +1668,7 @@ class TestRunStreaming:
         client = get_client()
 
         with mock.patch("fake_commands.active_runs_for_session", return_value=[]):
-            resp = client.post("/run", json={"command": "runs"}, headers={"X-Session-ID": "sess-runs"})
+            resp = _post_run(client, json={"command": "runs"}, headers={"X-Session-ID": "sess-runs"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1609,7 +1681,7 @@ class TestRunStreaming:
         with mock.patch("fake_commands.runtime_missing_command_name", side_effect=[None, None]), \
              mock.patch("fake_commands.resolve_runtime_command", return_value="/usr/bin/man"), \
              mock.patch("fake_commands.subprocess.run", return_value=fake_proc):
-            resp = client.post("/run", json={"command": "man curl"})
+            resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1625,7 +1697,7 @@ class TestRunStreaming:
              mock.patch("fake_commands.resolve_runtime_command", return_value="/usr/bin/man"), \
              mock.patch("fake_commands.subprocess.run", return_value=fake_proc), \
              mock.patch("fake_commands.CFG", {**shell_app.CFG, "max_output_lines": 2}):
-            resp = client.post("/run", json={"command": "man curl"})
+            resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1637,7 +1709,7 @@ class TestRunStreaming:
         client = get_client()
 
         with mock.patch("fake_commands.runtime_missing_command_name", return_value="man"):
-            resp = client.post("/run", json={"command": "man curl"})
+            resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1650,7 +1722,7 @@ class TestRunStreaming:
         with mock.patch("fake_commands.runtime_missing_command_name", side_effect=[None, "curl"]), \
              mock.patch("fake_commands.resolve_runtime_command", return_value="/usr/bin/man"), \
              mock.patch("fake_commands.subprocess.run") as run_cmd:
-            resp = client.post("/run", json={"command": "man curl"})
+            resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1661,7 +1733,7 @@ class TestRunStreaming:
     def test_fake_man_rejects_topics_outside_allowlist(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "man rm"})
+        resp = _post_run(client, json={"command": "man rm"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1671,7 +1743,7 @@ class TestRunStreaming:
     def test_fake_man_for_built_in_topic_returns_shell_help(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "man history"})
+        resp = _post_run(client, json={"command": "man history"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1682,7 +1754,7 @@ class TestRunStreaming:
     def test_fake_man_for_shortcuts_topic_returns_web_shell_help(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "man shortcuts"})
+        resp = _post_run(client, json={"command": "man shortcuts"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1705,7 +1777,7 @@ class TestRunStreaming:
             )
             conn.commit()
 
-        resp = client.post("/run", json={"command": "history"}, headers={"X-Session-ID": "sess-history"})
+        resp = _post_run(client, json={"command": "history"}, headers={"X-Session-ID": "sess-history"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1734,8 +1806,8 @@ class TestRunStreaming:
             conn.commit()
 
         with mock.patch.dict("fake_commands.CFG", {"recent_commands_limit": 3}):
-            resp = client.post(
-                "/run",
+            resp = _post_run(
+                client,
                 json={"command": "history"},
                 headers={"X-Session-ID": "sess-history-limit"},
             )
@@ -1753,7 +1825,7 @@ class TestRunStreaming:
         client = get_client()
 
         with mock.patch("fake_commands.CFG", {**shell_app.CFG, "workspace_enabled": False}):
-            resp = client.post("/run", json={"command": "pwd"})
+            resp = _post_run(client, json={"command": "pwd"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1764,7 +1836,7 @@ class TestRunStreaming:
         client = get_client()
 
         with mock.patch("fake_commands.CFG", {**shell_app.CFG, "workspace_enabled": True}):
-            resp = client.post("/run", json={"command": "pwd"})
+            resp = _post_run(client, json={"command": "pwd"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1775,7 +1847,7 @@ class TestRunStreaming:
     def test_fake_uname_a_returns_web_shell_environment(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "uname -a"})
+        resp = _post_run(client, json={"command": "uname -a"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1785,7 +1857,7 @@ class TestRunStreaming:
     def test_fake_uname_without_flags_returns_kernel_name(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "uname"})
+        resp = _post_run(client, json={"command": "uname"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1795,11 +1867,11 @@ class TestRunStreaming:
     def test_fake_xyzzy_coffee_and_fork_bomb_easter_eggs(self):
         client = get_client()
 
-        xyzzy_resp = client.post("/run", json={"command": "xyzzy"})
+        xyzzy_resp = _post_run(client, json={"command": "xyzzy"})
         xyzzy_body = xyzzy_resp.get_data(as_text=True)
-        coffee_resp = client.post("/run", json={"command": "coffee"})
+        coffee_resp = _post_run(client, json={"command": "coffee"})
         coffee_body = coffee_resp.get_data(as_text=True)
-        fork_resp = client.post("/run", json={"command": ":(){ :|:& };:"})
+        fork_resp = _post_run(client, json={"command": ":(){ :|:& };:"})
         fork_body = fork_resp.get_data(as_text=True)
 
         assert xyzzy_resp.status_code == 200
@@ -1814,7 +1886,7 @@ class TestRunStreaming:
     def test_fake_id_returns_synthetic_identity(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "id"})
+        resp = _post_run(client, json={"command": "id"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1827,7 +1899,7 @@ class TestRunStreaming:
     def test_fake_whoami_streams_project_description(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "whoami"})
+        resp = _post_run(client, json={"command": "whoami"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1838,7 +1910,7 @@ class TestRunStreaming:
     def test_fake_ps_lists_active_session_processes(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "ps aux"}, headers={"X-Session-ID": "sess-ps"})
+        resp = _post_run(client, json={"command": "ps aux"}, headers={"X-Session-ID": "sess-ps"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1854,7 +1926,7 @@ class TestRunStreaming:
              mock.patch("blueprints.run.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
              mock.patch("blueprints.run.runtime_missing_command_name", return_value="nmap"), \
              mock.patch("blueprints.run.subprocess.Popen") as popen:
-            resp = client.post("/run", json={"command": "nmap -sV darklab.sh"}, headers={"X-Session-ID": "sess-missing"})
+            resp = _post_run(client, json={"command": "nmap -sV darklab.sh"}, headers={"X-Session-ID": "sess-missing"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1875,7 +1947,7 @@ class TestRunStreaming:
              mock.patch("blueprints.run.rewrite_command", return_value=("nmap -sT -sV darklab.sh", None)), \
              mock.patch("blueprints.run.runtime_missing_command_name", return_value="nmap"), \
              mock.patch("blueprints.run.subprocess.Popen") as popen:
-            resp = client.post("/run", json={"command": "nmap -sV darklab.sh"})
+            resp = _post_run(client, json={"command": "nmap -sV darklab.sh"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -1932,8 +2004,8 @@ class TestRunStreaming:
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
              mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
-            resp = client.post(
-                "/run",
+            resp = _post_run(
+                client,
                 json={"command": "nmap -iL targets.txt -oN scan.txt"},
                 headers={"X-Session-ID": session_id},
             )
@@ -1998,8 +2070,8 @@ class TestRunStreaming:
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
              mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
-            resp = client.post(
-                "/run",
+            resp = _post_run(
+                client,
                 json={"command": "katana -u https://ip.darklab.sh -d 1"},
                 headers={"X-Session-ID": session_id},
             )
@@ -2016,8 +2088,8 @@ class TestRunStreaming:
     def test_session_variables_expand_before_validation_and_preserve_typed_history(self):
         client = get_client()
         session_id = "sess-vars-run"
-        set_resp = client.post(
-            "/run",
+        set_resp = _post_run(
+            client,
             json={"command": "var set HOST ip.darklab.sh"},
             headers={"X-Session-ID": session_id},
         )
@@ -2031,8 +2103,8 @@ class TestRunStreaming:
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
              mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
-            resp = client.post(
-                "/run",
+            resp = _post_run(
+                client,
                 json={"command": "nmap -sV $HOST"},
                 headers={"X-Session-ID": session_id},
             )
@@ -2048,8 +2120,8 @@ class TestRunStreaming:
     def test_session_variables_reject_undefined_reference_before_spawn(self):
         client = get_client()
         with mock.patch("blueprints.run.subprocess.Popen") as popen:
-            resp = client.post(
-                "/run",
+            resp = _post_run(
+                client,
                 json={"command": "nmap -sV $HOST"},
                 headers={"X-Session-ID": "sess-undefined-var"},
             )
@@ -2061,8 +2133,8 @@ class TestRunStreaming:
     def test_session_variables_validate_policy_after_expansion(self):
         client = get_client()
         session_id = "sess-vars-policy"
-        client.post(
-            "/run",
+        _post_run(
+            client,
             json={"command": "var set HOST blocked.darklab.sh"},
             headers={"X-Session-ID": session_id},
         )
@@ -2078,8 +2150,8 @@ class TestRunStreaming:
 
         with mock.patch("blueprints.run.validate_command", side_effect=_deny_expanded), \
              mock.patch("blueprints.run.subprocess.Popen") as popen:
-            resp = client.post(
-                "/run",
+            resp = _post_run(
+                client,
                 json={"command": "curl https://$HOST"},
                 headers={"X-Session-ID": session_id},
             )

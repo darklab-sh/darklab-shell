@@ -19,6 +19,7 @@ import io
 import json
 import logging
 import sqlite3
+import time
 import uuid
 import unittest.mock as mock
 
@@ -52,6 +53,23 @@ def get_client(*, use_forwarded_for=True):
     if use_forwarded_for:
         client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
     return client
+
+
+def _post_brokered_run(client, command, *, headers=None):
+    request_headers = dict(headers or {})
+    request_headers.setdefault("X-Session-ID", "log-test-session")
+    with mock.patch("blueprints.run.broker_available", return_value=True):
+        start_resp = client.post("/runs", json={"command": command}, headers=request_headers)
+    if start_resp.status_code != 202:
+        return start_resp
+    stream = json.loads(start_resp.data)["stream"]
+    stream_resp = client.get(stream, headers=request_headers)
+    for _ in range(10):
+        if stream_resp.status_code != 404:
+            return stream_resp
+        time.sleep(0.01)
+        stream_resp = client.get(stream, headers=request_headers)
+    return stream_resp
 
 
 class _FakeStdout:
@@ -404,8 +422,8 @@ class TestCmdDeniedEvent:
     _IP = "192.0.2.10"
 
     def _post_run(self, client, command):
-        return client.post(
-            "/run", json={"command": command},
+        return _post_brokered_run(
+            client, command,
             headers={"X-Forwarded-For": self._IP},
         )
 
@@ -460,7 +478,7 @@ class TestRateLimitEvent:
         e = TooManyRequests()
         e.description = "5 per 1 second"
         with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with shell_app.app.test_request_context("/run", method="POST"):
+            with shell_app.app.test_request_context("/runs", method="POST"):
                 shell_app._rate_limit_handler(e)
         rl_calls = [c for c in mock_warn.call_args_list if c[0][0] == "RATE_LIMIT"]
         assert len(rl_calls) == 1
@@ -470,7 +488,7 @@ class TestRateLimitEvent:
         e = TooManyRequests()
         e.description = "5 per 1 second"
         with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with shell_app.app.test_request_context("/run", method="POST"):
+            with shell_app.app.test_request_context("/runs", method="POST"):
                 shell_app._rate_limit_handler(e)
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "RATE_LIMIT")
         assert "ip" in call.kwargs["extra"]
@@ -480,7 +498,7 @@ class TestRateLimitEvent:
         e = TooManyRequests()
         e.description = "5 per 1 second"
         with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with shell_app.app.test_request_context("/run", method="POST"):
+            with shell_app.app.test_request_context("/runs", method="POST"):
                 shell_app._rate_limit_handler(e)
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "RATE_LIMIT")
         assert call.kwargs["extra"]["limit"] == "5 per 1 second"
@@ -489,7 +507,7 @@ class TestRateLimitEvent:
         from werkzeug.exceptions import TooManyRequests
         e = TooManyRequests()
         e.description = "30 per 1 minute"
-        with shell_app.app.test_request_context("/run", method="POST"):
+        with shell_app.app.test_request_context("/runs", method="POST"):
             response, status = shell_app._rate_limit_handler(e)
         assert status == 429
         data = json.loads(response.data)
@@ -569,8 +587,8 @@ class TestCmdRewriteEvent:
     _IP = "203.0.113.42"
 
     def _post_run(self, client, command):
-        return client.post(
-            "/run", json={"command": command},
+        return _post_brokered_run(
+            client, command,
             headers={"X-Forwarded-For": self._IP},
         )
 
@@ -579,7 +597,7 @@ class TestCmdRewriteEvent:
         with mock.patch.object(shell_app.log, "info") as mock_info:
             with mock.patch("commands.load_command_policy", return_value=(None, [])):
                 # Popen raises so we don't actually spawn — CMD_REWRITE fires before Popen
-                with mock.patch("subprocess.Popen", side_effect=OSError("no spawn")):
+                with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "nmap 8.8.8.8")
         rewrite_calls = [c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE"]
         assert len(rewrite_calls) == 1
@@ -588,7 +606,7 @@ class TestCmdRewriteEvent:
         client = get_client()
         with mock.patch.object(shell_app.log, "info") as mock_info:
             with mock.patch("commands.load_command_policy", return_value=(None, [])):
-                with mock.patch("subprocess.Popen", side_effect=OSError("no spawn")):
+                with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "nmap 8.8.8.8")
         call = next(c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE")
         assert call.kwargs["extra"]["original"] == "nmap 8.8.8.8"
@@ -597,7 +615,7 @@ class TestCmdRewriteEvent:
         client = get_client()
         with mock.patch.object(shell_app.log, "info") as mock_info:
             with mock.patch("commands.load_command_policy", return_value=(None, [])):
-                with mock.patch("subprocess.Popen", side_effect=OSError("no spawn")):
+                with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "nmap 8.8.8.8")
         call = next(c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE")
         assert "-sT" in call.kwargs["extra"]["rewritten"]
@@ -608,7 +626,7 @@ class TestCmdRewriteEvent:
         client = get_client()
         with mock.patch.object(shell_app.log, "info") as mock_info:
             with mock.patch("commands.load_command_policy", return_value=(None, [])):
-                with mock.patch("subprocess.Popen", side_effect=OSError("no spawn")):
+                with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "ping google.com")
         rewrite_calls = [c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE"]
         assert len(rewrite_calls) == 0
@@ -625,7 +643,7 @@ class TestRunLifecycleEvents:
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
              mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
-            resp = client.post("/run", json={"command": "echo hello"})
+            resp = _post_brokered_run(client, "echo hello")
             _ = resp.get_data(as_text=True)
 
         calls = [c for c in mock_info.call_args_list if c[0][0] == "RUN_START"]
@@ -642,7 +660,7 @@ class TestRunLifecycleEvents:
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
              mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
-            resp = client.post("/run", json={"command": "echo hello"}, headers={"X-Session-ID": token})
+            resp = _post_brokered_run(client, "echo hello", headers={"X-Session-ID": token})
             _ = resp.get_data(as_text=True)
 
         call = next(c for c in mock_info.call_args_list if c[0][0] == "RUN_START")
@@ -661,7 +679,7 @@ class TestRunLifecycleEvents:
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
              mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
-            resp = client.post("/run", json={"command": "echo hello"})
+            resp = _post_brokered_run(client, "echo hello")
             _ = resp.get_data(as_text=True)
 
         call = next(c for c in mock_info.call_args_list if c[0][0] == "RUN_END")
@@ -705,7 +723,7 @@ class TestRunFailureEvents:
              mock.patch("blueprints.run.os.getpgid", return_value=4321), \
              mock.patch("blueprints.run.os.killpg"), \
              mock.patch.dict("config.CFG", {"command_timeout_seconds": -1}):
-            resp = client.post("/run", json={"command": "sleep forever"})
+            resp = _post_brokered_run(client, "sleep forever")
             _ = resp.get_data(as_text=True)
 
         calls = [c for c in mock_warn.call_args_list if c[0][0] == "CMD_TIMEOUT"]
@@ -722,7 +740,7 @@ class TestRunFailureEvents:
              mock.patch("blueprints.run.pid_pop"), \
              mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]), \
              mock.patch("blueprints.run.db_connect", side_effect=Exception("db write failed")):
-            resp = client.post("/run", json={"command": "echo saved"})
+            resp = _post_brokered_run(client, "echo saved")
             _ = resp.get_data(as_text=True)
 
         calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_SAVED_ERROR"]
@@ -738,10 +756,10 @@ class TestRunFailureEvents:
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
              mock.patch("blueprints.run._stdout_ready", side_effect=RuntimeError("stream exploded")):
-            resp = client.post("/run", json={"command": "echo boom"})
+            resp = _post_brokered_run(client, "echo boom")
             _ = resp.get_data(as_text=True)
 
-        calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_STREAM_ERROR"]
+        calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_BROKER_STREAM_ERROR"]
         assert len(calls) == 1
 
 
@@ -1581,9 +1599,9 @@ class TestRunSpawnErrorEvent:
         # RFC 5737 TEST-NET-3 — never routed, unique per request so Flask-Limiter's
         # in-memory counter cannot leak into this class during full-suite runs.
         ip = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
-        return client.post(
-            "/run",
-            json={"command": cmd},
+        return _post_brokered_run(
+            client,
+            cmd,
             headers={"X-Forwarded-For": ip, "X-Session-ID": "rse-session"},
         )
 

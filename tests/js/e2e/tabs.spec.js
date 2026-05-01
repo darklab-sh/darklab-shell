@@ -147,36 +147,50 @@ test.describe('tab command recall', () => {
   test('running a command in one tab does not block another tab from running', async ({ page }) => {
     const secondCmd = 'status'
 
-    await page.route('**/run', async (route) => {
+    await page.route('**/runs', async (route) => {
       const payload = JSON.parse(route.request().postData() || '{}')
       const command = payload.command || ''
 
       if (command === LONG_CMD) {
         await route.fulfill({
-          status: 200,
-          contentType: 'text/event-stream',
-          body: [
-            'data: {"type":"started","run_id":"tabs-long-run"}\n\n',
-            'data: {"type":"output","text":"long run started\\n"}\n\n',
-          ].join(''),
+          status: 202,
+          contentType: 'application/json',
+          body: JSON.stringify({ run_id: 'tabs-long-run', stream: '/runs/tabs-long-run/stream' }),
         })
         return
       }
 
       if (command === secondCmd) {
         await route.fulfill({
-          status: 200,
-          contentType: 'text/event-stream',
-          body: [
-            'data: {"type":"started","run_id":"tabs-second-run"}\n\n',
-            'data: {"type":"output","text":"second tab output\\n"}\n\n',
-            'data: {"type":"exit","code":0,"elapsed":0.1}\n\n',
-          ].join(''),
+          status: 202,
+          contentType: 'application/json',
+          body: JSON.stringify({ run_id: 'tabs-second-run', stream: '/runs/tabs-second-run/stream' }),
         })
         return
       }
 
       await route.continue()
+    })
+    await page.route('**/runs/tabs-long-run/stream**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: [
+          'data: {"type":"started","run_id":"tabs-long-run"}\n\n',
+          'data: {"type":"output","text":"long run started\\n"}\n\n',
+        ].join(''),
+      })
+    })
+    await page.route('**/runs/tabs-second-run/stream**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: [
+          'data: {"type":"started","run_id":"tabs-second-run"}\n\n',
+          'data: {"type":"output","text":"second tab output\\n"}\n\n',
+          'data: {"type":"exit","code":0,"elapsed":0.1}\n\n',
+        ].join(''),
+      })
     })
 
     await page.locator('#cmd').fill(LONG_CMD)
@@ -338,7 +352,7 @@ test.describe('tab command recall', () => {
     const activeCmd = 'ping darklab.sh'
     let activeRunStarted = false
 
-    await page.route('**/run', async (route) => {
+    await page.route('**/runs', async (route) => {
       const body = route.request().postData() || '{}'
       const payload = JSON.parse(body)
       if ((payload.command || '') !== activeCmd) {
@@ -346,6 +360,14 @@ test.describe('tab command recall', () => {
         return
       }
       activeRunStarted = true
+      await route.fulfill({
+        status: 202,
+        contentType: 'application/json',
+        body: JSON.stringify({ run_id: 'tabs-reconnect-run', stream: '/runs/tabs-reconnect-run/stream' }),
+      })
+    })
+
+    await page.route('**/runs/tabs-reconnect-run/stream**', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'text/event-stream',

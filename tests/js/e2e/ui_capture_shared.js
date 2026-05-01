@@ -560,6 +560,7 @@ export async function installCommonCaptureMocks(page) {
       const originalFetch = window.fetch.bind(window)
       const encoder = new TextEncoder()
       let mockRunIndex = 0
+      const mockStreams = new Map()
 
       const sseEvent = (payload) => `data: ${JSON.stringify(payload)}\n\n`
       const mockRunResponse = (mock) => {
@@ -571,9 +572,10 @@ export async function installCommonCaptureMocks(page) {
           ...output.map((line) => sseEvent({ type: 'output', text: `${line}\n` })),
           sseEvent({ type: 'exit', code: mock.exitCode || 0, elapsed: mock.elapsed || 0.1 }),
         ].join('')
-        return new Response(body, {
-          status: 200,
-          headers: { 'Content-Type': 'text/event-stream' },
+        mockStreams.set(runId, body)
+        return new Response(JSON.stringify({ run_id: runId, stream: `/runs/${runId}/stream` }), {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
         })
       }
 
@@ -592,7 +594,7 @@ export async function installCommonCaptureMocks(page) {
         const method = String(init?.method || 'GET').toUpperCase()
         const rawBody = typeof init?.body === 'string' ? init.body : ''
 
-        if (url.endsWith('/run') && method === 'POST') {
+        if (url.endsWith('/runs') && method === 'POST') {
           const payload = JSON.parse(rawBody || '{}')
           const command = payload.command || ''
 
@@ -601,35 +603,54 @@ export async function installCommonCaptureMocks(page) {
           }
 
           if (command === longCmd) {
-            const body = new ReadableStream({
-              start(controller) {
-                controller.enqueue(
-                  encoder.encode('data: {"type":"started","run_id":"capture-long-run"}\n\n'),
-                )
-                controller.enqueue(
-                  encoder.encode('data: {"type":"output","text":"capture long run started\\n"}\n\n'),
-                )
-              },
-            })
-            return new Response(body, {
-              status: 200,
-              headers: { 'Content-Type': 'text/event-stream' },
+            return new Response(JSON.stringify({
+              run_id: 'capture-long-run',
+              stream: '/runs/capture-long-run/stream',
+            }), {
+              status: 202,
+              headers: { 'Content-Type': 'application/json' },
             })
           }
 
           if (command === fastCmd) {
-            return new Response(
-              [
-                'data: {"type":"started","run_id":"capture-fast-run"}\n\n',
-                'data: {"type":"output","text":"capture fast run output\\n"}\n\n',
-                'data: {"type":"exit","code":0,"elapsed":0.1}\n\n',
-              ].join(''),
-              {
-                status: 200,
-                headers: { 'Content-Type': 'text/event-stream' },
-              },
-            )
+            mockStreams.set('capture-fast-run', [
+              'data: {"type":"started","run_id":"capture-fast-run"}\n\n',
+              'data: {"type":"output","text":"capture fast run output\\n"}\n\n',
+              'data: {"type":"exit","code":0,"elapsed":0.1}\n\n',
+            ].join(''))
+            return new Response(JSON.stringify({
+              run_id: 'capture-fast-run',
+              stream: '/runs/capture-fast-run/stream',
+            }), {
+              status: 202,
+              headers: { 'Content-Type': 'application/json' },
+            })
           }
+        }
+
+        if (url.includes('/runs/capture-long-run/stream')) {
+          const body = new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                encoder.encode('data: {"type":"started","run_id":"capture-long-run"}\n\n'),
+              )
+              controller.enqueue(
+                encoder.encode('data: {"type":"output","text":"capture long run started\\n"}\n\n'),
+              )
+            },
+          })
+          return new Response(body, {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          })
+        }
+
+        const streamMatch = url.match(/\/runs\/([^/]+)\/stream/)
+        if (streamMatch && mockStreams.has(streamMatch[1])) {
+          return new Response(mockStreams.get(streamMatch[1]), {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          })
         }
 
         return originalFetch(input, init)

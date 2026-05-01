@@ -908,6 +908,19 @@
   overflow-wrap: anywhere;
 }
 
+.run-monitor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.run-monitor-action-btn {
+  min-height: 24px;
+  padding: 3px 8px;
+  font-size: 10px;
+}
+
 .run-monitor-elapsed {
   color: var(--green);
   font-weight: 700;

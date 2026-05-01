@@ -7,7 +7,7 @@ test.describe('rate limiting', () => {
   })
 
   test('firing more than 5 requests per second returns a 429', async ({ page }) => {
-    // Fire 20 simultaneous POST /run requests from within the page context so
+    // Fire 20 simultaneous POST /runs requests from within the page context so
     // they all share the same client IP and hit the per-IP rate limiter.
     // Using 20 (well above the 5/second limit) keeps the test reliable against
     // in-memory storage race conditions where a small burst might all slip
@@ -15,7 +15,7 @@ test.describe('rate limiting', () => {
     const statuses = await page.evaluate(async () => {
       const payload = JSON.stringify({ command: 'curl http://localhost:5001/health' })
       const requests = Array.from({ length: 20 }, () =>
-        fetch('/run', {
+        fetch('/runs', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: payload,

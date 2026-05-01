@@ -5,7 +5,7 @@
 # Run this after upgrading the base image, apt packages, or any pinned
 # tool version in the Dockerfile (Go binaries, pip packages, gems).
 # It builds a fresh image with docker compose, starts the container, and
-# runs every user-facing command in the shared smoke corpus through /run
+# runs every user-facing command in the shared smoke corpus through /runs
 # (commands.yaml examples plus workflow steps), checking each one against the expected output recorded in
 # tests/py/fixtures/container_smoke_test-expectations.json.
 #

@@ -18,12 +18,12 @@ The suites are intentionally layered:
 
 Current totals:
 
-- behavior tests: 2,241
+- behavior tests: 2,267
 - docs/inventory meta-tests: 30
-- `pytest`: 1112 (1082 behavior + 30 meta)
-- `vitest`: 930
+- `pytest`: 1132 (1102 behavior + 30 meta)
+- `vitest`: 936
 - `playwright`: 229
-- total: 2,271
+- total: 2,297
 
 This document is organized in two parts:
 
@@ -416,6 +416,17 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRewriteCaseInsensitive.test_mtr_uppercase` | Checks mtr uppercase handling. |
 | `TestRewriteCaseInsensitive.test_nmap_uppercase` | Checks nmap uppercase handling. |
 | `TestRewriteCaseInsensitive.test_nuclei_uppercase` | Checks nuclei uppercase handling. |
+| `TestRunBrokerMemoryStore.test_memory_store_replays_events_after_saved_event_id` | Verifies that the in-memory run broker replays only events after a saved event ID. |
+| `TestRunBrokerMemoryStore.test_memory_store_marks_trimmed_replay_with_notice` | Verifies that trimmed broker replay starts with a visible transcript notice. |
+| `TestRunBrokerMemoryStore.test_memory_store_uses_max_output_lines_as_replay_event_bound` | Verifies that the in-memory run broker uses `max_output_lines` as the replay line bound. |
+| `TestRunBrokerMemoryStore.test_bounded_replay_keeps_latest_output_and_terminal_event` | Verifies that bounded replay preserves the latest output plus the terminal event. |
+| `TestRunBrokerMemoryStore.test_stream_run_events_replays_snapshot_before_waiting_for_live_events` | Verifies that broker stream subscriptions replay an initial snapshot before waiting for live events. |
+| `TestRunBrokerMemoryStore.test_decode_payload_accepts_redis_bytes_fields` | Verifies that broker Redis payload decoding accepts byte-string stream fields. |
+| `TestRunBrokerMemoryStore.test_redis_store_decodes_bytes_event_ids_and_payloads` | Verifies that the Redis broker store decodes byte-string event IDs and payloads before replay filtering. |
+| `TestRunBrokerMemoryStore.test_redis_replay_marks_tail_fetch_as_trimmed_when_stream_is_longer` | Verifies that Redis replay prepends the trim notice when only the stream tail was fetched. |
+| `TestRunBrokerMemoryStore.test_redis_publish_trims_stream_with_replay_derived_maxlen` | Verifies that Redis broker publishes trim streams with a replay-derived maximum length. |
+| `TestRunBrokerMemoryStore.test_broker_requires_redis_when_configured` | Verifies that broker availability fails with an operator-facing message when Redis is required but unavailable. |
+| `TestRunBrokerMemoryStore.test_broker_allows_memory_store_when_redis_is_optional` | Verifies that local development can use the in-memory broker store when Redis is optional. |
 | `TestPidMap.test_register_and_pop_returns_pid` | Checks that register and pop returns pid. |
 | `TestPidMap.test_pop_unknown_run_id_returns_none` | Checks that pop unknown run id returns none. |
 | `TestPidMap.test_double_pop_returns_none_second_time` | Checks that double pop returns none second time. |
@@ -423,6 +434,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestActiveRunMetadata.test_active_runs_for_session_preserves_pid` | Checks that active-run metadata exposes the PID through session-scoped active-run listings. |
 | `TestActiveRunMetadata.test_active_runs_for_session_reports_owner_liveness_for_client` | Verifies that active-run metadata reports owner client, tab, liveness, and same-client state. |
 | `TestActiveRunMetadata.test_active_run_touch_owner_refreshes_liveness` | Verifies that owner heartbeats refresh liveness only for the owning client and tab. |
+| `TestActiveRunMetadata.test_active_run_set_owner_replaces_owner_metadata` | Verifies that active-run ownership can be reassigned when a browser explicitly takes over a run. |
+| `TestActiveRunMetadata.test_active_run_control_status_requires_live_owner` | Verifies that owner-only active-run controls are rejected for another live browser but allowed after owner staleness. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_dead_pid` | Checks that active-run metadata is pruned when the stored process no longer exists. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_pid_reuse` | Checks that Redis-backed active-run metadata is pruned when a PID has been reused by a different process. |
 | `TestActiveRunMetadata.test_pid_pop_for_session_requires_matching_session` | Verifies that active-run PID lookup only pops processes owned by the requesting session. |
@@ -535,7 +548,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `test_container_smoke_test_startup` | Checks that container smoke test startup. |
 | `test_container_smoke_test_expectations_cover_all_user_facing_commands` | Checks that the smoke-test expectation fixture covers every command in the shared user-facing smoke corpus. |
 | `test_container_smoke_test_command_matches_expected_output` | Checks that each smoke command matches expected output, retrying transient failures with `RUN_CONTAINER_SMOKE_TEST_RETRIES` before failing. |
-| `test_container_smoke_test_workspace_file_flags` | Verifies that the built image can create workspace files through the API, run workspace-enabled input/output flags through `/run`, read generated files back, and clean up through the workspace API. |
+| `test_container_smoke_test_workspace_file_flags` | Verifies that the built image can create workspace files through the API, run workspace-enabled input/output flags through `/runs`, read generated files back, and clean up through the workspace API. |
 
 #### `test_docs.py`
 
@@ -908,13 +921,20 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestWorkspaceRoutes.test_download_streams_session_owned_file` | Verifies that validated session-owned files can be downloaded without exposing absolute paths. |
 | `TestWorkspaceRoutes.test_periodic_cleanup_runs_before_requests_when_workspace_enabled` | Verifies that request-driven workspace cleanup removes expired session directories when workspace storage is enabled. |
 | `TestWorkspaceRoutes.test_periodic_cleanup_skips_request_session_workspace` | Verifies that request-driven workspace cleanup preserves the active request session while removing other expired workspaces. |
-| `TestRunRoute.test_missing_command_returns_400` | Checks that missing command returns 400. |
-| `TestRunRoute.test_empty_command_returns_400` | Checks that empty command returns 400. |
-| `TestRunRoute.test_non_string_command_returns_400` | Checks that non string command returns 400. |
-| `TestRunRoute.test_non_object_json_returns_400` | Checks that non object JSON returns 400. |
+| `TestRunRoute.test_brokered_run_requires_available_broker` | Verifies that `POST /runs` reports an unavailable broker before starting a command. |
+| `TestRunRoute.test_brokered_run_missing_runtime_returns_synthetic_stream_reference` | Verifies that brokered command starts return a synthetic stream reference when an allowed runtime is missing. |
+| `TestRunRoute.test_brokered_run_rejects_invalid_command_payloads` | Verifies that brokered command starts reject malformed, missing, non-string, and blank command payloads. |
+| `TestRunRoute.test_brokered_run_disallowed_command_returns_403_before_spawning` | Verifies that brokered command starts reject denied real commands before spawning a process. |
+| `TestRunRoute.test_brokered_run_starts_real_process_and_registers_active_run` | Verifies that brokered real command starts spawn a process, register active-run metadata, publish `started`, and schedule the broker worker. |
+| `TestRunRoute.test_brokered_run_events_returns_session_scoped_backfill` | Verifies that brokered event backfill returns session-authorized events with event IDs. |
+| `TestRunRoute.test_brokered_run_events_rejects_runs_outside_session` | Verifies that brokered event backfill rejects run IDs outside the current session before reading broker events. |
+| `TestRunRoute.test_brokered_run_stream_replays_events_for_session_run` | Verifies that brokered stream replay emits stored events and refreshes owner liveness. |
+| `TestRunRoute.test_brokered_run_stream_rejects_runs_outside_session` | Verifies that brokered stream replay rejects run IDs outside the current session before opening a broker stream. |
+| `TestRunRoute.test_brokered_run_owner_takeover_requires_client_id` | Verifies that active-run takeover rejects requests without a browser client identity. |
+| `TestRunRoute.test_brokered_run_owner_takeover_claims_active_run` | Verifies that the active-run owner route reassigns a running command to the requesting browser client. |
+| `TestRunRoute.test_kill_rejects_non_owner_for_live_owned_run` | Verifies that `/kill` refuses requests from a browser that no longer owns the active run. |
 | `TestRunRoute.test_disallowed_command_returns_403` | Checks that disallowed command returns 403. |
 | `TestRunRoute.test_shell_operator_returns_403` | Checks that shell operator returns 403. |
-| `TestRunRoute.test_missing_allowlisted_command_returns_synthetic_run` | Checks that missing allowlisted command returns synthetic run. |
 | `TestRunRoute.test_non_json_body_handled` | Checks that non JSON body handled. |
 | `TestRunRoute.test_client_side_run_persists_terminal_native_builtin` | Verifies that browser-owned built-in output is persisted as a server-backed history run. |
 | `TestRunRoute.test_client_side_run_rejects_non_client_builtin_root` | Verifies that `/run/client` only accepts allowlisted browser-owned built-in roots. |
@@ -1007,14 +1027,16 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 
 | Test | Description |
 | --- | --- |
+| `TestRunStreaming.test_brokered_synthetic_run_publishes_events_and_persists_history` | Verifies that brokered synthetic runs publish started/output/clear/exit events and persist searchable history. |
+| `TestRunStreaming.test_broker_worker_publishes_notices_filtered_output_exit_and_cleans_up` | Verifies that the broker worker publishes notices, filtered output, exit metadata, and cleanup calls. |
+| `TestRunStreaming.test_broker_worker_times_out_and_publishes_timeout_notice` | Verifies that the broker worker terminates timed-out commands and publishes the timeout notice before exit. |
+| `TestRunStreaming.test_broker_worker_publishes_error_and_cleans_up_when_stdout_is_missing` | Verifies that broker worker startup errors publish an error event and still clean up process tracking. |
 | `TestRunStreaming.test_run_emits_started_notice_output_and_exit` | Checks that run emits started notice output and exit. |
-| `TestRunStreaming.test_run_output_events_include_signal_metadata` | Verifies that live `/run` output events include backend signal metadata for classified lines. |
+| `TestRunStreaming.test_run_output_events_include_signal_metadata` | Verifies that live `/runs` output events include backend signal metadata for classified lines. |
 | `TestRunStreaming.test_history_restore_json_preserves_signal_metadata` | Verifies that history restore JSON preserves per-line signal metadata from persisted run output. |
 | `TestRunStreaming.test_nonblocking_stream_reader_preserves_partial_lines_until_finalize` | Checks that the nonblocking stream reader buffers partial lines until a newline or finalize flush completes them. |
 | `TestRunStreaming.test_nonblocking_stream_reader_logs_when_nonblocking_setup_fails` | Verifies that non-blocking stream setup failures warn before falling back to blocking line reads. |
 | `TestRunStreaming.test_run_returns_500_when_spawn_fails` | Checks that run returns 500 when spawn fails. |
-| `TestRunStreaming.test_run_emits_heartbeat_when_silent` | Checks that run emits heartbeat when silent. |
-| `TestRunStreaming.test_run_emits_heartbeat_when_readable_stdout_has_only_partial_line` | Verifies that readable partial stdout still emits a heartbeat before the buffered line is finalized. |
 | `TestRunStreaming.test_run_persists_completed_run_to_history` | Checks that run persists completed run to history. |
 | `TestRunStreaming.test_run_filters_output_through_synthetic_grep` | Checks that a synthetic grep run streams and persists only matching lines. |
 | `TestRunStreaming.test_run_supports_invert_match_synthetic_grep` | Checks that synthetic grep supports `-v` invert matching. |
@@ -1027,8 +1049,6 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunStreaming.test_run_still_exits_when_history_save_fails` | Checks that run still exits when history save fails. |
 | `TestRunStreaming.test_run_waits_before_emitting_exit_code` | Checks that successful runs wait before emitting the final exit code when the subprocess return code is still pending at EOF. |
 | `TestRunStreaming.test_run_cleans_up_stdout_and_waits_when_streaming_errors` | Checks that stream errors still close stdout and wait on the subprocess. |
-| `TestRunStreaming.test_run_disconnect_detaches_and_cleans_up_stdout` | Checks that disconnect-driven detaches still close stdout and wait on the subprocess. |
-| `TestRunStreaming.test_detached_run_drain_has_hard_ceiling` | Verifies that disconnected run drains kill and clean up a non-closing process after the detached ceiling. |
 | `TestRunStreaming.test_fake_commands_streams_grouped_catalog_and_persists_history` | Checks that fake `commands` streams the grouped command catalog and persists the run to history. |
 | `TestRunStreaming.test_fake_clear_emits_clear_event_and_persists_history` | Checks that fake clear emits clear event and persists history. |
 | `TestRunStreaming.test_fake_env_returns_web_environment` | Checks that fake env returns web environment. |
@@ -1082,9 +1102,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunStreaming.test_fake_ps_lists_active_session_processes` | Checks that `ps aux` lists active run processes for the current session. |
 | `TestRunStreaming.test_run_reports_missing_allowlisted_command_without_spawning` | Checks that run reports missing allowlisted command without spawning. |
 | `TestRunStreaming.test_run_checks_missing_binary_after_rewrite` | Checks that run checks missing binary after rewrite. |
-| `TestRunStreaming.test_run_rewrites_workspace_file_flags_and_emits_notices` | Verifies that `/run` executes workspace-aware file flags with rewritten session paths, emits friendly workspace read/write notices, and preserves the original command in history. |
+| `TestRunStreaming.test_run_rewrites_workspace_file_flags_and_emits_notices` | Verifies that `/runs` executes workspace-aware file flags with rewritten session paths, emits friendly workspace read/write notices, and preserves the original command in history. |
 | `TestRunStreaming.test_run_injects_projectdiscovery_workspace_state_and_surfaces_paths` | Verifies that ProjectDiscovery tools receive session-scoped runtime state and display generated workspace paths as user-facing paths. |
-| `TestRunStreaming.test_session_variables_expand_before_validation_and_preserve_typed_history` | Verifies that `/run` expands session variables before launch, emits the expanded-command notice, and keeps typed command history. |
+| `TestRunStreaming.test_session_variables_expand_before_validation_and_preserve_typed_history` | Verifies that `/runs` expands session variables before launch, emits the expanded-command notice, and keeps typed command history. |
 | `TestRunStreaming.test_session_variables_reject_undefined_reference_before_spawn` | Verifies that undefined session-variable references fail before spawning a process. |
 | `TestRunStreaming.test_session_variables_validate_policy_after_expansion` | Verifies that command policy receives the expanded command rather than the typed variable reference. |
 | `TestRunOutputArtifacts.test_delete_run_removes_output_artifact` | Checks that delete run removes output artifact. |
@@ -1749,6 +1769,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders active-run CPU and memory telemetry when available` | Verifies that the Run Monitor renders CPU and memory meters from active-run resource telemetry. |
 | `renders unavailable telemetry chips when backend stats are absent` | Verifies that the Run Monitor still shows CPU and memory meter placeholders when backend resource telemetry is not available. |
 | `labels active runs owned by another live browser as monitor-only` | Verifies that active runs owned by another live browser render as monitor-only instead of tab-owned rows. |
+| `offers attach and takeover actions for runs owned by another live browser` | Verifies that another browser's live runs expose read-only Attach and owner Take over actions from the Run Monitor. |
+| `keeps takeover available when another browser owns a run already attached locally` | Verifies that Run Monitor still offers Take over when the current browser has a read-only tab for a run controlled elsewhere. |
 | `warms CPU samples while closed so first open can show a percent` | Verifies that a background warmup sample pair can populate CPU percentage before the drawer is opened. |
 | `does a quick follow-up refresh after opening on a baseline-only CPU sample` | Verifies that opening the Run Monitor schedules a quick second poll when CPU telemetry only has a baseline sample. |
 | `opens as a header-only drawer when there are no active runs` | Verifies that the Run Monitor opens to a header-only `0 active runs` drawer when no commands are running. |
@@ -1792,10 +1814,14 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `clears stale failed tab and HUD state after a successful client-side built-in` | Verifies that successful client-side built-ins reset stale failed tab indicators, tab exit codes, and HUD state. |
 | `setStatus shows RUNNING only while running and IDLE otherwise` | Verifies that setStatus shows RUNNING only while running and IDLE otherwise. |
 | `doKill sends /kill immediately when runId is already known` | Verifies that doKill sends /kill immediately when runId is already known. |
-| `restoreActiveRunsAfterReload marks restored tabs as running placeholders` | Verifies that reload continuity restores running placeholder tabs with preserved run IDs and command labels. |
+| `doKill leaves a taken-over run read-only when the server denies control` | Verifies that a denied kill request keeps the original tab running, marks it read-only, and hides owner-only controls. |
+| `restoreActiveRunsAfterReload subscribes restored tabs to brokered live output` | Verifies that reload continuity restores running tabs with preserved run IDs and subscribes them back to replay plus live output. |
 | `restoreActiveRunsAfterReload skips runs owned by another live client` | Verifies that reload continuity does not auto-create terminal tabs for active runs owned by another live browser. |
 | `restoreActiveRunsAfterReload restores stale-owner runs` | Verifies that reload continuity can recover active runs once the previous owner is stale. |
 | `restoreActiveRunsAfterReload does not overwrite a restored non-running tab` | Verifies that active-run reconnect creates a separate tab instead of clobbering an already-restored idle tab. |
+| `attachActiveRunFromMonitor opens a read-only subscribed tab without kill controls` | Verifies that Run Monitor Attach opens a live read-only tab and hides owner-only controls. |
+| `attachActiveRunFromMonitor takes ownership before subscribing when requested` | Verifies that Run Monitor Take over claims ownership before opening a live subscribed tab with owner controls. |
+| `marks a subscribed tab read-only when ownership moves to another browser` | Verifies that brokered ownership events make the previous owner tab read-only and hide owner-only controls. |
 | `pollActiveRunsAfterReload restores a completed reconnected run through history` | Verifies that a reconnected placeholder tab swaps into the saved history view when the active run disappears. |
 | `pollActiveRunsAfterReload fails a missing reconnected run with no saved history` | Verifies that reconnect placeholders fail visibly instead of waiting forever when a run disappears after an app restart. |
 | `doKill marks pendingKill when runId is not yet available` | Verifies that doKill marks pendingKill when runId is not yet available. |
@@ -1808,7 +1834,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `runCommand on blank or whitespace input creates a new empty prompt line` | Verifies that runCommand on blank or whitespace input creates a new empty prompt line. |
 | `runCommand on blank input while a command is running does not append a prompt line` | Verifies that runCommand on blank input while a command is running does not append a prompt line. |
 | `runCommand blocks direct /tmp and /data paths client-side before calling the API` | Verifies that runCommand blocks direct /tmp and /data paths client-side before calling the API. |
-| `runCommand shows a fetch error when the /run request rejects` | Verifies that runCommand shows a fetch error when the /run request rejects. |
+| `runCommand shows a fetch error when the /runs request rejects` | Verifies that runCommand shows a fetch error when the `/runs` request rejects. |
 | `runCommand handles a 500 response as a friendly server error` | Verifies that runCommand handles a 500 response as a friendly server error. |
 | `runCommand handles a 403 response as a denied command` | Verifies that runCommand handles a 403 response as a denied command. |
 | `runCommand handles a 429 response as rate limited` | Verifies that runCommand handles a 429 response as rate limited. |
@@ -2385,9 +2411,9 @@ Desktop demo recording spec. Drives a tightened README-first interaction sequenc
 
 | Test | Description |
 | --- | --- |
-| `a 403 /run response renders a denied command message` | Verifies that a 403 /run response renders a denied command message. |
-| `a 429 /run response renders a rate limit message` | Verifies that a 429 /run response renders a rate limit message. |
-| `a rejected /run request renders a friendly offline message` | Verifies that a rejected /run request renders a friendly offline message. |
+| `a 403 /runs response renders a denied command message` | Verifies that a 403 `/runs` response renders a denied command message. |
+| `a 429 /runs response renders a rate limit message` | Verifies that a 429 `/runs` response renders a rate limit message. |
+| `a rejected /runs request renders a friendly offline message` | Verifies that a rejected `/runs` request renders a friendly offline message. |
 | `permalink shows a failure toast when /share returns invalid JSON` | Verifies that permalink shows a failure toast when /share returns invalid JSON. |
 | `deleting a history entry shows a failure toast when the delete request fails` | Verifies that deleting a history entry shows a failure toast when the delete request fails. |
 | `clearing history shows a failure toast when the delete request fails` | Verifies that clearing history shows a failure toast when the delete request fails. |

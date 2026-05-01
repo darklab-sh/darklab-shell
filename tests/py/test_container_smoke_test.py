@@ -2,7 +2,7 @@
 Opt-in regression for the built Docker image.
 
 This suite builds a fresh image, starts the web app container, and runs every
-user-facing command from the shared container smoke corpus through /run:
+user-facing command from the shared container smoke corpus through /runs:
 autocomplete examples plus workflow steps. Each command is checked against expected output recorded in
 tests/py/fixtures/container_smoke_test-expectations.json so missing apt/pip/go/gem
 tools, broken fake-command wiring, or changed command output surface before an
@@ -274,8 +274,9 @@ def test_compose_projects_from_container_names_filters_smoke_projects() -> None:
 
 def test_post_run_kills_early_when_stop_text_is_seen(monkeypatch: pytest.MonkeyPatch) -> None:
     class _FakeResponse:
-        def __init__(self, lines: list[str]):
-            self._lines = [line.encode("utf-8") for line in lines]
+        def __init__(self, lines: list[str] | None = None, body: str = ""):
+            self._lines = [line.encode("utf-8") for line in lines or []]
+            self._body = body.encode("utf-8")
 
         def __enter__(self):
             return self
@@ -288,15 +289,28 @@ def test_post_run_kills_early_when_stop_text_is_seen(monkeypatch: pytest.MonkeyP
                 return b""
             return self._lines.pop(0)
 
+        def read(self):
+            return self._body
+
     killed: list[tuple[str, str, str]] = []
+    calls: list[str] = []
 
     def _fake_urlopen(req, timeout=0):
         del timeout
-        assert req.full_url == "http://example.test/run"
+        calls.append(req.full_url)
+        if req.full_url == "http://example.test/runs":
+            return _FakeResponse(body='{"run_id":"run-123","stream":"/runs/run-123/stream"}')
+        assert req.full_url == "http://example.test/runs/run-123/stream"
         return _FakeResponse([
+            'id: 1-0\n',
             'data: {"type":"started","run_id":"run-123"}\n',
+            '\n',
+            'id: 2-0\n',
             'data: {"type":"output","text":"Current nuclei version\\n"}\n',
+            '\n',
+            'id: 3-0\n',
             'data: {"type":"exit","code":0}\n',
+            '\n',
         ])
 
     monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
@@ -321,6 +335,7 @@ def test_post_run_kills_early_when_stop_text_is_seen(monkeypatch: pytest.MonkeyP
     )
 
     assert killed_early is True
+    assert calls == ["http://example.test/runs", "http://example.test/runs/run-123/stream"]
     assert [event["type"] for event in events] == ["started", "output"]
     assert killed == [("http://example.test", "session-123", "run-123")]
     assert waited == [("http://example.test", "session-123", "run-123")]
@@ -693,8 +708,8 @@ def _post_run(
     stop_patterns: list[str] | None = None,
 ) -> tuple[list[dict[str, object]], bool]:
     payload = json.dumps({"command": command}).encode("utf-8")
-    req = urllib.request.Request(
-        f"{base_url}/run",
+    start_req = urllib.request.Request(
+        f"{base_url}/runs",
         data=payload,
         headers={
             "Content-Type": "application/json",
@@ -702,18 +717,36 @@ def _post_run(
         },
         method="POST",
     )
+    with urllib.request.urlopen(start_req, timeout=timeout) as resp:
+        started = json.loads(resp.read().decode("utf-8"))
+    stream_url = str(started.get("stream", ""))
+    if stream_url.startswith("/"):
+        stream_url = f"{base_url}{stream_url}"
+    req = urllib.request.Request(
+        stream_url,
+        headers={"X-Session-ID": session_id},
+        method="GET",
+    )
     events: list[dict[str, object]] = []
     run_id: str | None = None
     killed_early = False
+    data_lines: list[str] = []
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         while True:
             raw_line = resp.readline()
             if not raw_line:
                 break
             line = raw_line.decode("utf-8", "replace").strip()
-            if not line.startswith("data: "):
+            if not line:
+                if not data_lines:
+                    continue
+                event = json.loads("\n".join(data_lines))
+                data_lines = []
+            elif line.startswith("data: "):
+                data_lines.append(line[6:])
                 continue
-            event = json.loads(line[6:])
+            else:
+                continue
             events.append(event)
             if event.get("type") == "started":
                 run_id = str(event.get("run_id", ""))

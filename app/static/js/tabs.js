@@ -721,6 +721,8 @@ function createTab(label) {
     command: '',
     runId: null,
     historyRunId: null,
+    lastEventId: '',
+    attachMode: '',
     reconnectedRun: false,
     runStart: null,
     currentRunStartIndex: null,
@@ -820,6 +822,8 @@ function _resetPreservedSingleTabState(tab) {
   tab.command = '';
   tab.runId = null;
   tab.historyRunId = null;
+  tab.lastEventId = '';
+  tab.attachMode = '';
   tab.reconnectedRun = false;
   tab.runStart = null;
   tab.currentRunStartIndex = null;

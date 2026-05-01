@@ -52,7 +52,7 @@ function _recoverStalledRun(tabId) {
   }
   setTabStatus(tabId, 'running');
   _setRunButtonDisabled(true);
-  showTabKillBtn(tabId);
+  if (t.attachMode !== 'read-only') showTabKillBtn(tabId);
 }
 
 function _activeRunIdsFromPayload(data) {
@@ -94,7 +94,8 @@ function _markStalledButRunning(tabId) {
   }
   setTabStatus(tabId, 'running');
   _setRunButtonDisabled(true);
-  showTabKillBtn(tabId);
+  const t = getTab(tabId);
+  if (!t || t.attachMode !== 'read-only') showTabKillBtn(tabId);
 }
 
 function _markStalledAndInactive(tabId) {
@@ -224,7 +225,7 @@ function _activeRunReconnectNotice(run) {
     : startedAt.toLocaleString();
   return [
     `[reconnected to active run started at ${startedLabel}]`,
-    '[live output cannot be replayed after reload; this tab will restore the saved run automatically when it completes]',
+    '[restored available output; live output will continue here]',
   ];
 }
 
@@ -233,6 +234,13 @@ function _shouldAutoRestoreActiveRun(run) {
   if (run.owned_by_this_client) return true;
   if (run.owner_stale) return true;
   return !run.has_live_owner;
+}
+
+function _startedAtLabel(started) {
+  const startedAt = new Date(started);
+  return Number.isNaN(startedAt.getTime())
+    ? 'unknown start time'
+    : startedAt.toLocaleString();
 }
 
 function restoreActiveRunsAfterReload(runs) {
@@ -268,6 +276,7 @@ function restoreActiveRunsAfterReload(runs) {
     t.runId = run.run_id;
     t.historyRunId = run.run_id;
     t.reconnectedRun = true;
+    t.lastEventId = '';
     t.killed = false;
     t.pendingKill = false;
     t.previewTruncated = false;
@@ -280,12 +289,89 @@ function restoreActiveRunsAfterReload(runs) {
     _activeRunReconnectNotice(run).forEach(line => appendLine(line, 'notice', tabId));
     setTabStatus(tabId, 'running');
     showTabKillBtn(tabId);
+    _subscribeRunStream(run.run_id, tabId, { after: run.last_event_id || '' });
   });
 
   if (firstRestoredTabId) activateTab(firstRestoredTabId);
   syncActiveRunTimer(activeTabId);
-  startPollingActiveRunsAfterReload();
   return true;
+}
+
+function _attachActiveRunToTab(run, tabId, { mode = 'owner' } = {}) {
+  if (!run || !tabId) return false;
+  clearTab(tabId);
+  const t = getTab(tabId);
+  if (!t) return false;
+  if (typeof setTabRunningCommand === 'function') {
+    setTabRunningCommand(tabId, run.command);
+  } else {
+    if (!t.renamed) setTabLabel(tabId, run.command);
+    t.command = run.command;
+  }
+  t.runId = run.run_id;
+  t.historyRunId = run.run_id;
+  t.lastEventId = '';
+  t.attachMode = mode;
+  t.reconnectedRun = mode !== 'read-only';
+  t.killed = false;
+  t.pendingKill = false;
+  t.previewTruncated = false;
+  t.fullOutputAvailable = false;
+  t.fullOutputLoaded = false;
+  t.runStart = Number.isNaN(Date.parse(run.started)) ? Date.now() : Date.parse(run.started);
+  t.currentRunStartIndex = 0;
+  t.followOutput = true;
+  appendCommandEcho(run.command, tabId);
+  const startedLabel = _startedAtLabel(run.started);
+  appendLine(
+    mode === 'read-only'
+      ? `[attached read-only to active run started at ${startedLabel}]`
+      : `[attached to active run started at ${startedLabel}]`,
+    'notice',
+    tabId,
+  );
+  appendLine('[restored available output; live output will continue here]', 'notice', tabId);
+  setTabStatus(tabId, 'running');
+  if (tabId === activeTabId) {
+    setStatus('running');
+    syncActiveRunTimer(tabId);
+  }
+  if (mode === 'read-only') hideTabKillBtn(tabId);
+  else showTabKillBtn(tabId);
+  _setRunButtonDisabled(true);
+  _subscribeRunStream(run.run_id, tabId, { after: run.last_event_id || '' });
+  return true;
+}
+
+function attachActiveRunFromMonitor(run, { takeover = false } = {}) {
+  if (!run || !run.run_id) return Promise.resolve(false);
+  const tabId = createTab();
+  if (!tabId) return Promise.resolve(false);
+  activateTab(tabId, { focusComposer: false });
+
+  const attach = () => _attachActiveRunToTab(run, tabId, { mode: takeover ? 'owner' : 'read-only' });
+  if (!takeover) return Promise.resolve(attach());
+
+  return apiFetch(`/runs/${encodeURIComponent(run.run_id)}/owner`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tab_id: tabId }),
+  }).then(resp => {
+    if (!resp.ok) {
+      return _readRunErrorMessage(resp).then(message => {
+        appendLine(`[server error] ${message || 'Could not take over this run.'}`, 'exit-fail', tabId);
+        setTabStatus(tabId, 'fail');
+        if (tabId === activeTabId) setStatus('fail');
+        return false;
+      });
+    }
+    return attach();
+  }).catch(err => {
+    appendLine(`[network error] ${_describeRunnerFetchError(err, 'server')}`, 'exit-fail', tabId);
+    setTabStatus(tabId, 'fail');
+    if (tabId === activeTabId) setStatus('fail');
+    return false;
+  });
 }
 
 function _restoreCompletedReconnectedRun(tab, run) {
@@ -390,6 +476,71 @@ function _handleKillRequestFailure(err, tabId) {
   appendLine('[kill request failed] ' + _describeRunnerFetchError(err), 'notice', tabId);
 }
 
+function _handleKillRequestDenied(message, tabId, runId) {
+  const t = getTab(tabId);
+  if (t) {
+    t.runId = runId || t.runId;
+    t.killed = false;
+    t.pendingKill = false;
+    t.attachMode = 'read-only';
+    setTabStatus(tabId, 'running');
+    hideTabKillBtn(tabId);
+  }
+  appendLine(`[kill request denied] ${message || 'This browser no longer controls that run.'}`, 'notice', tabId);
+  if (tabId === activeTabId) {
+    setStatus('running');
+    _setRunButtonDisabled(true);
+  }
+}
+
+function _currentClientId() {
+  return typeof CLIENT_ID !== 'undefined' ? String(CLIENT_ID || '') : '';
+}
+
+function _handleRunOwnerChanged(msg, tabId) {
+  const t = getTab(tabId);
+  if (!t) return;
+  const ownerClientId = String(msg.owner_client_id || '');
+  const ownedByThisClient = !!(ownerClientId && ownerClientId === _currentClientId());
+  if (ownedByThisClient) {
+    t.attachMode = 'owner';
+    if (t.st === 'running') showTabKillBtn(tabId);
+    appendLine('[this browser now controls this run]', 'notice', tabId);
+    return;
+  }
+  if (t.attachMode !== 'read-only') {
+    appendLine('Run ownership moved to another browser. This tab is now read-only.', 'notice', tabId);
+  }
+  t.attachMode = 'read-only';
+  t.killed = false;
+  t.pendingKill = false;
+  hideTabKillBtn(tabId);
+}
+
+function _markTabKilledByUser(tabId, secs, { suppressTranscript = false } = {}) {
+  const t = getTab(tabId);
+  if (!t) return;
+  t.killed = true;
+  t.reconnectedRun = false;
+  t.lastEventId = '';
+  t.attachMode = '';
+  stopTimer();
+  if (!t.closing && !suppressTranscript) {
+    appendLine(`[killed by user${secs != null ? ' after ' + _formatElapsed(secs) : ''}]`, 'exit-fail', tabId);
+  }
+  _maybeNotify(t.command, 'killed', secs != null ? _formatElapsed(secs) : null);
+  if (typeof emitUiEvent === 'function') emitUiEvent('app:last-exit-changed', { value: 'killed' });
+  setTabStatus(tabId, 'killed');
+  hideTabKillBtn(tabId);
+  if (tabId === activeTabId) {
+    setStatus('killed');
+    _setRunButtonDisabled(false);
+  }
+  if (typeof _maybeMountDeferredPrompt === 'function') {
+    _maybeMountDeferredPrompt(tabId);
+  }
+}
+
 function _handleRunTransportFailure(err, tabId) {
   _logRunnerError('run request failed', err);
   appendLine('[connection error] ' + _describeRunnerFetchError(err), 'exit-fail', tabId);
@@ -409,7 +560,7 @@ async function _readRunErrorMessage(res) {
       if (text) return text;
     }
   } catch (err) {
-    _logRunnerError('failed to parse /run error response', err);
+    _logRunnerError('failed to parse run error response', err);
   }
   return '';
 }
@@ -445,6 +596,206 @@ function appendCommandEcho(cmd, tabId) {
 
 function appendPromptNewline(tabId) {
   appendLine('', 'prompt-echo', tabId);
+}
+
+function _brokerStreamUrl(runId, tabId, streamUrl = '', afterId = '') {
+  const base = streamUrl || `/runs/${encodeURIComponent(runId)}/stream`;
+  const params = [];
+  if (tabId) params.push(`tab_id=${encodeURIComponent(tabId)}`);
+  if (afterId) params.push(`after=${encodeURIComponent(afterId)}`);
+  if (!params.length) return base;
+  const separator = base.includes('?') ? '&' : '?';
+  return `${base}${separator}${params.join('&')}`;
+}
+
+function _sseMessageFromChunk(part) {
+  let eventId = '';
+  const dataLines = [];
+  String(part || '').split(/\r?\n/).forEach(line => {
+    if (line.startsWith('id: ')) eventId = line.slice(4).trim();
+    else if (line.startsWith('data: ')) dataLines.push(line.slice(6));
+  });
+  if (!dataLines.length) return null;
+  const msg = JSON.parse(dataLines.join('\n'));
+  if (eventId && msg && typeof msg === 'object' && !msg.event_id) msg.event_id = eventId;
+  return msg;
+}
+
+function _markTabRunStarted(tabId, runId) {
+  const t = getTab(tabId);
+  if (!t || !runId) return;
+  const sameRun = t.runId === runId || t.historyRunId === runId;
+  t.runId = runId;
+  t.historyRunId = runId;
+  if (!sameRun) t.lastEventId = '';
+  t.unknownCommand = false;
+  t.reconnectedRun = false;
+  if (t.pendingKill) {
+    // Kill was requested before runId was available — send it now.
+    t.pendingKill = false;
+    apiFetch('/kill', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ run_id: t.runId })
+    }).catch(err => _handleKillRequestFailure(err, tabId));
+    t.runId = null;
+  } else {
+    t.killed = false;
+  }
+}
+
+function _handleRunStreamMessage(msg, tabId) {
+  if (!msg || typeof msg !== 'object') return;
+  const t = getTab(tabId);
+  if (t && msg.event_id) t.lastEventId = String(msg.event_id || '');
+  if (msg.type === 'started') {
+    _markTabRunStarted(tabId, msg.run_id);
+  } else if (msg.type === 'notice') {
+    _appendStreamLine(msg.text, 'notice', tabId, msg);
+  } else if (msg.type === 'owner') {
+    _handleRunOwnerChanged(msg, tabId);
+  } else if (msg.type === 'clear') {
+    clearTab(tabId);
+    const t = getTab(tabId);
+    if (t) t.syntheticClear = true;
+  } else if (msg.type === 'output') {
+    const t = getTab(tabId);
+    if (t && typeof msg.text === 'string' && /^Unsupported fake command: /.test(msg.text)) {
+      t.unknownCommand = true;
+    }
+    String(msg.text || '').split('\n').forEach((line, i, arr) => {
+      if ((i < arr.length - 1 || line) && !_shouldSuppressStreamOutputLine(t, line)) {
+        _appendStreamLine(line, msg.cls || '', tabId, msg);
+      }
+    });
+  } else if (msg.type === 'exit') {
+    _clearStalledTimeout(tabId);
+    const t = getTab(tabId);
+    if (t) {
+      t.exitCode = msg.code;
+      t.runId = null;
+      t.reconnectedRun = false;
+      t.lastEventId = '';
+      t.attachMode = '';
+      t.deferPromptMount = true;
+      t.previewTruncated = !!msg.preview_truncated;
+      t.fullOutputAvailable = !!msg.full_output_available;
+      t.fullOutputLoaded = !msg.preview_truncated;
+    }
+    // If already killed by user, ignore the subsequent -15 exit code.
+    if (t && t.killed) {
+      t.killed = false;
+      stopTimer();
+      _setRunButtonDisabled(false); hideTabKillBtn(tabId);
+      if (t.closing && typeof finalizeClosingTab === 'function') {
+        finalizeClosingTab(tabId);
+        if (isHistoryPanelOpen()) refreshHistoryPanel();
+      }
+      if (isHistoryPanelOpen()) refreshHistoryPanel();
+      if (!(t && t.closing) && typeof _maybeMountDeferredPrompt === 'function') {
+        _maybeMountDeferredPrompt(tabId);
+      }
+      return;
+    }
+    const dur = msg.elapsed ? ` in ${msg.elapsed}s` : '';
+    stopTimer();
+    if (msg.preview_truncated) {
+      appendLine(_previewTruncationNotice(msg.output_line_count, msg.full_output_available), 'notice', tabId);
+    }
+    if (msg.code === 0) {
+      if (!(t && t.syntheticClear)) appendLine(`[process exited with code 0${dur}]`, 'exit-ok', tabId);
+      if (tabId === activeTabId) setStatus('ok');
+      setTabStatus(tabId, 'ok');
+    } else {
+      appendLine(`[process exited with code ${msg.code}${dur}]`, 'exit-fail', tabId);
+      if (tabId === activeTabId) setStatus('fail');
+      setTabStatus(tabId, 'fail');
+    }
+    if (typeof addToRecentPreview === 'function' && t && t.command && !t.unknownCommand) {
+      addToRecentPreview(t.command);
+    }
+    if (t && /^var(?:\s|$)/i.test(String(t.command || '')) && typeof loadSessionVariables === 'function') {
+      loadSessionVariables().catch(() => {});
+    }
+    if (t) t.syntheticClear = false;
+    _maybeNotify(t ? t.command : '', msg.code, msg.elapsed ? msg.elapsed + 's' : null);
+    if (typeof emitUiEvent === 'function') emitUiEvent('app:last-exit-changed', { value: msg.code });
+    _setRunButtonDisabled(false); hideTabKillBtn(tabId);
+    if (t && t.closing && typeof finalizeClosingTab === 'function') {
+      finalizeClosingTab(tabId);
+      if (isHistoryPanelOpen()) refreshHistoryPanel();
+      return;
+    }
+    if (isHistoryPanelOpen()) refreshHistoryPanel();
+    if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache();
+    if (typeof _maybeMountDeferredPrompt === 'function') _maybeMountDeferredPrompt(tabId);
+  } else if (msg.type === 'error') {
+    _clearStalledTimeout(tabId);
+    appendLine('[error] ' + msg.text, 'exit-fail', tabId);
+    if (tabId === activeTabId) setStatus('fail');
+    setTabStatus(tabId, 'fail');
+    stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
+  }
+}
+
+function _streamRunResponse(res, tabId) {
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    appendLine('[server error] The server returned an invalid streaming response.', 'exit-fail', tabId);
+    setStatus('fail'); setTabStatus(tabId, 'fail');
+    stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  _resetStalledTimeout(tabId);
+
+  function read() {
+    reader.read().then(({ done, value }) => {
+      if (done) { _handleStreamEndedWithoutExit(tabId); return; }
+      _recoverStalledRun(tabId);
+      _resetStalledTimeout(tabId);
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop();
+      parts.forEach(part => {
+        try {
+          const msg = _sseMessageFromChunk(part);
+          if (msg) _handleRunStreamMessage(msg, tabId);
+        } catch(e) {}
+      });
+      read();
+    });
+  }
+  read();
+}
+
+function _subscribeRunStream(runId, tabId, { streamUrl = '', after = '' } = {}) {
+  if (!runId || !tabId || typeof apiFetch !== 'function') return Promise.resolve(false);
+  return apiFetch(_brokerStreamUrl(runId, tabId, streamUrl, after))
+    .then(streamRes => {
+      if (!streamRes.ok) {
+        return _readRunErrorMessage(streamRes).then(message => {
+          const suffix = message ? ` ${message}` : '';
+          appendLine(`[server error] The server could not stream the command.${suffix}`, 'exit-fail', tabId);
+          if (tabId === activeTabId) setStatus('fail');
+          setTabStatus(tabId, 'fail');
+          stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
+          return false;
+        });
+      }
+      _streamRunResponse(streamRes, tabId);
+      return true;
+    })
+    .catch(err => {
+      appendLine(`[network error] ${_describeRunnerFetchError(err, 'server')}`, 'exit-fail', tabId);
+      if (tabId === activeTabId) setStatus('fail');
+      setTabStatus(tabId, 'fail');
+      stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
+      return false;
+    });
 }
 
 function _clearDesktopInput() {
@@ -485,34 +836,41 @@ function confirmKill(tabId) {
 function doKill(tabId) {
   const t = getTab(tabId);
   if (!t || t.st !== 'running') return;
+  if (t.attachMode === 'read-only') {
+    appendLine('[read-only attach — take over the run before killing it]', 'notice', tabId);
+    return;
+  }
   const secs = elapsedSeconds();
+  const suppressKilledTranscript = !!t.closing;
   if (t.runId) {
     // runId already available — send kill immediately
+    const runId = t.runId;
     apiFetch('/kill', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ run_id: t.runId })
+      body: JSON.stringify({ run_id: runId })
+    }).then(resp => {
+      if (!resp) {
+        _handleKillRequestFailure(new Error('Kill request failed'), tabId);
+        return false;
+      }
+      if (!resp.ok) {
+        return _readRunErrorMessage(resp).then(message => {
+          if (resp && resp.status === 403) _handleKillRequestDenied(message, tabId, runId);
+          else _handleKillRequestFailure(new Error(message || 'Kill request failed'), tabId);
+          return false;
+        });
+      }
+      const current = getTab(tabId);
+      if (current) current.runId = null;
+      _markTabKilledByUser(tabId, secs, { suppressTranscript: suppressKilledTranscript });
+      return true;
     }).catch(err => _handleKillRequestFailure(err, tabId));
-    t.runId = null;
   } else {
     // runId not yet available (SSE 'started' hasn't arrived) — flag it so the
     // started handler sends the kill request as soon as the run_id is known
     t.pendingKill = true;
-  }
-  t.killed = true;
-  t.reconnectedRun = false;
-  stopTimer();
-  appendLine(`[killed by user${secs != null ? ' after ' + _formatElapsed(secs) : ''}]`, 'exit-fail', tabId);
-  _maybeNotify(t.command, 'killed', secs != null ? _formatElapsed(secs) : null);
-  if (typeof emitUiEvent === 'function') emitUiEvent('app:last-exit-changed', { value: 'killed' });
-  setTabStatus(tabId, 'killed');
-  hideTabKillBtn(tabId);
-  if (tabId === activeTabId) {
-    setStatus('killed');
-    _setRunButtonDisabled(false);
-  }
-  if (typeof _maybeMountDeferredPrompt === 'function') {
-    _maybeMountDeferredPrompt(tabId);
+    _markTabKilledByUser(tabId, secs, { suppressTranscript: suppressKilledTranscript });
   }
 }
 
@@ -1051,6 +1409,8 @@ function _finalizeClientSideCommandStatus(tabId, statusValue) {
     tab.exitCode = exitCode;
     tab.runId = null;
     tab.reconnectedRun = false;
+    tab.lastEventId = '';
+    tab.attachMode = '';
   }
   if (tabId === activeTabId) setStatus(finalStatus);
   setTabStatus(tabId, finalStatus);
@@ -2384,6 +2744,8 @@ function submitCommand(rawCmd) {
     _runTab.fullOutputLoaded = false;
     _runTab.historyRunId = null;
     _runTab.reconnectedRun = false;
+    _runTab.lastEventId = '';
+    _runTab.attachMode = '';
     _runTab.followOutput = true;
     _runTab.deferPromptMount = false;
   }
@@ -2395,7 +2757,7 @@ function submitCommand(rawCmd) {
 
   const tabId = activeTabId;
 
-  apiFetch('/run', {
+  apiFetch('/runs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ command: cmd, tab_id: tabId })
@@ -2421,140 +2783,17 @@ function submitCommand(rawCmd) {
         stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
       });
     }
-    if (!res.body || typeof res.body.getReader !== 'function') {
-      appendLine('[server error] The server returned an invalid streaming response.', 'exit-fail', tabId);
-      setStatus('fail'); setTabStatus(tabId, 'fail');
-      stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
-      return;
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    _resetStalledTimeout(tabId);
-
-    function read() {
-      reader.read().then(({ done, value }) => {
-        if (done) { _handleStreamEndedWithoutExit(tabId); return; }
-        _recoverStalledRun(tabId);
-        _resetStalledTimeout(tabId);
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop();
-        parts.forEach(part => {
-          if (part.startsWith('data: ')) {
-            try {
-              const msg = JSON.parse(part.slice(6));
-                if (msg.type === 'started') {
-                  const t = getTab(tabId);
-                  if (t) {
-                    t.runId = msg.run_id;
-                    t.historyRunId = msg.run_id;
-                    t.unknownCommand = false;
-                    t.reconnectedRun = false;
-                  if (t.pendingKill) {
-                    // Kill was requested before runId was available — send it now
-                    t.pendingKill = false;
-                    apiFetch('/kill', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ run_id: t.runId })
-                    }).catch(err => _handleKillRequestFailure(err, tabId));
-                    t.runId = null;
-                  } else {
-                    t.killed = false;
-                  }
-                }
-              } else if (msg.type === 'notice') {
-                _appendStreamLine(msg.text, 'notice', tabId, msg);
-              } else if (msg.type === 'clear') {
-                clearTab(tabId);
-                const t = getTab(tabId);
-                if (t) t.syntheticClear = true;
-              } else if (msg.type === 'output') {
-                const t = getTab(tabId);
-                if (t && typeof msg.text === 'string' && /^Unsupported fake command: /.test(msg.text)) {
-                  t.unknownCommand = true;
-                }
-                msg.text.split('\n').forEach((line, i, arr) => {
-                  if ((i < arr.length - 1 || line) && !_shouldSuppressStreamOutputLine(t, line)) {
-                    _appendStreamLine(line, msg.cls || '', tabId, msg);
-                  }
-                });
-              } else if (msg.type === 'exit') {
-                _clearStalledTimeout(tabId);
-                const t = getTab(tabId);
-                if (t) {
-                  t.exitCode = msg.code;
-                  t.runId = null;
-                  t.reconnectedRun = false;
-                  t.deferPromptMount = true;
-                  t.previewTruncated = !!msg.preview_truncated;
-                  t.fullOutputAvailable = !!msg.full_output_available;
-                  t.fullOutputLoaded = !msg.preview_truncated;
-                }
-                // If already killed by user, ignore the subsequent -15 exit code
-                if (t && t.killed) {
-                  t.killed = false;
-                  stopTimer();
-                  _setRunButtonDisabled(false); hideTabKillBtn(tabId);
-                  if (t.closing && typeof finalizeClosingTab === 'function') {
-                    finalizeClosingTab(tabId);
-                    if (isHistoryPanelOpen()) refreshHistoryPanel();
-                  }
-                  if (isHistoryPanelOpen()) refreshHistoryPanel();
-                  if (!(t && t.closing) && typeof _maybeMountDeferredPrompt === 'function') {
-                    _maybeMountDeferredPrompt(tabId);
-                  }
-                  return;
-                }
-                const dur = msg.elapsed ? ` in ${msg.elapsed}s` : '';
-                stopTimer();
-                if (msg.preview_truncated) {
-                  appendLine(_previewTruncationNotice(msg.output_line_count, msg.full_output_available), 'notice', tabId);
-                }
-                if (msg.code === 0) {
-                  if (!(t && t.syntheticClear)) appendLine(`[process exited with code 0${dur}]`, 'exit-ok', tabId);
-                  if (tabId === activeTabId) setStatus('ok');
-                  setTabStatus(tabId, 'ok');
-                } else {
-                  appendLine(`[process exited with code ${msg.code}${dur}]`, 'exit-fail', tabId);
-                  if (tabId === activeTabId) setStatus('fail');
-                  setTabStatus(tabId, 'fail');
-                }
-                if (typeof addToRecentPreview === 'function' && t && t.command && !t.unknownCommand) {
-                  addToRecentPreview(t.command);
-                }
-                if (t && /^var(?:\s|$)/i.test(String(t.command || '')) && typeof loadSessionVariables === 'function') {
-                  loadSessionVariables().catch(() => {});
-                }
-                if (t) t.syntheticClear = false;
-                _maybeNotify(t ? t.command : '', msg.code, msg.elapsed ? msg.elapsed + 's' : null);
-                if (typeof emitUiEvent === 'function') emitUiEvent('app:last-exit-changed', { value: msg.code });
-                _setRunButtonDisabled(false); hideTabKillBtn(tabId);
-                if (t && t.closing && typeof finalizeClosingTab === 'function') {
-                  finalizeClosingTab(tabId);
-                  if (isHistoryPanelOpen()) refreshHistoryPanel();
-                  return;
-                }
-                if (isHistoryPanelOpen()) refreshHistoryPanel();
-                if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache();
-                if (typeof _maybeMountDeferredPrompt === 'function') _maybeMountDeferredPrompt(tabId);
-              } else if (msg.type === 'error') {
-                _clearStalledTimeout(tabId);
-                appendLine('[error] ' + msg.text, 'exit-fail', tabId);
-                if (tabId === activeTabId) setStatus('fail');
-                setTabStatus(tabId, 'fail');
-                stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
-              }
-            } catch(e) {}
-          }
-        });
-        read();
-      });
-    }
-    read();
+    return res.json().then(data => {
+      const runId = data && data.run_id;
+      if (!runId) {
+        appendLine('[server error] The server did not return a run id.', 'exit-fail', tabId);
+        setStatus('fail'); setTabStatus(tabId, 'fail');
+        stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
+        return;
+      }
+      _markTabRunStarted(tabId, runId);
+      return _subscribeRunStream(runId, tabId, { streamUrl: data.stream });
+    });
   }).catch(err => {
     _clearStalledTimeout(tabId);
     _handleRunTransportFailure(err, tabId);

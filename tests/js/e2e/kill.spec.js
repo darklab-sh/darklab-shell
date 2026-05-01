@@ -35,10 +35,20 @@ test.describe('kill running command', () => {
         const rawBody = typeof init?.body === 'string' ? init.body : ''
 
         if (
-          url.endsWith('/run') &&
+          url.endsWith('/runs') &&
           init?.method === 'POST' &&
           rawBody.includes('ping -c 1000 127.0.0.1')
         ) {
+          return new Response(JSON.stringify({
+            run_id: 'kill-spec-long-run',
+            stream: '/runs/kill-spec-long-run/stream',
+          }), {
+            status: 202,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+
+        if (url.includes('/runs/kill-spec-long-run/stream')) {
           const body = new ReadableStream({
             start(controller) {
               longRunController = controller

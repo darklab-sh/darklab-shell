@@ -100,7 +100,7 @@ describe('session.js', () => {
       storageData: { session_id: 'session-abc', client_id: 'client-abc' },
     })
 
-    await apiFetch('/run', {
+    await apiFetch('/runs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     })

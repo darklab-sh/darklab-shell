@@ -801,22 +801,29 @@ test.describe('mobile menu', () => {
     const releaseRun = new Promise((resolve) => {
       finishRun = resolve
     })
-    await page.route('**/run', async (route) => {
+    await page.route('**/runs', async (route) => {
       const payload = JSON.parse(route.request().postData() || '{}')
       if (payload.command === LONG_CMD) {
-        await releaseRun
         await route.fulfill({
-          status: 200,
-          contentType: 'text/event-stream',
-          body: [
-            'data: {"type":"started","run_id":"mobile-long-run"}\n\n',
-            'data: {"type":"output","text":"mobile long run finished\\n"}\n\n',
-            'data: {"type":"exit","code":0,"elapsed":0.1}\n\n',
-          ].join(''),
+          status: 202,
+          contentType: 'application/json',
+          body: JSON.stringify({ run_id: 'mobile-long-run', stream: '/runs/mobile-long-run/stream' }),
         })
         return
       }
       await route.continue()
+    })
+    await page.route('**/runs/mobile-long-run/stream**', async (route) => {
+      await releaseRun
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: [
+          'data: {"type":"started","run_id":"mobile-long-run"}\n\n',
+          'data: {"type":"output","text":"mobile long run finished\\n"}\n\n',
+          'data: {"type":"exit","code":0,"elapsed":0.1}\n\n',
+        ].join(''),
+      })
     })
 
     await ensurePromptReady(page)

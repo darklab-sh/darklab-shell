@@ -22,8 +22,8 @@ test.describe('failure paths', () => {
     await page.locator('#cmd').waitFor()
   })
 
-  test('a 403 /run response renders a denied command message', async ({ page }) => {
-    await page.route('**/run', (route) => {
+  test('a 403 /runs response renders a denied command message', async ({ page }) => {
+    await page.route('**/runs', (route) => {
       route.fulfill({
         status: 403,
         contentType: 'application/json',
@@ -39,8 +39,8 @@ test.describe('failure paths', () => {
     )
   })
 
-  test('a 429 /run response renders a rate limit message', async ({ page }) => {
-    await page.route('**/run', (route) => {
+  test('a 429 /runs response renders a rate limit message', async ({ page }) => {
+    await page.route('**/runs', (route) => {
       route.fulfill({
         status: 429,
         contentType: 'text/plain',
@@ -56,8 +56,8 @@ test.describe('failure paths', () => {
     )
   })
 
-  test('a rejected /run request renders a friendly offline message', async ({ page }) => {
-    await page.route('**/run', (route) => {
+  test('a rejected /runs request renders a friendly offline message', async ({ page }) => {
+    await page.route('**/runs', (route) => {
       route.abort('failed')
     })
 

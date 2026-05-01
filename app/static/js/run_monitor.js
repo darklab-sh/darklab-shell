@@ -162,6 +162,27 @@
     return String(tab.label || tab.command || tab.id || '').trim();
   }
 
+  function _runMonitorActionButton(label, title, onClick) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-secondary btn-compact run-monitor-action-btn';
+    btn.textContent = label;
+    btn.title = title;
+    btn.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const result = onClick();
+      Promise.resolve(result).then(attached => {
+        if (attached) closeRunMonitor();
+      }).catch(err => {
+        if (typeof showToast === 'function') {
+          showToast(err?.message || 'Could not attach to run', 'error');
+        }
+      });
+    });
+    return btn;
+  }
+
   function _positionMonitor() {
     const rail = document.getElementById('rail');
     const right = rail ? Math.ceil(rail.getBoundingClientRect().right) : 0;
@@ -301,14 +322,36 @@
       elapsed.setAttribute('data-run-monitor-started', String(run?.started || ''));
       elapsed.textContent = _formatElapsed(run?.started);
       meta.append(runId, document.createTextNode(' · '), pid, document.createTextNode(' · '), elapsed);
-      if (tabLabel) meta.append(document.createTextNode(' · '), document.createTextNode(tabLabel));
-      else if (run?.has_live_owner && !run?.owned_by_this_client) {
+      if (tabLabel) {
+        meta.append(document.createTextNode(' · '), document.createTextNode(tabLabel));
+        if (run?.has_live_owner && !run?.owned_by_this_client) {
+          meta.append(document.createTextNode(' · '), document.createTextNode('controlled elsewhere'));
+        }
+      } else if (run?.has_live_owner && !run?.owned_by_this_client) {
         meta.append(document.createTextNode(' · '), document.createTextNode('another browser'));
       }
 
       const details = document.createElement('div');
       details.className = 'run-monitor-details';
       details.append(command, meta);
+
+      const actions = document.createElement('div');
+      actions.className = 'run-monitor-actions';
+      const canActOnOtherBrowserRun = run?.has_live_owner
+        && !run?.owned_by_this_client
+        && typeof attachActiveRunFromMonitor === 'function';
+      const canAttachOtherBrowserRun = canActOnOtherBrowserRun && !tab;
+      const canTakeOverOtherBrowserRun = canActOnOtherBrowserRun;
+      if (canAttachOtherBrowserRun) {
+        actions.append(_runMonitorActionButton('Attach', 'Open a read-only tab for this run', () => (
+          attachActiveRunFromMonitor(run, { takeover: false })
+        )));
+      }
+      if (canTakeOverOtherBrowserRun) {
+        actions.append(_runMonitorActionButton('Take over', 'Move this run into a controllable tab in this browser', () => (
+          attachActiveRunFromMonitor(run, { takeover: true })
+        )));
+      }
 
       const usage = _runResourceUsage(run);
       const cpuValue = _formatCpuPercent(usage.cpu_percent);
@@ -332,6 +375,7 @@
         }),
       );
 
+      if (actions.childElementCount) details.append(actions);
       item.append(details, meters);
       listEl.appendChild(item);
     });

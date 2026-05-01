@@ -202,16 +202,16 @@
 
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 
-# Whether the /run rate limiter is active at all. Set to false for test-only or
+# Whether the /runs rate limiter is active at all. Set to false for test-only or
 # maintenance overlays where you want the app to accept runs without throttling.
 # Server default if unset: true
 # rate_limit_enabled: true
 
-# Maximum number of /run requests per minute per IP
+# Maximum number of /runs requests per minute per IP
 # Server default if unset: 30
 # rate_limit_per_minute: 30
 
-# Maximum number of /run requests per second per IP
+# Maximum number of /runs requests per second per IP
 # Server default if unset: 5
 # rate_limit_per_second: 5
 
@@ -250,6 +250,47 @@
 # to prevent nginx and the browser from dropping the connection.
 # Server default if unset: 20
 # heartbeat_interval_seconds: 20
+
+# ── Run Broker ────────────────────────────────────────────────────────────────
+
+# Enable the Redis-backed run broker that lets command output be replayed and
+# reattached independently of the HTTP request that started the command.
+# Server default if unset: true
+# run_broker_enabled: true
+
+# Require Redis when the run broker is enabled. Production Docker deployments
+# should keep this enabled; local single-process development can set this to
+# false for a limited in-memory fallback.
+# Server default if unset: true
+# run_broker_require_redis: true
+
+# Safety TTL for active broker streams, refreshed while the run is active.
+# Server default if unset: 14400
+# run_broker_active_stream_ttl_seconds: 14400
+
+# TTL for completed broker streams after history finalization. Completed run
+# restore falls back to SQLite/history artifacts after this window.
+# Server default if unset: 3600
+# run_broker_completed_stream_ttl_seconds: 3600
+
+# Maximum replay payload retained per run stream, in bytes. Line replay is also
+# bounded by max_output_lines; there is no separate run_broker_max_replay_lines.
+# Server default if unset: 10485760
+# run_broker_max_replay_bytes: 10485760
+
+# How long stream subscribers block waiting for new events before the server
+# emits a heartbeat and checks again.
+# Server default if unset: 15
+# run_broker_subscriber_block_seconds: 15
+
+# How often broker workers emit heartbeat events while a process is idle.
+# Server default if unset: 20
+# run_broker_heartbeat_seconds: 20
+
+# How long an owner browser can go without touching a run before ownership is
+# considered stale and another browser can reconnect/take over.
+# Server default if unset: 75
+# run_broker_owner_stale_seconds: 75
 
 # ── Welcome Animation ─────────────────────────────────────────────────────────
 

@@ -20,6 +20,55 @@ const { _parseSyntheticPostFilterCommand, _applySyntheticPostFilterLines } = fro
   '_applySyntheticPostFilterLines',
 )
 
+async function flushPromises(times = 6) {
+  for (let i = 0; i < times; i += 1) await Promise.resolve()
+}
+
+function brokerStreamResponse(payload) {
+  let done = false
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      getReader: () => ({
+        read: vi.fn(() => {
+          if (done) return Promise.resolve({ done: true, value: undefined })
+          done = true
+          return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
+        }),
+      }),
+    },
+  }
+}
+
+function brokerApiFetch(payload, { runId = 'run-1' } = {}) {
+  return vi.fn((url) => {
+    if (url === '/runs') {
+      return Promise.resolve({
+        ok: true,
+        status: 202,
+        json: () => Promise.resolve({ run_id: runId, stream: `/runs/${runId}/stream` }),
+      })
+    }
+    if (String(url).startsWith(`/runs/${runId}/stream`)) {
+      return Promise.resolve(brokerStreamResponse(payload))
+    }
+    return Promise.reject(new Error(`Unexpected URL: ${url}`))
+  })
+}
+
+function pendingBrokerStreamResponse() {
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      getReader: () => ({
+        read: vi.fn(() => new Promise(() => {})),
+      }),
+    },
+  }
+}
+
 // ── _formatElapsed ────────────────────────────────────────────────────────────
 
 describe('_formatElapsed', () => {
@@ -540,6 +589,7 @@ function loadRunnerFns({
   reloadSessionHistory: reloadSessionHistoryOverride = vi.fn(() => Promise.resolve()),
   hydrateCmdHistory: hydrateCmdHistoryOverride = vi.fn(),
   sessionId = 'session-old',
+  clientId = 'client-1',
   localStorageEntries = {},
   dismissMobileKeyboardAfterSubmit = () => {},
   maybeMountDeferredPrompt = vi.fn(),
@@ -661,6 +711,7 @@ function loadRunnerFns({
       localStorage: storage,
       sessionStorage: sessionStore,
       SESSION_ID: sessionId,
+      CLIENT_ID: clientId,
       maskSessionToken: (token) => {
         if (typeof token !== 'string' || !token) return '(none)'
         if (token.startsWith('tok_')) return `tok_${token.slice(4, 8)}••••`
@@ -734,9 +785,11 @@ function loadRunnerFns({
     hasPendingTerminalConfirm,
     cancelPendingTerminalConfirm,
     runCommand,
+    attachActiveRunFromMonitor,
     restoreActiveRunsAfterReload,
     pollActiveRunsAfterReload,
     syncActiveRunTimer,
+    _handleRunStreamMessage,
     _resetStalledTimeout,
     _clearStalledTimeout,
     _recoverStalledRun,
@@ -761,6 +814,7 @@ function loadRunnerFns({
     cancelPendingTerminalConfirm: fns.cancelPendingTerminalConfirm,
     maybeMountDeferredPrompt,
     restoreHistoryRunIntoTab,
+    attachActiveRunFromMonitor: fns.attachActiveRunFromMonitor,
   }
 }
 
@@ -785,8 +839,8 @@ describe('runner helpers', () => {
     expect(status.textContent).toBe('IDLE')
   })
 
-  it('doKill sends /kill immediately when runId is already known', () => {
-    const apiFetch = vi.fn(() => Promise.resolve())
+  it('doKill sends /kill immediately when runId is already known', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve({ ok: true, status: 200 }))
     const maybeMountDeferredPrompt = vi.fn()
     const { doKill, tabs, runBtn, status } = loadRunnerFns({
       tabs: [{ id: 'tab-1', st: 'running', runId: 'run-123', killed: false, pendingKill: false }],
@@ -795,6 +849,7 @@ describe('runner helpers', () => {
     })
 
     doKill('tab-1')
+    await flushPromises()
 
     expect(apiFetch).toHaveBeenCalledWith(
       '/kill',
@@ -813,10 +868,55 @@ describe('runner helpers', () => {
     expect(maybeMountDeferredPrompt).toHaveBeenCalledWith('tab-1')
   })
 
-  it('restoreActiveRunsAfterReload marks restored tabs as running placeholders', () => {
+  it('doKill leaves a taken-over run read-only when the server denies control', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: false,
+      status: 403,
+      headers: { get: () => 'application/json' },
+      json: () => Promise.resolve({ error: 'This browser no longer controls that run. Use Take over from Run Monitor before killing it.' }),
+    }))
+    const appendLine = vi.fn()
+    const { doKill, tabs, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'running', runId: 'run-123', killed: false, pendingKill: false, attachMode: 'owner' }],
+      apiFetch,
+      appendLine,
+    })
+
+    doKill('tab-1')
+    await flushPromises()
+
+    expect(tabs[0].runId).toBe('run-123')
+    expect(tabs[0].killed).toBe(false)
+    expect(tabs[0].attachMode).toBe('read-only')
+    expect(document.querySelector('.tab-status').className).toBe('tab-status running')
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(true)
+    expect(status.className).toBe('status-pill running')
+    expect(appendLine).toHaveBeenCalledWith(
+      '[kill request denied] This browser no longer controls that run. Use Take over from Run Monitor before killing it.',
+      'notice',
+      'tab-1',
+    )
+  })
+
+  it('restoreActiveRunsAfterReload subscribes restored tabs to brokered live output', async () => {
     const appendLine = vi.fn()
     const createTab = vi.fn(() => 'tab-2')
-    const setTabLabel = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/runs/run-1/stream')) {
+        return Promise.resolve(brokerStreamResponse([
+          'id: 1-0',
+          'data: {"type":"started","run_id":"run-1"}',
+          '',
+          'id: 1-1',
+          'data: {"type":"output","text":"live line","event_id":"1-1"}',
+          '',
+          'id: 1-2',
+          'data: {"type":"exit","code":0,"elapsed":"1.2","event_id":"1-2"}',
+          '',
+        ].join('\n') + '\n'))
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
     const now = Date.now()
     vi.useFakeTimers()
     vi.setSystemTime(new Date(now))
@@ -826,18 +926,23 @@ describe('runner helpers', () => {
       ],
       appendLine,
       createTab,
+      apiFetch,
     })
 
     restoreActiveRunsAfterReload([
       { run_id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z' },
     ])
+    await flushPromises()
 
     expect(tabs[0].historyRunId).toBe('run-1')
-    expect(tabs[0].reconnectedRun).toBe(true)
-    expect(tabs[0].st).toBe('running')
+    expect(tabs[0].lastEventId).toBe('')
+    expect(tabs[0].reconnectedRun).toBe(false)
+    expect(tabs[0].st).toBe('ok')
+    expect(apiFetch).toHaveBeenCalledWith('/runs/run-1/stream?tab_id=tab-1')
     expect(appendLine).toHaveBeenCalledWith('ping darklab.sh', 'prompt-echo', 'tab-1')
-    expect(document.querySelector('.tab-kill-btn').hidden).toBe(false)
-    expect(status.className).toBe('status-pill running')
+    expect(appendLine).toHaveBeenCalledWith('live line', '', 'tab-1')
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(true)
+    expect(status.className).toBe('status-pill ok')
     vi.useRealTimers()
   })
 
@@ -872,11 +977,25 @@ describe('runner helpers', () => {
 
   it('restoreActiveRunsAfterReload restores stale-owner runs', () => {
     const appendLine = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/runs/run-1/stream')) {
+        return Promise.resolve(brokerStreamResponse([
+          'id: 1-6',
+          'data: {"type":"output","text":"resumed"}',
+          '',
+          'id: 1-7',
+          'data: {"type":"exit","code":0}',
+          '',
+        ].join('\n') + '\n'))
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
     const { restoreActiveRunsAfterReload, tabs } = loadRunnerFns({
       tabs: [
         { id: 'tab-1', st: 'idle', runId: null, rawLines: [], pendingKill: false, killed: false },
       ],
       appendLine,
+      apiFetch,
     })
 
     restoreActiveRunsAfterReload([
@@ -887,12 +1006,14 @@ describe('runner helpers', () => {
         owned_by_this_client: false,
         has_live_owner: false,
         owner_stale: true,
+        last_event_id: '1-5',
       },
     ])
 
     expect(tabs[0].historyRunId).toBe('run-1')
     expect(tabs[0].reconnectedRun).toBe(true)
     expect(tabs[0].st).toBe('running')
+    expect(apiFetch).toHaveBeenCalledWith('/runs/run-1/stream?tab_id=tab-1&after=1-5')
     expect(appendLine).toHaveBeenCalledWith('ping darklab.sh', 'prompt-echo', 'tab-1')
   })
 
@@ -924,6 +1045,87 @@ describe('runner helpers', () => {
 
     expect(createTab).toHaveBeenCalledWith()
     expect(tabs[0].historyRunId).toBe('run-old')
+  })
+
+  it('attachActiveRunFromMonitor opens a read-only subscribed tab without kill controls', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/runs/run-other/stream')) {
+        return Promise.resolve(pendingBrokerStreamResponse())
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
+    const { attachActiveRunFromMonitor, tabs } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, rawLines: [], pendingKill: false, killed: false }],
+      createTab: vi.fn(() => 'tab-1'),
+      appendLine,
+      apiFetch,
+    })
+
+    await expect(attachActiveRunFromMonitor({
+      run_id: 'run-other',
+      command: 'ping darklab.sh',
+      started: '2026-01-01T00:00:00Z',
+    }, { takeover: false })).resolves.toBe(true)
+
+    expect(tabs[0].attachMode).toBe('read-only')
+    expect(tabs[0].st).toBe('running')
+    expect(apiFetch).toHaveBeenCalledWith('/runs/run-other/stream?tab_id=tab-1')
+    expect(appendLine).toHaveBeenCalledWith(
+      expect.stringContaining('[attached read-only to active run started at'),
+      'notice',
+      'tab-1',
+    )
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(true)
+  })
+
+  it('attachActiveRunFromMonitor takes ownership before subscribing when requested', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/runs/run-other/owner') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+      }
+      if (String(url).startsWith('/runs/run-other/stream')) {
+        return Promise.resolve(pendingBrokerStreamResponse())
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
+    const { attachActiveRunFromMonitor, tabs } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, rawLines: [], pendingKill: false, killed: false }],
+      createTab: vi.fn(() => 'tab-1'),
+      apiFetch,
+    })
+
+    await expect(attachActiveRunFromMonitor({
+      run_id: 'run-other',
+      command: 'ping darklab.sh',
+      started: '2026-01-01T00:00:00Z',
+    }, { takeover: true })).resolves.toBe(true)
+
+    expect(apiFetch).toHaveBeenNthCalledWith(1, '/runs/run-other/owner', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ tab_id: 'tab-1' }),
+    }))
+    expect(apiFetch).toHaveBeenNthCalledWith(2, '/runs/run-other/stream?tab_id=tab-1')
+    expect(tabs[0].attachMode).toBe('owner')
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(false)
+  })
+
+  it('marks a subscribed tab read-only when ownership moves to another browser', () => {
+    const appendLine = vi.fn()
+    const { _handleRunStreamMessage, tabs } = loadRunnerFns({
+      clientId: 'client-1',
+      tabs: [{ id: 'tab-1', st: 'running', runId: 'run-1', pendingKill: false, killed: false, attachMode: 'owner' }],
+      appendLine,
+    })
+
+    _handleRunStreamMessage({ type: 'owner', owner_client_id: 'client-2', owner_tab_id: 'tab-9' }, 'tab-1')
+
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(true)
+    expect(appendLine).toHaveBeenCalledWith(
+      'Run ownership moved to another browser. This tab is now read-only.',
+      'notice',
+      'tab-1',
+    )
   })
 
   it('pollActiveRunsAfterReload restores a completed reconnected run through history', async () => {
@@ -1079,29 +1281,10 @@ describe('runner helpers', () => {
   })
 
   it('adds commands to the preview recents even when they exit non-zero', async () => {
-    let readCount = 0
     const addToRecentPreview = vi.fn()
-    const apiFetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        body: {
-          getReader: () => ({
-            read: vi.fn(() => {
-              readCount += 1
-              if (readCount === 1) {
-                return Promise.resolve({
-                  done: false,
-                  value: new TextEncoder().encode(
-                    'data: {"type":"started","run_id":"run-1"}\n\n' +
-                    'data: {"type":"exit","code":0,"elapsed":"0.1"}\n\n',
-                  ),
-                })
-              }
-              return Promise.resolve({ done: true })
-            }),
-          }),
-        },
-      }),
+    const apiFetch = brokerApiFetch(
+      'data: {"type":"started","run_id":"run-1"}\n\n' +
+      'data: {"type":"exit","code":0,"elapsed":"0.1"}\n\n',
     )
     const { runCommand } = loadRunnerFns({
       cmdValue: 'ping -c 1 darklab.sh',
@@ -1111,34 +1294,15 @@ describe('runner helpers', () => {
     })
 
     runCommand()
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromises()
 
     expect(addToRecentPreview).toHaveBeenCalledWith('ping -c 1 darklab.sh')
 
-    readCount = 0
     addToRecentPreview.mockClear()
-    const failedFetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        body: {
-          getReader: () => ({
-            read: vi.fn(() => {
-              readCount += 1
-              if (readCount === 1) {
-                return Promise.resolve({
-                  done: false,
-                  value: new TextEncoder().encode(
-                    'data: {"type":"started","run_id":"run-2"}\n\n' +
-                    'data: {"type":"exit","code":1,"elapsed":"0.1"}\n\n',
-                  ),
-                })
-              }
-              return Promise.resolve({ done: true })
-            }),
-          }),
-        },
-      }),
+    const failedFetch = brokerApiFetch(
+      'data: {"type":"started","run_id":"run-2"}\n\n' +
+      'data: {"type":"exit","code":1,"elapsed":"0.1"}\n\n',
+      { runId: 'run-2' },
     )
     const failedHarness = loadRunnerFns({
       cmdValue: 'ping -c 1 nope.darklab',
@@ -1148,37 +1312,18 @@ describe('runner helpers', () => {
     })
 
     failedHarness.runCommand()
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromises()
 
     expect(addToRecentPreview).toHaveBeenCalledWith('ping -c 1 nope.darklab')
   })
 
   it('does not add unsupported fake commands to the preview recents', async () => {
-    let readCount = 0
     const addToRecentPreview = vi.fn()
-    const apiFetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        body: {
-          getReader: () => ({
-            read: vi.fn(() => {
-              readCount += 1
-              if (readCount === 1) {
-                return Promise.resolve({
-                  done: false,
-                  value: new TextEncoder().encode(
-                    'data: {"type":"started","run_id":"run-3"}\n\n' +
-                    'data: {"type":"output","text":"Unsupported fake command: pign darklab.sh"}\n\n' +
-                    'data: {"type":"exit","code":1,"elapsed":"0.1"}\n\n',
-                  ),
-                })
-              }
-              return Promise.resolve({ done: true })
-            }),
-          }),
-        },
-      }),
+    const apiFetch = brokerApiFetch(
+      'data: {"type":"started","run_id":"run-3"}\n\n' +
+      'data: {"type":"output","text":"Unsupported fake command: pign darklab.sh"}\n\n' +
+      'data: {"type":"exit","code":1,"elapsed":"0.1"}\n\n',
+      { runId: 'run-3' },
     )
     const { runCommand } = loadRunnerFns({
       cmdValue: 'pign darklab.sh',
@@ -1188,8 +1333,7 @@ describe('runner helpers', () => {
     })
 
     runCommand()
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromises()
 
     expect(addToRecentPreview).not.toHaveBeenCalled()
   })
@@ -1300,7 +1444,7 @@ describe('runner helpers', () => {
     expect(status.className).toBe('status-pill fail')
   })
 
-  it('runCommand shows a fetch error when the /run request rejects', async () => {
+  it('runCommand shows a fetch error when the /runs request rejects', async () => {
     const apiFetch = vi.fn(() => Promise.reject(new Error('Failed to fetch')))
     const appendLine = vi.fn()
     const { runCommand, status, runBtn } = loadRunnerFns({
@@ -1315,7 +1459,7 @@ describe('runner helpers', () => {
     await Promise.resolve()
 
     expect(apiFetch).toHaveBeenCalledWith(
-      '/run',
+      '/runs',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1448,7 +1592,7 @@ describe('runner helpers', () => {
     expect(cancelWelcome).toHaveBeenCalledWith('tab-1')
     expect(clearTab).toHaveBeenCalledWith('tab-1')
     expect(apiFetch).toHaveBeenCalledWith(
-      '/run',
+      '/runs',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1459,29 +1603,13 @@ describe('runner helpers', () => {
   it('runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line', async () => {
     const appendLine = vi.fn()
     const clearTab = vi.fn()
-    const apiFetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        body: {
-          getReader: () => {
-            let done = false
-            return {
-              read: () => {
-                if (done) return Promise.resolve({ done: true, value: undefined })
-                done = true
-                const payload =
-                  [
-                    'data: {"type":"started","run_id":"run-clear"}',
-                    'data: {"type":"clear"}',
-                    'data: {"type":"exit","code":0,"elapsed":0.1}',
-                  ].join('\n\n') + '\n\n'
-                return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
-              },
-            }
-          },
-        },
-      }),
+    const apiFetch = brokerApiFetch(
+      [
+        'data: {"type":"started","run_id":"run-clear"}',
+        'data: {"type":"clear"}',
+        'data: {"type":"exit","code":0,"elapsed":0.1}',
+      ].join('\n\n') + '\n\n',
+      { runId: 'run-clear' },
     )
     const loaded = loadRunnerFns({
       cmdValue: 'clear',
@@ -1492,9 +1620,7 @@ describe('runner helpers', () => {
     })
 
     loaded.runCommand()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromises()
 
     expect(clearTab).toHaveBeenCalledWith('tab-1')
     expect(appendLine).not.toHaveBeenCalledWith(
@@ -1507,29 +1633,13 @@ describe('runner helpers', () => {
 
   it('runCommand appends a count-aware preview truncation notice on exit', async () => {
     const appendLine = vi.fn()
-    const apiFetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        body: {
-          getReader: () => {
-            let done = false
-            return {
-              read: () => {
-                if (done) return Promise.resolve({ done: true, value: undefined })
-                done = true
-                const payload =
-                  [
-                    'data: {"type":"started","run_id":"run-man"}',
-                    'data: {"type":"output","text":"line 1"}',
-                    'data: {"type":"exit","code":0,"elapsed":0.1,"preview_truncated":true,"output_line_count":5104,"full_output_available":true}',
-                  ].join('\n\n') + '\n\n'
-                return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
-              },
-            }
-          },
-        },
-      }),
+    const apiFetch = brokerApiFetch(
+      [
+        'data: {"type":"started","run_id":"run-man"}',
+        'data: {"type":"output","text":"line 1"}',
+        'data: {"type":"exit","code":0,"elapsed":0.1,"preview_truncated":true,"output_line_count":5104,"full_output_available":true}',
+      ].join('\n\n') + '\n\n',
+      { runId: 'run-man' },
     )
     const loaded = loadRunnerFns({
       cmdValue: 'man curl',
@@ -1540,9 +1650,7 @@ describe('runner helpers', () => {
     })
 
     loaded.runCommand()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromises()
 
     expect(appendLine).toHaveBeenCalledWith(
       "[preview truncated — only the last 5000 lines are shown here, but the full output had 5104 lines. To view the full output, use either permalink button now; after another command, use this command's history permalink]",
@@ -1554,30 +1662,14 @@ describe('runner helpers', () => {
 
   it('runCommand preserves output classes from streamed events', async () => {
     const appendLine = vi.fn()
-    const apiFetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        body: {
-          getReader: () => {
-            let done = false
-            return {
-              read: () => {
-                if (done) return Promise.resolve({ done: true, value: undefined })
-                done = true
-                const payload =
-                  [
-                    'data: {"type":"started","run_id":"run-faq"}',
-                    'data: {"type":"output","text":"Q  Example question\\n","cls":"fake-faq-q"}',
-                    'data: {"type":"output","text":"A  Example answer\\n","cls":"fake-faq-a"}',
-                    'data: {"type":"exit","code":0,"elapsed":0.1}',
-                  ].join('\n\n') + '\n\n'
-                return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
-              },
-            }
-          },
-        },
-      }),
+    const apiFetch = brokerApiFetch(
+      [
+        'data: {"type":"started","run_id":"run-faq"}',
+        'data: {"type":"output","text":"Q  Example question\\n","cls":"fake-faq-q"}',
+        'data: {"type":"output","text":"A  Example answer\\n","cls":"fake-faq-a"}',
+        'data: {"type":"exit","code":0,"elapsed":0.1}',
+      ].join('\n\n') + '\n\n',
+      { runId: 'run-faq' },
     )
     const loaded = loadRunnerFns({
       cmdValue: 'faq',
@@ -1587,9 +1679,7 @@ describe('runner helpers', () => {
     })
 
     loaded.runCommand()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromises()
 
     expect(appendLine).toHaveBeenCalledWith('Q  Example question', 'fake-faq-q', 'tab-1')
     expect(appendLine).toHaveBeenCalledWith('A  Example answer', 'fake-faq-a', 'tab-1')
@@ -1597,29 +1687,13 @@ describe('runner helpers', () => {
 
   it('runCommand suppresses nc inverse-host-lookup noise while keeping the open-port result', async () => {
     const appendLine = vi.fn()
-    const apiFetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        body: {
-          getReader: () => {
-            let done = false
-            return {
-              read: () => {
-                if (done) return Promise.resolve({ done: true, value: undefined })
-                done = true
-                const payload =
-                  [
-                    'data: {"type":"started","run_id":"run-nc"}',
-                    'data: {"type":"output","text":"Warning: inverse host lookup failed for 107.178.109.44: No address associated with name\\nip.darklab.sh [107.178.109.44] 80 (http) open\\n"}',
-                    'data: {"type":"exit","code":0,"elapsed":0.1}',
-                  ].join('\n\n') + '\n\n'
-                return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
-              },
-            }
-          },
-        },
-      }),
+    const apiFetch = brokerApiFetch(
+      [
+        'data: {"type":"started","run_id":"run-nc"}',
+        'data: {"type":"output","text":"Warning: inverse host lookup failed for 107.178.109.44: No address associated with name\\nip.darklab.sh [107.178.109.44] 80 (http) open\\n"}',
+        'data: {"type":"exit","code":0,"elapsed":0.1}',
+      ].join('\n\n') + '\n\n',
+      { runId: 'run-nc' },
     )
     const loaded = loadRunnerFns({
       cmdValue: 'nc -zv ip.darklab.sh 80',
@@ -1629,9 +1703,7 @@ describe('runner helpers', () => {
     })
 
     loaded.runCommand()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromises()
 
     expect(appendLine).not.toHaveBeenCalledWith(
       'Warning: inverse host lookup failed for 107.178.109.44: No address associated with name',
@@ -1750,7 +1822,7 @@ describe('submitCommand return contract', () => {
     submitVisibleComposerCommand({ dismissKeyboard: true, focusAfterSubmit: false })
 
     expect(apiFetch).toHaveBeenCalledWith(
-      '/run',
+      '/runs',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1773,7 +1845,7 @@ describe('submitCommand return contract', () => {
     })
 
     expect(apiFetch).toHaveBeenCalledWith(
-      '/run',
+      '/runs',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2510,7 +2582,7 @@ describe('workspace file delete confirmation', () => {
 
     await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('Usage: rm [-r|-f|-rf] <file-or-folder>', 'exit-fail', 'tab-1'))
     expect(appendLine).toHaveBeenCalledWith('Usage: file delete [-r|-f|-rf] <file-or-folder>', 'exit-fail', 'tab-1')
-    expect(apiFetch).not.toHaveBeenCalledWith('/run', expect.anything())
+    expect(apiFetch).not.toHaveBeenCalledWith('/runs', expect.anything())
     expect(status.className).toBe('status-pill fail')
   })
 
