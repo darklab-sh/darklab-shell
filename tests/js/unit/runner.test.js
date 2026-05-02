@@ -69,6 +69,29 @@ function pendingBrokerStreamResponse() {
   }
 }
 
+function controllableBrokerStreamResponse() {
+  let resolveRead = null
+  const read = vi.fn(() => new Promise((resolve) => {
+    resolveRead = resolve
+  }))
+  const cancel = vi.fn(() => {
+    if (resolveRead) {
+      resolveRead({ done: true, value: undefined })
+      resolveRead = null
+    }
+    return Promise.resolve()
+  })
+  return {
+    ok: true,
+    status: 200,
+    read,
+    cancel,
+    body: {
+      getReader: () => ({ read, cancel }),
+    },
+  }
+}
+
 // ── _formatElapsed ────────────────────────────────────────────────────────────
 
 describe('_formatElapsed', () => {
@@ -789,6 +812,10 @@ function loadRunnerFns({
     restoreActiveRunsAfterReload,
     pollActiveRunsAfterReload,
     syncActiveRunTimer,
+    _subscribeRunStream,
+    pauseBackgroundRunStreamsForStatusMonitor,
+    resumeBackgroundRunStreamsAfterStatusMonitor,
+    detachRunStreamForTab,
     _handleRunStreamMessage,
     _resetStalledTimeout,
     _clearStalledTimeout,
@@ -815,6 +842,10 @@ function loadRunnerFns({
     maybeMountDeferredPrompt,
     restoreHistoryRunIntoTab,
     attachActiveRunFromMonitor: fns.attachActiveRunFromMonitor,
+    _subscribeRunStream: fns._subscribeRunStream,
+    pauseBackgroundRunStreamsForStatusMonitor: fns.pauseBackgroundRunStreamsForStatusMonitor,
+    resumeBackgroundRunStreamsAfterStatusMonitor: fns.resumeBackgroundRunStreamsAfterStatusMonitor,
+    detachRunStreamForTab: fns.detachRunStreamForTab,
   }
 }
 
@@ -873,7 +904,7 @@ describe('runner helpers', () => {
       ok: false,
       status: 403,
       headers: { get: () => 'application/json' },
-      json: () => Promise.resolve({ error: 'This browser no longer controls that run. Use Take over from Run Monitor before killing it.' }),
+      json: () => Promise.resolve({ error: 'This browser no longer controls that run. Use Take over from Status Monitor before killing it.' }),
     }))
     const appendLine = vi.fn()
     const { doKill, tabs, status } = loadRunnerFns({
@@ -892,7 +923,7 @@ describe('runner helpers', () => {
     expect(document.querySelector('.tab-kill-btn').hidden).toBe(true)
     expect(status.className).toBe('status-pill running')
     expect(appendLine).toHaveBeenCalledWith(
-      '[kill request denied] This browser no longer controls that run. Use Take over from Run Monitor before killing it.',
+      '[kill request denied] This browser no longer controls that run. Use Take over from Status Monitor before killing it.',
       'notice',
       'tab-1',
     )
@@ -1015,6 +1046,65 @@ describe('runner helpers', () => {
     expect(tabs[0].st).toBe('running')
     expect(apiFetch).toHaveBeenCalledWith('/runs/run-1/stream?tab_id=tab-1&after=1-5')
     expect(appendLine).toHaveBeenCalledWith('ping darklab.sh', 'prompt-echo', 'tab-1')
+  })
+
+  it('pauses background run streams for Status Monitor API calls and resumes from the last event id', async () => {
+    const activeStream = controllableBrokerStreamResponse()
+    const backgroundStream = controllableBrokerStreamResponse()
+    const resumedStream = controllableBrokerStreamResponse()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/runs/run-active/stream?tab_id=tab-1') return Promise.resolve(activeStream)
+      if (url === '/runs/run-bg/stream?tab_id=tab-2') return Promise.resolve(backgroundStream)
+      if (url === '/runs/run-bg/stream?tab_id=tab-2&after=1-9') return Promise.resolve(resumedStream)
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
+    const {
+      _subscribeRunStream,
+      pauseBackgroundRunStreamsForStatusMonitor,
+      resumeBackgroundRunStreamsAfterStatusMonitor,
+    } = loadRunnerFns({
+      activeTabId: 'tab-1',
+      tabs: [
+        {
+          id: 'tab-1',
+          st: 'running',
+          runId: 'run-active',
+          historyRunId: 'run-active',
+          lastEventId: '1-2',
+          pendingKill: false,
+          killed: false,
+        },
+        {
+          id: 'tab-2',
+          st: 'running',
+          runId: 'run-bg',
+          historyRunId: 'run-bg',
+          lastEventId: '1-9',
+          pendingKill: false,
+          killed: false,
+        },
+      ],
+      apiFetch,
+    })
+
+    await expect(_subscribeRunStream('run-active', 'tab-1')).resolves.toBe(true)
+    await expect(_subscribeRunStream('run-bg', 'tab-2')).resolves.toBe(true)
+    await flushPromises()
+
+    expect(activeStream.read).toHaveBeenCalled()
+    expect(backgroundStream.read).toHaveBeenCalled()
+
+    expect(pauseBackgroundRunStreamsForStatusMonitor()).toBe(1)
+    expect(activeStream.cancel).not.toHaveBeenCalled()
+    expect(backgroundStream.cancel).toHaveBeenCalledTimes(1)
+
+    await flushPromises()
+    resumeBackgroundRunStreamsAfterStatusMonitor()
+    await flushPromises()
+
+    expect(apiFetch).toHaveBeenCalledWith('/runs/run-bg/stream?tab_id=tab-2&after=1-9')
+    expect(resumedStream.read).toHaveBeenCalled()
+    expect(apiFetch).toHaveBeenCalledTimes(3)
   })
 
   it('restoreActiveRunsAfterReload does not overwrite a restored non-running tab', () => {

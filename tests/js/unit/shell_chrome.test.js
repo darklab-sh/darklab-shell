@@ -10,7 +10,7 @@ function tick() {
   return new Promise(resolve => setTimeout(resolve, 0))
 }
 
-function loadShellChrome({ fetch, preferences = {} } = {}) {
+function loadShellChrome({ fetch, preferences = {}, openRunMonitor = vi.fn(() => Promise.resolve(true)) } = {}) {
   document.body.innerHTML = `
     <aside id="rail">
       <button id="rail-collapse-btn"></button>
@@ -52,6 +52,7 @@ function loadShellChrome({ fetch, preferences = {} } = {}) {
     recentPreviewHistory: [],
     renderHudClock: null,
     toggleRailCollapsed: null,
+    openRunMonitor,
   }
 
   new Function(
@@ -84,6 +85,7 @@ function loadShellChrome({ fetch, preferences = {} } = {}) {
     'renderWorkflowItems',
     'openWorkflows',
     'showWorkflowsOverlay',
+    'openRunMonitor',
     `
       const globalThis = global;
       ${SHELL_CHROME_SRC}
@@ -131,6 +133,7 @@ function loadShellChrome({ fetch, preferences = {} } = {}) {
     () => {},
     () => {},
     () => {},
+    openRunMonitor,
   )
 
   return {
@@ -142,10 +145,22 @@ function loadShellChrome({ fetch, preferences = {} } = {}) {
     railWorkflowsHeader: document.getElementById('rail-workflows-header'),
     railSectionWorkflows: document.getElementById('rail-section-workflows'),
     preferences,
+    openRunMonitor,
   }
 }
 
 describe('shell chrome rail sections', () => {
+  it('opens Status Monitor from the desktop rail nav item', () => {
+    const openRunMonitor = vi.fn(() => Promise.resolve(true))
+    const shell = loadShellChrome({ openRunMonitor })
+    const nav = document.getElementById('rail-nav')
+    nav.innerHTML = '<button data-action="run-monitor" type="button"></button>'
+
+    nav.querySelector('[data-action="run-monitor"]').click()
+
+    expect(shell.openRunMonitor).toHaveBeenCalledWith({ source: 'rail' })
+  })
+
   it('keeps the default split when workflows is closed and reopened before resizing', async () => {
     const shell = loadShellChrome()
 

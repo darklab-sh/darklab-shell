@@ -329,6 +329,9 @@ function dispatchMobileMenuAction(action, btn = null) {
     refocusComposerAfterAction({ defer: true });
   }
   if (action === 'options') openOptions();
+  if (action === 'run-monitor' && typeof openRunMonitor === 'function') {
+    void openRunMonitor({ source: 'mobile-menu' });
+  }
   if (action === 'theme') openThemeSelector();
   if (action === 'workflows') openWorkflows();
   if (action === 'workspace' && typeof openWorkspace === 'function') openWorkspace();

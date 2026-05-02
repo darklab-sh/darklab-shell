@@ -186,7 +186,7 @@ function mountMobileHarness() {
           has_next: true,
           roots: ['ping'],
           runs: [
-            { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
+            { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: -15 },
           ],
         }),
       })
@@ -267,6 +267,9 @@ describe('runtime button primitive contract', () => {
   expect(document.getElementById('mobile-recents-filter-root')?.getAttribute('autocorrect')).toBe('off')
   expect(document.getElementById('mobile-recents-filter-root')?.getAttribute('spellcheck')).toBe('false')
   expect(document.getElementById('mobile-recents-filter-root')?.getAttribute('inputmode')).toBe('text')
+  const exitEl = document.querySelector('#mobile-recents-list .sheet-item-exit')
+  expect(exitEl?.textContent).toBe('terminated')
+  expect(exitEl?.classList.contains('nonzero')).toBe(false)
   expectButtonPrimitives(
     document.getElementById('mobile-recents-pagination-controls'),
     'mobile recents pagination',

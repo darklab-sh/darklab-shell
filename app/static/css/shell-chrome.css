@@ -2,6 +2,30 @@
    Desktop shell: left rail, tabbar, and bottom HUD.
    Mobile uses the stacked layout in mobile.css. */
 
+@property --pulse-load-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: lime;
+}
+
+@property --pulse-load-alpha {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0.1;
+}
+
+@property --pulse-load-border-alpha {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0.28;
+}
+
+@property --pulse-load-shadow-alpha {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0.08;
+}
+
 /* ============================================================
    Shared helpers
    ============================================================ */
@@ -787,39 +811,37 @@
 
   .run-monitor {
     position: fixed;
-    left: var(--run-monitor-left, 214px);
-    bottom: var(--run-monitor-bottom, 46px);
-    width: min(560px, calc(100vw - var(--run-monitor-left, 214px) - 16px));
-    max-height: min(520px, calc(100vh - var(--shell-top-chrome-height) - var(--run-monitor-bottom, 46px) - 24px));
-    z-index: 75;
-    border: 1px solid var(--border-bright);
-    border-left: none;
-    border-bottom: none;
-    box-shadow:
-      18px 0 34px var(--theme-chrome-shadow),
-      0 7px 14px color-mix(in srgb, var(--theme-chrome-shadow) 86%, transparent),
-      inset 1px 0 0 color-mix(in srgb, var(--green) 22%, transparent);
-    transform-origin: bottom left;
-    animation: run-monitor-hud-rise 180ms ease-out both;
+    left: 50%;
+    top: 50%;
+    width: min(1180px, 96vw);
+    max-height: min(820px, 90vh);
+    z-index: 321;
+    border: 1px solid var(--theme-panel-border);
+    border-radius: 6px;
+    box-shadow: 0 24px 60px var(--theme-panel-shadow);
+    transform-origin: center;
+    transform: translate(-50%, -50%);
+    animation: run-monitor-modal-enter 160ms ease-out both;
   }
 }
 
-@keyframes run-monitor-hud-rise {
+@keyframes run-monitor-modal-enter {
   from {
     opacity: 0.86;
-    transform: translateY(18px) scaleY(0.96);
+    transform: translate(-50%, calc(-50% + 10px)) scale(0.985);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scaleY(1);
+    transform: translate(-50%, -50%) scale(1);
   }
 }
 
 .run-monitor-scrim {
   position: fixed;
   inset: 0;
-  z-index: 74;
-  background: transparent;
+  z-index: 320;
+  background: var(--theme-overlay-backdrop-bg);
+  backdrop-filter: blur(3px);
 }
 
 .run-monitor.u-hidden,
@@ -868,27 +890,875 @@
 
 .run-monitor-collapse-glyph {
   display: inline-block;
-  font-size: 18px;
+  font-size: 14px;
   line-height: 1;
-  transform: rotate(90deg);
 }
 
 .run-monitor-list {
   display: flex;
   flex-direction: column;
-  padding: 0;
+  gap: 14px;
+  padding: 14px;
+}
+
+.status-monitor-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.status-monitor-section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px;
+}
+
+.status-monitor-section-title {
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.status-monitor-section-meta {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.status-monitor-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.status-monitor-grid-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.status-monitor-card {
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--border-bright) 45%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--theme-chrome-row-bg) 84%, transparent);
+  padding: 10px;
+}
+
+.status-monitor-card-label {
+  color: var(--muted);
+  font-size: 8.5px;
+  text-transform: uppercase;
+}
+
+.status-monitor-card-value-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  margin-top: 7px;
+}
+
+.status-monitor-card-value {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-monitor-card-meta {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.status-monitor-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--muted) 30%, transparent);
+}
+
+.status-monitor-dot-ok { background: var(--green); box-shadow: 0 0 8px color-mix(in srgb, var(--green) 35%, transparent); }
+.status-monitor-dot-warn { background: var(--amber); box-shadow: 0 0 8px color-mix(in srgb, var(--amber) 35%, transparent); }
+.status-monitor-dot-bad { background: var(--red); box-shadow: 0 0 8px color-mix(in srgb, var(--red) 35%, transparent); }
+.status-monitor-dot-idle { background: var(--muted); }
+
+.status-monitor-card-meter {
+  --status-meter-percent: 0%;
+  height: 3px;
+  margin-top: 9px;
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      90deg,
+      var(--green) var(--status-meter-percent),
+      color-mix(in srgb, var(--border-bright) 35%, transparent) 0
+    );
+}
+
+.status-monitor-card-warn .status-monitor-card-meter {
+  background:
+    linear-gradient(
+      90deg,
+      var(--amber) var(--status-meter-percent),
+      color-mix(in srgb, var(--border-bright) 35%, transparent) 0
+    );
+}
+
+.status-monitor-showcase {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.status-monitor-pulse-strip {
+  --pulse-glow-opacity: 0.34;
+  --pulse-glow-width: 7px;
+  --pulse-beat-glow-opacity: 0.32;
+  --pulse-beat-glow-width: 16px;
+  --pulse-line-width: 1.8px;
+  --pulse-load-color: var(--green);
+  --pulse-load-alpha: 0.1;
+  --pulse-load-border-alpha: 0.28;
+  --pulse-load-shadow-alpha: 0.08;
+  position: relative;
+  min-height: 84px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--pulse-load-color) calc(var(--pulse-load-border-alpha) * 100%), var(--border));
+  border-radius: 8px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--pulse-load-color) calc(var(--pulse-load-alpha) * 100%), transparent),
+      color-mix(in srgb, var(--pulse-load-color) calc(var(--pulse-load-alpha) * 42%), transparent) 56%,
+      transparent
+    ),
+    radial-gradient(ellipse at center, color-mix(in srgb, var(--pulse-load-color) calc(var(--pulse-load-alpha) * 58%), transparent), transparent 72%),
+    linear-gradient(180deg, color-mix(in srgb, var(--theme-chrome-row-bg) 92%, transparent), var(--theme-chrome-bg));
+  box-shadow:
+    inset 0 0 28px color-mix(in srgb, var(--pulse-load-color) calc(var(--pulse-load-shadow-alpha) * 100%), transparent),
+    0 0 24px color-mix(in srgb, var(--pulse-load-color) calc(var(--pulse-load-shadow-alpha) * 82%), transparent);
+  transition:
+    --pulse-load-color 1400ms ease,
+    --pulse-load-alpha 1400ms ease,
+    --pulse-load-border-alpha 1400ms ease,
+    --pulse-load-shadow-alpha 1400ms ease,
+    border-color 1400ms ease,
+    box-shadow 1400ms ease;
+}
+
+.status-monitor-pulse-strip.status-monitor-pulse-load-resetting {
+  transition: none;
+}
+
+.status-monitor-pulse-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.status-monitor-pulse-grid {
+  fill: none;
+  stroke: color-mix(in srgb, var(--green) 16%, transparent);
+  stroke-width: 1;
+  stroke-dasharray: 4 8;
+}
+
+.status-monitor-pulse-glow,
+.status-monitor-pulse-beat-glow,
+.status-monitor-pulse-placeholder-line,
+.status-monitor-pulse-line {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.status-monitor-pulse-glow {
+  stroke: color-mix(in srgb, var(--green) 65%, transparent);
+  stroke-width: var(--pulse-glow-width);
+  filter: blur(9px);
+  opacity: var(--pulse-glow-opacity);
+}
+
+.status-monitor-pulse-beat-glow {
+  stroke: color-mix(in srgb, var(--green) 86%, transparent);
+  stroke-width: var(--pulse-beat-glow-width);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: blur(12px);
+  opacity: var(--pulse-beat-glow-opacity);
+}
+
+.status-monitor-pulse-line {
+  stroke: var(--green);
+  stroke-width: var(--pulse-line-width);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.status-monitor-pulse-placeholder-line {
+  stroke: color-mix(in srgb, var(--green) 48%, transparent);
+  stroke-width: 1.8px;
+  stroke-dasharray: 7 10;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.68;
+}
+
+.status-monitor-health-pips {
+  position: absolute;
+  z-index: 1;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 7px;
+}
+
+.status-monitor-health-pip {
+  border: 1px solid color-mix(in srgb, var(--border-bright) 60%, transparent);
+  border-radius: 999px;
+  padding: 4px 7px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--theme-chrome-bg) 74%, transparent);
+  font-size: 8.5px;
+  text-transform: uppercase;
+}
+
+.status-monitor-health-pip-ok {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 42%, var(--border));
+  box-shadow: 0 0 12px color-mix(in srgb, var(--green) 16%, transparent);
+}
+
+.status-monitor-health-pip-warn {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 42%, var(--border));
+}
+
+.status-monitor-health-pip-bad {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 48%, var(--border));
+}
+
+.status-monitor-showcase-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: 260px 190px;
+  gap: 10px;
+}
+
+.status-monitor-visual-card {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border-bright) 42%, transparent);
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--theme-chrome-row-bg) 88%, transparent), var(--theme-chrome-bg));
+  box-shadow: inset 0 0 24px color-mix(in srgb, var(--green) 5%, transparent);
+}
+
+.status-monitor-constellation-card {
+  grid-column: 1 / -1;
+  grid-row: auto;
+}
+
+.status-monitor-constellation-card,
+.status-monitor-treemap-card,
+.status-monitor-heatmap-card {
+  contain: layout paint;
+}
+
+.status-monitor-visual-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px 0;
+}
+
+.status-monitor-visual-title {
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.status-monitor-visual-meta {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.status-monitor-category-legend {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.status-monitor-category-legend-item {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.status-monitor-category-legend-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: hsl(var(--legend-hue, 120) var(--legend-saturation, 100%) 58%);
+  box-shadow: 0 0 7px hsl(var(--legend-hue, 120) var(--legend-saturation, 100%) 58% / 0.48);
+}
+
+.status-monitor-category-legend-label {
+  overflow: hidden;
+  max-width: 54px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-monitor-heatmap-meta-group {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.status-monitor-heatmap-legend {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.status-monitor-heatmap-legend-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.status-monitor-constellation-plot {
+  position: relative;
+  height: calc(100% - 28px);
+}
+
+.status-monitor-constellation {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--green) 8%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--green) 8%, transparent) 1px, transparent 1px);
+  background-size: 42px 42px;
+}
+
+.status-monitor-star-ambient {
+  fill: hsl(var(--ambient-hue, 120) 80% 72% / var(--ambient-opacity, 0.5));
+  filter: drop-shadow(0 0 var(--ambient-glow, 4px) hsl(var(--ambient-hue, 120) 92% 68% / 0.36));
+  transform: scaleX(var(--constellation-star-scale-x, 1));
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.status-monitor-constellation-streak {
+  fill: none;
+  stroke: hsl(var(--star-hue, 120) var(--star-saturation, 100%) 62% / 0.4);
+  stroke-width: 1.1;
+  stroke-dasharray: 2.5 7;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 6px hsl(var(--star-hue, 120) var(--star-saturation, 100%) 58% / 0.25));
+  pointer-events: none;
+}
+
+.status-monitor-constellation-guide {
+  stroke: color-mix(in srgb, var(--green) 18%, transparent);
+  stroke-width: 0.8;
+  stroke-dasharray: 1.5 9;
+  pointer-events: none;
+}
+
+.status-monitor-constellation-guide-label {
+  fill: color-mix(in srgb, var(--muted) 72%, transparent);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0;
+  pointer-events: none;
+}
+
+.status-monitor-star {
+  fill: hsl(var(--star-hue, 120) var(--star-saturation, 100%) 58%);
+  stroke: color-mix(in srgb, var(--text) 58%, transparent);
+  stroke-width: 0.5;
+  filter: drop-shadow(0 0 6px hsl(var(--star-hue, 120) var(--star-saturation, 100%) 58% / var(--star-age-glow, 0.72)));
+}
+
+.status-monitor-star-failed {
+  filter:
+    drop-shadow(0 0 5px hsl(var(--star-hue, 120) var(--star-saturation, 100%) 54% / var(--star-age-glow, 0.72)))
+    drop-shadow(0 0 7px color-mix(in srgb, var(--red) 58%, transparent));
+}
+
+.status-monitor-star-failure-ring {
+  fill: none;
+  stroke: color-mix(in srgb, var(--red) 78%, transparent);
+  stroke-width: 1.4;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--red) 64%, transparent));
+  pointer-events: none;
+}
+
+.status-monitor-star-node {
+  cursor: pointer;
+  transform: scaleX(var(--constellation-star-scale-x, 1));
+  transform-box: fill-box;
+  transform-origin: center;
+  user-select: none;
+}
+
+.status-monitor-star-ring {
+  fill: none;
+  stroke: hsl(var(--star-hue, 120) var(--star-saturation, 100%) 62%);
+  stroke-width: 1.2;
+  opacity: 0;
+  filter: drop-shadow(0 0 8px hsl(var(--star-hue, 120) var(--star-saturation, 100%) 58%));
+  pointer-events: none;
+}
+
+.status-monitor-star-hit {
+  fill: transparent;
+  pointer-events: all;
+}
+
+.status-monitor-star-node:hover .status-monitor-star-ring,
+.status-monitor-star-node:focus .status-monitor-star-ring,
+.status-monitor-star-node:focus-visible .status-monitor-star-ring {
+  opacity: 0.95;
+}
+
+.status-monitor-constellation-popover {
+  position: absolute;
+  z-index: 3;
+  width: min(280px, calc(100% - 22px));
+  border: 1px solid color-mix(in srgb, var(--green) 42%, var(--border));
+  border-radius: 7px;
+  padding: 9px 10px;
+  color: var(--text);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--theme-chrome-bg) 96%, transparent), color-mix(in srgb, var(--theme-chrome-row-bg) 96%, transparent));
+  box-shadow:
+    0 10px 28px color-mix(in srgb, var(--bg) 72%, transparent),
+    0 0 18px color-mix(in srgb, var(--green) 18%, transparent),
+    inset 0 0 16px color-mix(in srgb, var(--green) 7%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transform: none;
+}
+
+.status-monitor-constellation-popover-visible {
+  opacity: 1;
+}
+
+.status-monitor-heatmap-popover {
+  width: min(210px, calc(100% - 22px));
+}
+
+.status-monitor-treemap-popover {
+  width: min(240px, calc(100% - 22px));
+}
+
+.status-monitor-constellation-popover-below {
+  transform: none;
+}
+
+.status-monitor-constellation-popover-root {
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.status-monitor-constellation-popover-command {
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.status-monitor-constellation-popover-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.status-monitor-constellation-popover-meta span {
+  border: 1px solid color-mix(in srgb, var(--border-bright) 38%, transparent);
+  border-radius: 999px;
+  padding: 3px 6px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--theme-chrome-row-bg) 72%, transparent);
+  font-size: 8.5px;
+}
+
+.status-monitor-constellation-sparse {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  max-width: min(330px, calc(100% - 48px));
+  border: 1px solid color-mix(in srgb, var(--green) 26%, transparent);
+  border-radius: 999px;
+  padding: 7px 12px;
+  color: color-mix(in srgb, var(--text) 86%, transparent);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--theme-chrome-bg) 74%, transparent), color-mix(in srgb, var(--theme-chrome-row-bg) 70%, transparent));
+  box-shadow:
+    0 0 22px color-mix(in srgb, var(--green) 12%, transparent),
+    inset 0 0 14px color-mix(in srgb, var(--green) 5%, transparent);
+  font-size: 10px;
+  line-height: 1.25;
+  pointer-events: none;
+  text-align: center;
+  text-transform: uppercase;
+  transform: translate(-50%, -50%);
+  white-space: normal;
+}
+
+.status-monitor-treemap {
+  position: relative;
+  height: calc(100% - 30px);
+  margin: 9px 10px 10px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--theme-chrome-bg) 86%, transparent);
+}
+
+.status-monitor-treemap-tile {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid color-mix(in srgb, var(--border-bright) 58%, var(--theme-chrome-bg));
+  background:
+    radial-gradient(
+      circle at var(--tile-glow-x, 18%) var(--tile-glow-y, 20%),
+      hsl(var(--category-hue, 120) var(--category-saturation-strong, 100%) 58% / 0.42),
+      transparent 54%
+    ),
+    linear-gradient(
+      to top,
+      hsl(4 88% 45% / var(--failure-alpha, 0)) 0%,
+      hsl(4 88% 45% / var(--failure-alpha, 0)) var(--failure-stop, 0%),
+      hsl(4 88% 45% / 0) var(--failure-fade, 14%)
+    ),
+    linear-gradient(
+      135deg,
+      hsl(var(--category-hue, 120) var(--category-saturation-mid, 82%) 28% / 0.68),
+      hsl(var(--category-hue, 120) var(--category-saturation-low, 72%) 12% / 0.82)
+    );
+  color: var(--text);
+  padding: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: inset 0 0 18px hsl(var(--category-hue, 120) var(--category-saturation-strong, 100%) 54% / 0.12);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
+  will-change: transform;
+}
+
+.status-monitor-treemap-tile-compact {
+  gap: 2px;
+  padding: 6px;
+}
+
+.status-monitor-treemap-tile-tiny {
+  justify-content: center;
+  padding: 4px 6px;
+}
+
+.status-monitor-treemap-tile-inline {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+  justify-content: flex-start;
+  padding: 5px 7px;
+}
+
+.status-monitor-treemap-tile:hover,
+.status-monitor-treemap-tile:focus-within {
+  z-index: 2;
+  border-color: color-mix(in srgb, var(--border-bright) 82%, var(--green-dim));
+  box-shadow:
+    inset 0 0 18px hsl(var(--category-hue, 120) var(--category-saturation-strong, 100%) 54% / 0.18),
+    0 8px 18px color-mix(in srgb, var(--bg) 52%, transparent);
+  transform: translateY(-1px);
+}
+
+.status-monitor-treemap-root {
+  min-width: 0;
+  font-size: clamp(9px, 1.2vw, 15px);
+  font-weight: 800;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 0 10px color-mix(in srgb, var(--bg) 80%, transparent);
+}
+
+.status-monitor-treemap-tile-compact .status-monitor-treemap-root {
+  font-size: clamp(8px, 0.82vw, 11px);
+  line-height: 1.05;
+}
+
+.status-monitor-treemap-tile-tiny .status-monitor-treemap-root {
+  font-size: clamp(8px, 0.72vw, 10px);
+  line-height: 1;
+}
+
+.status-monitor-treemap-tile-inline .status-monitor-treemap-root {
+  flex: 0 1 auto;
+  max-width: 56%;
+  font-size: clamp(8px, 0.82vw, 11px);
+  line-height: 1;
+}
+
+.status-monitor-treemap-detail {
+  min-width: 0;
+  color: color-mix(in srgb, var(--text) 80%, transparent);
+  font-size: 9px;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-monitor-treemap-tile-compact .status-monitor-treemap-detail {
+  font-size: 8px;
+}
+
+.status-monitor-treemap-tile-inline .status-monitor-treemap-detail {
+  flex: 1 1 auto;
+  font-size: 8px;
+  line-height: 1;
+}
+
+.status-monitor-treemap-tile-tiny .status-monitor-treemap-detail {
+  display: none;
+}
+
+.status-monitor-heatmap-body {
+  position: relative;
+  display: grid;
+  grid-template-columns: 23px minmax(0, 1fr);
+  grid-template-rows: 12px minmax(0, 1fr);
+  gap: 2px 5px;
+  height: calc(100% - 40px);
+  margin: 7px 12px 12px;
+}
+
+.status-monitor-heatmap-months {
+  display: grid;
+  grid-column: 2;
+  grid-row: 1;
+  grid-template-columns: repeat(var(--status-heatmap-weeks, 4), minmax(4px, 1fr));
+  align-items: end;
+  min-width: 0;
+}
+
+.status-monitor-heatmap-month {
+  overflow: hidden;
+  color: color-mix(in srgb, var(--muted) 78%, transparent);
+  font-size: 8px;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.status-monitor-heatmap-weekdays {
+  display: grid;
+  grid-column: 1;
+  grid-row: 2;
+  grid-template-rows: repeat(7, 1fr);
+  align-items: center;
+}
+
+.status-monitor-heatmap-weekday {
+  color: color-mix(in srgb, var(--muted) 72%, transparent);
+  font-size: 7.5px;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.status-monitor-heatmap {
+  display: grid;
+  grid-auto-flow: column;
+  grid-column: 2;
+  grid-row: 2;
+  grid-template-columns: repeat(var(--status-heatmap-weeks, 4), minmax(4px, 1fr));
+  grid-template-rows: repeat(7, 1fr);
+  gap: 3px;
+  min-width: 0;
+}
+
+.status-monitor-heatmap-cell {
+  min-width: 4px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--border-bright) 22%, transparent);
+  outline: none;
+}
+
+.status-monitor-heatmap-cell:hover,
+.status-monitor-heatmap-cell:focus-visible {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--text) 54%, transparent),
+    0 0 10px color-mix(in srgb, var(--green) 28%, transparent);
+}
+
+.status-monitor-heatmap-level-1 { background: color-mix(in srgb, var(--green) 26%, var(--theme-chrome-bg)); }
+.status-monitor-heatmap-level-2 { background: color-mix(in srgb, var(--green) 46%, var(--theme-chrome-bg)); }
+.status-monitor-heatmap-level-3 { background: color-mix(in srgb, var(--green) 68%, var(--theme-chrome-bg)); box-shadow: 0 0 5px color-mix(in srgb, var(--green) 16%, transparent); }
+.status-monitor-heatmap-level-4 { background: var(--green); box-shadow: 0 0 8px color-mix(in srgb, var(--green) 36%, transparent); }
+
+.status-monitor-heatmap-legend-swatch.status-monitor-heatmap-level-0 {
+  background: color-mix(in srgb, var(--border-bright) 22%, transparent);
+}
+
+.status-monitor-heatmap-out-of-range {
+  background: color-mix(in srgb, var(--theme-chrome-bg) 78%, var(--border-bright)) !important;
+  box-shadow: none;
+  opacity: 0.45;
+}
+
+.status-monitor-visual-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.status-monitor-event-ticker {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+  contain: paint;
+  border: 1px solid color-mix(in srgb, var(--amber) 28%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--theme-chrome-row-bg) 78%, transparent);
+  padding: 7px 9px;
+}
+
+.status-monitor-event-label {
+  color: var(--amber);
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.status-monitor-event-track {
+  min-width: 0;
+  overflow: hidden;
+  contain: paint;
+  transform: translateZ(0);
+}
+
+.status-monitor-event-row {
+  display: inline-flex;
+  gap: 18px;
+  width: max-content;
+  white-space: nowrap;
+  backface-visibility: hidden;
+  transform: translate3d(0, 0, 0);
+  will-change: transform;
+  animation: status-monitor-event-scroll 34s linear infinite;
+}
+
+.status-monitor-event-item {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.status-monitor-event-item::before {
+  content: '▸ ';
+  color: var(--green);
+}
+
+.status-monitor-event-failed::before {
+  color: var(--red);
+}
+
+@keyframes status-monitor-event-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.status-monitor-runs-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid color-mix(in srgb, var(--border-bright) 35%, transparent);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.status-monitor-runs-section {
+  margin-top: 2px;
 }
 
 .run-monitor-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(220px, 0.95fr) minmax(300px, 1.45fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px 12px 18px;
+  gap: 16px;
+  min-height: 112px;
+  padding: 14px 16px 14px 20px;
+  border: 0;
+  border-radius: 0;
+}
+
+.status-monitor-runs-list-medium .run-monitor-item {
+  grid-template-columns: minmax(200px, 0.95fr) minmax(260px, 1.35fr) auto;
+  min-height: 98px;
+  padding-block: 12px;
+}
+
+.status-monitor-runs-list-many .run-monitor-item {
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.2fr) auto;
+  min-height: 82px;
+  padding-block: 10px;
+}
+
+.status-monitor-runs-list .run-monitor-item + .run-monitor-item {
+  border-top: 1px solid var(--theme-chrome-divider-color);
 }
 
 .run-monitor-details {
-  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -901,6 +1771,9 @@
 }
 
 .run-monitor-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
   margin-top: 6px;
   color: var(--muted);
   font-size: 10px;
@@ -908,11 +1781,100 @@
   overflow-wrap: anywhere;
 }
 
+.run-monitor-meta-chip {
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--green) 36%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--green) 8%, var(--theme-chrome-bg));
+  color: var(--green);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-monitor-meta-chip-ok {
+  border-color: color-mix(in srgb, var(--green) 42%, transparent);
+  color: var(--green);
+}
+
+.run-monitor-meta-chip-warn {
+  border-color: color-mix(in srgb, var(--amber) 45%, transparent);
+  color: var(--amber);
+}
+
+.run-monitor-meta-chip-tab {
+  color: var(--green);
+}
+
 .run-monitor-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
+}
+
+.run-monitor-spark-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.run-monitor-spark-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.run-monitor-spark-title {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.run-monitor-sparkline {
+  width: 100%;
+  height: 42px;
+  border-radius: 4px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--green) 5%, transparent), transparent 58%),
+    color-mix(in srgb, var(--theme-chrome-bg) 78%, transparent);
+}
+
+.run-monitor-sparkline-grid,
+.run-monitor-sparkline-cpu,
+.run-monitor-sparkline-mem {
+  fill: none;
+  vector-effect: non-scaling-stroke;
+}
+
+.run-monitor-sparkline-grid {
+  stroke: color-mix(in srgb, var(--border-bright) 35%, transparent);
+  stroke-width: 1;
+  stroke-dasharray: 3 5;
+}
+
+.run-monitor-sparkline-cpu {
+  stroke: var(--green);
+  stroke-width: 1.7;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--green) 48%, transparent));
+}
+
+.run-monitor-sparkline-mem {
+  stroke: var(--amber);
+  stroke-width: 1.4;
+  opacity: 0.88;
+}
+
+.run-monitor-spark-label {
+  color: var(--muted);
+  font-size: 8.5px;
+  white-space: nowrap;
 }
 
 .run-monitor-action-btn {
@@ -924,6 +1886,19 @@
 .run-monitor-elapsed {
   color: var(--green);
   font-weight: 700;
+}
+
+.run-monitor-meter-rail {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.run-monitor-meter-rail .run-monitor-actions {
+  justify-content: flex-end;
+  margin-top: 0;
 }
 
 .run-monitor-meters {
@@ -941,6 +1916,32 @@
   grid-template-columns: 46px;
   justify-items: center;
   gap: 4px;
+}
+
+.status-monitor-runs-list-many .run-monitor-sparkline {
+  height: 32px;
+}
+
+.status-monitor-runs-list-many .run-monitor-spark-header {
+  gap: 8px;
+}
+
+.status-monitor-runs-list-many .run-monitor-spark-title {
+  font-size: 8.5px;
+}
+
+.status-monitor-runs-list-many .run-monitor-meter {
+  grid-template-columns: 40px;
+}
+
+.status-monitor-runs-list-many .run-monitor-meter-ring {
+  width: 40px;
+  height: 40px;
+}
+
+.status-monitor-runs-list-many .run-monitor-meter-value {
+  max-width: 34px;
+  font-size: 8.5px;
 }
 
 .run-monitor-meter-ring {
@@ -1004,6 +2005,15 @@
   color: var(--green);
 }
 
+.run-monitor-meter-cpu .run-monitor-meter-label {
+  color: var(--green);
+}
+
+.run-monitor-meter-mem .run-monitor-meter-label,
+.run-monitor-meter-mem .run-monitor-meter-value {
+  color: var(--amber);
+}
+
 .run-monitor-meter-collecting .run-monitor-meter-ring {
   animation: run-monitor-meter-spin 960ms linear infinite;
 }
@@ -1016,6 +2026,10 @@
   .run-monitor-meter-collecting .run-monitor-meter-ring {
     animation: none;
   }
+
+  .status-monitor-event-row {
+    animation: none;
+  }
 }
 
 .run-monitor-empty {
@@ -1023,6 +2037,10 @@
   color: var(--muted);
   font-size: 11px;
   text-align: center;
+}
+
+.status-monitor-runs-empty {
+  background: color-mix(in srgb, var(--theme-chrome-row-bg) 78%, transparent);
 }
 
 .run-monitor-error {
@@ -1051,6 +2069,7 @@ body.mobile-terminal-mode .tabbar-scroll { display: contents; }
   .run-monitor {
     position: fixed;
     left: 0;
+    top: auto;
     right: 0;
     bottom: 0;
     width: auto;
@@ -1064,7 +2083,66 @@ body.mobile-terminal-mode .tabbar-scroll { display: contents; }
     border-radius: 14px 14px 0 0;
     box-shadow: 0 -14px 28px var(--theme-chrome-shadow);
     font-family: var(--font-mono);
+    transform: none;
     animation: none;
+  }
+
+  .run-monitor-list {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .status-monitor-grid,
+  .status-monitor-grid-two {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .status-monitor-pulse-strip {
+    min-height: 76px;
+  }
+
+  .status-monitor-health-pips {
+    position: relative;
+    top: auto;
+    right: auto;
+    margin: 0 12px 10px;
+  }
+
+  .status-monitor-showcase-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: 240px 190px 126px;
+  }
+
+  .status-monitor-constellation-card {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .run-monitor-item {
+    display: flex;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 0;
+  }
+
+  .run-monitor-spark-panel {
+    width: 100%;
+  }
+
+  .run-monitor-sparkline {
+    height: 34px;
+  }
+
+  .run-monitor-meter-rail {
+    align-self: stretch;
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+
+  .run-monitor-meters {
+    align-self: auto;
   }
 
   .run-monitor-scrim {
@@ -1075,4 +2153,92 @@ body.mobile-terminal-mode .tabbar-scroll { display: contents; }
   body.run-monitor-mobile-open .run-monitor-close {
     display: none !important;
   }
+}
+
+body.mobile-terminal-mode .run-monitor {
+  position: fixed;
+  left: 0;
+  top: auto;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  max-height: min(68vh, 520px);
+  z-index: 120;
+  display: flex;
+  flex-direction: column;
+  background: var(--theme-chrome-bg);
+  border: 1px solid var(--border-bright);
+  border-bottom: none;
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 -14px 28px var(--theme-chrome-shadow);
+  font-family: var(--font-mono);
+  transform: none;
+  animation: none;
+}
+
+body.mobile-terminal-mode .run-monitor-list {
+  gap: 12px;
+  padding: 12px;
+}
+
+body.mobile-terminal-mode .status-monitor-grid,
+body.mobile-terminal-mode .status-monitor-grid-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+body.mobile-terminal-mode .status-monitor-pulse-strip {
+  min-height: 76px;
+}
+
+body.mobile-terminal-mode .status-monitor-health-pips {
+  position: relative;
+  top: auto;
+  right: auto;
+  margin: 0 12px 10px;
+}
+
+body.mobile-terminal-mode .status-monitor-showcase-grid {
+  grid-template-columns: 1fr;
+  grid-template-rows: 240px 190px 126px;
+}
+
+body.mobile-terminal-mode .status-monitor-constellation-card {
+  grid-column: auto;
+  grid-row: auto;
+}
+
+body.mobile-terminal-mode .run-monitor-item {
+  display: flex;
+  align-items: stretch;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+body.mobile-terminal-mode .run-monitor-spark-panel {
+  width: 100%;
+}
+
+body.mobile-terminal-mode .run-monitor-sparkline {
+  height: 34px;
+}
+
+body.mobile-terminal-mode .run-monitor-meter-rail {
+  align-self: stretch;
+  flex-direction: row;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+body.mobile-terminal-mode .run-monitor-meters {
+  align-self: auto;
+}
+
+body.mobile-terminal-mode .run-monitor-scrim {
+  z-index: 119;
+  background: color-mix(in srgb, var(--bg) 45%, transparent);
+}
+
+body.run-monitor-mobile-open .run-monitor-close {
+  display: none !important;
 }

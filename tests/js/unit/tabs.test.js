@@ -492,6 +492,26 @@ describe('tabs helpers', () => {
     expect(document.getElementById('cmd').focus).not.toHaveBeenCalled()
   })
 
+  it('closing a read-only attached running tab removes it without killing the run', () => {
+    const { createTab, activateTab, closeTab, _getTabs, doKill } = loadTabsFns()
+    const firstId = createTab('tab 1')
+    const secondId = createTab('attached run')
+
+    activateTab(secondId)
+    const attachedTab = _getTabs().find((tab) => tab.id === secondId)
+    attachedTab.st = 'running'
+    attachedTab.runId = 'run-other'
+    attachedTab.historyRunId = 'run-other'
+    attachedTab.attachMode = 'read-only'
+
+    closeTab(secondId)
+
+    expect(doKill).not.toHaveBeenCalled()
+    expect(_getTabs().map((tab) => tab.id)).toEqual([firstId])
+    expect(document.querySelector(`[data-id="${secondId}"]`)).toBeNull()
+    expect(document.querySelector('.tab.active').dataset.id).toBe(firstId)
+  })
+
   it('closing the only running tab kills it and keeps the tab shell ready', () => {
     const { createTab, closeTab, _getTabs, doKill } = loadTabsFns()
     const id = createTab('tab 1')

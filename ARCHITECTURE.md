@@ -166,7 +166,7 @@ There are three core request classes:
 - run/kill lifecycle
 - history/share/diagnostic reads
 
-`/history/active` is part of that third class. It exposes only the current session's in-flight run metadata so the browser can rebuild running tabs after a reload, keep kill available, render the submitted command as a normal prompt line, and subscribe back to `/runs/<run_id>/stream` for replay plus live output. Active-run metadata includes a browser-level owner identity (`owner_client_id`), the owning terminal tab id (`owner_tab_id`), and `owner_last_seen` liveness so the same session token can be open on a laptop and phone without the second browser automatically stealing a live command. If the owner is another live client, Run Monitor can open a read-only attached tab that follows brokered output without exposing owner-only controls, or explicitly take over ownership through `POST /runs/<run_id>/owner`; if the owner is stale or belongs to this browser, reload recovery rebuilds the running tab and follows brokered output. Non-running tabs and drafts are restored separately from browser `sessionStorage`, which keeps the reload path split cleanly between browser-owned idle state and server-owned active-run state.
+`/history/active` is part of that third class. It exposes only the current session's in-flight run metadata so the browser can rebuild running tabs after a reload, keep kill available, render the submitted command as a normal prompt line, and subscribe back to `/runs/<run_id>/stream` for replay plus live output. Active-run metadata includes a browser-level owner identity (`owner_client_id`), the owning terminal tab id (`owner_tab_id`), and `owner_last_seen` liveness so the same session token can be open on a laptop and phone without the second browser automatically stealing a live command. If the owner is another live client, Status Monitor can open a read-only attached tab that follows brokered output without exposing owner-only controls, or explicitly take over ownership through `POST /runs/<run_id>/owner`; if the owner is stale or belongs to this browser, reload recovery rebuilds the running tab and follows brokered output. Non-running tabs and drafts are restored separately from browser `sessionStorage`, which keeps the reload path split cleanly between browser-owned idle state and server-owned active-run state.
 
 That split is reflected directly in the blueprint structure.
 
@@ -203,7 +203,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `POST` | `/runs` | Validates, expands session variables, rewrites, starts brokered execution, and returns the run id plus stream URL. |
 | `GET` | `/runs/<run_id>/stream` | Replays brokered events and follows live output over SSE for a current-session run. |
 | `GET` | `/runs/<run_id>/events` | Returns bounded brokered event backfill for tests and non-SSE clients. |
-| `POST` | `/runs/<run_id>/owner` | Reassigns active-run UI ownership to the requesting browser client for explicit Run Monitor takeover. |
+| `POST` | `/runs/<run_id>/owner` | Reassigns active-run UI ownership to the requesting browser client for explicit Status Monitor takeover. |
 | `POST` | `/run/client` | Persists allowlisted browser-owned built-in output, such as client-side theme/session commands, as normal run history. |
 | `POST` | `/kill` | Kills an active process group by `run_id` and clears active-run tracking. |
 
@@ -214,7 +214,9 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/history` | Returns paginated current-session history items with run/snapshot filters, command/output search, starred-only filtering, and command-root summaries. |
 | `DELETE` | `/history` | Deletes all run history for the current session and removes matching full-output artifacts. |
 | `GET` | `/history/commands` | Returns newest distinct command strings for prompt history, desktop recents, and mobile recents. |
-| `GET` | `/history/active` | Returns active-run metadata and telemetry for reload recovery and the Run Monitor drawer. |
+| `GET` | `/history/stats` | Returns compact current-session counters for the Status Monitor dashboard. |
+| `GET` | `/history/insights` | Returns compact visual history data for Status Monitor constellation, heatmap, ticker, and command mix widgets. |
+| `GET` | `/history/active` | Returns active-run metadata and telemetry for reload recovery and the Status Monitor. |
 | `GET` | `/history/<run_id>/compare-candidates` | Returns ranked previous current-session runs for the History drawer's compare launcher. |
 | `GET` | `/history/compare` | Compares two current-session runs and returns metadata deltas plus bounded added/removed output lines. |
 | `GET` | `/history/<run_id>` | Serves an implicit-bearer styled run permalink, or raw JSON with `?json`; uses full-output artifacts when available unless `?preview=1` is set. |
@@ -459,9 +461,9 @@ Current consumers are terminal/permalink/HUD Save menus, app-native selects, com
 
 ### Row Primitive Family
 
-Repeated list rows use shared row primitives instead of rebuilding background, divider, hover, and accent behavior per surface. `.chrome-row` is for shell-chrome lists such as History drawer rows, Run Monitor rows, and mobile recents rows. `.chrome-row-clickable` adds the shared hover/focus state for rows that activate on click or keyboard. Accent classes such as `.row-accent-green` and `.row-accent-amber` are visual only; each component still decides when a run is active or a history row is starred.
+Repeated list rows use shared row primitives instead of rebuilding background, divider, hover, and accent behavior per surface. `.chrome-row` is for shell-chrome lists such as History drawer rows, Status Monitor run rows, and mobile recents rows. `.chrome-row-clickable` adds the shared hover/focus state for rows that activate on click or keyboard. Accent classes such as `.row-accent-green` and `.row-accent-amber` are visual only; each component still decides when a run is active or a history row is starred.
 
-Modal and panel content uses `.panel-row` instead of `.chrome-row`. The Files modal composes `.panel-row` for file, folder, and empty-state rows so it gets consistent border/radius/focus treatment without visually becoming a History/Run Monitor drawer row. Rail navigation stays under the `.nav-item` primitive because selected navigation state and rail density are different from content-list row behavior.
+Modal and panel content uses `.panel-row` instead of `.chrome-row`. The Files modal composes `.panel-row` for file, folder, and empty-state rows so it gets consistent border/radius/focus treatment without visually becoming a History or Status Monitor chrome row. Rail navigation stays under the `.nav-item` primitive because selected navigation state and rail density are different from content-list row behavior.
 
 ### Chip And Badge Primitive Family
 
@@ -477,7 +479,7 @@ Text fields and compact filter controls compose `.form-control` and `.control-ro
 
 ### Drawer And Sheet Primitive Family
 
-Drawer-like chrome surfaces compose `.chrome-drawer`, `.surface-header`, and `.surface-body` so shared background, header band, scroll containment, and mono typography stay consistent. History and Run Monitor use this family, while each keeps its own placement, width, shadow direction, animation, and active-row semantics local.
+Drawer-like chrome surfaces compose `.chrome-drawer`, `.surface-header`, and `.surface-body` so shared background, header band, scroll containment, and mono typography stay consistent. History uses this family as a side panel, while the desktop Status Monitor presents its dashboard inside a centered modal and mobile keeps the sheet treatment.
 
 Mobile bottom sheets compose `.bottom-sheet`, `.bottom-sheet-header`, `.bottom-sheet-body`, `.bottom-sheet-footer`, and `.gesture-handle`. These primitives own the shared sheet background, top border, top radius, shadow, grab-handle affordance, and basic header/body/footer structure. Scrims, keyboard-aware modal sizing, and sheet-specific controls remain local because those details are tied to mobile interaction behavior rather than general visual treatment.
 
@@ -631,7 +633,9 @@ Fast output bursts are rendered in small batches instead of forcing a full DOM u
 
 The brokered stream keeps the transport alive with heartbeat comments during idle periods, while the backend-owned worker drains subprocess stdout exactly once and publishes normalized `started`, `notice`, `output`, `exit`, and `error` events. The subprocess stdout reader uses a nonblocking buffered path rather than `select()` followed by `readline()`. That matters for tools that emit partial progress lines: partial output no longer wedges the drain waiting for a newline and starving the heartbeat stream. If a platform refuses nonblocking setup, the server warning-logs the fallback so a deployment that could stall on partial-line output leaves an operator-visible trail. On the browser side, `runner.js` treats 45 seconds of browser-visible silence as a potentially stalled stream, then checks `/history/active` before changing tab state. If the run is still active, the tab stays `RUNNING`, Kill remains available, and the warning copy says the process is still alive; only inactive runs fall back to the history/final-result recovery path. The async recovery path captures the tab/run generation before it awaits backend state and re-checks that generation before applying status, which prevents stale timeout promises from overwriting a newer run after rapid tab switches, kills, or restarts. If the same stream later resumes, the runner prints an explicit recovery notice and keeps the tab/HUD in the running state instead of leaving the UI failed-looking while output silently continues.
 
-Active-run metadata is also the source for the Run Monitor. `/history/active` returns the current run IDs, PIDs, commands, start times, metadata source, owner fields, and best-effort `psutil` resource telemetry when available. The backend reports summed RSS bytes and cumulative process-tree CPU seconds for the tracked process plus recursive children. The desktop Run Monitor is a HUD-attached drawer that can open even when idle, rendering a header-only `0 active runs` state; mobile uses the same data in a sheet. Runs owned by another live browser stay listed with Attach and Take over actions: Attach opens a read-only subscribed tab with live output but without Kill, while Take over claims owner metadata first and then opens a normal owner-controlled tab. The monitor calculates the displayed CPU percentage from adjacent poll samples in the browser and caps the display at 100%, which avoids per-worker CPU sample caches and keeps multi-worker deployments from flickering when successive polls land on different workers. Memory fill is normalized client-side against a 1 GB scale while the label continues to show the actual RSS value. Telemetry failures are intentionally non-fatal and omitted from the response rather than breaking reload recovery, stall checks, or the terminal `runs` command.
+Active-run metadata is also the source for the Status Monitor's run section. `/history/active` returns the current run IDs, PIDs, commands, start times, metadata source, owner fields, and best-effort `psutil` resource telemetry when available. The backend reports summed RSS bytes and cumulative process-tree CPU seconds for the tracked process plus recursive children. `/history/insights` supplies bounded visual history payloads for the monitor's constellation, activity heatmap, command treemap, and event ticker without overfetching full history rows; the browser refreshes that heavier payload on monitor open, active-run count transitions, and a slower open-monitor cadence instead of coupling it to every active-run telemetry poll. The desktop Status Monitor is a centered modal available from the rail, HUD cells, and `Alt+R`; mobile exposes the same monitor as a bottom sheet from the normal menu and running-tab peek. Both surfaces can open while idle and render system health, workspace quota, session statistics, visual history, a continuous glowing CPU-driven heartbeat strip, app-native constellation/day heatmap popovers, a seeded ambient constellation sky for sparse history, labeled calendar heat, and a `No active runs` row at the bottom. To avoid browser connection starvation when many tabs already hold live SSE streams, opening Status Monitor pauses non-active tab subscriptions and resubscribes them from the last broker event id on close; `/history/active` polling refreshes same-client owner liveness while those owner streams are paused. Runs owned by another live browser stay listed with Attach and Take over actions: Attach opens a read-only subscribed tab with live output but without Kill, while Take over claims owner metadata first and then opens a normal owner-controlled tab. The monitor calculates the displayed CPU percentage from adjacent poll samples in the browser and caps the display at 100%, which avoids per-worker CPU sample caches and keeps multi-worker deployments from flickering when successive polls land on different workers. Memory fill is normalized client-side against a 1 GB scale while the label continues to show the actual RSS value. Telemetry failures are intentionally non-fatal and omitted from the response rather than breaking reload recovery, stall checks, or the terminal `runs` command.
+
+Two compact history endpoints feed the Status Monitor dashboard without exposing full run bodies. `/history/stats` returns current-session counters: `runs.total`, `runs.succeeded`, `runs.failed`, `runs.incomplete`, `runs.average_elapsed_seconds`, plus `snapshots`, `starred_commands`, and `active_runs`. SIGTERM-style `-15` exits are retained in totals but excluded from `failed` so user-killed, timeout-cleaned, or supervisor-stopped runs do not inflate failure visuals. `/history/insights` accepts `days=auto` or an integer clamped to 28-365 days. It returns `activity` day buckets for the selected window, `max_day_count`, capped `command_mix` data, capped recent-run `constellation` data, recent `events`, and a `windows` object that records the resolved activity, command-mix, and constellation ranges. Command mix uses 30 days, expanding to 90 days when fewer than 25 runs exist; constellation uses 30 days, expanding to 90 days when fewer than 40 plotted runs exist, and caps plotted stars at 350. Those resolved windows are part of the response so the UI can label sparse or expanded panels honestly.
 
 ### Output Prefixes And Follow State
 
@@ -931,12 +935,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,267
+- behavior tests: 2,292
 - docs/inventory meta-tests: 30
-- `pytest`: 1132 (1102 behavior + 30 meta)
-- `vitest`: 936
-- `playwright`: 229
-- total: 2,297
+- `pytest`: 1135 (1105 behavior + 30 meta)
+- `vitest`: 954
+- `playwright`: 233
+- total: 2,322
 
 ### Testing Architecture
 

@@ -14,7 +14,14 @@ from flask import Blueprint, abort, jsonify, render_template, request, send_file
 from commands import command_root, load_command_policy
 from config import APP_VERSION, CFG, get_theme_entry
 from database import db_connect
-from helpers import FONT_FILES, current_theme_name, get_client_ip, get_log_session_id, ip_is_in_cidrs
+from helpers import (
+    FONT_FILES,
+    GRACEFUL_TERMINATION_EXIT_CODE,
+    current_theme_name,
+    get_client_ip,
+    get_log_session_id,
+    ip_is_in_cidrs,
+)
 from process import redis_client
 
 log = logging.getLogger("shell")
@@ -261,9 +268,16 @@ def diag():
                 row = conn.execute(
                     """SELECT
                          SUM(CASE WHEN exit_code = 0                             THEN 1 ELSE 0 END),
-                         SUM(CASE WHEN exit_code IS NOT NULL AND exit_code != 0  THEN 1 ELSE 0 END),
+                         SUM(
+                             CASE
+                                 WHEN exit_code IS NOT NULL AND exit_code != 0 AND exit_code != ?
+                                 THEN 1
+                                 ELSE 0
+                             END
+                         ),
                          SUM(CASE WHEN exit_code IS NULL                         THEN 1 ELSE 0 END)
-                       FROM runs"""
+                       FROM runs""",
+                    (GRACEFUL_TERMINATION_EXIT_CODE,),
                 ).fetchone()
                 stats["outcomes"] = {
                     "success":    row[0] or 0,

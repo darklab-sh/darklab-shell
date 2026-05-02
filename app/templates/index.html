@@ -101,7 +101,7 @@
             <div class="sheet-filter-menu dropdown-surface" role="listbox">
               <button type="button" class="dropdown-item dropdown-item-touch" role="option" data-dropdown-value="all">all</button>
               <button type="button" class="dropdown-item dropdown-item-touch" role="option" data-dropdown-value="success">success (0)</button>
-              <button type="button" class="dropdown-item dropdown-item-touch" role="option" data-dropdown-value="failed">failed (non-zero)</button>
+              <button type="button" class="dropdown-item dropdown-item-touch" role="option" data-dropdown-value="failed">failed</button>
             </div>
           </div>
           <div class="sheet-filter-dropdown-wrap" data-recents-dropdown="date">
@@ -190,6 +190,11 @@
           <span class="menu-item-hint" id="mobile-menu-history-count"></span>
           <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
+        <button type="button" class="menu-item nav-item" data-menu-action="run-monitor">
+          <span class="menu-item-icon" aria-hidden="true">◉</span>
+          <span class="menu-item-label">status monitor</span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+        </button>
         <button type="button" class="menu-item nav-item" data-menu-action="workflows">
           <span class="menu-item-icon" aria-hidden="true">⚙</span>
           <span class="menu-item-label">workflows</span>
@@ -274,6 +279,7 @@
     <nav class="rail-nav" id="rail-nav">
       <button class="rail-nav-item nav-item" data-action="options" type="button" title="Display and preference options (Alt+,)"><span class="rail-nav-glyph">≡</span><span class="rail-nav-label">options</span></button>
       <button class="rail-nav-item nav-item" data-action="history" type="button" title="Run history (Alt+H)"><span class="rail-nav-glyph">⧖</span><span class="rail-nav-label">history</span></button>
+      <button class="rail-nav-item nav-item" data-action="run-monitor" type="button" title="Status Monitor (Alt+R)"><span class="rail-nav-glyph">◉</span><span class="rail-nav-label">status</span></button>
       {% if workspace_enabled %}
       <button class="rail-nav-item nav-item" data-action="workspace" type="button" title="Session files (Alt+Shift+F)"><span class="rail-nav-glyph">▣</span><span class="rail-nav-label">files</span></button>
       {% endif %}
@@ -348,7 +354,7 @@
     <div class="hud" id="hud" aria-label="Run HUD">
       <div class="hud-pills" id="hud-pills">
         <div class="hud-cell hud-status hud-cell-clickable hud-action-cell" id="hud-status-cell" role="button" tabindex="0"
-             aria-haspopup="dialog" aria-label="Open run monitor from status">
+             aria-haspopup="dialog" aria-label="Open status monitor from status">
           <span class="hud-label">status</span>
           <span class="hud-status-value-row">
             <span id="status" class="status-pill idle hud-value">IDLE</span>
@@ -356,12 +362,12 @@
           </span>
         </div>
         <div class="hud-cell hud-cell-clickable hud-action-cell" id="hud-last-exit-cell" role="button" tabindex="0"
-             aria-haspopup="dialog" aria-label="Open run monitor from last exit">
+             aria-haspopup="dialog" aria-label="Open status monitor from last exit">
           <span class="hud-label">last exit</span>
           <span id="hud-last-exit" class="hud-value hud-muted">—</span>
         </div>
         <div class="hud-cell hud-cell-clickable hud-action-cell" id="hud-tabs-cell" role="button" tabindex="0"
-             aria-haspopup="dialog" aria-label="Open run monitor from tabs">
+             aria-haspopup="dialog" aria-label="Open status monitor from tabs">
           <span class="hud-label">tabs</span>
           <span id="hud-tabs" class="hud-value hud-muted">0</span>
         </div>
@@ -430,7 +436,7 @@
         <select id="history-exit-filter" aria-label="Filter by exit code">
           <option value="all">exit: all</option>
           <option value="0">exit: 0</option>
-          <option value="nonzero">exit: non-zero</option>
+          <option value="nonzero">exit: failed</option>
           <option value="incomplete">exit: incomplete</option>
         </select>
         <select id="history-date-filter" aria-label="Filter by recent date range">

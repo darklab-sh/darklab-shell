@@ -861,7 +861,7 @@ function closeTab(id) {
     closingTab.suppressOutputScrollTracking = false;
     closingTab.deferPromptMount = false;
   }
-  if (closingTab && closingTab.st === 'running') {
+  if (closingTab && closingTab.st === 'running' && closingTab.attachMode !== 'read-only') {
     closingTab.closing = true;
     if (typeof doKill === 'function') doKill(id);
     if (activeTabId === id && tabs.length > 1) {
@@ -876,6 +876,9 @@ function closeTab(id) {
       emitUiEvent('app:tab-closing-deferred', { id, activeTabId });
     }
     return;
+  }
+  if (closingTab && closingTab.attachMode === 'read-only' && typeof detachRunStreamForTab === 'function') {
+    detachRunStreamForTab(id);
   }
   if (tabs.length === 1) {
     // Last tab: reset to blank instead of closing

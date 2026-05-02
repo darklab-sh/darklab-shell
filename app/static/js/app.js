@@ -1142,7 +1142,7 @@ function handleActionShortcut(e) {
 }
 
 // Desktop chrome shortcuts (rail, search, history, options, theme, workflows,
-// Files, and Run Monitor).
+      // Files, and Status Monitor).
 // The composer is allowed to pass through so prompt-focused users can still
 // trigger chrome toggles — each branch calls preventDefault so Option-glyphs
 // (`«`, `˙`, `®`, `©`, `≤`, `ˇ`, `ß`) never leak into the prompt on macOS.

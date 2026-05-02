@@ -583,7 +583,7 @@ test.describe('desktop chrome keyboard shortcuts', () => {
     await expect(page.locator('#search-bar')).not.toBeVisible()
   })
 
-  test('Alt+R opens the Run Monitor from the composer', async ({ page }) => {
+  test('Alt+R opens the Status Monitor from the composer', async ({ page }) => {
     await page.route('**/history/active', route => route.fulfill({
       status: 200,
       contentType: 'application/json',

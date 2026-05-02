@@ -17,92 +17,11 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
   - [Safety and Policy](#safety-and-policy)
   - [Content and Guidance](#content-and-guidance)
   - [Architecture](#architecture)
+  - [Status Monitor Enhancements](#status-monitor-enhancements)
 
 ---
 
 ## Open TODOs
-
-- **Redis-backed run broker and live-output reattachment**
-  - Continue hardening the backend-owned run broker so subprocess stdout is drained exactly once by the backend and any authorized browser can subscribe to the processed event stream.
-  - Current state:
-    - Normal browser command starts now use `POST /runs`, then subscribe to `GET /runs/<run_id>/stream`.
-    - The broker has Redis-backed event storage for production and a single-process in-memory fallback for local development.
-    - The legacy request-owned `POST /run` route has been removed; browser-owned built-ins still persist through `POST /run/client`.
-    - Real-process launch, PID registration, active-run registration, stream replay, spawn-error handling, and finalization now flow through the brokered `/runs` path.
-  - Current reattachment behavior:
-    - Reloaded owned/stale-owner tabs now subscribe back to the broker stream and replay available live output.
-    - Browsers sharing a session token can attach read-only to another live browser's active run or explicitly take over ownership from the Run Monitor.
-    - When ownership moves to another browser, the previous owner receives an app-native notice and becomes read-only.
-    - Remaining follow-up work is polish and broader coverage, especially two-browser Playwright coverage.
-  - Target architecture:
-    - Introduce a run broker that owns subprocess launch, stdout drain, timeout handling, signal classification, workspace path surfacing, synthetic post-filters, output capture, and final history persistence.
-    - Store active run events in Redis Streams keyed by `runstream:<run_id>`.
-    - Keep active run state in Redis keys such as `runstate:<run_id>`, `proc:<run_id>`, `procmeta:<run_id>`, and the existing `sessionprocs:<session_id>` set.
-    - Store processed transcript events, not raw stdout bytes, so every subscriber sees the same text, classes, timestamps, signal metadata, workspace path rewrites, and post-filtered output.
-    - Use monotonically ordered stream IDs so clients can reconnect with `after=<last_event_id>`.
-    - Treat Redis as required for production live reattachment in the Docker-first deployment model; local development may use a single-process fallback with clearly limited reconnect behavior.
-  - Configuration plan:
-    - Add the broker settings to `app/config.py`, `app/conf/config.yaml`, README configuration docs, and the configuration drift tests.
-    - Use these initial defaults:
-
-      ```yaml
-      run_broker_enabled: true
-      run_broker_require_redis: true
-      run_broker_active_stream_ttl_seconds: 14400
-      run_broker_completed_stream_ttl_seconds: 3600
-      run_broker_max_replay_bytes: 10485760
-      run_broker_subscriber_block_seconds: 15
-      run_broker_heartbeat_seconds: 20
-      run_broker_owner_stale_seconds: 75
-      ```
-
-    - Do not add a separate `run_broker_max_replay_lines` setting; use the existing `max_output_lines` value for line-bounded replay.
-  - Backend implementation plan:
-    - Expand the broker module's Redis-backed implementation and single-process in-memory fallback as needed for attach/takeover behavior.
-    - Have the worker append `started`, `notice`, `output`, `error`, `heartbeat`, and `exit` events to the stream.
-    - Continue feeding `RunOutputCapture` from those same processed events so history persistence remains compatible, but write full-output artifacts incrementally during the run instead of waiting until completion.
-    - Make finalization idempotent so duplicate worker cleanup or reconnect races do not save the same run twice.
-    - Preserve current `/kill` behavior by continuing to register PID metadata before any stream subscriber attaches.
-    - Preserve active-run owner metadata, but treat it as UI/control ownership rather than stream ownership.
-    - Preserve synthetic post-filter behavior (`tail`, `sort`, `uniq`, `wc -l`) by streaming the same processed output that the owner sees to every subscriber.
-  - API plan:
-    - Extend `GET /runs/<run_id>/stream?after=<event_id>` for direct live subscription and replay from stored tab event ids.
-    - Keep `GET /runs/<run_id>/events?after=<event_id>&limit=<n>` as bounded backfill, tests, and non-SSE client support.
-    - Add `POST /runs/<run_id>/owner` for explicit owner takeover/touch.
-    - Continue using `/history/active` for active run discovery, but include stream attach capability and owner state in the response.
-  - Frontend plan:
-    - Continue evolving the shared broker subscription helper for explicit attach/takeover modes.
-    - Store each tab's `attachMode`, `runId`, `historyRunId`, and owner state. `lastEventId` is tracked for live broker subscriptions; add broader persistence if future attach modes need cross-reload resume from a specific event id instead of replay from the broker's retained beginning.
-    - On reload, owned or stale-owner runs subscribe back to the broker stream instead of waiting for history completion. Continue using history completion restore as the fallback when the broker stream detaches or replay is unavailable.
-    - In the Run Monitor, show another-client active runs with honest actions:
-      - `Attach read-only`: subscribe to live output without mutating owner metadata.
-      - `Take over`: claim owner metadata, enable owner controls, and continue subscribing from the selected tab.
-      - `Follow completion`: fallback when broker replay is unavailable.
-    - Hide or disable owner-only controls such as Kill in read-only attached tabs unless the user explicitly takes over.
-    - When ownership moves to another browser, show an app-native notice in the previous owner tab: `Run ownership moved to another browser. This tab is now read-only.`
-  - Replay and retention behavior:
-    - Attach from the beginning by default, bounded by `run_broker_max_replay_bytes` and the existing `max_output_lines`.
-    - Keep the viewport anchored to the current live output when attaching, so the user lands at the bottom while still being able to scroll up through replayed output.
-    - Refresh the active stream TTL while a run is active using `run_broker_active_stream_ttl_seconds`.
-    - Keep completed streams briefly after finalization using `run_broker_completed_stream_ttl_seconds`, then rely on SQLite history/artifacts for completed-run restore.
-    - If replay output has been trimmed, emit a visible transcript notice such as `[live replay starts here; earlier output was trimmed due to size]`.
-  - Failure behavior:
-    - If Redis is required and unavailable, fail command start with an operator-facing configuration error instead of silently falling back.
-    - If Redis is optional in local development, allow the in-memory broker but mark replay/reattach behavior as single-process only.
-    - If the broker worker crashes while the process may still be alive, surface `Live output stream lost. The process may still be running but final history may be incomplete or unavailable.`
-    - Keep finalization idempotent and defensive so partial stream loss does not corrupt existing run history.
-  - Testing expectations:
-    - Backend tests for event ordering, replay from beginning, replay from a saved event ID, multiple simultaneous subscribers, and stream expiration after completion.
-    - Backend tests that the broker finalizes history/artifacts exactly once and preserves existing preview/full-output behavior.
-    - Backend tests for Redis-required startup failures and Redis-unavailable local fallback behavior when `run_broker_require_redis` is false.
-    - Continue expanding route tests for `/runs/<run_id>/stream`, `/runs/<run_id>/events`, and owner takeover/touch authorization.
-    - Continue expanding frontend unit tests for reconnecting from `lastEventId`, read-only attach mode, takeover mode, owner-control visibility, and fallback to completed history as the UI grows.
-    - Two-browser Playwright coverage using the same session token with different client IDs: owner reconnect, read-only attach receiving new live output, takeover, and mobile Run Monitor behavior.
-  - Documentation expectations:
-    - Keep ARCHITECTURE current as the broker lifecycle and Redis stream key model evolve.
-    - Keep README configuration notes current for Redis-required production live reattachment and local fallback limitations.
-    - Update `docs/external-command-integrations.md` only if output filtering or command runtime behavior changes.
-    - Update CHANGELOG and release drafts with the user-visible reliability and reattachment behavior.
 
 - **Workflow provenance and promotion follow-ups**
   - Link generated runs back to the workflow id/name and step index.
@@ -136,25 +55,93 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
     - Add Playwright coverage for the compare launcher/result flow on desktop and mobile after the UI settles.
     - Add focused large/noisy comparison regression coverage if real-world outputs expose performance issues beyond current backend and unit coverage.
 
-- **Run Monitor access and modal redesign after broker migration**
-  - Promote Run Monitor from a contextual drawer/sheet into a first-class navigation surface once the broker reattachment work is complete.
-  - Problem to solve:
-    - Mobile can currently open Run Monitor only while the active tab has a running process, because the bottom peek swaps from Recents to Run Monitor only in that state.
-    - Desktop can open Run Monitor from HUD/status affordances, but it is still discoverability-led rather than a durable menu destination.
-    - Attach and Take over make Run Monitor useful even when the current tab is idle, so users need a reliable way to reach it from any browser sharing the session token.
-  - Recommended implementation shape:
-    - Add a dedicated Run Monitor entry to the desktop rail/menu area and the mobile menu.
-    - Keep the existing running-state HUD/peek affordances as shortcuts, but treat them as secondary entry points.
-    - Convert desktop Run Monitor from a HUD-attached drawer into a proper app modal using the shared modal/focus/dismiss primitives.
-    - Keep mobile on sheet formatting, but make it reachable from the normal mobile menu even when no active tab is running.
-    - Preserve the running-process peek behavior as a contextual shortcut while a command is active.
-    - Ensure idle, owned, read-only attached, and other-browser-owned runs all render coherently in the new surface.
-    - Make Attach and Take over actions available from the dedicated surface, including when the active tab is idle.
+- **History killed-run filter**
+  - Add a dedicated history drawer/mobile recents exit filter option for `exit: killed (-15)`.
+  - Keep the existing `failed` filter scoped to true command failures so SIGTERM/user-killed/container-stopped runs do not inflate failure views.
+  - Backend implementation:
+    - Extend the `/history` `exit_code` query filter with a distinct value such as `killed` or `terminated` that maps to `exit_code = -15`.
+    - Keep `nonzero`/`failed` semantics excluding `-15` through the shared graceful-termination helper.
+  - Frontend implementation:
+    - Add the new option to the desktop history exit dropdown and mobile recents exit dropdown.
+    - Add active-filter chip labels that read `exit: killed (-15)` or similarly explicit copy.
+    - Ensure URL/query state, pagination reset, and filter clearing behave like the existing `0`, `failed`, and `incomplete` filters.
   - Testing expectations:
-    - Vitest coverage for desktop/mobile entry visibility independent of active-tab running state.
-    - Vitest coverage that Attach/Take over actions remain available in the modal/sheet for other-browser-owned runs.
-    - Playwright coverage for opening Run Monitor from desktop navigation, mobile menu, and existing running-state shortcuts.
-    - Accessibility/focus coverage for Escape/backdrop/close behavior on desktop modal and tap/drag dismissal on mobile sheet.
+    - Pytest coverage for `/history?exit_code=<new-value>` returning `-15` runs and excluding normal failures.
+    - JS unit coverage for desktop history and mobile recents query-param construction and chip/dropdown labels.
+    - Update test counts/docs if new tests are added.
+
+- **Active-run attach, detach, and kill model**
+  - Goal: simplify the run broker UX so active runs behave like backend-owned processes with one or more browser tabs acting as views, instead of making the user reason about "read-only" attach and "take over" permissions.
+  - Product model:
+    - Keep browser/run ownership metadata internally for provenance, reload recovery, stale-owner detection, and labels such as "started here" / "another browser".
+    - Remove user-facing `Take over` language and controls.
+    - Treat the session token as the real permission boundary. Any browser using the same session token that can see an active run can attach to it and can explicitly kill it.
+    - Treat tabs as detachable views. Closing a running tab should not silently kill the process.
+  - Status Monitor behavior:
+    - Replace the current `Take over` button with a `Kill` button on active-run rows.
+    - Keep an `Attach` button only when that run is not already open in a local tab.
+    - Clicking an active-run row should:
+      - Activate the existing local tab if the run is already open in any local tab, regardless of original ownership.
+      - Otherwise open a new tab and attach to the broker stream from the last available event id.
+    - Attached tabs should show live replay/output and expose normal kill controls.
+    - Row copy should avoid ownership jargon:
+      - Prefer "another browser" / "started here" / "attached" style labels.
+      - Avoid "read-only", "take over", "controls this run", and similar permission-sounding language unless there is a real permission boundary.
+  - Tab-close behavior:
+    - Replace "close running tab means kill immediately" with a confirmation modal.
+    - Modal choices:
+      - `Detach` / `Keep running` as the safe primary action.
+      - `Kill run` as the destructive action.
+      - `Cancel` to leave the tab untouched.
+    - `Detach` should:
+      - Cancel only the browser stream subscription for that tab.
+      - Remove or reset the local tab view.
+      - Leave backend active-run metadata and subprocess execution untouched.
+      - Keep the run visible in Status Monitor so it can be reopened later.
+    - `Kill run` should send `/kill` and then follow the existing killed-tab cleanup.
+    - For the short window before a started event provides `run_id`, either keep the tab open with "Command is still starting" copy or disable detach until `run_id` exists. Do not silently kill in this edge case.
+    - Closing an attached tab should detach by default through the same safe path; only explicit `Kill run` should terminate the process.
+  - Backend/API behavior:
+    - Remove or retire the user-facing `/runs/<run_id>/owner` takeover flow unless an internal reload/provenance use remains.
+    - Relax `/kill` so any browser client in the same session can kill a visible active run. Keep session scoping and PID start-time safety checks.
+    - Publish a broker event before or during kill, for example:
+      - `type: "killed"`
+      - `killer_client_id`
+      - optional `killer_tab_id`
+    - The browser that issued the kill can keep the normal `[killed by user after Ns]` line.
+    - Other subscribed browsers should render a clear message such as `[killed by another browser]` and then process the normal exit event without making it look like the command failed on its own.
+    - Continue treating final exit code `-15` as graceful termination in stats/graphs.
+  - Frontend implementation notes:
+    - Rename `attachMode` values away from `read-only` / `owner` if they are still needed; suggested shape is `origin` / `attached` or a boolean such as `detachedView`.
+    - `doKill()` should no longer block attached tabs.
+    - `closeTab()` should route running tabs through the new detach/kill/cancel modal instead of calling `doKill()` directly.
+    - `detachRunStreamForTab()` should remain the low-level stream cleanup primitive.
+    - Status Monitor attach should reuse the same broker subscription path as reload recovery and should not need to claim ownership first.
+    - Owner broker events can likely be removed or downgraded to metadata refresh once `Take over` is gone.
+  - Testing expectations:
+    - Pytest route coverage:
+      - `/kill` allows a same-session non-owner/attached client.
+      - `/kill` still rejects other sessions and missing run ids.
+      - kill publishes the new broker `killed` event with the killer client id.
+    - Backend/process tests:
+      - ownership metadata remains available for reload/status display.
+      - stale-owner detection still works for reload recovery if retained.
+    - Vitest coverage:
+      - Status Monitor shows `Attach` or `Kill` instead of `Take over`.
+      - Clicking a run row activates an existing tab when present.
+      - Clicking a run row attaches in a new tab when absent.
+      - Attached tabs can call `doKill()`.
+      - Closing a running origin tab opens the detach/kill/cancel modal.
+      - `Detach` cancels the stream without sending `/kill`.
+      - `Kill run` sends `/kill`.
+      - Other subscribed tabs render `[killed by another browser]`.
+    - Playwright coverage:
+      - Close a running tab and choose `Detach`; verify the run remains active and can be reopened from Status Monitor.
+      - Close a running tab and choose `Kill run`; verify the run terminates.
+      - Open the same session in two browser contexts, attach from the second context, kill from one, and verify the other receives the "killed by another browser" message.
+  - Documentation expectations:
+    - Update README/session-token copy, ARCHITECTURE active-run ownership docs, CHANGELOG, and release drafts.
+    - Update tests/README.md, CONTRIBUTING.md, and ARCHITECTURE.md test counts with any new tests.
 
 - **ProjectDiscovery secondary workspace outputs**
   - Follow up on the initial ProjectDiscovery session-state work by expanding workspace-aware flags for generated directories and secondary outputs.
@@ -170,6 +157,24 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
     - Container smoke coverage for at least `katana` resume output and one `pd-httpx` or `katana` stored-response directory.
   - Documentation expectations:
     - Update `docs/external-command-integrations.md`, README tool notes, CHANGELOG, and release drafts for any newly surfaced directory flags or export/security behavior.
+
+- **Status Monitor performance follow-ups**
+  - Goal: keep these as optional micro-optimizations after the high-priority Status Monitor performance pass. Defer until profiling shows they are worth the complexity.
+  - Low priority:
+    - IntersectionObserver gating on the pulse rAF loop. `_startPulseAnimation` already gates on `isOpen` and `visibilityState`, but if the user scrolls the modal so the strip is below the fold the loop still runs. Skip frames while the strip is offscreen.
+    - Cache `getBoundingClientRect()` reads in `_showConstellationPopover`. The plot rect does not change between consecutive popover shows; cache on first show and invalidate on resize. Use `popover.offsetWidth/offsetHeight` instead of a second `getBoundingClientRect()` call to avoid a synchronous layout read.
+    - `toFixed(0)` for the glow path inside `_pathFromPoints`. Sub-pixel precision is invisible through the glow; keep `toFixed(1)` on the visible pulse line.
+    - Single `style.cssText` write per treemap tile in `_renderTreemapPanel`, instead of five separate `style.left / top / width / height / setProperty('--category-hue', ...)` writes per tile. One mutation instead of five.
+    - Reuse the constellation popover element across rebuilds rather than constructing a new one inside `_constellationPopover()` on every `_renderConstellationPanel` call. Keep a single popover instance and re-parent it on rebuild.
+    - Quantise glow profile keys in `_pulseGlowGroups`. With per-beat amplitude variance from the new CPU ring buffer (visualization-fixes entry), bucket count grows from one to up to roughly fifty unless `glowOpacity` and `glowWidth` are quantised (for example 0.05 / 1px steps). Without quantisation `_syncPulseGlowGroup` becomes O(beats) and erodes some of the transform-based win.
+  - Out of scope (intentionally left alone):
+    - Closed-state polling at `CLOSED_POLL_MS = 8000` is already lightweight: no insights call, only fires when not visible, halts when no runs exist.
+    - The 1s `tickTimer` for elapsed counters — text-only updates on a small DOM set.
+    - The 42 ambient stars in the constellation — static `<circle>` elements without listeners, not a hot path.
+    - The visibility / `prefers-reduced-motion` gating around `_startPulseAnimation`; keep as-is and pair with the rendered-snapshot path already specced in the visualization-fixes entry.
+  - Documentation expectations:
+    - Update CHANGELOG and the in-repo release drafts as perf-only changes ship.
+    - Update `tests/README.md`, `CONTRIBUTING.md`, and `ARCHITECTURE.md` test counts in lockstep with the new Vitest and Playwright additions.
 
 ## Research
 
@@ -192,6 +197,20 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
   - Continue replacing fixed sleeps with state-aware waits on server-backed history, DOM readiness, or explicit UI state.
   - Review the remaining synthetic-event workaround in `tests/js/e2e/interaction-contract.spec.js` and add a small app/test readiness signal if the product surface can expose one cleanly.
   - Prefer tiny observable hooks over lower-level event synthesis when validating focus, modal, or keyboard contracts under parallel load.
+
+- **Test-suite follow-up from the run broker and Status Monitor merge**
+  - Improve full Playwright suite stability diagnostics:
+    - Add automatic server crash diagnostics when isolated worker servers fail, refuse connections, or stop responding.
+    - Consider a health-check/retry wrapper for local full-suite runs.
+    - Rebalance or temporarily serialize noisy worker buckets if intermittent `ERR_CONNECTION_REFUSED` failures continue under parallel load.
+  - Add broader Status Monitor integration coverage:
+    - Add a real-data Playwright spec that seeds history and opens Status Monitor without route stubs, verifying `/history/stats`, `/history/insights`, `/status`, and `/workspace/files` together.
+    - Add unit tests for partial-fetch failures from `/status`, `/history/stats`, `/history/insights`, workspace disabled/missing responses, and missing optional UI helpers.
+  - Expand analytics route pytest coverage beyond happy paths:
+    - Cover empty sessions, `days=auto`, `<28` and `>365` clamps, missing optional `snapshots` / `starred_commands` tables, command-registry load failure, and exact 30/90-day adaptive window thresholds for command mix and constellation data.
+  - Reduce Status Monitor visual-test brittleness once the dashboard settles:
+    - Keep the current SVG/CSS/DOM-order assertions while the visual contracts are still changing quickly.
+    - Later, move more visual structure checks to capture/audit tests and keep unit/e2e tests focused on user-visible behavior and accessibility.
 
 ---
 
@@ -436,3 +455,61 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
     - bidirectional browser transport
     - terminal resize handling
     - stricter command scoping and lifecycle cleanup
+
+### Status Monitor Enhancements
+
+Future visualizations that extend the Status Monitor after the first visual dashboard pass. The current baseline already includes a CPU-driven heartbeat strip, DB/Redis/SSE health pips, workspace quota meters, session stats, activity heatmap, command territory treemap, recent-run constellation popovers, event ticker, and per-run CPU/RSS sparklines. Future work should deepen signal rather than duplicate those widgets.
+
+- **Live pulse strip v2**
+  - Add compact 60-second mini-charts for aggregate CPU, aggregate MEM, runs/min, output bytes/sec, errors/min, and queue depth when those metrics exist.
+  - Add latency-aware pulse rates only where a real latency probe exists. Avoid synthesizing precision from binary health checks.
+  - Add a dedicated boot uptime ticker if the pulse strip header needs more motion once the layout settles.
+
+- **Active-run depth**
+  - Output velocity speedometer in lines/sec, sampled from the SSE stream the broker already emits.
+  - Per-run owner badge — small color block keyed to the owning browser session, surfacing the multi-browser broker work that is currently easy to miss.
+  - "Quiet for Ns" dim treatment for runs that have stopped emitting stdout, distinguishing active scanning from a stuck TCP wait.
+
+- **Activity rhythm**
+  - Punchcard view (hour × day-of-week, dot size = volume) for shorter horizons.
+  - Streamgraph of outcomes over time (succeeded / failed / incomplete, smoothed stacked area). Organic flowing shapes contrast nicely with the angular chrome.
+  - Let the heatmap, punchcard, and streamgraph become a segmented/toggleable hero area if all three prove useful.
+
+- **Command mix and tool usage**
+  - Tool coverage grid — one square per allowlisted tool: filled if used in last 30 days, hollow if untouched, red-dashed if missing from `$PATH`. Doubles as a "what have I been neglecting" prompt.
+  - Category donut or radial bar showing percentage of session time per tool category.
+  - Top-N horizontal bar list with neon-green fill and right-aligned counts.
+
+- **Outcome and quality**
+  - Success-rate semicircle dial with green→amber→red ramp and a large mono number in the center. Status-page-style headline metric.
+  - Exit-code histogram with `0` in green, non-zero in red, log scale. Reveals whether failures concentrate on one code (signal) or scatter (noise).
+  - Clean-streak counter: "23 successful runs since last failure". Cheap to compute, oddly motivating, real signal when it resets.
+  - Anomaly badges on runs whose duration or output size is more than 2σ from the median for that command root.
+
+- **Performance and duration**
+  - Violin or horizon chart of duration distribution for the top-5 commands, with p50 and p95 markers. Reveals bimodal commands (small vs big targets) without inspection.
+  - Slowest-runs leaderboard (already in `/diag`) pinned into the monitor with click-through to replay.
+  - Average-elapsed trendline over time to surface workload getting slower.
+
+- **Storage and artifacts**
+  - Cumulative output bytes counter that ticks up as runs stream.
+  - Largest-artifacts list with one-click delete. Doubles as a maintenance affordance.
+  - Snapshot timeline — small dots on a horizontal axis, hover for label.
+
+- **Sessions and multi-browser**
+  - Live session count with a small avatar stack.
+  - Run-origin map: active runs listed with the originating browser/session highlighted; runs available to attach get a glow. Makes cross-browser attach/detach affordances discoverable without reviving takeover language.
+  - Attach/detach counter — runs reopened or detached today, proving the broker is earning its keep without takeover semantics.
+
+- **Showpiece widgets**
+  - ASCII-art bordered dashboard panels for one widget, leaning fully into the retro-terminal aesthetic.
+
+- **Backend follow-ups**
+  - Per-tool `$PATH` availability is already in `/diag`; pipe the same data into the Status Monitor instead of probing twice.
+  - Consider denormalizing command category metadata only if `/history/insights` becomes hot under large histories.
+
+- **Visual constraints**
+  - Stay inside the existing palette: `#39ff14` primary, `#ffb800` secondary energy, `#ff3c3c` failure, `#0d0d0d/#141414/#1f1f1f` surfaces.
+  - All numerals in JetBrains Mono; Syne reserved for section headers.
+  - Respect `prefers-reduced-motion` for high-motion widgets.
+  - Avoid fake precision: if a metric isn't actually measurable, prefer a binary state pip over a synthesized number.

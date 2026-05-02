@@ -29,7 +29,16 @@ const COMMAND_TEMPLATES = [
   ['whois 104.21.0.1', 0],
   ['naabu -host darklab.sh', 0],
   ['dnsx -resp -a darklab.sh', 0],
+  ['ping darklab.sh', -15],
 ]
+
+const GRACEFUL_TERMINATION_EXIT_CODES = new Set([-15])
+
+function isFailedExitCode(exitCode) {
+  if (exitCode === null || exitCode === undefined || exitCode === '') return false
+  const code = Number(exitCode)
+  return Number.isFinite(code) && code !== 0 && !GRACEFUL_TERMINATION_EXIT_CODES.has(code)
+}
 
 export function buildVisualHistoryRuns({
   now = Date.now(),
@@ -65,7 +74,7 @@ function filterRuns(runs, params) {
 
   const exitCode = String(params.get('exit_code') || '').trim()
   if (exitCode === '0') next = next.filter((run) => Number(run.exit_code) === 0)
-  else if (exitCode === 'nonzero') next = next.filter((run) => Number(run.exit_code) !== 0)
+  else if (exitCode === 'nonzero') next = next.filter((run) => isFailedExitCode(run.exit_code))
 
   return next
 }

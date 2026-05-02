@@ -6,6 +6,7 @@
 // Keyed by tabId so multiple concurrent tabs each have their own independent timer.
 const _stalledTimeouts = new Map();
 const _stalledRuns = new Set();
+const _runStreamStateByTabId = new Map();
 let _activeRunPollTimer = null;
 
 // Pending terminal confirmation: used by transcript-owned yes/no flows such as
@@ -738,7 +739,107 @@ function _handleRunStreamMessage(msg, tabId) {
   }
 }
 
-function _streamRunResponse(res, tabId) {
+function _sameTabRunStillActive(tabId, runId) {
+  const t = getTab(tabId);
+  return !!(
+    t
+    && t.st === 'running'
+    && runId
+    && (t.runId === runId || t.historyRunId === runId)
+  );
+}
+
+function _streamResumeAfterId(tabId, state) {
+  const t = getTab(tabId);
+  return String((t && t.lastEventId) || (state && state.after) || '');
+}
+
+function _finishPausedRunStream(tabId, state) {
+  const current = _runStreamStateByTabId.get(tabId);
+  if (current !== state) return true;
+  state.reader = null;
+  state.starting = false;
+  if (state.detached) {
+    _runStreamStateByTabId.delete(tabId);
+    return true;
+  }
+  if (!state.pausedForApi) return false;
+  if (state.resumeAfterPause) {
+    const runId = state.runId;
+    const streamUrl = state.streamUrl || '';
+    const after = _streamResumeAfterId(tabId, state);
+    _runStreamStateByTabId.delete(tabId);
+    if (_sameTabRunStillActive(tabId, runId)) {
+      _subscribeRunStream(runId, tabId, { streamUrl, after });
+    }
+    return true;
+  }
+  return true;
+}
+
+function detachRunStreamForTab(tabId) {
+  const state = _runStreamStateByTabId.get(tabId);
+  if (!state) return false;
+  state.detached = true;
+  state.pausedForApi = false;
+  state.resumeAfterPause = false;
+  const reader = state.reader;
+  state.reader = null;
+  _runStreamStateByTabId.delete(tabId);
+  _clearStalledTimeout(tabId);
+  if (reader && typeof reader.cancel === 'function') {
+    try {
+      const cancelled = reader.cancel();
+      if (cancelled && typeof cancelled.catch === 'function') cancelled.catch(() => {});
+    } catch (_) {}
+  }
+  return true;
+}
+
+function pauseBackgroundRunStreamsForStatusMonitor() {
+  const keepTabId = activeTabId;
+  let paused = 0;
+  _runStreamStateByTabId.forEach((state, tabId) => {
+    if (!state || tabId === keepTabId || state.pausedForApi || state.detached) return;
+    if (!_sameTabRunStillActive(tabId, state.runId)) {
+      detachRunStreamForTab(tabId);
+      return;
+    }
+    state.pausedForApi = true;
+    state.resumeAfterPause = false;
+    paused += 1;
+    _clearStalledTimeout(tabId);
+    const reader = state.reader;
+    state.reader = null;
+    state.starting = false;
+    if (reader && typeof reader.cancel === 'function') {
+      try {
+        const cancelled = reader.cancel();
+        if (cancelled && typeof cancelled.catch === 'function') cancelled.catch(() => {});
+      } catch (_) {}
+    }
+  });
+  return paused;
+}
+
+function resumeBackgroundRunStreamsAfterStatusMonitor() {
+  _runStreamStateByTabId.forEach((state, tabId) => {
+    if (!state || !state.pausedForApi || state.detached) return;
+    if (state.reader) {
+      state.resumeAfterPause = true;
+      return;
+    }
+    const runId = state.runId;
+    const streamUrl = state.streamUrl || '';
+    const after = _streamResumeAfterId(tabId, state);
+    _runStreamStateByTabId.delete(tabId);
+    if (_sameTabRunStillActive(tabId, runId)) {
+      _subscribeRunStream(runId, tabId, { streamUrl, after });
+    }
+  });
+}
+
+function _streamRunResponse(res, tabId, state = null) {
   if (!res.body || typeof res.body.getReader !== 'function') {
     appendLine('[server error] The server returned an invalid streaming response.', 'exit-fail', tabId);
     setStatus('fail'); setTabStatus(tabId, 'fail');
@@ -748,13 +849,31 @@ function _streamRunResponse(res, tabId) {
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
+  const streamState = state || _runStreamStateByTabId.get(tabId) || {};
+  streamState.reader = reader;
+  streamState.starting = false;
+  streamState.runId = streamState.runId || _tabRunGeneration(tabId);
+  _runStreamStateByTabId.set(tabId, streamState);
+  if (streamState.pausedForApi && !streamState.resumeAfterPause) {
+    streamState.reader = null;
+    try {
+      const cancelled = reader.cancel();
+      if (cancelled && typeof cancelled.catch === 'function') cancelled.catch(() => {});
+    } catch (_) {}
+    return;
+  }
   let buffer = '';
 
   _resetStalledTimeout(tabId);
 
   function read() {
     reader.read().then(({ done, value }) => {
-      if (done) { _handleStreamEndedWithoutExit(tabId); return; }
+      if (done) {
+        if (_finishPausedRunStream(tabId, streamState)) return;
+        _runStreamStateByTabId.delete(tabId);
+        _handleStreamEndedWithoutExit(tabId);
+        return;
+      }
       _recoverStalledRun(tabId);
       _resetStalledTimeout(tabId);
       buffer += decoder.decode(value, { stream: true });
@@ -767,6 +886,13 @@ function _streamRunResponse(res, tabId) {
         } catch(e) {}
       });
       read();
+    }).catch(err => {
+      if (_finishPausedRunStream(tabId, streamState)) return;
+      _runStreamStateByTabId.delete(tabId);
+      appendLine(`[network error] ${_describeRunnerFetchError(err, 'server')}`, 'exit-fail', tabId);
+      if (tabId === activeTabId) setStatus('fail');
+      setTabStatus(tabId, 'fail');
+      stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
     });
   }
   read();
@@ -774,9 +900,27 @@ function _streamRunResponse(res, tabId) {
 
 function _subscribeRunStream(runId, tabId, { streamUrl = '', after = '' } = {}) {
   if (!runId || !tabId || typeof apiFetch !== 'function') return Promise.resolve(false);
+  const existing = _runStreamStateByTabId.get(tabId);
+  if (existing && (existing.reader || existing.starting) && !existing.pausedForApi && !existing.detached) {
+    return Promise.resolve(true);
+  }
+  const streamState = {
+    runId,
+    tabId,
+    streamUrl,
+    after,
+    reader: null,
+    starting: true,
+    pausedForApi: false,
+    resumeAfterPause: false,
+    detached: false,
+  };
+  _runStreamStateByTabId.set(tabId, streamState);
   return apiFetch(_brokerStreamUrl(runId, tabId, streamUrl, after))
     .then(streamRes => {
+      if (streamState.detached) return false;
       if (!streamRes.ok) {
+        _runStreamStateByTabId.delete(tabId);
         return _readRunErrorMessage(streamRes).then(message => {
           const suffix = message ? ` ${message}` : '';
           appendLine(`[server error] The server could not stream the command.${suffix}`, 'exit-fail', tabId);
@@ -786,10 +930,12 @@ function _subscribeRunStream(runId, tabId, { streamUrl = '', after = '' } = {}) 
           return false;
         });
       }
-      _streamRunResponse(streamRes, tabId);
+      _streamRunResponse(streamRes, tabId, streamState);
       return true;
     })
     .catch(err => {
+      if (streamState.detached) return false;
+      _runStreamStateByTabId.delete(tabId);
       appendLine(`[network error] ${_describeRunnerFetchError(err, 'server')}`, 'exit-fail', tabId);
       if (tabId === activeTabId) setStatus('fail');
       setTabStatus(tabId, 'fail');

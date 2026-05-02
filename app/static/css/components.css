@@ -1068,6 +1068,7 @@ body #history-panel { background: var(--theme-chrome-bg); }
 }
 .history-entry-meta .exit-ok { color: var(--green); }
 .history-entry-meta .exit-fail { color: var(--red); }
+.history-entry-meta .exit-neutral { color: var(--muted); }
 .history-actions {
   display: flex;
   flex-wrap: wrap;

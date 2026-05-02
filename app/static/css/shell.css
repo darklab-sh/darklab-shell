@@ -307,6 +307,7 @@ body.ts-clock .output .shell-prompt-wrap {
 .line.stderr    { color: var(--red); }
 .line.exit-ok   { color: var(--green); font-weight: 700; margin-top: 8px; }
 .line.exit-fail { color: var(--red);   font-weight: 700; margin-top: 8px; }
+.line.exit-neutral { color: var(--muted); font-weight: 700; margin-top: 8px; }
 
 .terminal-actions {
   display: flex;

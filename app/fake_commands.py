@@ -28,6 +28,7 @@ from commands import (
 )
 from config import APP_VERSION, CFG, PROJECT_README
 from database import db_connect
+from helpers import is_failed_exit_code
 from process import active_runs_for_session, redis_client
 from session_variables import (
     InvalidSessionVariableName,
@@ -94,7 +95,7 @@ _CURRENT_SHORTCUTS = [
     ]),
     ("UI", [
         ({"mac": "Option+\\", "other": "Alt+\\"}, "toggle the desktop sidebar (rail) open / collapsed"),
-        ({"mac": "Option+R", "other": "Alt+R"}, "open the Run Monitor for active commands"),
+        ({"mac": "Option+R", "other": "Alt+R"}, "open the Status Monitor"),
         ({"mac": "Option+S", "other": "Alt+S"}, "toggle the transcript search bar"),
         ({"mac": "Option+H", "other": "Alt+H"}, "toggle the history drawer"),
         ({"mac": "Option+Shift+F", "other": "Alt+Shift+F"}, "open the Files modal"),
@@ -2078,7 +2079,7 @@ def _run_fake_stats(session_id: str) -> list[dict[str, str]]:
             pass
         elif int(exit_code) == 0:
             success_total += 1
-        else:
+        elif is_failed_exit_code(exit_code):
             failed_total += 1
 
         elapsed = row["elapsed_s"]
@@ -2101,7 +2102,7 @@ def _run_fake_stats(session_id: str) -> list[dict[str, str]]:
             bucket["incomplete"] += 1
         elif int(exit_code) == 0:
             bucket["success"] += 1
-        else:
+        elif is_failed_exit_code(exit_code):
             bucket["failed"] += 1
 
         if elapsed is not None:

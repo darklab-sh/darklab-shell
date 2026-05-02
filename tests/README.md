@@ -18,12 +18,12 @@ The suites are intentionally layered:
 
 Current totals:
 
-- behavior tests: 2,267
+- behavior tests: 2,292
 - docs/inventory meta-tests: 30
-- `pytest`: 1132 (1102 behavior + 30 meta)
-- `vitest`: 936
-- `playwright`: 229
-- total: 2,297
+- `pytest`: 1135 (1105 behavior + 30 meta)
+- `vitest`: 954
+- `playwright`: 233
+- total: 2,322
 
 This document is organized in two parts:
 
@@ -174,7 +174,7 @@ scripts/record_demo_mobile.sh                       # mobile (430×932 iPhone 15
 scripts/record_demo.sh --base-url http://localhost:9000
 ```
 
-Wrappers health-check the container, seed/register the demo session token, probe `GET /workspace/files` with that token so the Files segment can create `response.html`, set `RUN_DEMO=1`, run the spec, and stitch frames into `assets/darklab_shell_demo.mp4` / `assets/darklab_shell_mobile_demo.mp4` with ffmpeg (HEVC/VideoToolbox on macOS, VP9/libvpx on Linux). The desktop recording also opens the HUD-attached Run Monitor during the long-running ping segment and pauses after telemetry has populated so the CPU/RSS memory meters appear in the final video. See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
+Wrappers health-check the container, seed/register the demo session token, probe `GET /workspace/files` with that token so the Files segment can create `response.html`, set `RUN_DEMO=1`, run the spec, and stitch frames into `assets/darklab_shell_demo.mp4` / `assets/darklab_shell_mobile_demo.mp4` with ffmpeg (HEVC/VideoToolbox on macOS, VP9/libvpx on Linux). The desktop recording also opens the Status Monitor during the long-running ping segment and pauses after telemetry has populated so the CPU/RSS memory meters appear in the final video. See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
 
 Desktop and mobile demo configs share a central visual contract in [config/playwright.visual.contracts.js](../config/playwright.visual.contracts.js), and both specs assert that contract at startup through `tests/js/e2e/visual_guardrails.js`. That keeps viewport, pixel density, touch/mobile-mode assumptions, and `/status` health aligned with the wrapper/config setup instead of drifting silently.
 
@@ -192,7 +192,7 @@ scripts/capture_ui_screenshots.sh --theme all
 scripts/capture_ui_screenshots.sh --theme all --theme-variant light
 ```
 
-The wrapper sets `RUN_CAPTURE=1` and writes PNGs, per-UI manifest JSON files, and a static `index.html` review page to `/tmp/darklab_shell-ui-capture/`. Unset `--theme` and `--theme default` resolve to the configured app default theme slug from `app/config.py`, so default captures are stored under that real theme name instead of a duplicate `default/` folder. The review page groups scenes by UI/theme and includes a full-screen image viewer with left/right keyboard navigation. Capture runs boot an isolated temp app instance with seeded history, workspace storage enabled, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, history-heavy states, Files panel states, and the Run Monitor active-telemetry drawer look production-like. See [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
+The wrapper sets `RUN_CAPTURE=1` and writes PNGs, per-UI manifest JSON files, and a static `index.html` review page to `/tmp/darklab_shell-ui-capture/`. Unset `--theme` and `--theme default` resolve to the configured app default theme slug from `app/config.py`, so default captures are stored under that real theme name instead of a duplicate `default/` folder. The review page groups scenes by UI/theme and includes a full-screen image viewer with left/right keyboard navigation. Capture runs boot an isolated temp app instance with seeded history, workspace storage enabled, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, history-heavy states, Files panel states, and the Status Monitor active-telemetry modal look production-like. See [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
 
 The capture configs use the same shared visual contract file as the demo pipeline, and `ui_capture_shared.js` runs `visual_guardrails.js` during each `freshHome(...)` reset. That means every captured scene re-checks viewport, density, touch/mobile-mode expectations, `/status` health, the fixed capture token, and the minimum seeded `/history` shape before screenshots are taken.
 
@@ -433,6 +433,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPidMap.test_multiple_runs_isolated` | Checks multiple runs isolated handling. |
 | `TestActiveRunMetadata.test_active_runs_for_session_preserves_pid` | Checks that active-run metadata exposes the PID through session-scoped active-run listings. |
 | `TestActiveRunMetadata.test_active_runs_for_session_reports_owner_liveness_for_client` | Verifies that active-run metadata reports owner client, tab, liveness, and same-client state. |
+| `TestActiveRunMetadata.test_active_runs_for_session_refreshes_matching_owner_liveness` | Verifies that active-run listings refresh same-client owner liveness so Status Monitor polling keeps run control alive. |
 | `TestActiveRunMetadata.test_active_run_touch_owner_refreshes_liveness` | Verifies that owner heartbeats refresh liveness only for the owning client and tab. |
 | `TestActiveRunMetadata.test_active_run_set_owner_replaces_owner_metadata` | Verifies that active-run ownership can be reassigned when a browser explicitly takes over a run. |
 | `TestActiveRunMetadata.test_active_run_control_status_requires_live_owner` | Verifies that owner-only active-run controls are rejected for another live browser but allowed after owner staleness. |
@@ -440,7 +441,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_pid_reuse` | Checks that Redis-backed active-run metadata is pruned when a PID has been reused by a different process. |
 | `TestActiveRunMetadata.test_pid_pop_for_session_requires_matching_session` | Verifies that active-run PID lookup only pops processes owned by the requesting session. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_legacy_metadata_on_linux` | Checks that legacy Redis metadata without PID start-time tracking is pruned on Linux instead of trusting a reused PID. |
-| `TestActiveRunMetadata.test_active_run_resource_usage_reports_cumulative_cpu_and_memory` | Verifies that active-run resource telemetry reports process-tree CPU seconds and RSS memory for Run Monitor display. |
+| `TestActiveRunMetadata.test_active_run_resource_usage_reports_cumulative_cpu_and_memory` | Verifies that active-run resource telemetry reports process-tree CPU seconds and RSS memory for Status Monitor display. |
 | `TestFormatRetention.test_zero_returns_unlimited` | Checks zero returns unlimited handling. |
 | `TestFormatRetention.test_365_returns_one_year` | Checks that 365 returns one year. |
 | `TestFormatRetention.test_730_returns_two_years` | Checks that 730 returns two years. |
@@ -940,6 +941,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunRoute.test_client_side_run_rejects_non_client_builtin_root` | Verifies that `/run/client` only accepts allowlisted browser-owned built-in roots. |
 | `TestHistoryRoute.test_get_returns_200` | Checks get returns 200 handling. |
 | `TestHistoryRoute.test_get_returns_runs_list` | Checks that get returns runs list. |
+| `TestHistoryRoute.test_stats_returns_compact_session_counters` | Verifies that `/history/stats` returns compact session counters for the Status Monitor dashboard. |
+| `TestHistoryRoute.test_insights_returns_visual_history_payloads` | Verifies that `/history/insights` returns heatmap, command mix, constellation, and event ticker data. |
 | `TestHistoryRoute.test_delete_all_returns_ok` | Checks that delete all returns ok. |
 | `TestHistoryRoute.test_delete_specific_nonexistent_run_returns_ok` | Checks that delete specific nonexistent run returns ok. |
 | `TestHistoryRoute.test_get_run_nonexistent_returns_404` | Checks that get run nonexistent returns 404. |
@@ -1302,6 +1305,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `ts-toggle does not close the mobile sheet (disclosure in mobile_chrome.js owns the submenu toggle)` | Verifies that the mobile menu `ts-toggle` row leaves the sheet open while the disclosure logic in `mobile_chrome.js` owns the submenu state. |
 | `ts-set applies the selected mode and closes the sheet` | Verifies that tapping a `ts-set` sub-menu row applies the chosen timestamps mode (off/elapsed/clock) and closes the menu sheet. |
 | `clear cancels welcome, clears the active tab preserving run state, and closes the sheet` | Verifies that the mobile menu `clear` entry routes through `cancelWelcome(activeTabId)` + `clearTab(activeTabId, { preserveRunState: true })` and closes the menu sheet. |
+| `opens Status Monitor from the mobile menu and closes the sheet` | Verifies that the mobile menu exposes Status Monitor even when the active tab is idle and closes the menu sheet before opening it. |
 | `opens the theme selector from the theme button` | Verifies that opens the theme selector from the theme button. |
 | `populates the theme select from the registry and applies the selected theme` | Verifies that populates the theme select from the registry and applies the selected theme. |
 | `renders theme preview cards with the current desktop shell structure` | Verifies that theme preview cards render the current rail/tabbar/panel/HUD/drawer shell schematic and do not reintroduce old preview-only bar, pill, or chip elements. |
@@ -1403,7 +1407,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `supports macOS Option+P to create a permalink via physical key code` | Verifies that supports macOS Option+P to create a permalink via physical key code. |
 | `supports Alt+Shift+C to copy output for the active tab` | Verifies that supports Alt+Shift+C to copy output for the active tab. |
 | `supports macOS Option+Shift+C to copy output via physical key code` | Verifies that supports macOS Option+Shift+C to copy output via physical key code. |
-| `supports Alt+R to open the run monitor from the terminal prompt` | Verifies that Alt+R routes to the Run Monitor shortcut entry point. |
+| `supports Alt+R to open the status monitor from the terminal prompt` | Verifies that Alt+R routes to the Status Monitor shortcut entry point. |
 | `supports Alt+Shift+F to open the Files modal from the terminal prompt` | Verifies that Alt+Shift+F opens Files while preserving Alt+F for word-forward. |
 | `supports Ctrl+L to clear the active tab without dropping a running command` | Verifies that supports Ctrl+L to clear the active tab without dropping a running command. |
 | `does not apply Alt-based tab shortcuts while typing in non-terminal inputs` | Verifies that does not apply Alt-based tab shortcuts while typing in non-terminal inputs. |
@@ -1614,6 +1618,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `closes the history panel for permalink but keeps it open for star and delete` | Verifies permalink closes the desktop drawer while star and delete keep it open so the row stays in context under the confirm modal. |
 | `keeps the history panel open on mobile for every row action (confirm modal overlays it)` | Verifies the mobile drawer no longer auto-closes on the delete row — the confirm modal overlays the drawer and ui_confirm owns refocus on resolve. |
 | `refreshHistoryPanel labels the history permalink action as permalink` | Verifies that the history drawer permalink action keeps the expected label. |
+| `renders SIGTERM-terminated runs as neutral history rows instead of failures` | Verifies that SIGTERM-terminated history rows render as neutral terminated entries instead of failed runs. |
 | `opens the run comparison launcher from a history row` | Verifies that the history row compare action opens the comparison launcher with the suggested previous run. |
 | `replaces manual comparison choices when searching the compare launcher` | Verifies that compare launcher search replaces the manual candidate list instead of merging stale suggested runs into the search results. |
 | `renders changed added and removed lines after choosing a comparison candidate` | Verifies that choosing a comparison candidate renders paired changed lines plus added/removed output. |
@@ -1677,11 +1682,11 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `hides the chip when there are no running non-active tabs` | Checks that hides the chip when there are no running non-active tabs. |
 | `shows the chip with a count that equals the number of running non-active tabs` | Checks that shows the chip with a count that equals the number of running non-active tabs. |
 | `excludes the active tab from the count even if it is running` | Checks that excludes the active tab from the count even if it is running. |
-| `replaces the mobile recents peek with Run Monitor while the active tab is running` | Verifies that the mobile bottom peek switches from recents to Run Monitor details for the active running tab. |
-| `opens Run Monitor from the running peek instead of the recents sheet` | Verifies that tapping the running mobile peek opens Run Monitor rather than the recents sheet. |
-| `shows elapsed time for the active mobile Run Monitor peek when runStart is known` | Verifies that the mobile Run Monitor peek shows elapsed time when the active run has a start timestamp. |
-| `suppresses the mobile Run Monitor peek wiggle for reduced motion` | Verifies that the mobile Run Monitor peek does not animate when reduced motion is requested. |
-| `returns the peek to recents after the active run finalization hold expires` | Verifies that the mobile peek briefly holds Run Monitor state after completion, then returns to recents. |
+| `replaces the mobile recents peek with Status Monitor while the active tab is running` | Verifies that the mobile bottom peek switches from recents to Status Monitor details for the active running tab. |
+| `opens Status Monitor from the running peek instead of the recents sheet` | Verifies that tapping the running mobile peek opens Status Monitor rather than the recents sheet. |
+| `shows elapsed time for the active mobile Status Monitor peek when runStart is known` | Verifies that the mobile Status Monitor peek shows elapsed time when the active run has a start timestamp. |
+| `suppresses the mobile Status Monitor peek wiggle for reduced motion` | Verifies that the mobile Status Monitor peek does not animate when reduced motion is requested. |
+| `returns the peek to recents after the active run finalization hold expires` | Verifies that the mobile peek briefly holds Status Monitor state after completion, then returns to recents. |
 | `activates the edge glow when a running non-active tab is only partially clipped off-screen` | Checks that activates the edge glow when a running non-active tab is only partially clipped off-screen. |
 | `chip tap activates the next running non-active tab in tab-row order` | Checks that chip tap activates the next running non-active tab in tab-row order. |
 | `chip tap cycles through the running set and wraps around` | Checks that chip tap cycles through the running set and wraps around. |
@@ -1766,17 +1771,30 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 
 | Test | Description |
 | --- | --- |
-| `renders active-run CPU and memory telemetry when available` | Verifies that the Run Monitor renders CPU and memory meters from active-run resource telemetry. |
-| `renders unavailable telemetry chips when backend stats are absent` | Verifies that the Run Monitor still shows CPU and memory meter placeholders when backend resource telemetry is not available. |
+| `pauses background run streams while open and resumes them on close` | Verifies that the Status Monitor frees background broker stream connections while open and resumes them after close. |
+| `renders active-run CPU and memory telemetry when available` | Verifies that the Status Monitor renders CPU and memory meters from active-run resource telemetry. |
+| `renders unavailable telemetry chips when backend stats are absent` | Verifies that the Status Monitor still shows CPU and memory meter placeholders when backend resource telemetry is not available. |
 | `labels active runs owned by another live browser as monitor-only` | Verifies that active runs owned by another live browser render as monitor-only instead of tab-owned rows. |
-| `offers attach and takeover actions for runs owned by another live browser` | Verifies that another browser's live runs expose read-only Attach and owner Take over actions from the Run Monitor. |
-| `keeps takeover available when another browser owns a run already attached locally` | Verifies that Run Monitor still offers Take over when the current browser has a read-only tab for a run controlled elsewhere. |
-| `warms CPU samples while closed so first open can show a percent` | Verifies that a background warmup sample pair can populate CPU percentage before the drawer is opened. |
-| `does a quick follow-up refresh after opening on a baseline-only CPU sample` | Verifies that opening the Run Monitor schedules a quick second poll when CPU telemetry only has a baseline sample. |
-| `opens as a header-only drawer when there are no active runs` | Verifies that the Run Monitor opens to a header-only `0 active runs` drawer when no commands are running. |
-| `uses mobile sheet chrome and shared sheet binding on mobile` | Verifies that the mobile Run Monitor opens with sheet chrome and shared mobile-sheet dismissal behavior. |
-| `calculates CPU from cumulative samples, keeps the last value, and caps display at 100%` | Verifies that the Run Monitor derives CPU percentage from adjacent cumulative CPU samples, preserves the last value when a later poll lacks CPU data, and display-caps at 100%. |
-| `adds the running status affordance and pulses it once per session` | Verifies that the STATUS HUD cell gets the Run Monitor expansion affordance while running and only pulses once per browser session. |
+| `offers attach and takeover actions for runs owned by another live browser` | Verifies that another browser's live runs expose read-only Attach and owner Take over actions from the Status Monitor. |
+| `keeps takeover available when another browser owns a run already attached locally` | Verifies that Status Monitor still offers Take over when the current browser has a read-only tab for a run controlled elsewhere. |
+| `shows attach again after a read-only attached tab is closed` | Verifies that Status Monitor offers Attach again when the local read-only tab for another browser's run has been closed. |
+| `warms CPU samples while closed so first open can show a percent` | Verifies that a background warmup sample pair can populate CPU percentage before the monitor is opened. |
+| `does a quick follow-up refresh after opening on a baseline-only CPU sample` | Verifies that opening the Status Monitor schedules a quick second poll when CPU telemetry only has a baseline sample. |
+| `does not reload history insights on every active-run refresh` | Verifies that frequent active-run refreshes do not refetch the heavier history insights payload when the run count is stable. |
+| `refreshes history insights when active run count changes` | Verifies that the Status Monitor refreshes history insights and rebuilds the visual signature when active runs start or finish. |
+| `refreshes history insights on a slower monitor cadence` | Verifies that history insights refresh on their slower open-monitor cadence instead of the active-run polling cadence. |
+| `uses CPU hysteresis and recent samples for the pulse strip` | Verifies that the Status Monitor pulse strip preserves raw CPU readouts while damping small pulse-signature changes, keeping a recent CPU sample window, and scrolling via a translated SVG track. |
+| `shows active-run loading state on open instead of stale cached rows` | Verifies that opening the Status Monitor shows an active-run loading row until fresh active-run data arrives instead of flashing stale cached rows. |
+| `opens as a status dashboard when there are no active runs` | Verifies that the desktop Status Monitor opens to a dashboard with a `0 active runs` runs section when no commands are running. |
+| `opens history from command territory tiles` | Verifies that Command Territory tiles open History with the clicked command root filter applied. |
+| `restores runs from constellation stars` | Verifies that Command Constellation stars restore the matching run through the shared history restore helper. |
+| `keeps failed constellation stars category-colored with a failure ring` | Verifies that failed constellation stars keep their command-category hue and use a separate red failure ring. |
+| `uses neutral category tones and normalized decorative seeds` | Verifies that unknown Status Monitor categories render neutrally and normalized seeds keep decorative jitter and treemap glow placement stable across casing and whitespace variants. |
+| `uses a squarified command territory layout for small tiles` | Verifies that Command Territory uses a squarified treemap layout so small command tiles remain reasonably rectangular instead of collapsing into thin slivers. |
+| `keeps an ambient constellation visible before real run history exists` | Verifies that the Status Monitor keeps the ambient constellation visible and uses calm sparse-state copy when no real runs are plotted. |
+| `uses mobile sheet chrome and shared sheet binding on mobile` | Verifies that the mobile Status Monitor opens with sheet chrome and shared mobile-sheet dismissal behavior. |
+| `calculates CPU from cumulative samples, keeps the last value, and caps display at 100%` | Verifies that the Status Monitor derives CPU percentage from adjacent cumulative CPU samples, preserves the last value when a later poll lacks CPU data, and display-caps at 100%. |
+| `adds the running status affordance and pulses it once per session` | Verifies that the STATUS HUD cell gets the Status Monitor expansion affordance while running and only pulses once per browser session. |
 
 #### `runner.test.js`
 
@@ -1818,9 +1836,10 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `restoreActiveRunsAfterReload subscribes restored tabs to brokered live output` | Verifies that reload continuity restores running tabs with preserved run IDs and subscribes them back to replay plus live output. |
 | `restoreActiveRunsAfterReload skips runs owned by another live client` | Verifies that reload continuity does not auto-create terminal tabs for active runs owned by another live browser. |
 | `restoreActiveRunsAfterReload restores stale-owner runs` | Verifies that reload continuity can recover active runs once the previous owner is stale. |
+| `pauses background run streams for Status Monitor API calls and resumes from the last event id` | Verifies that Status Monitor connection relief pauses only background live streams and resubscribes them from the last broker event id. |
 | `restoreActiveRunsAfterReload does not overwrite a restored non-running tab` | Verifies that active-run reconnect creates a separate tab instead of clobbering an already-restored idle tab. |
-| `attachActiveRunFromMonitor opens a read-only subscribed tab without kill controls` | Verifies that Run Monitor Attach opens a live read-only tab and hides owner-only controls. |
-| `attachActiveRunFromMonitor takes ownership before subscribing when requested` | Verifies that Run Monitor Take over claims ownership before opening a live subscribed tab with owner controls. |
+| `attachActiveRunFromMonitor opens a read-only subscribed tab without kill controls` | Verifies that Status Monitor Attach opens a live read-only tab and hides owner-only controls. |
+| `attachActiveRunFromMonitor takes ownership before subscribing when requested` | Verifies that Status Monitor Take over claims ownership before opening a live subscribed tab with owner controls. |
 | `marks a subscribed tab read-only when ownership moves to another browser` | Verifies that brokered ownership events make the previous owner tab read-only and hide owner-only controls. |
 | `pollActiveRunsAfterReload restores a completed reconnected run through history` | Verifies that a reconnected placeholder tab swaps into the saved history view when the active run disappears. |
 | `pollActiveRunsAfterReload fails a missing reconnected run with no saved history` | Verifies that reconnect placeholders fail visibly instead of waiting forever when a run disappears after an app restart. |
@@ -1992,6 +2011,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 
 | Test | Description |
 | --- | --- |
+| `opens Status Monitor from the desktop rail nav item` | Verifies that the desktop rail exposes Status Monitor as a first-class navigation item. |
 | `keeps the default split when workflows is closed and reopened before resizing` | Verifies that the desktop rail preserves the default Recents/Workflows split when Workflows is collapsed before the user drags the splitter. |
 | `restores the last split height when workflows is closed and reopened` | Verifies that the desktop rail preserves the user-sized Recents/Workflows split when the Workflows section is collapsed and reopened. |
 | `marks Redis offline when the status poll cannot reach the server` | Verifies that a failed HUD status poll clears a previously online Redis pill instead of leaving stale state visible. |
@@ -2022,6 +2042,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `clearTab preserves a running tab state when asked to keep the run active` | Verifies that clearTab preserves a running tab state when asked to keep the run active. |
 | `clearTab clears the active un-ran composer input along with the tab output` | Verifies that clearTab clears the active un-ran composer input along with the tab output. |
 | `closing a running tab kills it and activates a neighboring tab` | Verifies that closing a running tab kills it and activates a neighboring tab. |
+| `closing a read-only attached running tab removes it without killing the run` | Verifies that closing a read-only attached active-run tab removes the local tab without sending a kill request. |
 | `closing the only running tab kills it and keeps the tab shell ready` | Verifies that closing the only running tab kills it and keeps the tab shell ready. |
 | `mountShellPrompt does not render prompt when tab is running even when forced` | Verifies that mountShellPrompt does not render prompt when tab is running even when forced. |
 | `mountShellPrompt keeps the desktop prompt mirror out of mobile mode` | Verifies that mountShellPrompt keeps the desktop prompt mirror out of mobile mode. |
@@ -2495,7 +2516,8 @@ Desktop demo recording spec. Drives a tightened README-first interaction sequenc
 | `hamburger button is visible and legacy desktop header button DOM is absent at mobile width` | Verifies that hamburger button is visible and the removed legacy desktop header button container is absent at mobile width. |
 | `clicking the hamburger opens the mobile menu` | Verifies that clicking the hamburger opens the mobile menu. |
 | `mobile menu FAQ and options open overlays in the mobile shell` | Verifies that mobile menu FAQ and options open overlays in the mobile shell and can be dismissed by tapping the backdrop, matching the shared mobile-sheet contract. |
-| `mobile menu contains history and theme action buttons` | Verifies that mobile menu contains history and theme action buttons. |
+| `mobile menu contains history and theme action buttons` | Verifies that mobile menu contains history, Status Monitor, Files, and theme action buttons. |
+| `mobile menu opens the idle Status Monitor sheet` | Verifies that the mobile menu opens Status Monitor as a bottom sheet even when the active tab is idle. |
 | `mobile Files create inputs use mobile-safe text defaults` | Verifies that mobile Files create inputs use mobile-safe text defaults and 16px text to avoid browser focus zoom. |
 | `timestamps menu expands inline and applies the selected mode` | Verifies that the mobile menu `timestamps` row expands inline to a three-mode picker (off / elapsed / clock), keeps the sheet open while expanded, applies the selected mode on tap, closes the sheet, and resets the sub-menu to collapsed on the next sheet open. |
 | `mobile theme selector opens full screen with evenly sized grouped sections` | Verifies that mobile theme selector opens full screen with evenly sized grouped sections. |
@@ -2619,7 +2641,7 @@ Desktop demo recording spec. Drives a tightened README-first interaction sequenc
 | `Alt+Shift+T opens the theme selector from the composer` | Pressing Alt+Shift+T with the composer focused opens the theme selector without leaking `ˇ`. |
 | `Alt+G opens the workflows overlay from the composer` | Pressing Alt+G with the composer focused opens the guided workflows overlay without leaking `©`. |
 | `Alt+S toggles the transcript search bar from the composer` | Alt+S is the canonical search chord — works from the prompt because `S` has no readline conflict (unlike `F`, which the composer owns as word-forward). |
-| `Alt+R opens the Run Monitor from the composer` | Alt+R opens the active-run monitor drawer without leaking `®` into the prompt. |
+| `Alt+R opens the Status Monitor from the composer` | Alt+R opens the status monitor without leaking `®` into the prompt. |
 | `Alt+Shift+F opens the Files modal from the composer` | Alt+Shift+F opens Files without stealing the terminal's Alt+F word-forward chord. |
 | `Alt+\ toggles the rail collapsed state from the composer` | Pressing Alt+\ with the composer focused toggles the desktop left rail between collapsed and expanded without leaking `«`. |
 | `Alt+/ toggles the FAQ overlay from the composer` | Alt+/ opens the FAQ overlay from the prompt and closes it on a second press without leaking `÷`. |
@@ -2692,6 +2714,9 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | `close button inside the FAQ modal closes it` | Verifies that close button inside the FAQ modal closes it. |
 | `clicking the overlay backdrop closes the FAQ modal` | Verifies that clicking the overlay backdrop closes the FAQ modal. |
 | `renders backend-driven FAQ content and allowlist chips` | Verifies that renders backend-driven FAQ content and allowlist chips. |
+| `desktop rail opens the idle Status Monitor modal` | Verifies that the desktop rail opens Status Monitor as a centered modal when no commands are active. |
+| `active rows sit under the pulse strip with wide telemetry` | Verifies that active Status Monitor rows render directly under the pulse strip with wide telemetry and meter rails. |
+| `visual cards open filtered history and restore constellation runs` | Verifies that Status Monitor visual cards can open filtered History and restore a run from the constellation. |
 | `creates, views, edits, downloads, and consumes session files` | Verifies that the workspace modal can create, view, edit, and download a session file, and that the terminal can consume it through `cat`. |
 | `navigates nested file output folders and exposes viewer actions` | Verifies that the workspace modal displays nested output paths as folders and exposes actions in the file viewer header. |
 | `input-driven workflows render prefilled form fields and runnable rendered steps` | Verifies that input-driven workflow cards render prefilled fields, runnable rendered steps, and a `Run all` control. |

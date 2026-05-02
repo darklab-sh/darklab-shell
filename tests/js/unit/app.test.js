@@ -125,6 +125,7 @@ async function loadAppFns({
           <button data-menu-action="search"></button>
           <button data-menu-action="clear"></button>
           <button data-menu-action="history"></button>
+          <button data-menu-action="run-monitor"></button>
           <button data-menu-action="options"></button>
           <button data-menu-action="theme"></button>
           <button data-menu-action="faq"></button>
@@ -1110,6 +1111,18 @@ describe('app helpers', () => {
     expect(sheet.classList.contains('u-hidden')).toBe(true)
   })
 
+  it('opens Status Monitor from the mobile menu and closes the sheet', async () => {
+    const openRunMonitor = vi.fn(() => Promise.resolve(true))
+    await loadAppFns({ openRunMonitor })
+    const sheet = document.getElementById('mobile-menu-sheet')
+    sheet.classList.remove('u-hidden')
+
+    document.querySelector('#mobile-menu-sheet [data-menu-action="run-monitor"]').click()
+
+    expect(openRunMonitor).toHaveBeenCalledWith({ source: 'mobile-menu' })
+    expect(sheet.classList.contains('u-hidden')).toBe(true)
+  })
+
   it('opens the theme selector from the theme button', async () => {
     const { openThemeSelector } = await loadAppFns({
       themeRegistry: {
@@ -2008,6 +2021,7 @@ describe('app helpers', () => {
         </div>
         <button data-menu-action="search"></button>
         <button data-menu-action="history"></button>
+        <button data-menu-action="run-monitor"></button>
         <button data-menu-action="theme"></button>
         <button data-menu-action="faq"></button>
       </div>
@@ -3949,7 +3963,7 @@ describe('app helpers', () => {
     expect(copyTab).toHaveBeenCalledWith('tab-1')
   })
 
-  it('supports Alt+R to open the run monitor from the terminal prompt', async () => {
+  it('supports Alt+R to open the status monitor from the terminal prompt', async () => {
     const openRunMonitor = vi.fn(() => Promise.resolve(true))
     const { cmdInput } = await loadAppFns({
       openRunMonitor,

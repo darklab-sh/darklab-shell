@@ -463,8 +463,22 @@ test.describe('mobile menu', () => {
     await page.locator('#hamburger-btn').click()
     const menu = page.locator('#mobile-menu-sheet')
     await expect(menu.locator('[data-menu-action="history"]')).toBeVisible()
+    await expect(menu.locator('[data-menu-action="run-monitor"] .menu-item-label')).toHaveText('status monitor')
     await expect(menu.locator('[data-menu-action="workspace"] .menu-item-label')).toHaveText('files')
     await expect(menu.locator('[data-menu-action="theme"]')).toBeVisible()
+  })
+
+  test('mobile menu opens the idle Status Monitor sheet', async ({ page }) => {
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="run-monitor"]').click()
+
+    await expect(page.locator('#mobile-menu-sheet')).toBeHidden()
+    await expect(page.locator('#run-monitor')).toBeVisible()
+    await expect(page.locator('#run-monitor > .sheet-grab.gesture-handle')).toBeVisible()
+    await expect(page.locator('#run-monitor-title')).toHaveText('Status Monitor')
+    await expect(page.locator('.run-monitor-summary')).toContainText('0 active')
+    await expect(page.locator('.run-monitor-summary')).toContainText('uptime')
+    await expect(page.locator('.run-monitor-close')).toBeHidden()
   })
 
   test('mobile Files create inputs use mobile-safe text defaults', async ({ page }) => {

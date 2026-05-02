@@ -298,7 +298,7 @@ function _historyActiveFilterItems() {
   if (_historyFilters.q) items.push({ key: 'q', label: `search: ${_historyFilters.q}` });
   if (_historyFilters.commandRoot) items.push({ key: 'commandRoot', label: `command: ${_historyFilters.commandRoot}` });
   if (_historyFilters.exitCode === '0') items.push({ key: 'exitCode', label: 'exit: 0' });
-  else if (_historyFilters.exitCode === 'nonzero') items.push({ key: 'exitCode', label: 'exit: non-zero' });
+  else if (_historyFilters.exitCode === 'nonzero') items.push({ key: 'exitCode', label: 'exit: failed' });
   else if (_historyFilters.exitCode === 'incomplete') items.push({ key: 'exitCode', label: 'exit: incomplete' });
   if (_historyFilters.dateRange !== 'all') items.push({ key: 'dateRange', label: `date: ${_historyFilters.dateRange}` });
   if (_historyFilters.starredOnly) items.push({ key: 'starredOnly', label: 'starred' });
@@ -454,6 +454,42 @@ function _setHistoryFilter(key, value, { debounce = false } = {}) {
   _historyPaging.page = 1;
   if (debounce) _scheduleHistoryPanelRefresh();
   else refreshHistoryPanel();
+}
+
+function openHistoryWithFilters(filters = {}) {
+  const selection = window.getSelection?.();
+  if (selection && typeof selection.removeAllRanges === 'function') {
+    selection.removeAllRanges();
+  }
+  const nextFilters = {
+    ..._historyFilters,
+    ...filters,
+  };
+  if (Object.prototype.hasOwnProperty.call(filters, 'commandRoot')) {
+    nextFilters.commandRoot = _normalizeHistoryFilterValue(filters.commandRoot);
+    if (nextFilters.commandRoot && (!filters.type || filters.type === 'all')) {
+      nextFilters.type = 'runs';
+    }
+  }
+  _historyFilters = {
+    type: _normalizeHistoryFilterValue(nextFilters.type) || 'all',
+    q: _normalizeHistoryFilterValue(nextFilters.q),
+    commandRoot: _normalizeHistoryFilterValue(nextFilters.commandRoot),
+    exitCode: _normalizeHistoryFilterValue(nextFilters.exitCode) || 'all',
+    dateRange: _normalizeHistoryFilterValue(nextFilters.dateRange) || 'all',
+    starredOnly: !!nextFilters.starredOnly,
+  };
+  _historyPaging.page = 1;
+  _syncHistoryFilterControls();
+  _renderHistoryActiveFilters();
+  _hideHistoryRootDropdown();
+  if (typeof toggleHistoryPanelSurface === 'function') {
+    toggleHistoryPanelSurface(true);
+  } else {
+    if (typeof showHistoryPanel === 'function') showHistoryPanel();
+    refreshHistoryPanel();
+  }
+  return true;
 }
 
 function clearHistoryFilters() {
@@ -764,10 +800,41 @@ function _historyMetaKindBadge(kind, label = kind.toUpperCase()) {
   return badge;
 }
 
+const HISTORY_GRACEFUL_TERMINATION_EXIT_CODES = new Set([-15]);
+
+function _historyExitCodeNumber(exitCode) {
+  if (exitCode === null || exitCode === undefined || exitCode === '') return null;
+  const number = Number(exitCode);
+  return Number.isFinite(number) ? number : null;
+}
+
+function _historyIsGracefulTerminationExitCode(exitCode) {
+  const code = _historyExitCodeNumber(exitCode);
+  return code !== null && HISTORY_GRACEFUL_TERMINATION_EXIT_CODES.has(code);
+}
+
+function _historyIsFailedExitCode(exitCode) {
+  const code = _historyExitCodeNumber(exitCode);
+  return code !== null && code !== 0 && !HISTORY_GRACEFUL_TERMINATION_EXIT_CODES.has(code);
+}
+
+function _historyExitLabel(exitCode) {
+  const code = _historyExitCodeNumber(exitCode);
+  if (code === null) return 'exit —';
+  return _historyIsGracefulTerminationExitCode(code) ? 'terminated' : `exit ${code}`;
+}
+
+function _historyExitClass(exitCode) {
+  const code = _historyExitCodeNumber(exitCode);
+  if (code === 0) return 'exit-ok';
+  if (_historyIsFailedExitCode(code)) return 'exit-fail';
+  return 'exit-neutral';
+}
+
 function _createHistoryEntry(run, isStarred) {
   const entry = document.createElement('div');
   entry.className = 'history-entry chrome-row chrome-row-clickable' + (isStarred ? ' starred row-accent-amber' : '');
-  const exitCls = run.exit_code === 0 ? 'exit-ok' : 'exit-fail';
+  const exitCls = _historyExitClass(run.exit_code);
   const startedAt = new Date(run.started);
   const now = new Date();
   const validDate = !Number.isNaN(startedAt.getTime());
@@ -813,7 +880,7 @@ function _createHistoryEntry(run, isStarred) {
   }
   const exitEl = document.createElement('span');
   exitEl.className = exitCls;
-  exitEl.textContent = `exit ${run.exit_code}`;
+  exitEl.textContent = _historyExitLabel(run.exit_code);
   meta.appendChild(exitEl);
   entry.appendChild(meta);
 
@@ -1723,8 +1790,8 @@ function restoreHistoryRunIntoTab(run, { targetTabId = null, hidePanelOnSuccess 
       outputLines.forEach(line => _appendHistoryOutputLine(line, tabId));
       if (previewNotice) appendLine(previewNotice, 'notice', tabId);
       appendLine(
-        `[history — exit ${fullRun.exit_code}]`,
-        fullRun.exit_code === 0 ? 'exit-ok' : 'exit-fail',
+        `[history — ${_historyExitLabel(fullRun.exit_code)}]`,
+        _historyExitClass(fullRun.exit_code),
         tabId
       );
       if (typeof setTabStatus === 'function') {
@@ -1735,6 +1802,19 @@ function restoreHistoryRunIntoTab(run, { targetTabId = null, hidePanelOnSuccess 
       return tabId;
     });
 }
+
+function restoreHistoryRun(runOrId, options = {}) {
+  const run = typeof runOrId === 'object' && runOrId !== null
+    ? runOrId
+    : { id: String(runOrId || ''), full_output_available: true };
+  return restoreHistoryRunIntoTab(run, {
+    hidePanelOnSuccess: false,
+    ...options,
+  });
+}
+
+window.openHistoryWithFilters = openHistoryWithFilters;
+window.restoreHistoryRun = restoreHistoryRun;
 
 function refreshHistoryPanel() {
   // The panel is populated on demand so we always fetch the latest persisted

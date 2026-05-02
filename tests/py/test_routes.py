@@ -11,7 +11,7 @@ import re
 import sqlite3
 import tempfile
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 import unittest.mock as mock
@@ -1586,7 +1586,7 @@ class TestRunRoute:
             )
         assert resp.status_code == 403
         assert json.loads(resp.data)["error"] == (
-            "This browser no longer controls that run. Use Take over from Run Monitor before killing it."
+            "This browser no longer controls that run. Use Take over from Status Monitor before killing it."
         )
         pop_pid.assert_not_called()
 
@@ -1690,6 +1690,140 @@ class TestHistoryRoute:
         assert isinstance(data["runs"], list)
         assert "roots" in data
         assert isinstance(data["roots"], list)
+
+    def test_stats_returns_compact_session_counters(self):
+        client = get_client()
+        session = "history-stats-" + uuid.uuid4().hex[:8]
+        run_ids = [f"{session}-ok", f"{session}-fail", f"{session}-terminated", f"{session}-active"]
+        snapshot_id = f"{session}-snapshot"
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[0], session, "nmap -sT ip.darklab.sh", "2026-01-01T00:00:00",
+                 "2026-01-01T00:00:10", 0, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[1], session, "curl https://ip.darklab.sh", "2026-01-01T00:01:00",
+                 "2026-01-01T00:01:20", 1, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[2], session, "ping ip.darklab.sh", "2026-01-01T00:02:00",
+                 "2026-01-01T00:02:15", -15, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[3], session, "sleep 60", "2026-01-01T00:03:00", None, None, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
+                (snapshot_id, session, "snap", "2026-01-01T00:03:00", "[]"),
+            )
+            conn.execute(
+                "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                (session, "nmap -sT ip.darklab.sh"),
+            )
+            conn.commit()
+            data = json.loads(client.get("/history/stats", headers={"X-Session-ID": session}).data)
+            assert data["runs"]["total"] == 4
+            assert data["runs"]["succeeded"] == 1
+            assert data["runs"]["failed"] == 1
+            assert data["runs"]["incomplete"] == 1
+            assert abs(data["runs"]["average_elapsed_seconds"] - 15.0) < 0.01
+            assert data["snapshots"] == 1
+            assert data["starred_commands"] == 1
+            assert isinstance(data["active_runs"], int)
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("DELETE FROM runs WHERE id IN (?, ?, ?, ?)", run_ids)
+                conn.execute("DELETE FROM snapshots WHERE id = ?", (snapshot_id,))
+                conn.execute("DELETE FROM starred_commands WHERE session_id = ?", (session,))
+                conn.commit()
+
+    def test_insights_returns_visual_history_payloads(self):
+        client = get_client()
+        session = "history-insights-" + uuid.uuid4().hex[:8]
+        run_ids = [
+            f"{session}-nmap",
+            f"{session}-curl",
+            f"{session}-terminated",
+            f"{session}-sleep",
+            f"{session}-old",
+        ]
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        day_sixty = (now - timedelta(days=60)).isoformat()
+        day_ten = (now - timedelta(days=10)).isoformat()
+        day_one = (now - timedelta(days=1)).isoformat()
+        today = now.isoformat()
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[4], session, "whois old.darklab.sh", day_sixty,
+                 (now - timedelta(days=60, seconds=-2)).isoformat(), 0, "[]", 1),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[0], session, "nmap -sT ip.darklab.sh", day_ten,
+                 (now - timedelta(days=10, seconds=-10)).isoformat(), 0, "[]", 12),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[1], session, "curl https://ip.darklab.sh", day_one,
+                 (now - timedelta(days=1, seconds=-5)).isoformat(), 1, "[]", 4),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[2], session, "ping ip.darklab.sh", day_one,
+                 (now - timedelta(days=1, seconds=-15)).isoformat(), -15, "[]", 2),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[3], session, "sleep 60", today, None, None, "[]", 0),
+            )
+            conn.commit()
+            data = json.loads(client.get("/history/insights", headers={"X-Session-ID": session}).data)
+            assert data["days"] == 61
+            assert len(data["activity"]) == 61
+            assert data["start_date"] == (now - timedelta(days=60)).date().isoformat()
+            assert data["first_run_date"] == (now - timedelta(days=60)).date().isoformat()
+            assert data["windows"]["activity"]["days"] == 61
+            assert data["windows"]["command_mix"]["days"] == 90
+            assert data["windows"]["constellation"]["days"] == 90
+            assert data["windows"]["command_mix"]["sparse"] is True
+            assert data["windows"]["constellation"]["sparse"] is True
+            assert data["max_day_count"] >= 1
+            roots = {item["root"]: item for item in data["command_mix"]}
+            assert roots["nmap"]["count"] == 1
+            assert roots["nmap"]["succeeded"] == 1
+            assert roots["curl"]["failed"] == 1
+            assert roots["ping"]["count"] == 1
+            assert roots["ping"]["failed"] == 0
+            assert roots["whois"]["count"] == 1
+            assert any(item["root"] == "nmap" for item in data["constellation"])
+            assert data["events"][0]["root"] == "sleep"
+
+            fixed = json.loads(client.get("/history/insights?days=7", headers={"X-Session-ID": session}).data)
+            assert fixed["days"] == 28
+            assert len(fixed["activity"]) == 28
+            assert fixed["windows"]["activity"]["days"] == 28
+            assert fixed["windows"]["command_mix"]["days"] == 90
+            assert any(item["root"] == "nmap" for item in fixed["command_mix"])
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+                conn.commit()
 
     def test_delete_all_returns_ok(self):
         client = get_client()
@@ -2010,7 +2144,7 @@ class TestHistoryRoute:
     def test_history_filters_by_exit_code_and_recent_date_range(self):
         client = get_client()
         session = "history-date-session"
-        run_ids = ["date-run-1", "date-run-2", "date-run-3"]
+        run_ids = ["date-run-1", "date-run-2", "date-run-3", "date-run-4"]
         recent = datetime.now().replace(microsecond=0)
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -2042,6 +2176,19 @@ class TestHistoryRoute:
                     (recent - timedelta(days=40)).isoformat(),
                     (recent - timedelta(days=40) + timedelta(seconds=2)).isoformat(),
                     2,
+                    "[]",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run_ids[3],
+                    session,
+                    "ping stopped",
+                    (recent - timedelta(minutes=30)).isoformat(),
+                    (recent - timedelta(minutes=30) + timedelta(seconds=2)).isoformat(),
+                    -15,
                     "[]",
                 ),
             )

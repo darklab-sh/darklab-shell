@@ -804,6 +804,45 @@ describe('history panel actions', () => {
     expect(btn.textContent).toBe('permalink')
   })
 
+  it('renders SIGTERM-terminated runs as neutral history rows instead of failures', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            roots: ['ping'],
+            items: [
+              {
+                id: 'run-killed',
+                type: 'run',
+                command: 'ping darklab.sh',
+                started: '2026-01-01T00:00:00Z',
+                exit_code: -15,
+              },
+            ],
+            runs: [
+              {
+                id: 'run-killed',
+                command: 'ping darklab.sh',
+                started: '2026-01-01T00:00:00Z',
+                exit_code: -15,
+              },
+            ],
+          }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+    const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const exitEl = document.querySelector('#history-list .history-entry .history-entry-meta span:last-child')
+    expect(exitEl?.textContent).toBe('terminated')
+    expect(exitEl?.classList.contains('exit-neutral')).toBe(true)
+    expect(exitEl?.classList.contains('exit-fail')).toBe(false)
+  })
+
   it('opens the run comparison launcher from a history row', async () => {
     const apiFetch = vi.fn((url) => {
       if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
@@ -1612,7 +1651,7 @@ describe('history panel actions', () => {
     expect(chips).toEqual([
       expect.stringContaining('search: dig'),
       expect.stringContaining('command: nmap'),
-      expect.stringContaining('exit: non-zero'),
+      expect.stringContaining('exit: failed'),
       expect.stringContaining('date: 7d'),
       expect.stringContaining('starred'),
     ])

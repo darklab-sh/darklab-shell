@@ -600,7 +600,8 @@ def active_runs_for_session(session_id: str, client_id: str = "") -> list[dict]:
         items = []
         stale = []
         for run_id in run_ids:
-            raw = redis_client.get(f"procmeta:{run_id}")
+            meta_key = f"procmeta:{run_id}"
+            raw = redis_client.get(meta_key)
             if not raw:
                 stale.append(run_id)
                 continue
@@ -613,8 +614,11 @@ def active_runs_for_session(session_id: str, client_id: str = "") -> list[dict]:
                 continue
             if not _active_run_is_alive(payload):
                 stale.append(run_id)
-                redis_client.delete(f"procmeta:{run_id}", f"proc:{run_id}")
+                redis_client.delete(meta_key, f"proc:{run_id}")
                 continue
+            if client_id and str(payload.get("owner_client_id", "") or "") == client_id:
+                payload["owner_last_seen"] = time.time()
+                redis_client.set(meta_key, json.dumps(payload), ex=_PID_TTL)
             items.append(payload)
         if stale:
             redis_client.srem(session_key, *stale)
@@ -637,6 +641,8 @@ def active_runs_for_session(session_id: str, client_id: str = "") -> list[dict]:
             if not _active_run_is_alive(item):
                 stale.append(run_id)
                 continue
+            if client_id and str(item.get("owner_client_id", "") or "") == client_id:
+                item["owner_last_seen"] = time.time()
             items.append(_active_run_public_item(item, "memory", client_id=client_id))
         for run_id in stale:
             _active_run_meta.pop(run_id, None)

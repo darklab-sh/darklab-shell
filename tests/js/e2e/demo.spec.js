@@ -380,7 +380,7 @@ test('demo', async ({ page }) => {
   await page.locator('.tab').first().click()
   await page.waitForTimeout(2_700)
 
-  // ── Run Monitor: active run telemetry ────────────────────────────────────
+  // ── Status Monitor: active run telemetry ────────────────────────────────────
   await prepareDemoRunMonitorTelemetry(page)
   await page.locator('#hud-status-cell').hover()
   await page.waitForTimeout(550)

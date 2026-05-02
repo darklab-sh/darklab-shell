@@ -444,7 +444,7 @@
     const holdRunMonitor = !activeRunning && _runMonitorPeekHoldUntil && Date.now() < _runMonitorPeekHoldUntil;
     if (activeRunning || holdRunMonitor) {
       recentPeek.dataset.peekMode = 'run-monitor';
-      recentPeek.setAttribute('aria-label', 'Open Run Monitor');
+      recentPeek.setAttribute('aria-label', 'Open Status Monitor');
       const elapsed = activeRunning ? _formatPeekElapsed(activeTab.runStart) : '';
       if (recentPeekCount) recentPeekCount.textContent = activeRunning ? (elapsed || 'live') : 'done';
       if (recentPeekPreview) {
@@ -453,7 +453,7 @@
           : 'final state available';
       }
       const label = recentPeek.querySelector('.recent-peek-label');
-      if (label) label.textContent = 'Run Monitor';
+      if (label) label.textContent = 'Status Monitor';
       show(recentPeek);
       if (activeRunning && !_prefersReducedMotion()) {
         try {
@@ -624,6 +624,25 @@
     badge.textContent = label;
     return badge;
   }
+  const RECENTS_GRACEFUL_TERMINATION_EXIT_CODES = new Set([-15]);
+  function _recentsExitCodeNumber(exitCode) {
+    if (exitCode === null || exitCode === undefined || exitCode === '') return null;
+    const number = Number(exitCode);
+    return Number.isFinite(number) ? number : null;
+  }
+  function _recentsIsGracefulTerminationExitCode(exitCode) {
+    const code = _recentsExitCodeNumber(exitCode);
+    return code !== null && RECENTS_GRACEFUL_TERMINATION_EXIT_CODES.has(code);
+  }
+  function _recentsIsFailedExitCode(exitCode) {
+    const code = _recentsExitCodeNumber(exitCode);
+    return code !== null && code !== 0 && !RECENTS_GRACEFUL_TERMINATION_EXIT_CODES.has(code);
+  }
+  function _recentsExitLabel(exitCode) {
+    const code = _recentsExitCodeNumber(exitCode);
+    if (code === null) return '—';
+    return _recentsIsGracefulTerminationExitCode(code) ? 'terminated' : `exit ${code}`;
+  }
   function _recentsSnapshotUrl(item) {
     return `${location.origin}/share/${item.id}`;
   }
@@ -711,8 +730,8 @@
       if (isRun) {
         const exitEl = document.createElement('span');
         const exitCode = (run.exit_code ?? null);
-        exitEl.className = 'sheet-item-exit' + (exitCode !== null && exitCode !== 0 ? ' nonzero' : '');
-        exitEl.textContent = exitCode === null ? '—' : `exit ${exitCode}`;
+        exitEl.className = 'sheet-item-exit' + (_recentsIsFailedExitCode(exitCode) ? ' nonzero' : '');
+        exitEl.textContent = _recentsExitLabel(exitCode);
         meta.appendChild(exitEl);
       }
 
@@ -922,14 +941,14 @@
   const recentsChipsEl         = document.getElementById('mobile-recents-chips');
   const _dropdownLabels = {
     type: { all: 'all', runs: 'runs', snapshots: 'snapshots' },
-    exit: { all: 'all', success: 'success (0)', failed: 'failed (non-zero)' },
+    exit: { all: 'all', success: 'success (0)', failed: 'failed' },
     date: { all: 'all', today: 'today', week: 'this week' },
   };
   // Short labels used inside the active-filter chips (desktop uses the same
   // pattern: shorter inside chips than inside the filter rows).
   const _chipLabels = {
     type: { runs: 'runs', snapshots: 'snapshots' },
-    exit: { success: 'exit 0', failed: 'exit ≠ 0' },
+    exit: { success: 'exit 0', failed: 'failed' },
     date: { today: 'today', week: 'past week' },
   };
 

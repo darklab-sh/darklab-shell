@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady, runCommand } from './helpers.js'
+import { ensurePromptReady, runCommand, waitForHistoryRuns } from './helpers.js'
 
 test.describe('theme selector', () => {
   test.beforeEach(async ({ page }) => {
@@ -113,6 +113,111 @@ test.describe('FAQ modal', () => {
     // The allowed-commands section is inside a collapsed accordion — expand it first
     await page.locator('.faq-q').filter({ hasText: 'What commands are allowed?' }).click()
     await expect(page.locator('#faq-allowed-text')).toBeVisible()
+  })
+})
+
+test.describe('Status Monitor', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await ensurePromptReady(page)
+  })
+
+  test('desktop rail opens the idle Status Monitor modal', async ({ page }) => {
+    await expect(page.locator('.rail-nav [data-action="run-monitor"] .rail-nav-label')).toHaveText('status')
+
+    await page.locator('.rail-nav [data-action="run-monitor"]').click()
+
+    await expect(page.locator('#run-monitor')).toBeVisible()
+    await expect(page.locator('#run-monitor')).toHaveClass(/\brun-monitor-modal\b/)
+    await expect(page.locator('#run-monitor-title')).toHaveText('Status Monitor')
+    await expect(page.locator('.run-monitor-summary')).toContainText('0 active')
+    await expect(page.locator('.run-monitor-summary')).toContainText('uptime')
+    await expect(page.locator('.status-monitor-section-title').filter({ hasText: 'System' })).toBeVisible()
+    await expect(page.locator('.status-monitor-runs-section')).toBeVisible()
+    await expect(page.locator('.status-monitor-showcase > .status-monitor-runs-section')).toBeVisible()
+
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#run-monitor')).toBeHidden()
+  })
+
+  test('active rows sit under the pulse strip with wide telemetry', async ({ page }) => {
+    await page.route('**/history/active', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          runs: [
+            {
+              run_id: 'status-monitor-active-row',
+              pid: 4242,
+              command: 'ping -c 1000 127.0.0.1',
+              started: new Date(Date.now() - 45_000).toISOString(),
+              owner_tab_id: 'tab-1',
+              has_live_owner: true,
+              owned_by_this_client: true,
+              resource_usage: {
+                cpu_seconds: 12.5,
+                memory_bytes: 12582912,
+              },
+            },
+          ],
+        }),
+      })
+    })
+
+    await page.locator('.rail-nav [data-action="run-monitor"]').click()
+    await expect(page.locator('#run-monitor')).toBeVisible()
+
+    const showcase = page.locator('.status-monitor-showcase')
+    await expect(showcase.locator(':scope > .status-monitor-pulse-strip')).toBeVisible()
+    await expect(showcase.locator(':scope > .status-monitor-runs-section')).toBeVisible()
+    await expect(showcase.locator(':scope > .status-monitor-showcase-grid')).toBeVisible()
+    await expect(showcase.locator(':scope > .status-monitor-runs-section').locator('.run-monitor-command')).toContainText('ping -c 1000')
+    await expect(showcase.locator('.run-monitor-meta-chip').filter({ hasText: 'owned here' })).toBeVisible()
+    await expect(showcase.locator('.run-monitor-spark-panel')).toContainText('CPU/MEM 60s')
+    await expect(showcase.locator('.run-monitor-spark-values')).toHaveCount(0)
+    await expect(showcase.locator('.run-monitor-meter-mem')).toContainText('12 MB')
+    await expect(showcase.locator('.run-monitor-meter-rail')).toBeVisible()
+
+    const showcaseOrder = await showcase.evaluate((el) => (
+      [...el.children].slice(0, 3).map(child => [...child.classList][0])
+    ))
+    expect(showcaseOrder).toEqual([
+      'status-monitor-pulse-strip',
+      'status-monitor-section',
+      'status-monitor-showcase-grid',
+    ])
+  })
+
+  test('visual cards open filtered history and restore constellation runs', async ({ page }) => {
+    await runCommand(page, 'hostname')
+    await waitForHistoryRuns(page, 1)
+
+    await page.locator('.rail-nav [data-action="run-monitor"]').click()
+    await expect(page.locator('#run-monitor')).toBeVisible()
+
+    const tile = page.locator('.status-monitor-treemap-tile', { hasText: 'hostname' }).first()
+    await expect(tile).toBeVisible()
+    await tile.click()
+
+    await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#history-root-input')).toHaveValue('hostname')
+    await expect(page.locator('#history-list .history-entry').first()).toContainText('hostname')
+    await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() || '')).toBe('')
+
+    await page.locator('#history-close').click()
+    await expect(page.locator('#history-panel')).not.toHaveClass(/\bopen\b/)
+
+    await page.locator('.rail-nav [data-action="run-monitor"]').click()
+    await expect(page.locator('#run-monitor')).toBeVisible()
+    await page.locator('.status-monitor-star-node[aria-label^="hostname "]').first().click()
+
+    await expect(page.locator('#run-monitor')).toBeHidden()
+    await page.waitForFunction(() => {
+      const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
+      return !!tab && tab.command === 'hostname' && !!tab.historyRunId
+    })
+    await expect(page.locator('.tab-panel.active .output')).toContainText('[history')
   })
 })
 
@@ -240,7 +345,7 @@ test.describe('workspace modal', () => {
 test.describe('workflows modal', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
   })
 
   async function openWorkflowsModal(page) {

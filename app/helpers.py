@@ -21,6 +21,29 @@ log = logging.getLogger("shell")
 
 _IP_RE = re.compile(r"^((\d{1,3}\.){3}\d{1,3}|[0-9a-fA-F:]{2,39})$")
 _UNTRUSTED_PROXY_LOGGED_FLAG = "_untrusted_proxy_logged"
+GRACEFUL_TERMINATION_EXIT_CODE = -15
+GRACEFUL_TERMINATION_EXIT_CODES = frozenset({GRACEFUL_TERMINATION_EXIT_CODE})
+
+
+def _coerce_exit_code(exit_code):
+    if exit_code is None:
+        return None
+    try:
+        return int(exit_code)
+    except (TypeError, ValueError):
+        return None
+
+
+def is_graceful_termination_exit_code(exit_code):
+    """Return true for process exits that mean the run was externally stopped."""
+    code = _coerce_exit_code(exit_code)
+    return code in GRACEFUL_TERMINATION_EXIT_CODES
+
+
+def is_failed_exit_code(exit_code):
+    """Return true when an exit code should count as a command failure."""
+    code = _coerce_exit_code(exit_code)
+    return code is not None and code != 0 and code not in GRACEFUL_TERMINATION_EXIT_CODES
 
 
 def is_valid_anonymous_session_id(session_id):

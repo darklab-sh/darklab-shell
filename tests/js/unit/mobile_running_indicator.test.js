@@ -235,7 +235,7 @@ describe('mobile running-state indicator', () => {
     expect(chip.querySelector('.mobile-running-count').textContent).toBe('2')
   })
 
-  it('replaces the mobile recents peek with Run Monitor while the active tab is running', () => {
+  it('replaces the mobile recents peek with Status Monitor while the active tab is running', () => {
     ctx = mountModule({
       includePeek: true,
       recentPreviewHistory: ['hostname'],
@@ -249,12 +249,12 @@ describe('mobile running-state indicator', () => {
     expect(peek.classList.contains('u-hidden')).toBe(false)
     expect(peek.dataset.peekMode).toBe('run-monitor')
     expect(document.getElementById('mobile-recent-peek-count').textContent).toBe('live')
-    expect(document.querySelector('.recent-peek-label').textContent).toBe('Run Monitor')
+    expect(document.querySelector('.recent-peek-label').textContent).toBe('Status Monitor')
     expect(document.getElementById('mobile-recent-peek-preview').textContent).toBe('sleep 30')
     expect(peek.classList.contains('recent-peek-run-monitor-wiggle')).toBe(true)
   })
 
-  it('opens Run Monitor from the running peek instead of the recents sheet', () => {
+  it('opens Status Monitor from the running peek instead of the recents sheet', () => {
     const openRunMonitor = vi.fn(() => Promise.resolve(true))
     ctx = mountModule({
       includePeek: true,
@@ -268,7 +268,7 @@ describe('mobile running-state indicator', () => {
     expect(openRunMonitor).toHaveBeenCalledWith({ source: 'mobile-peek' })
   })
 
-  it('shows elapsed time for the active mobile Run Monitor peek when runStart is known', () => {
+  it('shows elapsed time for the active mobile Status Monitor peek when runStart is known', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-01T00:00:05Z'))
     ctx = mountModule({
@@ -289,7 +289,7 @@ describe('mobile running-state indicator', () => {
     vi.useRealTimers()
   })
 
-  it('suppresses the mobile Run Monitor peek wiggle for reduced motion', () => {
+  it('suppresses the mobile Status Monitor peek wiggle for reduced motion', () => {
     ctx = mountModule({
       includePeek: true,
       reducedMotion: true,

@@ -1225,7 +1225,7 @@ def kill_command():
     control_status = active_run_control_status(run_id, session_id, owner_client_id)
     if control_status == "forbidden":
         return jsonify({
-            "error": "This browser no longer controls that run. Use Take over from Run Monitor before killing it.",
+            "error": "This browser no longer controls that run. Use Take over from Status Monitor before killing it.",
         }), 403
     pid       = pid_pop_for_session(run_id, session_id)
     if not pid:

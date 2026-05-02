@@ -175,8 +175,8 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1132 pytest + 936 Vitest + 229 Playwright = 2,297 tests**.
-That total includes 2,267 behavior tests plus 30 docs/inventory meta-tests.
+Current totals: **1135 pytest + 954 Vitest + 233 Playwright = 2,322 tests**.
+That total includes 2,292 behavior tests plus 30 docs/inventory meta-tests.
 
 Playwright notes:
 

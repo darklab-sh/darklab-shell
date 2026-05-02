@@ -514,7 +514,7 @@ const scenes = [
   },
   {
     slug: 'run-monitor-active-telemetry',
-    title: 'Main UI - Run Monitor with active telemetry',
+    title: 'Main UI - Status Monitor with active telemetry',
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })

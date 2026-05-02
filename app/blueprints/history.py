@@ -9,7 +9,7 @@ import re
 import sqlite3
 import uuid
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from typing import Any
 
@@ -17,7 +17,13 @@ from flask import Blueprint, jsonify, request
 
 import config as _config
 from database import db_connect, delete_run_artifacts
-from helpers import get_client_ip, get_log_session_id, get_session_id
+from helpers import (
+    GRACEFUL_TERMINATION_EXIT_CODE,
+    get_client_ip,
+    get_log_session_id,
+    get_session_id,
+    is_failed_exit_code,
+)
 from output_signals import classify_line, command_root as output_command_root, extract_target
 from permalinks import _format_duration, _permalink_error_page, _permalink_page
 from process import active_runs_for_session
@@ -78,7 +84,8 @@ def _history_add_filters(sql, params, command_root, exit_code_filter, date_range
     if exit_code_filter == "0":
         sql += " AND r.exit_code = 0"
     elif exit_code_filter == "nonzero":
-        sql += " AND r.exit_code IS NOT NULL AND r.exit_code != 0"
+        sql += " AND r.exit_code IS NOT NULL AND r.exit_code != 0 AND r.exit_code != ?"
+        params.append(GRACEFUL_TERMINATION_EXIT_CODE)
     elif exit_code_filter == "incomplete":
         sql += " AND r.exit_code IS NULL"
     cutoff = _history_cutoff_for_range(date_range)
@@ -188,6 +195,290 @@ def _history_snapshot_base_clause(session_id, query, date_range):
         sql += " AND s.created >= ?"
         params.append(cutoff)
     return sql, params
+
+
+def _session_history_stats(conn, session_id: str) -> dict[str, Any]:
+    run_row = conn.execute(
+        """
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN exit_code = 0 THEN 1 ELSE 0 END) AS succeeded,
+               SUM(
+                   CASE
+                       WHEN exit_code IS NOT NULL AND exit_code != 0 AND exit_code != ?
+                       THEN 1
+                       ELSE 0
+                   END
+               ) AS failed,
+               SUM(CASE WHEN exit_code IS NULL THEN 1 ELSE 0 END) AS incomplete,
+               AVG(
+                   CASE
+                       WHEN started IS NOT NULL AND finished IS NOT NULL
+                       THEN (julianday(finished) - julianday(started)) * 86400.0
+                       ELSE NULL
+                   END
+               ) AS average_elapsed_seconds
+          FROM runs
+         WHERE session_id = ?
+        """,
+        (GRACEFUL_TERMINATION_EXIT_CODE, session_id),
+    ).fetchone()
+    snapshots = 0
+    if _history_table_exists(conn, "snapshots"):
+        snapshots = int(conn.execute(
+            "SELECT COUNT(*) AS count FROM snapshots WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()["count"] or 0)
+    starred = 0
+    if _history_table_exists(conn, "starred_commands"):
+        starred = int(conn.execute(
+            "SELECT COUNT(*) AS count FROM starred_commands WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()["count"] or 0)
+    return {
+        "runs": {
+            "total": int(run_row["total"] or 0),
+            "succeeded": int(run_row["succeeded"] or 0),
+            "failed": int(run_row["failed"] or 0),
+            "incomplete": int(run_row["incomplete"] or 0),
+            "average_elapsed_seconds": (
+                float(run_row["average_elapsed_seconds"])
+                if run_row["average_elapsed_seconds"] is not None
+                else None
+            ),
+        },
+        "snapshots": snapshots,
+        "starred_commands": starred,
+        "active_runs": len(active_runs_for_session(session_id)),
+    }
+
+
+def _command_category_map() -> dict[str, str]:
+    try:
+        from commands import load_commands_registry
+
+        registry = load_commands_registry()
+    except Exception:  # noqa: BLE001
+        return {}
+    categories: dict[str, str] = {}
+    for entry in registry.get("commands", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        root = str(entry.get("root") or "").strip().lower()
+        if root:
+            categories[root] = str(entry.get("category") or "Allowed commands").strip() or "Allowed commands"
+    return categories
+
+
+def _history_run_root(command: str) -> str:
+    return output_command_root(command) or str(command or "").strip().split(maxsplit=1)[0].lower() or "unknown"
+
+
+def _history_run_elapsed_seconds(row) -> float | None:
+    started = _parse_iso_datetime(row["started"])
+    finished = _parse_iso_datetime(row["finished"])
+    if not started or not finished:
+        return None
+    return max(0.0, (finished - started).total_seconds())
+
+
+def _history_insights(conn, session_id: str, *, days: int | None = None) -> dict[str, Any]:
+    today = datetime.now(timezone.utc).date()
+    first_row = conn.execute(
+        "SELECT MIN(started) AS first_started FROM runs WHERE session_id = ?",
+        (session_id,),
+    ).fetchone()
+    first_started = _parse_iso_datetime(first_row["first_started"]) if first_row else None
+    first_run_date = first_started.date() if first_started else None
+    if days is None:
+        first_day = first_run_date or today
+        days = min(365, max(28, (today - first_day).days + 1))
+    else:
+        days = min(365, max(28, int(days or 28)))
+    start_date = today - timedelta(days=days - 1)
+    fetch_days = max(days, 90)
+    fetch_start_date = today - timedelta(days=fetch_days - 1)
+    cutoff = datetime.combine(fetch_start_date, datetime.min.time()).isoformat()
+    rows = conn.execute(
+        """
+        SELECT id, command, started, finished, exit_code, output_line_count
+          FROM runs
+         WHERE session_id = ? AND started >= ?
+         ORDER BY started ASC, id ASC
+        """,
+        (session_id, cutoff),
+    ).fetchall()
+    categories = _command_category_map()
+    activity: dict[str, dict[str, Any]] = {
+        (start_date + timedelta(days=offset)).isoformat(): {
+            "date": (start_date + timedelta(days=offset)).isoformat(),
+            "count": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "incomplete": 0,
+        }
+        for offset in range(days)
+    }
+    records: list[dict[str, Any]] = []
+    recent_events: list[dict[str, Any]] = []
+
+    for row in rows:
+        root = _history_run_root(str(row["command"] or ""))
+        category = categories.get(root, "Other")
+        elapsed = _history_run_elapsed_seconds(row)
+        exit_code = row["exit_code"]
+        started_dt = _parse_iso_datetime(row["started"])
+        records.append({
+            "row": row,
+            "root": root,
+            "category": category,
+            "elapsed": elapsed,
+            "exit_code": exit_code,
+            "started_dt": started_dt,
+            "started_date": started_dt.date() if started_dt else None,
+        })
+        day_key = started_dt.date().isoformat() if started_dt else str(row["started"] or "")[:10]
+        if day_key in activity:
+            activity[day_key]["count"] += 1
+            if exit_code is None:
+                activity[day_key]["incomplete"] += 1
+            elif int(exit_code) == 0:
+                activity[day_key]["succeeded"] += 1
+            elif is_failed_exit_code(exit_code):
+                activity[day_key]["failed"] += 1
+
+    def _records_for_window(window_days: int) -> tuple[date, list[dict[str, Any]]]:
+        window_start = today - timedelta(days=window_days - 1)
+        return (
+            window_start,
+            [
+                record for record in records
+                if record["started_date"] and record["started_date"] >= window_start
+            ],
+        )
+
+    command_mix_start_30, command_mix_records_30 = _records_for_window(30)
+    command_mix_days = 30 if len(command_mix_records_30) >= 25 else 90
+    command_mix_start, command_mix_records = (
+        (command_mix_start_30, command_mix_records_30)
+        if command_mix_days == 30
+        else _records_for_window(90)
+    )
+
+    constellation_start_30, constellation_records_30 = _records_for_window(30)
+    constellation_days = 30 if len(constellation_records_30) >= 40 else 90
+    constellation_start, constellation_records = (
+        (constellation_start_30, constellation_records_30)
+        if constellation_days == 30
+        else _records_for_window(90)
+    )
+
+    command_buckets: dict[str, dict[str, Any]] = {}
+    for record in command_mix_records:
+        row = record["row"]
+        root = record["root"]
+        exit_code = record["exit_code"]
+        elapsed = record["elapsed"]
+        bucket = command_buckets.setdefault(root, {
+            "root": root,
+            "category": record["category"],
+            "count": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "incomplete": 0,
+            "durations": [],
+            "total_elapsed_seconds": 0.0,
+            "last_started": "",
+        })
+        bucket["count"] += 1
+        bucket["last_started"] = str(row["started"] or bucket["last_started"])
+        if exit_code is None:
+            bucket["incomplete"] += 1
+        elif int(exit_code) == 0:
+            bucket["succeeded"] += 1
+        elif is_failed_exit_code(exit_code):
+            bucket["failed"] += 1
+        if elapsed is not None:
+            bucket["durations"].append(elapsed)
+            bucket["total_elapsed_seconds"] += elapsed
+
+    constellation: list[dict[str, Any]] = []
+    for record in constellation_records:
+        row = record["row"]
+        constellation.append({
+            "id": str(row["id"]),
+            "root": record["root"],
+            "category": record["category"],
+            "command": str(row["command"] or ""),
+            "started": str(row["started"] or ""),
+            "elapsed_seconds": record["elapsed"],
+            "exit_code": record["exit_code"],
+            "output_line_count": int(row["output_line_count"] or 0),
+        })
+
+    command_mix = []
+    for bucket in command_buckets.values():
+        durations = bucket.pop("durations")
+        bucket["average_elapsed_seconds"] = (
+            sum(durations) / len(durations)
+            if durations
+            else None
+        )
+        command_mix.append(bucket)
+    command_mix.sort(key=lambda item: (int(item["count"]), float(item["total_elapsed_seconds"])), reverse=True)
+
+    for row in reversed(rows[-18:]):
+        elapsed = _history_run_elapsed_seconds(row)
+        recent_events.append({
+            "type": "run-finished" if row["finished"] else "run-started",
+            "root": _history_run_root(str(row["command"] or "")),
+            "command": str(row["command"] or ""),
+            "started": str(row["started"] or ""),
+            "finished": str(row["finished"] or ""),
+            "exit_code": row["exit_code"],
+            "elapsed_seconds": elapsed,
+        })
+
+    max_day_count = max((day["count"] for day in activity.values()), default=0)
+    activity_total = sum(day["count"] for day in activity.values())
+    constellation_plotted = constellation[-350:]
+    windows = {
+        "activity": {
+            "days": days,
+            "start_date": start_date.isoformat(),
+            "end_date": today.isoformat(),
+            "label": f"last {days} days",
+            "total_runs": activity_total,
+        },
+        "command_mix": {
+            "days": command_mix_days,
+            "start_date": command_mix_start.isoformat(),
+            "end_date": today.isoformat(),
+            "label": f"last {command_mix_days} days",
+            "total_runs": len(command_mix_records),
+            "sparse": command_mix_days == 90 and len(command_mix_records) < 25,
+        },
+        "constellation": {
+            "days": constellation_days,
+            "start_date": constellation_start.isoformat(),
+            "end_date": today.isoformat(),
+            "label": f"last {constellation_days} days",
+            "total_runs": len(constellation_records),
+            "plotted_runs": len(constellation_plotted),
+            "sparse": constellation_days == 90 and len(constellation_records) < 40,
+        },
+    }
+    return {
+        "days": days,
+        "start_date": start_date.isoformat(),
+        "end_date": today.isoformat(),
+        "first_run_date": first_run_date.isoformat() if first_run_date else None,
+        "activity": list(activity.values()),
+        "max_day_count": max_day_count,
+        "command_mix": command_mix[:18],
+        "constellation": constellation_plotted,
+        "events": recent_events,
+        "windows": windows,
+    }
 
 
 # ── Preview output helpers ────────────────────────────────────────────────────
@@ -739,6 +1030,37 @@ def get_history_commands():
         "runs": runs,
         "limit": limit,
     })
+
+
+@history_bp.route("/history/stats")
+def get_history_stats():
+    """Return compact session-level history counters for Status Monitor."""
+    session_id = get_session_id()
+    with db_connect() as conn:
+        payload = _session_history_stats(conn, session_id)
+    log.debug("HISTORY_STATS_VIEWED", extra={
+        "ip": get_client_ip(), "session": get_log_session_id(session_id),
+    })
+    return jsonify(payload)
+
+
+@history_bp.route("/history/insights")
+def get_history_insights():
+    """Return compact visual history data for the Status Monitor."""
+    session_id = get_session_id()
+    requested_days = _normalize_history_filter_text(request.args.get("days")).lower()
+    days = (
+        None
+        if requested_days in {"", "auto"}
+        else _parse_history_int(requested_days, 28, minimum=28, maximum=365)
+    )
+    with db_connect() as conn:
+        payload = _history_insights(conn, session_id, days=days)
+    log.debug("HISTORY_INSIGHTS_VIEWED", extra={
+        "ip": get_client_ip(), "session": get_log_session_id(session_id),
+        "days": payload.get("days"),
+    })
+    return jsonify(payload)
 
 
 @history_bp.route("/history/active")
