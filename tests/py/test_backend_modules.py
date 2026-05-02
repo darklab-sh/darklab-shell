@@ -948,7 +948,7 @@ class TestDerivedCommandRegistry:
                 "workspace_root": tmp,
                 "workspace_quota_mb": 1,
                 "workspace_max_file_mb": 1,
-                "workspace_max_files": 20,
+                "workspace_max_files": 40,
                 "workspace_inactivity_ttl_hours": 1,
             }
             session_id = "registry-workspace-flags"
@@ -958,6 +958,18 @@ class TestDerivedCommandRegistry:
                 "subdomains.txt": "www.darklab.sh\n",
                 "domains.txt": "darklab.sh\n",
                 "targets.txt": "ip.darklab.sh\n",
+                "excluded-hosts.txt": "skip.darklab.sh\n",
+                "httpx-config.yaml": "threads: 5\n",
+                "katana-config.yaml": "depth: 1\n",
+                "katana-field-config.yaml": "rules: []\n",
+                "nuclei-config.yaml": "rate-limit: 10\n",
+                "nuclei-report-config.yaml": "markdown: {}\n",
+                "nuclei-resume.cfg": "resume\n",
+                "ports.txt": "80\n443\n",
+                "resolvers.txt": "1.1.1.1\n",
+                "request.txt": "GET / HTTP/1.1\nHost: ip.darklab.sh\n\n",
+                "subfinder-config.yaml": "recursive: false\n",
+                "subfinder-provider-config.yaml": "github: []\n",
                 "ca.pem": "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n",
                 "nmap-script-args.txt": "http.useragent=darklab\n",
             }.items():
@@ -974,6 +986,12 @@ class TestDerivedCommandRegistry:
                     ["subdomains.txt"], ["dnsrecon.csv"],
                 ),
                 "subfinder -dL domains.txt -o subfinder.txt": (["domains.txt"], ["subfinder.txt"]),
+                "subfinder -dL domains.txt -oD subfinder-by-domain": (
+                    ["domains.txt"], ["subfinder-by-domain"],
+                ),
+                "subfinder -d darklab.sh -config subfinder-config.yaml -pc subfinder-provider-config.yaml -rL resolvers.txt": (
+                    ["subfinder-config.yaml", "subfinder-provider-config.yaml", "resolvers.txt"], [],
+                ),
                 "amass enum -df domains.txt -timeout 10": (["domains.txt"], ["amass"]),
                 "amass subs -d darklab.sh -names": ([], ["amass"]),
                 "amass subs -d darklab.sh -names -dir amass": ([], ["amass"]),
@@ -983,11 +1001,55 @@ class TestDerivedCommandRegistry:
                 "amass track -d darklab.sh": ([], ["amass"]),
                 "amass viz -d darklab.sh -d3 -o amass-viz": ([], ["amass-viz", "amass"]),
                 "dnsx -l subdomains.txt -o dnsx.txt": (["subdomains.txt"], ["dnsx.txt"]),
+                "pd-httpx -rr request.txt -status-code -o httpx-raw.txt": (
+                    ["request.txt"], ["httpx-raw.txt"],
+                ),
+                "pd-httpx -l urls.txt -status-code -sr -srd httpx-responses": (
+                    ["urls.txt"], ["httpx-responses"],
+                ),
+                "pd-httpx -l urls.txt -screenshot -srd httpx-screenshots -config httpx-config.yaml": (
+                    ["urls.txt", "httpx-config.yaml"], ["httpx-screenshots"],
+                ),
                 "wafw00f -i urls.txt -o wafw00f.txt": (["urls.txt"], ["wafw00f.txt"]),
                 "masscan -iL targets.txt -oL masscan.txt -p 80": (["targets.txt"], ["masscan.txt"]),
                 "testssl --fast --jsonfile testssl.json https://ip.darklab.sh": ([], ["testssl.json"]),
                 "nikto -h ip.darklab.sh -o nikto.txt": ([], ["nikto.txt"]),
                 "wpscan --url https://ip.darklab.sh -o wpscan.txt": ([], ["wpscan.txt"]),
+                "naabu -host ip.darklab.sh -pf ports.txt -ef excluded-hosts.txt -o naabu-results.txt": (
+                    ["ports.txt", "excluded-hosts.txt"], ["naabu-results.txt"],
+                ),
+                (
+                    "katana -u https://ip.darklab.sh -config katana-config.yaml "
+                    "-flc katana-field-config.yaml -elog katana-errors.log"
+                ): (
+                    ["katana-config.yaml", "katana-field-config.yaml"], ["katana-errors.log"],
+                ),
+                "katana -u https://ip.darklab.sh -sr -srd katana-responses": (
+                    [], ["katana-responses"],
+                ),
+                "katana -u https://ip.darklab.sh -sf fqdn -sfd katana-fields": (
+                    [], ["katana-fields"],
+                ),
+                "nuclei -u https://ip.darklab.sh -sresp -srd nuclei-responses": (
+                    [], ["nuclei-responses"],
+                ),
+                "nuclei -u https://ip.darklab.sh -me nuclei-markdown": (
+                    [], ["nuclei-markdown"],
+                ),
+                (
+                    "nuclei -u https://ip.darklab.sh -je nuclei-results.json "
+                    "-jle nuclei-results.jsonl -se nuclei-results.sarif"
+                ): (
+                    [], ["nuclei-results.json", "nuclei-results.jsonl", "nuclei-results.sarif"],
+                ),
+                (
+                    "nuclei -u https://ip.darklab.sh -tlog nuclei-trace.log "
+                    "-elog nuclei-errors.log -config nuclei-config.yaml "
+                    "-rc nuclei-report-config.yaml -resume nuclei-resume.cfg"
+                ): (
+                    ["nuclei-config.yaml", "nuclei-report-config.yaml", "nuclei-resume.cfg"],
+                    ["nuclei-trace.log", "nuclei-errors.log"],
+                ),
                 "nmap --script http-headers --script-args-file nmap-script-args.txt ip.darklab.sh": (
                     ["nmap-script-args.txt"], [],
                 ),

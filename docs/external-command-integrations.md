@@ -35,9 +35,11 @@ Command-specific runtime behavior is declared in `app/conf/commands.yaml` under 
 | ---- | -------------- | --- |
 | `mtr` | Adds `--report-wide` when no report mode flag is present. | Interactive `mtr` expects a real TTY and redraws in place; report mode streams clean text over SSE. |
 | `nmap` | Adds `-sT` when no scan mode is explicit. | TCP connect scans work reliably as the unprivileged `scanner` user; raw SYN scans (`-sS`) and explicit `--privileged` mode are blocked. |
-| `nuclei` | Adds `-ud /tmp/nuclei-templates` when no update-directory flag is present and wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>` when Files are enabled. | Template storage must be writable under the read-only container filesystem, while useful per-session config/resume state should be visible in Files. |
-| `subfinder` / `pd-httpx` / `katana` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>` when Files are enabled. | ProjectDiscovery tools otherwise fall back to `$HOME/.config` under `/tmp`, hiding useful session artifacts such as config and resume files. |
-| `naabu` | Adds `-scan-type c` when no scan type is present and wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>` when Files are enabled. | TCP connect scanning works reliably inside container runtimes where raw SYN scanning via libpcap may fail; config state should remain session-visible. |
+| `nuclei` | Adds `-ud /tmp/nuclei-templates` when no update-directory flag is present, wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>` when Files are enabled, and declares workspace paths for response stores, Markdown/SARIF/JSON/JSONL exports, trace/error logs, resume files, and selected config/secret inputs. | Template storage must be writable under the read-only container filesystem, while useful per-session evidence and logs should be visible in Files without exposing template caches as session artifacts. |
+| `subfinder` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>` when Files are enabled and declares workspace paths for list input, per-domain output directories, resolver lists, config files, and provider config files. | Subfinder otherwise falls back to `$HOME/.config` under `/tmp`, hiding useful session artifacts; provider configs can contain API keys and remain session-owned rather than share/export artifacts. |
+| `pd-httpx` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>` when Files are enabled and declares workspace paths for list/raw-request inputs, normal outputs, response/screenshot store directories, and config files. | Response stores and screenshots are high-value session evidence, while config state should remain visible only to the active session owner. |
+| `katana` | Wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>` when Files are enabled and declares workspace paths for list/config inputs, error logs, stored response directories, and stored field directories. | Katana can generate useful secondary request/response and field-extraction artifacts; keeping those directories in Files makes them inspectable and reusable. |
+| `naabu` | Adds `-scan-type c` when no scan type is present, wraps ProjectDiscovery config state with `XDG_CONFIG_HOME=<session workspace>` when Files are enabled, and declares workspace paths for host lists, exclude lists, ports files, and normal outputs. | TCP connect scanning works reliably inside container runtimes where raw SYN scanning via libpcap may fail; config state and secondary input lists should remain session-visible. |
 | `amass enum` / `amass subs` / `amass track` / `amass viz` | Adds managed `-dir amass` when absent, rewrites it to the session workspace, and launches with `XDG_CONFIG_HOME=<session workspace>`. | Amass v5 is database-first and auto-starts `amass engine`; the engine and CLI must use the same per-session database path instead of falling back to `$HOME/.config/amass`. |
 
 ---
@@ -54,7 +56,7 @@ Validation behavior:
 - Write and read/write flags prepare the destination path before subprocess launch.
 - Directory flags can create and prepare managed session directories.
 
-This covers normal file input/output tools such as `nmap -iL`, `nmap -oN`, `curl -o`, `ffuf -o`, `subfinder -dL`, `naabu -list`, `nuclei -l`, and Amass database directories.
+This covers normal file input/output tools such as `nmap -iL`, `nmap -oN`, `curl -o`, `ffuf -o`, `subfinder -dL`, `naabu -list`, `nuclei -l`, and Amass database directories. It also covers selected directory-producing ProjectDiscovery flags such as `katana -srd`, `katana -sfd`, `pd-httpx -srd`, `subfinder -oD`, and `nuclei -srd` / `-me`.
 
 ## Runtime Adaptations
 
@@ -124,7 +126,15 @@ This keeps useful generated state under session-visible folders such as:
 
 `nuclei` still receives `-ud /tmp/nuclei-templates` unless the user provides an update directory. Template caches are intentionally left in tmpfs because they are large, reusable container state rather than session evidence.
 
-Security note: ProjectDiscovery provider/config files can contain API keys or other operator secrets. The Files view can show them to the current session owner, but share/export flows should continue to treat generated config directories carefully and avoid publishing provider configs by default.
+Several ProjectDiscovery flags are also declared as workspace-aware paths so generated evidence and secondary outputs can be inspected in Files:
+
+- `katana -srd` / `-store-response-dir` and `katana -sfd` / `-store-field-dir`
+- `pd-httpx -srd` / `-store-response-dir`, including response stores and screenshot output directories
+- `nuclei -srd` / `-store-resp-dir`, `-me`, SARIF/JSON/JSONL exports, trace/error logs, and resume/config inputs
+- `subfinder -oD`, resolver lists, config files, and provider config files
+- `naabu` host-list, exclude-list, ports-file, and output paths
+
+Security note: ProjectDiscovery provider/config files can contain API keys or other operator secrets. The Files view can show them to the current session owner, and current share/permalink export flows only package terminal output rather than workspace directories. Future share/export package work should continue to treat generated config directories carefully and avoid publishing provider configs by default.
 
 ---
 

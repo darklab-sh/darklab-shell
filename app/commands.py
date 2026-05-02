@@ -2525,13 +2525,13 @@ def _flag_matches_token(flag: str, token: str) -> bool:
     if len(flag) == 2 and flag[0] == '-' and flag[1].isalpha():
         if token == flag:
             return True
-        # Combined short-flag group matching: `-ve` matches `-e`, `-sOL` matches `-O`.
+        # Combined short-flag group matching: `-ve` matches `-e`.
         # Only applies when the token looks like a POSIX short-flag bundle:
-        # single dash, all-alphabetic, at most 4 chars (e.g. -ef, -sVT).
-        # Tokens of 5+ chars (e.g. -host, -timeout, -list) are long-form single-dash
-        # options used by many non-POSIX tools and must match exactly.
+        # single dash, all-lowercase alphabetic, at most 4 chars (e.g. -ef, -zvn).
+        # Mixed-case tokens such as ProjectDiscovery's -oD or nmap's -sV are
+        # long-form/specialized single-dash options and must match exactly.
         if (token.startswith('-') and not token.startswith('--')
-                and len(token) <= 4 and token[1:].isalpha()):
+                and len(token) <= 4 and token[1:].isalpha() and token[1:].islower()):
             return flag[1] in token[1:]
         return False
     return token == flag
@@ -2540,7 +2540,7 @@ def _flag_matches_token(flag: str, token: str) -> bool:
 def _grouped_short_flag_members(token: str, allow_grouping_flags: set[str]) -> set[str] | None:
     if not token.startswith("-") or token.startswith("--") or len(token) < 2:
         return None
-    if not token[1:].isalpha():
+    if not token[1:].isalpha() or not token[1:].islower():
         return None
     members = {f"-{char}" for char in token[1:]}
     if not members or not members.issubset(allow_grouping_flags):
@@ -2588,6 +2588,15 @@ def _is_allowed_by_policy(command_tokens: list[str], allowed: list[str], allow_g
         if _allowed_prefix_matches_with_grouping(command_tokens, prefix_tokens, allow_grouping.get(root, set())):
             return True
     return False
+
+
+def _nmap_output_deny_matches(flag: str, token: str) -> bool:
+    if flag != "-o":
+        return False
+    return any(
+        token == output_flag or token.startswith(output_flag)
+        for output_flag in ("-oN", "-oX", "-oG", "-oA", "-oS")
+    )
 
 
 def _workspace_flag_specs_by_root() -> dict[str, list[dict[str, object]]]:
@@ -3167,7 +3176,10 @@ def _is_denied(command: str, deny_entries: list[str], *, exempt_flags: set[str] 
 
         tail = command_tokens[len(tool_prefix):]
         for idx, token in enumerate(tail):
-            if not _flag_matches_token(flag, token):
+            if not (
+                _flag_matches_token(flag, token)
+                or (command_tokens[0].lower() == "nmap" and _nmap_output_deny_matches(flag, token))
+            ):
                 continue
             if idx + 1 < len(tail) and tail[idx + 1] == "/dev/null":
                 break

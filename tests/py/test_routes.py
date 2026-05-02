@@ -2267,6 +2267,13 @@ class TestHistoryRoute:
             )
             data = json.loads(resp.data)
             assert [r["command"] for r in data["runs"]] == ["curl recent fail"]
+
+            resp = client.get(
+                "/history?exit_code=-15&date_range=24h",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+            assert [r["command"] for r in data["runs"]] == ["ping stopped"]
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])

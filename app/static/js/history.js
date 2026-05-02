@@ -299,6 +299,7 @@ function _historyActiveFilterItems() {
   if (_historyFilters.commandRoot) items.push({ key: 'commandRoot', label: `command: ${_historyFilters.commandRoot}` });
   if (_historyFilters.exitCode === '0') items.push({ key: 'exitCode', label: 'exit: 0' });
   else if (_historyFilters.exitCode === 'nonzero') items.push({ key: 'exitCode', label: 'exit: failed' });
+  else if (_historyFilters.exitCode === '-15') items.push({ key: 'exitCode', label: 'exit: terminated' });
   else if (_historyFilters.exitCode === 'incomplete') items.push({ key: 'exitCode', label: 'exit: incomplete' });
   if (_historyFilters.dateRange !== 'all') items.push({ key: 'dateRange', label: `date: ${_historyFilters.dateRange}` });
   if (_historyFilters.starredOnly) items.push({ key: 'starredOnly', label: 'starred' });
@@ -831,6 +832,31 @@ function _historyExitClass(exitCode) {
   return 'exit-neutral';
 }
 
+function _historyElapsedSeconds(run) {
+  const explicit = Number(run?.elapsed_seconds ?? run?.duration_seconds);
+  if (Number.isFinite(explicit) && explicit >= 0) return explicit;
+  const started = new Date(run?.started);
+  const finished = new Date(run?.finished);
+  if (Number.isNaN(started.getTime()) || Number.isNaN(finished.getTime())) return null;
+  return Math.max(0, (finished.getTime() - started.getTime()) / 1000);
+}
+
+function _historyElapsedLabel(run) {
+  const total = _historyElapsedSeconds(run);
+  if (total === null) return '';
+  if (total >= 3600) {
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  if (total >= 60) {
+    const minutes = Math.floor(total / 60);
+    const seconds = Math.round(total % 60);
+    return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  }
+  return `${total.toFixed(total >= 10 ? 0 : 1)}s`;
+}
+
 function _createHistoryEntry(run, isStarred) {
   const entry = document.createElement('div');
   entry.className = 'history-entry chrome-row chrome-row-clickable' + (isStarred ? ' starred row-accent-amber' : '');
@@ -877,6 +903,13 @@ function _createHistoryEntry(run, isStarred) {
     dateEl.className = 'history-entry-date';
     dateEl.textContent = startedAt.toLocaleDateString();
     meta.appendChild(dateEl);
+  }
+  const elapsedLabel = _historyElapsedLabel(run);
+  if (elapsedLabel) {
+    const elapsedEl = document.createElement('span');
+    elapsedEl.className = 'history-entry-elapsed';
+    elapsedEl.textContent = elapsedLabel;
+    meta.appendChild(elapsedEl);
   }
   const exitEl = document.createElement('span');
   exitEl.className = exitCls;

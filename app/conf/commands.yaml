@@ -965,6 +965,13 @@ commands:
         - subfinder --output
         - subfinder -dL
         - subfinder --list
+        - subfinder -oD
+        - subfinder -output-dir
+        - subfinder -config
+        - subfinder -pc
+        - subfinder -provider-config
+        - subfinder -rL
+        - subfinder -rlist
     workspace_flags:
       - flag: -dL
         mode: read
@@ -981,6 +988,34 @@ commands:
       - flag: --output
         mode: write
         value: separate_or_attached
+        format: text
+      - flag: -oD
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -output-dir
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -config
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -pc
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -provider-config
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -rL
+        mode: read
+        value: separate
+        format: text
+      - flag: -rlist
+        mode: read
+        value: separate
         format: text
     runtime_adaptations:
       inject_flags:
@@ -1002,6 +1037,9 @@ commands:
           feature_required: workspace
         - value: subfinder -dL domains.txt -silent -o subfinder-results.txt
           description: Discover subdomains for domains in a session file and save results
+          feature_required: workspace
+        - value: subfinder -dL domains.txt -silent -oD subfinder-by-domain
+          description: Discover subdomains from a session file and save per-domain outputs
           feature_required: workspace
       flags:
         - value: -h
@@ -1056,6 +1094,55 @@ commands:
           suggest:
             - value: subfinder-results.txt
               description: Save discovered subdomains
+        - value: -oD
+          description: Write per-domain results to a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: subfinder-by-domain
+              description: Save per-domain subfinder outputs
+        - value: -output-dir
+          description: Write per-domain results to a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: subfinder-by-domain
+              description: Save per-domain subfinder outputs
+        - value: -config
+          description: Read subfinder config from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: subfinder-config.yaml
+              description: Session subfinder config file
+        - value: -pc
+          description: Read provider config from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: subfinder-provider-config.yaml
+              description: Session provider config file
+        - value: -provider-config
+          description: Read provider config from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: subfinder-provider-config.yaml
+              description: Session provider config file
+        - value: -rL
+          description: Read DNS resolvers from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: resolvers.txt
+              description: Session resolver list
+        - value: -rlist
+          description: Read DNS resolvers from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: resolvers.txt
+              description: Session resolver list
   - root: amass
     category: Network Reconnaissance
     policy:
@@ -1475,6 +1562,11 @@ commands:
         - pd-httpx -list
         - pd-httpx -o
         - pd-httpx --output
+        - pd-httpx -rr
+        - pd-httpx -request
+        - pd-httpx -srd
+        - pd-httpx -store-response-dir
+        - pd-httpx -config
     workspace_flags:
       - flag: -l
         mode: read
@@ -1492,6 +1584,33 @@ commands:
         mode: write
         value: separate_or_attached
         format: text
+      - flag: -rr
+        mode: read
+        value: separate
+        format: text
+      - flag: -request
+        mode: read
+        value: separate
+        format: text
+      - flag: -srd
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -store-response-dir
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -config
+        mode: read
+        value: separate
+        format: yaml
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - env
+            - XDG_CONFIG_HOME={session_workspace}
+          position: command_prefix
+          requires_workspace: true
     autocomplete:
       examples:
         - value: pd-httpx -h
@@ -1510,6 +1629,12 @@ commands:
           feature_required: workspace
         - value: pd-httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt
           description: Summarize live URLs from a session file
+          feature_required: workspace
+        - value: pd-httpx -l urls.txt -status-code -sr -srd httpx-responses
+          description: Store HTTP responses in a session directory
+          feature_required: workspace
+        - value: pd-httpx -l urls.txt -screenshot -srd httpx-screenshots
+          description: Save screenshots in a session directory
           feature_required: workspace
       flags:
         - value: -h
@@ -1553,6 +1678,51 @@ commands:
           suggest:
             - value: httpx-results.txt
               description: Save probe results for later viewing
+        - value: -rr
+          description: Read a raw HTTP request from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: request.txt
+              description: Session raw request file
+        - value: -request
+          description: Read a raw HTTP request from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: request.txt
+              description: Session raw request file
+        - value: -sr
+          description: Store HTTP responses
+        - value: -srd
+          description: Store responses or screenshots in a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: httpx-responses
+              description: Store HTTP responses
+            - value: httpx-screenshots
+              description: Store screenshots
+        - value: -store-response-dir
+          description: Store responses or screenshots in a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: httpx-responses
+              description: Store HTTP responses
+            - value: httpx-screenshots
+              description: Store screenshots
+        - value: -ss
+          description: Save screenshots with headless browser
+        - value: -screenshot
+          description: Save screenshots with headless browser
+        - value: -config
+          description: Read httpx config from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: httpx-config.yaml
+              description: Session httpx config file
   - root: assetfinder
     category: Network Reconnaissance
     policy:
@@ -2057,6 +2227,10 @@ commands:
         - naabu -l
         - naabu --list
         - naabu -list
+        - naabu -exclude-file
+        - naabu -ef
+        - naabu -ports-file
+        - naabu -pf
     workspace_flags:
       - flag: -l
         mode: read
@@ -2077,6 +2251,22 @@ commands:
       - flag: --output
         mode: write
         value: separate_or_attached
+        format: text
+      - flag: -exclude-file
+        mode: read
+        value: separate
+        format: text
+      - flag: -ef
+        mode: read
+        value: separate
+        format: text
+      - flag: -ports-file
+        mode: read
+        value: separate
+        format: text
+      - flag: -pf
+        mode: read
+        value: separate
         format: text
     runtime_adaptations:
       inject_flags:
@@ -2102,6 +2292,9 @@ commands:
           description: Scan with minimal output
         - value: naabu -l targets.txt -p 80,443 -o naabu-results.txt
           description: Scan hosts from a session file and save open ports
+          feature_required: workspace
+        - value: naabu -l targets.txt -pf ports.txt -o naabu-results.txt
+          description: Scan hosts with ports loaded from a session file
           feature_required: workspace
       flags:
         - value: -help
@@ -2157,6 +2350,34 @@ commands:
         - value: -exclude-ports
           description: Ports to exclude from scan
           takes_value: true
+        - value: -ports-file
+          description: Read ports to scan from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: ports.txt
+              description: Session port list
+        - value: -pf
+          description: Read ports to scan from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: ports.txt
+              description: Session port list
+        - value: -exclude-file
+          description: Read hosts to exclude from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: excluded-hosts.txt
+              description: Session exclude list
+        - value: -ef
+          description: Read hosts to exclude from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: excluded-hosts.txt
+              description: Session exclude list
       arguments:
         - placeholder: <target>
           value_type: domain
@@ -2170,6 +2391,14 @@ commands:
         - katana -o
         - katana --output
         - katana -list
+        - katana -config
+        - katana -fc
+        - katana -flc
+        - katana -elog
+        - katana -srd
+        - katana -store-response-dir
+        - katana -sfd
+        - katana -store-field-dir
     workspace_flags:
       - flag: -list
         mode: read
@@ -2183,6 +2412,38 @@ commands:
         mode: write
         value: separate_or_attached
         format: text
+      - flag: -config
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -fc
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -flc
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -elog
+        mode: write
+        value: separate
+        format: text
+      - flag: -srd
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -store-response-dir
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -sfd
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -store-field-dir
+        mode: write
+        value: separate
+        kind: directory
     runtime_adaptations:
       inject_flags:
         - flags:
@@ -2201,6 +2462,12 @@ commands:
           feature_required: workspace
         - value: katana -list urls.txt -d 1 -silent -o katana-urls.txt
           description: Crawl URLs from a session file and save discovered URLs
+          feature_required: workspace
+        - value: katana -u https://ip.darklab.sh -sr -srd katana-responses
+          description: Store crawled HTTP requests and responses in a session directory
+          feature_required: workspace
+        - value: katana -u https://ip.darklab.sh -sf fqdn -sfd katana-fields
+          description: Store extracted fields in a session directory
           feature_required: workspace
       flags:
         - value: -help
@@ -2244,6 +2511,72 @@ commands:
           takes_value: true
         - value: -silent
           description: Suppress banner and output headers
+        - value: -config
+          description: Read katana config from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: katana-config.yaml
+              description: Session katana config file
+        - value: -fc
+          description: Read form-fill config from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: katana-form-config.yaml
+              description: Session katana form config file
+        - value: -flc
+          description: Read field extraction config from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: katana-field-config.yaml
+              description: Session katana field config file
+        - value: -elog
+          description: Write request error log to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: katana-errors.log
+              description: Save katana request errors
+        - value: -sr
+          description: Store HTTP requests and responses
+        - value: -srd
+          description: Store HTTP requests and responses in a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: katana-responses
+              description: Store crawled request/response files
+        - value: -store-response-dir
+          description: Store HTTP requests and responses in a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: katana-responses
+              description: Store crawled request/response files
+        - value: -sf
+          description: Store selected fields per host
+          takes_value: true
+          suggest:
+            - value: fqdn
+              description: Store discovered FQDNs
+            - value: url,path,key
+              description: Store URLs, paths, and parameter keys
+        - value: -sfd
+          description: Store extracted fields in a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: katana-fields
+              description: Store field extraction files
+        - value: -store-field-dir
+          description: Store extracted fields in a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: katana-fields
+              description: Store field extraction files
         - value: -list
           description: File with URLs to crawl
           takes_value: true
@@ -2977,6 +3310,26 @@ commands:
         - nuclei -o
         - nuclei --output
         - nuclei -me
+        - nuclei -srd
+        - nuclei -store-resp-dir
+        - nuclei -se
+        - nuclei -sarif-export
+        - nuclei -je
+        - nuclei -json-export
+        - nuclei -jle
+        - nuclei -jsonl-export
+        - nuclei -rdb
+        - nuclei -report-db
+        - nuclei -tlog
+        - nuclei -trace-log
+        - nuclei -elog
+        - nuclei -error-log
+        - nuclei -config
+        - nuclei -rc
+        - nuclei -report-config
+        - nuclei -sf
+        - nuclei -secret-file
+        - nuclei -resume
     workspace_flags:
       - flag: -l
         mode: read
@@ -2990,6 +3343,87 @@ commands:
         mode: write
         value: separate_or_attached
         format: text
+      - flag: -srd
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -store-resp-dir
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -me
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -se
+        mode: write
+        value: separate
+        format: sarif
+      - flag: -sarif-export
+        mode: write
+        value: separate
+        format: sarif
+      - flag: -je
+        mode: write
+        value: separate
+        format: json
+      - flag: -json-export
+        mode: write
+        value: separate
+        format: json
+      - flag: -jle
+        mode: write
+        value: separate
+        format: jsonl
+      - flag: -jsonl-export
+        mode: write
+        value: separate
+        format: jsonl
+      - flag: -rdb
+        mode: write
+        value: separate
+      - flag: -report-db
+        mode: write
+        value: separate
+      - flag: -tlog
+        mode: write
+        value: separate
+        format: text
+      - flag: -trace-log
+        mode: write
+        value: separate
+        format: text
+      - flag: -elog
+        mode: write
+        value: separate
+        format: text
+      - flag: -error-log
+        mode: write
+        value: separate
+        format: text
+      - flag: -config
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -rc
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -report-config
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -sf
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -secret-file
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -resume
+        mode: read
+        value: separate
     runtime_adaptations:
       inject_flags:
         - flags:
@@ -3015,6 +3449,12 @@ commands:
           description: Run TLS/SSL detection templates
         - value: nuclei -l urls.txt -severity high,critical -o nuclei-findings.txt
           description: Scan URLs from a session file and save findings
+          feature_required: workspace
+        - value: nuclei -u https://ip.darklab.sh -sresp -srd nuclei-responses
+          description: Store raw request/response evidence in a session directory
+          feature_required: workspace
+        - value: nuclei -u https://ip.darklab.sh -me nuclei-markdown
+          description: Export findings as Markdown files in a session directory
           feature_required: workspace
       flags:
         - value: -h
@@ -3060,6 +3500,92 @@ commands:
           suggest:
             - value: nuclei-findings.txt
               description: Save nuclei findings
+        - value: -sresp
+          description: Store raw request/response evidence
+        - value: -srd
+          description: Store raw request/response evidence in a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-responses
+              description: Store request/response evidence
+        - value: -store-resp-dir
+          description: Store raw request/response evidence in a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-responses
+              description: Store request/response evidence
+        - value: -me
+          description: Export Markdown findings to a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-markdown
+              description: Save Markdown finding reports
+        - value: -se
+          description: Export SARIF findings to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-results.sarif
+              description: Save SARIF findings
+        - value: -je
+          description: Export JSON findings to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-results.json
+              description: Save JSON findings
+        - value: -jle
+          description: Export JSONL findings to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-results.jsonl
+              description: Save JSONL findings
+        - value: -tlog
+          description: Write request trace log to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-trace.log
+              description: Save nuclei trace log
+        - value: -elog
+          description: Write request error log to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-errors.log
+              description: Save nuclei error log
+        - value: -config
+          description: Read nuclei config from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-config.yaml
+              description: Session nuclei config file
+        - value: -rc
+          description: Read report integration config from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-report-config.yaml
+              description: Session nuclei report config file
+        - value: -sf
+          description: Read authenticated-scan secrets from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-secrets.yaml
+              description: Session nuclei secrets file
+        - value: -resume
+          description: Resume from a session resume file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-resume.cfg
+              description: Session nuclei resume file
       arguments:
         - placeholder: <target>
           value_type: target

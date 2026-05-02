@@ -75,6 +75,7 @@ function filterRuns(runs, params) {
   const exitCode = String(params.get('exit_code') || '').trim()
   if (exitCode === '0') next = next.filter((run) => Number(run.exit_code) === 0)
   else if (exitCode === 'nonzero') next = next.filter((run) => isFailedExitCode(run.exit_code))
+  else if (exitCode === '-15') next = next.filter((run) => Number(run.exit_code) === -15)
 
   return next
 }

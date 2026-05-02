@@ -86,6 +86,9 @@ def _history_add_filters(sql, params, command_root, exit_code_filter, date_range
     elif exit_code_filter == "nonzero":
         sql += " AND r.exit_code IS NOT NULL AND r.exit_code != 0 AND r.exit_code != ?"
         params.append(GRACEFUL_TERMINATION_EXIT_CODE)
+    elif exit_code_filter == str(GRACEFUL_TERMINATION_EXIT_CODE):
+        sql += " AND r.exit_code = ?"
+        params.append(GRACEFUL_TERMINATION_EXIT_CODE)
     elif exit_code_filter == "incomplete":
         sql += " AND r.exit_code IS NULL"
     cutoff = _history_cutoff_for_range(date_range)

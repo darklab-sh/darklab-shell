@@ -1,8 +1,8 @@
 # ROADMAP
 
 This file tracks the next major product direction for darklab_shell: evolving from
-a command-at-a-time shell into a lightweight project workspace for security and
-diagnostic work.
+a command-at-a-time shell into a lightweight project/case workspace for security
+and diagnostic work.
 
 The goal is not to become a full project manager, ticket tracker, or note-taking
 app. The goal is to help an operator keep related commands, findings, snapshots,
@@ -18,6 +18,10 @@ speed and directness of the shell.
 - **Make project association cheap.** The happy path should be "run command while
   project is active" and have the app associate the run, findings, and artifacts
   automatically.
+- **Treat projects as case folders.** A project should be the first-class run
+  collection/case folder model: related runs, snapshots, findings, files,
+  labels, and targets all collect there instead of adding a second grouping
+  concept.
 - **Prefer additive metadata over duplicated data.** Runs, snapshots, findings,
   and workspace files should remain the source records. Projects should link to
   them instead of copying them.
@@ -41,12 +45,13 @@ speed and directness of the shell.
 | 0 | Preconditions and safety fixes | Low-Medium | Clearer privacy/session behavior before larger organization features build on it |
 | 1 | Project data model | Medium | Users can create projects and manually associate runs, snapshots, and files |
 | 2 | Project-aware shell flow | Medium | Active project context automatically captures new runs and generated artifacts |
-| 3 | Targets and autocomplete context | Medium | Projects can own domains, URLs, hosts, and port sets that feed filtering and suggestions |
-| 4 | Findings and annotations | Medium-High | Findings, runs, snapshots, and files can be reviewed, annotated, and filtered by project |
-| 5 | Project notes | Low-Medium | Each project gets one lightweight notes document |
-| 6 | Share/export packages | High | Runs, snapshots, findings, annotations, files, and notes can be packaged together |
-| 7 | Workflow and comparison layer | High | Projects become useful for repeatable workflows, baselines, and drift comparison |
-| 8 | Polish, mobile, and operations | Medium | Project work is smooth across desktop, mobile, diagnostics, and retention paths |
+| 3 | Run-created file artifacts | Medium | Command-created outputs are associated with their source runs and active projects |
+| 4 | Targets and autocomplete context | Medium | Projects can own domains, URLs, hosts, and port sets that feed filtering and suggestions |
+| 5 | Findings, labels, and annotations | Medium-High | Findings, runs, snapshots, and files can be reviewed, labeled, annotated, and filtered by project |
+| 6 | Project notes | Low-Medium | Each project gets one lightweight notes document |
+| 7 | Share/export packages | High | Runs, snapshots, findings, annotations, files, and notes can be packaged together |
+| 8 | Workflow and comparison layer | High | Projects become useful for repeatable workflows, baselines, and drift comparison |
+| 9 | Polish, mobile, and operations | Medium | Project work is smooth across desktop, mobile, diagnostics, and retention paths |
 
 ---
 
@@ -96,8 +101,8 @@ projects become another session-scoped persistence layer.
 
 ## Phase 1: Project Data Model
 
-Goal: introduce projects as durable organizational containers without changing
-how command execution works yet.
+Goal: introduce projects as durable organizational containers and case folders
+without changing how command execution works yet.
 
 ### P1.1 Core Project Schema
 
@@ -124,6 +129,10 @@ Add a small set of durable project tables:
 
 Design notes:
 
+- This is the implementation home for the "run collections / case folders"
+  idea. A project is the named investigation/case folder that groups related
+  runs, snapshots, findings, workspace files, artifacts, targets, notes, and
+  future packages.
 - Prefer a generic link table for early flexibility, but keep constraints and
   helper functions strict so invalid entity types do not spread through the app.
 - Keep runs/snapshots/files usable outside projects.
@@ -333,10 +342,10 @@ Port sets should support named reusable values:
 
 ---
 
-## Phase 5: Findings And Annotations
+## Phase 5: Findings, Labels, And Annotations
 
-Goal: make findings reviewable project records instead of transient signal counts
-inside one tab.
+Goal: make findings and important runs reviewable project records instead of
+transient signal counts or one-off starred history rows.
 
 ### P5.1 Persist Finding Records
 
@@ -373,7 +382,55 @@ Add lightweight review state:
 
 Support filtering by state in the project findings view.
 
-### P5.3 Annotations
+### P5.3 Run Labels And History Bookmarks
+
+Add richer saved-state labels for runs so "starred" is not the only bookmark
+state:
+
+- `baseline`
+- `finding`
+- `follow-up`
+- `customer-facing`
+- `interesting`
+- `retest`
+
+Suggested storage:
+
+- Start with a generic label/bookmark table if it stays simple:
+  - `id`
+  - `session_id`
+  - `entity_type` such as `run`, `snapshot`, `finding`, `workspace_file`
+  - `entity_id`
+  - `label`
+  - `source` such as `terminal`, `history_ui`, `project_view`, `package_flow`
+  - `created`
+- Keep the existing star as either:
+  - a compatibility flag on runs, or
+  - a special label rendered as the familiar star affordance.
+
+UI and shell behavior:
+
+- Add label chips to history rows, restored runs, project run lists, compare
+  summaries, and package builders.
+- Add label filters to history and project views.
+- Keep labels short and operator-controlled; avoid building a full tag manager
+  in the first pass.
+- Add terminal-native labeling:
+  - `tag <label>` attaches a label to the most recent completed run.
+  - `tag run <run-id> <label>` labels a specific run.
+  - `tag remove ...` or a history/project UI action removes labels.
+- Labeling from the terminal should be the fast path; the history drawer and
+  project view should make labels visible, filterable, and editable.
+
+Project behavior:
+
+- Project runs can be filtered by label.
+- Labels should feed comparison and export flows:
+  - `baseline` runs become compare candidates.
+  - `finding` / `customer-facing` runs become package candidates.
+  - `follow-up` / `retest` labels help drive project next-action views.
+
+### P5.4 Annotations
 
 Add annotations that can attach to:
 
@@ -401,7 +458,7 @@ Rules:
 - Annotations are private by default.
 - Share/export package flow chooses which annotations to include.
 
-### P5.4 Project Findings View
+### P5.5 Project Findings View
 
 - Add a project-level findings timeline/table.
 - Filter by:
@@ -410,11 +467,12 @@ Rules:
   - command root
   - severity/scope
   - review state
+  - run label/bookmark
   - annotated/unannotated
 - Allow opening the original run at the matched line.
 - Allow creating a snapshot or package from selected findings.
 
-### P5.5 Output Navigation Improvements
+### P5.6 Output Navigation Improvements
 
 Fold the old "better output navigation" idea into findings work:
 
@@ -756,9 +814,10 @@ These fit the model, but should not block the core roadmap.
 6. Add declared output artifact capture for a few high-value tools.
 7. Add project targets and autocomplete suggestions.
 8. Persist findings and add annotation support.
-9. Add project notes.
-10. Build package export around the already-linked data.
-11. Add workflow replay, baselines, and comparison after project data is real.
+9. Add run labels/history bookmarks and terminal `tag <label>`.
+10. Add project notes.
+11. Build package export around the already-linked data.
+12. Add workflow replay, baselines, and comparison after project data is real.
 
 This order keeps each phase useful on its own while avoiding the scary version
 where everything must exist before anything works.

@@ -53,6 +53,21 @@
       ]
     },
     {
+      "name": "pd_httpx_stores_responses_directory",
+      "setup_files": {
+        "urls.txt": "https://ip.darklab.sh\n"
+      },
+      "command": "pd-httpx -l urls.txt -status-code -sr -srd httpx-responses",
+      "expected_text": [
+        "[workspace] reading urls.txt",
+        "[workspace] writing httpx-responses"
+      ],
+      "cleanup_files": [
+        "urls.txt",
+        "httpx-responses"
+      ]
+    },
+    {
       "name": "gobuster_writes_results",
       "command": "gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -o gobuster-dir.txt",
       "exit_code": null,
@@ -105,6 +120,16 @@
       "cleanup_files": [
         "urls.txt",
         "katana-urls.txt"
+      ]
+    },
+    {
+      "name": "katana_stores_responses_directory",
+      "command": "katana -u https://ip.darklab.sh -d 1 -silent -sr -srd katana-responses",
+      "expected_text": [
+        "[workspace] writing katana-responses"
+      ],
+      "cleanup_files": [
+        "katana-responses"
       ]
     },
     {

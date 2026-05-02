@@ -508,6 +508,52 @@ describe('workspace UI helpers', () => {
     expect(document.getElementById('workspace-viewer-text').textContent).toContain('"id": 2')
   })
 
+  it('shows loading feedback before opening the editor for large files', async () => {
+    let resolveRead
+    let afterPaint
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/workspace/files/read')) {
+        return new Promise(resolve => {
+          resolveRead = () => resolve(responseJson({ path: 'large.txt', text: 'large file contents\n' }))
+        })
+      }
+      return Promise.resolve(responseJson({}))
+    })
+    const { handleWorkspaceFileAction } = setupWorkspace(apiFetch, {
+      window: {
+        ...window,
+        requestAnimationFrame: vi.fn((fn) => {
+          afterPaint = fn
+          return 1
+        }),
+      },
+    })
+
+    const pending = handleWorkspaceFileAction('edit', 'large.txt')
+    await flushWorkspacePromises()
+
+    expect(document.getElementById('workspace-viewer-overlay').classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('workspace-viewer-title').textContent).toBe('large.txt')
+    expect(document.getElementById('workspace-viewer').dataset.format).toBe('loading')
+    expect(document.getElementById('workspace-viewer-text').textContent).toContain('Loading file for edit...')
+    expect(document.getElementById('workspace-editor').classList.contains('u-hidden')).toBe(true)
+    expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/workspace/files/read'))).toBe(false)
+
+    afterPaint()
+    await flushWorkspacePromises()
+    resolveRead()
+    await pending
+    await flushWorkspacePromises()
+
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/read?path=large.txt')
+    expect(document.getElementById('workspace-viewer-overlay').classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('workspace-editor-overlay').classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('workspace-editor').classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('workspace-path-input').value).toBe('large.txt')
+    expect(document.getElementById('workspace-path-input').readOnly).toBe(true)
+    expect(document.getElementById('workspace-text-input').value).toBe('large file contents\n')
+  })
+
   it('refreshes the currently viewed file when the files list is refreshed', async () => {
     const apiFetch = vi.fn((url) => {
       if (String(url) === '/workspace/files') {

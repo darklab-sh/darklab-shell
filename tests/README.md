@@ -18,12 +18,12 @@ The suites are intentionally layered:
 
 Current totals:
 
-- behavior tests: 2,309
+- behavior tests: 2,312
 - docs/inventory meta-tests: 30
-- `pytest`: 1143 (1113 behavior + 30 meta)
-- `vitest`: 961
+- `pytest`: 1145 (1115 behavior + 30 meta)
+- `vitest`: 962
 - `playwright`: 235
-- total: 2,339
+- total: 2,342
 
 This document is organized in two parts:
 
@@ -2379,6 +2379,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `opens the editor with a prefilled file name from terminal commands` | Verifies that terminal-native file add/edit flows can open the Files editor with a prefilled file name. |
 | `shows file contents in a read-only viewer and keeps edit mode separate` | Verifies that View opens a read-only file display at the top of the file without exposing the larger edit form. |
 | `opens the viewer with a loading preview while a file read is pending` | Verifies that clicking View opens the viewer immediately with loading feedback before the file read and preview rendering finish. |
+| `shows loading feedback before opening the editor for large files` | Verifies that Edit opens with loading feedback before large file contents are loaded into the editor modal. |
 | `refreshes the currently viewed file when the files list is refreshed` | Verifies that Refresh updates both the file browser and the currently open read-only viewer. |
 | `refreshes the viewer directly and keeps following when scrolled to the bottom` | Verifies that the viewer Refresh button reloads the active file, keeps bottom-following scroll behavior, and shows the refresh spinner. |
 | `keeps auto-refresh off by default and refreshes only after opt-in` | Verifies that open viewer files do not poll by default, and that the Auto control starts the five-second poll only after the user enables it. |

@@ -227,7 +227,7 @@ function hideWorkspaceViewer() {
   _workspaceViewerPayloadCache = null;
 }
 
-function showWorkspaceViewerLoading(path = '') {
+function showWorkspaceViewerLoading(path = '', message = 'Loading preview...') {
   hideWorkspaceEditor();
   _workspaceStopViewerAutoRefresh();
   _workspaceViewedPath = String(path || '').trim();
@@ -252,7 +252,7 @@ function showWorkspaceViewerLoading(path = '') {
     workspaceViewerText.replaceChildren();
     const notice = document.createElement('div');
     notice.className = 'workspace-preview-notice workspace-preview-loading';
-    notice.textContent = 'Loading preview...';
+    notice.textContent = message;
     workspaceViewerText.appendChild(notice);
     workspaceViewerText.scrollTop = 0;
   }
@@ -1353,7 +1353,10 @@ async function handleWorkspaceFileAction(action, path) {
       if (_workspaceViewedPath !== String(path || '').trim()) return;
       showWorkspaceViewer(data.path || path, data.text || '', { size: data.size });
     } else if (action === 'edit') {
+      showWorkspaceViewerLoading(path, 'Loading file for edit...');
+      await _workspaceAfterPaint();
       const data = await readWorkspaceFile(path);
+      if (_workspaceViewedPath !== String(path || '').trim()) return;
       showWorkspaceEditor(data.path || path, data.text || '', { readOnlyPath: true });
     } else if (action === 'download') {
       await downloadWorkspaceFile(path);

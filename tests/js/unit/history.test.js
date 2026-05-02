@@ -493,6 +493,7 @@ describe('history panel actions', () => {
         <option value="all">all</option>
         <option value="0">0</option>
         <option value="nonzero">nonzero</option>
+        <option value="-15">-15</option>
         <option value="incomplete">incomplete</option>
       </select>
       <select id="history-date-filter">
@@ -1329,6 +1330,7 @@ describe('history panel actions', () => {
                   id: 'run-1',
                   command: 'ping darklab.sh',
                   started: '2026-04-20T09:00:00Z',
+                  finished: '2026-04-20T09:01:05Z',
                   exit_code: 0,
                 },
               ],
@@ -1343,6 +1345,12 @@ describe('history panel actions', () => {
     const timeEl = document.querySelector('.history-entry-meta span')
     expect(timeEl.textContent).not.toMatch(/ago|just now/)
     expect(timeEl.title).toBe('')
+    const metaItems = [...document.querySelectorAll('.history-entry-meta > span')]
+    const elapsedIndex = metaItems.findIndex(el => el.classList.contains('history-entry-elapsed'))
+    const exitIndex = metaItems.findIndex(el => el.classList.contains('exit-ok'))
+    expect(metaItems[elapsedIndex]?.textContent).toBe('1m 5s')
+    expect(elapsedIndex).toBeGreaterThan(0)
+    expect(exitIndex).toBeGreaterThan(elapsedIndex)
   })
 
   it('refreshHistoryPanel sends the active server-side filters to /history', async () => {
@@ -1640,7 +1648,7 @@ describe('history panel actions', () => {
 
     _setHistoryFilter('q', 'dig')
     _setHistoryFilter('commandRoot', 'nmap')
-    _setHistoryFilter('exitCode', 'nonzero')
+    _setHistoryFilter('exitCode', '-15')
     _setHistoryFilter('dateRange', '7d')
     _setHistoryFilter('starredOnly', true)
     await new Promise((resolve) => setImmediate(resolve))
@@ -1651,7 +1659,7 @@ describe('history panel actions', () => {
     expect(chips).toEqual([
       expect.stringContaining('search: dig'),
       expect.stringContaining('command: nmap'),
-      expect.stringContaining('exit: failed'),
+      expect.stringContaining('exit: terminated'),
       expect.stringContaining('date: 7d'),
       expect.stringContaining('starred'),
     ])
