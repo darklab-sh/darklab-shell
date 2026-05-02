@@ -409,10 +409,6 @@
   }
 
   function _ambientConstellationSeed() {
-    try {
-      const browserClientId = localStorage.getItem('client_id') || '';
-      if (browserClientId) return _normalizedHash(`ambient:${browserClientId}`);
-    } catch (_) {}
     if (typeof CLIENT_ID !== 'undefined' && CLIENT_ID) return _normalizedHash(`ambient:${CLIENT_ID}`);
     return _normalizedHash('ambient:darklab');
   }

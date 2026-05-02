@@ -48,6 +48,11 @@ function loadShellChrome({ fetch, preferences = {}, openRunMonitor = vi.fn(() =>
   const global = {
     document,
     window,
+    localStorage: {
+      getItem: vi.fn(() => ''),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    },
     tabs: [],
     recentPreviewHistory: [],
     renderHudClock: null,
@@ -99,7 +104,7 @@ function loadShellChrome({ fetch, preferences = {}, openRunMonitor = vi.fn(() =>
       ok: true,
       json: () => Promise.resolve({ uptime: 1, db: 'ok', redis: 'ok' }),
     }),
-    localStorage,
+    window.localStorage,
     (fn) => {
       intervalCallbacks.push(fn)
       return 1

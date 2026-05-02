@@ -578,12 +578,12 @@
 
   function _renderSession() {
     if (!hudSessionEl) return;
-    // Read directly from localStorage: SESSION_ID in session.js is declared
+    // Read directly from window storage: SESSION_ID in session.js is declared
     // with `let` so it is not attached to window; localStorage is the
     // underlying source of truth and updates synchronously across all paths
     // that change the active session token.
     let token = '';
-    try { token = localStorage.getItem('session_token') || ''; } catch (_) {}
+    try { token = global.localStorage?.getItem('session_token') || ''; } catch (_) {}
     if (token && token.startsWith('tok_')) {
       const masked = (typeof maskSessionToken === 'function') ? maskSessionToken(token) : token;
       hudSessionEl.textContent = masked;
