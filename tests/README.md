@@ -1785,8 +1785,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders unavailable telemetry chips when backend stats are absent` | Verifies that the Status Monitor still shows CPU and memory meter placeholders when backend resource telemetry is not available. |
 | `labels active runs owned by another live browser as monitor-only` | Verifies that active runs owned by another live browser render as monitor-only instead of tab-owned rows. |
 | `offers attach and kill actions for runs owned by another live browser` | Verifies that another browser's live runs expose Attach and Kill actions from the Status Monitor. |
-| `keeps kill available when another browser owns a run already attached locally` | Verifies that Status Monitor still offers Kill when the current browser already has an attached tab for a run started elsewhere. |
-| `shows attach again after an attached tab is closed` | Verifies that Status Monitor offers Attach again when the local attached tab for another browser's run has been closed. |
+| `keeps attach and kill available when another browser owns a run already attached locally` | Verifies that Status Monitor still offers Attach and Kill when the current browser already has an attached tab for a run started elsewhere. |
+| `keeps attach visible before and after an attached tab is closed` | Verifies that Status Monitor keeps Attach visible while a run has a local tab and after that tab is closed. |
 | `warms CPU samples while closed so first open can show a percent` | Verifies that a background warmup sample pair can populate CPU percentage before the monitor is opened. |
 | `does a quick follow-up refresh after opening on a baseline-only CPU sample` | Verifies that opening the Status Monitor schedules a quick second poll when CPU telemetry only has a baseline sample. |
 | `reuses the active-run row, sparkline path, and meter elements across polls` | Verifies that successive active-run polls keep the same `<article>`, sparkline `<path>`, and meter element references for a stable `run_id`, only mutating the `d` attribute and `--meter-percent` CSS variable. |

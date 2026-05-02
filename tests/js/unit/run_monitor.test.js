@@ -93,6 +93,7 @@ function loadRunMonitor({
   const insightResponses = Array.isArray(insights) ? insights : [insights]
   let responseIndex = 0
   let insightResponseIndex = 0
+  const activateTab = vi.fn()
   const apiFetch = vi.fn((url) => {
     if (String(url) === '/status') {
       return Promise.resolve({ ok: true, json: () => Promise.resolve(status) })
@@ -133,7 +134,7 @@ function loadRunMonitor({
       apiFetch,
       showToast: vi.fn(),
       getTabs: vi.fn(() => tabs),
-      activateTab: vi.fn(),
+      activateTab,
       ...(pauseBackgroundRunStreamsForStatusMonitor
         ? { pauseBackgroundRunStreamsForStatusMonitor }
         : {}),
@@ -146,6 +147,7 @@ function loadRunMonitor({
     },
     `{
       apiFetch,
+      activateTab,
       openRunMonitor: window.openRunMonitor,
       closeRunMonitor: window.closeRunMonitor,
     }`,
@@ -318,10 +320,10 @@ describe('Status Monitor', () => {
     expect(document.getElementById('run-monitor')?.classList.contains('u-hidden')).toBe(false)
   })
 
-  it('keeps kill available when another browser owns a run already attached locally', async () => {
+  it('keeps attach and kill available when another browser owns a run already attached locally', async () => {
     const attachActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
     const killActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
-    const { openRunMonitor } = loadRunMonitor({
+    const { openRunMonitor, activateTab } = loadRunMonitor({
       attachActiveRunFromMonitor,
       killActiveRunFromMonitor,
       tabs: [{ id: 'tab-2', label: 'sleep 60', runId: 'run-other-client', attachMode: 'attached' }],
@@ -341,16 +343,21 @@ describe('Status Monitor', () => {
 
     expect(document.querySelector('.run-monitor-meta')?.textContent).toContain('another browser')
     const buttons = [...document.querySelectorAll('.run-monitor-action-btn')]
-    expect(buttons.map(button => button.textContent)).toEqual(['Kill'])
+    expect(buttons.map(button => button.textContent)).toEqual(['Attach', 'Kill'])
     buttons[0].click()
     await Promise.resolve()
+    expect(activateTab).toHaveBeenCalledWith('tab-2', { focusComposer: false })
     expect(attachActiveRunFromMonitor).not.toHaveBeenCalled()
+
+    await openRunMonitor({ source: 'test' })
+    document.querySelectorAll('.run-monitor-action-btn')[1].click()
+    await Promise.resolve()
     expect(killActiveRunFromMonitor).toHaveBeenCalledWith(
       expect.objectContaining({ run_id: 'run-other-client' }),
     )
   })
 
-  it('shows attach again after an attached tab is closed', async () => {
+  it('keeps attach visible before and after an attached tab is closed', async () => {
     const attachActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
     const killActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
     const tabs = [{ id: 'tab-2', label: 'sleep 60', runId: 'run-other-client', attachMode: 'attached' }]
@@ -371,7 +378,7 @@ describe('Status Monitor', () => {
     })
 
     await openRunMonitor({ source: 'test' })
-    expect([...document.querySelectorAll('.run-monitor-action-btn')].map(button => button.textContent)).toEqual(['Kill'])
+    expect([...document.querySelectorAll('.run-monitor-action-btn')].map(button => button.textContent)).toEqual(['Attach', 'Kill'])
 
     closeRunMonitor()
     tabs.length = 0
@@ -938,8 +945,8 @@ describe('Status Monitor', () => {
     expect(document.querySelector('.status-monitor-constellation-card')?.textContent).toContain('Command Constellation')
     expect(document.querySelector('.status-monitor-constellation-card')?.textContent).toContain('last 90 days')
     expect(document.querySelector('.status-monitor-constellation-card .status-monitor-category-legend')?.textContent).toContain('Vuln')
-    expect(document.querySelectorAll('.status-monitor-constellation-guide-major')).toHaveLength(7)
-    expect(document.querySelectorAll('.status-monitor-constellation-guide-minor')).toHaveLength(6)
+    expect(document.querySelectorAll('.status-monitor-constellation-guide-major')).toHaveLength(10)
+    expect(document.querySelectorAll('.status-monitor-constellation-guide-minor')).toHaveLength(8)
     expect([...document.querySelectorAll('.status-monitor-constellation-guide-label')].map(label => label.textContent)).toEqual([
       '00',
       '04',
@@ -947,6 +954,11 @@ describe('Status Monitor', () => {
       '12',
       '16',
       '20',
+      '0s',
+      '1s',
+      '3s',
+      '7s',
+      '15s',
     ])
     expect(document.querySelector('.status-monitor-treemap-card')?.textContent).toContain('nmap')
     expect(document.querySelector('.status-monitor-treemap-card')?.textContent).toContain('last 90 days')

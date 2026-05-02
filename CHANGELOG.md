@@ -22,10 +22,12 @@ All notable changes to darklab_shell are documented here.
     - Streak connectors now require same-root, ≤2 hours between consecutive starts, and the same calendar date — a session at 23:30 → 00:30 splits at midnight rather than wrapping back across the canvas.
     - Dropped the `24` axis label from `_appendConstellationTimeGuides` (the X mapping caps at 23:59, so the rightmost cluster is unambiguously 20:00–midnight against the `20` major guide).
     - Constellation legend gained a "Failed" key for the red failure ring (when any failed run is plotted) and a small/large size key for the `Output` line-count encoding.
+    - Constellation Y axis now carries a five-tick legend (`0s`, plus quartile log-scale ticks, up to the dynamic ceiling) with horizontal major/minor guide lines that mirror the X axis pattern; the plot region shifted right to make room for the labels without pushing the right edge.
   - **Tests:**
     - Added pytest coverage in `TestHistoryRoute.test_insights_filters_app_builtin_commands` confirming built-ins drop from `constellation`, `command_mix`, `activity`, `events`, and `max_day_count` together.
     - Replaced the polling-cadence Vitest with a no-poll assertion plus a `>0 → 0` drain refresh test and a `0 → >0` no-refresh test.
     - Added Vitest coverage for the off-scale clamp + upward-tick element, the same-root + ≤2h + same-day connector predicate, and the dropped `24` axis label.
+    - Extended the constellation render Vitest assertion to lock the new five Y-axis labels and the updated major/minor horizontal guide counts to the dynamic ceiling.
     - Updated test totals across `tests/README.md`, `CONTRIBUTING.md`, `ARCHITECTURE.md`, and the in-repo release drafts.
 - **Status Monitor replaces the run-only monitor with a useful idle dashboard** — session health and active-run control now live in one first-class desktop/mobile surface.
   - **Why:** brokered attach/kill makes the monitor useful as a session command center, while an empty active-run modal was a poor idle-state experience.

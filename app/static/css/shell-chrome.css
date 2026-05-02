@@ -1312,6 +1312,10 @@
   pointer-events: none;
 }
 
+.status-monitor-constellation-guide-label-y {
+  dominant-baseline: middle;
+}
+
 .status-monitor-star {
   fill: hsl(var(--star-hue, 120) var(--star-saturation, 100%) 58%);
   stroke: color-mix(in srgb, var(--text) 58%, transparent);
@@ -1749,9 +1753,9 @@
 
 .run-monitor-item {
   display: grid;
-  grid-template-columns: minmax(220px, 0.95fr) minmax(300px, 1.45fr) auto;
+  grid-template-columns: minmax(220px, 0.95fr) minmax(230px, 1.05fr) minmax(200px, auto);
   align-items: center;
-  gap: 16px;
+  gap: 14px;
   min-height: 112px;
   padding: 14px 16px 14px 20px;
   border: 0;
@@ -1759,13 +1763,13 @@
 }
 
 .status-monitor-runs-list-medium .run-monitor-item {
-  grid-template-columns: minmax(200px, 0.95fr) minmax(260px, 1.35fr) auto;
+  grid-template-columns: minmax(200px, 0.95fr) minmax(210px, 1fr) minmax(190px, auto);
   min-height: 98px;
   padding-block: 12px;
 }
 
 .status-monitor-runs-list-many .run-monitor-item {
-  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.2fr) auto;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(170px, auto);
   min-height: 82px;
   padding-block: 10px;
 }
@@ -1826,9 +1830,11 @@
 
 .run-monitor-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
+  flex-direction: column;
+  flex-wrap: nowrap;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: 0;
 }
 
 .run-monitor-spark-panel {
@@ -1894,6 +1900,7 @@
 }
 
 .run-monitor-action-btn {
+  min-width: 62px;
   min-height: 24px;
   padding: 3px 8px;
   font-size: 10px;
@@ -1911,14 +1918,15 @@
 .run-monitor-meter-rail {
   display: flex;
   flex: 0 0 auto;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  min-width: 0;
 }
 
 .run-monitor-meter-rail .run-monitor-actions {
   justify-content: flex-end;
-  margin-top: 0;
 }
 
 .run-monitor-meters {
@@ -1933,9 +1941,18 @@
   --meter-percent: 0%;
   --meter-color: var(--green);
   display: grid;
-  grid-template-columns: 46px;
+  grid-template-columns: 54px;
   justify-items: center;
   gap: 4px;
+}
+
+.status-monitor-runs-list-medium .run-monitor-meter {
+  grid-template-columns: 50px;
+}
+
+.status-monitor-runs-list-medium .run-monitor-meter-ring {
+  width: 50px;
+  height: 50px;
 }
 
 .status-monitor-runs-list-many .run-monitor-sparkline {
@@ -1965,8 +1982,8 @@
 }
 
 .run-monitor-meter-ring {
-  width: 46px;
-  height: 46px;
+  width: 54px;
+  height: 54px;
   border-radius: 50%;
   background:
     conic-gradient(
@@ -2015,7 +2032,7 @@
   font-size: 10px;
   line-height: 1;
   text-align: center;
-  max-width: 40px;
+  max-width: 48px;
   margin: auto;
   overflow: hidden;
   text-overflow: ellipsis;

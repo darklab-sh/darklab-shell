@@ -47,6 +47,11 @@
   const PULSE_CPU_BUCKET_HYSTERESIS = 8;
   const PULSE_RECENT_CPU_SAMPLE_LIMIT = 8;
   const CONSTELLATION_POPOVER_MOVE_DELAY_MS = 80;
+  const CONSTELLATION_PLOT_LEFT = 38;
+  const CONSTELLATION_PLOT_WIDTH = 580;
+  const CONSTELLATION_PLOT_RIGHT = CONSTELLATION_PLOT_LEFT + CONSTELLATION_PLOT_WIDTH;
+  const CONSTELLATION_Y_BASELINE = 260;
+  const CONSTELLATION_Y_RANGE = 205;
   const DAY_MS = 86400000;
   const GRACEFUL_TERMINATION_EXIT_CODES = new Set([-15]);
 
@@ -1796,7 +1801,51 @@
   }
 
   function _constellationTimeGuideX(hour) {
-    return 22 + ((hour * 60) / 1440) * 596;
+    return CONSTELLATION_PLOT_LEFT + ((hour * 60) / 1440) * CONSTELLATION_PLOT_WIDTH;
+  }
+
+  function _formatConstellationAxisDuration(seconds) {
+    const total = Math.max(0, Number(seconds) || 0);
+    if (total < 1) return '0s';
+    if (total < 60) return `${Math.round(total)}s`;
+    if (total < 3600) return `${Math.round(total / 60)}m`;
+    const hours = total / 3600;
+    if (hours >= 10) return `${Math.round(hours)}h`;
+    if (Math.abs(hours - Math.round(hours)) < 0.05) return `${Math.round(hours)}h`;
+    return `${hours.toFixed(1)}h`;
+  }
+
+  function _appendConstellationElapsedGuides(svg, ceilingElapsed) {
+    const ceiling = Number.isFinite(ceilingElapsed) && ceilingElapsed > 0 ? ceilingElapsed : 1;
+    const logCeil = Math.log1p(ceiling);
+    const ticks = [
+      { fraction: 0, major: true },
+      { fraction: 0.25, major: false },
+      { fraction: 0.5, major: true },
+      { fraction: 0.75, major: false },
+      { fraction: 1, major: true },
+    ];
+    for (const { fraction, major } of ticks) {
+      const y = CONSTELLATION_Y_BASELINE - (fraction * CONSTELLATION_Y_RANGE);
+      svg.appendChild(_svgEl('line', {
+        class: major
+          ? 'status-monitor-constellation-guide status-monitor-constellation-guide-major'
+          : 'status-monitor-constellation-guide status-monitor-constellation-guide-minor',
+        x1: CONSTELLATION_PLOT_LEFT,
+        y1: y,
+        x2: CONSTELLATION_PLOT_RIGHT,
+        y2: y,
+      }));
+      const seconds = Math.expm1(fraction * logCeil);
+      const label = _svgEl('text', {
+        class: 'status-monitor-constellation-guide-label status-monitor-constellation-guide-label-y',
+        x: CONSTELLATION_PLOT_LEFT - 6,
+        y,
+        'text-anchor': 'end',
+      });
+      label.textContent = _formatConstellationAxisDuration(seconds);
+      svg.appendChild(label);
+    }
   }
 
   function _appendConstellationTimeGuides(svg) {
@@ -1826,7 +1875,7 @@
       if (hour === 24) continue;
       const label = _svgEl('text', {
         class: 'status-monitor-constellation-guide-label',
-        x: Math.max(18, Math.min(622, x)),
+        x: Math.max(CONSTELLATION_PLOT_LEFT, Math.min(CONSTELLATION_PLOT_RIGHT + 4, x)),
         y: 289,
         'text-anchor': 'middle',
       });
@@ -1967,7 +2016,11 @@
       _clearDocumentSelection();
       _restoreConstellationRun(payload.star);
     });
+    const ceilingElapsed = _computeConstellationCeiling(
+      stars.map(star => star.elapsed_seconds),
+    );
     _appendConstellationTimeGuides(svg);
+    _appendConstellationElapsedGuides(svg, ceilingElapsed);
     _ambientConstellationStars().forEach(star => {
       svg.appendChild(_svgEl('circle', {
         class: 'status-monitor-star-ambient',
@@ -1984,19 +2037,16 @@
         ].join(';'),
       }));
     });
-    const ceilingElapsed = _computeConstellationCeiling(
-      stars.map(star => star.elapsed_seconds),
-    );
     const now = Date.now();
     const plottedStars = stars.map((star) => {
       const started = Date.parse(String(star.started || '')) || now;
       const date = new Date(started);
       const minutes = date.getHours() * 60 + date.getMinutes();
       const jitter = _normalizedHash(star.id || star.command || star.root);
-      const x = 22 + (minutes / 1440) * 596 + ((jitter % 29) - 14) * 0.45;
+      const x = CONSTELLATION_PLOT_LEFT + (minutes / 1440) * CONSTELLATION_PLOT_WIDTH + ((jitter % 29) - 14) * 0.45;
       const elapsed = Number(star.elapsed_seconds || 0);
       const offScale = elapsed > ceilingElapsed;
-      const yBase = 260 - ((Math.log1p(elapsed) / Math.log1p(ceilingElapsed)) * 205);
+      const yBase = CONSTELLATION_Y_BASELINE - ((Math.log1p(elapsed) / Math.log1p(ceilingElapsed)) * CONSTELLATION_Y_RANGE);
       const y = Math.max(18, Math.min(280, yBase + (((jitter / 31) % 31) - 15) * 0.65));
       const ageDays = Math.max(0, (now - started) / 86400000);
       const opacity = Math.max(0.28, 1 - (ageDays / 34));
@@ -2789,20 +2839,34 @@
   }
 
   function _activeRunActionsSignature(run) {
-    const hasAttach = !_tabForRun(run) && typeof attachActiveRunFromMonitor === 'function';
+    const hasAttach = (
+      (typeof activateTab === 'function' && !!_tabForRun(run))
+      || typeof attachActiveRunFromMonitor === 'function'
+    );
     const hasKill = typeof killActiveRunFromMonitor === 'function';
     return `${hasAttach ? 'A' : ''}${hasKill ? 'K' : ''}`;
+  }
+
+  function _openOrAttachActiveRun(run) {
+    const currentTab = _tabForRun(run);
+    if (currentTab && typeof activateTab === 'function') {
+      activateTab(currentTab.id, { focusComposer: false });
+      return Promise.resolve(true);
+    }
+    if (typeof attachActiveRunFromMonitor === 'function') {
+      return Promise.resolve(attachActiveRunFromMonitor(run));
+    }
+    return Promise.resolve(false);
   }
 
   function _renderActiveRunActions(run) {
     const actions = document.createElement('div');
     actions.className = 'run-monitor-actions';
     actions.dataset.actionsSignature = _activeRunActionsSignature(run);
-    const tab = _tabForRun(run);
-    if (!tab && typeof attachActiveRunFromMonitor === 'function') {
-      actions.append(_runMonitorActionButton('Attach', 'Open this run in a tab', () => {
+    if ((typeof activateTab === 'function' && !!_tabForRun(run)) || typeof attachActiveRunFromMonitor === 'function') {
+      actions.append(_runMonitorActionButton('Attach', 'Open or attach this run in a tab', () => {
         const latest = activeRunByRow.get(actions.closest('.run-monitor-item')) || run;
-        return attachActiveRunFromMonitor(latest);
+        return _openOrAttachActiveRun(latest);
       }));
     }
     if (typeof killActiveRunFromMonitor === 'function') {
@@ -2822,19 +2886,10 @@
 
     const openRun = () => {
       const latest = activeRunByRow.get(item) || run;
-      const currentTab = _tabForRun(latest);
-      if (currentTab && typeof activateTab === 'function') {
-        activateTab(currentTab.id, { focusComposer: false });
-        closeRunMonitor();
-        return Promise.resolve(true);
-      }
-      if (typeof attachActiveRunFromMonitor === 'function') {
-        return Promise.resolve(attachActiveRunFromMonitor(latest)).then(attached => {
-          if (attached) closeRunMonitor();
-          return attached;
-        });
-      }
-      return Promise.resolve(false);
+      return _openOrAttachActiveRun(latest).then(attached => {
+        if (attached) closeRunMonitor();
+        return attached;
+      });
     };
 
     const tab = _tabForRun(run);
