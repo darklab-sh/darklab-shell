@@ -95,7 +95,7 @@ _CURRENT_SHORTCUTS = [
     ]),
     ("UI", [
         ({"mac": "Option+\\", "other": "Alt+\\"}, "toggle the desktop sidebar (rail) open / collapsed"),
-        ({"mac": "Option+R", "other": "Alt+R"}, "open the Status Monitor"),
+        ({"mac": "Option+M", "other": "Alt+M"}, "open the Status Monitor"),
         ({"mac": "Option+S", "other": "Alt+S"}, "toggle the transcript search bar"),
         ({"mac": "Option+H", "other": "Alt+H"}, "toggle the history drawer"),
         ({"mac": "Option+Shift+F", "other": "Alt+Shift+F"}, "open the Files modal"),

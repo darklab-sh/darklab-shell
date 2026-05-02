@@ -463,7 +463,7 @@ test.describe('mobile menu', () => {
     await page.locator('#hamburger-btn').click()
     const menu = page.locator('#mobile-menu-sheet')
     await expect(menu.locator('[data-menu-action="history"]')).toBeVisible()
-    await expect(menu.locator('[data-menu-action="run-monitor"] .menu-item-label')).toHaveText('status monitor')
+    await expect(menu.locator('[data-menu-action="run-monitor"] .menu-item-label')).toHaveText('status')
     await expect(menu.locator('[data-menu-action="workspace"] .menu-item-label')).toHaveText('files')
     await expect(menu.locator('[data-menu-action="theme"]')).toBeVisible()
   })

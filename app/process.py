@@ -491,61 +491,6 @@ def active_run_touch_owner(run_id: str, owner_client_id: str = "", owner_tab_id:
         return True
 
 
-def active_run_set_owner(run_id: str, owner_client_id: str = "", owner_tab_id: str = "") -> bool:
-    """Claim active-run UI ownership for a browser client."""
-    if not run_id or not owner_client_id:
-        return False
-
-    if redis_client:
-        meta_key = f"procmeta:{run_id}"
-        raw = redis_client.get(meta_key)
-        payload = _load_active_run_payload(raw)
-        if not payload:
-            return False
-        payload["owner_client_id"] = owner_client_id
-        payload["owner_tab_id"] = owner_tab_id
-        payload["owner_last_seen"] = time.time()
-        redis_client.set(meta_key, json.dumps(payload), ex=_PID_TTL)
-        session_id = str(payload.get("session_id", "") or "")
-        if session_id:
-            redis_client.expire(f"sessionprocs:{session_id}", _PID_TTL)
-        return True
-
-    with _pid_lock:
-        payload = _active_run_meta.get(run_id)
-        if not payload:
-            return False
-        payload["owner_client_id"] = owner_client_id
-        payload["owner_tab_id"] = owner_tab_id
-        payload["owner_last_seen"] = time.time()
-        return True
-
-
-def active_run_control_status(run_id: str, session_id: str, owner_client_id: str = "") -> str:
-    """Return whether a browser client can control an active run.
-
-    Results are:
-      - "allowed": the run has no live owner, the owner is stale, or the client owns it.
-      - "forbidden": another live browser owns the run.
-      - "missing": active-run metadata is absent or belongs to another session.
-    """
-    if not run_id or not session_id:
-        return "missing"
-
-    if redis_client:
-        payload = _load_active_run_payload(redis_client.get(f"procmeta:{run_id}"))
-    else:
-        with _pid_lock:
-            payload = dict(_active_run_meta.get(run_id) or {})
-
-    if not payload or str(payload.get("session_id", "")) != session_id:
-        return "missing"
-    owner_state = _active_run_owner_state(payload, client_id=owner_client_id)
-    if owner_state.get("has_live_owner") and not owner_state.get("owned_by_this_client"):
-        return "forbidden"
-    return "allowed"
-
-
 def active_run_remove(run_id: str) -> None:
     """Remove active-run metadata after completion or explicit kill."""
     if redis_client:

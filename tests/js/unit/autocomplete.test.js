@@ -781,7 +781,7 @@ describe('autocomplete helpers', () => {
     expect(getAutocompleteMatches('amass viz -o ', 13).map(item => item.value)).toEqual(['amass-viz'])
   })
 
-  it('tracks recent domains from structured flag and positional slots, capped per session', () => {
+  it('tracks recent domains from structured flag and positional slots, capped in memory', () => {
     const { rememberRecentDomainsFromCommand, _readRecentDomains } = fromDomScripts(
       ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
       {
@@ -838,10 +838,16 @@ describe('autocomplete helpers', () => {
       'd2.example.com',
       'd1.example.com',
     ])
+    expect(sessionStorage.getItem('recent_domains:session-a')).toBeNull()
   })
 
-  it('keeps recent domains isolated by session id', () => {
-    const makeFns = (sessionId) => fromDomScripts(
+  it('loads recent domains from the session endpoint', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve({
+      json: () => Promise.resolve({
+        domains: ['Alpha.example.com.', 'https://ignored.example', 'beta.example.org'],
+      }),
+    }))
+    const { loadRecentDomains, _readRecentDomains } = fromDomScripts(
       ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
       {
         document,
@@ -849,7 +855,40 @@ describe('autocomplete helpers', () => {
         acDropdown: document.getElementById('ac'),
         mobileComposerHost: document.getElementById('mobile-composer-host'),
         mobileCmdInput: document.getElementById('mobile-cmd'),
-        SESSION_ID: sessionId,
+        SESSION_ID: 'session-a',
+        apiFetch,
+        acSuggestions: [],
+        acContextRegistry: {},
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      loadRecentDomains,
+      _readRecentDomains,
+    }`,
+    )
+
+    await loadRecentDomains()
+
+    expect(apiFetch).toHaveBeenCalledWith('/session/recent-domains')
+    expect(_readRecentDomains()).toEqual(['alpha.example.com', 'beta.example.org'])
+  })
+
+  it('persists captured recent domains without requiring browser storage', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve({
+      json: () => Promise.resolve({ domains: ['alpha.example.com'] }),
+    }))
+    const { rememberRecentDomainsFromCommand, _readRecentDomains } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        SESSION_ID: 'session-a',
+        apiFetch,
         acSuggestions: [],
         acContextRegistry: {
           dig: {
@@ -868,12 +907,16 @@ describe('autocomplete helpers', () => {
     }`,
     )
 
-    const a = makeFns('session-a')
-    a.rememberRecentDomainsFromCommand('dig alpha.example.com')
-    const b = makeFns('session-b')
+    rememberRecentDomainsFromCommand('dig Alpha.example.com')
+    await Promise.resolve()
+    await Promise.resolve()
 
-    expect(a._readRecentDomains()).toEqual(['alpha.example.com'])
-    expect(b._readRecentDomains()).toEqual([])
+    expect(apiFetch).toHaveBeenCalledWith('/session/recent-domains', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ domains: ['alpha.example.com'] }),
+    }))
+    expect(_readRecentDomains()).toEqual(['alpha.example.com'])
+    expect(sessionStorage.getItem('recent_domains:session-a')).toBeNull()
   })
 
   it('suggests recent domains only inside known domain value slots', () => {
@@ -904,6 +947,18 @@ describe('autocomplete helpers', () => {
             expects_value: [],
             arg_hints: { __positional__: [{ value: '<domain>', value_type: 'domain', description: 'Domain name to query' }] },
           },
+          ping: {
+            flags: [
+              { value: '-c', description: 'Stop after count replies' },
+              { value: '-i', description: 'Wait interval seconds between probes' },
+            ],
+            expects_value: ['-c', '-i'],
+            arg_hints: {
+              '-c': [{ value: '4', description: 'Send four probes' }],
+              '-i': [{ value: '0.5', description: 'Half-second probe interval' }],
+              __positional__: [{ value: '<host>', value_type: 'domain', description: 'Hostname or IP address to probe' }],
+            },
+          },
         },
         acFiltered: [],
         acIndex: -1,
@@ -917,13 +972,23 @@ describe('autocomplete helpers', () => {
 
     rememberRecentDomainsFromCommand('subfinder -d alpha.example.com')
     rememberRecentDomainsFromCommand('dig beta.example.org')
+    rememberRecentDomainsFromCommand('ping darklab.sh')
 
     expect(getAutocompleteMatches('subfinder -d ', 13).map(item => item.value)).toEqual([
+      'darklab.sh',
       'beta.example.org',
       'alpha.example.com',
       '<domain>',
     ])
-    expect(getAutocompleteMatches('dig MX b', 8).map(item => item.value)).toEqual(['beta.example.org', '<domain>'])
+    expect(getAutocompleteMatches('dig MX be', 9).map(item => item.value)).toEqual(['beta.example.org', '<domain>'])
+    expect(getAutocompleteMatches('ping ', 5).map(item => item.value)).toEqual([
+      'darklab.sh',
+      'beta.example.org',
+      'alpha.example.com',
+      '-c',
+      '-i',
+      '<host>',
+    ])
     expect(getAutocompleteMatches('subfinder -o ', 13).map(item => item.value)).toEqual(['subdomains.txt'])
   })
 

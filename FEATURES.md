@@ -91,6 +91,7 @@ Full per-feature reference for darklab_shell. See the [README](README.md) for th
 - Tool suggestions load from the structured command registry at page load and use ranked exact, prefix, token-boundary, substring, and fuzzy matching; matched spans or fuzzy characters are highlighted in green.
 - App-owned built-in commands complete from a runtime context that uses the same matching engine as YAML-backed tools.
 - Workspace file paths and installed wordlist paths match by useful path segments and filename substrings, so users can type the part they remember instead of the beginning of the path.
+- Domain slots marked with `value_type: domain` capture up to 10 recent domains for the active session token and suggest them only in other marked domain slots. Recents persist across browser restarts and devices when the same `tok_...` session token is active.
 - The dropdown opens below the prompt when there is room and flips above when space is tight, preserving top-to-bottom keyboard navigation order.
 - `Tab` expands to the longest shared prefix, then cycles matches; `Shift+Tab` cycles backward; `Enter` accepts the highlighted match or runs the command if none is selected.
 - While typing a command root, a unique root match shows real example invocations for discoverability. For commands with scoped subcommands, this includes both root-level examples and subcommand examples.
@@ -104,7 +105,7 @@ Full per-feature reference for darklab_shell. See the [README](README.md) for th
 
 **Configuration:** external-tool suggestions use `conf/commands.yaml` (plus optional `conf/commands.local.yaml`). App-owned built-ins use `app/builtin_autocomplete.yaml`, which is packaged with the application rather than treated as operator config. YAML changes reload on the next page load — no server restart needed.
 
-**Related files:** `app/static/js/autocomplete.js`, `app/static/js/app.js`, `app/builtin_autocomplete.yaml`, `app/conf/commands.yaml`.
+**Related files:** `app/static/js/autocomplete.js`, `app/static/js/app.js`, `app/builtin_autocomplete.yaml`, `app/conf/commands.yaml`, `app/blueprints/session.py`, `app/database.py`.
 
 **Keyboard controls:**
 
@@ -297,6 +298,7 @@ Practical authoring guidance:
 - use `argument_limit` for commands such as `man`, `which`, or `type` where the shell should stop suggesting additional positional operands after one topic/command has already been provided
 - group related behavior together: root `examples` for broadly useful top-level invocations, subcommand `examples` for complete mode-specific invocations, flag value hints under the flag, and subcommand-specific flags under `subcommands`
 - use `arguments` for unflagged inputs like hosts, URLs, domains, files, or CIDR targets
+- add `value_type: domain` to flag or positional value slots that should capture and suggest recent domains
 - use `placeholder: "<...>"` when the hint is explanatory and should persist while typing
 - use `value: "..."` when the suggestion should be inserted and prefix-filtered normally
 - use `pipe_helpers` entries with `autocomplete.pipe.enabled: true` when a helper should appear after `command |`

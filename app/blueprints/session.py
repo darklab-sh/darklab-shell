@@ -4,8 +4,9 @@ Session token routes: session token generation and session history migration.
 
 import json
 import logging
+import re
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify, request
 
@@ -36,6 +37,9 @@ _SESSION_PREFERENCE_KEYS = {
     "pref_hud_clock",
 }
 
+_RECENT_DOMAIN_LIMIT = 10
+_DOMAIN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+
 
 def _session_kind(session_id):
     return "token" if str(session_id or "").startswith("tok_") else "anonymous"
@@ -59,6 +63,112 @@ def _normalize_session_preferences(raw):
             continue
         prefs[key] = value
     return prefs
+
+
+def _normalize_recent_domain(value):
+    text = str(value or "").strip().lower().rstrip(".")
+    if not text or len(text) > 253:
+        return ""
+    if "/" in text or ":" in text or "@" in text:
+        return ""
+    if "." not in text:
+        return ""
+    if re.fullmatch(r"\d+(?:\.\d+){3}", text):
+        return ""
+    labels = text.split(".")
+    if len(labels) < 2:
+        return ""
+    for label in labels:
+        if len(label) < 1 or len(label) > 63 or not _DOMAIN_LABEL_RE.fullmatch(label):
+            return ""
+    return text
+
+
+def _normalize_recent_domain_list(values):
+    if not isinstance(values, list):
+        return []
+    domains = []
+    for value in values:
+        domain = _normalize_recent_domain(value)
+        if domain and domain not in domains:
+            domains.append(domain)
+        if len(domains) >= _RECENT_DOMAIN_LIMIT:
+            break
+    return domains
+
+
+def _list_recent_domains(conn, session_id):
+    rows = conn.execute(
+        "SELECT domain FROM recent_domains "
+        "WHERE session_id = ? "
+        "ORDER BY last_used DESC, domain ASC "
+        "LIMIT ?",
+        (session_id, _RECENT_DOMAIN_LIMIT),
+    ).fetchall()
+    return [row["domain"] for row in rows]
+
+
+def _prune_recent_domains(conn, session_id):
+    conn.execute(
+        "DELETE FROM recent_domains "
+        "WHERE session_id = ? "
+        "AND domain NOT IN ("
+        "    SELECT domain FROM recent_domains "
+        "    WHERE session_id = ? "
+        "    ORDER BY last_used DESC, domain ASC "
+        "    LIMIT ?"
+        ")",
+        (session_id, session_id, _RECENT_DOMAIN_LIMIT),
+    )
+
+
+def _upsert_recent_domains(conn, session_id, values):
+    domains = _normalize_recent_domain_list(values)
+    if not domains:
+        return 0
+    base_time = datetime.now(timezone.utc)
+    for index, domain in enumerate(domains):
+        last_used = (base_time - timedelta(microseconds=index)).strftime("%Y-%m-%d %H:%M:%S.%f")
+        conn.execute(
+            "INSERT INTO recent_domains (session_id, domain, last_used, use_count) "
+            "VALUES (?, ?, ?, 1) "
+            "ON CONFLICT(session_id, domain) DO UPDATE SET "
+            "last_used = excluded.last_used, "
+            "use_count = recent_domains.use_count + 1",
+            (session_id, domain, last_used),
+        )
+    _prune_recent_domains(conn, session_id)
+    return len(domains)
+
+
+def _migrate_recent_domains(conn, from_session_id, to_session_id):
+    rows = conn.execute(
+        "SELECT domain, last_used, use_count FROM recent_domains "
+        "WHERE session_id = ? "
+        "ORDER BY last_used DESC, domain ASC",
+        (from_session_id,),
+    ).fetchall()
+    for row in rows:
+        domain = _normalize_recent_domain(row["domain"])
+        if not domain:
+            continue
+        conn.execute(
+            "INSERT INTO recent_domains (session_id, domain, last_used, use_count) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(session_id, domain) DO UPDATE SET "
+            "last_used = CASE "
+            "  WHEN excluded.last_used > recent_domains.last_used THEN excluded.last_used "
+            "  ELSE recent_domains.last_used "
+            "END, "
+            "use_count = recent_domains.use_count + excluded.use_count",
+            (to_session_id, domain, row["last_used"], int(row["use_count"] or 1)),
+        )
+    conn.execute(
+        "DELETE FROM recent_domains WHERE session_id = ?",
+        (from_session_id,),
+    )
+    _prune_recent_domains(conn, to_session_id)
+    return len(rows)
 
 
 @session_bp.route("/session/token/generate")
@@ -190,6 +300,37 @@ def session_token_verify():
     return jsonify({"ok": True, "exists": row is not None})
 
 
+@session_bp.route("/session/recent-domains")
+def session_recent_domains_list():
+    """Return recently used domain values for autocomplete in this session."""
+    session_id = get_session_id()
+    with db_connect() as conn:
+        domains = _list_recent_domains(conn, session_id)
+    return jsonify({"domains": domains})
+
+
+@session_bp.route("/session/recent-domains", methods=["POST"])
+def session_recent_domains_save():
+    """Persist recently used domain values for autocomplete in this session."""
+    data = request.get_json(silent=True) or {}
+    raw_domains = data.get("domains")
+    if not isinstance(raw_domains, list):
+        return jsonify({"error": "domains must be a list"}), 400
+    session_id = get_session_id()
+    with db_connect() as conn:
+        saved = _upsert_recent_domains(conn, session_id, raw_domains)
+        domains = _list_recent_domains(conn, session_id)
+        conn.commit()
+    log.debug("SESSION_RECENT_DOMAINS_SAVED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "session_kind": _session_kind(session_id),
+        "saved": saved,
+        "count": len(domains),
+    })
+    return jsonify({"ok": True, "domains": domains, "saved": saved})
+
+
 @session_bp.route("/session/migrate", methods=["POST"])
 def session_migrate():
     """Migrate all runs and snapshots from one session ID to another.
@@ -277,6 +418,7 @@ def session_migrate():
             "UPDATE user_workflows SET session_id = ? WHERE session_id = ?",
             (to_session_id, from_session_id),
         )
+        migrated_recent_domains = _migrate_recent_domains(conn, from_session_id, to_session_id)
         conn.execute(
             "DELETE FROM starred_commands WHERE session_id = ?",
             (from_session_id,),
@@ -316,6 +458,7 @@ def session_migrate():
         "migrated_preferences": migrated_preferences,
         "migrated_variables": migrated_variables,
         "migrated_workflows": migrated_workflows,
+        "migrated_recent_domains": migrated_recent_domains,
         "migrated_workspace_files": workspace_migration.migrated_files,
         "skipped_workspace_files": workspace_migration.skipped_files,
         "migrated_workspace_directories": workspace_migration.migrated_directories,
@@ -329,6 +472,7 @@ def session_migrate():
         "migrated_preferences": migrated_preferences,
         "migrated_variables": migrated_variables,
         "migrated_workflows": migrated_workflows,
+        "migrated_recent_domains": migrated_recent_domains,
         "migrated_workspace_files": workspace_migration.migrated_files,
         "skipped_workspace_files": workspace_migration.skipped_files,
         "migrated_workspace_directories": workspace_migration.migrated_directories,
@@ -495,8 +639,13 @@ def session_run_count():
             "SELECT COUNT(*) AS n FROM user_workflows WHERE session_id = ?",
             (session_id,),
         ).fetchone()
+        recent_domain_row = conn.execute(
+            "SELECT COUNT(*) AS n FROM recent_domains WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
     count = int(row["n"] if row else 0)
     workflow_count = int(workflow_row["n"] if workflow_row else 0)
+    recent_domain_count = int(recent_domain_row["n"] if recent_domain_row else 0)
     workspace_files = 0
     try:
         workspace_files = workspace_usage(session_id).file_count
@@ -509,8 +658,14 @@ def session_run_count():
         "count": count,
         "workspace_files": workspace_files,
         "workflow_count": workflow_count,
+        "recent_domain_count": recent_domain_count,
     })
-    return jsonify({"count": count, "workspace_files": workspace_files, "workflow_count": workflow_count})
+    return jsonify({
+        "count": count,
+        "workspace_files": workspace_files,
+        "workflow_count": workflow_count,
+        "recent_domain_count": recent_domain_count,
+    })
 
 
 @session_bp.route("/session/starred")

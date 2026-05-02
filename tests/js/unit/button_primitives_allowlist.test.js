@@ -43,6 +43,10 @@ function walkHtml(dir) {
 // HTML; the scan only cares about static tag/attribute shape.
 function stripJinja(src) {
   return src
+    // This suite only inspects button-like markup. Jinja-rendered CSS custom
+    // properties become invalid after delimiter stripping, which makes jsdom
+    // emit noisy stylesheet parse warnings unrelated to the button contract.
+    .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
     .replace(/\{%[\s\S]*?%\}/g, ' ')
     .replace(/\{\{[\s\S]*?\}\}/g, ' ')
     .replace(/\{#[\s\S]*?#\}/g, ' ')

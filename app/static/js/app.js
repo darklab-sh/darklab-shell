@@ -1145,7 +1145,7 @@ function handleActionShortcut(e) {
       // Files, and Status Monitor).
 // The composer is allowed to pass through so prompt-focused users can still
 // trigger chrome toggles — each branch calls preventDefault so Option-glyphs
-// (`«`, `˙`, `®`, `©`, `≤`, `ˇ`, `ß`) never leak into the prompt on macOS.
+// (`«`, `˙`, `µ`, `©`, `≤`, `ˇ`, `ß`) never leak into the prompt on macOS.
 // Other editable targets (modal inputs, search field, options textarea)
 // remain gated so typing isn't hijacked.
 //
@@ -1173,7 +1173,7 @@ function handleChromeShortcut(e) {
   }
   // All remaining chrome chords are shift-free.
   if (e.shiftKey) return false;
-  if (eventMatchesLetter(e, 'r')) {
+  if (eventMatchesLetter(e, 'm')) {
     if (typeof openRunMonitor === 'function') void openRunMonitor({ source: 'shortcut' });
     e.preventDefault();
     return true;

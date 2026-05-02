@@ -809,6 +809,7 @@ function loadRunnerFns({
     cancelPendingTerminalConfirm,
     runCommand,
     attachActiveRunFromMonitor,
+    killActiveRunFromMonitor,
     restoreActiveRunsAfterReload,
     pollActiveRunsAfterReload,
     syncActiveRunTimer,
@@ -842,6 +843,7 @@ function loadRunnerFns({
     maybeMountDeferredPrompt,
     restoreHistoryRunIntoTab,
     attachActiveRunFromMonitor: fns.attachActiveRunFromMonitor,
+    killActiveRunFromMonitor: fns.killActiveRunFromMonitor,
     _subscribeRunStream: fns._subscribeRunStream,
     pauseBackgroundRunStreamsForStatusMonitor: fns.pauseBackgroundRunStreamsForStatusMonitor,
     resumeBackgroundRunStreamsAfterStatusMonitor: fns.resumeBackgroundRunStreamsAfterStatusMonitor,
@@ -899,16 +901,16 @@ describe('runner helpers', () => {
     expect(maybeMountDeferredPrompt).toHaveBeenCalledWith('tab-1')
   })
 
-  it('doKill leaves a taken-over run read-only when the server denies control', async () => {
+  it('doKill keeps an attached run active when the server denies the kill request', async () => {
     const apiFetch = vi.fn(() => Promise.resolve({
       ok: false,
       status: 403,
       headers: { get: () => 'application/json' },
-      json: () => Promise.resolve({ error: 'This browser no longer controls that run. Use Take over from Status Monitor before killing it.' }),
+      json: () => Promise.resolve({ error: 'No such process' }),
     }))
     const appendLine = vi.fn()
     const { doKill, tabs, status } = loadRunnerFns({
-      tabs: [{ id: 'tab-1', st: 'running', runId: 'run-123', killed: false, pendingKill: false, attachMode: 'owner' }],
+      tabs: [{ id: 'tab-1', st: 'running', runId: 'run-123', killed: false, pendingKill: false, attachMode: 'attached' }],
       apiFetch,
       appendLine,
     })
@@ -918,12 +920,12 @@ describe('runner helpers', () => {
 
     expect(tabs[0].runId).toBe('run-123')
     expect(tabs[0].killed).toBe(false)
-    expect(tabs[0].attachMode).toBe('read-only')
+    expect(tabs[0].attachMode).toBe('attached')
     expect(document.querySelector('.tab-status').className).toBe('tab-status running')
-    expect(document.querySelector('.tab-kill-btn').hidden).toBe(true)
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(false)
     expect(status.className).toBe('status-pill running')
     expect(appendLine).toHaveBeenCalledWith(
-      '[kill request denied] This browser no longer controls that run. Use Take over from Status Monitor before killing it.',
+      '[kill request denied] No such process',
       'notice',
       'tab-1',
     )
@@ -1137,7 +1139,7 @@ describe('runner helpers', () => {
     expect(tabs[0].historyRunId).toBe('run-old')
   })
 
-  it('attachActiveRunFromMonitor opens a read-only subscribed tab without kill controls', async () => {
+  it('attachActiveRunFromMonitor opens an attached subscribed tab with kill controls', async () => {
     const appendLine = vi.fn()
     const apiFetch = vi.fn((url) => {
       if (String(url).startsWith('/runs/run-other/stream')) {
@@ -1156,24 +1158,21 @@ describe('runner helpers', () => {
       run_id: 'run-other',
       command: 'ping darklab.sh',
       started: '2026-01-01T00:00:00Z',
-    }, { takeover: false })).resolves.toBe(true)
+    })).resolves.toBe(true)
 
-    expect(tabs[0].attachMode).toBe('read-only')
+    expect(tabs[0].attachMode).toBe('attached')
     expect(tabs[0].st).toBe('running')
     expect(apiFetch).toHaveBeenCalledWith('/runs/run-other/stream?tab_id=tab-1')
     expect(appendLine).toHaveBeenCalledWith(
-      expect.stringContaining('[attached read-only to active run started at'),
+      expect.stringContaining('[attached to active run started at'),
       'notice',
       'tab-1',
     )
-    expect(document.querySelector('.tab-kill-btn').hidden).toBe(true)
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(false)
   })
 
-  it('attachActiveRunFromMonitor takes ownership before subscribing when requested', async () => {
+  it('attachActiveRunFromMonitor subscribes without claiming ownership', async () => {
     const apiFetch = vi.fn((url) => {
-      if (url === '/runs/run-other/owner') {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
-      }
       if (String(url).startsWith('/runs/run-other/stream')) {
         return Promise.resolve(pendingBrokerStreamResponse())
       }
@@ -1189,30 +1188,34 @@ describe('runner helpers', () => {
       run_id: 'run-other',
       command: 'ping darklab.sh',
       started: '2026-01-01T00:00:00Z',
-    }, { takeover: true })).resolves.toBe(true)
+    })).resolves.toBe(true)
 
-    expect(apiFetch).toHaveBeenNthCalledWith(1, '/runs/run-other/owner', expect.objectContaining({
-      method: 'POST',
-      body: JSON.stringify({ tab_id: 'tab-1' }),
-    }))
-    expect(apiFetch).toHaveBeenNthCalledWith(2, '/runs/run-other/stream?tab_id=tab-1')
-    expect(tabs[0].attachMode).toBe('owner')
+    expect(apiFetch).toHaveBeenCalledTimes(1)
+    expect(apiFetch).toHaveBeenCalledWith('/runs/run-other/stream?tab_id=tab-1')
+    expect(tabs[0].attachMode).toBe('attached')
     expect(document.querySelector('.tab-kill-btn').hidden).toBe(false)
   })
 
-  it('marks a subscribed tab read-only when ownership moves to another browser', () => {
+  it('keeps subscribed tabs killable on owner metadata and reports remote kills', () => {
     const appendLine = vi.fn()
     const { _handleRunStreamMessage, tabs } = loadRunnerFns({
       clientId: 'client-1',
-      tabs: [{ id: 'tab-1', st: 'running', runId: 'run-1', pendingKill: false, killed: false, attachMode: 'owner' }],
+      tabs: [{ id: 'tab-1', st: 'running', runId: 'run-1', pendingKill: false, killed: false, attachMode: 'attached' }],
       appendLine,
     })
 
     _handleRunStreamMessage({ type: 'owner', owner_client_id: 'client-2', owner_tab_id: 'tab-9' }, 'tab-1')
 
+    expect(tabs[0].attachMode).toBe('attached')
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(false)
+    expect(appendLine).not.toHaveBeenCalled()
+
+    _handleRunStreamMessage({ type: 'killed', killer_client_id: 'client-2', killer_tab_id: 'tab-9' }, 'tab-1')
+
+    expect(tabs[0].killed).toBe(true)
     expect(document.querySelector('.tab-kill-btn').hidden).toBe(true)
     expect(appendLine).toHaveBeenCalledWith(
-      'Run ownership moved to another browser. This tab is now read-only.',
+      '[killed by another browser]',
       'notice',
       'tab-1',
     )
@@ -2213,7 +2216,7 @@ describe('_sessionTokenSet verify failure behavior', () => {
     await _sessionTokenSet('tok_abcd1234efgh5678ijkl9012mnop3456', 'tab-1')
 
     expect(appendLine).toHaveBeenCalledWith(
-      'you have 1 run(s) in your current session. migrate history, files, and workflows to this session token?',
+      'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
       '',
       'tab-1',
     )
@@ -3122,7 +3125,7 @@ describe('session-token set pending prompt', () => {
     await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 1 run(s) in your current session. migrate history, files, and workflows to this session token?',
+        'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
         '',
         'tab-1',
       ),
@@ -3136,7 +3139,7 @@ describe('session-token set pending prompt', () => {
     )
     expect(appendLine).toHaveBeenNthCalledWith(
       2,
-      'you have 1 run(s) in your current session. migrate history, files, and workflows to this session token?',
+      'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
       '',
       'tab-1',
     )
@@ -3169,7 +3172,7 @@ describe('session-token set pending prompt', () => {
       '',
       'tab-1',
     )
-    expect(appendLine).toHaveBeenCalledWith('History and file migration skipped.', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('History, file, workflow, and recent-domain migration skipped.', '', 'tab-1')
     expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
   })
 
@@ -3197,7 +3200,7 @@ describe('session-token set pending prompt', () => {
     await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 1 run(s) in your current session. migrate history, files, and workflows to this session token?',
+        'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
         '',
         'tab-1',
       ),
@@ -3241,7 +3244,7 @@ describe('session-token set pending prompt', () => {
     await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 1 run(s) in your current session. migrate history, files, and workflows to this session token?',
+        'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
         '',
         'tab-1',
       ),
@@ -3279,7 +3282,7 @@ describe('session-token set pending prompt', () => {
 
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 73 run(s) in your current session. migrate history, files, and workflows to this session token?',
+        'you have 73 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
         '',
         'tab-1',
       ),
@@ -3307,7 +3310,7 @@ describe('session-token set pending prompt', () => {
 
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 2 workspace file(s) in your current session. migrate history, files, and workflows to this session token?',
+        'you have 2 workspace file(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
         '',
         'tab-1',
       ),

@@ -243,27 +243,15 @@ function _filterAutocompleteItems(items, query) {
 }
 
 const RECENT_DOMAIN_LIMIT = 10;
-
-function _recentDomainsSessionKey(sessionId = (typeof SESSION_ID !== 'undefined' ? SESSION_ID : 'session')) {
-  return `recent_domains:${String(sessionId || 'session')}`;
-}
+let acRecentDomains = [];
+const acRecentDomainPersistPromises = new Set();
 
 function _readRecentDomains() {
-  try {
-    const raw = sessionStorage.getItem(_recentDomainsSessionKey());
-    const parsed = JSON.parse(raw || '[]');
-    return Array.isArray(parsed)
-      ? parsed.map(value => String(value || '').trim().toLowerCase()).filter(Boolean).slice(0, RECENT_DOMAIN_LIMIT)
-      : [];
-  } catch (_) {
-    return [];
-  }
+  return acRecentDomains.slice(0, RECENT_DOMAIN_LIMIT);
 }
 
 function _writeRecentDomains(items) {
-  try {
-    sessionStorage.setItem(_recentDomainsSessionKey(), JSON.stringify(items.slice(0, RECENT_DOMAIN_LIMIT)));
-  } catch (_) { /* non-critical */ }
+  return setRecentDomains(items);
 }
 
 function _isDomainValue(value) {
@@ -282,6 +270,64 @@ function _isDomainValue(value) {
 function _normalizeRecentDomain(value) {
   const text = String(value || '').trim().toLowerCase().replace(/\.$/, '');
   return _isDomainValue(text) ? text : '';
+}
+
+function _normalizeRecentDomainList(items) {
+  const next = [];
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const domain = _normalizeRecentDomain(item);
+    if (!domain || next.includes(domain)) return;
+    next.push(domain);
+  });
+  return next.slice(0, RECENT_DOMAIN_LIMIT);
+}
+
+function setRecentDomains(items) {
+  acRecentDomains = _normalizeRecentDomainList(items);
+  return _readRecentDomains();
+}
+
+function loadRecentDomains() {
+  if (typeof apiFetch !== 'function') return Promise.resolve(_readRecentDomains());
+  return apiFetch('/session/recent-domains')
+    .then(resp => (resp && typeof resp.json === 'function' ? resp.json() : {}))
+    .then((data) => {
+      if (data && Array.isArray(data.domains)) return setRecentDomains(data.domains);
+      return _readRecentDomains();
+    })
+    .catch((err) => {
+      if (typeof logClientError === 'function') logClientError('failed to load recent domains', err);
+      return _readRecentDomains();
+    });
+}
+
+function _persistRecentDomains(items) {
+  const domains = _normalizeRecentDomainList(items);
+  if (!domains.length || typeof apiFetch !== 'function') return Promise.resolve(null);
+  const request = apiFetch('/session/recent-domains', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ domains }),
+  })
+    .then(resp => (resp && typeof resp.json === 'function' ? resp.json() : null))
+    .then((data) => {
+      if (data && Array.isArray(data.domains)) setRecentDomains(data.domains);
+      return data;
+    })
+    .catch((err) => {
+      if (typeof logClientError === 'function') logClientError('failed to save recent domains', err);
+      return null;
+    });
+  const tracked = request.finally(() => {
+    acRecentDomainPersistPromises.delete(tracked);
+  });
+  acRecentDomainPersistPromises.add(tracked);
+  return tracked;
+}
+
+function flushRecentDomains() {
+  if (!acRecentDomainPersistPromises.size) return Promise.resolve([]);
+  return Promise.all(Array.from(acRecentDomainPersistPromises)).catch(() => []);
 }
 
 function _itemLooksLikeDomainSlot(item) {
@@ -532,6 +578,7 @@ function rememberRecentDomainsFromCommand(command) {
     next.push(domain);
   });
   _writeRecentDomains(next);
+  _persistRecentDomains(found);
   return found;
 }
 
@@ -898,7 +945,12 @@ function _buildContextAutocomplete(ctx) {
         replaceEnd: ctx.tokenEnd,
         insertValue: item.insertValue != null ? item.insertValue : null,
       }));
-      return filteredFlags.concat(positionalItems);
+      return _withTypedValueSlotSuggestions(
+        ctx,
+        filteredFlags.concat(positionalItems),
+        domainValueSlot,
+        wordlistValueSlot,
+      );
     }
     return filteredFlags;
   }

@@ -3963,14 +3963,14 @@ describe('app helpers', () => {
     expect(copyTab).toHaveBeenCalledWith('tab-1')
   })
 
-  it('supports Alt+R to open the status monitor from the terminal prompt', async () => {
+  it('supports Alt+M to open the status monitor from the terminal prompt', async () => {
     const openRunMonitor = vi.fn(() => Promise.resolve(true))
     const { cmdInput } = await loadAppFns({
       openRunMonitor,
       tabs: [{ id: 'tab-1', st: 'idle' }],
     })
 
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', altKey: true, bubbles: true }))
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', altKey: true, bubbles: true }))
 
     expect(openRunMonitor).toHaveBeenCalledWith({ source: 'shortcut' })
   })

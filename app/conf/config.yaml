@@ -287,8 +287,8 @@
 # Server default if unset: 20
 # run_broker_heartbeat_seconds: 20
 
-# How long an owner browser can go without touching a run before ownership is
-# considered stale and another browser can reconnect/take over.
+# How long an origin browser can go without touching a run before that origin
+# is considered stale and another browser can reconnect/restore it.
 # Server default if unset: 75
 # run_broker_owner_stale_seconds: 75
 

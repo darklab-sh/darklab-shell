@@ -2281,7 +2281,7 @@ class TestActiveRunMetadata:
         assert run["owner_last_seen"] == 1101.0
         assert run["owner_stale"] is False
 
-    def test_active_run_set_owner_replaces_owner_metadata(self):
+    def test_active_run_owner_metadata_remains_provenance_only(self):
         with (
             mock.patch.object(process, "_pid_is_alive", return_value=True),
             mock.patch.object(process, "_pid_start_time", return_value=None),
@@ -2296,24 +2296,22 @@ class TestActiveRunMetadata:
                 owner_client_id="client-1",
                 owner_tab_id="tab-1",
             )
-
-        with mock.patch.object(process.time, "time", return_value=1100.0):
-            assert process.active_run_set_owner("run-owned", "client-2", "tab-2") is True
 
         with (
             mock.patch.object(process, "_pid_is_alive", return_value=True),
             mock.patch.object(process.time, "time", return_value=1101.0),
         ):
-            old_owner = process.active_runs_for_session("session-1", client_id="client-1")[0]
-            new_owner = process.active_runs_for_session("session-1", client_id="client-2")[0]
+            origin = process.active_runs_for_session("session-1", client_id="client-1")[0]
+            attached = process.active_runs_for_session("session-1", client_id="client-2")[0]
 
-        assert old_owner["owned_by_this_client"] is False
-        assert new_owner["owned_by_this_client"] is True
-        assert new_owner["owner_client_id"] == "client-2"
-        assert new_owner["owner_tab_id"] == "tab-2"
-        assert new_owner["owner_last_seen"] == 1101.0
+        assert origin["owned_by_this_client"] is True
+        assert attached["owned_by_this_client"] is False
+        assert attached["has_live_owner"] is True
+        assert attached["owner_client_id"] == "client-1"
+        assert attached["owner_tab_id"] == "tab-1"
+        assert not hasattr(process, "active_run_set_owner")
 
-    def test_active_run_control_status_requires_live_owner(self):
+    def test_pid_pop_for_session_is_the_active_run_permission_boundary(self):
         with (
             mock.patch.object(process, "_pid_is_alive", return_value=True),
             mock.patch.object(process, "_pid_start_time", return_value=None),
@@ -2328,14 +2326,14 @@ class TestActiveRunMetadata:
                 owner_client_id="client-1",
                 owner_tab_id="tab-1",
             )
+            process.pid_register("run-owned", 12345)
 
-        with mock.patch.object(process.time, "time", return_value=1030.0):
-            assert process.active_run_control_status("run-owned", "session-1", "client-1") == "allowed"
-            assert process.active_run_control_status("run-owned", "session-1", "client-2") == "forbidden"
+        assert process.pid_pop_for_session("run-owned", "session-2") is None
+        assert process.pid_pop_for_session("run-owned", "session-1") == 12345
 
-        with mock.patch.object(process.time, "time", return_value=1200.0):
-            assert process.active_run_control_status("run-owned", "session-1", "client-2") == "allowed"
-            assert process.active_run_control_status("run-owned", "session-2", "client-1") == "missing"
+        with process._pid_lock:
+            assert "run-owned" not in process._pid_map
+            assert "run-owned" not in process._active_run_meta
 
     def test_active_runs_for_session_prunes_dead_pid(self):
         with mock.patch.object(process, "_pid_start_time", return_value=None):

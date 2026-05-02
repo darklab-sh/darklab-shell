@@ -3,6 +3,10 @@ import { fromDomScripts } from './helpers/extract.js'
 
 // The tabs module owns a large amount of DOM state, so these tests build a
 // minimal but realistic shell scaffold rather than mocking every interaction.
+async function flushPromises(times = 4) {
+  for (let i = 0; i < times; i += 1) await Promise.resolve()
+}
+
 function touchPointerEvent(type, init) {
   const event = new Event(type, { bubbles: true, cancelable: true })
   Object.assign(event, init)
@@ -29,6 +33,8 @@ function loadTabsFns({
   welcomeBootPending = undefined,
   clipboardWrite = () => Promise.resolve(),
   doKill = vi.fn(),
+  showConfirm = undefined,
+  detachRunStreamForTab = undefined,
   acFiltered: acFilteredOverride = [],
   acHide: acHideOverride = () => {},
   urlImpl = {
@@ -93,6 +99,8 @@ function loadTabsFns({
       clearSearch: () => {},
       confirmKill: () => {},
       doKill,
+      ...(showConfirm ? { showConfirm } : {}),
+      ...(detachRunStreamForTab ? { detachRunStreamForTab } : {}),
       cancelWelcome: () => {},
       confirmPermalinkRedactionChoice,
       apiFetch,
@@ -472,8 +480,9 @@ describe('tabs helpers', () => {
     expect(mobileCmdInput.value).toBe('pending mobile command')
   })
 
-  it('closing a running tab kills it and activates a neighboring tab', () => {
-    const { createTab, activateTab, closeTab, _getTabs, doKill } = loadTabsFns()
+  it('closing a running tab prompts before killing it and activates a neighboring tab', async () => {
+    const showConfirm = vi.fn(() => Promise.resolve('kill'))
+    const { createTab, activateTab, closeTab, _getTabs, doKill } = loadTabsFns({ showConfirm })
     const firstId = createTab('tab 1')
     const secondId = createTab('tab 2')
 
@@ -484,6 +493,13 @@ describe('tabs helpers', () => {
     runningTab.runId = 'run-2'
 
     closeTab(secondId)
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({
+        text: 'Close this running tab?',
+        note: expect.stringContaining('Keep running detaches this tab only'),
+      }),
+    }))
+    await flushPromises()
 
     expect(doKill).toHaveBeenCalledWith(secondId)
     expect(_getTabs().map((tab) => tab.id)).toEqual([firstId, secondId])
@@ -492,8 +508,13 @@ describe('tabs helpers', () => {
     expect(document.getElementById('cmd').focus).not.toHaveBeenCalled()
   })
 
-  it('closing a read-only attached running tab removes it without killing the run', () => {
-    const { createTab, activateTab, closeTab, _getTabs, doKill } = loadTabsFns()
+  it('closing an attached running tab can detach it without killing the run', async () => {
+    const showConfirm = vi.fn(() => Promise.resolve('detach'))
+    const detachRunStreamForTab = vi.fn()
+    const { createTab, activateTab, closeTab, _getTabs, doKill } = loadTabsFns({
+      showConfirm,
+      detachRunStreamForTab,
+    })
     const firstId = createTab('tab 1')
     const secondId = createTab('attached run')
 
@@ -502,29 +523,40 @@ describe('tabs helpers', () => {
     attachedTab.st = 'running'
     attachedTab.runId = 'run-other'
     attachedTab.historyRunId = 'run-other'
-    attachedTab.attachMode = 'read-only'
+    attachedTab.attachMode = 'attached'
 
     closeTab(secondId)
+    await flushPromises()
 
+    expect(detachRunStreamForTab).toHaveBeenCalledWith(secondId)
     expect(doKill).not.toHaveBeenCalled()
     expect(_getTabs().map((tab) => tab.id)).toEqual([firstId])
     expect(document.querySelector(`[data-id="${secondId}"]`)).toBeNull()
     expect(document.querySelector('.tab.active').dataset.id).toBe(firstId)
   })
 
-  it('closing the only running tab kills it and keeps the tab shell ready', () => {
-    const { createTab, closeTab, _getTabs, doKill } = loadTabsFns()
+  it('closing the only running tab can detach it and keep the tab shell ready', async () => {
+    const showConfirm = vi.fn(() => Promise.resolve('detach'))
+    const detachRunStreamForTab = vi.fn()
+    const { createTab, closeTab, _getTabs, doKill } = loadTabsFns({
+      showConfirm,
+      detachRunStreamForTab,
+    })
     const id = createTab('tab 1')
     const runningTab = _getTabs()[0]
     runningTab.st = 'running'
     runningTab.runId = 'run-1'
+    runningTab.historyRunId = 'run-1'
 
     closeTab(id)
+    await flushPromises()
 
-    expect(doKill).toHaveBeenCalledWith(id)
+    expect(detachRunStreamForTab).toHaveBeenCalledWith(id)
+    expect(doKill).not.toHaveBeenCalled()
     expect(_getTabs()).toHaveLength(1)
-    expect(_getTabs()[0].closing).toBe(true)
-    expect(_getTabs()[0].st).toBe('running')
+    expect(_getTabs()[0].closing).toBe(false)
+    expect(_getTabs()[0].st).toBe('idle')
+    expect(_getTabs()[0].runId).toBeNull()
   })
 
   it('mountShellPrompt does not render prompt when tab is running even when forced', () => {

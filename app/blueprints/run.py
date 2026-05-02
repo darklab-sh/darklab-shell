@@ -44,8 +44,6 @@ from helpers import get_client_ip, get_log_session_id, get_session_id
 from process import (
     active_run_register,
     active_run_remove,
-    active_run_control_status,
-    active_run_set_owner,
     active_run_touch_owner,
     active_runs_for_session,
     pid_pop,
@@ -1193,40 +1191,18 @@ def stream_brokered_run(run_id):
                     headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
 
-@run_bp.route("/runs/<run_id>/owner", methods=["POST"])
-def claim_brokered_run_owner(run_id):
-    session_id = get_session_id()
-    if not _run_belongs_to_session(run_id, session_id):
-        return jsonify({"error": "Run not found"}), 404
-    data = request.get_json(silent=True) or {}
-    owner_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
-    owner_tab_id = _active_run_owner_value(data.get("tab_id", ""))
-    if not owner_client_id:
-        return jsonify({"error": "Client identity is required to take over a run."}), 400
-    if not active_run_set_owner(run_id, owner_client_id, owner_tab_id):
-        return jsonify({"error": "Run is no longer active."}), 404
-    publish_run_event(run_id, "owner", {
-        "owner_client_id": owner_client_id,
-        "owner_tab_id": owner_tab_id,
-    })
-    return jsonify({"ok": True, "run_id": run_id})
-
 @run_bp.route("/kill", methods=["POST"])
 def kill_command():
     data      = request.get_json() or {}
     if not isinstance(data, dict):
         return jsonify({"error": "Request body must be a JSON object"}), 400
     run_id    = data.get("run_id", "")
+    killer_tab_id = _active_run_owner_value(data.get("tab_id", ""))
     client_ip = get_client_ip()
     if not isinstance(run_id, str):
         return jsonify({"error": "run_id must be a string"}), 400
     session_id = get_session_id()
-    owner_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
-    control_status = active_run_control_status(run_id, session_id, owner_client_id)
-    if control_status == "forbidden":
-        return jsonify({
-            "error": "This browser no longer controls that run. Use Take over from Status Monitor before killing it.",
-        }), 403
+    killer_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
     pid       = pid_pop_for_session(run_id, session_id)
     if not pid:
         log.debug("KILL_MISS", extra={
@@ -1235,6 +1211,10 @@ def kill_command():
             "session": get_log_session_id(session_id),
         })
         return jsonify({"error": "No such process"}), 404
+    publish_run_event(run_id, "killed", {
+        "killer_client_id": killer_client_id,
+        "killer_tab_id": killer_tab_id,
+    })
     try:
         # Subprocesses call os.setsid() during child setup, which makes PGID
         # == PID at creation time. Use the stored PID directly as the

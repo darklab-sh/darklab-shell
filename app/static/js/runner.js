@@ -53,7 +53,7 @@ function _recoverStalledRun(tabId) {
   }
   setTabStatus(tabId, 'running');
   _setRunButtonDisabled(true);
-  if (t.attachMode !== 'read-only') showTabKillBtn(tabId);
+  showTabKillBtn(tabId);
 }
 
 function _activeRunIdsFromPayload(data) {
@@ -96,7 +96,7 @@ function _markStalledButRunning(tabId) {
   setTabStatus(tabId, 'running');
   _setRunButtonDisabled(true);
   const t = getTab(tabId);
-  if (!t || t.attachMode !== 'read-only') showTabKillBtn(tabId);
+  if (t) showTabKillBtn(tabId);
 }
 
 function _markStalledAndInactive(tabId) {
@@ -298,7 +298,7 @@ function restoreActiveRunsAfterReload(runs) {
   return true;
 }
 
-function _attachActiveRunToTab(run, tabId, { mode = 'owner' } = {}) {
+function _attachActiveRunToTab(run, tabId, { mode = 'attached' } = {}) {
   if (!run || !tabId) return false;
   clearTab(tabId);
   const t = getTab(tabId);
@@ -313,7 +313,7 @@ function _attachActiveRunToTab(run, tabId, { mode = 'owner' } = {}) {
   t.historyRunId = run.run_id;
   t.lastEventId = '';
   t.attachMode = mode;
-  t.reconnectedRun = mode !== 'read-only';
+  t.reconnectedRun = true;
   t.killed = false;
   t.pendingKill = false;
   t.previewTruncated = false;
@@ -325,9 +325,7 @@ function _attachActiveRunToTab(run, tabId, { mode = 'owner' } = {}) {
   appendCommandEcho(run.command, tabId);
   const startedLabel = _startedAtLabel(run.started);
   appendLine(
-    mode === 'read-only'
-      ? `[attached read-only to active run started at ${startedLabel}]`
-      : `[attached to active run started at ${startedLabel}]`,
+    `[attached to active run started at ${startedLabel}]`,
     'notice',
     tabId,
   );
@@ -337,42 +335,66 @@ function _attachActiveRunToTab(run, tabId, { mode = 'owner' } = {}) {
     setStatus('running');
     syncActiveRunTimer(tabId);
   }
-  if (mode === 'read-only') hideTabKillBtn(tabId);
-  else showTabKillBtn(tabId);
+  showTabKillBtn(tabId);
   _setRunButtonDisabled(true);
   _subscribeRunStream(run.run_id, tabId, { after: run.last_event_id || '' });
   return true;
 }
 
-function attachActiveRunFromMonitor(run, { takeover = false } = {}) {
+function attachActiveRunFromMonitor(run) {
   if (!run || !run.run_id) return Promise.resolve(false);
   const tabId = createTab();
   if (!tabId) return Promise.resolve(false);
   activateTab(tabId, { focusComposer: false });
+  return Promise.resolve(_attachActiveRunToTab(run, tabId, { mode: 'attached' }));
+}
 
-  const attach = () => _attachActiveRunToTab(run, tabId, { mode: takeover ? 'owner' : 'read-only' });
-  if (!takeover) return Promise.resolve(attach());
+function _tabForActiveRunId(runId) {
+  const normalized = String(runId || '');
+  if (!normalized || !Array.isArray(tabs)) return null;
+  return tabs.find(tab => (
+    tab && (tab.runId === normalized || tab.historyRunId === normalized)
+  )) || null;
+}
 
-  return apiFetch(`/runs/${encodeURIComponent(run.run_id)}/owner`, {
+function _requestKillActiveRun(run, tabId = '') {
+  const runId = String(run?.run_id || run?.id || '').trim();
+  if (!runId || typeof apiFetch !== 'function') return Promise.resolve(false);
+  return apiFetch('/kill', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tab_id: tabId }),
+    body: JSON.stringify({ run_id: runId, tab_id: tabId }),
   }).then(resp => {
-    if (!resp.ok) {
-      return _readRunErrorMessage(resp).then(message => {
-        appendLine(`[server error] ${message || 'Could not take over this run.'}`, 'exit-fail', tabId);
-        setTabStatus(tabId, 'fail');
-        if (tabId === activeTabId) setStatus('fail');
-        return false;
-      });
-    }
-    return attach();
-  }).catch(err => {
-    appendLine(`[network error] ${_describeRunnerFetchError(err, 'server')}`, 'exit-fail', tabId);
-    setTabStatus(tabId, 'fail');
-    if (tabId === activeTabId) setStatus('fail');
-    return false;
+    if (resp && resp.ok) return true;
+    return _readRunErrorMessage(resp || {}).then(message => {
+      throw new Error(message || 'Could not kill this run.');
+    });
   });
+}
+
+function killActiveRunFromMonitor(run) {
+  const runId = String(run?.run_id || run?.id || '').trim();
+  if (!runId) return Promise.resolve(false);
+  const tab = _tabForActiveRunId(runId);
+  const kill = () => {
+    if (tab && tab.st === 'running') {
+      doKill(tab.id);
+      return Promise.resolve(true);
+    }
+    return _requestKillActiveRun(run, '');
+  };
+  if (typeof showConfirm !== 'function') return kill();
+  return showConfirm({
+    body: {
+      text: 'Kill this active run?',
+      note: 'This sends SIGTERM to the running process group. Other attached tabs will be notified.',
+    },
+    tone: 'danger',
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'kill', label: 'Kill run', role: 'destructive' },
+    ],
+  }).then(result => (result === 'kill' ? kill() : false));
 }
 
 function _restoreCompletedReconnectedRun(tab, run) {
@@ -483,11 +505,10 @@ function _handleKillRequestDenied(message, tabId, runId) {
     t.runId = runId || t.runId;
     t.killed = false;
     t.pendingKill = false;
-    t.attachMode = 'read-only';
     setTabStatus(tabId, 'running');
-    hideTabKillBtn(tabId);
+    showTabKillBtn(tabId);
   }
-  appendLine(`[kill request denied] ${message || 'This browser no longer controls that run.'}`, 'notice', tabId);
+  appendLine(`[kill request denied] ${message || 'The server could not kill this run.'}`, 'notice', tabId);
   if (tabId === activeTabId) {
     setStatus('running');
     _setRunButtonDisabled(true);
@@ -504,18 +525,38 @@ function _handleRunOwnerChanged(msg, tabId) {
   const ownerClientId = String(msg.owner_client_id || '');
   const ownedByThisClient = !!(ownerClientId && ownerClientId === _currentClientId());
   if (ownedByThisClient) {
-    t.attachMode = 'owner';
+    t.attachMode = t.attachMode || 'origin';
     if (t.st === 'running') showTabKillBtn(tabId);
-    appendLine('[this browser now controls this run]', 'notice', tabId);
     return;
   }
-  if (t.attachMode !== 'read-only') {
-    appendLine('Run ownership moved to another browser. This tab is now read-only.', 'notice', tabId);
-  }
-  t.attachMode = 'read-only';
+  t.attachMode = t.attachMode || 'attached';
   t.killed = false;
   t.pendingKill = false;
+  if (t.st === 'running') showTabKillBtn(tabId);
+}
+
+function _handleRunKilled(msg, tabId) {
+  const t = getTab(tabId);
+  if (!t) return;
+  const killerClientId = String(msg.killer_client_id || '');
+  const killerTabId = String(msg.killer_tab_id || '');
+  const killedByThisBrowser = !!(killerClientId && killerClientId === _currentClientId());
+  const killedByThisTab = killedByThisBrowser && killerTabId && killerTabId === tabId;
+  t.killed = true;
+  t.pendingKill = false;
+  if (!killedByThisTab) {
+    appendLine(
+      killedByThisBrowser ? '[killed from another tab]' : '[killed by another browser]',
+      'notice',
+      tabId,
+    );
+  }
+  setTabStatus(tabId, 'killed');
   hideTabKillBtn(tabId);
+  if (tabId === activeTabId) {
+    setStatus('killed');
+    _setRunButtonDisabled(false);
+  }
 }
 
 function _markTabKilledByUser(tabId, secs, { suppressTranscript = false } = {}) {
@@ -637,7 +678,7 @@ function _markTabRunStarted(tabId, runId) {
     apiFetch('/kill', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ run_id: t.runId })
+      body: JSON.stringify({ run_id: t.runId, tab_id: tabId })
     }).catch(err => _handleKillRequestFailure(err, tabId));
     t.runId = null;
   } else {
@@ -655,6 +696,8 @@ function _handleRunStreamMessage(msg, tabId) {
     _appendStreamLine(msg.text, 'notice', tabId, msg);
   } else if (msg.type === 'owner') {
     _handleRunOwnerChanged(msg, tabId);
+  } else if (msg.type === 'killed') {
+    _handleRunKilled(msg, tabId);
   } else if (msg.type === 'clear') {
     clearTab(tabId);
     const t = getTab(tabId);
@@ -982,10 +1025,6 @@ function confirmKill(tabId) {
 function doKill(tabId) {
   const t = getTab(tabId);
   if (!t || t.st !== 'running') return;
-  if (t.attachMode === 'read-only') {
-    appendLine('[read-only attach — take over the run before killing it]', 'notice', tabId);
-    return;
-  }
   const secs = elapsedSeconds();
   const suppressKilledTranscript = !!t.closing;
   if (t.runId) {
@@ -994,7 +1033,7 @@ function doKill(tabId) {
     apiFetch('/kill', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ run_id: runId })
+      body: JSON.stringify({ run_id: runId, tab_id: tabId })
     }).then(resp => {
       if (!resp) {
         _handleKillRequestFailure(new Error('Kill request failed'), tabId);
@@ -1590,12 +1629,13 @@ function _persistSessionTokenRun(command, lineItems, statusValue = 'ok') {
   _persistClientSideRun(command, lineItems, statusValue);
 }
 
-function _sessionMigrationCountLabel(runCount = 0, workspaceFileCount = 0, workflowCount = 0) {
+function _sessionMigrationCountLabel(runCount = 0, workspaceFileCount = 0, workflowCount = 0, recentDomainCount = 0) {
   const parts = [];
   if (runCount > 0) parts.push(`${runCount} run(s)`);
   if (workspaceFileCount > 0) parts.push(`${workspaceFileCount} workspace file(s)`);
   if (workflowCount > 0) parts.push(`${workflowCount} workflow(s)`);
-  if (!parts.length) return 'no runs, workspace files, or workflows';
+  if (recentDomainCount > 0) parts.push(`${recentDomainCount} recent domain(s)`);
+  if (!parts.length) return 'no runs, workspace files, workflows, or recent domains';
   if (parts.length === 1) return parts[0];
   return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
@@ -1605,6 +1645,7 @@ function _sessionMigrationResultText(data = {}) {
   const skippedWorkspaceFiles = Number(data.skipped_workspace_files || 0);
   const workspaceDirs = Number(data.migrated_workspace_directories || 0);
   const skippedWorkspaceDirs = Number(data.skipped_workspace_directories || 0);
+  const recentDomains = Number(data.migrated_recent_domains || 0);
   const workspaceParts = [
     `${workspaceFiles} workspace file(s)`,
   ];
@@ -1613,6 +1654,7 @@ function _sessionMigrationResultText(data = {}) {
   if (skippedWorkspaceDirs > 0) workspaceParts.push(`${skippedWorkspaceDirs} folder(s) skipped`);
   return `migrated — ${data.migrated_runs} run(s), ${data.migrated_snapshots} snapshot(s), `
     + `${data.migrated_stars ?? 0} starred command(s), ${data.migrated_workflows ?? 0} workflow(s), `
+    + `${recentDomains} recent domain(s), `
     + `${workspaceParts.join(', ')}, `
     + 'and saved user options when the destination had none';
 }
@@ -1742,6 +1784,7 @@ function _clearVisibleSessionHistoryState() {
 async function _activateSessionTokenIdentity(token) {
   localStorage.setItem('session_token', token);
   updateSessionId(token);
+  if (typeof loadRecentDomains === 'function') await loadRecentDomains().catch(() => {});
   await _seedLocalStorageStarsToServer();
   if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
   if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
@@ -1762,10 +1805,15 @@ async function _sessionTokenGenerate(tabId) {
     const data = await resp.json();
     const newToken = data.session_token;
 
+    if (typeof flushRecentDomains === 'function') {
+      await flushRecentDomains().catch(() => {});
+    }
+
     // Check run/workspace counts on old session before switching identity.
     let runCount = 0;
     let workspaceFileCount = 0;
     let workflowCount = 0;
+    let recentDomainCount = 0;
     try {
       const countResp = await apiFetch('/session/run-count');
       if (countResp.ok) {
@@ -1773,6 +1821,7 @@ async function _sessionTokenGenerate(tabId) {
         runCount = countData.count || 0;
         workspaceFileCount = countData.workspace_files || 0;
         workflowCount = countData.workflow_count || 0;
+        recentDomainCount = countData.recent_domain_count || 0;
       }
     } catch (_) {}
 
@@ -1781,12 +1830,12 @@ async function _sessionTokenGenerate(tabId) {
     appendLine('use session-token set <value> on another device to continue your session', '', tabId);
     appendLine('warning: your session token grants full access to your session history — treat it like a password', 'notice', tabId);
 
-    if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0) {
+    if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0 || recentDomainCount > 0) {
       // Defer identity switch until the user answers the migration prompt so a
       // failed /session/migrate does not strand runs on the old session while
       // the active identity is already the new token.
       appendLine(
-        `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount, workflowCount)} in your previous session. migrate history, files, and workflows to your new session token?`,
+        `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount, workflowCount, recentDomainCount)} in your previous session. migrate history, files, workflows, and recent domains to your new session token?`,
         '',
         tabId
       );
@@ -1803,7 +1852,7 @@ async function _sessionTokenGenerate(tabId) {
             _recordSuccessfulLocalCommand('session-token generate');
             _persistSessionTokenRun('session-token generate', [
               { text: `session token generated:  ${maskSessionToken(newToken)}` },
-              { text: 'history and files migrated to the new session token' },
+              { text: 'history, files, workflows, and recent domains migrated to the new session token' },
             ]);
           }
           setStatus('idle');
@@ -1815,10 +1864,10 @@ async function _sessionTokenGenerate(tabId) {
           if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
           if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
           _recordSuccessfulLocalCommand('session-token generate');
-          appendLine('History and file migration skipped.', '', tabId);
+          appendLine('History, file, workflow, and recent-domain migration skipped.', '', tabId);
           _persistSessionTokenRun('session-token generate', [
             { text: `session token generated:  ${maskSessionToken(newToken)}` },
-            { text: 'History and file migration skipped.' },
+            { text: 'History, file, workflow, and recent-domain migration skipped.' },
           ]);
           setStatus('idle');
         },
@@ -1887,10 +1936,15 @@ async function _sessionTokenSet(value, tabId) {
 
   const oldSessionId = SESSION_ID;
 
+  if (typeof flushRecentDomains === 'function') {
+    await flushRecentDomains().catch(() => {});
+  }
+
   // Check current session's run/workspace counts before switching identity.
   let runCount = 0;
   let workspaceFileCount = 0;
   let workflowCount = 0;
+  let recentDomainCount = 0;
   try {
     const countResp = await apiFetch('/session/run-count');
     if (countResp.ok) {
@@ -1898,15 +1952,16 @@ async function _sessionTokenSet(value, tabId) {
       runCount = countData.count || 0;
       workspaceFileCount = countData.workspace_files || 0;
       workflowCount = countData.workflow_count || 0;
+      recentDomainCount = countData.recent_domain_count || 0;
     }
   } catch (_) {}
 
-  if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0) {
+  if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0 || recentDomainCount > 0) {
     // Defer identity switch until the user answers the migration prompt so a
     // failed /session/migrate does not strand runs on the old session while
     // the active identity is already the new token.
     appendLine(
-      `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount, workflowCount)} in your current session. migrate history, files, and workflows to this session token?`,
+      `you have ${_sessionMigrationCountLabel(runCount, workspaceFileCount, workflowCount, recentDomainCount)} in your current session. migrate history, files, workflows, and recent domains to this session token?`,
       '',
       tabId
     );
@@ -1929,11 +1984,11 @@ async function _sessionTokenSet(value, tabId) {
         await _activateSessionTokenIdentity(value);
         _appendSessionTokenSetLines(value, tabId);
         _recordSuccessfulLocalCommand(`session-token set ${value}`);
-        appendLine('History and file migration skipped.', '', tabId);
+        appendLine('History, file, workflow, and recent-domain migration skipped.', '', tabId);
         _persistSessionTokenRun(`session-token set ${value}`, [
           { text: `session token set: ${maskSessionToken(value)}` },
           { text: 'reload other tabs to apply the new session token' },
-          { text: 'History and file migration skipped.' },
+          { text: 'History, file, workflow, and recent-domain migration skipped.' },
         ]);
         setStatus('idle');
       },
@@ -1956,6 +2011,9 @@ async function _sessionTokenSet(value, tabId) {
 }
 
 async function _sessionTokenCopy(tabId) {
+  if (typeof flushRecentDomains === 'function') {
+    await flushRecentDomains().catch(() => {});
+  }
   const token = localStorage.getItem('session_token');
   if (!token) {
     appendLine('no session token is set — already using an anonymous session', '', tabId);

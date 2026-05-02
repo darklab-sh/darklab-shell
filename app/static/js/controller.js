@@ -466,12 +466,13 @@ async function _waitForMigrateChoice(msg) {
   });
 }
 
-function _optionsMigrationCountLabel(runCount = 0, workspaceFileCount = 0, workflowCount = 0) {
+function _optionsMigrationCountLabel(runCount = 0, workspaceFileCount = 0, workflowCount = 0, recentDomainCount = 0) {
   const parts = [];
   if (runCount > 0) parts.push(`${runCount} run(s)`);
   if (workspaceFileCount > 0) parts.push(`${workspaceFileCount} workspace file(s)`);
   if (workflowCount > 0) parts.push(`${workflowCount} workflow(s)`);
-  if (!parts.length) return 'no runs, workspace files, or workflows';
+  if (recentDomainCount > 0) parts.push(`${recentDomainCount} recent domain(s)`);
+  if (!parts.length) return 'no runs, workspace files, workflows, or recent domains';
   if (parts.length === 1) return parts[0];
   return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
@@ -481,12 +482,14 @@ function _optionsMigrationResultText(data = {}) {
   const skippedWorkspaceFiles = Number(data.skipped_workspace_files || 0);
   const workspaceDirs = Number(data.migrated_workspace_directories || 0);
   const skippedWorkspaceDirs = Number(data.skipped_workspace_directories || 0);
+  const recentDomains = Number(data.migrated_recent_domains || 0);
   const workspaceParts = [`${workspaceFiles} workspace file(s)`];
   if (workspaceDirs > 0) workspaceParts.push(`${workspaceDirs} folder(s)`);
   if (skippedWorkspaceFiles > 0) workspaceParts.push(`${skippedWorkspaceFiles} workspace file(s) skipped`);
   if (skippedWorkspaceDirs > 0) workspaceParts.push(`${skippedWorkspaceDirs} folder(s) skipped`);
   return `Migrated ${data.migrated_runs} run(s), ${data.migrated_snapshots} snapshot(s), `
     + `${data.migrated_stars ?? 0} starred command(s), ${data.migrated_workflows ?? 0} workflow(s), `
+    + `${recentDomains} recent domain(s), `
     + `${workspaceParts.join(', ')}, `
     + 'and saved user options when the destination had none.';
 }
@@ -495,6 +498,7 @@ async function _clearActiveSessionToken() {
   localStorage.removeItem('session_token');
   const uuid = localStorage.getItem('session_id') || SESSION_ID;
   updateSessionId(uuid);
+  if (typeof loadRecentDomains === 'function') await loadRecentDomains().catch(() => {});
   if (typeof hydrateCmdHistory === 'function') hydrateCmdHistory([]);
   if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
   if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
@@ -541,7 +545,10 @@ async function confirmClearSessionToken() {
   return { cleared: true, anonymousSessionId: uuid };
 }
 
-document.getElementById('options-session-token-copy-btn')?.addEventListener('click', () => {
+document.getElementById('options-session-token-copy-btn')?.addEventListener('click', async () => {
+  if (typeof flushRecentDomains === 'function') {
+    await flushRecentDomains().catch(() => {});
+  }
   const token = localStorage.getItem('session_token');
   if (!token) return;
   copyTextToClipboard(token)
@@ -562,10 +569,15 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
     }
     const { session_token: newToken } = await resp.json();
 
+    if (typeof flushRecentDomains === 'function') {
+      await flushRecentDomains().catch(() => {});
+    }
+
     // Count runs/files on OLD session before switching identity.
     let runCount = 0;
     let workspaceFileCount = 0;
     let workflowCount = 0;
+    let recentDomainCount = 0;
     try {
       const countResp = await apiFetch('/session/run-count');
       if (countResp.ok) {
@@ -573,14 +585,15 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
         runCount = countData.count || 0;
         workspaceFileCount = countData.workspace_files || 0;
         workflowCount = countData.workflow_count || 0;
+        recentDomainCount = countData.recent_domain_count || 0;
       }
     } catch (_) {}
 
     // Migrate BEFORE switching identity so a failed /session/migrate does not
     // leave the user on the new token with their runs still on the old session.
-    if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0) {
+    if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0 || recentDomainCount > 0) {
       const migrateChoice = await _waitForMigrateChoice(
-        `You have ${_optionsMigrationCountLabel(runCount, workspaceFileCount, workflowCount)} in your previous session. Migrate history, files, and workflows to the new token?`
+        `You have ${_optionsMigrationCountLabel(runCount, workspaceFileCount, workflowCount, recentDomainCount)} in your previous session. Migrate history, files, workflows, and recent domains to the new token?`
       );
       if (migrateChoice !== 'skip' && migrateChoice !== 'yes') return;
       if (migrateChoice === 'yes') {
@@ -601,6 +614,7 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
 
     localStorage.setItem('session_token', newToken);
     updateSessionId(newToken);
+    if (typeof loadRecentDomains === 'function') await loadRecentDomains().catch(() => {});
     if (typeof _seedLocalStorageStarsToServer === 'function') await _seedLocalStorageStarsToServer();
     if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
     if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
@@ -715,9 +729,14 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
   _optionsTokenSetBusy(true);
   _optionsTokenShowMsg('');
   try {
+    if (typeof flushRecentDomains === 'function') {
+      await flushRecentDomains().catch(() => {});
+    }
+
     let runCount = 0;
     let workspaceFileCount = 0;
     let workflowCount = 0;
+    let recentDomainCount = 0;
     try {
       const countResp = await apiFetch('/session/run-count');
       if (countResp.ok) {
@@ -725,14 +744,15 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
         runCount = countData.count || 0;
         workspaceFileCount = countData.workspace_files || 0;
         workflowCount = countData.workflow_count || 0;
+        recentDomainCount = countData.recent_domain_count || 0;
       }
     } catch (_) {}
 
     // Migrate BEFORE switching identity so a failed /session/migrate does not
     // leave the user on the new token with their runs still on the old session.
-    if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0) {
+    if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0 || recentDomainCount > 0) {
       const migrateChoice = await _waitForMigrateChoice(
-        `You have ${_optionsMigrationCountLabel(runCount, workspaceFileCount, workflowCount)} in your current session. Migrate history, files, and workflows to this token?`
+        `You have ${_optionsMigrationCountLabel(runCount, workspaceFileCount, workflowCount, recentDomainCount)} in your current session. Migrate history, files, workflows, and recent domains to this token?`
       );
       if (migrateChoice !== 'skip' && migrateChoice !== 'yes') return;
       if (migrateChoice === 'yes') {
@@ -753,6 +773,7 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
 
     localStorage.setItem('session_token', value);
     updateSessionId(value);
+    if (typeof loadRecentDomains === 'function') await loadRecentDomains().catch(() => {});
     if (typeof _seedLocalStorageStarsToServer === 'function') await _seedLocalStorageStarsToServer();
     if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
     if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
@@ -794,6 +815,7 @@ document.getElementById('options-session-token-rotate-btn')?.addEventListener('c
 
     localStorage.setItem('session_token', newToken);
     updateSessionId(newToken);
+    if (typeof loadRecentDomains === 'function') await loadRecentDomains().catch(() => {});
     if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
     if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
 
@@ -1440,6 +1462,7 @@ apiFetch('/autocomplete').then(r => r.json()).then(data => {
   acSpecialCommands = data.special_commands || [];
   acBuiltinCommandRoots = data.builtin_command_roots || [];
   if (typeof loadSessionVariables === 'function') loadSessionVariables().catch(() => {});
+  if (typeof loadRecentDomains === 'function') loadRecentDomains().catch(() => {});
   if (typeof scheduleSearchDiscoverabilityRefresh === 'function') scheduleSearchDiscoverabilityRefresh();
   else if (typeof refreshSearchDiscoverabilityUi === 'function') refreshSearchDiscoverabilityUi();
 }).catch(err => {

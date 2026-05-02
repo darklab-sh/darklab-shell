@@ -145,9 +145,9 @@ test.describe('session-token lifecycle', () => {
 
     await runCommand(page, `session-token set ${token}`)
     await expect(page.locator('.tab-panel.active .output')).toContainText(
-      'migrate history, files, and workflows to this session token?',
+      'migrate history, files, workflows, and recent domains to this session token?',
     )
-    await answerTerminalConfirm(page, 'no', 'History and file migration skipped.')
+    await answerTerminalConfirm(page, 'no', 'History, file, workflow, and recent-domain migration skipped.')
 
     expect(await storedSessionToken(page)).toBe(token)
     expect(await currentSessionId(page)).toBe(token)
@@ -165,7 +165,7 @@ test.describe('session-token lifecycle', () => {
 
     await runCommand(page, `session-token set ${token}`)
     await expect(page.locator('.tab-panel.active .output')).toContainText(
-      'migrate history, files, and workflows to this session token?',
+      'migrate history, files, workflows, and recent domains to this session token?',
     )
     await answerTerminalConfirm(page, 'yes', 'migrated —')
 
@@ -175,6 +175,44 @@ test.describe('session-token lifecycle', () => {
     await expect.poll(async () => workspaceFilePaths(page)).toContain(
       'nested/token-migration.txt',
     )
+  })
+
+  test('recent domain autocomplete follows the active session token across browser contexts', async ({
+    page,
+    browser,
+  }, testInfo) => {
+    const token = await issueSessionToken(page)
+    await runCommand(page, `session-token set ${token}`)
+    await expect.poll(async () => currentSessionId(page)).toBe(token)
+
+    await runCommand(page, 'ping -c 1 darklab.sh')
+    await expect.poll(async () => page.evaluate(async () => {
+      const resp = await apiFetch('/session/recent-domains')
+      const data = await resp.json()
+      return data.domains || []
+    })).toContain('darklab.sh')
+
+    const context = await browser.newContext({
+      extraHTTPHeaders: { 'X-Forwarded-For': testScopedIp(testInfo, 390) },
+    })
+    const otherPage = await context.newPage()
+    try {
+      await otherPage.goto('/')
+      await ensurePromptReady(otherPage)
+      await runCommand(otherPage, `session-token set ${token}`)
+      await expect.poll(async () => currentSessionId(otherPage)).toBe(token)
+      await expect.poll(async () => otherPage.evaluate(() => (
+        typeof _readRecentDomains === 'function' ? _readRecentDomains() : []
+      ))).toContain('darklab.sh')
+
+      await expect.poll(async () => otherPage.evaluate(() => (
+        typeof getAutocompleteMatches === 'function'
+          ? getAutocompleteMatches('ping ', 5).map(item => item.value)
+          : []
+      ))).toContain('darklab.sh')
+    } finally {
+      await context.close()
+    }
   })
 
   test('set rejects unknown tok tokens before switching identity', async ({ page }) => {

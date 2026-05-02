@@ -1,6 +1,6 @@
 // ── App-native status monitor ──
 // First-class session/status surface: centered modal on desktop, bottom sheet
-// on mobile. Active-run attach/takeover remains the bottom section.
+// on mobile. Active-run attach/kill remains the bottom section.
 
 (function () {
   let monitorEl = null;
@@ -8,7 +8,6 @@
   let listEl = null;
   let summaryEl = null;
   let pollTimer = null;
-  let insightsPollTimer = null;
   let tickTimer = null;
   let closedPollTimer = null;
   let warmupTimer = null;
@@ -28,7 +27,6 @@
   const pulseRecentCpuSamples = [];
 
   const POLL_MS = 3000;
-  const INSIGHTS_POLL_MS = 45000;
   const CLOSED_POLL_MS = 8000;
   const CPU_SAMPLE_WARMUP_MS = 900;
   const STATUS_AFFORDANCE_PULSE_KEY = 'run_monitor_status_affordance_seen';
@@ -36,6 +34,7 @@
   const resourceTrendByRunId = new Map();
   const pulseStateByStrip = new WeakMap();
   const pulseNodeCacheByStrip = new WeakMap();
+  const activeRunByRow = new WeakMap();
   const categoryToneCache = new Map();
   const constellationPopoverTimerByPanel = new WeakMap();
   const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -363,6 +362,47 @@
     return legend;
   }
 
+  function _buildConstellationLegendKey({ modifier, ariaLabel, label }) {
+    const item = document.createElement('span');
+    item.className = `status-monitor-category-legend-item status-monitor-legend-key status-monitor-legend-key-${modifier}`;
+    item.setAttribute('aria-label', ariaLabel);
+    const glyph = document.createElement('span');
+    glyph.className = `status-monitor-legend-key-glyph status-monitor-legend-key-glyph-${modifier}`;
+    glyph.setAttribute('aria-hidden', 'true');
+    if (modifier === 'size') {
+      // Render literal mini-stars at the chart's actual min and max radii so
+      // the legend visual is identical to what the viewer sees on the canvas.
+      const small = _svgEl('svg', {
+        class: 'status-monitor-legend-star-svg status-monitor-legend-star-svg-small',
+        viewBox: '0 0 8 8',
+        'aria-hidden': 'true',
+      });
+      small.appendChild(_svgEl('circle', {
+        class: 'status-monitor-star',
+        cx: 4,
+        cy: 4,
+        r: 1.8,
+      }));
+      const large = _svgEl('svg', {
+        class: 'status-monitor-legend-star-svg status-monitor-legend-star-svg-large',
+        viewBox: '0 0 18 18',
+        'aria-hidden': 'true',
+      });
+      large.appendChild(_svgEl('circle', {
+        class: 'status-monitor-star',
+        cx: 9,
+        cy: 9,
+        r: 7,
+      }));
+      glyph.append(small, large);
+    }
+    const text = document.createElement('span');
+    text.className = 'status-monitor-category-legend-label';
+    text.textContent = label;
+    item.append(glyph, text);
+    return item;
+  }
+
   function _seededUnit(seed) {
     const value = Math.sin(Number(seed) || 1) * 10000;
     return value - Math.floor(value);
@@ -389,13 +429,20 @@
         const jitterY = _seededUnit(seed + (index * 53) + 19);
         const scale = _seededUnit(seed + (index * 71) + 23);
         const tone = _seededUnit(seed + (index * 89) + 31);
+        const depth = _seededUnit(seed + (index * 113) + 59);
+        const bright = depth > 0.88;
+        const baseRadius = 0.85 + (scale * 1.25);
+        const baseOpacity = 0.42 + (_seededUnit(seed + (index * 97) + 43) * 0.34);
         stars.push({
           x: 12 + ((column + (jitterX * 0.88) + 0.06) / columns) * 616,
           y: 12 + ((row + (jitterY * 0.86) + 0.07) / rows) * 276,
-          radius: 0.85 + (scale * 1.25),
-          opacity: 0.42 + (_seededUnit(seed + (index * 97) + 43) * 0.34),
+          radius: baseRadius + (bright ? 0.45 + (depth * 0.35) : 0),
+          opacity: Math.min(0.92, baseOpacity + (bright ? 0.16 + ((depth - 0.88) * 0.75) : 0)),
           hue: tone > 0.86 ? 48 : 92 + (tone * 55),
-          glow: 2.5 + (scale * 3.5),
+          saturation: bright ? 92 : 72 + (tone * 16),
+          lightness: bright ? 82 + ((depth - 0.88) * 32) : 68 + (scale * 8),
+          glow: 2.5 + (scale * 3.5) + (bright ? 3.4 : 0),
+          glowAlpha: bright ? 0.54 : 0.3,
         });
       }
     }
@@ -717,6 +764,22 @@
     return meter;
   }
 
+  function _updateRunMonitorMeter(meter, { label, value, percent, collecting = false, ariaValue = value }) {
+    meter.classList.toggle('run-monitor-meter-collecting', collecting);
+    const nextPercent = `${collecting ? 75 : _meterPercent(percent)}%`;
+    if (meter.style.getPropertyValue('--meter-percent') !== nextPercent) {
+      meter.style.setProperty('--meter-percent', nextPercent);
+    }
+    const ariaLabel = `${label} ${ariaValue}`;
+    if (meter.getAttribute('aria-label') !== ariaLabel) {
+      meter.setAttribute('aria-label', ariaLabel);
+    }
+    const valueEl = meter.querySelector('.run-monitor-meter-value');
+    if (valueEl && valueEl.textContent !== String(value)) {
+      valueEl.textContent = String(value);
+    }
+  }
+
   function _tabForRun(run) {
     const runId = String(run?.run_id || run?.id || '');
     const currentTabs = typeof getTabs === 'function' ? getTabs() : [];
@@ -732,10 +795,11 @@
     return String(tab.label || tab.command || tab.id || '').trim();
   }
 
-  function _runMonitorActionButton(label, title, onClick) {
+  function _runMonitorActionButton(label, title, onClick, options = {}) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'btn btn-secondary btn-compact run-monitor-action-btn';
+    if (options.className) btn.classList.add(...String(options.className).split(/\s+/).filter(Boolean));
     btn.textContent = label;
     btn.title = title;
     btn.addEventListener('click', event => {
@@ -743,10 +807,10 @@
       event.stopPropagation();
       const result = onClick();
       Promise.resolve(result).then(attached => {
-        if (attached) closeRunMonitor();
+        if (attached && options.closeOnSuccess !== false) closeRunMonitor();
       }).catch(err => {
         if (typeof showToast === 'function') {
-          showToast(err?.message || 'Could not attach to run', 'error');
+          showToast(err?.message || 'Could not complete run action', 'error');
         }
       });
     });
@@ -1040,11 +1104,6 @@
       cpuSamples,
       ...profile,
       meta: `${activeRuns.length} active${cpuMeta} · ${_formatDurationSeconds(status.uptime || 0)} uptime`,
-      pips: [
-        ['DB', status.db],
-        ['Redis', status.redis],
-        ['SSE', 'ok'],
-      ],
     };
   }
 
@@ -1234,6 +1293,71 @@
     });
   }
 
+  function _pulseGlowRenderScale() {
+    if (!_isMobileRunMonitor()) {
+      return {
+        glowWidth: 1,
+        glowOpacity: 1,
+        glowMinWidth: 1,
+        glowMinOpacity: 0,
+        beatGlowWidth: 1,
+        beatGlowOpacity: 1,
+        beatGlowMinWidth: 1,
+        beatGlowMinOpacity: 0,
+      };
+    }
+    return {
+      glowWidth: 1,
+      glowOpacity: 1,
+      glowMinWidth: 6,
+      glowMinOpacity: 0.3,
+      beatGlowWidth: 0.16,
+      beatGlowOpacity: 0.2,
+      beatGlowMinWidth: 2.5,
+      beatGlowMinOpacity: 0.08,
+    };
+  }
+
+  function _renderMobilePulseGlowEllipses(groupEl, beats, gradientId) {
+    if (!groupEl || !gradientId) return;
+    const fragment = document.createDocumentFragment();
+    beats.forEach((beat) => {
+      const load = _clampNumber((Number(beat.spike || 0) - 10) / 28, 0, 1);
+      const points = _pulseBeatPoints(beat);
+      const xs = points.map(point => point[0]);
+      const ys = points.map(point => point[1]);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const beatHeight = Math.max(1, maxY - minY);
+      const smallBeatBoost = (1 - load) * 8;
+      const radius = (beatHeight * 0.62) + 6 + (load * 4) + smallBeatBoost;
+      const weighted = points.reduce((acc, point) => {
+        const weight = Math.abs(point[1] - PULSE_BASELINE_Y);
+        if (!weight) return acc;
+        acc.x += point[0] * weight;
+        acc.y += point[1] * weight;
+        acc.weight += weight;
+        return acc;
+      }, { x: 0, y: 0, weight: 0 });
+      const centerX = weighted.weight ? weighted.x / weighted.weight : (minX + maxX) / 2;
+      const weightedCenterY = weighted.weight ? weighted.y / weighted.weight : (minY + maxY) / 2;
+      const centerY = (weightedCenterY * 0.38) + (PULSE_BASELINE_Y * 0.62);
+      const ellipse = _svgEl('ellipse', {
+        class: 'status-monitor-pulse-mobile-glow',
+        cx: centerX.toFixed(1),
+        cy: centerY.toFixed(1),
+        rx: radius.toFixed(1),
+        ry: (radius * 1.08).toFixed(1),
+        opacity: _clampNumber(0.64 + (load * 0.22) + ((1 - load) * 0.04), 0.64, 0.86).toFixed(2),
+        fill: `url(#${gradientId})`,
+      });
+      fragment.appendChild(ellipse);
+    });
+    groupEl.replaceChildren(fragment);
+  }
+
   function _pulseNodes(strip) {
     let nodes = pulseNodeCacheByStrip.get(strip);
     if (!nodes) {
@@ -1243,7 +1367,6 @@
         beatGroup: strip.querySelector('.status-monitor-pulse-beat-glows'),
         placeholderLine: strip.querySelector('.status-monitor-pulse-placeholder-line'),
         line: strip.querySelector('.status-monitor-pulse-line'),
-        pips: strip.querySelector('.status-monitor-health-pips'),
       };
       pulseNodeCacheByStrip.set(strip, nodes);
     }
@@ -1254,13 +1377,18 @@
     const { broadGroup, beatGroup } = _pulseNodes(strip);
     if (!broadGroup || !beatGroup) return;
     const groups = _pulseGlowGroups(beats);
-    _syncPulseGlowGroup(broadGroup, groups, 'status-monitor-pulse-glow', group => [
-      `--pulse-glow-opacity:${group.glowOpacity.toFixed(2)}`,
-      `--pulse-glow-width:${group.glowWidth.toFixed(1)}px`,
-    ].join(';'));
+    const scale = _pulseGlowRenderScale();
+    if (_isMobileRunMonitor()) {
+      _renderMobilePulseGlowEllipses(broadGroup, beats, strip.dataset.pulseGlowGradientId || '');
+    } else {
+      _syncPulseGlowGroup(broadGroup, groups, 'status-monitor-pulse-glow', group => [
+        `--pulse-glow-opacity:${Math.max(scale.glowMinOpacity, group.glowOpacity * scale.glowOpacity).toFixed(2)}`,
+        `--pulse-glow-width:${Math.max(scale.glowMinWidth, group.glowWidth * scale.glowWidth).toFixed(1)}px`,
+      ].join(';'));
+    }
     _syncPulseGlowGroup(beatGroup, groups, 'status-monitor-pulse-beat-glow', group => [
-      `--pulse-beat-glow-opacity:${group.beatGlowOpacity.toFixed(2)}`,
-      `--pulse-beat-glow-width:${group.beatGlowWidth.toFixed(1)}px`,
+      `--pulse-beat-glow-opacity:${Math.max(scale.beatGlowMinOpacity, group.beatGlowOpacity * scale.beatGlowOpacity).toFixed(2)}`,
+      `--pulse-beat-glow-width:${Math.max(scale.beatGlowMinWidth, group.beatGlowWidth * scale.beatGlowWidth).toFixed(1)}px`,
     ].join(';'));
   }
 
@@ -1460,16 +1588,6 @@
     _applyPulseLoadStyle(strip, data);
     _ensurePulseState(strip, data);
     _renderPulseState(strip, _pulseNow());
-    const { pips } = _pulseNodes(strip);
-    if (pips) {
-      data.pips.forEach(([label, value], index) => {
-        const pip = pips.children[index];
-        if (!pip) return;
-        pip.className = `status-monitor-health-pip status-monitor-health-pip-${_statusTone(value)}`;
-        pip.textContent = label;
-        pip.title = `${label}: ${_statusLabel(value)}`;
-      });
-    }
   }
 
   function _renderPulseStrip(runs) {
@@ -1481,13 +1599,41 @@
     strip.classList.toggle('status-monitor-pulse-active', data.activeCount > 0);
     strip.dataset.pulseSignature = data.signature;
     strip.dataset.pulseCpuSamples = data.cpuSamples.map(value => Math.round(value).toString()).join(',');
+    strip.dataset.pulseGlowGradientId = `status-monitor-pulse-mobile-glow-${Math.random().toString(36).slice(2)}`;
     _applyPulseLoadStyle(strip, data);
+    // On narrow mobile viewports the strip is roughly half as wide as desktop.
+    // With `preserveAspectRatio: 'none'` the path geometry compresses
+    // horizontally, so beats sit too close together and full-amplitude
+    // ECG spikes stack into a wall of overlapping vertical strokes. Use
+    // `xMidYMid slice` on mobile so beats render at their native aspect
+    // (Y-fill scale ≈ 1.0 with the 720×76 viewBox) and the canvas crops
+    // the horizontal overflow — fewer beats are visible at once but each
+    // one keeps the same character as desktop.
+    const sliceAspect = typeof window.matchMedia === 'function'
+      && window.matchMedia('(max-width: 600px)').matches;
     const svg = _svgEl('svg', {
       viewBox: '0 0 720 76',
-      preserveAspectRatio: 'none',
+      preserveAspectRatio: sliceAspect ? 'xMidYMid slice' : 'none',
       class: 'status-monitor-pulse-svg',
       'aria-hidden': 'true',
     });
+    const defs = _svgEl('defs');
+    const glowGradient = _svgEl('radialGradient', {
+      id: strip.dataset.pulseGlowGradientId,
+      cx: '50%',
+      cy: '50%',
+      r: '50%',
+      fx: '50%',
+      fy: '50%',
+    });
+    glowGradient.append(
+      _svgEl('stop', { offset: '0%', 'stop-color': 'var(--green)', 'stop-opacity': '1' }),
+      _svgEl('stop', { offset: '22%', 'stop-color': 'var(--green)', 'stop-opacity': '0.82' }),
+      _svgEl('stop', { offset: '56%', 'stop-color': 'var(--green)', 'stop-opacity': '0.34' }),
+      _svgEl('stop', { offset: '84%', 'stop-color': 'var(--green)', 'stop-opacity': '0.08' }),
+      _svgEl('stop', { offset: '100%', 'stop-color': 'var(--green)', 'stop-opacity': '0' }),
+    );
+    defs.appendChild(glowGradient);
     const track = _svgEl('g', { class: 'status-monitor-pulse-track' });
     track.append(
       _svgEl('g', { class: 'status-monitor-pulse-glows' }),
@@ -1496,21 +1642,12 @@
       _svgEl('path', { class: 'status-monitor-pulse-line', d: '' }),
     );
     svg.append(
+      defs,
       _svgEl('path', { class: 'status-monitor-pulse-grid', d: 'M0 40 L720 40' }),
       track,
     );
 
-    const pips = document.createElement('div');
-    pips.className = 'status-monitor-health-pips';
-    data.pips.forEach(([label, value]) => {
-      const pip = document.createElement('span');
-      pip.className = `status-monitor-health-pip status-monitor-health-pip-${_statusTone(value)}`;
-      pip.textContent = label;
-      pip.title = `${label}: ${_statusLabel(value)}`;
-      pips.appendChild(pip);
-    });
-
-    strip.append(svg, pips);
+    strip.append(svg);
     _ensurePulseState(strip, data);
     _renderPulseState(strip, _pulseNow());
     return strip;
@@ -1617,6 +1754,33 @@
     return '';
   }
 
+  function _splitConstellationStreakSegments(group) {
+    // Streaks already group same-root points (e.g. nuclei connects to nuclei
+    // only). Add max ≤2h between consecutive starts AND same calendar date so
+    // a long-running session at 23:30 → 00:30 splits at midnight rather than
+    // wrapping back across the entire X axis, and bursts hours apart are not
+    // joined into spaghetti.
+    const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+    const segments = [];
+    let current = [];
+    let previous = null;
+    for (const point of group) {
+      if (previous) {
+        const sameDay = new Date(previous.started).toDateString()
+          === new Date(point.started).toDateString();
+        const within2h = (point.started - previous.started) <= TWO_HOURS_MS;
+        if (!sameDay || !within2h) {
+          if (current.length >= 2) segments.push(current);
+          current = [];
+        }
+      }
+      current.push(point);
+      previous = point;
+    }
+    if (current.length >= 2) segments.push(current);
+    return segments;
+  }
+
   function _constellationStreakPath(points) {
     if (!Array.isArray(points) || points.length < 2) return '';
     if (points.length === 2) {
@@ -1635,22 +1799,42 @@
     return commands.join(' ');
   }
 
+  function _constellationTimeGuideX(hour) {
+    return 22 + ((hour * 60) / 1440) * 596;
+  }
+
   function _appendConstellationTimeGuides(svg) {
-    for (let hour = 0; hour <= 24; hour += 4) {
-      const x = 22 + ((hour * 60) / 1440) * 596;
+    for (let hour = 0; hour <= 24; hour += 2) {
+      if (hour % 4 === 0) continue;
+      const x = _constellationTimeGuideX(hour);
       svg.appendChild(_svgEl('line', {
-        class: 'status-monitor-constellation-guide',
+        class: 'status-monitor-constellation-guide status-monitor-constellation-guide-minor',
         x1: x,
         y1: 12,
         x2: x,
         y2: 286,
       }));
+    }
+    for (let hour = 0; hour <= 24; hour += 4) {
+      const x = _constellationTimeGuideX(hour);
+      svg.appendChild(_svgEl('line', {
+        class: 'status-monitor-constellation-guide status-monitor-constellation-guide-major',
+        x1: x,
+        y1: 12,
+        x2: x,
+        y2: 286,
+      }));
+      // Stars max out at minute 1439 (23:59), so the `24` tick can never
+      // carry data — drop the label so the rightmost cluster reads as
+      // 20:00–midnight rather than as overflow at the next-day boundary.
+      if (hour === 24) continue;
       const label = _svgEl('text', {
         class: 'status-monitor-constellation-guide-label',
-        x: Math.min(612, x + 3),
-        y: 292,
+        x: Math.max(18, Math.min(622, x)),
+        y: 289,
+        'text-anchor': 'middle',
       });
-      label.textContent = `${String(hour).padStart(2, '0')}h`;
+      label.textContent = String(hour).padStart(2, '0');
       svg.appendChild(label);
     }
   }
@@ -1675,6 +1859,30 @@
     }
   }
 
+  function _computeConstellationCeiling(elapsedValues) {
+    // p98 + 6% headroom, quantised up to the nearest 10% of full range,
+    // floored at 25% of full range. Y in the constellation is log-scaled
+    // elapsed_seconds; using p98 as the denominator instead of max() pulls
+    // the bulk of stars off the baseline when a single long-tail outlier
+    // would otherwise flatten the canvas.
+    const finite = [];
+    for (const value of elapsedValues) {
+      const n = Number(value);
+      if (Number.isFinite(n) && n >= 0) finite.push(n);
+    }
+    if (!finite.length) return 1;
+    finite.sort((left, right) => left - right);
+    const fullMax = finite[finite.length - 1];
+    if (fullMax <= 0) return 1;
+    const p98Index = Math.max(0, Math.ceil(finite.length * 0.98) - 1);
+    const p98 = finite[p98Index];
+    const padded = p98 * 1.06;
+    const step = Math.max(fullMax / 10, 1e-6);
+    const quantised = Math.ceil(padded / step) * step;
+    const sparsityFloor = fullMax * 0.25;
+    return Math.max(sparsityFloor, quantised, 1);
+  }
+
   function _renderConstellationPanel() {
     const insights = cachedInsights || {};
     const stars = Array.isArray(insights.constellation) ? insights.constellation : [];
@@ -1692,6 +1900,21 @@
       ? `${_formatCount(stars.length)} plotted · ${_insightWindowLabel('constellation', 30)}`
       : `awaiting run history · ${_insightWindowLabel('constellation', 30)}`;
     const legend = _categoryLegend(stars);
+    if (legend && stars.length) {
+      const hasFailed = stars.some(star => _isFailedExitCode(star?.exit_code));
+      if (hasFailed) {
+        legend.appendChild(_buildConstellationLegendKey({
+          modifier: 'failed',
+          ariaLabel: 'Failed runs are ringed in red',
+          label: 'Failed',
+        }));
+      }
+      legend.appendChild(_buildConstellationLegendKey({
+        modifier: 'size',
+        ariaLabel: 'Star size encodes output line count',
+        label: 'Output',
+      }));
+    }
     header.append(title);
     if (legend) header.appendChild(legend);
     header.appendChild(meta);
@@ -1757,14 +1980,16 @@
         r: star.radius,
         style: [
           `--ambient-hue:${star.hue.toFixed(1)}`,
+          `--ambient-saturation:${star.saturation.toFixed(1)}%`,
+          `--ambient-lightness:${star.lightness.toFixed(1)}%`,
           `--ambient-opacity:${star.opacity.toFixed(2)}`,
           `--ambient-glow:${star.glow.toFixed(1)}px`,
+          `--ambient-glow-alpha:${star.glowAlpha.toFixed(2)}`,
         ].join(';'),
       }));
     });
-    const maxElapsed = Math.max(
-      1,
-      ...stars.map(star => Number(star.elapsed_seconds || 0)).filter(Number.isFinite),
+    const ceilingElapsed = _computeConstellationCeiling(
+      stars.map(star => star.elapsed_seconds),
     );
     const now = Date.now();
     const plottedStars = stars.map((star) => {
@@ -1774,7 +1999,8 @@
       const jitter = _normalizedHash(star.id || star.command || star.root);
       const x = 22 + (minutes / 1440) * 596 + ((jitter % 29) - 14) * 0.45;
       const elapsed = Number(star.elapsed_seconds || 0);
-      const yBase = 260 - ((Math.log1p(elapsed) / Math.log1p(maxElapsed)) * 205);
+      const offScale = elapsed > ceilingElapsed;
+      const yBase = 260 - ((Math.log1p(elapsed) / Math.log1p(ceilingElapsed)) * 205);
       const y = Math.max(18, Math.min(280, yBase + (((jitter / 31) % 31) - 15) * 0.65));
       const ageDays = Math.max(0, (now - started) / 86400000);
       const opacity = Math.max(0.28, 1 - (ageDays / 34));
@@ -1793,6 +2019,7 @@
         tone,
         starStyle,
         failed,
+        offScale,
       };
     });
     const streakGroups = new Map();
@@ -1807,19 +2034,24 @@
       if (group.length < 2) return;
       group.sort((left, right) => left.started - right.started);
       const tone = group[0].tone;
-      const path = _constellationStreakPath(group);
-      if (!path) return;
-      svg.appendChild(_svgEl('path', {
-        class: 'status-monitor-constellation-streak',
-        d: path,
-        style: `--star-hue:${tone.hue};--star-saturation:${tone.saturation}%`,
-      }));
+      const segments = _splitConstellationStreakSegments(group);
+      segments.forEach((segment) => {
+        const path = _constellationStreakPath(segment);
+        if (!path) return;
+        svg.appendChild(_svgEl('path', {
+          class: 'status-monitor-constellation-streak',
+          d: path,
+          style: `--star-hue:${tone.hue};--star-saturation:${tone.saturation}%`,
+        }));
+      });
     });
-    plottedStars.forEach(({ star, x, y, radius, opacity, starStyle, failed }, index) => {
+    plottedStars.forEach(({ star, x, y, radius, opacity, starStyle, failed, offScale }, index) => {
       const starId = String(star.id || `${star.root || 'run'}:${star.started || ''}:${index}`);
       starsByNodeId.set(starId, { star, x, y });
       const node = _svgEl('g', {
-        class: 'status-monitor-star-node',
+        class: offScale
+          ? 'status-monitor-star-node status-monitor-star-node-offscale'
+          : 'status-monitor-star-node',
         tabindex: '0',
         role: 'button',
         'aria-label': `${star.root || 'run'} ${_formatStarStarted(star.started)}`,
@@ -1856,6 +2088,18 @@
       });
       node.append(ring);
       if (failureRing) node.appendChild(failureRing);
+      if (offScale) {
+        const tickTop = Math.max(4, y - radius - 7);
+        const tickBottom = Math.max(tickTop + 1, y - radius - 1.5);
+        node.appendChild(_svgEl('line', {
+          class: 'status-monitor-star-offscale-tick',
+          x1: x,
+          x2: x,
+          y1: tickTop,
+          y2: tickBottom,
+          style: starStyle,
+        }));
+      }
       node.append(circle, hit);
       svg.appendChild(node);
     });
@@ -2355,12 +2599,13 @@
       section.prepend(_renderPulseStrip(activeRuns));
     }
     const runsSection = section.querySelector(':scope > .status-monitor-runs-section');
-    const nextRunsSection = _renderActiveRunsSection(activeRuns, options);
     if (runsSection) {
-      runsSection.replaceWith(nextRunsSection);
+      _applyActiveRunsSection(runsSection, activeRuns, options);
     } else {
+      const fresh = _renderActiveRunsSection(activeRuns, options);
       const pulse = section.querySelector(':scope > .status-monitor-pulse-strip');
-      pulse?.after(nextRunsSection);
+      if (pulse) pulse.after(fresh);
+      else section.appendChild(fresh);
     }
     const grid = section.querySelector(':scope > .status-monitor-showcase-grid');
     const nextSignature = _visualGridSignature();
@@ -2495,150 +2740,325 @@
     return section;
   }
 
-  function _renderActiveRunsSection(runs, options = {}) {
-    const loading = !!options.loadingActiveRuns;
-    const section = _statusSection(
-      'Runs',
-      loading ? 'Loading active runs' : (runs.length === 1 ? '1 active run' : `${runs.length} active runs`),
-    );
-    section.classList.add('status-monitor-runs-section');
-    section.dataset.activeRunCount = String(runs.length);
-    const runList = document.createElement('div');
-    runList.className = 'status-monitor-runs-list';
-    runList.classList.toggle('status-monitor-runs-list-many', runs.length >= 5);
-    runList.classList.toggle('status-monitor-runs-list-medium', runs.length >= 3 && runs.length < 5);
+  function _activeRunsSummary(runs, loading) {
+    if (loading) return 'Loading active runs';
+    return runs.length === 1 ? '1 active run' : `${runs.length} active runs`;
+  }
+
+  function _gcResourceStateForRuns(runs) {
     const activeRunIds = new Set(
       runs.map(run => String(run?.run_id || run?.id || '')).filter(Boolean),
     );
-    if (!loading) {
-      [...resourceStateByRunId.keys()].forEach(runId => {
-        if (!activeRunIds.has(runId)) resourceStateByRunId.delete(runId);
+    for (const runId of [...resourceStateByRunId.keys()]) {
+      if (!activeRunIds.has(runId)) resourceStateByRunId.delete(runId);
+    }
+    for (const runId of [...resourceTrendByRunId.keys()]) {
+      if (!activeRunIds.has(runId)) resourceTrendByRunId.delete(runId);
+    }
+  }
+
+  function _populateActiveRunMeta(meta, run) {
+    const tabLabel = _tabLabelForRun(run);
+    const elapsed = document.createElement('span');
+    elapsed.className = 'run-monitor-meta-chip run-monitor-elapsed';
+    elapsed.setAttribute('data-run-monitor-started', String(run?.started || ''));
+    elapsed.textContent = _formatElapsed(run?.started);
+    const chips = [
+      _runMetaChip(`run ${_shortRunId(run)}`),
+      _runMetaChip(`pid ${run?.pid || '-'}`),
+      elapsed,
+    ];
+    if (tabLabel) {
+      chips.push(_runMetaChip(tabLabel, 'run-monitor-meta-chip-tab'));
+    }
+    if (run?.has_live_owner && !run?.owned_by_this_client) {
+      chips.push(_runMetaChip('another browser', 'run-monitor-meta-chip-warn'));
+    } else if (run?.owned_by_this_client) {
+      chips.push(_runMetaChip('started here', 'run-monitor-meta-chip-ok'));
+    }
+    meta.replaceChildren(...chips);
+    meta.dataset.metaSignature = [
+      tabLabel || '',
+      run?.has_live_owner ? '1' : '0',
+      run?.owned_by_this_client ? '1' : '0',
+    ].join('|');
+  }
+
+  function _activeRunMetaSignature(run) {
+    return [
+      _tabLabelForRun(run) || '',
+      run?.has_live_owner ? '1' : '0',
+      run?.owned_by_this_client ? '1' : '0',
+    ].join('|');
+  }
+
+  function _activeRunActionsSignature(run) {
+    const hasAttach = !_tabForRun(run) && typeof attachActiveRunFromMonitor === 'function';
+    const hasKill = typeof killActiveRunFromMonitor === 'function';
+    return `${hasAttach ? 'A' : ''}${hasKill ? 'K' : ''}`;
+  }
+
+  function _renderActiveRunActions(run) {
+    const actions = document.createElement('div');
+    actions.className = 'run-monitor-actions';
+    actions.dataset.actionsSignature = _activeRunActionsSignature(run);
+    const tab = _tabForRun(run);
+    if (!tab && typeof attachActiveRunFromMonitor === 'function') {
+      actions.append(_runMonitorActionButton('Attach', 'Open this run in a tab', () => {
+        const latest = activeRunByRow.get(actions.closest('.run-monitor-item')) || run;
+        return attachActiveRunFromMonitor(latest);
+      }));
+    }
+    if (typeof killActiveRunFromMonitor === 'function') {
+      actions.append(_runMonitorActionButton('Kill', 'Kill this active run', () => {
+        const latest = activeRunByRow.get(actions.closest('.run-monitor-item')) || run;
+        return killActiveRunFromMonitor(latest);
+      }, { className: 'run-monitor-action-btn-kill', closeOnSuccess: false }));
+    }
+    return actions;
+  }
+
+  function _renderActiveRunRow(run) {
+    const item = document.createElement('article');
+    item.className = 'run-monitor-item chrome-row row-accent-green';
+    item.dataset.runId = String(run?.run_id || run?.id || '');
+    activeRunByRow.set(item, run);
+
+    const openRun = () => {
+      const latest = activeRunByRow.get(item) || run;
+      const currentTab = _tabForRun(latest);
+      if (currentTab && typeof activateTab === 'function') {
+        activateTab(currentTab.id, { focusComposer: false });
+        closeRunMonitor();
+        return Promise.resolve(true);
+      }
+      if (typeof attachActiveRunFromMonitor === 'function') {
+        return Promise.resolve(attachActiveRunFromMonitor(latest)).then(attached => {
+          if (attached) closeRunMonitor();
+          return attached;
+        });
+      }
+      return Promise.resolve(false);
+    };
+
+    const tab = _tabForRun(run);
+    if (tab || typeof attachActiveRunFromMonitor === 'function') {
+      item.classList.add('run-monitor-item-clickable', 'chrome-row-clickable');
+      item.setAttribute('role', 'button');
+      item.setAttribute('tabindex', '0');
+      item.setAttribute('aria-label', `${tab ? 'Open tab for' : 'Attach to'} ${String(run?.command || 'active run')}`);
+      item.addEventListener('click', event => {
+        if (event.target && event.target.closest && event.target.closest('.run-monitor-action-btn')) return;
+        openRun().catch(err => {
+          if (typeof showToast === 'function') showToast(err?.message || 'Could not open run', 'error');
+        });
       });
-      [...resourceTrendByRunId.keys()].forEach(runId => {
-        if (!activeRunIds.has(runId)) resourceTrendByRunId.delete(runId);
+      item.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        openRun().catch(err => {
+          if (typeof showToast === 'function') showToast(err?.message || 'Could not open run', 'error');
+        });
       });
     }
 
+    const command = document.createElement('div');
+    command.className = 'run-monitor-command';
+    command.textContent = String(run?.command || '').trim() || '(unknown command)';
+
+    const meta = document.createElement('div');
+    meta.className = 'run-monitor-meta';
+    _populateActiveRunMeta(meta, run);
+
+    const details = document.createElement('div');
+    details.className = 'run-monitor-details';
+    details.append(command, meta);
+
+    const usage = _runResourceUsage(run);
+    const telemetry = _runSparklinePanel(run, usage);
+    const cpuValue = _formatCpuPercent(usage.cpu_percent);
+    const cpuCollecting = cpuValue === 'collecting';
+    const meters = document.createElement('div');
+    meters.className = 'run-monitor-meters';
+    meters.append(
+      _runMonitorMeter({
+        label: 'CPU',
+        value: cpuCollecting ? '' : cpuValue,
+        percent: usage.cpu_percent,
+        className: 'run-monitor-meter-cpu',
+        collecting: cpuCollecting,
+        ariaValue: cpuValue,
+      }),
+      _runMonitorMeter({
+        label: 'MEM',
+        value: _formatMemoryBytes(usage.memory_bytes),
+        percent: _memoryPercent(usage.memory_bytes),
+        className: 'run-monitor-meter-mem',
+      }),
+    );
+
+    const meterRail = document.createElement('div');
+    meterRail.className = 'run-monitor-meter-rail';
+    meterRail.appendChild(meters);
+    const actions = _renderActiveRunActions(run);
+    if (actions.childElementCount) meterRail.append(actions);
+    item.append(details, telemetry, meterRail);
+    return item;
+  }
+
+  function _updateActiveRunRow(row, run) {
+    activeRunByRow.set(row, run);
+
+    const meta = row.querySelector(':scope > .run-monitor-details > .run-monitor-meta');
+    if (meta && meta.dataset.metaSignature !== _activeRunMetaSignature(run)) {
+      _populateActiveRunMeta(meta, run);
+    } else if (meta) {
+      // Signature unchanged but the elapsed chip's data attribute should still
+      // track the run's started time in case the API ever rewrites it; the
+      // 1s tick timer rewrites textContent.
+      const elapsed = meta.querySelector('.run-monitor-elapsed');
+      if (elapsed) {
+        const started = String(run?.started || '');
+        if (elapsed.getAttribute('data-run-monitor-started') !== started) {
+          elapsed.setAttribute('data-run-monitor-started', started);
+          elapsed.textContent = _formatElapsed(run?.started);
+        }
+      }
+    }
+
+    const usage = _runResourceUsage(run);
+    const samples = _recordResourceTrend(run, usage);
+    const cpuPath = row.querySelector('.run-monitor-sparkline-cpu');
+    const memPath = row.querySelector('.run-monitor-sparkline-mem');
+    if (cpuPath) cpuPath.setAttribute('d', _trendPath(samples, 'cpu'));
+    if (memPath) memPath.setAttribute('d', _trendPath(samples, 'mem'));
+
+    const cpuValue = _formatCpuPercent(usage.cpu_percent);
+    const cpuCollecting = cpuValue === 'collecting';
+    const cpuMeter = row.querySelector('.run-monitor-meter-cpu');
+    if (cpuMeter) {
+      _updateRunMonitorMeter(cpuMeter, {
+        label: 'CPU',
+        value: cpuCollecting ? '' : cpuValue,
+        percent: usage.cpu_percent,
+        collecting: cpuCollecting,
+        ariaValue: cpuValue,
+      });
+    }
+    const memMeter = row.querySelector('.run-monitor-meter-mem');
+    if (memMeter) {
+      _updateRunMonitorMeter(memMeter, {
+        label: 'MEM',
+        value: _formatMemoryBytes(usage.memory_bytes),
+        percent: _memoryPercent(usage.memory_bytes),
+      });
+    }
+
+    const meterRail = row.querySelector(':scope > .run-monitor-meter-rail');
+    if (meterRail) {
+      const expectedSig = _activeRunActionsSignature(run);
+      const existingActions = meterRail.querySelector(':scope > .run-monitor-actions');
+      if (!expectedSig) {
+        if (existingActions) existingActions.remove();
+      } else if (!existingActions) {
+        meterRail.append(_renderActiveRunActions(run));
+      } else if (existingActions.dataset.actionsSignature !== expectedSig) {
+        existingActions.replaceWith(_renderActiveRunActions(run));
+      }
+    }
+  }
+
+  function _renderActiveRunsSection(runs, options = {}) {
+    const loading = !!options.loadingActiveRuns;
+    const section = _statusSection('Runs', _activeRunsSummary(runs, loading));
+    section.classList.add('status-monitor-runs-section');
+    const runList = document.createElement('div');
+    runList.className = 'status-monitor-runs-list';
+    section.appendChild(runList);
+    _applyActiveRunsSection(section, runs, options);
+    return section;
+  }
+
+  function _applyActiveRunsSection(section, runs, options = {}) {
+    const loading = !!options.loadingActiveRuns;
+    const summary = _activeRunsSummary(runs, loading);
+    const header = section.querySelector(':scope > .status-monitor-section-header');
+    if (header) {
+      let metaEl = header.querySelector(':scope > .status-monitor-section-meta');
+      if (summary) {
+        if (!metaEl) {
+          metaEl = document.createElement('div');
+          metaEl.className = 'status-monitor-section-meta';
+          header.appendChild(metaEl);
+        }
+        if (metaEl.textContent !== summary) metaEl.textContent = summary;
+      } else if (metaEl) {
+        metaEl.remove();
+      }
+    }
+    section.dataset.activeRunCount = String(runs.length);
+
+    const runList = section.querySelector(':scope > .status-monitor-runs-list');
+    if (!runList) return;
+    runList.classList.toggle('status-monitor-runs-list-many', runs.length >= 5);
+    runList.classList.toggle('status-monitor-runs-list-medium', runs.length >= 3 && runs.length < 5);
+
     if (loading) {
+      const existingEmpty = runList.querySelector(':scope > .run-monitor-empty');
+      if (existingEmpty && existingEmpty.textContent === 'Loading active runs...'
+          && runList.children.length === 1) {
+        return;
+      }
       const empty = document.createElement('div');
       empty.className = 'run-monitor-empty status-monitor-runs-empty';
       empty.textContent = 'Loading active runs...';
-      runList.appendChild(empty);
-      section.appendChild(runList);
-      return section;
+      runList.replaceChildren(empty);
+      return;
     }
 
-    runs.forEach(run => {
-      const tab = _tabForRun(run);
-      const item = document.createElement('article');
-      item.className = 'run-monitor-item chrome-row row-accent-green';
-      item.dataset.runId = String(run?.run_id || run?.id || '');
-      if (tab && typeof activateTab === 'function') {
-        item.classList.add('run-monitor-item-clickable', 'chrome-row-clickable');
-        item.setAttribute('role', 'button');
-        item.setAttribute('tabindex', '0');
-        item.setAttribute('aria-label', `Open tab for ${String(run?.command || 'active run')}`);
-        const openTab = () => {
-          activateTab(tab.id, { focusComposer: false });
-          closeRunMonitor();
-        };
-        item.addEventListener('click', openTab);
-        item.addEventListener('keydown', event => {
-          if (event.key !== 'Enter' && event.key !== ' ') return;
-          event.preventDefault();
-          openTab();
-        });
-      }
+    _gcResourceStateForRuns(runs);
 
-      const command = document.createElement('div');
-      command.className = 'run-monitor-command';
-      command.textContent = String(run?.command || '').trim() || '(unknown command)';
+    const emptyNode = runList.querySelector(':scope > .run-monitor-empty');
+    if (emptyNode) emptyNode.remove();
 
-      const meta = document.createElement('div');
-      meta.className = 'run-monitor-meta';
-      const tabLabel = _tabLabelForRun(run);
-      const elapsed = document.createElement('span');
-      elapsed.className = 'run-monitor-meta-chip run-monitor-elapsed';
-      elapsed.setAttribute('data-run-monitor-started', String(run?.started || ''));
-      elapsed.textContent = _formatElapsed(run?.started);
-      meta.append(
-        _runMetaChip(`run ${_shortRunId(run)}`),
-        _runMetaChip(`pid ${run?.pid || '-'}`),
-        elapsed,
-      );
-      if (tabLabel) {
-        meta.append(_runMetaChip(tabLabel, 'run-monitor-meta-chip-tab'));
-        if (run?.has_live_owner && !run?.owned_by_this_client) {
-          meta.append(_runMetaChip('controlled elsewhere', 'run-monitor-meta-chip-warn'));
-        } else if (run?.owned_by_this_client) {
-          meta.append(_runMetaChip('owned here', 'run-monitor-meta-chip-ok'));
-        }
-      } else if (run?.has_live_owner && !run?.owned_by_this_client) {
-        meta.append(_runMetaChip('another browser', 'run-monitor-meta-chip-warn'));
-      } else if (run?.owned_by_this_client) {
-        meta.append(_runMetaChip('owned here', 'run-monitor-meta-chip-ok'));
-      }
-
-      const details = document.createElement('div');
-      details.className = 'run-monitor-details';
-      details.append(command, meta);
-
-      const actions = document.createElement('div');
-      actions.className = 'run-monitor-actions';
-      const canActOnOtherBrowserRun = run?.has_live_owner
-        && !run?.owned_by_this_client
-        && typeof attachActiveRunFromMonitor === 'function';
-      const canAttachOtherBrowserRun = canActOnOtherBrowserRun && !tab;
-      const canTakeOverOtherBrowserRun = canActOnOtherBrowserRun;
-      if (canAttachOtherBrowserRun) {
-        actions.append(_runMonitorActionButton('Attach', 'Open a read-only tab for this run', () => (
-          attachActiveRunFromMonitor(run, { takeover: false })
-        )));
-      }
-      if (canTakeOverOtherBrowserRun) {
-        actions.append(_runMonitorActionButton('Take over', 'Move this run into a controllable tab in this browser', () => (
-          attachActiveRunFromMonitor(run, { takeover: true })
-        )));
-      }
-
-      const usage = _runResourceUsage(run);
-      const telemetry = _runSparklinePanel(run, usage);
-      const cpuValue = _formatCpuPercent(usage.cpu_percent);
-      const cpuCollecting = cpuValue === 'collecting';
-      const meters = document.createElement('div');
-      meters.className = 'run-monitor-meters';
-      meters.append(
-        _runMonitorMeter({
-          label: 'CPU',
-          value: cpuCollecting ? '' : cpuValue,
-          percent: usage.cpu_percent,
-          className: 'run-monitor-meter-cpu',
-          collecting: cpuCollecting,
-          ariaValue: cpuValue,
-        }),
-        _runMonitorMeter({
-          label: 'MEM',
-          value: _formatMemoryBytes(usage.memory_bytes),
-          percent: _memoryPercent(usage.memory_bytes),
-          className: 'run-monitor-meter-mem',
-        }),
-      );
-
-      const meterRail = document.createElement('div');
-      meterRail.className = 'run-monitor-meter-rail';
-      meterRail.appendChild(meters);
-      if (actions.childElementCount) meterRail.append(actions);
-      item.append(details, telemetry, meterRail);
-      runList.appendChild(item);
-    });
     if (!runs.length) {
+      runList.querySelectorAll(':scope > .run-monitor-item').forEach(node => node.remove());
       const empty = document.createElement('div');
       empty.className = 'run-monitor-empty status-monitor-runs-empty';
       empty.textContent = 'No active runs.';
       runList.appendChild(empty);
+      return;
     }
-    section.appendChild(runList);
-    return section;
+
+    const existingRows = new Map();
+    runList.querySelectorAll(':scope > .run-monitor-item').forEach(node => {
+      const id = node.dataset.runId || '';
+      if (id) existingRows.set(id, node);
+    });
+
+    const seen = new Set();
+    let cursor = null;
+    for (const run of runs) {
+      const id = String(run?.run_id || run?.id || '');
+      if (!id) continue;
+      seen.add(id);
+      let row = existingRows.get(id);
+      if (row) {
+        _updateActiveRunRow(row, run);
+      } else {
+        row = _renderActiveRunRow(run);
+      }
+      if (cursor) {
+        if (cursor.nextSibling !== row) cursor.after(row);
+      } else if (runList.firstChild !== row) {
+        runList.insertBefore(row, runList.firstChild || null);
+      }
+      cursor = row;
+    }
+
+    for (const [id, row] of existingRows) {
+      if (!seen.has(id)) row.remove();
+    }
   }
 
   function _renderDashboard(runs, options = {}) {
@@ -2665,7 +3085,11 @@
       const forceInsights = !!options.forceInsights;
       await _refreshDashboardData({ includeInsights: forceInsights });
       const runs = await _refreshActiveRunCache({ render: true });
-      if (!forceInsights && runs.length !== previousRunCount) {
+      // Insights are loaded once on open and refreshed on the >0 → 0
+      // transition only. A freshly completed run lands in the heatmap
+      // "today" cell, the treemap percentages, and the constellation
+      // without continuous polling.
+      if (!forceInsights && previousRunCount > 0 && runs.length === 0) {
         await _refreshHistoryInsights();
         _renderDashboard(runs);
       }
@@ -2740,11 +3164,6 @@
     pollTimer = setInterval(() => {
       if (isOpen && document.visibilityState === 'visible') void refreshRunMonitor();
     }, POLL_MS);
-    if (insightsPollTimer) clearInterval(insightsPollTimer);
-    insightsPollTimer = setInterval(() => {
-      if (!isOpen || document.visibilityState !== 'visible') return;
-      void _refreshHistoryInsights().then(() => _renderDashboard(cachedRuns));
-    }, INSIGHTS_POLL_MS);
     if (tickTimer) clearInterval(tickTimer);
     tickTimer = setInterval(() => {
       if (isOpen && document.visibilityState === 'visible') {
@@ -2757,8 +3176,6 @@
   function _stopPolling() {
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = null;
-    if (insightsPollTimer) clearInterval(insightsPollTimer);
-    insightsPollTimer = null;
     if (tickTimer) clearInterval(tickTimer);
     tickTimer = null;
     _stopPulseAnimation();

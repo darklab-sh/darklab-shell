@@ -849,6 +849,112 @@ function _resetPreservedSingleTabState(tab) {
   tab.runningLabel = '';
 }
 
+function _activateNeighborAfterClose(idx, id) {
+  if (activeTabId !== id) return;
+  const nextId = _getNeighborTabIdAfterClose(Math.min(idx, tabs.length), id);
+  if (nextId) activateTab(nextId, { focusComposer: false });
+  if (typeof document !== 'undefined'
+    && document.body
+    && document.body.classList
+    && document.body.classList.contains('mobile-terminal-mode')
+    && typeof window !== 'undefined'
+    && typeof window.scrollTo === 'function') {
+    setTimeout(() => {
+      try {
+        window.scrollTo({ top: 0, behavior: 'auto' });
+      } catch (_) {
+        // jsdom does not implement scrollTo; browsers do.
+      }
+    }, 0);
+  }
+}
+
+function _removeClosedTabView(id, idx) {
+  tabs.splice(idx, 1);
+  _getTabEl(id)?.remove();
+  _getTabPanelEl(id)?.remove();
+  _activateNeighborAfterClose(idx, id);
+  updateNewTabBtn();
+  updateTabScrollButtons();
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:tab-closed', { id, activeTabId });
+  }
+}
+
+function detachRunningTabAndClose(id) {
+  const idx = tabs.findIndex(t => t.id === id);
+  if (idx < 0) return false;
+  const tab = tabs[idx];
+  if (!tab || tab.st !== 'running') return false;
+  if (typeof detachRunStreamForTab === 'function') detachRunStreamForTab(id);
+  tab.closing = false;
+  if (tabs.length === 1) {
+    _resetPreservedSingleTabState(tab);
+    clearTab(id);
+    setTabLabel(id, createDefaultTabLabel(1));
+    blurActiveElement();
+    if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+    if (typeof emitUiEvent === 'function') {
+      emitUiEvent('app:tab-detached', { id, activeTabId, preservedSingleTab: true });
+      emitUiEvent('app:tab-closed', { id, activeTabId, preservedSingleTab: true });
+    }
+    return true;
+  }
+  _removeClosedTabView(id, idx);
+  if (typeof emitUiEvent === 'function') emitUiEvent('app:tab-detached', { id, activeTabId });
+  return true;
+}
+
+function _deferRunningTabCloseForKill(id, idx) {
+  const closingTab = tabs[idx];
+  if (!closingTab || closingTab.st !== 'running') return false;
+  closingTab.closing = true;
+  if (typeof doKill === 'function') doKill(id);
+  if (activeTabId === id && tabs.length > 1) {
+    const nextId = _getNeighborTabIdAfterClose(idx, id);
+    if (nextId) activateTab(nextId, { focusComposer: false });
+  }
+  if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
+  updateNewTabBtn();
+  updateTabScrollButtons();
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:tab-closing-deferred', { id, activeTabId });
+  }
+  return true;
+}
+
+function confirmCloseRunningTab(id) {
+  const idx = tabs.findIndex(t => t.id === id);
+  const tab = tabs[idx];
+  if (!tab || tab.st !== 'running') return Promise.resolve(false);
+  const canDetach = !!(tab.runId || tab.historyRunId);
+  const kill = () => _deferRunningTabCloseForKill(id, idx);
+  if (typeof showConfirm !== 'function') {
+    return Promise.resolve(canDetach ? detachRunningTabAndClose(id) : kill());
+  }
+  const actions = [
+    ...(canDetach ? [{ id: 'detach', label: 'Keep running', role: 'primary' }] : []),
+    { id: 'kill', label: 'Kill run', role: 'destructive' },
+    { id: 'cancel', label: 'Cancel', role: 'cancel' },
+  ];
+  return showConfirm({
+    body: {
+      text: 'Close this running tab?',
+      note: canDetach
+        ? 'Keep running detaches this tab only. The command keeps running and can be reopened from Status Monitor.'
+        : 'The command is still starting, so it cannot be detached yet.',
+    },
+    tone: 'danger',
+    actions,
+  }).then(result => {
+    if (result === 'detach') return detachRunningTabAndClose(id);
+    if (result === 'kill') return kill();
+    return false;
+  });
+}
+
 function closeTab(id) {
   // Closing a tab may need to preserve run state until the kill flow or output
   // persistence finishes, so final removal is sometimes deferred.
@@ -861,24 +967,9 @@ function closeTab(id) {
     closingTab.suppressOutputScrollTracking = false;
     closingTab.deferPromptMount = false;
   }
-  if (closingTab && closingTab.st === 'running' && closingTab.attachMode !== 'read-only') {
-    closingTab.closing = true;
-    if (typeof doKill === 'function') doKill(id);
-    if (activeTabId === id && tabs.length > 1) {
-      const nextId = _getNeighborTabIdAfterClose(idx, id);
-      if (nextId) activateTab(nextId, { focusComposer: false });
-    }
-    if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
-    updateNewTabBtn();
-    updateTabScrollButtons();
-    if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
-    if (typeof emitUiEvent === 'function') {
-      emitUiEvent('app:tab-closing-deferred', { id, activeTabId });
-    }
+  if (closingTab && closingTab.st === 'running') {
+    confirmCloseRunningTab(id);
     return;
-  }
-  if (closingTab && closingTab.attachMode === 'read-only' && typeof detachRunStreamForTab === 'function') {
-    detachRunStreamForTab(id);
   }
   if (tabs.length === 1) {
     // Last tab: reset to blank instead of closing
@@ -897,33 +988,7 @@ function closeTab(id) {
     }
     return;
   }
-  tabs.splice(idx, 1);
-  _getTabEl(id)?.remove();
-  _getTabPanelEl(id)?.remove();
-  if (activeTabId === id) {
-    const nextId = _getNeighborTabIdAfterClose(Math.min(idx, tabs.length), id);
-    if (nextId) activateTab(nextId, { focusComposer: false });
-    if (typeof document !== 'undefined'
-      && document.body
-      && document.body.classList
-      && document.body.classList.contains('mobile-terminal-mode')
-      && typeof window !== 'undefined'
-      && typeof window.scrollTo === 'function') {
-      setTimeout(() => {
-        try {
-          window.scrollTo({ top: 0, behavior: 'auto' });
-        } catch (_) {
-          // jsdom does not implement scrollTo; browsers do.
-        }
-      }, 0);
-    }
-  }
-  updateNewTabBtn();
-  updateTabScrollButtons();
-  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
-  if (typeof emitUiEvent === 'function') {
-    emitUiEvent('app:tab-closed', { id, activeTabId });
-  }
+  _removeClosedTabView(id, idx);
 }
 
 function setTabStatus(id, st) {

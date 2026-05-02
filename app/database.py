@@ -4,7 +4,7 @@ Database lives in the configured data directory. If unset, /data is used when
 writable and /tmp is the local-dev fallback.
 
 Tables: runs, run_output_artifacts, snapshots, session_tokens, session_preferences,
-starred_commands, session_variables, user_workflows.
+starred_commands, session_variables, user_workflows, recent_domains.
 FTS: runs_fts (FTS5 virtual table over runs.command + runs.output_search_text).
 """
 
@@ -128,6 +128,15 @@ def _create_schema(conn):
             updated     TEXT NOT NULL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS recent_domains (
+            session_id TEXT NOT NULL,
+            domain     TEXT NOT NULL,
+            last_used  TEXT NOT NULL,
+            use_count  INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (session_id, domain)
+        )
+    """)
 
 
 def _create_indexes(conn):
@@ -138,6 +147,10 @@ def _create_indexes(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_starred_commands_session ON starred_commands (session_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_session_variables_session ON session_variables (session_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_user_workflows_session ON user_workflows (session_id)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_recent_domains_session_last_used "
+        "ON recent_domains (session_id, last_used DESC)"
+    )
 
 
 def _extract_search_text_from_preview_json(raw_preview):
@@ -313,6 +326,19 @@ def _migrate_schema(conn):
                 steps       TEXT NOT NULL DEFAULT '[]',
                 created     TEXT NOT NULL,
                 updated     TEXT NOT NULL
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS recent_domains (
+                session_id TEXT NOT NULL,
+                domain     TEXT NOT NULL,
+                last_used  TEXT NOT NULL,
+                use_count  INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (session_id, domain)
             )
         """)
     except sqlite3.OperationalError:

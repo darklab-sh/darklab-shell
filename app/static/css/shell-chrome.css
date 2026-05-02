@@ -1114,41 +1114,6 @@
   opacity: 0.68;
 }
 
-.status-monitor-health-pips {
-  position: absolute;
-  z-index: 1;
-  top: 12px;
-  right: 12px;
-  display: flex;
-  gap: 7px;
-}
-
-.status-monitor-health-pip {
-  border: 1px solid color-mix(in srgb, var(--border-bright) 60%, transparent);
-  border-radius: 999px;
-  padding: 4px 7px;
-  color: var(--muted);
-  background: color-mix(in srgb, var(--theme-chrome-bg) 74%, transparent);
-  font-size: 8.5px;
-  text-transform: uppercase;
-}
-
-.status-monitor-health-pip-ok {
-  color: var(--green);
-  border-color: color-mix(in srgb, var(--green) 42%, var(--border));
-  box-shadow: 0 0 12px color-mix(in srgb, var(--green) 16%, transparent);
-}
-
-.status-monitor-health-pip-warn {
-  color: var(--amber);
-  border-color: color-mix(in srgb, var(--amber) 42%, var(--border));
-}
-
-.status-monitor-health-pip-bad {
-  color: var(--red);
-  border-color: color-mix(in srgb, var(--red) 48%, var(--border));
-}
-
 .status-monitor-showcase-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -1233,6 +1198,37 @@
   white-space: nowrap;
 }
 
+.status-monitor-legend-key-glyph {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.status-monitor-legend-key-glyph-failed {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  border: 1.4px solid color-mix(in srgb, var(--red) 78%, transparent);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--red) 64%, transparent);
+}
+
+.status-monitor-legend-star-svg {
+  display: block;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.status-monitor-legend-star-svg-small {
+  width: 8px;
+  height: 8px;
+}
+
+.status-monitor-legend-star-svg-large {
+  width: 14px;
+  height: 14px;
+}
+
 .status-monitor-heatmap-meta-group {
   display: flex;
   min-width: 0;
@@ -1266,14 +1262,16 @@
   width: 100%;
   height: 100%;
   background-image:
-    linear-gradient(color-mix(in srgb, var(--green) 8%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--green) 8%, transparent) 1px, transparent 1px);
-  background-size: 42px 42px;
+    linear-gradient(color-mix(in srgb, var(--green) 7%, transparent) 1px, transparent 1px);
+  background-size: 100% 42px;
 }
 
 .status-monitor-star-ambient {
-  fill: hsl(var(--ambient-hue, 120) 80% 72% / var(--ambient-opacity, 0.5));
-  filter: drop-shadow(0 0 var(--ambient-glow, 4px) hsl(var(--ambient-hue, 120) 92% 68% / 0.36));
+  fill: hsl(var(--ambient-hue, 120) var(--ambient-saturation, 80%) var(--ambient-lightness, 72%) / var(--ambient-opacity, 0.5));
+  filter: drop-shadow(
+    0 0 var(--ambient-glow, 4px)
+    hsl(var(--ambient-hue, 120) 92% 68% / var(--ambient-glow-alpha, 0.36))
+  );
   transform: scaleX(var(--constellation-star-scale-x, 1));
   transform-box: fill-box;
   transform-origin: center;
@@ -1290,16 +1288,26 @@
 }
 
 .status-monitor-constellation-guide {
-  stroke: color-mix(in srgb, var(--green) 18%, transparent);
-  stroke-width: 0.8;
-  stroke-dasharray: 1.5 9;
   pointer-events: none;
 }
 
+.status-monitor-constellation-guide-minor {
+  stroke: color-mix(in srgb, var(--green) 8%, transparent);
+  stroke-width: 0.55;
+  stroke-dasharray: 1 11;
+}
+
+.status-monitor-constellation-guide-major {
+  stroke: color-mix(in srgb, var(--green) 18%, transparent);
+  stroke-width: 0.85;
+  stroke-dasharray: 1.5 9;
+}
+
 .status-monitor-constellation-guide-label {
-  fill: color-mix(in srgb, var(--muted) 72%, transparent);
+  fill: color-mix(in srgb, var(--muted) 86%, transparent);
+  font-family: var(--font-mono);
   font-size: 8px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0;
   pointer-events: none;
 }
@@ -1345,6 +1353,14 @@
 .status-monitor-star-hit {
   fill: transparent;
   pointer-events: all;
+}
+
+.status-monitor-star-offscale-tick {
+  stroke: hsl(var(--star-hue, 120) var(--star-saturation, 100%) 70%);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+  pointer-events: none;
+  filter: drop-shadow(0 0 3px hsl(var(--star-hue, 120) var(--star-saturation, 100%) 60%));
 }
 
 .status-monitor-star-node:hover .status-monitor-star-ring,
@@ -1883,6 +1899,10 @@
   font-size: 10px;
 }
 
+.run-monitor-action-btn-kill {
+  border-color: color-mix(in srgb, var(--red) 72%, var(--border));
+}
+
 .run-monitor-elapsed {
   color: var(--green);
   font-weight: 700;
@@ -2099,13 +2119,36 @@ body.mobile-terminal-mode .tabbar-scroll { display: contents; }
 
   .status-monitor-pulse-strip {
     min-height: 76px;
+    /*
+     * The pulse SVG runs `preserveAspectRatio: 'xMidYMid slice'` on mobile so
+     * beats render at native aspect (1 viewBox unit ≈ 1 CSS pixel) instead of
+     * the X-compressed `none` mode used on desktop. The generated glow paths
+     * scale their inline widths in run_monitor.js for mobile; keep the visible
+     * line itself a touch thinner here.
+     */
+    --pulse-line-width: 1.5px;
   }
 
-  .status-monitor-health-pips {
-    position: relative;
-    top: auto;
-    right: auto;
-    margin: 0 12px 10px;
+  /*
+   * iOS Safari (3x DPR) silently drops or hard-masks CSS `filter: blur()`
+   * on SVG paths that have `vector-effect: non-scaling-stroke` — the halo
+   * renders as a concentric solid band instead of a Gaussian falloff. The
+   * non-scaling-stroke is only needed because of desktop's `preserveAspectRatio:
+   * 'none'` X-compression; under mobile's slice mode the path renders at 1:1
+   * already. Drop it on mobile and force the glow layers onto a GPU
+   * compositing layer so iOS Safari rasterizes the blur properly.
+   */
+  .status-monitor-pulse-glow,
+  .status-monitor-pulse-beat-glow {
+    vector-effect: none;
+    transform: translateZ(0);
+    will-change: filter;
+  }
+
+  .status-monitor-pulse-line {
+    filter:
+      drop-shadow(0 0 2px color-mix(in srgb, var(--green) 82%, transparent))
+      drop-shadow(0 0 7px color-mix(in srgb, var(--green) 48%, transparent));
   }
 
   .status-monitor-showcase-grid {
@@ -2188,13 +2231,6 @@ body.mobile-terminal-mode .status-monitor-grid-two {
 
 body.mobile-terminal-mode .status-monitor-pulse-strip {
   min-height: 76px;
-}
-
-body.mobile-terminal-mode .status-monitor-health-pips {
-  position: relative;
-  top: auto;
-  right: auto;
-  margin: 0 12px 10px;
 }
 
 body.mobile-terminal-mode .status-monitor-showcase-grid {

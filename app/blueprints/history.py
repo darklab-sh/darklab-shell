@@ -269,6 +269,19 @@ def _command_category_map() -> dict[str, str]:
     return categories
 
 
+def _app_builtin_command_roots() -> frozenset[str]:
+    # App built-ins (the synthetic command layer in fake_commands.py) finish
+    # instantly and would smear the constellation baseline, inflate Activity
+    # Heatmap day counts, and steal share from real recon categories in the
+    # treemap. Filter them out at the source so all Status Monitor widgets see
+    # the same recon-only view.
+    try:
+        from fake_commands import get_fake_command_roots
+    except Exception:  # noqa: BLE001
+        return frozenset()
+    return frozenset(get_fake_command_roots())
+
+
 def _history_run_root(command: str) -> str:
     return output_command_root(command) or str(command or "").strip().split(maxsplit=1)[0].lower() or "unknown"
 
@@ -307,6 +320,12 @@ def _history_insights(conn, session_id: str, *, days: int | None = None) -> dict
         """,
         (session_id, cutoff),
     ).fetchall()
+    builtin_roots = _app_builtin_command_roots()
+    if builtin_roots:
+        rows = [
+            row for row in rows
+            if _history_run_root(str(row["command"] or "")) not in builtin_roots
+        ]
     categories = _command_category_map()
     activity: dict[str, dict[str, Any]] = {
         (start_date + timedelta(days=offset)).isoformat(): {

@@ -175,6 +175,16 @@ class TestSessionMigrate:
             )
             conn.commit()
 
+    def _seed_recent_domains(self, session_id, rows):
+        with sqlite3.connect(DB_PATH) as conn:
+            for domain, last_used, use_count in rows:
+                conn.execute(
+                    "INSERT OR REPLACE INTO recent_domains (session_id, domain, last_used, use_count) "
+                    "VALUES (?, ?, ?, ?)",
+                    (session_id, domain, last_used, use_count),
+                )
+            conn.commit()
+
     def _enable_workspace(self, monkeypatch, tmp_path, **overrides):
         cfg = {
             "workspace_enabled": True,
@@ -465,6 +475,42 @@ class TestSessionMigrate:
         assert self._count_rows("user_workflows", from_id) == 0
         assert self._count_rows("user_workflows", to_id) == 1
 
+    def test_migrates_recent_domains_and_merges_destination(self):
+        client = get_client()
+        from_id = "migrate-recents-from-" + __import__("uuid").uuid4().hex[:8]
+        to_id = str(__import__("uuid").uuid4())
+        self._seed_recent_domains(from_id, [
+            ("alpha.example.com", "2026-05-01 10:00:00.000001", 2),
+            ("shared.example.com", "2026-05-01 11:00:00.000001", 3),
+        ])
+        self._seed_recent_domains(to_id, [
+            ("shared.example.com", "2026-05-01 09:00:00.000001", 4),
+        ])
+
+        resp = client.post(
+            "/session/migrate",
+            json={"from_session_id": from_id, "to_session_id": to_id},
+            headers={"X-Session-ID": from_id},
+        )
+        data = json.loads(resp.data)
+
+        with sqlite3.connect(DB_PATH) as conn:
+            source_count = conn.execute(
+                "SELECT COUNT(*) FROM recent_domains WHERE session_id = ?",
+                (from_id,),
+            ).fetchone()[0]
+            rows = conn.execute(
+                "SELECT domain, last_used, use_count FROM recent_domains WHERE session_id = ?",
+                (to_id,),
+            ).fetchall()
+        by_domain = {row[0]: {"last_used": row[1], "use_count": row[2]} for row in rows}
+        assert resp.status_code == 200
+        assert data["migrated_recent_domains"] == 2
+        assert source_count == 0
+        assert by_domain["alpha.example.com"]["use_count"] == 2
+        assert by_domain["shared.example.com"]["use_count"] == 7
+        assert by_domain["shared.example.com"]["last_used"] == "2026-05-01 11:00:00.000001"
+
     def test_migrate_keeps_existing_destination_session_preferences(self):
         client = get_client()
         from_id = "migrate-prefs-src-" + __import__("uuid").uuid4().hex[:8]
@@ -658,6 +704,117 @@ class TestSessionWorkflows:
         ).data)["items"] == []
 
 
+# ── /session/recent-domains ───────────────────────────────────────────────────
+
+class TestSessionRecentDomains:
+    def _domains(self, session_id):
+        with sqlite3.connect(DB_PATH) as conn:
+            rows = conn.execute(
+                "SELECT domain FROM recent_domains WHERE session_id = ? ORDER BY last_used DESC, domain ASC",
+                (session_id,),
+            ).fetchall()
+        return [row[0] for row in rows]
+
+    def test_get_returns_empty_list_for_new_session(self):
+        client = get_client()
+        session_id = "recent-empty-" + __import__("uuid").uuid4().hex[:8]
+        resp = client.get("/session/recent-domains", headers={"X-Session-ID": session_id})
+
+        assert resp.status_code == 200
+        assert json.loads(resp.data)["domains"] == []
+
+    def test_post_normalizes_filters_and_caps_domains(self):
+        client = get_client()
+        session_id = "recent-save-" + __import__("uuid").uuid4().hex[:8]
+        valid = [f"d{i}.example.com" for i in range(12)]
+        resp = client.post(
+            "/session/recent-domains",
+            json={
+                "domains": [
+                    "Alpha.Example.com.",
+                    "https://ignored.example",
+                    "127.0.0.1",
+                    "user@example.com",
+                    "with/path.example",
+                    "Alpha.Example.com",
+                    *valid,
+                ],
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        data = json.loads(resp.data)
+
+        assert resp.status_code == 200
+        assert data["saved"] == 10
+        assert data["domains"] == [
+            "alpha.example.com",
+            "d0.example.com",
+            "d1.example.com",
+            "d2.example.com",
+            "d3.example.com",
+            "d4.example.com",
+            "d5.example.com",
+            "d6.example.com",
+            "d7.example.com",
+            "d8.example.com",
+        ]
+        assert self._domains(session_id) == data["domains"]
+
+    def test_post_is_session_scoped(self):
+        client = get_client()
+        session_a = "recent-scope-a-" + __import__("uuid").uuid4().hex[:8]
+        session_b = "recent-scope-b-" + __import__("uuid").uuid4().hex[:8]
+
+        client.post(
+            "/session/recent-domains",
+            json={"domains": ["alpha.example.com"]},
+            headers={"X-Session-ID": session_a},
+        )
+        resp = client.get("/session/recent-domains", headers={"X-Session-ID": session_b})
+
+        assert json.loads(resp.data)["domains"] == []
+
+    def test_post_updates_existing_domain_count_and_recency(self):
+        client = get_client()
+        session_id = "recent-upsert-" + __import__("uuid").uuid4().hex[:8]
+
+        client.post(
+            "/session/recent-domains",
+            json={"domains": ["alpha.example.com"]},
+            headers={"X-Session-ID": session_id},
+        )
+        client.post(
+            "/session/recent-domains",
+            json={"domains": ["beta.example.org"]},
+            headers={"X-Session-ID": session_id},
+        )
+        client.post(
+            "/session/recent-domains",
+            json={"domains": ["alpha.example.com"]},
+            headers={"X-Session-ID": session_id},
+        )
+
+        with sqlite3.connect(DB_PATH) as conn:
+            count = conn.execute(
+                "SELECT use_count FROM recent_domains WHERE session_id = ? AND domain = ?",
+                (session_id, "alpha.example.com"),
+            ).fetchone()[0]
+        resp = client.get("/session/recent-domains", headers={"X-Session-ID": session_id})
+        assert json.loads(resp.data)["domains"][0] == "alpha.example.com"
+        assert count == 2
+
+    def test_post_rejects_non_list_payload(self):
+        client = get_client()
+        session_id = "recent-invalid-" + __import__("uuid").uuid4().hex[:8]
+        resp = client.post(
+            "/session/recent-domains",
+            json={"domains": "alpha.example.com"},
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert resp.status_code == 400
+
+
 # ── /session/run-count ────────────────────────────────────────────────────────
 
 class TestSessionRunCount:
@@ -718,6 +875,19 @@ class TestSessionRunCount:
         resp = client.get("/session/run-count", headers={"X-Session-ID": session_id})
 
         assert json.loads(resp.data)["workflow_count"] == 1
+
+    def test_returns_recent_domain_count(self):
+        client = get_client()
+        session_id = "run-count-recents-" + __import__("uuid").uuid4().hex[:8]
+        client.post(
+            "/session/recent-domains",
+            headers={"X-Session-ID": session_id},
+            json={"domains": ["alpha.example.com", "beta.example.org"]},
+        )
+
+        resp = client.get("/session/run-count", headers={"X-Session-ID": session_id})
+
+        assert json.loads(resp.data)["recent_domain_count"] == 2
 
 
 # ── /session/starred ──────────────────────────────────────────────────────────

@@ -1546,49 +1546,48 @@ class TestRunRoute:
         assert json.loads(resp.data) == {"error": "Run not found"}
         stream_events.assert_not_called()
 
-    def test_brokered_run_owner_takeover_requires_client_id(self):
+    def test_brokered_run_owner_takeover_route_is_retired(self):
         client = get_client()
-        with mock.patch("blueprints.run.active_runs_for_session", return_value=[{"run_id": "run-1"}]):
-            resp = client.post(
-                "/runs/run-1/owner",
-                headers={"X-Session-ID": "session-1"},
-                json={"tab_id": "tab-2"},
-            )
-        assert resp.status_code == 400
-        assert json.loads(resp.data)["error"] == "Client identity is required to take over a run."
+        resp = client.post(
+            "/runs/run-1/owner",
+            headers={"X-Session-ID": "session-1", "X-Client-ID": "client-2"},
+            json={"tab_id": "tab-2"},
+        )
+        assert resp.status_code == 404
 
-    def test_brokered_run_owner_takeover_claims_active_run(self):
+    def test_kill_allows_same_session_attached_client_and_publishes_killer(self):
         client = get_client()
-        with mock.patch("blueprints.run.active_runs_for_session", return_value=[{"run_id": "run-1"}]), \
-             mock.patch("blueprints.run.active_run_set_owner", return_value=True) as set_owner, \
-             mock.patch("blueprints.run.publish_run_event") as publish:
-            resp = client.post(
-                "/runs/run-1/owner",
-                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-2"},
-                json={"tab_id": "tab-2"},
-            )
-        assert resp.status_code == 200
-        assert json.loads(resp.data) == {"ok": True, "run_id": "run-1"}
-        set_owner.assert_called_once_with("run-1", "client-2", "tab-2")
-        publish.assert_called_once_with("run-1", "owner", {
-            "owner_client_id": "client-2",
-            "owner_tab_id": "tab-2",
-        })
-
-    def test_kill_rejects_non_owner_for_live_owned_run(self):
-        client = get_client()
-        with mock.patch("blueprints.run.active_run_control_status", return_value="forbidden"), \
-             mock.patch("blueprints.run.pid_pop_for_session") as pop_pid:
+        with mock.patch("blueprints.run.pid_pop_for_session", return_value=4321) as pop_pid, \
+             mock.patch("blueprints.run.publish_run_event") as publish, \
+             mock.patch("blueprints.run.SCANNER_PREFIX", ""), \
+             mock.patch("blueprints.run.os.killpg") as killpg:
             resp = client.post(
                 "/kill",
-                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-old"},
+                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-2"},
+                json={"run_id": "run-1", "tab_id": "tab-2"},
+            )
+        assert resp.status_code == 200
+        assert json.loads(resp.data) == {"killed": True}
+        pop_pid.assert_called_once_with("run-1", "session-1")
+        publish.assert_called_once_with("run-1", "killed", {
+            "killer_client_id": "client-2",
+            "killer_tab_id": "tab-2",
+        })
+        killpg.assert_called_once_with(4321, shell_app.signal.SIGTERM)
+
+    def test_kill_rejects_runs_outside_session(self):
+        client = get_client()
+        with mock.patch("blueprints.run.pid_pop_for_session", return_value=None) as pop_pid, \
+             mock.patch("blueprints.run.publish_run_event") as publish:
+            resp = client.post(
+                "/kill",
+                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-2"},
                 json={"run_id": "run-1"},
             )
-        assert resp.status_code == 403
-        assert json.loads(resp.data)["error"] == (
-            "This browser no longer controls that run. Use Take over from Status Monitor before killing it."
-        )
-        pop_pid.assert_not_called()
+        assert resp.status_code == 404
+        assert json.loads(resp.data) == {"error": "No such process"}
+        pop_pid.assert_called_once_with("run-1", "session-1")
+        publish.assert_not_called()
 
     def test_disallowed_command_returns_403(self):
         client = get_client()
@@ -1820,6 +1819,73 @@ class TestHistoryRoute:
             assert fixed["windows"]["activity"]["days"] == 28
             assert fixed["windows"]["command_mix"]["days"] == 90
             assert any(item["root"] == "nmap" for item in fixed["command_mix"])
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+                conn.commit()
+
+    def test_insights_filters_app_builtin_commands(self):
+        # The Status Monitor's constellation, treemap, heatmap, events, and
+        # max_day_count must all exclude synthetic app built-ins (pwd, whoami,
+        # help, ...) so the visualizations reflect real recon work only.
+        client = get_client()
+        session = "history-insights-builtin-" + uuid.uuid4().hex[:8]
+        run_ids = [
+            f"{session}-nmap",
+            f"{session}-pwd",
+            f"{session}-whoami",
+            f"{session}-help",
+        ]
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        day_two = (now - timedelta(days=2)).isoformat()
+        day_one = (now - timedelta(days=1)).isoformat()
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (run_ids[0], session, "nmap -sT ip.darklab.sh", day_two,
+                     (now - timedelta(days=2, seconds=-30)).isoformat(), 0, "[]", 12),
+                )
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (run_ids[1], session, "pwd", day_one,
+                     (now - timedelta(days=1, seconds=-1)).isoformat(), 0, "[]", 1),
+                )
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (run_ids[2], session, "whoami", day_one,
+                     (now - timedelta(days=1, seconds=-1)).isoformat(), 0, "[]", 1),
+                )
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (run_ids[3], session, "help", day_one,
+                     (now - timedelta(days=1, seconds=-1)).isoformat(), 0, "[]", 5),
+                )
+                conn.commit()
+            data = json.loads(client.get("/history/insights", headers={"X-Session-ID": session}).data)
+            mix_roots = {item["root"] for item in data["command_mix"]}
+            constellation_roots = {item["root"] for item in data["constellation"]}
+            event_roots = {item["root"] for item in data["events"]}
+            assert "nmap" in mix_roots
+            assert "nmap" in constellation_roots
+            assert "nmap" in event_roots
+            for builtin in ("pwd", "whoami", "help"):
+                assert builtin not in mix_roots
+                assert builtin not in constellation_roots
+                assert builtin not in event_roots
+            day_two_key = (now - timedelta(days=2)).date().isoformat()
+            day_one_key = (now - timedelta(days=1)).date().isoformat()
+            day_counts = {entry["date"]: entry["count"] for entry in data["activity"]}
+            assert day_counts.get(day_two_key) == 1
+            assert day_counts.get(day_one_key, 0) == 0
+            assert data["max_day_count"] == 1
+            assert data["windows"]["constellation"]["total_runs"] == 1
+            assert data["windows"]["constellation"]["plotted_runs"] == 1
+            assert data["windows"]["command_mix"]["total_runs"] == 1
         finally:
             with sqlite3.connect(DB_PATH) as conn:
                 conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])

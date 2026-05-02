@@ -173,7 +173,7 @@ test.describe('Status Monitor', () => {
     await expect(showcase.locator(':scope > .status-monitor-runs-section')).toBeVisible()
     await expect(showcase.locator(':scope > .status-monitor-showcase-grid')).toBeVisible()
     await expect(showcase.locator(':scope > .status-monitor-runs-section').locator('.run-monitor-command')).toContainText('ping -c 1000')
-    await expect(showcase.locator('.run-monitor-meta-chip').filter({ hasText: 'owned here' })).toBeVisible()
+    await expect(showcase.locator('.run-monitor-meta-chip').filter({ hasText: 'started here' })).toBeVisible()
     await expect(showcase.locator('.run-monitor-spark-panel')).toContainText('CPU/MEM 60s')
     await expect(showcase.locator('.run-monitor-spark-values')).toHaveCount(0)
     await expect(showcase.locator('.run-monitor-meter-mem')).toContainText('12 MB')
@@ -190,19 +190,25 @@ test.describe('Status Monitor', () => {
   })
 
   test('visual cards open filtered history and restore constellation runs', async ({ page }) => {
-    await runCommand(page, 'hostname')
+    const command = 'ping -c 1 darklab.sh'
+    await runCommand(page, command)
     await waitForHistoryRuns(page, 1)
+    await expect.poll(async () => page.evaluate(async () => {
+      const resp = await apiFetch('/history/insights')
+      const data = await resp.json()
+      return (data.command_mix || []).map(item => item.root)
+    })).toContain('ping')
 
     await page.locator('.rail-nav [data-action="run-monitor"]').click()
     await expect(page.locator('#run-monitor')).toBeVisible()
 
-    const tile = page.locator('.status-monitor-treemap-tile', { hasText: 'hostname' }).first()
+    const tile = page.locator('.status-monitor-treemap-tile', { hasText: 'ping' }).first()
     await expect(tile).toBeVisible()
     await tile.click()
 
     await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
-    await expect(page.locator('#history-root-input')).toHaveValue('hostname')
-    await expect(page.locator('#history-list .history-entry').first()).toContainText('hostname')
+    await expect(page.locator('#history-root-input')).toHaveValue('ping')
+    await expect(page.locator('#history-list .history-entry').first()).toContainText(command)
     await expect.poll(() => page.evaluate(() => window.getSelection()?.toString() || '')).toBe('')
 
     await page.locator('#history-close').click()
@@ -210,13 +216,13 @@ test.describe('Status Monitor', () => {
 
     await page.locator('.rail-nav [data-action="run-monitor"]').click()
     await expect(page.locator('#run-monitor')).toBeVisible()
-    await page.locator('.status-monitor-star-node[aria-label^="hostname "]').first().click()
+    await page.locator('.status-monitor-star-node[aria-label^="ping "]').first().click()
 
     await expect(page.locator('#run-monitor')).toBeHidden()
-    await page.waitForFunction(() => {
+    await page.waitForFunction((expectedCommand) => {
       const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
-      return !!tab && tab.command === 'hostname' && !!tab.historyRunId
-    })
+      return !!tab && tab.command === expectedCommand && !!tab.historyRunId
+    }, command)
     await expect(page.locator('.tab-panel.active .output')).toContainText('[history')
   })
 })

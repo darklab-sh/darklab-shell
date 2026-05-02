@@ -18,12 +18,12 @@ The suites are intentionally layered:
 
 Current totals:
 
-- behavior tests: 2,292
+- behavior tests: 2,309
 - docs/inventory meta-tests: 30
-- `pytest`: 1135 (1105 behavior + 30 meta)
-- `vitest`: 954
-- `playwright`: 233
-- total: 2,322
+- `pytest`: 1143 (1113 behavior + 30 meta)
+- `vitest`: 961
+- `playwright`: 235
+- total: 2,339
 
 This document is organized in two parts:
 
@@ -435,8 +435,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestActiveRunMetadata.test_active_runs_for_session_reports_owner_liveness_for_client` | Verifies that active-run metadata reports owner client, tab, liveness, and same-client state. |
 | `TestActiveRunMetadata.test_active_runs_for_session_refreshes_matching_owner_liveness` | Verifies that active-run listings refresh same-client owner liveness so Status Monitor polling keeps run control alive. |
 | `TestActiveRunMetadata.test_active_run_touch_owner_refreshes_liveness` | Verifies that owner heartbeats refresh liveness only for the owning client and tab. |
-| `TestActiveRunMetadata.test_active_run_set_owner_replaces_owner_metadata` | Verifies that active-run ownership can be reassigned when a browser explicitly takes over a run. |
-| `TestActiveRunMetadata.test_active_run_control_status_requires_live_owner` | Verifies that owner-only active-run controls are rejected for another live browser but allowed after owner staleness. |
+| `TestActiveRunMetadata.test_active_run_owner_metadata_remains_provenance_only` | Verifies that active-run owner metadata remains origin/liveness information rather than a reassignment permission model. |
+| `TestActiveRunMetadata.test_pid_pop_for_session_is_the_active_run_permission_boundary` | Verifies that active-run PID lookup is scoped to the requesting session. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_dead_pid` | Checks that active-run metadata is pruned when the stored process no longer exists. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_pid_reuse` | Checks that Redis-backed active-run metadata is pruned when a PID has been reused by a different process. |
 | `TestActiveRunMetadata.test_pid_pop_for_session_requires_matching_session` | Verifies that active-run PID lookup only pops processes owned by the requesting session. |
@@ -931,9 +931,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunRoute.test_brokered_run_events_rejects_runs_outside_session` | Verifies that brokered event backfill rejects run IDs outside the current session before reading broker events. |
 | `TestRunRoute.test_brokered_run_stream_replays_events_for_session_run` | Verifies that brokered stream replay emits stored events and refreshes owner liveness. |
 | `TestRunRoute.test_brokered_run_stream_rejects_runs_outside_session` | Verifies that brokered stream replay rejects run IDs outside the current session before opening a broker stream. |
-| `TestRunRoute.test_brokered_run_owner_takeover_requires_client_id` | Verifies that active-run takeover rejects requests without a browser client identity. |
-| `TestRunRoute.test_brokered_run_owner_takeover_claims_active_run` | Verifies that the active-run owner route reassigns a running command to the requesting browser client. |
-| `TestRunRoute.test_kill_rejects_non_owner_for_live_owned_run` | Verifies that `/kill` refuses requests from a browser that no longer owns the active run. |
+| `TestRunRoute.test_brokered_run_owner_takeover_route_is_retired` | Verifies that the previous active-run takeover route is no longer exposed. |
+| `TestRunRoute.test_kill_allows_same_session_attached_client_and_publishes_killer` | Verifies that `/kill` accepts a same-session attached client and publishes killed-event metadata. |
+| `TestRunRoute.test_kill_rejects_runs_outside_session` | Verifies that `/kill` refuses run IDs outside the requesting session. |
 | `TestRunRoute.test_disallowed_command_returns_403` | Checks that disallowed command returns 403. |
 | `TestRunRoute.test_shell_operator_returns_403` | Checks that shell operator returns 403. |
 | `TestRunRoute.test_non_json_body_handled` | Checks that non JSON body handled. |
@@ -943,6 +943,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestHistoryRoute.test_get_returns_runs_list` | Checks that get returns runs list. |
 | `TestHistoryRoute.test_stats_returns_compact_session_counters` | Verifies that `/history/stats` returns compact session counters for the Status Monitor dashboard. |
 | `TestHistoryRoute.test_insights_returns_visual_history_payloads` | Verifies that `/history/insights` returns heatmap, command mix, constellation, and event ticker data. |
+| `TestHistoryRoute.test_insights_filters_app_builtin_commands` | Verifies that synthetic app built-ins (`pwd`, `whoami`, `help`, …) are filtered from the constellation, treemap, heatmap, events, and `max_day_count` returned by `/history/insights`. |
 | `TestHistoryRoute.test_delete_all_returns_ok` | Checks that delete all returns ok. |
 | `TestHistoryRoute.test_delete_specific_nonexistent_run_returns_ok` | Checks that delete specific nonexistent run returns ok. |
 | `TestHistoryRoute.test_get_run_nonexistent_returns_404` | Checks that get run nonexistent returns 404. |
@@ -1149,6 +1150,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestSessionMigrate.test_migrates_session_preferences_when_destination_has_none` | Checks that a source session's saved preference snapshot moves to the destination session when the destination has no saved preferences yet. |
 | `TestSessionMigrate.test_migrates_session_variables` | Checks that session command variables move to the destination identity and are returned by `/session/variables`. |
 | `TestSessionMigrate.test_migrates_user_workflows` | Checks that session-owned user workflows move to the destination identity during migration. |
+| `TestSessionMigrate.test_migrates_recent_domains_and_merges_destination` | Checks that recent-domain autocomplete entries move to the destination identity, merge counts for overlapping domains, and keep the newest timestamp. |
 | `TestSessionMigrate.test_migrate_keeps_existing_destination_session_preferences` | Checks that migration does not overwrite a destination session's existing saved preference snapshot. |
 | `TestSessionMigrate.test_migrate_workspace_returns_zero_without_source_workspace` | Checks that workspace migration reports zero file movement when the source session has no workspace directory. |
 | `TestSessionMigrate.test_migrates_source_workspace_files_to_destination` | Checks that source workspace files and empty folders move to the destination session during migration. |
@@ -1157,11 +1159,17 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestSessionWorkflows.test_create_lists_and_returns_normalized_workflow` | Checks that creating a session workflow stores normalized workflow data and returns it through the list endpoint. |
 | `TestSessionWorkflows.test_rejects_undeclared_workflow_variables` | Checks that workflow steps cannot reference undeclared template variables. |
 | `TestSessionWorkflows.test_update_and_delete_are_session_scoped` | Checks that workflow update and delete operations are scoped to the owning session. |
+| `TestSessionRecentDomains.test_get_returns_empty_list_for_new_session` | Checks that a new session starts with no recent-domain autocomplete entries. |
+| `TestSessionRecentDomains.test_post_normalizes_filters_and_caps_domains` | Checks that recent-domain persistence normalizes domain values, rejects non-domain values, de-duplicates entries, and caps each session at 10 domains. |
+| `TestSessionRecentDomains.test_post_is_session_scoped` | Checks that recent-domain entries do not leak between session IDs. |
+| `TestSessionRecentDomains.test_post_updates_existing_domain_count_and_recency` | Checks that saving an existing recent domain updates its recency and increments its usage count. |
+| `TestSessionRecentDomains.test_post_rejects_non_list_payload` | Checks that recent-domain saves require a `domains` array. |
 | `TestSessionRunCount.test_returns_zero_for_empty_session` | Checks that `/session/run-count` reports zero runs for a session with no run history. |
 | `TestSessionRunCount.test_returns_true_count` | Checks that the endpoint returns the exact number of seeded run rows for the session. |
 | `TestSessionRunCount.test_is_uncapped_beyond_history_panel_limit` | Checks that 75 seeded runs are all counted — confirming the endpoint is not capped by `history_panel_limit` (50). |
 | `TestSessionRunCount.test_is_scoped_to_session` | Checks that the count only includes runs belonging to the requesting `X-Session-ID`. |
 | `TestSessionRunCount.test_returns_user_workflow_count` | Checks that `/session/run-count` reports the session's saved workflow count for migration prompts. |
+| `TestSessionRunCount.test_returns_recent_domain_count` | Checks that `/session/run-count` reports the session's recent-domain count for migration prompts. |
 | `TestSessionStarred.test_get_returns_empty_list_for_new_session` | Checks that `GET /session/starred` returns an empty list for a new session. |
 | `TestSessionStarred.test_get_returns_starred_commands` | Checks that starred commands are included in the GET response. |
 | `TestSessionStarred.test_get_is_scoped_to_session` | Checks that GET only returns stars belonging to the requesting session. |
@@ -1407,7 +1415,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `supports macOS Option+P to create a permalink via physical key code` | Verifies that supports macOS Option+P to create a permalink via physical key code. |
 | `supports Alt+Shift+C to copy output for the active tab` | Verifies that supports Alt+Shift+C to copy output for the active tab. |
 | `supports macOS Option+Shift+C to copy output via physical key code` | Verifies that supports macOS Option+Shift+C to copy output via physical key code. |
-| `supports Alt+R to open the status monitor from the terminal prompt` | Verifies that Alt+R routes to the Status Monitor shortcut entry point. |
+| `supports Alt+M to open the status monitor from the terminal prompt` | Verifies that Alt+M routes to the Status Monitor shortcut entry point. |
 | `supports Alt+Shift+F to open the Files modal from the terminal prompt` | Verifies that Alt+Shift+F opens Files while preserving Alt+F for word-forward. |
 | `supports Ctrl+L to clear the active tab without dropping a running command` | Verifies that supports Ctrl+L to clear the active tab without dropping a running command. |
 | `does not apply Alt-based tab shortcuts while typing in non-terminal inputs` | Verifies that does not apply Alt-based tab shortcuts while typing in non-terminal inputs. |
@@ -1479,8 +1487,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `shows subcommand-scoped examples when a partial subcommand uniquely matches` | Verifies that partial subcommand input such as `amass s` surfaces examples once it uniquely matches one subcommand. |
 | `keeps ambiguous partial subcommands as token suggestions instead of examples` | Verifies that ambiguous partial subcommands such as `gobuster d` keep showing matching subcommand tokens instead of prematurely expanding examples. |
 | `uses subcommand-scoped value hints` | Verifies that value hints for repeated flags such as `-o` come from the active subcommand context. |
-| `tracks recent domains from structured flag and positional slots, capped per session` | Verifies that recent domain capture reads known domain argument slots, preserves recency order, and enforces the per-session cap. |
-| `keeps recent domains isolated by session id` | Verifies that recent domain suggestions do not leak between session IDs. |
+| `tracks recent domains from structured flag and positional slots, capped in memory` | Verifies that recent domain capture reads known domain argument slots, preserves recency order in the browser cache, and enforces the autocomplete cap without using browser storage. |
+| `loads recent domains from the session endpoint` | Verifies that recent-domain autocomplete loads persisted session domains from the backend and normalizes the returned values. |
+| `persists captured recent domains without requiring browser storage` | Verifies that captured domain values are posted to the session endpoint while the local autocomplete cache remains usable immediately. |
 | `suggests recent domains only inside known domain value slots` | Verifies that recent domain autocomplete appears only where command metadata identifies a domain value. |
 | `does not infer recent-domain slots from placeholder text without value_type metadata` | Verifies that recent-domain capture and suggestions require explicit `value_type: domain` metadata. |
 | `suggests installed wordlists only inside marked wordlist slots` | Verifies that installed SecLists suggestions appear only in explicit `value_type: wordlist` slots and filter by category. |
@@ -1775,14 +1784,20 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders active-run CPU and memory telemetry when available` | Verifies that the Status Monitor renders CPU and memory meters from active-run resource telemetry. |
 | `renders unavailable telemetry chips when backend stats are absent` | Verifies that the Status Monitor still shows CPU and memory meter placeholders when backend resource telemetry is not available. |
 | `labels active runs owned by another live browser as monitor-only` | Verifies that active runs owned by another live browser render as monitor-only instead of tab-owned rows. |
-| `offers attach and takeover actions for runs owned by another live browser` | Verifies that another browser's live runs expose read-only Attach and owner Take over actions from the Status Monitor. |
-| `keeps takeover available when another browser owns a run already attached locally` | Verifies that Status Monitor still offers Take over when the current browser has a read-only tab for a run controlled elsewhere. |
-| `shows attach again after a read-only attached tab is closed` | Verifies that Status Monitor offers Attach again when the local read-only tab for another browser's run has been closed. |
+| `offers attach and kill actions for runs owned by another live browser` | Verifies that another browser's live runs expose Attach and Kill actions from the Status Monitor. |
+| `keeps kill available when another browser owns a run already attached locally` | Verifies that Status Monitor still offers Kill when the current browser already has an attached tab for a run started elsewhere. |
+| `shows attach again after an attached tab is closed` | Verifies that Status Monitor offers Attach again when the local attached tab for another browser's run has been closed. |
 | `warms CPU samples while closed so first open can show a percent` | Verifies that a background warmup sample pair can populate CPU percentage before the monitor is opened. |
 | `does a quick follow-up refresh after opening on a baseline-only CPU sample` | Verifies that opening the Status Monitor schedules a quick second poll when CPU telemetry only has a baseline sample. |
+| `reuses the active-run row, sparkline path, and meter elements across polls` | Verifies that successive active-run polls keep the same `<article>`, sparkline `<path>`, and meter element references for a stable `run_id`, only mutating the `d` attribute and `--meter-percent` CSS variable. |
+| `drops a run row when the active set no longer contains it` | Verifies that an active-run row is removed when its `run_id` disappears from the next poll, and the runs list shows the empty state when no active runs remain. |
 | `does not reload history insights on every active-run refresh` | Verifies that frequent active-run refreshes do not refetch the heavier history insights payload when the run count is stable. |
-| `refreshes history insights when active run count changes` | Verifies that the Status Monitor refreshes history insights and rebuilds the visual signature when active runs start or finish. |
-| `refreshes history insights on a slower monitor cadence` | Verifies that history insights refresh on their slower open-monitor cadence instead of the active-run polling cadence. |
+| `refreshes history insights when active runs drain to zero` | Verifies that the Status Monitor refreshes history insights and rebuilds the visual signature when the active-run count transitions from `>0` to `0`. |
+| `does not refresh insights on a 0 → >0 transition` | Verifies that starting a new run while the Status Monitor is open does not retrigger the insights load — only the `>0 → 0` drain transition refreshes. |
+| `clamps off-scale stars above the p98 ceiling and renders an upward tick` | Verifies that the Command Constellation Y axis crops at the p98 of `elapsed_seconds`, clamps stars above the ceiling to the top edge, and renders an upward tick on each off-scale star. |
+| `only connects same-root stars within 2h on the same calendar date` | Verifies that the Command Constellation streak connectors require same-root, ≤2h between consecutive starts, and the same calendar date — sessions split at midnight and large gaps drop the line. |
+| `omits the 24 axis label so the rightmost cluster reads as 20:00 to midnight` | Verifies that the Command Constellation drops the misleading `24` axis label, since the X mapping caps at 23:59 and the rightmost cluster is unambiguous as 20:00 to midnight. |
+| `does not poll history insights on a timer while the monitor is open` | Verifies that the Status Monitor does not run a `/history/insights` polling timer while open; insights are loaded once on open and only refreshed on the active-run drain transition. |
 | `uses CPU hysteresis and recent samples for the pulse strip` | Verifies that the Status Monitor pulse strip preserves raw CPU readouts while damping small pulse-signature changes, keeping a recent CPU sample window, and scrolling via a translated SVG track. |
 | `shows active-run loading state on open instead of stale cached rows` | Verifies that opening the Status Monitor shows an active-run loading row until fresh active-run data arrives instead of flashing stale cached rows. |
 | `opens as a status dashboard when there are no active runs` | Verifies that the desktop Status Monitor opens to a dashboard with a `0 active runs` runs section when no commands are running. |
@@ -1832,15 +1847,15 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `clears stale failed tab and HUD state after a successful client-side built-in` | Verifies that successful client-side built-ins reset stale failed tab indicators, tab exit codes, and HUD state. |
 | `setStatus shows RUNNING only while running and IDLE otherwise` | Verifies that setStatus shows RUNNING only while running and IDLE otherwise. |
 | `doKill sends /kill immediately when runId is already known` | Verifies that doKill sends /kill immediately when runId is already known. |
-| `doKill leaves a taken-over run read-only when the server denies control` | Verifies that a denied kill request keeps the original tab running, marks it read-only, and hides owner-only controls. |
+| `doKill keeps an attached run active when the server denies the kill request` | Verifies that a denied kill request keeps an attached tab running with kill controls still visible. |
 | `restoreActiveRunsAfterReload subscribes restored tabs to brokered live output` | Verifies that reload continuity restores running tabs with preserved run IDs and subscribes them back to replay plus live output. |
 | `restoreActiveRunsAfterReload skips runs owned by another live client` | Verifies that reload continuity does not auto-create terminal tabs for active runs owned by another live browser. |
 | `restoreActiveRunsAfterReload restores stale-owner runs` | Verifies that reload continuity can recover active runs once the previous owner is stale. |
 | `pauses background run streams for Status Monitor API calls and resumes from the last event id` | Verifies that Status Monitor connection relief pauses only background live streams and resubscribes them from the last broker event id. |
 | `restoreActiveRunsAfterReload does not overwrite a restored non-running tab` | Verifies that active-run reconnect creates a separate tab instead of clobbering an already-restored idle tab. |
-| `attachActiveRunFromMonitor opens a read-only subscribed tab without kill controls` | Verifies that Status Monitor Attach opens a live read-only tab and hides owner-only controls. |
-| `attachActiveRunFromMonitor takes ownership before subscribing when requested` | Verifies that Status Monitor Take over claims ownership before opening a live subscribed tab with owner controls. |
-| `marks a subscribed tab read-only when ownership moves to another browser` | Verifies that brokered ownership events make the previous owner tab read-only and hide owner-only controls. |
+| `attachActiveRunFromMonitor opens an attached subscribed tab with kill controls` | Verifies that Status Monitor Attach opens a live subscribed tab with normal kill controls. |
+| `attachActiveRunFromMonitor subscribes without claiming ownership` | Verifies that Status Monitor Attach subscribes directly to the broker stream without calling an ownership route. |
+| `keeps subscribed tabs killable on owner metadata and reports remote kills` | Verifies that owner metadata does not hide kill controls and that remote killed events render a clear notice. |
 | `pollActiveRunsAfterReload restores a completed reconnected run through history` | Verifies that a reconnected placeholder tab swaps into the saved history view when the active run disappears. |
 | `pollActiveRunsAfterReload fails a missing reconnected run with no saved history` | Verifies that reconnect placeholders fail visibly instead of waiting forever when a run disappears after an app restart. |
 | `doKill marks pendingKill when runId is not yet available` | Verifies that doKill marks pendingKill when runId is not yet available. |
@@ -2041,9 +2056,9 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `closeTab resets the preserved last tab line counter before the next command output` | Verifies that closing the only tab clears preserved tab state so the next command starts line numbering from the fresh prompt. |
 | `clearTab preserves a running tab state when asked to keep the run active` | Verifies that clearTab preserves a running tab state when asked to keep the run active. |
 | `clearTab clears the active un-ran composer input along with the tab output` | Verifies that clearTab clears the active un-ran composer input along with the tab output. |
-| `closing a running tab kills it and activates a neighboring tab` | Verifies that closing a running tab kills it and activates a neighboring tab. |
-| `closing a read-only attached running tab removes it without killing the run` | Verifies that closing a read-only attached active-run tab removes the local tab without sending a kill request. |
-| `closing the only running tab kills it and keeps the tab shell ready` | Verifies that closing the only running tab kills it and keeps the tab shell ready. |
+| `closing a running tab prompts before killing it and activates a neighboring tab` | Verifies that closing a running tab asks before sending a kill request and activates a neighboring tab when kill is chosen. |
+| `closing an attached running tab can detach it without killing the run` | Verifies that closing an attached active-run tab can remove the local view without sending a kill request. |
+| `closing the only running tab can detach it and keep the tab shell ready` | Verifies that closing the only running tab can detach the browser view and reset the shell without terminating the run. |
 | `mountShellPrompt does not render prompt when tab is running even when forced` | Verifies that mountShellPrompt does not render prompt when tab is running even when forced. |
 | `mountShellPrompt keeps the desktop prompt mirror out of mobile mode` | Verifies that mountShellPrompt keeps the desktop prompt mirror out of mobile mode. |
 | `tracks whether the output should keep following the live tail` | Verifies that tracks whether the output should keep following the live tail. |
@@ -2486,7 +2501,8 @@ Desktop demo recording spec. Drives a tightened README-first interaction sequenc
 | `kill button stops a running command and status becomes KILLED` | Verifies that kill button stops a running command and status becomes KILLED. |
 | `kill button disappears after the command is killed` | Verifies that kill button disappears after the command is killed. |
 | `Ctrl+C opens the kill confirmation modal while a command is running` | Ctrl+C opens the kill confirmation modal while a command is running. |
-| `closing the only running tab kills the command and resets the shell` | Verifies that closing the only running tab kills the command and resets the shell. |
+| `closing the only running tab can keep the run active and reset the shell` | Verifies that the running-tab close prompt can detach the tab while leaving the backend run active. |
+| `closing the only running tab can kill the command from the close prompt` | Verifies that the running-tab close prompt can explicitly terminate the active run. |
 | `Enter cancels kill while the kill confirmation modal is open` | Verifies that Enter defaults to the cancel action because the confirmation-dialog primitive focuses the cancel button on open. |
 | `Escape cancels kill while the kill confirmation modal is open` | Escape cancels kill while the kill confirmation modal is open. |
 | `Ctrl+C on an idle prompt appends a new prompt line instead of opening kill confirmation` | Ctrl+C on an idle prompt appends a new prompt line instead of opening kill confirmation. |
@@ -2587,6 +2603,7 @@ Desktop demo recording spec. Drives a tightened README-first interaction sequenc
 | `generate persists the token across reload and clear returns to anonymous` | Verifies that terminal-driven token generation stores the active token, survives a reload, and `session-token clear` returns the browser to its anonymous session after confirmation. |
 | `set can skip migration without moving anonymous history` | Verifies that setting an issued token can explicitly skip migration and does not carry the prior anonymous run history into the token session. |
 | `set migration carries history, starred commands, and workspace files` | Verifies that the browser migration path moves run history, starred commands, and app-mediated workspace files to the selected session token. |
+| `recent domain autocomplete follows the active session token across browser contexts` | Verifies that recent-domain autocomplete persists with the active session token and becomes available in another browser context after setting that token. |
 | `set rejects unknown tok tokens before switching identity` | Verifies that unknown `tok_` values fail verification and leave the browser on the original anonymous session. |
 | `revoke active token clears browser storage and reverts to anonymous` | Verifies that revoking the active token removes browser token storage and switches back to the anonymous session after confirmation. |
 
@@ -2641,7 +2658,7 @@ Desktop demo recording spec. Drives a tightened README-first interaction sequenc
 | `Alt+Shift+T opens the theme selector from the composer` | Pressing Alt+Shift+T with the composer focused opens the theme selector without leaking `ˇ`. |
 | `Alt+G opens the workflows overlay from the composer` | Pressing Alt+G with the composer focused opens the guided workflows overlay without leaking `©`. |
 | `Alt+S toggles the transcript search bar from the composer` | Alt+S is the canonical search chord — works from the prompt because `S` has no readline conflict (unlike `F`, which the composer owns as word-forward). |
-| `Alt+R opens the Status Monitor from the composer` | Alt+R opens the status monitor without leaking `®` into the prompt. |
+| `Alt+M opens the Status Monitor from the composer` | Alt+M opens the status monitor without leaking `µ` into the prompt. |
 | `Alt+Shift+F opens the Files modal from the composer` | Alt+Shift+F opens Files without stealing the terminal's Alt+F word-forward chord. |
 | `Alt+\ toggles the rail collapsed state from the composer` | Pressing Alt+\ with the composer focused toggles the desktop left rail between collapsed and expanded without leaking `«`. |
 | `Alt+/ toggles the FAQ overlay from the composer` | Alt+/ opens the FAQ overlay from the prompt and closes it on a second press without leaking `÷`. |

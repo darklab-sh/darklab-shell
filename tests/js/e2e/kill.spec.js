@@ -12,6 +12,8 @@ const TEST_IP = makeTestIp(63)
 const CONFIRM_HOST = '#confirm-host'
 const CONFIRM_BTN = '#confirm-host [data-confirm-action-id="confirm"]'
 const CANCEL_BTN = '#confirm-host [data-confirm-action-id="cancel"]'
+const DETACH_BTN = '#confirm-host [data-confirm-action-id="detach"]'
+const CLOSE_KILL_BTN = '#confirm-host [data-confirm-action-id="kill"]'
 
 test.describe('kill running command', () => {
   test.beforeEach(async ({ page }) => {
@@ -20,6 +22,7 @@ test.describe('kill running command', () => {
       const originalFetch = window.fetch.bind(window)
       const encoder = new TextEncoder()
       let longRunController = null
+      window.__killRequests = 0
 
       const finishLongRun = () => {
         if (!longRunController) return
@@ -73,6 +76,7 @@ test.describe('kill running command', () => {
           init?.method === 'POST' &&
           rawBody.includes('kill-spec-long-run')
         ) {
+          window.__killRequests += 1
           finishLongRun()
           return new Response('{}', {
             status: 200,
@@ -141,17 +145,37 @@ test.describe('kill running command', () => {
     await expect(page.locator(CONFIRM_HOST)).toBeHidden()
   })
 
-  test('closing the only running tab kills the command and resets the shell', async ({ page }) => {
+  test('closing the only running tab can keep the run active and reset the shell', async ({ page }) => {
     await page.locator('#cmd').fill(LONG_CMD)
     await page.keyboard.press('Enter')
     await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
 
     await page.locator('.tab .tab-close').click()
+    await expect(page.locator(CONFIRM_HOST)).toBeVisible()
+    await expect(page.locator(CONFIRM_HOST)).toContainText('Close this running tab?')
+    await expect(page.locator(DETACH_BTN)).toHaveText('Keep running')
+    await page.locator(DETACH_BTN).click()
 
     await expect(page.locator('.status-pill')).toHaveText('IDLE', { timeout: 10_000 })
     await expect(page.locator('.tab .tab-label')).toHaveText('shell 1')
     await expect(page.locator('.tab-panel .output .line')).toHaveCount(0)
     await expect(page.locator('#hud-actions [data-action="kill"]')).toBeHidden()
+    await expect.poll(() => page.evaluate(() => window.__killRequests)).toBe(0)
+  })
+
+  test('closing the only running tab can kill the command from the close prompt', async ({ page }) => {
+    await page.locator('#cmd').fill(LONG_CMD)
+    await page.keyboard.press('Enter')
+    await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
+
+    await page.locator('.tab .tab-close').click()
+    await expect(page.locator(CONFIRM_HOST)).toBeVisible()
+    await page.locator(CLOSE_KILL_BTN).click()
+
+    await expect(page.locator('.status-pill')).toHaveText('IDLE', { timeout: 10_000 })
+    await expect(page.locator('#hud-last-exit')).toHaveText('KILLED', { timeout: 10_000 })
+    await expect(page.locator('#hud-actions [data-action="kill"]')).toBeHidden()
+    await expect.poll(() => page.evaluate(() => window.__killRequests)).toBe(1)
   })
 
   test('Enter cancels kill while the kill confirmation modal is open', async ({ page }) => {
