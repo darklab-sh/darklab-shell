@@ -2,6 +2,8 @@
 
 All notable changes to darklab_shell are documented here.
 
+Entries favor clear outcomes first, then implementation and test details when they help future maintainers understand why the change matters.
+
 ---
 
 ## [1.6] — Unreleased

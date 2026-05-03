@@ -1,25 +1,26 @@
 # Documentation Standards
 
-This document defines how project documentation should be structured and maintained.
+This document explains how project docs should be written and kept up to date.
 
-The goal is not to make the docs shorter. The goal is to keep the same level of detail while making the docs easier to scan, browse, and review.
+The goal is not to make the docs shorter for its own sake. The goal is to keep the useful detail while making each page easier to scan, browse, and review.
 
-For planned documentation cleanup work, see [TODO.md](TODO.md). This file is the standing source of truth for how docs should be written going forward.
+For planned doc cleanup work, see [TODO.md](TODO.md). This file is the standing guide for how docs should sound and be shaped.
 
 ---
 
-## Core principles
+## Core Principles
 
-- Preserve detail. Do not simplify away technical nuance just to make a section shorter.
-- Optimize for scanability. Long dense prose should become summary lines, flat bullets, short subsections, tables, or examples when that improves lookup and navigation.
+- Preserve detail. Do not flatten technical meaning just to make a section shorter.
+- Make docs easy to scan. Long dense prose should become summary lines, flat bullets, short subsections, tables, or examples when that helps the reader find things.
 - Keep prose where sequence matters. Request flows, rationale, and decision history should remain prose-first when order is part of the meaning.
-- Keep one concern per unit. Avoid bullets or paragraphs that mix user-visible behavior, implementation detail, and validation notes unless that grouping is genuinely necessary.
-- Respect the audience boundary of each document. End-user/operator docs should not drift into internal implementation notes, and developer docs should not lose the technical detail they need.
+- Keep one idea per paragraph, bullet, or table row. Avoid mixing user-visible behavior, implementation detail, and validation notes unless they really belong together.
+- Match the doc to its reader. End-user/operator docs should not drift into internal implementation notes, and developer docs should not lose the technical detail they need.
+- Write like a person. Use plain language, contractions, and a conversational tone when they make the text clearer. Prefer everyday words over jargon when the simpler word says the same thing.
 - Preserve anchors, cross-links, and doc-test expectations unless there is a strong reason to change them.
 
 ---
 
-## General rules
+## General Rules
 
 ### Summary first
 
@@ -34,7 +35,7 @@ The lead should tell the reader what the section is about before the details beg
 ### Use the right shape for the content
 
 - Use prose for narratives, request flows, and rationale.
-- Use flat bullets for contracts, responsibilities, inventories, and constraints.
+- Use flat bullets for responsibilities, inventories, rules, and constraints.
 - Use tables for lookup-oriented reference material such as route inventories, config keys, or feature matrices.
 - Use short subsections when a section is trying to explain multiple related but distinct concerns.
 
@@ -42,7 +43,7 @@ The lead should tell the reader what the section is about before the details beg
 
 - Do not introduce deep nesting unless the content truly needs hierarchy.
 - If a bullet gets too long, split it or promote the content into a short subsection.
-- If a labeled bullet or sub-bullet still carries multiple parallel points, split it into short child bullets rather than leaving it as a 4-5 sentence blob.
+- If a labeled bullet or sub-bullet still carries several parallel points, split it into short child bullets rather than leaving it as a 4-5 sentence block.
 - One additional bullet level is allowed when the parent is acting as a labeled container such as `Before`, `After`, `Fix`, `What`, `Tests`, `Behavior`, or `Configuration`, and the child bullets stay parallel and flat.
 - If a section has a repeated pattern, normalize the shape across sibling sections.
 
@@ -57,11 +58,11 @@ If a section is already stable, coherent, and not mixing concerns, do not “bul
 
 ---
 
-## Canonical templates
+## Preferred Templates
 
-These templates define the preferred shape for common doc types in this project. Copy the shape, not the literal wording.
+These templates show the preferred shape for common doc types in this project. Copy the shape, not the exact wording.
 
-Each template lists a set of **Invariants** — the contract the shape is meant to carry. Honour the invariants even when the skeleton is adapted.
+Each template lists **Must keep** points. Keep those points even when you adapt the template.
 
 ### T1. Release-entry umbrella shape
 
@@ -80,9 +81,9 @@ Shape:
   - **{Next subsystem or surface} — ...**
 ```
 
-Invariants:
+Must keep:
 
-- Umbrella lead is self-contained — a reader gets the full scope without reading every child bullet.
+- The umbrella lead is self-contained — a reader gets the full scope without reading every child bullet.
 - Every child bullet is itself bold-led and skimmable.
 - Child bullets share consistent axes (Contract / Migrated / Removed / Test coverage).
 
@@ -102,10 +103,10 @@ Shape:
 - **{Outcome in one bold sentence}** — {short follow-on explanation covering mechanism, constraint, or scope}.
 ```
 
-Invariants:
+Must keep:
 
 - Bold lead is skimmable on its own.
-- Implementation note is short — one sentence, one scope.
+- The implementation note is short — one sentence, one scope.
 
 #### T2 long form
 
@@ -124,10 +125,10 @@ Shape:
   - **Tests:** {cases added or changed + suite delta if applicable}
 ```
 
-Invariants:
+Must keep:
 
 - Bold lead is still skimmable on its own — the long form never buries the outcome.
-- Sub-bullet labels match the section semantics (do not mix Root-cause labels into `### Added` entries or vice versa).
+- Sub-bullet labels match the section they live in (do not mix Root-cause labels into `### Added` entries or vice versa).
 - The **Tests** sub-bullet is always present, even if the value is `no new cases — {how the change was verified}`.
 - One additional child-bullet level is allowed inside labeled sub-bullets such as `Before`, `After`, `Fix`, `What`, or `Tests` when it improves scanability by splitting parallel points.
 - Use T1 only when the change is genuinely an umbrella with multiple stages or coordinated subprojects, not merely because a T2 long entry needs child bullets for clarity.
@@ -148,7 +149,7 @@ Use for merge-request drafts.
 
 Release branches should keep active merge-request and release-note drafts under `docs/release-drafts/` so normal git diffs and review show when release messaging changes. Treat these files as temporary branch artifacts: update them alongside user-facing changes, keep them passing markdown lint, and remove them before merging to `main` unless the release intentionally preserves those drafts.
 
-Required section contract (top-level headings):
+Required top-level headings:
 
 - `Summary`
 - `Validation`
@@ -179,11 +180,11 @@ Suggested shape:
 - **{file}** — {what changed}
 ```
 
-Invariants:
+Must keep:
 
 - The four required top-level headings are always present, in order.
 - Validation carries concrete evidence (commands run, counts, deltas) — not a promise that it was tested.
-- Risks names the risk and its mitigation in the same bullet.
+- Risks names the risk and the mitigation in the same bullet.
 
 ### T4. Architecture section shape
 
@@ -210,7 +211,7 @@ Or, for lookup-heavy sections:
 | ...    | ...    | ...    |
 ```
 
-Invariants:
+Must keep:
 
 - Framing paragraph comes first; the table or bullet list follows.
 - Request-flow narratives stay prose — do not convert them into bullets when order is part of the meaning.
@@ -233,7 +234,7 @@ Preferred order:
 **Related files:** {if useful for contributors}
 ```
 
-Invariants:
+Must keep:
 
 - **Purpose:** is always present.
 - Other labeled fields are optional, but sibling sections that genuinely have limits or configuration must not silently skip them.
@@ -258,7 +259,7 @@ Preferred order:
 
 Note: the outer fence here is four backticks so the inner ```bash command block nests cleanly. Use the same trick (or `~~~md`) any time a template skeleton needs to contain a fenced block.
 
-Invariants:
+Must keep:
 
 - Summary first — heavy detail belongs in the appendix, not the overview.
 - The command block is the canonical invocation reviewers will copy-paste.
@@ -278,7 +279,7 @@ Shape:
 - {concrete improvement}
 ```
 
-Invariants:
+Must keep:
 
 - End-user / operator voice throughout — no internal function names, private module paths, or raw test-count deltas.
 - Operator-facing references (config keys, routes, keyboard chords, tool names) are fine.
@@ -286,7 +287,7 @@ Invariants:
 
 ---
 
-## Per-document guidance
+## Per-Document Guidance
 
 ### `README.md`
 
@@ -311,7 +312,7 @@ Invariants:
 
 ### `DECISIONS.md`
 
-- Keep rationale-first writing.
+- Keep the reasoning first.
 - Strong one-line lead statements are good.
 - Preserve the ADR-style feel of each entry.
 - Use labeled groups like problem, solution, tradeoffs, or consequences when that makes a decision easier to review.
@@ -349,13 +350,13 @@ Invariants:
 
 ---
 
-## Review checklist
+## Review Checklist
 
-Before finalizing doc changes, check:
+Before finishing doc changes, check:
 
 - Does the section still contain the same substantive detail?
 - Is the lead clearer than before?
-- Did any bullet become too dense or try to carry too many concerns?
+- Did any bullet become too dense or try to carry too many ideas?
 - Does any labeled bullet or sub-bullet still contain multiple sentence-level ideas that should become child bullets?
 - Would a reader have to parse a 4-5 sentence block to find one fact that should be scannable?
 - Was prose kept where sequencing or rationale matters?
@@ -367,13 +368,13 @@ Before finalizing doc changes, check:
 
 ---
 
-## Anti-patterns
+## Anti-Patterns
 
 Avoid these:
 
 - turning every paragraph into bullets without improving structure
 - mixing user-facing behavior, implementation detail, and validation notes in one long bullet
-- over-nesting bullets until the section becomes harder to scan than the original prose
+- nesting bullets so deeply that the section is harder to scan than the original prose
 - keeping paragraph-sized labeled bullets when the content is really a small list of parallel points
 - moving contributor-only details into end-user docs
 - adding implementation trivia to release notes
@@ -381,7 +382,7 @@ Avoid these:
 
 ---
 
-## Decision rule
+## Decision Rule
 
 If a proposed rewrite makes the structure cleaner but the meaning flatter, do not take it.
 

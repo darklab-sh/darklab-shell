@@ -1,6 +1,6 @@
 # Feature Details
 
-Full per-feature reference for darklab_shell. See the [README](README.md) for the quick summary and the [Quick Start](README.md#quick-start).
+This is the detailed feature reference for darklab_shell. If you want the short version or setup steps, start with the [README](README.md) and [Quick Start](README.md#quick-start).
 
 ---
 
@@ -43,38 +43,38 @@ Full per-feature reference for darklab_shell. See the [README](README.md) for th
 
 ## Shell Prompt
 
-**Purpose:** terminal-style prompt flow that mirrors real shell transcript semantics for command echo, blank-Enter, and Ctrl+C handling.
+**Purpose:** a terminal-like prompt that keeps command echo, blank Enter, and Ctrl+C behavior predictable.
 
 **Behavior:**
 
 - Submitted commands are echoed inline above their output so the transcript reads like a real terminal session.
-- Pressing **Enter** on a blank prompt adds a fresh prompt line without calling `/run`.
+- Pressing **Enter** on a blank prompt adds a fresh prompt line without starting a run.
 - **Ctrl+C** is context-aware: while a command is running it opens a kill confirmation dialog; while the tab is idle it drops a new prompt line.
 - After highlighting transcript text on desktop, **ArrowUp**, **ArrowDown**, **Enter**, and **Ctrl+R** return control to the prompt without clearing the selection.
 - Desktop prompt text is selectable in place: drag selection, reverse-direction selection, double-click word selection, and copied transcript ranges all behave like normal transcript text, including prompt prefixes from historical rows.
 - While a command is running the live input prompt hides so output has full focus; once the command completes the prompt reappears immediately.
 
-**Limits:** prompt flow is per-tab; selection-preserving key routing applies to desktop only (mobile uses native touch selection).
+**Limits:** prompt flow is per-tab. Selection-preserving key handling is desktop-only; mobile uses the browser's normal touch selection.
 
-**Configuration:** none — prompt semantics are not user-tunable.
+**Configuration:** none.
 
-**Related files:** `app/static/js/controller.js` (composer + keypress dispatch), `app/static/js/runner.js` (echo on submit + prompt hide/show around `/run`).
+**Related files:** `app/static/js/controller.js` (composer + keypress handling), `app/static/js/runner.js` (command echo and prompt hide/show around `/runs`).
 
 ---
 
 ## Recent Commands
 
-**Purpose:** quick access to the most recent commands from the current session without opening the full history drawer.
+**Purpose:** quick access to recent commands without opening the full history drawer.
 
 **Behavior:**
 
 - Desktop rail's `Recent` section renders clickable chips that load a command into the prompt when tapped.
-- Mobile surfaces a persistent `Recent` peek row between the transcript and the composer showing a count plus a one-line preview.
-- Prompt Up/Down history, desktop rail recents, and the mobile recent peek hydrate from the same newest-distinct command list and include known commands regardless of exit code.
+- Mobile shows a persistent `Recent` peek row between the transcript and the composer with a count plus a one-line preview.
+- Prompt Up/Down history, desktop rail recents, and the mobile recent peek load from the same newest-distinct command list and include known commands regardless of exit code.
 - Tapping the mobile recent peek opens a full recents sheet backed by persisted history rows: tapping a row injects the command into the composer (matching the terminal up-arrow convention); per-row **restore** / **permalink** / **delete** action buttons, search, filter chips (root / exit / date / starred), and a clear-all control round out the sheet.
-- Both surfaces update live as commands are run.
+- Both views update live as commands are run.
 
-**Limits:** compact recents and Up/Down history use the most recent distinct commands only; hidden entirely until there is at least one command in history; entry count capped at `recent_commands_limit`. The full desktop drawer and mobile recents sheet are paginated persisted-history views controlled by `history_panel_limit`.
+**Limits:** compact recents and Up/Down history use only the newest distinct commands. They stay hidden until history exists and are capped by `recent_commands_limit`. The full desktop drawer and mobile recents sheet are paginated by `history_panel_limit`.
 
 **Configuration:** `recent_commands_limit` in `config.yaml` (default 50).
 
@@ -84,24 +84,24 @@ Full per-feature reference for darklab_shell. See the [README](README.md) for th
 
 ## Autocomplete
 
-**Purpose:** shell-like completion that expands to the longest shared prefix, cycles matches, and surfaces context-aware flag and value hints per tool.
+**Purpose:** shell-like completion for commands, flags, files, wordlists, variables, and tool-specific values.
 
 **Behavior:**
 
-- Tool suggestions load from the structured command registry at page load and use ranked exact, prefix, token-boundary, substring, and fuzzy matching; matched spans or fuzzy characters are highlighted in green.
-- App-owned built-in commands complete from a runtime context that uses the same matching engine as YAML-backed tools.
+- Tool suggestions load from the command registry at page load and use ranked exact, prefix, token-boundary, substring, and fuzzy matching. Matched text is highlighted in green.
+- App-owned built-in commands use the same matching engine as YAML-backed tools.
 - Workspace file paths and installed wordlist paths match by useful path segments and filename substrings, so users can type the part they remember instead of the beginning of the path.
 - Domain slots marked with `value_type: domain` capture up to 10 recent domains for the active session token and suggest them only in other marked domain slots. Recents persist across browser restarts and devices when the same `tok_...` session token is active.
 - The dropdown opens below the prompt when there is room and flips above when space is tight, preserving top-to-bottom keyboard navigation order.
 - `Tab` expands to the longest shared prefix, then cycles matches; `Shift+Tab` cycles backward; `Enter` accepts the highlighted match or runs the command if none is selected.
-- While typing a command root, a unique root match shows real example invocations for discoverability. For commands with scoped subcommands, this includes both root-level examples and subcommand examples.
+- While typing a command root, a unique root match shows real example invocations. For commands with scoped subcommands, this includes both root-level and subcommand examples.
 - After a known command root plus a trailing space, the dropdown switches to grammar-style suggestions for that tool: root/global flags, subcommands, and positional hints.
 - While typing a subcommand token, examples narrow to the matching subcommand once the prefix is unique. For example, `amass s` can show `amass subs ...` examples, while an ambiguous prefix such as `gobuster d` keeps showing `dir` and `dns` token choices.
 - After a known subcommand plus a trailing space, the dropdown switches to that subcommand's scoped flags and value hints.
 - After `|`, autocomplete switches into the built-in pipe stage (`grep`, `head`, `tail`, `wc -l`, `sort`, `uniq`).
 - Already-used singleton-style flags are suppressed from contextual suggestions.
 
-**Limits:** external-tool completions come from the static command-registry YAML, while app-owned built-ins come from the browser runtime. There is no shell introspection and no `--help` parsing.
+**Limits:** external-tool completions come from the command-registry YAML, while app-owned built-ins come from the browser runtime. The app does not inspect the live shell and does not parse `--help` output.
 
 **Configuration:** external-tool suggestions use `conf/commands.yaml` (plus optional `conf/commands.local.yaml`). App-owned built-ins use `app/builtin_autocomplete.yaml`, which is packaged with the application rather than treated as operator config. YAML changes reload on the next page load — no server restart needed.
 
@@ -117,7 +117,7 @@ Full per-feature reference for darklab_shell. See the [README](README.md) for th
 | **Enter** | Accept highlighted suggestion, or run the command if none selected |
 | **Escape** | Dismiss the dropdown |
 
-**Structured context format**
+**Structured Context Format**
 
 `conf/commands.yaml` stores each external command under `commands`, with policy, runtime adaptations, workspace file flags, and root-aware flag, argument, subcommand, and example hints:
 
@@ -155,10 +155,10 @@ arguments:
 How the keys work:
 
 - `argument_limit`
-  - optional cap on how many positional arguments should keep receiving autocomplete guidance
+  - optional cap on how many positional arguments should keep receiving autocomplete hints
   - once that many positional arguments are already filled, positional hints stop, but flags and other non-positional suggestions can still appear
 - `examples`
-  - complete command invocations used for discovery while a root command or unique subcommand prefix is being typed
+  - complete command examples shown while a root command or unique subcommand prefix is being typed
   - root examples and scoped subcommand examples are flattened only for the root-typing discovery view; they stay separate in the schema so subcommand-specific matching remains clean
   - when an example is accepted, it replaces the typed command prefix rather than only the active token
 - `flags`
@@ -172,12 +172,12 @@ How the keys work:
 - `arguments`
   - ordered unflagged argument slots like `<target>`, `<url>`, or `<domain>`
   - these appear both at `command ` and while the user types the argument value
-  - use `placeholder` for persistent guidance and `value` for concrete starter text
+  - use `placeholder` for display guidance and `value` for text the user can insert
 - `subcommands`
   - command trees such as `gobuster dir`, `gobuster vhost`, or other external-tool subcommands
   - each subcommand can also use `takes_value`, `value_hint`, `suggest`, `insert`, and `closes`
   - for tools where each subcommand has its own flags and examples, use a mapping of subcommand names to scoped autocomplete blocks
-  - nested examples surface during root discovery and while typing a unique matching subcommand prefix; nested flags surface after the subcommand has been selected
+  - nested examples appear during root discovery and while typing a unique matching subcommand prefix; nested flags appear after the subcommand has been selected
 - `pipe_helpers`
   - top-level registry entries for helpers that appear after `command |`
   - each helper has its own `autocomplete.pipe.enabled`, flags, arguments, and optional insert/display metadata
@@ -351,7 +351,7 @@ To update suggestions, edit `conf/commands.yaml` and/or `conf/commands.local.yam
 - **Ctrl+R** again cycles forward through the current matches.
 - **Escape** dismisses the search and restores whatever draft was in the prompt before `Ctrl+R` was pressed.
 
-**Limits:** results are capped at 10 entries — narrowing the query further surfaces deeper matches.
+**Limits:** results are capped at 10 entries — narrowing the query further shows deeper matches.
 
 **Configuration:** none — behavior is not user-tunable.
 
@@ -361,13 +361,13 @@ To update suggestions, edit `conf/commands.yaml` and/or `conf/commands.local.yam
 
 ## Keyboard Shortcuts
 
-**Purpose:** app-safe chords for tab lifecycle, active-tab actions, and readline-style prompt editing, surfaced through both the `?` overlay and the `shortcuts` built-in.
+**Purpose:** app-safe chords for tab lifecycle, active-tab actions, and readline-style prompt editing, shown through both the `?` overlay and the `shortcuts` built-in.
 
 **Behavior:**
 
 - Tab chords use `Option`/`Alt` to avoid fighting browser `Ctrl`/`Cmd` bindings; terminal chords use `Ctrl` in the readline tradition.
 - The `?` overlay opens from anywhere on the page (including the empty prompt); `shortcuts` prints the same reference as a text dump.
-- Both surfaces read from a single canonical list via `GET /shortcuts`, so they cannot drift.
+- Both views read from a single shared list via `GET /shortcuts`, so they cannot drift.
 
 **Limits:** browser-native combos like `Cmd+T`, `Cmd+W`, and `Ctrl+Tab` are optional fallbacks only — browser interception is inconsistent across environments, especially on macOS.
 
@@ -388,7 +388,7 @@ Shipped app-safe shortcuts:
 | `Enter` / `Escape` in kill confirmation | Confirm / cancel kill | Mirrors modal button intent |
 | `Option+P` (`Alt+P`) | Create share snapshot for active tab | |
 | `Option+Shift+C` (`Alt+Shift+C`) | Copy active tab output | Kept distinct from terminal `Ctrl+C` |
-| `Option+R` (`Alt+R`) | Open the Status Monitor | Opens the modal/sheet with live runs, session health, and idle dashboard metrics |
+| `Option+M` (`Alt+M`) | Open the Status Monitor | Opens the modal/sheet with live runs, session health, and idle dashboard metrics |
 | `Option+Shift+F` (`Alt+Shift+F`) | Open Files | Leaves `Option+F` / `Alt+F` available for terminal word-forward |
 | `Ctrl+L` | Clear current tab output | Shell-style convenience |
 | `Ctrl+A` | Move cursor to start of line | Readline-style editing |
@@ -402,12 +402,12 @@ Shipped app-safe shortcuts:
 
 Browser-native combos like `Cmd+T`, `Cmd+W`, and `Ctrl+Tab` are intentionally treated as optional fallbacks rather than the primary contract because browser interception is inconsistent across environments, especially on macOS browsers.
 
-The same shortcut reference is surfaced in two places in the shell:
+The same shortcut reference appears in two places in the shell:
 
 - press `?` from anywhere on the page to open the keyboard-shortcuts overlay — including from the command prompt itself when it is empty. Once any text is present in the prompt (or any other input), `?` types normally so args like `curl "…?foo=bar"` are not interfered with. The handler also skips modifier chords (`Ctrl` / `Meta` / `Alt`) and the welcome-animation active state
 - run `shortcuts` in the shell to print the same reference as a text dump inside the current tab
 
-Both surfaces read from the same canonical list in the backend (exposed to the browser via `GET /shortcuts`), so they cannot drift. The overlay lists the `?` binding itself as the first entry so the shortcut is self-documenting.
+Both views read from the same backend list (exposed to the browser via `GET /shortcuts`), so they cannot drift. The overlay lists the `?` binding itself as the first entry so the shortcut is self-documenting.
 
 ---
 
@@ -418,7 +418,7 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 **Behavior:**
 
 - Command output arrives line-by-line over SSE; fast commands batch flushes, slow scans stream each line as it arrives.
-- The output view follows the live tail automatically, including during bursty runs that repaint quickly; only an actual user scroll-away disables follow mode and surfaces the tab-scoped jump-to-live / jump-to-bottom helper until the tail is rejoined.
+- The output view follows the live tail automatically, including during bursty runs that repaint quickly. Only a real user scroll-away disables follow mode and shows the tab-scoped jump-to-live / jump-to-bottom helper until the tail is rejoined.
 - A live elapsed run-timer sits next to the status pill while a command runs; the final elapsed time is recorded in the exit line.
 - Timestamps (elapsed or clock) and line numbers are independently toggleable from the tabbar controls (or the mobile menu). Timestamp fragments stay on each row, while line numbers are assigned once as output is emitted so high-volume commands do not have to renumber thousands of visible rows after `max_output_lines` trimming begins.
 - Live output rendering batches bursty streams, skips full transcript scans on normal appends, uses browser content visibility for offscreen rows, and trims old rendered rows without changing the retained raw-output model. Once `max_output_lines` is reached, visible line numbers continue increasing with the command's emitted output order rather than resetting to `1` for the remaining rendered window.
@@ -453,7 +453,7 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 
 ## Status HUD
 
-**Purpose:** a persistent desktop status surface that consolidates run state, connection health, session identity, and environment telemetry into one scanable row without displacing the terminal.
+**Purpose:** a persistent desktop status row that brings together run state, connection health, session identity, and environment telemetry without displacing the terminal.
 
 **Behavior:**
 
@@ -556,7 +556,7 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 
 ## Command Findings
 
-**Purpose:** surface high-signal lines from the active tab so operators can review findings, warnings, errors, and roll-up summaries without manually skimming every line of noisy tool output.
+**Purpose:** show high-signal lines from the active tab so operators can review findings, warnings, errors, and roll-up summaries without manually skimming every line of noisy tool output.
 
 **Behavior:**
 
@@ -568,7 +568,7 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
   - **S** — summary lines
 - Clicking a signal chip opens the search bar in that scope immediately. Re-clicking the same chip cycles to the next match in the same way as the search bar’s **↓** button.
 - The search bar now supports scope buttons for **text**, **findings**, **warnings**, **errors**, and **summaries**. Scope buttons show live counts, and findings-heavy output opens directly into the **findings** scope.
-- Findings are pattern-driven rather than command-whitelisted. Live `/run` output is classified server-side and carries additive per-line signal metadata through history restore and share/permalink payloads; the browser uses that metadata as the source of truth for counts, scoped navigation, and summaries. The current server matcher is tuned for the tool output the shell already surfaces most often:
+- Findings are pattern-driven rather than command-whitelisted. Live `/runs` output is classified server-side and carries additive per-line signal metadata through history restore and share/permalink payloads; the browser uses that metadata as the source of truth for counts, scoped navigation, and summaries. The current server matcher is tuned for the tool output the shell already shows most often:
   - open-port and service rows from scanners such as `nmap`, `naabu`, `rustscan`, and `nc`
   - hit rows from `ffuf`, `gobuster`, and related directory fuzzers
   - passive subdomain rows from `assetfinder`
@@ -592,7 +592,7 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 
 ## Copy, Save, and Export
 
-**Purpose:** surface consistent copy-to-clipboard and download-output actions (`txt` / `html` / `pdf`) across the desktop HUD, the mobile menu, and the permalink page.
+**Purpose:** keep copy-to-clipboard and download-output actions (`txt` / `html` / `pdf`) consistent across the desktop HUD, mobile menu, and permalink page.
 
 **Behavior:**
 
@@ -761,7 +761,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 - `help`, `commands`, `history`, `last`, `limits`, `retention`, `status`, `runs`, `jobs`, `stats`, `config`, `theme`, `which`, `type`, `wordlist`, `faq`, `banner`, `fortune`, `shortcuts`, `clear`, `version`, and `whoami` are available in every session.
 - `status` prints a compact session summary: masked active session ID, session type, run count, snapshot count, starred-command count, whether saved Options exist for the session, session-variable count, active-run count, compact session file usage when Files are enabled, and the current instance-level save/retention limits.
-- `runs` prints app-native active-run metadata for the current session, including CPU percent derived from cumulative CPU seconds over run elapsed time, RSS-memory snapshot, and a hint that the desktop `STATUS` HUD pill opens real-time monitoring; `jobs` is a compatibility alias for the same terminal output. `runs -v` also prints full run IDs, started timestamps, cumulative CPU time, and active-run metadata source, while `runs --json` prints the active-run snapshot in JSON for debugging or automation. On desktop, the `STATUS`, `LAST EXIT`, and `TABS` HUD pills open the Status Monitor modal, and `Option+R` / `Alt+R` opens the same surface. The monitor is also available from the desktop rail and mobile menu, stays useful when idle with system/resource/session cards and visual history widgets, lists active commands as divided rows, labels runs owned by another live browser as monitor-only, and shows best-effort CPU and RSS memory telemetry as circular meters/sparklines with memory fill normalized against 1 GB when backend process stats are available.
+- `runs` prints app-native active-run metadata for the current session, including CPU percent derived from cumulative CPU seconds over run elapsed time, RSS-memory snapshot, and a hint that the desktop `STATUS` HUD pill opens real-time monitoring; `jobs` is a compatibility alias for the same terminal output. `runs -v` also prints full run IDs, started timestamps, cumulative CPU time, and active-run metadata source, while `runs --json` prints the active-run snapshot in JSON for debugging or automation. On desktop, the `STATUS`, `LAST EXIT`, and `TABS` HUD pills open the Status Monitor modal, and `Option+M` / `Alt+M` opens the same view. The monitor is also available from the desktop rail and mobile menu, stays useful when idle with system/resource/session cards and visual history widgets, lists active commands as divided rows, exposes Attach/Kill actions for visible active runs, and shows best-effort CPU and RSS memory telemetry as circular meters/sparklines with memory fill normalized against 1 GB when backend process stats are available.
 - `stats` prints session activity totals and external-tool command-root breakdowns: runs, snapshots, starred commands, active runs, success rate, average duration, and the top non-built-in command roots by run count.
 - `cd [folder]`, `pwd`, `file list [-l] [folder]`, `file show <file>`, `file add [file]`, `file add-dir <folder>`, `file edit <file>`, `file download <file>`, and confirmed `file delete [-r|-f|-rf] <file-or-folder>` / `file rm [-r|-f|-rf] <file-or-folder>`, plus the convenience aliases `ls [-l] [folder]`, `cat <file>`, `mkdir <folder>`, and confirmed `rm [-r|-f|-rf] <file-or-folder>`, expose keyboard-first access to the current session files when workspace storage is enabled. `cd` is tab-local and treats the session workspace root as `/`; relative file commands resolve from that tab's current workspace folder. `file add` opens a blank file editor, `file add <file>` opens the same editor with the file name prefilled, `file add-dir` / `mkdir` creates a folder, and `file download <file>` starts a browser download. `file list` / `ls` list the current folder non-recursively in short form by default; `file list -l` / `ls -l` show the long listing with type, size, and modified columns.
 - `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq` also work as standalone workspace-file commands, for example `grep -i admin targets.txt`, `head -n 20 output.txt`, `wc -l urls.txt`, and `sort -u names.txt`. They reuse the same constrained helper implementation as built-in pipe stages and never expose arbitrary shell piping or host filesystem access.
@@ -783,7 +783,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Limits:** built-ins intentionally cover only app-owned helpers and a narrow set of shell-identity responses. They are not a general shell-emulation layer.
 
-**Configuration:** none. The built-in command surface is defined in application code, not in operator config.
+**Configuration:** none. Built-in commands are defined in application code, not in operator config.
 
 **Related files:** `app/builtin_commands.py` (built-in command registry + output rendering), `app/commands.py` (dispatch, autocomplete loading, and man routing), `app/builtin_autocomplete.yaml` (built-in autocomplete grammar), `app/static/js/app.js` (dynamic autocomplete hooks, client-side command flows, and Options/theme command handling), `app/static/js/runner.js` (client-side command interception).
 
@@ -811,7 +811,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 ## Session Files
 
-**Purpose:** optional app-mediated per-session file access for commands that need small input or output files, without turning the app into a general-purpose shell filesystem.
+**Purpose:** optional app-managed per-session file access for commands that need small input or output files, without turning the app into a general-purpose shell filesystem.
 
 **Behavior:**
 
@@ -838,14 +838,14 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 ## Command Allowlist
 
-**Purpose:** operator-controlled set of permitted command prefixes (with deny overrides) that gates every `/run` request before dispatch.
+**Purpose:** operator-controlled set of permitted command prefixes (with deny overrides) that gates every `/runs` request before dispatch.
 
 **Behavior:**
 
-- Every `/run` request is checked against the `policy` blocks in `conf/commands.yaml` before dispatch.
+- Every `/runs` request is checked against the `policy` blocks in `conf/commands.yaml` before dispatch.
 - Allow entries match by prefix — a prefix of `ping` permits `ping google.com`, `ping -c 4 1.1.1.1`, etc. Be as specific or broad as you like: `nmap -sT` permits only TCP connect scans while `nmap` permits any nmap invocation.
 - Deny entries take priority over allow entries and match anywhere in the command as space-separated tokens (not as a prefix).
-- Category metadata also drives the command catalog; deny entries are not surfaced to users.
+- Category metadata also drives the command catalog; deny entries are not shown to users.
 - The registry is re-read on every request for command policy, so edits take effect without a restart. Deleting or emptying the registry disables restrictions entirely.
 - Tool names and subcommand prefixes are matched **case-insensitively**; flag names are matched **with exact case** (so `!curl -K` blocks `-K` without blocking `-k`).
 - `/dev/null` exception: denied output flags (`-o`, `-O`) are permitted when their argument is `/dev/null`, allowing patterns like `curl -o /dev/null -w "%{http_code}"`.
@@ -873,7 +873,7 @@ commands:
 - `category` — command catalog grouping.
 - `autocomplete.*.value_type` — declares target-like values for autocomplete and optional restricted-input checks.
 
-**Related files:** `app/conf/commands.yaml` (command registry), `app/commands.py` (allow/deny matching logic), `app/blueprints/run.py` (policy gate at the `/run` entry point).
+**Related files:** `app/conf/commands.yaml` (command registry), `app/commands.py` (allow/deny matching logic), `app/blueprints/run.py` (policy gate at the `/runs` entry point).
 
 ### Deny Prefixes
 
@@ -1111,7 +1111,7 @@ sqlite3 data/history.db "DELETE FROM snapshots;"
 - The active token is stored in `localStorage` under `session_token`; the original UUID is always preserved under `session_id` so `session-token clear` has a stable fallback.
 - The browser sends the active identity as `X-Session-ID` on every request; possession of the token string is the only authorization check (matching the existing anonymous session model).
 - Changing the token in one tab propagates to all open tabs via the `storage` event — recent chips, starred state, history drawer, session-scoped preferences, and the options-panel masked display all refresh without a reload.
-- `session-token` subcommands are rendered client-side so token values are not sent through the normal `/run` execution path. Successful commands are saved through the allowlisted `/run/client` history path with token-bearing arguments masked before they are stored or shown in recent-command surfaces.
+- `session-token` subcommands are rendered client-side so token values are not sent through the normal `/runs` execution path. Successful commands are saved through the allowlisted `/run/client` history path with token-bearing arguments masked before they are stored or shown in recent-command views.
 
 **Terminal commands:**
 
@@ -1138,7 +1138,7 @@ If a session has run history or workspace files, the terminal `generate` and `se
 
 **Limits:** there is no user-facing authentication — possession of the token is sufficient access. `POST /session/migrate` requires the `from_session_id` body field to match the caller's `X-Session-ID` header (mismatch returns 403), so a migration call can only move the caller's own data.
 
-**Configuration:** no config keys — token issuance is always enabled. Token scope covers runs, snapshots, starred commands, session variables, saved user options, and app-mediated workspace files when Files are enabled.
+**Configuration:** no config keys — token issuance is always enabled. Token scope covers runs, snapshots, starred commands, session variables, saved user options, and app-managed workspace files when Files are enabled.
 
 **Related files:** `app/static/js/session.js` (client-side token flow + cross-tab `storage` sync), `app/blueprints/session.py` (`/session/token/*`, `/session/preferences`, and `/session/migrate` routes), `app/database.py` (`session_tokens`, `session_preferences`, and `starred_commands` tables).
 

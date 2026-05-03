@@ -1,8 +1,8 @@
 # External Command Integrations
 
-This document tracks how darklab_shell adapts installed command-line tools so they behave well inside the web shell, container sandbox, and session workspace model.
+This document explains how darklab_shell adapts installed command-line tools so they work cleanly inside the web shell, container sandbox, and session workspace model.
 
-The goal is not to document every flag a tool supports. The goal is to make app-owned behavior visible: command rewrites, environment overrides, workspace file handling, permissions assumptions, and validation expectations.
+The goal is not to document every flag a tool supports. The goal is to make app-owned behavior visible: command rewrites, environment overrides, workspace file handling, permission assumptions, and validation rules.
 
 ---
 
@@ -10,9 +10,9 @@ The goal is not to document every flag a tool supports. The goal is to make app-
 
 - Preserve the command the user typed in history and UI wherever possible.
 - Rewrite only when the default tool behavior is broken, unsafe, misleading, or inaccessible in the web shell runtime.
-- Keep rewrites idempotent so users can provide the explicit flag themselves without duplicate options.
+- Keep rewrites safe to apply more than once so users can provide the explicit flag themselves without duplicate options.
 - Prefer session workspace paths for user-visible inputs and outputs.
-- Keep durable or inspectable artifacts out of `/tmp/.config` when they represent session-owned work.
+- Keep useful session-owned files out of `/tmp/.config` when users should be able to inspect them later.
 - Treat external-tool adaptation as part of the command trust boundary; all filesystem path expansion must happen through command validation and workspace helpers.
 
 ---
@@ -23,9 +23,9 @@ User-submitted external commands run as the `scanner` user with the shared `appu
 
 The scanner wrapper sets `HOME=/tmp` so tools that insist on a writable home can use the container tmpfs instead of the read-only application filesystem. That default is useful for caches and temporary tool state, but command-specific integrations may override narrower environment variables when a tool's useful state needs to be session-scoped.
 
-Session workspace files are app-mediated. Users can name relative files such as `targets.txt` or `amass`, and command validation rewrites those values to the active hashed session workspace path before subprocess launch.
+Session workspace files are app-managed. Users can name relative files such as `targets.txt` or `amass`, and command validation rewrites those values to the active hashed session workspace path before subprocess launch.
 
-Command-specific runtime behavior is declared in `app/conf/commands.yaml` under each command's `runtime_adaptations` section. The registry supports injected flags, managed workspace directories, and environment variables derived from managed workspace paths. Python owns the generic application machinery; the command registry owns the per-tool contract.
+Command-specific runtime behavior is declared in `app/conf/commands.yaml` under each command's `runtime_adaptations` section. The registry supports injected flags, managed workspace directories, and environment variables derived from managed workspace paths. Python handles the common plumbing; the command registry handles the tool-specific rules.
 
 ---
 
@@ -56,7 +56,7 @@ Validation behavior:
 - Write and read/write flags prepare the destination path before subprocess launch.
 - Directory flags can create and prepare managed session directories.
 
-This covers normal file input/output tools such as `nmap -iL`, `nmap -oN`, `curl -o`, `ffuf -o`, `subfinder -dL`, `naabu -list`, `nuclei -l`, and Amass database directories. It also covers selected directory-producing ProjectDiscovery flags such as `katana -srd`, `katana -sfd`, `pd-httpx -srd`, `subfinder -oD`, and `nuclei -srd` / `-me`.
+This covers normal file input/output tools such as `nmap -iL`, `nmap -oN`, `curl -o`, `ffuf -o`, `subfinder -dL`, `naabu -list`, `nuclei -l`, and Amass database directories. It also covers selected ProjectDiscovery flags that create directories, such as `katana -srd`, `katana -sfd`, `pd-httpx -srd`, `subfinder -oD`, and `nuclei -srd` / `-me`.
 
 ## Runtime Adaptations
 
@@ -84,7 +84,7 @@ runtime_adaptations:
       managed_directory_flag: -dir
 ```
 
-`inject_flags` rewrites command argv tokens with `shlex.join`, so injected values keep safe quoting when paths contain spaces or shell metacharacters. `position: prepend` inserts tokens after the command root, `position: append` adds trailing tokens, and `position: command_prefix` inserts tokens before the command root for wrappers such as `env NAME=value`. `unless_any` and `unless_any_regex` keep rewrites idempotent and prevent help/version commands from being mutated. `requires_workspace: true` skips the injection unless Files are enabled and a session workspace is available. Injected tokens may use `{session_workspace}` to point at the current session's hashed workspace directory. `notice` is emitted in the terminal for rewrites that need user-facing explanation.
+`inject_flags` rewrites command argv tokens with `shlex.join`, so injected values stay safely quoted when paths contain spaces or shell metacharacters. `position: prepend` inserts tokens after the command root, `position: append` adds trailing tokens, and `position: command_prefix` inserts tokens before the command root for wrappers such as `env NAME=value`. `unless_any` and `unless_any_regex` keep rewrites from duplicating flags and prevent help/version commands from being changed. `requires_workspace: true` skips the injection unless Files are enabled and a session workspace is available. Injected tokens may use `{session_workspace}` to point at the current session's hashed workspace directory. `notice` prints a short terminal message when a rewrite needs user-facing explanation.
 
 `managed_workspace_directory` is evaluated by workspace-aware validation. When it applies, the declared directory is injected if absent, rewritten through the same workspace directory helper as user-provided directory flags, and optionally rejects alternate user values so tool state does not split across multiple databases.
 
@@ -126,7 +126,7 @@ This keeps useful generated state under session-visible folders such as:
 
 `nuclei` still receives `-ud /tmp/nuclei-templates` unless the user provides an update directory. Template caches are intentionally left in tmpfs because they are large, reusable container state rather than session evidence.
 
-Several ProjectDiscovery flags are also declared as workspace-aware paths so generated evidence and secondary outputs can be inspected in Files:
+Several ProjectDiscovery flags are also declared as workspace-aware paths so generated files and secondary outputs can be inspected in Files:
 
 - `katana -srd` / `-store-response-dir` and `katana -sfd` / `-store-field-dir`
 - `pd-httpx -srd` / `-store-response-dir`, including response stores and screenshot output directories
@@ -134,7 +134,7 @@ Several ProjectDiscovery flags are also declared as workspace-aware paths so gen
 - `subfinder -oD`, resolver lists, config files, and provider config files
 - `naabu` host-list, exclude-list, ports-file, and output paths
 
-Security note: ProjectDiscovery provider/config files can contain API keys or other operator secrets. The Files view can show them to the current session owner, and current share/permalink export flows only package terminal output rather than workspace directories. Future share/export package work should continue to treat generated config directories carefully and avoid publishing provider configs by default.
+Security note: ProjectDiscovery provider/config files can contain API keys or other operator secrets. The Files view can show them to the current session owner, and current share/permalink export flows only package terminal output rather than workspace directories. Future share/export package work should keep treating generated config directories carefully and avoid publishing provider configs by default.
 
 ---
 
@@ -284,5 +284,5 @@ Before merging a new external-command adaptation:
 - Keep user-facing examples aligned with the app-owned rewrite behavior.
 - Add backend tests for validation, rewrite, and workspace path handling.
 - Add autocomplete tests if examples, flags, or positional hints change.
-- Add or update container smoke expectations when the change affects surfaced examples or workflow steps.
+- Add or update container smoke expectations when the change affects visible examples or workflow steps.
 - Document tool-specific behavior here when the app does more than simple allowlist metadata.

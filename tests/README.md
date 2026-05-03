@@ -2,7 +2,7 @@
 
 This directory contains the project’s test suites and the practical notes for running and extending them.
 
-This is the canonical testing document for the repository. Keep the detailed suite inventory and maintenance notes here, and keep `README.md`, `ARCHITECTURE.md`, and `DECISIONS.md` limited to summary-level testing guidance plus links back to this file.
+This is the main testing document for the repo. Keep the detailed suite inventory and maintenance notes here. Keep `README.md`, `ARCHITECTURE.md`, and `DECISIONS.md` to short testing summaries with links back to this file.
 
 ## What Lives Here
 
@@ -10,11 +10,11 @@ This is the canonical testing document for the repository. Keep the detailed sui
 - `tests/js/unit/` - Vitest coverage for browser-module helpers and DOM-bound client logic
 - `tests/js/e2e/` - Playwright coverage for the full browser UI against a live Flask server
 
-The suites are intentionally layered:
+The suites are layered on purpose:
 
-1. pytest checks the backend contracts and edge-case behavior quickly, without a browser
+1. pytest checks backend rules and edge cases quickly, without a browser
 2. Vitest checks client-side helper logic and browser-module failure paths in jsdom
-3. Playwright checks the integrated UI, network behavior, and cross-module interactions in a real browser
+3. Playwright checks the full UI, network behavior, and cross-module interactions in a real browser
 
 Current totals:
 
@@ -54,7 +54,7 @@ This document is organized in two parts:
 
 ## Prerequisites
 
-You need different local dependencies depending on which suite you want to run:
+You need different local dependencies depending on the suite:
 
 | Suite | Required locally | Notes |
 | --- | --- | --- |
@@ -90,7 +90,7 @@ Notes:
 - keep the Python virtualenv active for lint and backend debugging work
 - `Vitest` and `Playwright` use the repo-local npm dependencies; do not rely on global installs
 - most day-to-day test work does not require Docker
-- the container smoke test is slower and is intended for Dockerfile, dependency, and toolchain validation rather than the normal fast iteration loop
+- the container smoke test is slower and is meant for Dockerfile, dependency, and toolchain validation rather than the normal fast iteration loop
 
 ---
 
@@ -115,7 +115,7 @@ bash scripts/run_playwright.sh tests/js/e2e/failure-paths.spec.js --grep "histor
 
 Playwright notes:
 
-- `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps quiet local Playwright output by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. It uses [config/playwright.parallel.config.js](../config/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
+- `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps local Playwright output quiet by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. It uses [config/playwright.parallel.config.js](../config/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
 - plain `npx playwright test` uses [config/playwright.config.js](../config/playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
 - each parallel project gets its own Flask server port plus isolated `APP_DATA_DIR` state, so SQLite history, run-output artifacts, and limiter/process state do not leak between workers
 - modal interaction specs wait for app-level `data-interaction-ready` markers before driving real keyboard focus movement, keeping focus-trap coverage browser-native without fixed sleeps or synthetic key events
@@ -160,7 +160,7 @@ Large jsdom setup lives in focused helper modules under `tests/js/unit/helpers/`
 
 ### Playwright
 
-`tests/js/e2e/` covers the integrated browser UI against a live Flask server, including mobile behavior, kill/history/search/share flows, browser-visible output behavior, and startup resilience.
+`tests/js/e2e/` covers the browser UI against a live Flask server, including mobile behavior, kill/history/search/share flows, browser-visible output behavior, and startup resilience.
 
 The browser layer now uses a split config model:
 

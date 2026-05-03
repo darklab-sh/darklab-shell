@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the current system architecture of darklab_shell: runtime boundaries, request flow, browser/runtime composition, persistence, observability, testing shape, and production deployment model.
+This document explains how darklab_shell is put together today: runtime boundaries, request flow, browser code, backend code, persistence, observability, tests, and production deployment.
 
 For the architectural rationale, tradeoffs, and implementation-history notes behind those structures, see [DECISIONS.md](DECISIONS.md).
 
@@ -28,24 +28,24 @@ For the architectural rationale, tradeoffs, and implementation-history notes beh
 
 ## System Overview
 
-darklab_shell is a web-based shell for running network diagnostic and vulnerability scanning commands against remote endpoints. Flask + Gunicorn backend, single-file HTML frontend, SQLite persistence, and real-time SSE streaming.
+darklab_shell is a web-based shell for running network diagnostics and vulnerability scanning commands against remote targets. It uses Flask + Gunicorn on the backend, a classic-script browser frontend, SQLite for history/share data, Redis for shared live-run state, and SSE for live output.
 
 At a high level, it works like this:
 
-- A browser-based terminal UI loads a Flask-rendered shell page, then hydrates itself from focused read routes such as `/config`, `/themes`, `/faq`, `/autocomplete`, and `/welcome*`.
-- Command execution flows through brokered `POST /runs` starts plus replayable `/runs/<run_id>/stream` SSE subscriptions, which validate and rewrite commands, resolve app-native built-in commands, start isolated scanner subprocesses when needed, and publish output events.
-- `Redis` provides the shared state that must work correctly across multiple Gunicorn workers: rate limiting, active run PID tracking for `/kill`, and production run-broker event replay.
-- `SQLite` persists completed run metadata, preview output, snapshots, and full-output artifact metadata so history, canonical run permalinks, and snapshot permalinks survive restarts.
-- The browser client stays build-step-free. Classic scripts share one global runtime, while browser cookies and storage cover local continuity and cache layers around session identity, session-scoped preferences, and reload restore.
-- The Docker runtime enforces a two-user model: Gunicorn runs as `appuser`, while user-submitted commands run as `scanner` with the shared `appuser` run group. That explicit run group lets validated session workspace files stay group-readable or group-writable without becoming world-readable.
+- The browser loads a Flask-rendered shell page, then fetches focused startup data from routes such as `/config`, `/themes`, `/faq`, `/autocomplete`, and `/welcome*`.
+- Command execution starts with `POST /runs` and streams through replayable `/runs/<run_id>/stream` SSE subscriptions. The backend validates and rewrites commands, handles app-native built-ins, starts isolated scanner subprocesses when needed, and publishes output events.
+- Redis stores shared state that must work across multiple Gunicorn workers: rate limits, active run PID tracking for `/kill`, and production run-broker replay.
+- SQLite stores completed run metadata, preview output, snapshots, and full-output file metadata so history and share links survive restarts.
+- The browser client has no build step. Classic scripts share one global runtime, and browser cookies/storage handle local continuity around session identity, preferences, and reload restore.
+- The Docker runtime uses two unprivileged users: Gunicorn runs as `appuser`, while user-submitted commands run as `scanner` with the shared `appuser` group. That group lets validated session workspace files stay group-readable or group-writable without making them world-readable.
 
-The rest of this document is organized by concern rather than by historical file order: stable system structure first, then browser/backend composition, then the core runtime stories such as run lifecycle, state, observability, and security.
+The rest of this document is organized by concern rather than file order: system structure first, then browser/backend composition, then core runtime flows such as run lifecycle, state, observability, and security.
 
 ---
 
 ## System Structure
 
-This cluster groups the stable structural views of the application before the document dives into request flow, browser runtime behavior, or persistence details.
+Start here for the stable big-picture views before the doc dives into request flow, browser behavior, and persistence details.
 
 ### Logical Runtime Layers
 
@@ -86,16 +86,16 @@ flowchart TB
   Flask <--> Config
 ```
 
-This diagram is intentionally framework- and runtime-oriented rather than app-module-oriented. It is meant to answer the “which layer owns which responsibility?” question without duplicating the more detailed app diagrams later in the document.
+This diagram is intentionally about runtime layers rather than individual modules. It answers “which layer owns which responsibility?” without duplicating the more detailed diagrams later in the doc.
 
-- the browser runtime owns rendering, local interaction state, and web-platform APIs such as cookies, `localStorage`, `sessionStorage`, `fetch`, and SSE consumption
-- the Python web application owns routing, template rendering, config/theme loading, request validation, built-in command handling, and orchestration of real command execution
+- the browser owns rendering, local interaction state, and web APIs such as cookies, `localStorage`, `sessionStorage`, `fetch`, and SSE reads
+- the Python web app owns routing, template rendering, config/theme loading, request validation, built-in command handling, and real command setup
 - Redis owns the cross-worker coordination that cannot safely live inside one Gunicorn worker process
-- SQLite and artifact files own the durable run/share state that must survive reloads and restarts
+- SQLite and output files own the run/share state that must survive reloads and restarts
 - scanner subprocesses are a distinct execution boundary rather than an in-process extension of the Flask app
-- YAML config and theme files are shown as a separate logical dependency because they shape both backend behavior and frontend presentation, even though they are loaded from the local filesystem rather than over the network
+- YAML config and theme files are shown separately because they shape both backend behavior and frontend presentation, even though they load from the local filesystem rather than over the network
 
-The goal is for this section to stay stable even when app-specific modules, blueprints, or frontend files are refactored. The more detailed sections below cover those app-level components directly.
+This section should stay stable even when app modules, blueprints, or frontend files move around. The sections below cover those app-level pieces directly.
 
 ### Runtime Topology
 
@@ -119,11 +119,11 @@ flowchart TB
   Flask -->|spawn / signal process groups| Scanner
 ```
 
-This is the transport/boundary view of the app. It focuses on the stable communication paths rather than the internal modules that implement them.
+This is the transport and boundary view. It focuses on stable communication paths rather than the internal modules that implement them.
 
 - browser traffic is plain HTTP plus one-way SSE streaming for live command output
 - Redis is used for shared worker coordination and brokered active-run event replay, not as a general application datastore
-- SQLite and artifact files are the durable history/share boundary
+- SQLite and output files are the durable history/share boundary
 - command execution remains out-of-process, which keeps the Flask worker lifecycle separate from tool execution
 
 ---
@@ -708,7 +708,7 @@ That split is what allows the app to keep the interactive shell fast while still
 - `session_tokens` — one row per issued named session token `(token TEXT PRIMARY KEY, created TEXT)`. Used to validate `tok_`-prefixed `X-Session-ID` headers and to support `session-token list` and `session-token revoke`.
 - `session_preferences` — one row per session ID `(session_id TEXT PRIMARY KEY, preferences TEXT, updated TEXT)`. Stores the normalized Options snapshot that follows a named session token across browsers while still allowing browser-local UUID sessions to keep independent defaults.
 - `starred_commands` — one row per starred command per session `(session_id, command)`. Backs the `/session/starred` endpoints and follows session tokens across devices via the migration path.
-- `session_variables` — one row per session command variable `(session_id, name, value, updated)`. Backs the `var` built-in, `/session/variables`, and app-mediated command expansion before validation.
+- `session_variables` — one row per session command variable `(session_id, name, value, updated)`. Backs the `var` built-in, `/session/variables`, and app-managed command expansion before validation.
 - `user_workflows` — one row per saved workflow `(id, session_id, title, description, inputs, steps, created, updated)`. Backs the Workflows panel's **My workflows** section, the `workflow` terminal command, and session-token migration.
 - Redis-backed active-run metadata plus browser `sessionStorage` form a second persistence layer for reload continuity:
   - `/history/active` covers in-flight runs owned by the server/session
@@ -735,7 +735,7 @@ Session identity is a two-tier model managed in `app/static/js/session.js`:
 1. **UUID session (anonymous)** — generated by `_generateUUID()` on first visit and persisted in `localStorage` under `session_id`. Always present; never removed. `_generateUUID()` tries `crypto.randomUUID()` first (HTTPS/localhost) and falls back to `crypto.getRandomValues()` so HTTP LAN deployments (e.g. `http://192.168.x.x`) work without a secure context.
 2. **Session token (named)** — a `tok_<32 hex>` string generated server-side by `GET /session/token/generate` and persisted in `localStorage` under `session_token`. Takes precedence over the UUID when present. Stored in the `session_tokens` database table `(token TEXT PRIMARY KEY, created TEXT)`.
 
-`SESSION_ID` is initialised at page load by preferring `session_token` over `session_id`. `updateSessionId(newId)` switches identity at runtime without a page reload — used by `session-token generate/set/clear/rotate/revoke`. Every API call sends the active identity as `X-Session-ID` via `apiFetch()`. History, stars, saved Options state, and app-mediated workspace files are scoped to this identity; clearing a session token reverts to the UUID rather than losing the anonymous session. Terminal `session-token` flows keep their prompts in the transcript, while the Options-panel clear/set actions use `showConfirm()`.
+`SESSION_ID` is initialised at page load by preferring `session_token` over `session_id`. `updateSessionId(newId)` switches identity at runtime without a page reload — used by `session-token generate/set/clear/rotate/revoke`. Every API call sends the active identity as `X-Session-ID` via `apiFetch()`. History, stars, saved Options state, and app-managed workspace files are scoped to this identity; clearing a session token reverts to the UUID rather than losing the anonymous session. Terminal `session-token` flows keep their prompts in the transcript, while the Options-panel clear/set actions use `showConfirm()`.
 
 **Server-side token validation:** `get_session_id()` in `helpers.py` validates `tok_`-prefixed header values against the `session_tokens` table on every request. A revoked or never-issued `tok_` token is treated as anonymous (returns `""`) so the caller loses access to session-scoped data immediately, without requiring a client-side logout. UUID-format session IDs pass through without a DB lookup.
 

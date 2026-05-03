@@ -1,8 +1,8 @@
 # Contributor Guide
 
-This document is for developers and contributors working on darklab_shell locally: development setup, test workflow, lint and security checks, and the expected Git/GitLab merge request flow.
+This guide is for developers and contributors working on darklab_shell locally. It covers setup, tests, lint/security checks, and the expected Git/GitLab merge request flow.
 
-For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite inventory and focused test commands, use [tests/README.md](tests/README.md). For documentation structure and canonical writing templates, use [DOCS_STANDARDS.md](DOCS_STANDARDS.md).
+For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite inventory and focused test commands, use [tests/README.md](tests/README.md). For doc structure and preferred writing templates, use [DOCS_STANDARDS.md](DOCS_STANDARDS.md).
 
 ---
 
@@ -127,11 +127,11 @@ Recommended branch naming:
 - `docs/contributor-guide`
 - `test/playwright-parallel-balance`
 
-Keep branches focused. If the work changes product behavior, tests, and docs, include all three in the same branch only when they are part of one coherent change.
+Keep branches focused. If the work changes product behavior, tests, and docs, include all three in the same branch only when they are part of one clear change.
 
 Commit messages should describe the intent of the change, not just what files were touched. Lead with the affected area when it helps narrow scope — for example, `fix(mobile): restore scroll position on tab switch` or `feat(autocomplete): add positional hints for nmap`. Keep the subject line under 72 characters.
 
-Release branches may carry temporary merge-request and release-note drafts under `docs/release-drafts/`. Keep those drafts updated with user-facing features, fixes, risks, and validation as the branch evolves so release bookkeeping is visible in normal review. Remove the draft directory before merging back to `main` unless the project intentionally wants to preserve that release's draft artifacts.
+Release branches may carry temporary merge-request and release-note drafts under `docs/release-drafts/`. Keep those drafts updated with user-facing features, fixes, risks, and validation as the branch changes so release bookkeeping is visible in normal review. Remove the draft directory before merging back to `main` unless the project intentionally wants to keep that release's draft files.
 
 ---
 
@@ -159,9 +159,9 @@ Before merging a version branch back to `main`:
 
 **JavaScript** — the frontend has no transpiler or bundler. Keep the classic-script pattern: no ES modules, no framework dependencies. New logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the composition root that loads last. Match the existing style of the file you are editing. ESLint enforces 2-space indentation, single quotes, and no semicolons for config and test files ([`config/eslint.config.js`](config/eslint.config.js)).
 
-**General** — avoid speculative abstractions. Add helpers only when a pattern recurs across at least two real call sites. Prefer editing the relevant existing file over creating new ones.
+**General** — avoid speculative abstractions. Add helpers only when a pattern shows up in at least two real call sites. Prefer editing the relevant existing file over creating new ones.
 
-**Frontend UI rules** — cross-cutting UI rules (button primitive family, disclosure glyph mapping, semantic color contract, confirmation dialog contract) live in [ARCHITECTURE.md § Frontend Design System](ARCHITECTURE.md#frontend-design-system). New pressable surfaces, modals, disclosures, and color decisions must follow those rules or add an explicit exception to the relevant contract test.
+**Frontend UI rules** — shared UI rules (button primitive family, disclosure glyph mapping, semantic color contract, confirmation dialog contract) live in [ARCHITECTURE.md § Frontend Design System](ARCHITECTURE.md#frontend-design-system). New buttons, modals, disclosures, and color decisions must follow those rules or add an explicit exception to the relevant contract test.
 
 ---
 
@@ -180,7 +180,7 @@ That total includes 2,350 behavior tests plus 30 docs/inventory meta-tests.
 
 Playwright notes:
 
-- `npm run test:e2e` delegates to `bash scripts/run_playwright.sh`, which keeps quiet local Playwright output by default, clears the configured e2e ports, captures isolated server logs under `test-results/e2e-server-logs/`, and currently balances the browser suite across 5 isolated Chromium projects. On failure it prints the server log tails automatically. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
+- `npm run test:e2e` delegates to `bash scripts/run_playwright.sh`, which keeps local Playwright output quiet by default, clears the configured e2e ports, captures isolated server logs under `test-results/e2e-server-logs/`, and currently balances the browser suite across 5 isolated Chromium projects. On failure it prints the server log tails automatically. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
 - plain `npx playwright test` uses the default single-project config, which is the intended path for VS Code Test Explorer and focused local debugging
 - the parallel projects each get their own Flask server port and isolated local app state so history, run-output artifacts, and limiter/process state do not collide between workers
 

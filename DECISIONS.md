@@ -1,8 +1,8 @@
 # Architectural Decisions
 
-This document records the key architectural decisions, tradeoffs, bugs, and implementation lessons that shaped the current design of darklab_shell.
+This document records the main design decisions, tradeoffs, bugs, and lessons that shaped darklab_shell.
 
-Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, runtime diagrams, persistence model, and deployment shape. Use this file for the reasoning behind those structures. If you are about to change something and want to know what has historically caused problems, skip to [Known Gotchas and Lessons Learned](#known-gotchas-and-lessons-learned).
+Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagrams, persistence model, and deployment shape. Use this file for the reasoning behind those choices. If you're about to change something and want to know what has caused trouble before, start with [Known Gotchas and Lessons Learned](#known-gotchas-and-lessons-learned).
 
 ---
 
@@ -60,17 +60,17 @@ Server-Sent Events are simpler to implement with Flask, work correctly behind ng
 
 ### Redis-Backed Run Broker
 
-**Command execution is broker-owned instead of request-owned.**
+**Command execution is owned by the run broker, not by the browser request that started it.**
 
-Earlier command streaming tied subprocess stdout draining directly to the browser's HTTP request. That made the first browser connection special: if the page reloaded, another browser opened the same session token, or the request stream failed, the backend had to choose between losing live output, continuing detached work with a separate drain path, or waiting for completed history. Those paths were hard to reason about and became especially awkward once Status Monitor needed cross-browser attach and kill semantics.
+Earlier command streaming tied subprocess stdout draining directly to the browser's HTTP request. That made the first browser connection special: if the page reloaded, another browser opened the same session token, or the request stream failed, the backend had to choose between losing live output, continuing detached work with a separate drain path, or waiting for completed history. Those paths were hard to reason about and became especially awkward once Status Monitor needed cross-browser attach and kill behavior.
 
-The current model starts commands with `POST /runs`, records active-run ownership metadata, and has a backend worker drain stdout exactly once. The worker publishes normalized events (`started`, `notice`, `output`, `error`, `exit`) to a run stream. Browsers subscribe with `GET /runs/<run_id>/stream`, optionally replaying from an event id. This makes subscribers replaceable: the owning tab, a reloaded tab, a phone on the same session token, and a read-only attached tab all consume the same processed output stream.
+The current model starts commands with `POST /runs`, records active-run ownership metadata, and has a backend worker drain stdout exactly once. The worker publishes normalized events (`started`, `notice`, `output`, `error`, `exit`) to a run stream. Browsers subscribe with `GET /runs/<run_id>/stream`, optionally replaying from an event id. This makes subscribers replaceable: the owning tab, a reloaded tab, a phone on the same session token, and an attached tab all consume the same processed output stream.
 
-Redis Streams were chosen for production because darklab_shell already relies on Redis for cross-worker rate limiting and process coordination. Gunicorn workers do not share memory, so in-process queues cannot provide reliable live-output replay or attach/takeover behavior across workers. SQLite is the durable history store, but it is a poor fit for high-frequency ephemeral stream events and blocking subscriber reads. Redis Streams provide ordered event ids, bounded replay, blocking reads, TTL-backed cleanup, and cross-worker visibility without turning the history database into a message bus.
+Redis Streams were chosen for production because darklab_shell already relies on Redis for cross-worker rate limiting and process coordination. Gunicorn workers do not share memory, so in-process queues cannot provide reliable live-output replay or attach behavior across workers. SQLite is the durable history store, but it is a poor fit for high-frequency temporary stream events and blocking subscriber reads. Redis Streams provide ordered event ids, bounded replay, blocking reads, TTL-backed cleanup, and cross-worker visibility without turning the history database into a message bus.
 
-The app still includes a single-process in-memory broker fallback for local development, but production live reattachment expects Redis. That split is intentional: local development should remain easy to start, while Docker/Gunicorn deployments need one shared broker so active run state, stream replay, and process control behave consistently no matter which worker handles the next request.
+The app still includes a single-process in-memory broker fallback for local development, but production live reattachment expects Redis. That split is intentional: local development should stay easy to start, while Docker/Gunicorn deployments need one shared broker so active run state, stream replay, and process control behave consistently no matter which worker handles the next request.
 
-The legacy request-owned `POST /run` execution route was removed rather than kept as a compatibility layer. The app is pre-release, and maintaining two command execution paths would have duplicated lifecycle behavior, increased test burden, and made future active-run features more fragile. `POST /run/client` remains separate because browser-owned built-ins such as `theme`, `config`, and `session-token` need local DOM/storage behavior before their rendered transcript is persisted to normal run history.
+The old request-owned `POST /run` execution route was removed instead of kept as a compatibility layer. The app is pre-release, and maintaining two command execution paths would have duplicated lifecycle behavior, increased test burden, and made future active-run features more fragile. `POST /run/client` remains separate because browser-owned built-ins such as `theme`, `config`, and `session-token` need local DOM/storage behavior before their rendered transcript is saved to normal run history.
 
 ### Multi-worker Process Killing via Redis
 
@@ -83,7 +83,7 @@ The legacy request-owned `POST /run` execution route was removed rather than kep
 
 **Solution:** Redis keys — `SET proc:<run_id> <pid> EX 14400`. Every worker reads and writes the same Redis instance. `GETDEL` (Redis 6.2+) provides an atomic get-and-delete, preventing race conditions between workers. The 4-hour TTL (`EX 14400`) replaces the startup purge — orphaned entries self-expire rather than requiring cleanup on init.
 
-**Fallback for local development:** If `REDIS_URL` is not set, the app falls back to `memory://` for rate limiting and a `threading.Lock` + in-process dict for PID tracking. This is correct for single-process development (`python3 app.py`) but breaks under Gunicorn multi-worker mode — use Docker Compose for multi-worker testing.
+**Fallback for local development:** If `REDIS_URL` is not set, the app falls back to `memory://` for rate limiting and a `threading.Lock` + in-process dict for PID tracking. This works for single-process development (`python3 app.py`) but breaks under Gunicorn multi-worker mode — use Docker Compose for multi-worker testing.
 
 **Critical timing fix:** `Popen` and `pid_register` must happen *before* `return Response(generate(), ...)`. Flask generators are lazy — the generator body doesn't execute until Flask starts streaming. If `pid_register` is inside the generator, a kill request arriving before streaming starts finds nothing in Redis and silently fails.
 
@@ -418,7 +418,7 @@ Confirmations were originally per-surface: the kill flow, history clear, history
 
 **Partial-line stream readers must not block heartbeat delivery.** The server originally used `select()` followed by `readline()` on `proc.stdout`. That looks safe, but it fails for tools that write partial lines: `select()` reports readability as soon as bytes arrive, then `readline()` can still block waiting for a newline. While blocked, the generator cannot emit heartbeat comments, so the browser can misclassify the stream as stalled even though the subprocess is still alive. The fix is a nonblocking fd reader plus an incremental decoder and a pending-fragment buffer, so complete lines stream immediately, partial fragments wait safely for completion, and heartbeats keep flowing during quiet periods.
 
-**Detached run drains need a ceiling.** When a browser disconnects from `/run`, the server keeps draining stdout in a background thread so the run can still be persisted. Without a hard ceiling, a process that never exits or never closes stdout can leak a thread and pin active-run metadata until the worker is recycled. Detached drains are now bounded to the command timeout plus grace, terminate the scanner process group when exceeded, and always run the same PID/active-run cleanup path.
+**Detached run drains need a ceiling.** When a browser disconnects from `/runs/<run_id>/stream`, the server keeps draining stdout in a background worker so the run can still be persisted. Without a hard ceiling, a process that never exits or never closes stdout can leak work and pin active-run metadata until the worker is recycled. Detached drains are now bounded to the command timeout plus grace, terminate the scanner process group when exceeded, and always run the same PID/active-run cleanup path.
 
 **Workspace file opens use no-follow hardening at the final component.** The normal workspace resolver rejects unsafe relative paths and symlink components before use, but a final symlink can theoretically be swapped in after validation and before open by the same filesystem principal. Reads and downloads now use final-component no-follow opens where supported, which keeps the session-root boundary deterministic without changing the user-facing file API.
 

@@ -6,13 +6,13 @@ darklab_shell is designed, built, and maintained by [nona](https://github.com/no
 
 ## Contributing
 
-Contributions, bug reports, and feature suggestions are welcome. Before submitting a merge request, review the [Contributor Guide](CONTRIBUTING.md) for local setup, coding conventions, the test workflow, and merge request expectations.
+Contributions, bug reports, and feature suggestions are welcome. Before opening a merge request, review the [Contributor Guide](CONTRIBUTING.md) for local setup, coding conventions, tests, and merge request expectations.
 
 Key references for contributors:
 
 - [CONTRIBUTING.md](CONTRIBUTING.md) — local setup, branch workflow, code style, linting, and MR process
 - [ARCHITECTURE.md](ARCHITECTURE.md) — runtime layers, request flow, persistence model, and security design
-- [DECISIONS.md](DECISIONS.md) — architectural rationale, known gotchas, and implementation history
+- [DECISIONS.md](DECISIONS.md) — design reasoning, known gotchas, and implementation history
 - [tests/README.md](tests/README.md) — test suite handbook and full appendix
 
 ---

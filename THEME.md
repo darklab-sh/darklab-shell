@@ -1,6 +1,6 @@
 # Theme System
 
-This document is the full reference for the shell theme system. It explains how theme files are loaded, how values flow into the browser, and what every configurable key does.
+This is the full reference for the shell theme system. It explains how theme files load, how values reach the browser, and what each configurable key does.
 
 ---
 
@@ -23,13 +23,13 @@ This document is the full reference for the shell theme system. It explains how 
 
 ## Overview
 
-The theme system externalizes all visual palette values into named YAML files that the runtime loads, resolves against built-in fallback defaults, and injects into every presentation surface. The live shell, permalink pages, the runtime theme selector, exported HTML, and PDF export all read from the same resolved semantic tokens rather than each maintaining a separate palette. Themes are selectable at runtime through the preview modal or the `theme` terminal command without requiring code changes or a container rebuild.
+The theme system keeps visual palette values in named YAML files. The app loads those files, fills in any missing values from built-in defaults, and injects the resolved tokens into every UI surface. The live shell, permalink pages, theme selector, exported HTML, and PDF export all read from the same theme values instead of each carrying its own palette. Users can switch themes from the preview modal or the `theme` terminal command without code changes or a container rebuild.
 
 ---
 
 ## Semantic Color Contract
 
-Every theme provides four semantic colors with fixed meanings. Themes may choose any visual tone for each color, but the four must stay visually distinct within a single theme so each meaning remains recognizable.
+Every theme provides four colors with fixed meanings. A theme can choose any visual tone for each one, but all four must stay easy to tell apart inside that theme.
 
 | Semantic | Token | Meaning |
 |----------|-------|---------|
@@ -40,8 +40,8 @@ Every theme provides four semantic colors with fixed meanings. Themes may choose
 
 ### Rules
 
-- **Binary, not graded.** One color, one meaning. If a surface needs a softer treatment (e.g. dimmed expiry text) it uses the `dim` token plus the semantic color on the label only, not a second intensity tier of the same color.
-- **All four must stay distinct per theme.** A theme that collapses caution into danger (yellow ≈ red) defeats the purpose of the contract. Theme authors must verify red, yellow, green, and dim are visually separable inside each theme, not just in aggregate across the palette family.
+- **Binary, not graded.** One color, one meaning. If a surface needs a softer treatment, such as dimmed expiry text, it uses the `dim` token plus the semantic color on the label only. It should not create a second intensity tier of the same color.
+- **All four must stay distinct per theme.** A theme that makes caution look like danger (yellow ≈ red) defeats the point. Theme authors must verify red, yellow, green, and dim are visually separable inside each theme.
 - **In-progress belongs to yellow, not green.** A "running" task is yellow; a "completed success" task is green. This keeps the two states visually distinct even when both are "active" in the loose sense. Use yellow for running, live, pending, and the HUD `RUNNING` pill; use green only for completed success, enabled switches, and current-focus indicators.
 - **Use existing theme tokens.** Do not introduce surface-local amber / red / green variants. If a surface needs tuning, add a new `--theme-*` chrome token derived from the base semantic token via `color-mix()` in the theme file — never hardcode a one-off color.
 
@@ -62,13 +62,13 @@ The runtime theme choice is resolved in this order:
 2. `default_theme` from `app/conf/config.yaml`
 3. the baked-in dark fallback palette in `app/config.py`
 
-That means the browser always prefers the user's last selected theme, then the instance default filename, and only falls back to the built-in dark values if the saved or configured theme cannot be loaded. The selector does not promote the first registry theme as a hidden third fallback, and an empty registry simply leaves the preview modal empty while the app uses the baked-in fallback colors. Legacy `pref_theme_name` / `pref_theme` cookies are still read for backwards compatibility, but `localStorage.theme` is the canonical value.
+That means the browser first uses the user's last selected theme, then the instance default filename, and only falls back to the built-in dark values if the saved or configured theme cannot be loaded. The selector does not promote the first registry theme as a hidden third fallback. If the registry is empty, the preview modal is empty and the app uses the baked-in fallback colors. Legacy `pref_theme_name` / `pref_theme` cookies are still read for backwards compatibility, but `localStorage.theme` is the main saved value.
 
 ---
 
 ## Baked-In Fallback Palette
 
-The theme framework has two built-in, hard-coded palettes: a dark palette and a light palette. Both live in `app/config.py` under `_THEME_DEFAULTS["dark"]` and `_THEME_DEFAULTS["light"]`. These are not selectable theme files — they are the compile-time baseline that the loader falls back to for any key a custom theme file does not specify.
+The theme framework has two built-in palettes: dark and light. Both live in `app/config.py` under `_THEME_DEFAULTS["dark"]` and `_THEME_DEFAULTS["light"]`. These are not selectable theme files. They are the baseline the loader falls back to for any key a custom theme file does not specify.
 
 Every key listed in the [Theme Key Reference](#theme-key-reference) section below has a baked-in value in both palettes. If you need the exact source of truth, inspect `_THEME_DEFAULTS` in [app/config.py](app/config.py).
 
@@ -86,7 +86,7 @@ When `load_theme(name)` merges a custom theme file, it uses `color_scheme` to pi
 - `color_scheme: light` → missing keys are filled from `_THEME_DEFAULTS["light"]`
 - absent → falls back to `_THEME_DEFAULTS["dark"]`
 
-This means a light-family custom theme only needs to specify the values it actually changes. All unspecified keys automatically inherit the built-in light defaults rather than the dark ones. The two built-in palettes were designed as complementary starting points: all keys have sensible values in both, and any theme file is free to override as many or as few as it needs.
+This means a light-family custom theme only needs to list the values it changes. All other keys inherit the built-in light defaults rather than the dark ones. The two built-in palettes are starting points: every key has a sensible value in both, and a theme can override as many or as few as it needs.
 
 ### Generated example files
 
@@ -110,7 +110,7 @@ The checked-in files `app/conf/theme_dark.yaml.example` and `app/conf/theme_ligh
 
 ### 4. Expose the values to JS
 
-`theme_vars_script.html` serializes the current resolved values into `window.ThemeCssVars` and the full registry into `window.ThemeRegistry`. Browser-side helpers, especially the HTML export builder, runtime theme selector, and `theme` terminal command, can then read the exact runtime theme without duplicating a hardcoded palette.
+`theme_vars_script.html` serializes the current resolved values into `window.ThemeCssVars` and the full registry into `window.ThemeRegistry`. Browser-side helpers, especially the HTML export builder, theme selector, and `theme` terminal command, can then read the exact current theme without duplicating a hardcoded palette.
 
 ### 5. Consume from CSS and export helpers
 
@@ -139,7 +139,7 @@ The checked-in files `app/conf/theme_dark.yaml.example` and `app/conf/theme_ligh
 
 ## Runtime Theme Selector
 
-The theme preview grid is driven by the runtime theme registry. Clicking a preview card immediately applies that theme and persists the selection to `localStorage`. Each preview card renders a compact schematic of the current desktop shell — rail sections, tabbar with an active tab, terminal panel, HUD bar, and a small modal surface — so theme contrast is judged against the same surface relationships used by the live app. On desktop, the selector opens as a right-side drawer so the shell remains visible behind it while comparing themes. On mobile, it remains a full-screen chooser with a two-column preview layout on wider phones.
+The theme preview grid is driven by the theme registry. Clicking a preview card immediately applies that theme and saves the choice to `localStorage`. Each preview card renders a compact sketch of the current desktop shell — rail sections, tabbar with an active tab, terminal panel, HUD bar, and a small modal surface — so contrast is judged against the same relationships used by the live app. On desktop, the selector opens as a right-side drawer so the shell remains visible while comparing themes. On mobile, it remains a full-screen chooser with a two-column preview layout on wider phones.
 
 The built-in `theme` button is a shortcut to the selector. The preview grid is the source of truth for named variants — registry entries without an explicit `label:` fall back to a humanized filename stem, and entries without a `group:` appear under "Other".
 
@@ -160,7 +160,7 @@ The current built-in selector ships 18 named themes:
 
 ### Authoring a theme
 
-- Copy `theme_dark.yaml.example` or `theme_light.yaml.example` into `app/conf/themes/<filename>.yaml` to expose it in the runtime selector. The loader reads the canonical files plus every YAML file in `app/conf/themes/`.
+- Copy `theme_dark.yaml.example` or `theme_light.yaml.example` into `app/conf/themes/<filename>.yaml` to expose it in the runtime selector. The loader reads the built-in reference files plus every YAML file in `app/conf/themes/`.
 - For a private overlay on an existing base theme, create `app/conf/themes/<filename>.local.yaml` next to it; the loader merges the overlay after the checked-in base file.
 - Unknown keys are ignored — only keys present in `_THEME_DEFAULTS` (`app/config.py`) are accepted.
 - Values may be any valid CSS color, length, gradient, or shadow string, depending on the key.
@@ -195,9 +195,9 @@ There is no filename-based or palette-based group inference — `group` must be 
 
 ## Practical Notes
 
-- Theme YAML files are explicit and self-contained so operators can tune the shell appearance without touching code.
+- Theme YAML files are explicit and self-contained so operators can tune the shell without touching code.
 - Most values are safe to tweak live as long as they remain valid CSS values.
-- The theme layer is shared by the live app, permalink pages, and export HTML, so a change in these files can affect all three surfaces.
+- The theme layer is shared by the live app, permalink pages, and export HTML, so a change in these files can affect all three.
 - If you are trying to restyle something and cannot find a key in this appendix, it is probably still hardcoded elsewhere in CSS and should be moved to the theme system next.
 
 ---

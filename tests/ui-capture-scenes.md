@@ -1,15 +1,15 @@
 # UI Capture Scenes — Reviewer Companion
 
 Static reference for reviewing the output of `scripts/capture_ui_screenshots.sh`.
-This file describes every scene the capture pack walks, what each scene is
-supposed to demonstrate, and what cross-cutting patterns to look for per theme.
+This file lists every scene the capture pack visits, what each scene is meant to
+show, and what shared patterns to check in each theme.
 
 A machine-readable manifest (`{desktop,mobile}-manifest.json` with one entry per
 rendered PNG) is written alongside the PNG pack at
 `/tmp/darklab_shell-ui-capture/`. The capture helper also writes an `index.html`
 review page that groups captured scenes by UI and theme with labeled thumbnails.
-This doc remains the human-authored counterpart and source of truth for scene
-intent.
+This doc is the human-written companion to that generated output and the source
+of truth for scene intent.
 
 ## Running the pack
 
@@ -22,7 +22,7 @@ intent.
 - `scripts/capture_ui_screenshots.sh --out-dir /tmp/ui-review-2026-04-20` —
   override the output directory.
 
-Capture tests are gated behind `RUN_CAPTURE=1` via the dedicated configs in
+Capture tests are gated behind `RUN_CAPTURE=1` through the dedicated configs in
 `config/playwright.capture.{desktop,mobile}.config.js`, so the pack never runs
 as part of `npm run test:e2e`.
 
@@ -61,12 +61,12 @@ Currently 18 themes:
 
 ## Cross-cutting patterns to check per theme
 
-These rules apply to every theme and are exercised across many scenes. Flag any
+These rules apply to every theme and show up across many scenes. Flag any
 scene where one of these appears to have drifted.
 
 - **Semantic color contract** (see `THEME.md § Semantic Color Contract`) —
   `--amber` / `--red` / `--green` / `--muted` must stay visually distinct.
-  Scenes that surface all four signal colors in one frame: any scene with a
+  Scenes that show all four signal colors in one frame: any scene with a
   running tab (amber status dot + green exit-ok + muted chrome), any history
   drawer/sheet scene (starred amber stripe + exit-ok green), the HUD/rail in
   the desktop welcome scene.
@@ -112,7 +112,7 @@ Order matches the scene array in `tests/js/e2e/ui-capture.desktop.capture.js`.
 | 14 | `search-open-active-match` | `/` | Transcript search bar open with `localhost` matching three occurrences. | `<mark class="search-hl">` on each match; active-match tint stronger than inactive tint; counter reads `1 of 3` or equivalent. |
 | 15 | `files-panel-response-file` | `/` | Files panel open after `curl -L -o response.html https://noc.darklab.sh` creates a session file. | File row `response.html` visible; usage summary reflects one file; read-only viewer opens `response.html`; Files panel chrome matches theme. |
 | 16 | `workflow-modal-example` | `/` | First workflow modal open from the rail. | Step-row two-row grid; per-step ▶ run button present; step body readable; modal card max-width. |
-| 17 | `history-drawer` | `/` | History drawer open with one hydrated run. | Chrome-row background matches the HUD/rail family; starred rows with amber left-edge stripe; action buttons (restore / permalink / star / delete) revealed on hover (hover state may or may not be captured). |
+| 17 | `history-drawer` | `/` | History drawer open with one loaded run. | Chrome-row background matches the HUD/rail family; starred rows with amber left-edge stripe; action buttons (restore / permalink / star / delete) revealed on hover (hover state may or may not be captured). |
 | 18 | `history-drawer-snapshot-row` | `/` | History drawer showing a saved snapshot row. | Snapshot kind badge reads `SNAPSHOT`; row exposes `open`, `copy link`, and `delete`; snapshot row does not show the run-only star/restore affordances. |
 | 19 | `history-drawer-search-chip` | `/` | History drawer with `host` search applied and filter chip visible. | Active filter chip shows the current query; chip dismissal glyph (`✕`) visible; filtered row count reflects the query. |
 | 20 | `history-drawer-delete-all-confirmation` | `/` | History drawer + delete-all confirm modal stacked. | Confirm card sits above the drawer with backdrop dim; three buttons (`Cancel` / `Delete non-favorites` / `Delete all`) all fit on one row at 1024-wide. |

@@ -1,11 +1,11 @@
 # ROADMAP
 
-This file tracks the next major product direction for darklab_shell: evolving from
-a command-at-a-time shell into a lightweight project/case workspace for security
-and diagnostic work.
+This file tracks the next major product direction for darklab_shell: moving from
+a command-at-a-time shell toward a lightweight project/case workspace for
+security and diagnostic work.
 
-The goal is not to become a full project manager, ticket tracker, or note-taking
-app. The goal is to help an operator keep related commands, findings, snapshots,
+The goal is not to become a full project manager, ticket tracker, or notes app.
+The goal is to help an operator keep related commands, findings, snapshots,
 workspace files, targets, and exportable evidence together without losing the
 speed and directness of the shell.
 
@@ -15,17 +15,17 @@ speed and directness of the shell.
 
 - **Keep the shell primary.** Projects should organize work; they should not make
   running a command feel heavier.
-- **Make project association cheap.** The happy path should be "run command while
-  project is active" and have the app associate the run, findings, and artifacts
+- **Make project linking cheap.** The happy path should be "run command while
+  project is active" and have the app link the run, findings, and files
   automatically.
 - **Treat projects as case folders.** A project should be the first-class run
   collection/case folder model: related runs, snapshots, findings, files,
   labels, and targets all collect there instead of adding a second grouping
   concept.
-- **Prefer additive metadata over duplicated data.** Runs, snapshots, findings,
+- **Prefer links over copies.** Runs, snapshots, findings,
   and workspace files should remain the source records. Projects should link to
   them instead of copying them.
-- **Design for evidence packages early.** Annotations, notes, findings, files,
+- **Design for evidence packages early.** Notes, labels, findings, files,
   and run history should share enough structure that export/share packages do
   not require a second model later.
 - **Keep notes intentionally small.** One project notes document is enough. The
@@ -34,7 +34,7 @@ speed and directness of the shell.
   port sets should improve filtering, findings review, autocomplete, and
   workflows.
 - **Make privacy boundaries explicit.** Project sharing/export needs clear raw
-  vs redacted behavior, session ownership behavior, and artifact inclusion rules.
+  vs redacted behavior, session ownership behavior, and file inclusion rules.
 
 ---
 
@@ -57,7 +57,7 @@ speed and directness of the shell.
 
 ## Phase 0: Preconditions And Safety Fixes
 
-These are not the project features themselves, but they reduce ambiguity before
+These are not the project features themselves. They reduce ambiguity before
 projects become another session-scoped persistence layer.
 
 ### P0.1 Clarify Session And Permalink Boundaries
@@ -101,7 +101,7 @@ projects become another session-scoped persistence layer.
 
 ## Phase 1: Project Data Model
 
-Goal: introduce projects as durable organizational containers and case folders
+Goal: introduce projects as durable case folders
 without changing how command execution works yet.
 
 ### P1.1 Core Project Schema

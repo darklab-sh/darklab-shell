@@ -1,6 +1,6 @@
 # TODO
 
-This file tracks open work items, known issues, and product ideas for darklab_shell. Open TODOs, known issues, and technical debt are confirmed items. Ideas are speculative — not committed or planned.
+This file tracks open work, known issues, technical debt, and product ideas for darklab_shell. Open TODOs, known issues, and technical debt are confirmed items. Ideas are possible future work, not committed plans.
 
 ---
 
@@ -38,16 +38,16 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 - **Tool-specific guidance**
   - Add lightweight inline notes for tools with non-obvious web-shell behavior like `mtr`, `nmap`, `naabu`, or `nuclei`.
   - Good fit for the existing help / FAQ / welcome surfaces.
-  - Merge this with onboarding and command hints into a broader operator-guidance layer:
+  - Merge this with onboarding and command hints into a broader user guidance layer:
     - command-specific caveats
-    - runtime expectations
+    - what to expect while a tool runs
     - examples of when to use one tool vs another
 
 - **Command outcome summaries**
-  - For selected tools, generate short app-native summaries below the raw output. Security tool output is high-volume; a structured findings layer is what separates a purpose-built tool from a raw terminal.
+  - For selected tools, generate short app-native summaries below the raw output. Security tool output is high-volume; a clear findings layer is what separates a purpose-built tool from a raw terminal.
   - Keep raw output primary — the summary is additive, never a replacement.
   - Start narrow: nmap (open ports + service table), dig (records returned), curl (status code + redirect chain), openssl s_client (cert expiry + trust chain).
-  - The structured output model (see Architecture) is the right long-term foundation; build this feature to be retro-fittable once that model is in place rather than requiring it up front.
+  - The structured output model (see Architecture) is the right long-term foundation. Build this feature so it can move onto that model later instead of requiring it up front.
 
 - **Run comparison enhancements**
   - Future-state enhancements after the v1 history-row comparison flow has real use.
@@ -92,8 +92,8 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ## Architecture
 
 - **Full reconnectable live stream**
-  - Explore a true reconnectable live-output path that can resume active command streams after reload rather than only restoring a placeholder tab and polling for completion.
-  - This is a separate architecture step from the current active-run reconnect support and would likely require:
+  - Explore a live-output path that can fully resume active command streams after reload rather than restoring a placeholder tab and polling for completion.
+  - This is separate from the current active-run reconnect support and would likely require:
     - a per-run live output buffer
     - resumable stream offsets or event IDs
     - multi-consumer fan-out instead of one transient SSE consumer
@@ -101,9 +101,9 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Best fit is a dedicated live-stream architecture pass rather than incremental UI polish.
 
 - **Structured output model**
-  - Preserve richer line/event metadata consistently for all runs.
+  - Preserve richer line/event details consistently for all runs.
   - This would improve search, comparison, redaction, exports, and permalink fidelity.
-  - Command outcome summaries (see Near-term) are buildable without this foundation, but design them to be retro-fittable once the structured model is in place — the summary parsers should consume structured line events, not re-parse raw text.
+  - Command outcome summaries are buildable without this foundation, but design them so they can move onto the structured model later. Summary parsers should consume structured line events, not re-parse raw text forever.
 
 - **Unified terminal built-in lifecycle**
   - Browser-owned built-ins (`theme`, `config`, and `session-token`) need browser execution for DOM state, local storage, clipboard, and transcript-owned confirmations, while server-owned built-ins naturally flow through `/runs`.
@@ -113,11 +113,11 @@ These are product ideas and possible enhancements, not committed TODOs or planne
     - mask sensitive command arguments once
     - render transcript output once
     - persist server-backed history once
-    - hydrate recents and prompt history from the same saved run model
+    - load recents and prompt history from the same saved run model
   - Keep execution ownership separate where it matters, but remove duplicated recents/history/pipe/persistence glue so browser-owned and server-owned built-ins cannot drift.
 
 - **Plugin-style helper command registry**
-  - Turn the built-in command layer into a cleaner extension surface for future app-native helpers.
+  - Turn the built-in command layer into a cleaner extension point for future app-native helpers.
 
 - **Lightweight Jinja base template**
   - `index.html`, `permalink_base.html`, and `diag.html` now all share the same ~10 lines of `<head>` bootstrap (charset, viewport, color-scheme meta, favicon, `fonts.css`, `styles.css`, theme var includes, and the two vendor scripts). With three templates the duplication is starting to pay for the indirection.
