@@ -609,7 +609,7 @@
   .hud-cell.hud-status-expandable {
     padding-right: 28px;
   }
-  .run-monitor-status-glyph {
+  .status-monitor-status-glyph {
     position: absolute;
     right: 11px;
     top: 9px;
@@ -621,14 +621,14 @@
     pointer-events: none;
     transition: opacity 120ms ease, color 120ms ease;
   }
-  .hud-cell.hud-status-expandable .run-monitor-status-glyph {
+  .hud-cell.hud-status-expandable .status-monitor-status-glyph {
     opacity: 0.78;
   }
-  .hud-cell.hud-status-expandable:hover .run-monitor-status-glyph,
-  .hud-cell.hud-status-expandable:focus-visible .run-monitor-status-glyph {
+  .hud-cell.hud-status-expandable:hover .status-monitor-status-glyph,
+  .hud-cell.hud-status-expandable:focus-visible .status-monitor-status-glyph {
     opacity: 1;
   }
-  .hud-cell.hud-status-affordance-pulse .run-monitor-status-glyph {
+  .hud-cell.hud-status-affordance-pulse .status-monitor-status-glyph {
     color: var(--green);
     animation: hud-status-affordance-pulse 1.4s ease-out 1;
   }
@@ -809,7 +809,7 @@
     color: var(--text);
   }
 
-  .run-monitor {
+  .status-monitor {
     position: fixed;
     left: 50%;
     top: 50%;
@@ -821,11 +821,11 @@
     box-shadow: 0 24px 60px var(--theme-panel-shadow);
     transform-origin: center;
     transform: translate(-50%, -50%);
-    animation: run-monitor-modal-enter 160ms ease-out both;
+    animation: status-monitor-modal-enter 160ms ease-out both;
   }
 }
 
-@keyframes run-monitor-modal-enter {
+@keyframes status-monitor-modal-enter {
   from {
     opacity: 0.86;
     transform: translate(-50%, calc(-50% + 10px)) scale(0.985);
@@ -836,7 +836,7 @@
   }
 }
 
-.run-monitor-scrim {
+.status-monitor-scrim {
   position: fixed;
   inset: 0;
   z-index: 320;
@@ -844,31 +844,31 @@
   backdrop-filter: blur(3px);
 }
 
-.run-monitor.u-hidden,
-.run-monitor-scrim.u-hidden {
+.status-monitor.u-hidden,
+.status-monitor-scrim.u-hidden {
   display: none !important;
 }
 
-.run-monitor-header {
+.status-monitor-header {
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
 }
 
-.run-monitor-title {
+.status-monitor-title {
   color: var(--text);
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
 }
 
-.run-monitor-summary {
+.status-monitor-summary {
   margin-top: 3px;
   color: var(--muted);
   font-size: 10px;
 }
 
-.run-monitor-close {
+.status-monitor-close {
   width: 26px;
   height: 26px;
   border: 1px solid var(--border);
@@ -881,20 +881,20 @@
   justify-content: center;
 }
 
-.run-monitor-close:hover,
-.run-monitor-close:focus-visible {
+.status-monitor-close:hover,
+.status-monitor-close:focus-visible {
   color: var(--text);
   border-color: var(--border-bright);
   outline: none;
 }
 
-.run-monitor-collapse-glyph {
+.status-monitor-collapse-glyph {
   display: inline-block;
   font-size: 14px;
   line-height: 1;
 }
 
-.run-monitor-list {
+.status-monitor-list {
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -1751,7 +1751,7 @@
   margin-top: 2px;
 }
 
-.run-monitor-item {
+.status-monitor-item {
   display: grid;
   grid-template-columns: minmax(220px, 0.95fr) minmax(230px, 1.05fr) minmax(200px, auto);
   align-items: center;
@@ -1762,27 +1762,27 @@
   border-radius: 0;
 }
 
-.status-monitor-runs-list-medium .run-monitor-item {
+.status-monitor-runs-list-medium .status-monitor-item {
   grid-template-columns: minmax(200px, 0.95fr) minmax(210px, 1fr) minmax(190px, auto);
   min-height: 98px;
   padding-block: 12px;
 }
 
-.status-monitor-runs-list-many .run-monitor-item {
+.status-monitor-runs-list-many .status-monitor-item {
   grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(170px, auto);
   min-height: 82px;
   padding-block: 10px;
 }
 
-.status-monitor-runs-list .run-monitor-item + .run-monitor-item {
+.status-monitor-runs-list .status-monitor-item + .status-monitor-item {
   border-top: 1px solid var(--theme-chrome-divider-color);
 }
 
-.run-monitor-details {
+.status-monitor-details {
   min-width: 0;
 }
 
-.run-monitor-command {
+.status-monitor-command {
   color: var(--green);
   text-shadow: 0 0 8px color-mix(in srgb, var(--green) 20%, transparent);
   font-size: 11px;
@@ -1790,7 +1790,7 @@
   overflow-wrap: anywhere;
 }
 
-.run-monitor-meta {
+.status-monitor-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
@@ -1801,7 +1801,7 @@
   overflow-wrap: anywhere;
 }
 
-.run-monitor-meta-chip {
+.status-monitor-meta-chip {
   min-width: 0;
   max-width: 100%;
   padding: 2px 6px;
@@ -1814,21 +1814,21 @@
   white-space: nowrap;
 }
 
-.run-monitor-meta-chip-ok {
+.status-monitor-meta-chip-ok {
   border-color: color-mix(in srgb, var(--green) 42%, transparent);
   color: var(--green);
 }
 
-.run-monitor-meta-chip-warn {
+.status-monitor-meta-chip-warn {
   border-color: color-mix(in srgb, var(--amber) 45%, transparent);
   color: var(--amber);
 }
 
-.run-monitor-meta-chip-tab {
+.status-monitor-meta-chip-tab {
   color: var(--green);
 }
 
-.run-monitor-actions {
+.status-monitor-actions {
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
@@ -1837,14 +1837,14 @@
   margin-top: 0;
 }
 
-.run-monitor-spark-panel {
+.status-monitor-spark-panel {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: 7px;
 }
 
-.run-monitor-spark-header {
+.status-monitor-spark-header {
   display: flex;
   min-width: 0;
   align-items: center;
@@ -1852,14 +1852,14 @@
   gap: 12px;
 }
 
-.run-monitor-spark-title {
+.status-monitor-spark-title {
   flex: 0 0 auto;
   color: var(--muted);
   font-size: 9px;
   text-transform: uppercase;
 }
 
-.run-monitor-sparkline {
+.status-monitor-sparkline {
   width: 100%;
   height: 42px;
   border-radius: 4px;
@@ -1868,54 +1868,54 @@
     color-mix(in srgb, var(--theme-chrome-bg) 78%, transparent);
 }
 
-.run-monitor-sparkline-grid,
-.run-monitor-sparkline-cpu,
-.run-monitor-sparkline-mem {
+.status-monitor-sparkline-grid,
+.status-monitor-sparkline-cpu,
+.status-monitor-sparkline-mem {
   fill: none;
   vector-effect: non-scaling-stroke;
 }
 
-.run-monitor-sparkline-grid {
+.status-monitor-sparkline-grid {
   stroke: color-mix(in srgb, var(--border-bright) 35%, transparent);
   stroke-width: 1;
   stroke-dasharray: 3 5;
 }
 
-.run-monitor-sparkline-cpu {
+.status-monitor-sparkline-cpu {
   stroke: var(--green);
   stroke-width: 1.7;
   filter: drop-shadow(0 0 4px color-mix(in srgb, var(--green) 48%, transparent));
 }
 
-.run-monitor-sparkline-mem {
+.status-monitor-sparkline-mem {
   stroke: var(--amber);
   stroke-width: 1.4;
   opacity: 0.88;
 }
 
-.run-monitor-spark-label {
+.status-monitor-spark-label {
   color: var(--muted);
   font-size: 8.5px;
   white-space: nowrap;
 }
 
-.run-monitor-action-btn {
+.status-monitor-action-btn {
   min-width: 62px;
   min-height: 24px;
   padding: 3px 8px;
   font-size: 10px;
 }
 
-.run-monitor-action-btn-kill {
+.status-monitor-action-btn-kill {
   border-color: color-mix(in srgb, var(--red) 72%, var(--border));
 }
 
-.run-monitor-elapsed {
+.status-monitor-elapsed {
   color: var(--green);
   font-weight: 700;
 }
 
-.run-monitor-meter-rail {
+.status-monitor-meter-rail {
   display: flex;
   flex: 0 0 auto;
   flex-direction: row;
@@ -1925,11 +1925,11 @@
   min-width: 0;
 }
 
-.run-monitor-meter-rail .run-monitor-actions {
+.status-monitor-meter-rail .status-monitor-actions {
   justify-content: flex-end;
 }
 
-.run-monitor-meters {
+.status-monitor-meters {
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -1937,7 +1937,7 @@
   flex: 0 0 auto;
 }
 
-.run-monitor-meter {
+.status-monitor-meter {
   --meter-percent: 0%;
   --meter-color: var(--green);
   display: grid;
@@ -1946,42 +1946,42 @@
   gap: 4px;
 }
 
-.status-monitor-runs-list-medium .run-monitor-meter {
+.status-monitor-runs-list-medium .status-monitor-meter {
   grid-template-columns: 50px;
 }
 
-.status-monitor-runs-list-medium .run-monitor-meter-ring {
+.status-monitor-runs-list-medium .status-monitor-meter-ring {
   width: 50px;
   height: 50px;
 }
 
-.status-monitor-runs-list-many .run-monitor-sparkline {
+.status-monitor-runs-list-many .status-monitor-sparkline {
   height: 32px;
 }
 
-.status-monitor-runs-list-many .run-monitor-spark-header {
+.status-monitor-runs-list-many .status-monitor-spark-header {
   gap: 8px;
 }
 
-.status-monitor-runs-list-many .run-monitor-spark-title {
+.status-monitor-runs-list-many .status-monitor-spark-title {
   font-size: 8.5px;
 }
 
-.status-monitor-runs-list-many .run-monitor-meter {
+.status-monitor-runs-list-many .status-monitor-meter {
   grid-template-columns: 40px;
 }
 
-.status-monitor-runs-list-many .run-monitor-meter-ring {
+.status-monitor-runs-list-many .status-monitor-meter-ring {
   width: 40px;
   height: 40px;
 }
 
-.status-monitor-runs-list-many .run-monitor-meter-value {
+.status-monitor-runs-list-many .status-monitor-meter-value {
   max-width: 34px;
   font-size: 8.5px;
 }
 
-.run-monitor-meter-ring {
+.status-monitor-meter-ring {
   width: 54px;
   height: 54px;
   border-radius: 50%;
@@ -1994,11 +1994,11 @@
   box-shadow: 0 0 12px color-mix(in srgb, var(--meter-color) 16%, transparent);
 }
 
-.run-monitor-meter-mem {
+.status-monitor-meter-mem {
   --meter-color: var(--amber);
 }
 
-.run-monitor-meter-ring::before {
+.status-monitor-meter-ring::before {
   content: '';
   display: block;
   width: 100%;
@@ -2008,21 +2008,21 @@
   border: 1px solid color-mix(in srgb, var(--border-bright) 42%, transparent);
 }
 
-.run-monitor-meter-ring {
+.status-monitor-meter-ring {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.run-monitor-meter-label {
+.status-monitor-meter-label {
   color: var(--muted);
   font-size: 8.5px;
   letter-spacing: 0.5px;
   line-height: 1;
 }
 
-.run-monitor-meter-value {
+.status-monitor-meter-value {
   position: absolute;
   inset: 0;
   display: flex;
@@ -2038,29 +2038,29 @@
   text-overflow: ellipsis;
 }
 
-.run-monitor-meter-cpu .run-monitor-meter-value {
+.status-monitor-meter-cpu .status-monitor-meter-value {
   color: var(--green);
 }
 
-.run-monitor-meter-cpu .run-monitor-meter-label {
+.status-monitor-meter-cpu .status-monitor-meter-label {
   color: var(--green);
 }
 
-.run-monitor-meter-mem .run-monitor-meter-label,
-.run-monitor-meter-mem .run-monitor-meter-value {
+.status-monitor-meter-mem .status-monitor-meter-label,
+.status-monitor-meter-mem .status-monitor-meter-value {
   color: var(--amber);
 }
 
-.run-monitor-meter-collecting .run-monitor-meter-ring {
-  animation: run-monitor-meter-spin 960ms linear infinite;
+.status-monitor-meter-collecting .status-monitor-meter-ring {
+  animation: status-monitor-meter-spin 960ms linear infinite;
 }
 
-@keyframes run-monitor-meter-spin {
+@keyframes status-monitor-meter-spin {
   to { transform: rotate(360deg); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .run-monitor-meter-collecting .run-monitor-meter-ring {
+  .status-monitor-meter-collecting .status-monitor-meter-ring {
     animation: none;
   }
 
@@ -2069,7 +2069,7 @@
   }
 }
 
-.run-monitor-empty {
+.status-monitor-empty {
   padding: 14px;
   color: var(--muted);
   font-size: 11px;
@@ -2080,7 +2080,7 @@
   background: color-mix(in srgb, var(--theme-chrome-row-bg) 78%, transparent);
 }
 
-.run-monitor-error {
+.status-monitor-error {
   color: var(--red);
 }
 
@@ -2103,7 +2103,7 @@ body.mobile-terminal-mode .main-col,
 body.mobile-terminal-mode .tabbar-scroll { display: contents; }
 
 @media (max-width: 600px) {
-  .run-monitor {
+  .status-monitor {
     position: fixed;
     left: 0;
     top: auto;
@@ -2124,7 +2124,7 @@ body.mobile-terminal-mode .tabbar-scroll { display: contents; }
     animation: none;
   }
 
-  .run-monitor-list {
+  .status-monitor-list {
     gap: 12px;
     padding: 12px;
   }
@@ -2140,7 +2140,7 @@ body.mobile-terminal-mode .tabbar-scroll { display: contents; }
      * The pulse SVG runs `preserveAspectRatio: 'xMidYMid slice'` on mobile so
      * beats render at native aspect (1 viewBox unit ≈ 1 CSS pixel) instead of
      * the X-compressed `none` mode used on desktop. The generated glow paths
-     * scale their inline widths in run_monitor.js for mobile; keep the visible
+     * scale their inline widths in status_monitor.js for mobile; keep the visible
      * line itself a touch thinner here.
      */
     --pulse-line-width: 1.5px;
@@ -2178,7 +2178,7 @@ body.mobile-terminal-mode .tabbar-scroll { display: contents; }
     grid-row: auto;
   }
 
-  .run-monitor-item {
+  .status-monitor-item {
     display: flex;
     align-items: stretch;
     flex-direction: column;
@@ -2186,36 +2186,36 @@ body.mobile-terminal-mode .tabbar-scroll { display: contents; }
     min-height: 0;
   }
 
-  .run-monitor-spark-panel {
+  .status-monitor-spark-panel {
     width: 100%;
   }
 
-  .run-monitor-sparkline {
+  .status-monitor-sparkline {
     height: 34px;
   }
 
-  .run-monitor-meter-rail {
+  .status-monitor-meter-rail {
     align-self: stretch;
     flex-direction: row;
     align-items: flex-end;
     justify-content: space-between;
   }
 
-  .run-monitor-meters {
+  .status-monitor-meters {
     align-self: auto;
   }
 
-  .run-monitor-scrim {
+  .status-monitor-scrim {
     z-index: 119;
     background: color-mix(in srgb, var(--bg) 45%, transparent);
   }
 
-  body.run-monitor-mobile-open .run-monitor-close {
+  body.status-monitor-mobile-open .status-monitor-close {
     display: none !important;
   }
 }
 
-body.mobile-terminal-mode .run-monitor {
+body.mobile-terminal-mode .status-monitor {
   position: fixed;
   left: 0;
   top: auto;
@@ -2236,7 +2236,7 @@ body.mobile-terminal-mode .run-monitor {
   animation: none;
 }
 
-body.mobile-terminal-mode .run-monitor-list {
+body.mobile-terminal-mode .status-monitor-list {
   gap: 12px;
   padding: 12px;
 }
@@ -2260,7 +2260,7 @@ body.mobile-terminal-mode .status-monitor-constellation-card {
   grid-row: auto;
 }
 
-body.mobile-terminal-mode .run-monitor-item {
+body.mobile-terminal-mode .status-monitor-item {
   display: flex;
   align-items: stretch;
   flex-direction: column;
@@ -2268,30 +2268,30 @@ body.mobile-terminal-mode .run-monitor-item {
   min-height: 0;
 }
 
-body.mobile-terminal-mode .run-monitor-spark-panel {
+body.mobile-terminal-mode .status-monitor-spark-panel {
   width: 100%;
 }
 
-body.mobile-terminal-mode .run-monitor-sparkline {
+body.mobile-terminal-mode .status-monitor-sparkline {
   height: 34px;
 }
 
-body.mobile-terminal-mode .run-monitor-meter-rail {
+body.mobile-terminal-mode .status-monitor-meter-rail {
   align-self: stretch;
   flex-direction: row;
   align-items: flex-end;
   justify-content: space-between;
 }
 
-body.mobile-terminal-mode .run-monitor-meters {
+body.mobile-terminal-mode .status-monitor-meters {
   align-self: auto;
 }
 
-body.mobile-terminal-mode .run-monitor-scrim {
+body.mobile-terminal-mode .status-monitor-scrim {
   z-index: 119;
   background: color-mix(in srgb, var(--bg) 45%, transparent);
 }
 
-body.run-monitor-mobile-open .run-monitor-close {
+body.status-monitor-mobile-open .status-monitor-close {
   display: none !important;
 }

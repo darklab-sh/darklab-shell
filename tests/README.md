@@ -201,7 +201,7 @@ The capture configs use the same shared visual contract file as the demo pipelin
 
 Capture theme application now waits for the requested theme name, the active theme-registry entry, and the resolved `--bg` CSS variable to agree before screenshots are taken. The wrapper also accepts `--theme-variant light|dark|all` to restrict `--theme all` runs to one color-scheme family without changing the underlying theme registry or file order.
 
-Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py`, so the isolated app instance always starts with the same history volume and age spread instead of relying on hard-coded wrapper flags. That preset now stars only two commands so the desktop rail still shows Recent items, and its seeded commands come from the command-registry example set rather than hand-written fake commands.
+Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py`, so the isolated app instance always starts with the same history volume and age spread instead of relying on hard-coded wrapper flags. That preset now stars only two commands so the desktop rail still shows Recent items, and its seeded commands come from the command-registry example set rather than hand-written built-in commands.
 
 ### Container Smoke Test
 
@@ -502,7 +502,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWorkflowInputLoading.test_load_workflows_drops_steps_with_undeclared_tokens` | Verifies that workflow steps referencing undeclared input tokens are rejected instead of reaching the client as partially renderable templates. |
 | `TestWorkflowInputLoading.test_load_all_workflows_filters_workspace_required_workflows` | Verifies that Files-backed workflow chains are hidden when workspaces are disabled and retain their workspace feature gate when enabled. |
 | `TestSeedHistoryFixtures.test_visual_flows_fixture_only_stars_two_commands` | Verifies that the `visual-flows` seed fixture limits starred commands to two so capture and demo runs keep Recent rows visible. |
-| `TestSeedHistoryFixtures.test_seed_history_uses_runtime_command_registry_examples` | Verifies that `scripts/seed_history.py` pulls its seeded command pool from the command-registry examples and does not carry fake commands such as `bogus-command`. |
+| `TestSeedHistoryFixtures.test_seed_history_uses_runtime_command_registry_examples` | Verifies that `scripts/seed_history.py` pulls its seeded command pool from the command-registry examples and does not carry built-in commands such as `bogus-command`. |
 | `TestSeedHistoryFixtures.test_seed_runs_avoids_adjacent_duplicate_commands` | Verifies that seeded history avoids back-to-back duplicate commands even when the overall run set still includes repeats. |
 | `TestRewriteIdempotent.test_mtr_already_report_wide_unchanged` | Checks that mtr already report wide unchanged. |
 | `TestRewriteIdempotent.test_mtr_report_flag_unchanged` | Checks that mtr report flag unchanged. |
@@ -536,9 +536,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_migrate_schema_ignores_existing_column_error` | Checks that migrate schema ignores existing column error. |
 | `TestSessionVariables.test_set_list_unset_and_expand_variables` | Verifies that session command variables can be stored, listed, expanded in `$NAME` and `${NAME}` forms, and removed. |
 | `TestSessionVariables.test_rejects_invalid_names_and_undefined_references` | Verifies that invalid variable names, undefined variables, and unsupported shell-style `$...` syntax are rejected. |
-| `TestFakeStatus.test_includes_session_summary_counts` | Checks that the `status` built-in reports session type, run and snapshot counts, starred-command count, saved-options presence, and active-job count for the current session. |
-| `TestFakeStats.test_reports_session_activity_and_command_breakdown` | Checks that the `stats` built-in reports masked session identity, activity totals, success rate, average duration, and external command-root breakdowns for the current session. |
-| `TestFakeStats.test_top_commands_empty_state_ignores_builtin_only_sessions` | Verifies that built-in-only sessions still affect `stats` totals but do not appear in the external-tool Top commands section. |
+| `TestBuiltinStatus.test_includes_session_summary_counts` | Checks that the `status` built-in reports session type, run and snapshot counts, starred-command count, saved-options presence, and active-job count for the current session. |
+| `TestBuiltinStats.test_reports_session_activity_and_command_breakdown` | Checks that the `stats` built-in reports masked session identity, activity totals, success rate, average duration, and external command-root breakdowns for the current session. |
+| `TestBuiltinStats.test_top_commands_empty_state_ignores_builtin_only_sessions` | Verifies that built-in-only sessions still affect `stats` totals but do not appear in the external-tool Top commands section. |
 
 #### `test_container_smoke_test.py`
 
@@ -801,10 +801,10 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestIsCommandAllowedEdges.test_restricted_command_input_cidrs_block_inline_literal_targets` | Verifies configured restricted networks block literal IP and URL-host command inputs in metadata-known target slots while allowing ordinary domains. |
 | `TestIsCommandAllowedEdges.test_restricted_command_input_cidrs_block_overlapping_cidr_targets` | Verifies configured restricted networks block overlapping CIDR command inputs in metadata-known target slots. |
 | `TestIsCommandAllowedEdges.test_restricted_command_input_cidrs_inspect_workspace_target_files` | Verifies configured restricted networks are enforced for app-readable workspace target files passed through declared read flags. |
-| `TestFakeCommandResolution.test_documented_fake_commands_are_backed_by_runtime_dispatch` | Checks that every entry in `_DOCUMENTED_FAKE_COMMANDS` has a corresponding runtime dispatch handler. |
-| `TestFakeCommandResolution.test_resolves_supported_fake_commands` | Checks that resolves supported fake commands. |
-| `TestFakeCommandResolution.test_workspace_fake_commands_are_hidden_when_disabled` | Verifies that file built-ins and aliases stop resolving when Files are disabled. |
-| `TestFakeCommandResolution.test_rejects_non_fake_commands` | Checks that rejects non fake commands. |
+| `TestBuiltinCommandResolution.test_documented_builtin_commands_are_backed_by_runtime_dispatch` | Checks that every entry in `_DOCUMENTED_BUILTIN_COMMANDS` has a corresponding runtime dispatch handler. |
+| `TestBuiltinCommandResolution.test_resolves_supported_builtin_commands` | Checks that resolves supported built-in commands. |
+| `TestBuiltinCommandResolution.test_workspace_builtin_commands_are_hidden_when_disabled` | Verifies that file built-ins and aliases stop resolving when Files are disabled. |
+| `TestBuiltinCommandResolution.test_rejects_non_builtin_commands` | Checks that rejects non built-in commands. |
 
 #### `test_routes.py`
 
@@ -980,7 +980,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestHistoryRoute.test_insights_returns_visual_history_payloads` | Verifies that `/history/insights` returns heatmap, command mix, constellation, and event ticker data. |
 | `TestHistoryRoute.test_insights_falls_back_to_other_when_command_registry_fails` | Verifies that `/history/insights` keeps rendering command data with the `Other` category when command registry loading fails. |
 | `TestHistoryRoute.test_insights_adaptive_windows_switch_at_command_and_constellation_thresholds` | Verifies that `/history/insights` switches command mix and constellation windows at the 25-run and 40-run thresholds. |
-| `TestHistoryRoute.test_insights_filters_app_builtin_commands` | Verifies that synthetic app built-ins (`pwd`, `whoami`, `help`, …) are filtered from the constellation, treemap, heatmap, events, and `max_day_count` returned by `/history/insights`. |
+| `TestHistoryRoute.test_insights_filters_app_builtin_commands` | Verifies that app built-ins (`pwd`, `whoami`, `help`, …) are filtered from the constellation, treemap, heatmap, events, and `max_day_count` returned by `/history/insights`. |
 | `TestHistoryRoute.test_delete_all_returns_ok` | Checks that delete all returns ok. |
 | `TestHistoryRoute.test_delete_specific_nonexistent_run_returns_ok` | Checks that delete specific nonexistent run returns ok. |
 | `TestHistoryRoute.test_get_run_nonexistent_returns_404` | Checks that get run nonexistent returns 404. |
@@ -1090,57 +1090,57 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunStreaming.test_run_still_exits_when_history_save_fails` | Checks that run still exits when history save fails. |
 | `TestRunStreaming.test_run_waits_before_emitting_exit_code` | Checks that successful runs wait before emitting the final exit code when the subprocess return code is still pending at EOF. |
 | `TestRunStreaming.test_run_cleans_up_stdout_and_waits_when_streaming_errors` | Checks that stream errors still close stdout and wait on the subprocess. |
-| `TestRunStreaming.test_fake_commands_streams_grouped_catalog_and_persists_history` | Checks that fake `commands` streams the grouped command catalog and persists the run to history. |
-| `TestRunStreaming.test_fake_clear_emits_clear_event_and_persists_history` | Checks that fake clear emits clear event and persists history. |
-| `TestRunStreaming.test_fake_env_returns_web_environment` | Checks that fake env returns web environment. |
-| `TestRunStreaming.test_fake_help_lists_available_helpers` | Checks that fake help lists available helpers. |
-| `TestRunStreaming.test_fake_commands_lists_built_in_and_external_catalogs` | Checks that fake `commands` prints built-in and allowed external sections while deduping external command variants down to roots. |
-| `TestRunStreaming.test_fake_commands_supports_built_in_only_filter` | Checks that `commands --built-in` prints only the built-in command section. |
-| `TestRunStreaming.test_fake_commands_supports_external_only_filter` | Checks that `commands --external` prints only the allowed external command section. |
-| `TestRunStreaming.test_fake_wordlist_lists_searches_and_prints_paths` | Verifies that the `wordlist` built-in lists categories, searches curated entries, and prints a copy-friendly path. |
-| `TestRunStreaming.test_fake_wordlist_reports_missing_catalog` | Verifies that the `wordlist` built-in fails gracefully when the installed SecLists root is missing. |
-| `TestRunStreaming.test_fake_workspace_lists_shows_and_removes_session_files` | Verifies that the `file` built-in can list, show, and remove session-owned files. |
-| `TestRunStreaming.test_fake_workspace_aliases_list_and_show_session_files` | Verifies that `ls` lists session workspace files and `cat <file>` shows a session workspace file without exposing arbitrary filesystem access. |
-| `TestRunStreaming.test_fake_workspace_show_reports_binary_files` | Verifies that `file show` and `cat` report binary session files cleanly instead of surfacing a server error. |
-| `TestRunStreaming.test_fake_shortcuts_lists_current_shortcuts` | Checks that fake shortcuts lists current shortcuts. |
-| `TestRunStreaming.test_fake_shortcuts_renders_mac_keys_for_mac_user_agent` | Confirms a Macintosh User-Agent switches the built-in command's Tabs/UI rendering to `Option+*` chords. |
-| `TestRunStreaming.test_fake_banner_renders_ascii_art` | Checks that fake banner renders ascii art. |
-| `TestRunStreaming.test_fake_which_and_type_describe_commands` | Checks that fake which and type describe commands. |
-| `TestRunStreaming.test_fake_limits_and_status_show_configuration` | Checks that fake limits and status show configuration. |
-| `TestRunStreaming.test_fake_last_lists_recent_completed_runs` | Checks that fake last lists recent completed runs. |
-| `TestRunStreaming.test_fake_who_tty_groups_and_version_render_shell_identity` | Checks that fake who tty groups and version render shell identity. |
-| `TestRunStreaming.test_fake_faq_renders_builtin_and_configured_entries` | Checks that fake FAQ renders builtin and configured entries. |
-| `TestRunStreaming.test_fake_retention_reports_preview_and_full_output_policy` | Checks that fake retention reports preview and full output policy. |
-| `TestRunStreaming.test_fake_fortune_returns_configured_line` | Checks that fake fortune returns configured line. |
-| `TestRunStreaming.test_fake_sudo_reports_web_shell_restriction` | Checks that fake sudo reports web shell restriction. |
-| `TestRunStreaming.test_fake_sudo_without_arguments_uses_the_snark_pool` | Checks that fake sudo without arguments uses the snark pool. |
-| `TestRunStreaming.test_fake_reboot_reports_web_shell_restriction` | Checks that fake reboot reports web shell restriction. |
-| `TestRunStreaming.test_fake_poweroff_variants_use_poweroff_snark_pool` | Checks that `poweroff`, `halt`, and `shutdown now` use the shared power-off snark pool. |
-| `TestRunStreaming.test_fake_su_variants_use_shell_escalation_pool` | Checks that `su`, `sudo su`, and `sudo -s` use the shell-escalation denial pool. |
-| `TestRunStreaming.test_fake_rm_root_refuses_exact_root_delete_pattern` | Checks that fake rm root refuses exact root delete pattern. |
-| `TestRunStreaming.test_fake_date_hostname_and_uptime_render_shell_style_information` | Checks that fake date hostname and uptime render shell style information. |
-| `TestRunStreaming.test_fake_ip_route_df_and_free_render_shell_style_summaries` | Checks that `ip a`, `route`, `df -h`, and `free -h` render shell-style summary output. |
-| `TestRunStreaming.test_fake_jobs_aliases_runs_metadata` | Checks that `jobs` aliases the app-native `runs` metadata output with resource snapshots and HUD monitoring hints. |
-| `TestRunStreaming.test_fake_jobs_alias_reports_when_no_active_runs_exist` | Checks that the `jobs` alias reports cleanly when the current session has no active runs. |
-| `TestRunStreaming.test_fake_runs_lists_active_run_metadata` | Checks that `runs` lists app-native active-run IDs, PIDs, elapsed time, resource snapshots, commands, verbose metadata, and JSON output. |
-| `TestRunStreaming.test_fake_runs_reports_when_no_active_runs_exist` | Checks that `runs` reports cleanly when the current session has no active runs. |
-| `TestRunStreaming.test_fake_man_renders_real_page_for_allowed_topic` | Checks that fake man renders real page for allowed topic. |
-| `TestRunStreaming.test_fake_man_does_not_clip_to_max_output_lines` | Checks that fake man does not clip to max output lines. |
-| `TestRunStreaming.test_fake_man_reports_when_helper_binary_is_unavailable` | Checks that fake man reports when helper binary is unavailable. |
-| `TestRunStreaming.test_fake_man_reports_when_allowlisted_topic_is_missing` | Checks that fake man reports when allowlisted topic is missing. |
-| `TestRunStreaming.test_fake_man_rejects_topics_outside_allowlist` | Checks that fake man rejects topics outside allowlist. |
-| `TestRunStreaming.test_fake_man_for_built_in_topic_returns_shell_help` | Checks that `man history` and similar built-in topics return shell built-in help output. |
-| `TestRunStreaming.test_fake_man_for_shortcuts_topic_returns_web_shell_help` | Checks that fake man for shortcuts topic returns web shell help. |
-| `TestRunStreaming.test_fake_history_lists_recent_session_commands` | Checks that fake history lists recent session commands. |
-| `TestRunStreaming.test_fake_history_honors_recent_commands_limit` | Verifies that the built-in `history` command uses the configured recent-command limit instead of a separate hard cap. |
-| `TestRunStreaming.test_fake_pwd_returns_synthetic_path` | Checks that fake pwd returns synthetic path. |
-| `TestRunStreaming.test_fake_pwd_returns_workspace_root_when_workspace_enabled` | Verifies that fake `pwd` reports `/` when workspace storage owns the terminal path model. |
-| `TestRunStreaming.test_fake_uname_a_returns_web_shell_environment` | Checks that fake uname a returns web shell environment. |
-| `TestRunStreaming.test_fake_uname_without_flags_returns_kernel_name` | Checks that plain `uname` returns the short kernel name form. |
-| `TestRunStreaming.test_fake_xyzzy_coffee_and_fork_bomb_easter_eggs` | Checks that the undocumented `xyzzy`, `coffee`, and fork-bomb easter eggs return their special responses. |
-| `TestRunStreaming.test_fake_id_returns_synthetic_identity` | Checks that fake id returns synthetic identity. |
-| `TestRunStreaming.test_fake_whoami_streams_project_description` | Checks that fake whoami streams project description. |
-| `TestRunStreaming.test_fake_ps_lists_active_session_processes` | Checks that `ps aux` lists active run processes for the current session. |
+| `TestRunStreaming.test_builtin_commands_streams_grouped_catalog_and_persists_history` | Checks that built-in `commands` streams the grouped command catalog and persists the run to history. |
+| `TestRunStreaming.test_builtin_clear_emits_clear_event_and_persists_history` | Checks that built-in clear emits clear event and persists history. |
+| `TestRunStreaming.test_builtin_env_returns_web_environment` | Checks that built-in env returns web environment. |
+| `TestRunStreaming.test_builtin_help_lists_available_helpers` | Checks that built-in help lists available helpers. |
+| `TestRunStreaming.test_builtin_commands_lists_built_in_and_external_catalogs` | Checks that built-in `commands` prints built-in and allowed external sections while deduping external command variants down to roots. |
+| `TestRunStreaming.test_builtin_commands_supports_built_in_only_filter` | Checks that `commands --built-in` prints only the built-in command section. |
+| `TestRunStreaming.test_builtin_commands_supports_external_only_filter` | Checks that `commands --external` prints only the allowed external command section. |
+| `TestRunStreaming.test_builtin_wordlist_lists_searches_and_prints_paths` | Verifies that the `wordlist` built-in lists categories, searches curated entries, and prints a copy-friendly path. |
+| `TestRunStreaming.test_builtin_wordlist_reports_missing_catalog` | Verifies that the `wordlist` built-in fails gracefully when the installed SecLists root is missing. |
+| `TestRunStreaming.test_builtin_workspace_lists_shows_and_removes_session_files` | Verifies that the `file` built-in can list, show, and remove session-owned files. |
+| `TestRunStreaming.test_builtin_workspace_aliases_list_and_show_session_files` | Verifies that `ls` lists session workspace files and `cat <file>` shows a session workspace file without exposing arbitrary filesystem access. |
+| `TestRunStreaming.test_builtin_workspace_show_reports_binary_files` | Verifies that `file show` and `cat` report binary session files cleanly instead of surfacing a server error. |
+| `TestRunStreaming.test_builtin_shortcuts_lists_current_shortcuts` | Checks that built-in shortcuts lists current shortcuts. |
+| `TestRunStreaming.test_builtin_shortcuts_renders_mac_keys_for_mac_user_agent` | Confirms a Macintosh User-Agent switches the built-in command's Tabs/UI rendering to `Option+*` chords. |
+| `TestRunStreaming.test_builtin_banner_renders_ascii_art` | Checks that built-in banner renders ascii art. |
+| `TestRunStreaming.test_builtin_which_and_type_describe_commands` | Checks that built-in which and type describe commands. |
+| `TestRunStreaming.test_builtin_limits_and_status_show_configuration` | Checks that built-in limits and status show configuration. |
+| `TestRunStreaming.test_builtin_last_lists_recent_completed_runs` | Checks that built-in last lists recent completed runs. |
+| `TestRunStreaming.test_builtin_who_tty_groups_and_version_render_shell_identity` | Checks that built-in who tty groups and version render shell identity. |
+| `TestRunStreaming.test_builtin_faq_renders_builtin_and_configured_entries` | Checks that built-in FAQ renders builtin and configured entries. |
+| `TestRunStreaming.test_builtin_retention_reports_preview_and_full_output_policy` | Checks that built-in retention reports preview and full output policy. |
+| `TestRunStreaming.test_builtin_fortune_returns_configured_line` | Checks that built-in fortune returns configured line. |
+| `TestRunStreaming.test_builtin_sudo_reports_web_shell_restriction` | Checks that built-in sudo reports web shell restriction. |
+| `TestRunStreaming.test_builtin_sudo_without_arguments_uses_the_snark_pool` | Checks that built-in sudo without arguments uses the snark pool. |
+| `TestRunStreaming.test_builtin_reboot_reports_web_shell_restriction` | Checks that built-in reboot reports web shell restriction. |
+| `TestRunStreaming.test_builtin_poweroff_variants_use_poweroff_snark_pool` | Checks that `poweroff`, `halt`, and `shutdown now` use the shared power-off snark pool. |
+| `TestRunStreaming.test_builtin_su_variants_use_shell_escalation_pool` | Checks that `su`, `sudo su`, and `sudo -s` use the shell-escalation denial pool. |
+| `TestRunStreaming.test_builtin_rm_root_refuses_exact_root_delete_pattern` | Checks that built-in rm root refuses exact root delete pattern. |
+| `TestRunStreaming.test_builtin_date_hostname_and_uptime_render_shell_style_information` | Checks that built-in date hostname and uptime render shell style information. |
+| `TestRunStreaming.test_builtin_ip_route_df_and_free_render_shell_style_summaries` | Checks that `ip a`, `route`, `df -h`, and `free -h` render shell-style summary output. |
+| `TestRunStreaming.test_builtin_jobs_aliases_runs_metadata` | Checks that `jobs` aliases the app-native `runs` metadata output with resource snapshots and HUD monitoring hints. |
+| `TestRunStreaming.test_builtin_jobs_alias_reports_when_no_active_runs_exist` | Checks that the `jobs` alias reports cleanly when the current session has no active runs. |
+| `TestRunStreaming.test_builtin_runs_lists_active_run_metadata` | Checks that `runs` lists app-native active-run IDs, PIDs, elapsed time, resource snapshots, commands, verbose metadata, and JSON output. |
+| `TestRunStreaming.test_builtin_runs_reports_when_no_active_runs_exist` | Checks that `runs` reports cleanly when the current session has no active runs. |
+| `TestRunStreaming.test_builtin_man_renders_real_page_for_allowed_topic` | Checks that built-in man renders real page for allowed topic. |
+| `TestRunStreaming.test_builtin_man_does_not_clip_to_max_output_lines` | Checks that built-in man does not clip to max output lines. |
+| `TestRunStreaming.test_builtin_man_reports_when_helper_binary_is_unavailable` | Checks that built-in man reports when helper binary is unavailable. |
+| `TestRunStreaming.test_builtin_man_reports_when_allowlisted_topic_is_missing` | Checks that built-in man reports when allowlisted topic is missing. |
+| `TestRunStreaming.test_builtin_man_rejects_topics_outside_allowlist` | Checks that built-in man rejects topics outside allowlist. |
+| `TestRunStreaming.test_builtin_man_for_built_in_topic_returns_shell_help` | Checks that `man history` and similar built-in topics return shell built-in help output. |
+| `TestRunStreaming.test_builtin_man_for_shortcuts_topic_returns_web_shell_help` | Checks that built-in man for shortcuts topic returns web shell help. |
+| `TestRunStreaming.test_builtin_history_lists_recent_session_commands` | Checks that built-in history lists recent session commands. |
+| `TestRunStreaming.test_builtin_history_honors_recent_commands_limit` | Verifies that the built-in `history` command uses the configured recent-command limit instead of a separate hard cap. |
+| `TestRunStreaming.test_builtin_pwd_returns_synthetic_path` | Checks that built-in pwd returns synthetic path. |
+| `TestRunStreaming.test_builtin_pwd_returns_workspace_root_when_workspace_enabled` | Verifies that built-in `pwd` reports `/` when workspace storage owns the terminal path model. |
+| `TestRunStreaming.test_builtin_uname_a_returns_web_shell_environment` | Checks that built-in uname a returns web shell environment. |
+| `TestRunStreaming.test_builtin_uname_without_flags_returns_kernel_name` | Checks that plain `uname` returns the short kernel name form. |
+| `TestRunStreaming.test_builtin_xyzzy_coffee_and_fork_bomb_easter_eggs` | Checks that the undocumented `xyzzy`, `coffee`, and fork-bomb easter eggs return their special responses. |
+| `TestRunStreaming.test_builtin_id_returns_synthetic_identity` | Checks that built-in id returns synthetic identity. |
+| `TestRunStreaming.test_builtin_whoami_streams_project_description` | Checks that built-in whoami streams project description. |
+| `TestRunStreaming.test_builtin_ps_lists_active_session_processes` | Checks that `ps aux` lists active run processes for the current session. |
 | `TestRunStreaming.test_run_reports_missing_allowlisted_command_without_spawning` | Checks that run reports missing allowlisted command without spawning. |
 | `TestRunStreaming.test_run_checks_missing_binary_after_rewrite` | Checks that run checks missing binary after rewrite. |
 | `TestRunStreaming.test_run_rewrites_workspace_file_flags_and_emits_notices` | Verifies that `/runs` executes workspace-aware file flags with rewritten session paths, emits friendly workspace read/write notices, and preserves the original command in history. |
@@ -1813,44 +1813,6 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `includes line numbers in copied text when lnMode is on` | Verifies that includes line numbers in copied text when lnMode is on. |
 | `omits prefix in copied text when both lnMode and tsMode are off` | Verifies that omits prefix in copied text when both lnMode and tsMode are off. |
 
-#### `run_monitor.test.js`
-
-| Test | Description |
-| --- | --- |
-| `pauses background run streams while open and resumes them on close` | Verifies that the Status Monitor frees background broker stream connections while open and resumes them after close. |
-| `renders active-run CPU and memory telemetry when available` | Verifies that the Status Monitor renders CPU and memory meters from active-run resource telemetry. |
-| `renders unavailable telemetry chips when backend stats are absent` | Verifies that the Status Monitor still shows CPU and memory meter placeholders when backend resource telemetry is not available. |
-| `labels active runs owned by another live browser as monitor-only` | Verifies that active runs owned by another live browser render as monitor-only instead of tab-owned rows. |
-| `offers attach and kill actions for runs owned by another live browser` | Verifies that another browser's live runs expose Attach and Kill actions from the Status Monitor. |
-| `keeps attach and kill available when another browser owns a run already attached locally` | Verifies that Status Monitor still offers Attach and Kill when the current browser already has an attached tab for a run started elsewhere. |
-| `keeps attach visible before and after an attached tab is closed` | Verifies that Status Monitor keeps Attach visible while a run has a local tab and after that tab is closed. |
-| `warms CPU samples while closed so first open can show a percent` | Verifies that a background warmup sample pair can populate CPU percentage before the monitor is opened. |
-| `does a quick follow-up refresh after opening on a baseline-only CPU sample` | Verifies that opening the Status Monitor schedules a quick second poll when CPU telemetry only has a baseline sample. |
-| `reuses the active-run row, sparkline path, and meter elements across polls` | Verifies that successive active-run polls keep the same `<article>`, sparkline `<path>`, and meter element references for a stable `run_id`, only mutating the `d` attribute and `--meter-percent` CSS variable. |
-| `drops a run row when the active set no longer contains it` | Verifies that an active-run row is removed when its `run_id` disappears from the next poll, and the runs list shows the empty state when no active runs remain. |
-| `does not reload history insights on every active-run refresh` | Verifies that frequent active-run refreshes do not refetch the heavier history insights payload when the run count is stable. |
-| `refreshes history insights when active runs drain to zero` | Verifies that the Status Monitor refreshes history insights and rebuilds the visual signature when the active-run count transitions from `>0` to `0`. |
-| `does not refresh insights on a 0 → >0 transition` | Verifies that starting a new run while the Status Monitor is open does not retrigger the insights load — only the `>0 → 0` drain transition refreshes. |
-| `clamps off-scale stars above the p98 ceiling and renders an upward tick` | Verifies that the Command Constellation Y axis crops at the p98 of `elapsed_seconds`, clamps stars above the ceiling to the top edge, and renders an upward tick on each off-scale star. |
-| `only connects same-root stars within 2h on the same calendar date` | Verifies that the Command Constellation streak connectors require same-root, ≤2h between consecutive starts, and the same calendar date — sessions split at midnight and large gaps drop the line. |
-| `omits the 24 axis label so the rightmost cluster reads as 20:00 to midnight` | Verifies that the Command Constellation drops the misleading `24` axis label, since the X mapping caps at 23:59 and the rightmost cluster is unambiguous as 20:00 to midnight. |
-| `does not poll history insights on a timer while the monitor is open` | Verifies that the Status Monitor does not run a `/history/insights` polling timer while open; insights are loaded once on open and only refreshed on the active-run drain transition. |
-| `uses CPU hysteresis and recent samples for the pulse strip` | Verifies that the Status Monitor pulse strip preserves raw CPU readouts while damping small pulse-signature changes and keeping a recent CPU sample window. |
-| `shows active-run loading state on open instead of stale cached rows` | Verifies that opening the Status Monitor shows an active-run loading row until fresh active-run data arrives instead of flashing stale cached rows. |
-| `opens as a status dashboard when there are no active runs` | Verifies that the desktop Status Monitor opens to a dashboard with a `0 active runs` runs section when no commands are running. |
-| `opens history from command territory tiles` | Verifies that Command Territory tiles open History with the clicked command root filter applied. |
-| `keeps dashboard fallbacks visible when status data routes fail` | Verifies that the Status Monitor keeps rendering dashboard fallback copy when status, workspace, stats, or insights requests fail. |
-| `shows fallback toasts when optional history helpers are unavailable` | Verifies that missing optional history filter and run restore helpers show user-visible fallback toasts instead of throwing. |
-| `opens on mobile when the optional sheet binder is unavailable` | Verifies that the mobile Status Monitor still opens when the shared mobile sheet binder is not present. |
-| `restores runs from constellation stars` | Verifies that Command Constellation stars restore the matching run through the shared history restore helper. |
-| `keeps failed constellation stars category-colored with a failure ring` | Verifies that failed constellation stars keep their command-category hue and use a separate red failure ring. |
-| `normalizes unmapped command categories and decorative seeds` | Verifies that unmapped Status Monitor categories still render useful command details and that normalized seeds keep decorative jitter and treemap glow placement stable across casing and whitespace variants. |
-| `uses a squarified command territory layout for small tiles` | Verifies that Command Territory uses a squarified treemap layout so small command tiles remain reasonably rectangular instead of collapsing into thin slivers. |
-| `keeps an ambient constellation visible before real run history exists` | Verifies that the Status Monitor keeps the ambient constellation visible and uses calm sparse-state copy when no real runs are plotted. |
-| `uses mobile sheet chrome and shared sheet binding on mobile` | Verifies that the mobile Status Monitor opens with sheet chrome and shared mobile-sheet dismissal behavior. |
-| `calculates CPU from cumulative samples, keeps the last value, and caps display at 100%` | Verifies that the Status Monitor derives CPU percentage from adjacent cumulative CPU samples, preserves the last value when a later poll lacks CPU data, and display-caps at 100%. |
-| `adds the running status affordance and pulses it once per session` | Verifies that the STATUS HUD cell gets the Status Monitor expansion affordance while running and only pulses once per browser session. |
-
 #### `runner.test.js`
 
 | Test | Description |
@@ -1880,7 +1842,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `rejects unsupported uniq flags` | Verifies that rejects unsupported uniq flags. |
 | `parses the base command and grep stage for client-side built-ins` | Verifies that client-side built-ins can split a piped command into a runnable base command and synthetic helper stage. |
 | `applies chained synthetic helpers to captured client-side output` | Verifies that captured client-side command output can pass through chained synthetic helpers before rendering. |
-| `filters terminal-native theme output through the same pipe helpers as older built-ins` | Verifies that terminal-native `theme` output supports the same pipe helpers as server-side fake built-ins. |
+| `filters terminal-native theme output through the same pipe helpers as older built-ins` | Verifies that terminal-native `theme` output supports the same pipe helpers as server-side built-ins. |
 | `filters terminal-native config output through chained pipe helpers` | Verifies that terminal-native `config` output supports chained pipe helpers before rendering. |
 | `persists terminal-native built-ins to server-backed history` | Verifies that terminal-native built-ins post their rendered output to `/run/client` so recents and history survive reload. |
 | `routes workflow commands to the client-side workflow handler` | Verifies that `workflow` terminal commands are handled by the client workflow runtime. |
@@ -1902,7 +1864,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `runCommand blocks shell operators client-side before calling the API` | Verifies that runCommand blocks shell operators client-side before calling the API. |
 | `runCommand allows the narrow synthetic grep form through to the API` | Verifies that runCommand allows the narrow synthetic grep form through to the API. |
 | `adds commands to the preview recents even when they exit non-zero` | Verifies that valid commands still update the preview recents when they finish with a non-zero exit status. |
-| `does not add unsupported fake commands to the preview recents` | Verifies that obvious fake-command typos are excluded from preview recents even though real non-zero commands are kept. |
+| `does not add unsupported built-in commands to the preview recents` | Verifies that obvious built-in command typos are excluded from preview recents even though real non-zero commands are kept. |
 | `runCommand allows other synthetic post-filters through to the API` | Verifies that runCommand allows other synthetic post-filters through to the API. |
 | `runCommand allows exact special built-in commands with shell punctuation through to the API` | Verifies that runCommand allows exact special built-in commands with shell punctuation through to the API. |
 | `runCommand on blank or whitespace input creates a new empty prompt line` | Verifies that runCommand on blank or whitespace input creates a new empty prompt line. |
@@ -2078,6 +2040,44 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | --- | --- |
 | `stores composer value, selection, and active input without touching the DOM` | Verifies that stores composer value, selection, and active input without touching the DOM. |
 | `resets composer state back to the defaults` | Verifies that resets composer state back to the defaults. |
+
+#### `status_monitor.test.js`
+
+| Test | Description |
+| --- | --- |
+| `pauses background run streams while open and resumes them on close` | Verifies that the Status Monitor frees background broker stream connections while open and resumes them after close. |
+| `renders active-run CPU and memory telemetry when available` | Verifies that the Status Monitor renders CPU and memory meters from active-run resource telemetry. |
+| `renders unavailable telemetry chips when backend stats are absent` | Verifies that the Status Monitor still shows CPU and memory meter placeholders when backend resource telemetry is not available. |
+| `labels active runs owned by another live browser as monitor-only` | Verifies that active runs owned by another live browser render as monitor-only instead of tab-owned rows. |
+| `offers attach and kill actions for runs owned by another live browser` | Verifies that another browser's live runs expose Attach and Kill actions from the Status Monitor. |
+| `keeps attach and kill available when another browser owns a run already attached locally` | Verifies that Status Monitor still offers Attach and Kill when the current browser already has an attached tab for a run started elsewhere. |
+| `keeps attach visible before and after an attached tab is closed` | Verifies that Status Monitor keeps Attach visible while a run has a local tab and after that tab is closed. |
+| `warms CPU samples while closed so first open can show a percent` | Verifies that a background warmup sample pair can populate CPU percentage before the monitor is opened. |
+| `does a quick follow-up refresh after opening on a baseline-only CPU sample` | Verifies that opening the Status Monitor schedules a quick second poll when CPU telemetry only has a baseline sample. |
+| `reuses the active-run row, sparkline path, and meter elements across polls` | Verifies that successive active-run polls keep the same `<article>`, sparkline `<path>`, and meter element references for a stable `run_id`, only mutating the `d` attribute and `--meter-percent` CSS variable. |
+| `drops a run row when the active set no longer contains it` | Verifies that an active-run row is removed when its `run_id` disappears from the next poll, and the runs list shows the empty state when no active runs remain. |
+| `does not reload history insights on every active-run refresh` | Verifies that frequent active-run refreshes do not refetch the heavier history insights payload when the run count is stable. |
+| `refreshes history insights when active runs drain to zero` | Verifies that the Status Monitor refreshes history insights and rebuilds the visual signature when the active-run count transitions from `>0` to `0`. |
+| `does not refresh insights on a 0 → >0 transition` | Verifies that starting a new run while the Status Monitor is open does not retrigger the insights load — only the `>0 → 0` drain transition refreshes. |
+| `clamps off-scale stars above the p98 ceiling and renders an upward tick` | Verifies that the Command Constellation Y axis crops at the p98 of `elapsed_seconds`, clamps stars above the ceiling to the top edge, and renders an upward tick on each off-scale star. |
+| `only connects same-root stars within 2h on the same calendar date` | Verifies that the Command Constellation streak connectors require same-root, ≤2h between consecutive starts, and the same calendar date — sessions split at midnight and large gaps drop the line. |
+| `omits the 24 axis label so the rightmost cluster reads as 20:00 to midnight` | Verifies that the Command Constellation drops the misleading `24` axis label, since the X mapping caps at 23:59 and the rightmost cluster is unambiguous as 20:00 to midnight. |
+| `does not poll history insights on a timer while the monitor is open` | Verifies that the Status Monitor does not run a `/history/insights` polling timer while open; insights are loaded once on open and only refreshed on the active-run drain transition. |
+| `uses CPU hysteresis and recent samples for the pulse strip` | Verifies that the Status Monitor pulse strip preserves raw CPU readouts while damping small pulse-signature changes and keeping a recent CPU sample window. |
+| `shows active-run loading state on open instead of stale cached rows` | Verifies that opening the Status Monitor shows an active-run loading row until fresh active-run data arrives instead of flashing stale cached rows. |
+| `opens as a status dashboard when there are no active runs` | Verifies that the desktop Status Monitor opens to a dashboard with a `0 active runs` runs section when no commands are running. |
+| `opens history from command territory tiles` | Verifies that Command Territory tiles open History with the clicked command root filter applied. |
+| `keeps dashboard fallbacks visible when status data routes fail` | Verifies that the Status Monitor keeps rendering dashboard fallback copy when status, workspace, stats, or insights requests fail. |
+| `shows fallback toasts when optional history helpers are unavailable` | Verifies that missing optional history filter and run restore helpers show user-visible fallback toasts instead of throwing. |
+| `opens on mobile when the optional sheet binder is unavailable` | Verifies that the mobile Status Monitor still opens when the shared mobile sheet binder is not present. |
+| `restores runs from constellation stars` | Verifies that Command Constellation stars restore the matching run through the shared history restore helper. |
+| `keeps failed constellation stars category-colored with a failure ring` | Verifies that failed constellation stars keep their command-category hue and use a separate red failure ring. |
+| `normalizes unmapped command categories and decorative seeds` | Verifies that unmapped Status Monitor categories still render useful command details and that normalized seeds keep decorative jitter and treemap glow placement stable across casing and whitespace variants. |
+| `uses a squarified command territory layout for small tiles` | Verifies that Command Territory uses a squarified treemap layout so small command tiles remain reasonably rectangular instead of collapsing into thin slivers. |
+| `keeps an ambient constellation visible before real run history exists` | Verifies that the Status Monitor keeps the ambient constellation visible and uses calm sparse-state copy when no real runs are plotted. |
+| `uses mobile sheet chrome and shared sheet binding on mobile` | Verifies that the mobile Status Monitor opens with sheet chrome and shared mobile-sheet dismissal behavior. |
+| `calculates CPU from cumulative samples, keeps the last value, and caps display at 100%` | Verifies that the Status Monitor derives CPU percentage from adjacent cumulative CPU samples, preserves the last value when a later poll lacks CPU data, and display-caps at 100%. |
+| `adds the running status affordance and pulses it once per session` | Verifies that the STATUS HUD cell gets the Status Monitor expansion affordance while running and only pulses once per browser session. |
 
 #### `tabs.test.js`
 

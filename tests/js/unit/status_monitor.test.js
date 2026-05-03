@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fromDomScripts } from './helpers/extract.js'
 
-function loadRunMonitor({
+function loadStatusMonitor({
   runs = [],
   status = { uptime: 12, db: 'ok', redis: 'none', server_time: Date.now() },
   workspace = {
@@ -146,7 +146,7 @@ function loadRunMonitor({
   if (openHistoryWithFilters) window.openHistoryWithFilters = openHistoryWithFilters
   if (restoreHistoryRun) window.restoreHistoryRun = restoreHistoryRun
   return fromDomScripts(
-    ['app/static/js/run_monitor.js'],
+    ['app/static/js/status_monitor.js'],
     {
       document,
       window,
@@ -168,8 +168,8 @@ function loadRunMonitor({
       apiFetch,
       activateTab,
       showToast,
-      openRunMonitor: window.openRunMonitor,
-      closeRunMonitor: window.closeRunMonitor,
+      openStatusMonitor: window.openStatusMonitor,
+      closeStatusMonitor: window.closeStatusMonitor,
     }`,
   )
 }
@@ -198,27 +198,27 @@ describe('Status Monitor', () => {
     const resumeBackgroundRunStreamsAfterStatusMonitor = vi.fn()
     const {
       apiFetch,
-      openRunMonitor,
-      closeRunMonitor,
-    } = loadRunMonitor({
+      openStatusMonitor,
+      closeStatusMonitor,
+    } = loadStatusMonitor({
       pauseBackgroundRunStreamsForStatusMonitor,
       resumeBackgroundRunStreamsAfterStatusMonitor,
     })
 
-    await openRunMonitor({ source: 'test' })
+    await openStatusMonitor({ source: 'test' })
 
     expect(pauseBackgroundRunStreamsForStatusMonitor).toHaveBeenCalledTimes(1)
     expect(pauseBackgroundRunStreamsForStatusMonitor.mock.invocationCallOrder[0]).toBeLessThan(
       apiFetch.mock.invocationCallOrder[0],
     )
 
-    closeRunMonitor()
+    closeStatusMonitor()
 
     expect(resumeBackgroundRunStreamsAfterStatusMonitor).toHaveBeenCalledTimes(1)
   })
 
   it('renders active-run CPU and memory telemetry when available', async () => {
-    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
       runs: [
         {
           run_id: 'run-telemetry',
@@ -235,29 +235,29 @@ describe('Status Monitor', () => {
       ],
     })
 
-    await openRunMonitor({ source: 'test' })
+    await openStatusMonitor({ source: 'test' })
 
-    const cpuMeter = document.querySelector('.run-monitor-meter-cpu')
+    const cpuMeter = document.querySelector('.status-monitor-meter-cpu')
     expect(cpuMeter?.getAttribute('aria-label')).toBe('CPU collecting')
-    expect(cpuMeter?.classList.contains('run-monitor-meter-collecting')).toBe(true)
+    expect(cpuMeter?.classList.contains('status-monitor-meter-collecting')).toBe(true)
     expect(cpuMeter?.style.getPropertyValue('--meter-percent')).toBe('75%')
-    expect(cpuMeter?.querySelector('.run-monitor-meter-value')?.textContent).toBe('')
-    expect(document.querySelector('.run-monitor-meter-mem')?.getAttribute('aria-label')).toBe('MEM 512 MB')
-    expect(document.querySelector('.run-monitor-meter-mem')?.style.getPropertyValue('--meter-percent')).toBe('50%')
-    expect(document.querySelector('.run-monitor-spark-panel')?.textContent).toContain('CPU/MEM 60s')
-    expect(document.querySelector('.run-monitor-spark-values')).toBeNull()
-    expect([...document.querySelectorAll('.run-monitor-meta-chip')].map(chip => chip.textContent)).toEqual(
+    expect(cpuMeter?.querySelector('.status-monitor-meter-value')?.textContent).toBe('')
+    expect(document.querySelector('.status-monitor-meter-mem')?.getAttribute('aria-label')).toBe('MEM 512 MB')
+    expect(document.querySelector('.status-monitor-meter-mem')?.style.getPropertyValue('--meter-percent')).toBe('50%')
+    expect(document.querySelector('.status-monitor-spark-panel')?.textContent).toContain('CPU/MEM 60s')
+    expect(document.querySelector('.status-monitor-spark-values')).toBeNull()
+    expect([...document.querySelectorAll('.status-monitor-meta-chip')].map(chip => chip.textContent)).toEqual(
       expect.arrayContaining(['run run-tele', 'pid 1234']),
     )
     expect(document.querySelector('.status-monitor-pulse-strip')).not.toBeNull()
     expect(document.querySelector('.status-monitor-runs-section')?.textContent).toContain('amass enum')
     expect(document.querySelector('.status-monitor-showcase-grid')).not.toBeNull()
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('renders unavailable telemetry chips when backend stats are absent', async () => {
-    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
       runs: [
         {
           run_id: 'run-no-telemetry',
@@ -268,16 +268,16 @@ describe('Status Monitor', () => {
       ],
     })
 
-    await openRunMonitor({ source: 'test' })
+    await openStatusMonitor({ source: 'test' })
 
-    expect(document.querySelector('.run-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU n/a')
-    expect(document.querySelector('.run-monitor-meter-mem')?.getAttribute('aria-label')).toBe('MEM n/a')
+    expect(document.querySelector('.status-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU n/a')
+    expect(document.querySelector('.status-monitor-meter-mem')?.getAttribute('aria-label')).toBe('MEM n/a')
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('labels active runs owned by another live browser as monitor-only', async () => {
-    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
       runs: [
         {
           run_id: 'run-other-client',
@@ -290,17 +290,17 @@ describe('Status Monitor', () => {
       ],
     })
 
-    await openRunMonitor({ source: 'test' })
+    await openStatusMonitor({ source: 'test' })
 
-    expect(document.querySelector('.run-monitor-meta')?.textContent).toContain('another browser')
+    expect(document.querySelector('.status-monitor-meta')?.textContent).toContain('another browser')
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('offers attach and kill actions for runs owned by another live browser', async () => {
     const attachActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
     const killActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
-    const { openRunMonitor } = loadRunMonitor({
+    const { openStatusMonitor } = loadStatusMonitor({
       attachActiveRunFromMonitor,
       killActiveRunFromMonitor,
       runs: [
@@ -315,30 +315,30 @@ describe('Status Monitor', () => {
       ],
     })
 
-    await openRunMonitor({ source: 'test' })
+    await openStatusMonitor({ source: 'test' })
 
-    const buttons = [...document.querySelectorAll('.run-monitor-action-btn')]
+    const buttons = [...document.querySelectorAll('.status-monitor-action-btn')]
     expect(buttons.map(button => button.textContent)).toEqual(['Attach', 'Kill'])
-    expect(buttons[1].classList.contains('run-monitor-action-btn-kill')).toBe(true)
+    expect(buttons[1].classList.contains('status-monitor-action-btn-kill')).toBe(true)
     buttons[0].click()
     await Promise.resolve()
     expect(attachActiveRunFromMonitor).toHaveBeenCalledWith(
       expect.objectContaining({ run_id: 'run-other-client' }),
     )
 
-    await openRunMonitor({ source: 'test' })
-    document.querySelectorAll('.run-monitor-action-btn')[1].click()
+    await openStatusMonitor({ source: 'test' })
+    document.querySelectorAll('.status-monitor-action-btn')[1].click()
     await Promise.resolve()
     expect(killActiveRunFromMonitor).toHaveBeenCalledWith(
       expect.objectContaining({ run_id: 'run-other-client' }),
     )
-    expect(document.getElementById('run-monitor')?.classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('status-monitor')?.classList.contains('u-hidden')).toBe(false)
   })
 
   it('keeps attach and kill available when another browser owns a run already attached locally', async () => {
     const attachActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
     const killActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
-    const { openRunMonitor, activateTab } = loadRunMonitor({
+    const { openStatusMonitor, activateTab } = loadStatusMonitor({
       attachActiveRunFromMonitor,
       killActiveRunFromMonitor,
       tabs: [{ id: 'tab-2', label: 'sleep 60', runId: 'run-other-client', attachMode: 'attached' }],
@@ -354,18 +354,18 @@ describe('Status Monitor', () => {
       ],
     })
 
-    await openRunMonitor({ source: 'test' })
+    await openStatusMonitor({ source: 'test' })
 
-    expect(document.querySelector('.run-monitor-meta')?.textContent).toContain('another browser')
-    const buttons = [...document.querySelectorAll('.run-monitor-action-btn')]
+    expect(document.querySelector('.status-monitor-meta')?.textContent).toContain('another browser')
+    const buttons = [...document.querySelectorAll('.status-monitor-action-btn')]
     expect(buttons.map(button => button.textContent)).toEqual(['Attach', 'Kill'])
     buttons[0].click()
     await Promise.resolve()
     expect(activateTab).toHaveBeenCalledWith('tab-2', { focusComposer: false })
     expect(attachActiveRunFromMonitor).not.toHaveBeenCalled()
 
-    await openRunMonitor({ source: 'test' })
-    document.querySelectorAll('.run-monitor-action-btn')[1].click()
+    await openStatusMonitor({ source: 'test' })
+    document.querySelectorAll('.status-monitor-action-btn')[1].click()
     await Promise.resolve()
     expect(killActiveRunFromMonitor).toHaveBeenCalledWith(
       expect.objectContaining({ run_id: 'run-other-client' }),
@@ -376,7 +376,7 @@ describe('Status Monitor', () => {
     const attachActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
     const killActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
     const tabs = [{ id: 'tab-2', label: 'sleep 60', runId: 'run-other-client', attachMode: 'attached' }]
-    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
       attachActiveRunFromMonitor,
       killActiveRunFromMonitor,
       tabs,
@@ -392,22 +392,22 @@ describe('Status Monitor', () => {
       ],
     })
 
-    await openRunMonitor({ source: 'test' })
-    expect([...document.querySelectorAll('.run-monitor-action-btn')].map(button => button.textContent)).toEqual(['Attach', 'Kill'])
+    await openStatusMonitor({ source: 'test' })
+    expect([...document.querySelectorAll('.status-monitor-action-btn')].map(button => button.textContent)).toEqual(['Attach', 'Kill'])
 
-    closeRunMonitor()
+    closeStatusMonitor()
     tabs.length = 0
-    await openRunMonitor({ source: 'test' })
+    await openStatusMonitor({ source: 'test' })
 
-    expect([...document.querySelectorAll('.run-monitor-action-btn')].map(button => button.textContent)).toEqual(['Attach', 'Kill'])
-    closeRunMonitor()
+    expect([...document.querySelectorAll('.status-monitor-action-btn')].map(button => button.textContent)).toEqual(['Attach', 'Kill'])
+    closeStatusMonitor()
   })
 
   it('warms CPU samples while closed so first open can show a percent', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
     const started = new Date().toISOString()
-    const { openRunMonitor, closeRunMonitor, apiFetch } = loadRunMonitor({
+    const { openStatusMonitor, closeStatusMonitor, apiFetch } = loadStatusMonitor({
       runs: [
         [
           {
@@ -446,20 +446,20 @@ describe('Status Monitor', () => {
     vi.setSystemTime(new Date('2026-01-01T00:00:01Z'))
     await vi.advanceTimersByTimeAsync(900)
 
-    await openRunMonitor({ source: 'test' })
+    await openStatusMonitor({ source: 'test' })
 
     expect(apiFetch.mock.calls.filter(([url]) => url === '/history/active')).toHaveLength(3)
-    expect(document.querySelector('.run-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU 44%')
-    expect(document.querySelector('.run-monitor-meter-mem')?.getAttribute('aria-label')).toBe('MEM 8.0 KB')
+    expect(document.querySelector('.status-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU 44%')
+    expect(document.querySelector('.status-monitor-meter-mem')?.getAttribute('aria-label')).toBe('MEM 8.0 KB')
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('does a quick follow-up refresh after opening on a baseline-only CPU sample', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
     const started = new Date().toISOString()
-    const { openRunMonitor, closeRunMonitor, apiFetch } = loadRunMonitor({
+    const { openStatusMonitor, closeStatusMonitor, apiFetch } = loadStatusMonitor({
       runs: [
         [
           {
@@ -482,23 +482,23 @@ describe('Status Monitor', () => {
       ],
     })
 
-    await openRunMonitor({ source: 'test' })
-    expect(document.querySelector('.run-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU collecting')
+    await openStatusMonitor({ source: 'test' })
+    expect(document.querySelector('.status-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU collecting')
 
     vi.setSystemTime(new Date('2026-01-01T00:00:01Z'))
     await vi.advanceTimersByTimeAsync(900)
 
     expect(apiFetch.mock.calls.filter(([url]) => url === '/history/active')).toHaveLength(2)
-    expect(document.querySelector('.run-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU 47%')
+    expect(document.querySelector('.status-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU 47%')
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('reuses the active-run row, sparkline path, and meter elements across polls', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
     const started = new Date().toISOString()
-    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
       runs: [
         [
           {
@@ -530,36 +530,36 @@ describe('Status Monitor', () => {
       ],
     })
 
-    await openRunMonitor({ source: 'test' })
+    await openStatusMonitor({ source: 'test' })
 
-    const itemBefore = document.querySelector('.run-monitor-item')
-    const cpuPathBefore = document.querySelector('.run-monitor-sparkline-cpu')
-    const memPathBefore = document.querySelector('.run-monitor-sparkline-mem')
-    const cpuMeterBefore = document.querySelector('.run-monitor-meter-cpu')
-    const memMeterBefore = document.querySelector('.run-monitor-meter-mem')
+    const itemBefore = document.querySelector('.status-monitor-item')
+    const cpuPathBefore = document.querySelector('.status-monitor-sparkline-cpu')
+    const memPathBefore = document.querySelector('.status-monitor-sparkline-mem')
+    const cpuMeterBefore = document.querySelector('.status-monitor-meter-cpu')
+    const memMeterBefore = document.querySelector('.status-monitor-meter-mem')
     const cpuPercentBefore = cpuMeterBefore?.style.getPropertyValue('--meter-percent')
     const cpuPathDBefore = cpuPathBefore?.getAttribute('d')
 
     vi.setSystemTime(new Date('2026-01-01T00:00:01Z'))
     await vi.advanceTimersByTimeAsync(900)
 
-    expect(document.querySelector('.run-monitor-item')).toBe(itemBefore)
-    expect(document.querySelector('.run-monitor-sparkline-cpu')).toBe(cpuPathBefore)
-    expect(document.querySelector('.run-monitor-sparkline-mem')).toBe(memPathBefore)
-    expect(document.querySelector('.run-monitor-meter-cpu')).toBe(cpuMeterBefore)
-    expect(document.querySelector('.run-monitor-meter-mem')).toBe(memMeterBefore)
+    expect(document.querySelector('.status-monitor-item')).toBe(itemBefore)
+    expect(document.querySelector('.status-monitor-sparkline-cpu')).toBe(cpuPathBefore)
+    expect(document.querySelector('.status-monitor-sparkline-mem')).toBe(memPathBefore)
+    expect(document.querySelector('.status-monitor-meter-cpu')).toBe(cpuMeterBefore)
+    expect(document.querySelector('.status-monitor-meter-mem')).toBe(memMeterBefore)
     expect(cpuMeterBefore?.style.getPropertyValue('--meter-percent')).not.toBe(cpuPercentBefore)
     expect(cpuPathBefore?.getAttribute('d')).not.toBe(cpuPathDBefore)
-    expect(document.querySelectorAll('.run-monitor-item')).toHaveLength(1)
+    expect(document.querySelectorAll('.status-monitor-item')).toHaveLength(1)
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('drops a run row when the active set no longer contains it', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
     const started = new Date().toISOString()
-    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
       runs: [
         [
           {
@@ -574,27 +574,27 @@ describe('Status Monitor', () => {
       ],
     })
 
-    await openRunMonitor({ source: 'test' })
-    expect(document.querySelectorAll('.run-monitor-item')).toHaveLength(1)
+    await openStatusMonitor({ source: 'test' })
+    expect(document.querySelectorAll('.status-monitor-item')).toHaveLength(1)
 
-    await window.refreshRunMonitor()
+    await window.refreshStatusMonitor()
 
-    expect(document.querySelectorAll('.run-monitor-item')).toHaveLength(0)
-    expect(document.querySelector('.run-monitor-empty')?.textContent).toBe('No active runs.')
+    expect(document.querySelectorAll('.status-monitor-item')).toHaveLength(0)
+    expect(document.querySelector('.status-monitor-empty')?.textContent).toBe('No active runs.')
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('does not reload history insights on every active-run refresh', async () => {
-    const { openRunMonitor, closeRunMonitor, apiFetch } = loadRunMonitor({ runs: [[], []] })
+    const { openStatusMonitor, closeStatusMonitor, apiFetch } = loadStatusMonitor({ runs: [[], []] })
 
-    await openRunMonitor({ source: 'test' })
+    await openStatusMonitor({ source: 'test' })
     expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
 
-    await window.refreshRunMonitor()
+    await window.refreshStatusMonitor()
     expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('refreshes history insights when active runs drain to zero', async () => {
@@ -616,7 +616,7 @@ describe('Status Monitor', () => {
       max_day_count: 2,
       activity: [{ date: '2026-01-01', count: 2, succeeded: 1, failed: 0, incomplete: 1 }],
     }
-    const { openRunMonitor, closeRunMonitor, apiFetch } = loadRunMonitor({
+    const { openStatusMonitor, closeStatusMonitor, apiFetch } = loadStatusMonitor({
       runs: [
         [{
           run_id: 'run-transition',
@@ -629,22 +629,22 @@ describe('Status Monitor', () => {
       insights: [baseInsights, changedInsights],
     })
 
-    await openRunMonitor({ source: 'test' })
+    await openStatusMonitor({ source: 'test' })
     const initialSignature = document.querySelector('.status-monitor-showcase-grid')?.dataset.visualSignature
 
-    await window.refreshRunMonitor()
+    await window.refreshStatusMonitor()
 
     expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(2)
     expect(document.querySelector('.status-monitor-showcase-grid')?.dataset.visualSignature).not.toBe(initialSignature)
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('does not refresh insights on a 0 → >0 transition', async () => {
     // Insights-refresh trigger is locked to active-run count >0 → 0 only.
     // Starting a new run should not retrigger the load — the new run is
     // visible in the active runs panel and the pulse strip live.
-    const { openRunMonitor, closeRunMonitor, apiFetch } = loadRunMonitor({
+    const { openStatusMonitor, closeStatusMonitor, apiFetch } = loadStatusMonitor({
       runs: [
         [],
         [{
@@ -656,13 +656,13 @@ describe('Status Monitor', () => {
       ],
     })
 
-    await openRunMonitor({ source: 'test' })
+    await openStatusMonitor({ source: 'test' })
     expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
 
-    await window.refreshRunMonitor()
+    await window.refreshStatusMonitor()
     expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('clamps off-scale stars above the p98 ceiling and renders an upward tick', async () => {
@@ -704,9 +704,9 @@ describe('Status Monitor', () => {
         constellation: { days: 30, label: 'last 30 days' },
       },
     }
-    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({ insights })
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({ insights })
 
-    await openRunMonitor({ source: 'test' })
+    await openStatusMonitor({ source: 'test' })
 
     const outlier = document.querySelector('.status-monitor-star-node[data-star-id="outlier"]')
     expect(outlier).toBeTruthy()
@@ -718,7 +718,7 @@ describe('Status Monitor', () => {
     expect(fast.classList.contains('status-monitor-star-node-offscale')).toBe(false)
     expect(fast.querySelector('.status-monitor-star-offscale-tick')).toBeNull()
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('only connects same-root stars within 2h on the same calendar date', async () => {
@@ -762,22 +762,22 @@ describe('Status Monitor', () => {
         constellation: { days: 30, label: 'last 30 days' },
       },
     }
-    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({ insights })
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({ insights })
 
-    await openRunMonitor({ source: 'test' })
+    await openStatusMonitor({ source: 'test' })
 
     // Two segments connect: (s1a-s1b) and (s2-s3). The 3h gap between s1b
     // and s2 splits one. The next-day jump between s3 and s4 splits the other.
     const paths = document.querySelectorAll('.status-monitor-constellation-streak')
     expect(paths.length).toBe(2)
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('omits the 24 axis label so the rightmost cluster reads as 20:00 to midnight', async () => {
-    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({})
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({})
 
-    await openRunMonitor({ source: 'test' })
+    await openStatusMonitor({ source: 'test' })
 
     const labels = [...document.querySelectorAll('.status-monitor-constellation-guide-label')]
       .map(node => node.textContent)
@@ -785,14 +785,14 @@ describe('Status Monitor', () => {
     expect(labels).toContain('20')
     expect(labels).not.toContain('24')
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('does not poll history insights on a timer while the monitor is open', async () => {
     vi.useFakeTimers()
-    const { openRunMonitor, closeRunMonitor, apiFetch } = loadRunMonitor({ runs: [[], []] })
+    const { openStatusMonitor, closeStatusMonitor, apiFetch } = loadStatusMonitor({ runs: [[], []] })
 
-    await openRunMonitor({ source: 'test' })
+    await openStatusMonitor({ source: 'test' })
     expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
 
     await vi.advanceTimersByTimeAsync(3000)
@@ -801,14 +801,14 @@ describe('Status Monitor', () => {
     await vi.advanceTimersByTimeAsync(60000)
     expect(apiFetch.mock.calls.filter(([url]) => url === '/history/insights')).toHaveLength(1)
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('uses CPU hysteresis and recent samples for the pulse strip', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
     const started = new Date().toISOString()
-    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
       runs: [
         [
           {
@@ -849,7 +849,7 @@ describe('Status Monitor', () => {
       ],
     })
 
-    await openRunMonitor({ source: 'test' })
+    await openStatusMonitor({ source: 'test' })
     const strip = document.querySelector('.status-monitor-pulse-strip')
     expect(strip?.dataset.pulseSignature).toBe('1:0')
     expect(strip?.dataset.pulseCpuSamples).toBe('')
@@ -857,38 +857,38 @@ describe('Status Monitor', () => {
     expect(document.querySelector('.status-monitor-pulse-line')).not.toBeNull()
 
     vi.setSystemTime(new Date('2026-01-01T00:00:01Z'))
-    await window.refreshRunMonitor()
+    await window.refreshStatusMonitor()
     const firstCpuSignature = strip?.dataset.pulseSignature
     expect(firstCpuSignature).toBe('1:8')
     expect(strip?.dataset.pulseCpuSamples).toBe('40')
     expect(strip?.dataset.pulseLoad).toBe('busy')
-    expect(document.querySelector('.run-monitor-summary')?.textContent).toContain('40% avg CPU')
+    expect(document.querySelector('.status-monitor-summary')?.textContent).toContain('40% avg CPU')
     expect(strip?.querySelector('.status-monitor-pulse-meta')).toBeNull()
     await vi.advanceTimersByTimeAsync(700)
     expect(document.querySelector('.status-monitor-pulse-track')).not.toBeNull()
 
     vi.setSystemTime(new Date('2026-01-01T00:00:02Z'))
-    await window.refreshRunMonitor()
+    await window.refreshStatusMonitor()
     expect(strip?.dataset.pulseSignature).toBe(firstCpuSignature)
     expect(strip?.dataset.pulseCpuSamples).toBe('40,44')
-    expect(document.querySelector('.run-monitor-summary')?.textContent).toContain('44% avg CPU')
+    expect(document.querySelector('.status-monitor-summary')?.textContent).toContain('44% avg CPU')
 
     vi.setSystemTime(new Date('2026-01-01T00:00:03Z'))
-    await window.refreshRunMonitor()
+    await window.refreshStatusMonitor()
     expect(strip?.dataset.pulseSignature).toBe('1:10')
     expect(strip?.dataset.pulseCpuSamples).toBe('40,44,51')
     expect(strip?.dataset.pulseLoad).toBe('busy')
-    expect(document.querySelector('.run-monitor-summary')?.textContent).toContain('51% avg CPU')
+    expect(document.querySelector('.status-monitor-summary')?.textContent).toContain('51% avg CPU')
 
     await vi.advanceTimersByTimeAsync(700)
-    closeRunMonitor()
-    const reopenPromise = openRunMonitor({ source: 'test' })
+    closeStatusMonitor()
+    const reopenPromise = openStatusMonitor({ source: 'test' })
     expect(document.querySelector('.status-monitor-pulse-strip')?.dataset.pulseLoad).toBe('idle')
     await reopenPromise
     expect(document.querySelector('.status-monitor-pulse-placeholder-line')).not.toBeNull()
     expect(document.querySelector('.status-monitor-pulse-line')).not.toBeNull()
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('shows active-run loading state on open instead of stale cached rows', async () => {
@@ -898,40 +898,40 @@ describe('Status Monitor', () => {
       command: 'sleep 10',
       started: new Date().toISOString(),
     }
-    const { openRunMonitor, closeRunMonitor, apiFetch } = loadRunMonitor({ runs: [[activeRun], []] })
+    const { openStatusMonitor, closeStatusMonitor, apiFetch } = loadStatusMonitor({ runs: [[activeRun], []] })
 
-    const firstOpen = openRunMonitor({ source: 'test' })
+    const firstOpen = openStatusMonitor({ source: 'test' })
     expect(apiFetch.mock.calls[0]?.[0]).toBe('/history/active')
-    expect(document.querySelector('.run-monitor-summary')?.textContent).toBe('Loading active runs...')
+    expect(document.querySelector('.status-monitor-summary')?.textContent).toBe('Loading active runs...')
     expect(document.querySelector('.status-monitor-runs-empty')?.textContent).toBe('Loading active runs...')
-    expect(document.querySelector('.run-monitor-list')?.textContent).not.toContain('sleep 10')
+    expect(document.querySelector('.status-monitor-list')?.textContent).not.toContain('sleep 10')
 
     await firstOpen
-    expect(document.querySelector('.run-monitor-list')?.textContent).toContain('sleep 10')
-    closeRunMonitor()
+    expect(document.querySelector('.status-monitor-list')?.textContent).toContain('sleep 10')
+    closeStatusMonitor()
 
-    const reopen = openRunMonitor({ source: 'test' })
-    expect(document.querySelector('.run-monitor-summary')?.textContent).toBe('Loading active runs...')
+    const reopen = openStatusMonitor({ source: 'test' })
+    expect(document.querySelector('.status-monitor-summary')?.textContent).toBe('Loading active runs...')
     expect(document.querySelector('.status-monitor-runs-empty')?.textContent).toBe('Loading active runs...')
-    expect(document.querySelector('.run-monitor-list')?.textContent).not.toContain('sleep 10')
+    expect(document.querySelector('.status-monitor-list')?.textContent).not.toContain('sleep 10')
 
     await reopen
     expect(document.querySelector('.status-monitor-runs-empty')?.textContent).toBe('No active runs.')
-    expect(document.querySelector('.run-monitor-list')?.textContent).not.toContain('sleep 10')
-    closeRunMonitor()
+    expect(document.querySelector('.status-monitor-list')?.textContent).not.toContain('sleep 10')
+    closeStatusMonitor()
   })
 
   it('opens as a status dashboard when there are no active runs', async () => {
-    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({ runs: [] })
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({ runs: [] })
 
-    await expect(openRunMonitor({ source: 'test' })).resolves.toBe(true)
+    await expect(openStatusMonitor({ source: 'test' })).resolves.toBe(true)
 
-    expect(document.getElementById('run-monitor')?.classList.contains('u-hidden')).toBe(false)
-    expect(document.getElementById('run-monitor')?.classList.contains('run-monitor-modal')).toBe(true)
-    expect(document.body.classList.contains('run-monitor-desktop-open')).toBe(true)
-    expect(document.querySelector('.run-monitor-summary')?.textContent).toBe('0 active · 12s uptime')
-    expect(document.querySelector('.run-monitor-list')?.children.length).toBe(4)
-    expect(document.querySelector('#run-monitor-title')?.textContent).toBe('Status Monitor')
+    expect(document.getElementById('status-monitor')?.classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('status-monitor')?.classList.contains('status-monitor-modal')).toBe(true)
+    expect(document.body.classList.contains('status-monitor-desktop-open')).toBe(true)
+    expect(document.querySelector('.status-monitor-summary')?.textContent).toBe('0 active · 12s uptime')
+    expect(document.querySelector('.status-monitor-list')?.children.length).toBe(4)
+    expect(document.querySelector('#status-monitor-title')?.textContent).toBe('Status Monitor')
     expect(document.querySelector('.status-monitor-pulse-strip')).not.toBeNull()
     expect(document.querySelector('.status-monitor-health-pips')).toBeNull()
     expect(document.querySelector('.status-monitor-constellation-card')?.textContent).toContain('Command Constellation')
@@ -1014,32 +1014,32 @@ describe('Status Monitor', () => {
     const runsSection = document.querySelector('.status-monitor-runs-section')
     const visualGrid = document.querySelector('.status-monitor-showcase-grid')
     const eventRow = document.querySelector('.status-monitor-event-row')
-    await window.refreshRunMonitor()
+    await window.refreshStatusMonitor()
     expect(document.querySelector('.status-monitor-pulse-strip')).toBe(pulseStrip)
     expect(document.querySelector('.status-monitor-runs-section')).toBe(runsSection)
     expect(document.querySelector('.status-monitor-showcase-grid')).toBe(visualGrid)
     expect(document.querySelectorAll('.status-monitor-showcase-grid')).toHaveLength(1)
     expect(document.querySelector('.status-monitor-event-row')).toBe(eventRow)
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('opens history from command territory tiles', async () => {
     const openHistoryWithFilters = vi.fn()
-    const { openRunMonitor } = loadRunMonitor({ runs: [], openHistoryWithFilters })
+    const { openStatusMonitor } = loadStatusMonitor({ runs: [], openHistoryWithFilters })
 
-    await expect(openRunMonitor({ source: 'test' })).resolves.toBe(true)
+    await expect(openStatusMonitor({ source: 'test' })).resolves.toBe(true)
 
     document.querySelector('.status-monitor-treemap-tile')?.dispatchEvent(
       new MouseEvent('click', { bubbles: true, cancelable: true }),
     )
 
     expect(openHistoryWithFilters).toHaveBeenCalledWith({ type: 'runs', commandRoot: 'nmap' })
-    expect(document.getElementById('run-monitor')?.classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('status-monitor')?.classList.contains('u-hidden')).toBe(true)
   })
 
   it('keeps dashboard fallbacks visible when status data routes fail', async () => {
-    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
       runs: [],
       routeErrors: {
         status: { error: 'status route down' },
@@ -1049,7 +1049,7 @@ describe('Status Monitor', () => {
       },
     })
 
-    await expect(openRunMonitor({ source: 'test' })).resolves.toBe(true)
+    await expect(openStatusMonitor({ source: 'test' })).resolves.toBe(true)
 
     const sections = [...document.querySelectorAll('.status-monitor-section')]
     const sectionText = Object.fromEntries(sections.map(section => [
@@ -1065,19 +1065,19 @@ describe('Status Monitor', () => {
     expect(document.querySelector('.status-monitor-treemap-card')?.textContent).toContain('no commands yet')
     expect(document.querySelector('.status-monitor-event-ticker')?.textContent).toContain('waiting for run events')
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('shows fallback toasts when optional history helpers are unavailable', async () => {
-    const { openRunMonitor, showToast } = loadRunMonitor({ runs: [] })
+    const { openStatusMonitor, showToast } = loadStatusMonitor({ runs: [] })
 
-    await expect(openRunMonitor({ source: 'test' })).resolves.toBe(true)
+    await expect(openStatusMonitor({ source: 'test' })).resolves.toBe(true)
 
     document.querySelector('.status-monitor-treemap-tile')?.dispatchEvent(
       new MouseEvent('click', { bubbles: true, cancelable: true }),
     )
     expect(showToast).toHaveBeenCalledWith('History filtering is not available', 'error')
-    expect(document.getElementById('run-monitor')?.classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('status-monitor')?.classList.contains('u-hidden')).toBe(false)
 
     document.querySelector('.status-monitor-star-node')?.dispatchEvent(
       new MouseEvent('click', { bubbles: true, cancelable: true }),
@@ -1085,26 +1085,26 @@ describe('Status Monitor', () => {
     await new Promise(resolve => setImmediate(resolve))
 
     expect(showToast).toHaveBeenCalledWith('Run restore is not available', 'error')
-    expect(document.getElementById('run-monitor')?.classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('status-monitor')?.classList.contains('u-hidden')).toBe(false)
   })
 
   it('opens on mobile when the optional sheet binder is unavailable', async () => {
-    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({ runs: [], mobile: true })
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({ runs: [], mobile: true })
 
-    await expect(openRunMonitor({ source: 'test' })).resolves.toBe(true)
+    await expect(openStatusMonitor({ source: 'test' })).resolves.toBe(true)
 
-    expect(document.getElementById('run-monitor')?.classList.contains('u-hidden')).toBe(false)
-    expect(document.body.classList.contains('run-monitor-mobile-open')).toBe(true)
-    expect(document.getElementById('run-monitor')?.classList.contains('chrome-drawer')).toBe(false)
+    expect(document.getElementById('status-monitor')?.classList.contains('u-hidden')).toBe(false)
+    expect(document.body.classList.contains('status-monitor-mobile-open')).toBe(true)
+    expect(document.getElementById('status-monitor')?.classList.contains('chrome-drawer')).toBe(false)
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('restores runs from constellation stars', async () => {
     const restoreHistoryRun = vi.fn(() => Promise.resolve('tab-restored'))
-    const { openRunMonitor } = loadRunMonitor({ runs: [], restoreHistoryRun })
+    const { openStatusMonitor } = loadStatusMonitor({ runs: [], restoreHistoryRun })
 
-    await expect(openRunMonitor({ source: 'test' })).resolves.toBe(true)
+    await expect(openStatusMonitor({ source: 'test' })).resolves.toBe(true)
 
     document.querySelector('.status-monitor-star-node')?.dispatchEvent(
       new MouseEvent('click', { bubbles: true, cancelable: true }),
@@ -1112,11 +1112,11 @@ describe('Status Monitor', () => {
     await new Promise(resolve => setImmediate(resolve))
 
     expect(restoreHistoryRun).toHaveBeenCalledWith('run-star-1', { hidePanelOnSuccess: false })
-    expect(document.getElementById('run-monitor')?.classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('status-monitor')?.classList.contains('u-hidden')).toBe(true)
   })
 
   it('keeps failed constellation stars category-colored with a failure ring', async () => {
-    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
       runs: [],
       insights: {
         days: 28,
@@ -1159,7 +1159,7 @@ describe('Status Monitor', () => {
       },
     })
 
-    await expect(openRunMonitor({ source: 'test' })).resolves.toBe(true)
+    await expect(openStatusMonitor({ source: 'test' })).resolves.toBe(true)
 
     const failedStar = document.querySelector('.status-monitor-star-failed')
     expect(failedStar).not.toBeNull()
@@ -1168,11 +1168,11 @@ describe('Status Monitor', () => {
     expect(document.querySelector('.status-monitor-event-failed')).toBeNull()
     expect(document.querySelector('.status-monitor-event-row')?.textContent).toContain('ping terminated')
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('normalizes unmapped command categories and decorative seeds', async () => {
-    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
       runs: [],
       insights: {
         days: 28,
@@ -1227,7 +1227,7 @@ describe('Status Monitor', () => {
       },
     })
 
-    await expect(openRunMonitor({ source: 'test' })).resolves.toBe(true)
+    await expect(openStatusMonitor({ source: 'test' })).resolves.toBe(true)
 
     const tiles = [...document.querySelectorAll('.status-monitor-treemap-tile')]
     expect(tiles).toHaveLength(2)
@@ -1245,7 +1245,7 @@ describe('Status Monitor', () => {
     const streak = document.querySelector('.status-monitor-constellation-streak')
     expect(streak).not.toBeNull()
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('uses a squarified command territory layout for small tiles', async () => {
@@ -1274,7 +1274,7 @@ describe('Status Monitor', () => {
       average_elapsed_seconds: 2,
       total_elapsed_seconds: Number(count) * 2,
     }))
-    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
       runs: [],
       insights: {
         days: 28,
@@ -1287,7 +1287,7 @@ describe('Status Monitor', () => {
       },
     })
 
-    await expect(openRunMonitor({ source: 'test' })).resolves.toBe(true)
+    await expect(openStatusMonitor({ source: 'test' })).resolves.toBe(true)
 
     const aspects = [...document.querySelectorAll('.status-monitor-treemap-tile')].map((tile) => {
       const width = parseFloat(tile.style.width || '0')
@@ -1298,11 +1298,11 @@ describe('Status Monitor', () => {
     expect(Math.max(...aspects)).toBeLessThan(8)
     expect(document.querySelectorAll('.status-monitor-treemap-tile-compact').length).toBeGreaterThan(0)
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('keeps an ambient constellation visible before real run history exists', async () => {
-    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
       runs: [],
       insights: {
         days: 28,
@@ -1315,14 +1315,14 @@ describe('Status Monitor', () => {
       },
     })
 
-    await expect(openRunMonitor({ source: 'test' })).resolves.toBe(true)
+    await expect(openStatusMonitor({ source: 'test' })).resolves.toBe(true)
 
     expect(document.querySelectorAll('.status-monitor-star-ambient').length).toBeGreaterThan(0)
     expect(document.querySelector('.status-monitor-star-node')).toBeNull()
     expect(document.querySelector('.status-monitor-constellation-sparse')?.textContent).toBe('Run history will populate this constellation.')
     expect(document.querySelector('.status-monitor-constellation-empty')).toBeNull()
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('uses mobile sheet chrome and shared sheet binding on mobile', async () => {
@@ -1333,15 +1333,15 @@ describe('Status Monitor', () => {
       grab.setAttribute('aria-hidden', 'true')
       sheet.insertBefore(grab, sheet.firstChild || null)
     })
-    const { openRunMonitor } = loadRunMonitor({ runs: [], mobile: false, bindMobileSheet })
+    const { openStatusMonitor } = loadStatusMonitor({ runs: [], mobile: false, bindMobileSheet })
 
-    await openRunMonitor({ source: 'mobile-peek' })
+    await openStatusMonitor({ source: 'mobile-peek' })
 
-    const monitor = document.getElementById('run-monitor')
+    const monitor = document.getElementById('status-monitor')
     expect(monitor?.classList.contains('mobile-sheet-surface')).toBe(true)
     expect(monitor?.classList.contains('chrome-drawer')).toBe(false)
-    expect(document.body.classList.contains('run-monitor-mobile-open')).toBe(true)
-    expect(document.querySelector('#run-monitor > .sheet-grab.gesture-handle')).not.toBeNull()
+    expect(document.body.classList.contains('status-monitor-mobile-open')).toBe(true)
+    expect(document.querySelector('#status-monitor > .sheet-grab.gesture-handle')).not.toBeNull()
     expect(bindMobileSheet).toHaveBeenCalledWith(monitor, expect.objectContaining({ onClose: expect.any(Function) }))
   })
 
@@ -1349,7 +1349,7 @@ describe('Status Monitor', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'))
     const started = new Date().toISOString()
-    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({
+    const { openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
       runs: [
         [
           {
@@ -1392,25 +1392,25 @@ describe('Status Monitor', () => {
       ],
     })
 
-    await openRunMonitor({ source: 'test' })
-    expect(document.querySelector('.run-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU collecting')
+    await openStatusMonitor({ source: 'test' })
+    expect(document.querySelector('.status-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU collecting')
 
     vi.setSystemTime(new Date('2026-01-01T00:00:01Z'))
-    await window.refreshRunMonitor()
-    expect(document.querySelector('.run-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU 100%')
-    expect(document.querySelector('.run-monitor-meter-cpu')?.style.getPropertyValue('--meter-percent')).toBe('100%')
-    expect(document.querySelector('.run-monitor-meter-mem')?.getAttribute('aria-label')).toBe('MEM 8.0 KB')
+    await window.refreshStatusMonitor()
+    expect(document.querySelector('.status-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU 100%')
+    expect(document.querySelector('.status-monitor-meter-cpu')?.style.getPropertyValue('--meter-percent')).toBe('100%')
+    expect(document.querySelector('.status-monitor-meter-mem')?.getAttribute('aria-label')).toBe('MEM 8.0 KB')
 
     vi.setSystemTime(new Date('2026-01-01T00:00:02Z'))
-    await window.refreshRunMonitor()
-    expect(document.querySelector('.run-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU 100%')
-    expect(document.querySelector('.run-monitor-meter-mem')?.getAttribute('aria-label')).toBe('MEM 12 KB')
+    await window.refreshStatusMonitor()
+    expect(document.querySelector('.status-monitor-meter-cpu')?.getAttribute('aria-label')).toBe('CPU 100%')
+    expect(document.querySelector('.status-monitor-meter-mem')?.getAttribute('aria-label')).toBe('MEM 12 KB')
 
-    closeRunMonitor()
+    closeStatusMonitor()
   })
 
   it('adds the running status affordance and pulses it once per session', async () => {
-    loadRunMonitor()
+    loadStatusMonitor()
     const cell = document.getElementById('hud-status-cell')
 
     document.dispatchEvent(new CustomEvent('app:status-changed', { detail: { status: 'running' } }))

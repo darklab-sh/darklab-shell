@@ -127,7 +127,7 @@ Order matches the scene array in `tests/js/e2e/ui-capture.desktop.capture.js`.
 | 29 | `line-numbers-and-timestamps-enabled` | `/` | Both prefixes stacked. | Combined prefix width accommodates both; content wraps correctly inside the remaining width (regression target for the mobile-overflow fix). |
 | 30 | `snapshot-page` | `/share/:id` | Permalink landing page from `/share`. | Expiry line promoted above the run-meta row; share-unredacted-vs-redacted treatment visible; page-level save menu present. |
 | 31 | `permalink-page` | `/history/:id` | Permalink landing page from `/history`. | Prompt prefix on echoed command lines renders the configured `prompt_prefix` (not a bare `$`); header metadata alignment; green border removed from the page title. |
-| 32 | `run-monitor-active-telemetry` | `/` | Run Monitor drawer open while a command is active and resource telemetry has populated. | Drawer grows from the HUD without covering the rail; row uses the green active accent; CPU/MEM circular meters show populated values, not `n/a`; meter labels remain readable across themes. |
+| 32 | `status-monitor-active-telemetry` | `/` | Status Monitor drawer open while a command is active and resource telemetry has populated. | Drawer grows from the HUD without covering the rail; row uses the green active accent; CPU/MEM circular meters show populated values, not `n/a`; meter labels remain readable across themes. |
 | 33 | `diag-page` | `/diag` | Operator `/diag` page. | Activity and Outcomes cards are split; refreshed-at freshness line under the header; config `true` values not green-by-default; diag back-button present only at mobile/touch breakpoints (it should not appear here). |
 
 ## Mobile pack (27 scenes)

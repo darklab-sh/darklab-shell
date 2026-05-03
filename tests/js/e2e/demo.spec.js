@@ -178,21 +178,21 @@ async function openFirstWorkflowFromRail(page) {
   await page.locator('#workflows-overlay').waitFor({ state: 'visible' })
 }
 
-async function waitForRunMonitorResourceValues(page) {
-  await page.locator('#run-monitor').waitFor({ state: 'visible', timeout: 10_000 })
+async function waitForStatusMonitorResourceValues(page) {
+  await page.locator('#status-monitor').waitFor({ state: 'visible', timeout: 10_000 })
   await page.waitForTimeout(3_400)
   await page.evaluate(async () => {
-    if (typeof window.refreshRunMonitor === 'function') await window.refreshRunMonitor()
+    if (typeof window.refreshStatusMonitor === 'function') await window.refreshStatusMonitor()
   })
-  await expect(page.locator('.run-monitor-meter-cpu').first()).toHaveAttribute('aria-label', /CPU (?!n\/a|collecting)/, {
+  await expect(page.locator('.status-monitor-meter-cpu').first()).toHaveAttribute('aria-label', /CPU (?!n\/a|collecting)/, {
     timeout: 10_000,
   })
-  await expect(page.locator('.run-monitor-meter-mem').first()).toHaveAttribute('aria-label', /MEM (?!n\/a)/, {
+  await expect(page.locator('.status-monitor-meter-mem').first()).toHaveAttribute('aria-label', /MEM (?!n\/a)/, {
     timeout: 10_000,
   })
 }
 
-async function prepareDemoRunMonitorTelemetry(page) {
+async function prepareDemoStatusMonitorTelemetry(page) {
   let activePollCount = 0
   const tabRun = await page.evaluate(() => {
     const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
@@ -381,16 +381,16 @@ test('demo', async ({ page }) => {
   await page.waitForTimeout(2_700)
 
   // ── Status Monitor: active run telemetry ────────────────────────────────────
-  await prepareDemoRunMonitorTelemetry(page)
+  await prepareDemoStatusMonitorTelemetry(page)
   await page.locator('#hud-status-cell').hover()
   await page.waitForTimeout(550)
   await page.locator('#hud-status-cell').click()
-  await waitForRunMonitorResourceValues(page)
+  await waitForStatusMonitorResourceValues(page)
   await freezeFrame(3_200)
-  await page.locator('.run-monitor-close').hover()
+  await page.locator('.status-monitor-close').hover()
   await page.waitForTimeout(600)
-  await page.locator('.run-monitor-close').click()
-  await page.locator('#run-monitor').waitFor({ state: 'hidden', timeout: 10_000 })
+  await page.locator('.status-monitor-close').click()
+  await page.locator('#status-monitor').waitFor({ state: 'hidden', timeout: 10_000 })
   await page.unroute('**/history/active').catch(() => {})
   await page.waitForTimeout(1_000)
 

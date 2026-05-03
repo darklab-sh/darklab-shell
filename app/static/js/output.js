@@ -274,11 +274,11 @@ function _isWelcomeLine(line) {
 function _isSyntheticSummaryLine(line) {
   if (!line || !line.classList) return false;
   return [
-    'fake-signal-summary-header',
-    'fake-signal-summary-section',
-    'fake-signal-summary-row',
-    'fake-signal-summary-note',
-    'fake-signal-summary-sep',
+    'builtin-signal-summary-header',
+    'builtin-signal-summary-section',
+    'builtin-signal-summary-row',
+    'builtin-signal-summary-note',
+    'builtin-signal-summary-sep',
   ].some(cls => line.classList.contains(cls));
 }
 

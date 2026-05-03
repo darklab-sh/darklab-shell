@@ -29,11 +29,6 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Technical Debt
 
-- **Stale internal naming cleanup**
-  - Rename remaining `fake` command terminology in the codebase to `built-in` command terminology.
-  - Rename remaining `run monitor` / `Run Monitor` code identifiers, comments, tests, and docs to `status monitor` / `Status Monitor` where they now refer to the redesigned Status Monitor surface.
-  - Keep compatibility aliases only where they are still needed for persisted data, route contracts, or existing configuration keys; otherwise prefer one canonical name per concept.
-
 ---
 
 ## Ideas
@@ -122,7 +117,7 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Keep execution ownership separate where it matters, but remove duplicated recents/history/pipe/persistence glue so browser-owned and server-owned built-ins cannot drift.
 
 - **Plugin-style helper command registry**
-  - Turn the fake-command layer into a cleaner extension surface for future app-native helpers.
+  - Turn the built-in command layer into a cleaner extension surface for future app-native helpers.
 
 - **Lightweight Jinja base template**
   - `index.html`, `permalink_base.html`, and `diag.html` now all share the same ~10 lines of `<head>` bootstrap (charset, viewport, color-scheme meta, favicon, `fonts.css`, `styles.css`, theme var includes, and the two vendor scripts). With three templates the duplication is starting to pay for the indirection.

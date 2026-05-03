@@ -1,5 +1,5 @@
 """
-Synthetic command handlers for common shell commands that should be useful in
+Built-in command handlers for common shell commands that should be useful in
 the app without spawning a real process.
 """
 
@@ -168,7 +168,7 @@ _SNARKY_SU_RESPONSES = [
     "su: request denied by the continued health of the infrastructure.",
 ]
 _FORK_BOMB_RE = re.compile(r"^:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:$")
-_SPECIAL_FAKE_COMMANDS = {
+_SPECIAL_BUILTIN_COMMANDS = {
     ":(){ :|:& };:": "fork_bomb",
     "coffee": "coffee",
     "halt": "poweroff",
@@ -185,7 +185,7 @@ _SPECIAL_FAKE_COMMANDS = {
     "xyzzy": "xyzzy",
 }
 _BACKSPACE_RE = re.compile(r".\x08")
-_DOCUMENTED_FAKE_COMMANDS = [
+_DOCUMENTED_BUILTIN_COMMANDS = [
     {"name": "banner", "description": "Print the configured banner art without replaying welcome.", "root": "banner"},
     {"name": "cat <file>", "description": "Show a session file.", "root": "cat"},
     {"name": "cd [folder]", "description": "Change the current workspace folder for this tab.", "root": "cd"},
@@ -242,11 +242,11 @@ _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "wordlist", "description": "List and search installed SecLists wordlists.", "root": "wordlist"},
     {"name": "workflow", "description": "List, inspect, and run guided workflows from the terminal.", "root": "workflow"},
 ]
-_FAKE_COMMAND_HELP = [(entry["name"], entry["description"]) for entry in _DOCUMENTED_FAKE_COMMANDS]
-_DOCUMENTED_FAKE_COMMAND_ROOTS = {entry["root"] for entry in _DOCUMENTED_FAKE_COMMANDS if "root" in entry}
-_FAKE_COMMANDS = _DOCUMENTED_FAKE_COMMAND_ROOTS | {"reboot", "sudo"}
+_BUILTIN_COMMAND_HELP = [(entry["name"], entry["description"]) for entry in _DOCUMENTED_BUILTIN_COMMANDS]
+_DOCUMENTED_BUILTIN_COMMAND_ROOTS = {entry["root"] for entry in _DOCUMENTED_BUILTIN_COMMANDS if "root" in entry}
+_BUILTIN_COMMANDS = _DOCUMENTED_BUILTIN_COMMAND_ROOTS | {"reboot", "sudo"}
 _WORKSPACE_ALIAS_ROOTS = {"cat", "cd", "grep", "head", "ll", "ls", "mkdir", "rm", "sort", "tail", "uniq", "wc"}
-_WORKSPACE_FAKE_ROOTS = _WORKSPACE_ALIAS_ROOTS | {"file"}
+_WORKSPACE_BUILTIN_ROOTS = _WORKSPACE_ALIAS_ROOTS | {"file"}
 _SYNTHETIC_MAN_EXCLUDED_ROOTS = {"cat", "ll", "ls", "rm"}
 
 
@@ -254,32 +254,32 @@ def _workspace_feature_enabled() -> bool:
     return bool(CFG.get("workspace_enabled", False))
 
 
-def _active_documented_fake_commands() -> list[dict[str, str]]:
+def _active_documented_builtin_commands() -> list[dict[str, str]]:
     if _workspace_feature_enabled():
-        return _DOCUMENTED_FAKE_COMMANDS
+        return _DOCUMENTED_BUILTIN_COMMANDS
     return [
-        entry for entry in _DOCUMENTED_FAKE_COMMANDS
-        if str(entry.get("root") or "") not in _WORKSPACE_FAKE_ROOTS
+        entry for entry in _DOCUMENTED_BUILTIN_COMMANDS
+        if str(entry.get("root") or "") not in _WORKSPACE_BUILTIN_ROOTS
     ]
 
 
-def _active_fake_command_roots() -> set[str]:
-    roots = set(_FAKE_COMMANDS)
+def _active_builtin_command_roots() -> set[str]:
+    roots = set(_BUILTIN_COMMANDS)
     if not _workspace_feature_enabled():
-        roots -= _WORKSPACE_FAKE_ROOTS
+        roots -= _WORKSPACE_BUILTIN_ROOTS
     return roots
 
 
 def _split_command(command: str) -> list[str]:
-    # Fake-command routing keys off the first token only so "history --help"
-    # resolves to the same synthetic implementation as plain "history".
+    # Built-in command routing keys off the first token only so "history --help"
+    # resolves to the same built-in implementation as plain "history".
     return split_command_argv(command)
 
 
-def _resolve_special_fake_command(command: str) -> str | None:
+def _resolve_special_builtin_command(command: str) -> str | None:
     normalized = " ".join(command.strip().lower().split())
-    if normalized in _SPECIAL_FAKE_COMMANDS:
-        return _SPECIAL_FAKE_COMMANDS[normalized]
+    if normalized in _SPECIAL_BUILTIN_COMMANDS:
+        return _SPECIAL_BUILTIN_COMMANDS[normalized]
     if _FORK_BOMB_RE.fullmatch(command.strip()):
         return "fork_bomb"
     return None
@@ -307,15 +307,15 @@ def _resolve_workspace_alias_command(parts: list[str]) -> str | None:
     return None
 
 
-def resolve_fake_command(command: str) -> str | None:
-    special = _resolve_special_fake_command(command)
+def resolve_builtin_command(command: str) -> str | None:
+    special = _resolve_special_builtin_command(command)
     if special is not None:
         return special
     parts = _split_command(command)
     if not parts:
         return None
     root = parts[0].lower()
-    active_roots = _active_fake_command_roots()
+    active_roots = _active_builtin_command_roots()
     if root in _WORKSPACE_ALIAS_ROOTS:
         if root not in active_roots:
             return None
@@ -323,8 +323,8 @@ def resolve_fake_command(command: str) -> str | None:
     return root if root in active_roots else None
 
 
-def resolves_exact_special_fake_command(command: str) -> bool:
-    return _resolve_special_fake_command(command) is not None
+def resolves_exact_special_builtin_command(command: str) -> bool:
+    return _resolve_special_builtin_command(command) is not None
 
 
 def get_special_command_keys() -> list[str]:
@@ -333,94 +333,94 @@ def get_special_command_keys() -> list[str]:
     The JS client uses this list to exempt these commands from the client-side
     shell-operator validation check before they reach the server.
     """
-    return list(_SPECIAL_FAKE_COMMANDS.keys())
+    return list(_SPECIAL_BUILTIN_COMMANDS.keys())
 
 
-def get_fake_command_roots() -> list[str]:
-    """Return the command roots routed by the backend fake-command layer."""
+def get_builtin_command_roots() -> list[str]:
+    """Return the command roots routed by the backend built-in command layer."""
     exact_roots: set[str] = set()
-    for key in _SPECIAL_FAKE_COMMANDS:
+    for key in _SPECIAL_BUILTIN_COMMANDS:
         root = command_root(key)
         if root:
             if not _workspace_feature_enabled() and root in _WORKSPACE_ALIAS_ROOTS:
                 continue
             exact_roots.add(root)
-    return sorted(root for root in (_active_fake_command_roots() | exact_roots) if root)
+    return sorted(root for root in (_active_builtin_command_roots() | exact_roots) if root)
 
 
-_FAKE_COMMAND_DISPATCH = {
-    "banner":    lambda cmd, sid: _run_fake_banner(),
-    "cat":       lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
-    "cd":        lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
-    "clear":     lambda cmd, sid: _run_fake_clear(),
-    "commands":  lambda cmd, sid: _run_fake_commands(cmd),
-    "config":    lambda cmd, sid: _run_fake_client_side_command("config"),
-    "date":      lambda cmd, sid: _run_fake_date(),
-    "env":       lambda cmd, sid: _run_fake_env(sid),
-    "faq":       lambda cmd, sid: _run_fake_faq(),
-    "fortune":   lambda cmd, sid: _run_fake_fortune(),
-    "groups":    lambda cmd, sid: _run_fake_groups(),
-    "grep":      lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
-    "head":      lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
-    "help":      lambda cmd, sid: _run_fake_help(),
-    "history":   lambda cmd, sid: _run_fake_history(sid),
-    "hostname":  lambda cmd, sid: _run_fake_hostname(),
-    "id":        lambda cmd, sid: _run_fake_id(),
-    "ip_addr":   lambda cmd, sid: _run_fake_ip_addr(),
-    "jobs":      lambda cmd, sid: _run_fake_runs(cmd, sid),
-    "last":      lambda cmd, sid: _run_fake_last(sid),
-    "limits":    lambda cmd, sid: _run_fake_limits(),
-    "ll":        lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
-    "ls":        lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
-    "mkdir":     lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
-    "man":       lambda cmd, sid: _run_fake_man(cmd),
-    "ps":        lambda cmd, sid: _run_fake_ps(sid, cmd),
-    "pwd":       lambda cmd, sid: _run_fake_pwd(),
-    "poweroff":  lambda cmd, sid: _run_fake_poweroff(),
-    "reboot":    lambda cmd, sid: _run_fake_reboot(),
-    "retention": lambda cmd, sid: _run_fake_retention(),
-    "rm":        lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
-    "rm_root":   lambda cmd, sid: _run_fake_rm_root(),
-    "route":     lambda cmd, sid: _run_fake_route(),
-    "runs":      lambda cmd, sid: _run_fake_runs(cmd, sid),
-    "session-token": lambda cmd, sid: _run_fake_session_token(cmd, sid),
-    "shortcuts": lambda cmd, sid: _run_fake_shortcuts(),
-    "sort":      lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
-    "stats":     lambda cmd, sid: _run_fake_stats(sid),
-    "status":    lambda cmd, sid: _run_fake_status(sid),
-    "tail":      lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
-    "sudo":      lambda cmd, sid: _run_fake_sudo(cmd),
-    "su_shell":  lambda cmd, sid: _run_fake_su(cmd),
-    "theme":     lambda cmd, sid: _run_fake_client_side_command("theme"),
-    "tty":       lambda cmd, sid: _run_fake_tty(),
-    "type":      lambda cmd, sid: _run_fake_type(cmd),
-    "uname":     lambda cmd, sid: _run_fake_uname(cmd),
-    "uptime":    lambda cmd, sid: _run_fake_uptime(),
-    "uniq":      lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
-    "var":       lambda cmd, sid: _run_fake_var(cmd, sid),
-    "version":   lambda cmd, sid: _run_fake_version(),
-    "file":      lambda cmd, sid: _run_fake_workspace(cmd, sid),
-    "wc":        lambda cmd, sid: _run_fake_workspace_alias(cmd, sid),
-    "which":     lambda cmd, sid: _run_fake_which(cmd),
-    "who":       lambda cmd, sid: _run_fake_who(sid),
-    "whoami":    lambda cmd, sid: _run_fake_whoami(),
-    "wordlist":  lambda cmd, sid: _run_fake_wordlist(cmd),
-    "workflow":  lambda cmd, sid: _run_fake_client_side_command("workflow"),
-    "xyzzy":     lambda cmd, sid: _run_fake_xyzzy(),
-    "coffee":    lambda cmd, sid: _run_fake_coffee(),
-    "fork_bomb": lambda cmd, sid: _run_fake_fork_bomb(),
-    "df":        lambda cmd, sid: _run_fake_df(cmd),
-    "free":      lambda cmd, sid: _run_fake_free(cmd),
+_BUILTIN_COMMAND_DISPATCH = {
+    "banner":    lambda cmd, sid: _run_builtin_banner(),
+    "cat":       lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "cd":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "clear":     lambda cmd, sid: _run_builtin_clear(),
+    "commands":  lambda cmd, sid: _run_builtin_commands(cmd),
+    "config":    lambda cmd, sid: _run_builtin_client_side_command("config"),
+    "date":      lambda cmd, sid: _run_builtin_date(),
+    "env":       lambda cmd, sid: _run_builtin_env(sid),
+    "faq":       lambda cmd, sid: _run_builtin_faq(),
+    "fortune":   lambda cmd, sid: _run_builtin_fortune(),
+    "groups":    lambda cmd, sid: _run_builtin_groups(),
+    "grep":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "head":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "help":      lambda cmd, sid: _run_builtin_help(),
+    "history":   lambda cmd, sid: _run_builtin_history(sid),
+    "hostname":  lambda cmd, sid: _run_builtin_hostname(),
+    "id":        lambda cmd, sid: _run_builtin_id(),
+    "ip_addr":   lambda cmd, sid: _run_builtin_ip_addr(),
+    "jobs":      lambda cmd, sid: _run_builtin_runs(cmd, sid),
+    "last":      lambda cmd, sid: _run_builtin_last(sid),
+    "limits":    lambda cmd, sid: _run_builtin_limits(),
+    "ll":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "ls":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "mkdir":     lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "man":       lambda cmd, sid: _run_builtin_man(cmd),
+    "ps":        lambda cmd, sid: _run_builtin_ps(sid, cmd),
+    "pwd":       lambda cmd, sid: _run_builtin_pwd(),
+    "poweroff":  lambda cmd, sid: _run_builtin_poweroff(),
+    "reboot":    lambda cmd, sid: _run_builtin_reboot(),
+    "retention": lambda cmd, sid: _run_builtin_retention(),
+    "rm":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "rm_root":   lambda cmd, sid: _run_builtin_rm_root(),
+    "route":     lambda cmd, sid: _run_builtin_route(),
+    "runs":      lambda cmd, sid: _run_builtin_runs(cmd, sid),
+    "session-token": lambda cmd, sid: _run_builtin_session_token(cmd, sid),
+    "shortcuts": lambda cmd, sid: _run_builtin_shortcuts(),
+    "sort":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "stats":     lambda cmd, sid: _run_builtin_stats(sid),
+    "status":    lambda cmd, sid: _run_builtin_status(sid),
+    "tail":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "sudo":      lambda cmd, sid: _run_builtin_sudo(cmd),
+    "su_shell":  lambda cmd, sid: _run_builtin_su(cmd),
+    "theme":     lambda cmd, sid: _run_builtin_client_side_command("theme"),
+    "tty":       lambda cmd, sid: _run_builtin_tty(),
+    "type":      lambda cmd, sid: _run_builtin_type(cmd),
+    "uname":     lambda cmd, sid: _run_builtin_uname(cmd),
+    "uptime":    lambda cmd, sid: _run_builtin_uptime(),
+    "uniq":      lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "var":       lambda cmd, sid: _run_builtin_var(cmd, sid),
+    "version":   lambda cmd, sid: _run_builtin_version(),
+    "file":      lambda cmd, sid: _run_builtin_workspace(cmd, sid),
+    "wc":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "which":     lambda cmd, sid: _run_builtin_which(cmd),
+    "who":       lambda cmd, sid: _run_builtin_who(sid),
+    "whoami":    lambda cmd, sid: _run_builtin_whoami(),
+    "wordlist":  lambda cmd, sid: _run_builtin_wordlist(cmd),
+    "workflow":  lambda cmd, sid: _run_builtin_client_side_command("workflow"),
+    "xyzzy":     lambda cmd, sid: _run_builtin_xyzzy(),
+    "coffee":    lambda cmd, sid: _run_builtin_coffee(),
+    "fork_bomb": lambda cmd, sid: _run_builtin_fork_bomb(),
+    "df":        lambda cmd, sid: _run_builtin_df(cmd),
+    "free":      lambda cmd, sid: _run_builtin_free(cmd),
 }
 
 
-def execute_fake_command(command: str, session_id: str) -> tuple[list[dict[str, str]], int]:
-    # Fake commands still return the same [{text, class}, ...], exit_code shape
+def execute_builtin_command(command: str, session_id: str) -> tuple[list[dict[str, str]], int]:
+    # Built-in commands still return the same [{text, class}, ...], exit_code shape
     # as real runs so the frontend path is identical.
-    root = resolve_fake_command(command)
-    handler = _FAKE_COMMAND_DISPATCH.get(root) if root is not None else None
+    root = resolve_builtin_command(command)
+    handler = _BUILTIN_COMMAND_DISPATCH.get(root) if root is not None else None
     if handler is None:
-        return [{"type": "output", "text": f"Unsupported fake command: {command.strip()}"}], 1
+        return [{"type": "output", "text": f"Unsupported built-in command: {command.strip()}"}], 1
     return handler(command, session_id), 0
 
 
@@ -452,7 +452,7 @@ def _describe_command(name: str) -> tuple[str, str | None]:
     root = command_root(name) or name.strip().lower()
     if not root:
         return "missing", None
-    if root in _active_fake_command_roots():
+    if root in _active_builtin_command_roots():
         return "helper", None
     if root not in _allowed_roots():
         return "missing", None
@@ -667,15 +667,15 @@ def _format_native_record(label: str, value: str, width: int) -> str:
     return f"{_ansi_cyan(f'{label:<{width}}')}  {value}"
 
 
-def _run_fake_help() -> list[dict[str, str]]:
+def _run_builtin_help() -> list[dict[str, str]]:
     lines = [
-        _output_line("Help and discovery:", "fake-section"),
-        _output_line(f"README: {_format_terminal_link(PROJECT_README, PROJECT_README)}", "fake-note"),
-        _output_line("Run `faq` to browse the configured FAQ entries inside the terminal.", "fake-plain"),
-        _output_line("Run `shortcuts` to see the current keyboard shortcuts.", "fake-plain"),
-        _output_line("Run `commands` to browse built-in and allowed external commands.", "fake-plain"),
-        _output_line("Use `commands --built-in` or `commands --external` to filter that catalog.", "fake-plain"),
-        _output_line("Autocomplete appears as you type; press Tab to accept or cycle suggestions.", "fake-plain"),
+        _output_line("Help and discovery:", "builtin-section"),
+        _output_line(f"README: {_format_terminal_link(PROJECT_README, PROJECT_README)}", "builtin-note"),
+        _output_line("Run `faq` to browse the configured FAQ entries inside the terminal.", "builtin-plain"),
+        _output_line("Run `shortcuts` to see the current keyboard shortcuts.", "builtin-plain"),
+        _output_line("Run `commands` to browse built-in and allowed external commands.", "builtin-plain"),
+        _output_line("Use `commands --built-in` or `commands --external` to filter that catalog.", "builtin-plain"),
+        _output_line("Autocomplete appears as you type; press Tab to accept or cycle suggestions.", "builtin-plain"),
     ]
     return lines
 
@@ -683,7 +683,7 @@ def _run_fake_help() -> list[dict[str, str]]:
 def _documented_builtin_rows() -> list[tuple[str, str]]:
     rows = [
         (str(entry["name"]), str(entry["description"]))
-        for entry in _active_documented_fake_commands()
+        for entry in _active_documented_builtin_commands()
     ]
     return sorted(rows, key=lambda item: item[0].lower())
 
@@ -715,7 +715,7 @@ def _allowed_external_command_groups() -> list[tuple[str, list[str]]] | None:
     return rows or None
 
 
-def _run_fake_commands(command: str) -> list[dict[str, str]]:
+def _run_builtin_commands(command: str) -> list[dict[str, str]]:
     parts = _split_command(command)
     filters = {part.lower() for part in parts[1:]}
     valid_filters = {"--built-in", "--external"}
@@ -735,26 +735,29 @@ def _run_fake_commands(command: str) -> list[dict[str, str]]:
     if show_builtins:
         builtins = _documented_builtin_rows()
         width = max((len(name) for name, _ in builtins), default=0)
-        lines.append(_output_line("Built-in commands:", "fake-section"))
+        lines.append(_output_line("Built-in commands:", "builtin-section"))
         for name, description in builtins:
-            lines.append(_output_line(f"  {name:<{width}}  {description}", "fake-help-row"))
+            lines.append(_output_line(f"  {name:<{width}}  {description}", "builtin-help-row"))
 
     if show_external:
         external_groups = _allowed_external_command_groups()
         if lines:
-            lines.append(_output_line("", "fake-spacer"))
-        lines.append(_output_line("Allowed external commands:", "fake-section"))
+            lines.append(_output_line("", "builtin-spacer"))
+        lines.append(_output_line("Allowed external commands:", "builtin-section"))
         if external_groups is None:
             lines.extend([
-                _output_line("  No allowlist is configured on this instance.", "fake-note"),
-                _output_line("  External commands are unrestricted here, so there is no finite catalog to print.", "fake-note"),
+                _output_line("  No allowlist is configured on this instance.", "builtin-note"),
+                _output_line(
+                    "  External commands are unrestricted here, so there is no finite catalog to print.",
+                    "builtin-note",
+                ),
             ])
         else:
             for name, commands in external_groups:
                 if name:
-                    lines.append(_output_line(f"[{name}]", "fake-section"))
-                lines.extend(_output_line(f"  {cmd}", "fake-catalog-item") for cmd in commands)
-                lines.append(_output_line("", "fake-spacer"))
+                    lines.append(_output_line(f"[{name}]", "builtin-section"))
+                lines.extend(_output_line(f"  {cmd}", "builtin-catalog-item") for cmd in commands)
+                lines.append(_output_line("", "builtin-spacer"))
             if lines and lines[-1].get("text", "") == "":
                 lines.pop()
 
@@ -763,37 +766,37 @@ def _run_fake_commands(command: str) -> list[dict[str, str]]:
 
 def _wordlist_usage() -> list[dict[str, str]]:
     return [
-        _output_line("Usage: wordlist [list [category] | search <term> | path <name-or-path> | --all]", "fake-note"),
-        _output_line("  wordlist", "fake-help-row"),
-        _output_line("  wordlist list dns", "fake-help-row"),
-        _output_line("  wordlist search raft", "fake-help-row"),
-        _output_line("  wordlist path common.txt", "fake-help-row"),
+        _output_line("Usage: wordlist [list [category] | search <term> | path <name-or-path> | --all]", "builtin-note"),
+        _output_line("  wordlist", "builtin-help-row"),
+        _output_line("  wordlist list dns", "builtin-help-row"),
+        _output_line("  wordlist search raft", "builtin-help-row"),
+        _output_line("  wordlist path common.txt", "builtin-help-row"),
     ]
 
 
 def _wordlist_rows(items: list[dict], *, heading: str) -> list[dict[str, str]]:
     if not items:
-        return [_output_line("No matching wordlists found.", "fake-note")]
+        return [_output_line("No matching wordlists found.", "builtin-note")]
     widths = {
         "category": max(len("category"), *(len(str(item.get("category") or "")) for item in items)),
         "name": max(len("name"), *(len(str(item.get("name") or "")) for item in items)),
     }
     lines = [
-        _output_line(heading, "fake-section"),
+        _output_line(heading, "builtin-section"),
         _output_line(
             f"  {'category':<{widths['category']}}  {'name':<{widths['name']}}  path",
-            "fake-help-row",
+            "builtin-help-row",
         ),
     ]
     for item in items:
         category = str(item.get("category") or "")
         name = str(item.get("name") or "")
         path = str(item.get("path") or "")
-        lines.append(_output_line(f"  {category:<{widths['category']}}  {name:<{widths['name']}}  {path}", "fake-help-row"))
+        lines.append(_output_line(f"  {category:<{widths['category']}}  {name:<{widths['name']}}  {path}", "builtin-help-row"))
     return lines
 
 
-def _run_fake_wordlist(command: str) -> list[dict[str, str]]:
+def _run_builtin_wordlist(command: str) -> list[dict[str, str]]:
     parts = _split_command(command)
     args = parts[1:]
     catalog = load_wordlist_catalog(include_all="--all" in args)
@@ -804,8 +807,8 @@ def _run_fake_wordlist(command: str) -> list[dict[str, str]]:
 
     if not curated_items and not all_items:
         return [
-            _output_line("Installed SecLists wordlists were not found.", "fake-note"),
-            _output_line(f"Expected path: {root}", "fake-help-row"),
+            _output_line("Installed SecLists wordlists were not found.", "builtin-note"),
+            _output_line(f"Expected path: {root}", "builtin-help-row"),
         ]
 
     if not args or args == ["list"]:
@@ -819,7 +822,7 @@ def _run_fake_wordlist(command: str) -> list[dict[str, str]]:
             return _wordlist_usage()
         category = args[1].lower() if len(args) == 2 else ""
         if category and category not in category_keys:
-            return [_output_line(f"Unknown wordlist category: {category}", "fake-note")] + _wordlist_usage()
+            return [_output_line(f"Unknown wordlist category: {category}", "builtin-note")] + _wordlist_usage()
         items = filter_wordlists(curated_items, category=category or None)
         heading = f"Curated {category} wordlists:" if category else "Curated wordlists:"
         return _wordlist_rows(items, heading=heading)
@@ -836,8 +839,8 @@ def _run_fake_wordlist(command: str) -> list[dict[str, str]]:
             return _wordlist_usage()
         item = find_wordlist(args[1], curated_items)
         if not item:
-            return [_output_line(f"Wordlist not found: {args[1]}", "fake-note")]
-        return [_output_line(str(item.get("path") or ""), "fake-plain")]
+            return [_output_line(f"Wordlist not found: {args[1]}", "builtin-note")]
+        return [_output_line(str(item.get("path") or ""), "builtin-plain")]
 
     return _wordlist_usage()
 
@@ -849,7 +852,7 @@ def _mask_session_token(token: str) -> str:
     return token[:8] + "••••••••"
 
 
-def _run_fake_session_token(cmd: str, session_id: str) -> list[dict[str, str]]:
+def _run_builtin_session_token(cmd: str, session_id: str) -> list[dict[str, str]]:
     parts = _split_command(cmd)
     subcommand = parts[1].lower() if len(parts) > 1 else ""
 
@@ -869,39 +872,46 @@ def _run_fake_session_token(cmd: str, session_id: str) -> list[dict[str, str]]:
     width = 14
     if session_id.startswith("tok_"):
         return [
-            _output_line(_format_native_record("session token", masked, width), "fake-kv"),
-            _output_line(_format_native_record("status", _ansi_green("active"), width), "fake-kv"),
-            _output_line(_format_native_record("storage", "localStorage (session_token)", width), "fake-kv"),
+            _output_line(_format_native_record("session token", masked, width), "builtin-kv"),
+            _output_line(_format_native_record("status", _ansi_green("active"), width), "builtin-kv"),
+            _output_line(_format_native_record("storage", "localStorage (session_token)", width), "builtin-kv"),
         ]
     return [
-        _output_line(_format_native_record("session", masked, width), "fake-kv"),
-        _output_line(_format_native_record("status", _ansi_dim("anonymous (no session token set)"), width), "fake-kv"),
-        _output_line(_format_native_record("tip", "run 'session-token generate' to create a persistent token", width), "fake-kv"),
+        _output_line(_format_native_record("session", masked, width), "builtin-kv"),
+        _output_line(_format_native_record("status", _ansi_dim("anonymous (no session token set)"), width), "builtin-kv"),
+        _output_line(
+            _format_native_record(
+                "tip",
+                "run 'session-token generate' to create a persistent token",
+                width,
+            ),
+            "builtin-kv",
+        ),
     ]
 
 
-def _run_fake_var(cmd: str, session_id: str) -> list[dict[str, str]]:
+def _run_builtin_var(cmd: str, session_id: str) -> list[dict[str, str]]:
     parts = _split_command(cmd)
     subcommand = parts[1].lower() if len(parts) > 1 else "list"
     width = 12
 
     if subcommand in {"help", "-h", "--help"}:
         return [
-            _output_line("Session command variables:", "fake-section"),
-            _output_line("  var set NAME value", "fake-plain"),
-            _output_line("  var list", "fake-plain"),
-            _output_line("  var unset NAME", "fake-plain"),
-            _output_line("Reference variables as $NAME or ${NAME}. Values expand before command validation.", "fake-note"),
-            _output_line("Names must match [A-Z][A-Z0-9_]{0,31}. Do not store secrets here.", "fake-note"),
+            _output_line("Session command variables:", "builtin-section"),
+            _output_line("  var set NAME value", "builtin-plain"),
+            _output_line("  var list", "builtin-plain"),
+            _output_line("  var unset NAME", "builtin-plain"),
+            _output_line("Reference variables as $NAME or ${NAME}. Values expand before command validation.", "builtin-note"),
+            _output_line("Names must match [A-Z][A-Z0-9_]{0,31}. Do not store secrets here.", "builtin-note"),
         ]
 
     if subcommand == "list":
         variables = list_session_variables(session_id)
         if not variables:
-            return [_output_line("No session variables set.", "fake-note")]
-        lines = [_output_line("Session variables:", "fake-section")]
+            return [_output_line("No session variables set.", "builtin-note")]
+        lines = [_output_line("Session variables:", "builtin-section")]
         for name, value in variables.items():
-            lines.append(_output_line(_format_native_record(name, value, width), "fake-kv"))
+            lines.append(_output_line(_format_native_record(name, value, width), "builtin-kv"))
         return lines
 
     if subcommand == "set":
@@ -917,7 +927,7 @@ def _run_fake_var(cmd: str, session_id: str) -> list[dict[str, str]]:
             set_session_variable(session_id, normalized_name, value)
         except (InvalidSessionVariableName, InvalidSessionVariableValue) as exc:
             return [_output_line(f"var: {exc}")]
-        return [_output_line(f"Set ${normalized_name} = {value}", "fake-success")]
+        return [_output_line(f"Set ${normalized_name} = {value}", "builtin-success")]
 
     if subcommand in {"unset", "delete", "rm"}:
         if len(parts) != 3:
@@ -928,7 +938,7 @@ def _run_fake_var(cmd: str, session_id: str) -> list[dict[str, str]]:
         except InvalidSessionVariableName as exc:
             return [_output_line(f"var: {exc}")]
         status = "removed" if removed else "was not set"
-        return [_output_line(f"${normalized_name} {status}.", "fake-success" if removed else "fake-note")]
+        return [_output_line(f"${normalized_name} {status}.", "builtin-success" if removed else "builtin-note")]
 
     return [
         _output_line(f"var: unknown subcommand '{subcommand}'"),
@@ -936,7 +946,7 @@ def _run_fake_var(cmd: str, session_id: str) -> list[dict[str, str]]:
     ]
 
 
-def _run_fake_client_side_command(name: str) -> list[dict[str, str]]:
+def _run_builtin_client_side_command(name: str) -> list[dict[str, str]]:
     return [_output_line(f"{name}: command runs client-side — reload the page and try again.")]
 
 
@@ -989,7 +999,7 @@ def get_current_shortcuts(is_mac: bool | None = None) -> dict:
     }
 
 
-def _run_fake_shortcuts() -> list[dict[str, str]]:
+def _run_builtin_shortcuts() -> list[dict[str, str]]:
     payload = get_current_shortcuts()
     width = max(
         (len(item["key"]) for section in payload["sections"] for item in section["items"]),
@@ -998,19 +1008,19 @@ def _run_fake_shortcuts() -> list[dict[str, str]]:
     lines: list[dict[str, str]] = []
     for index, section in enumerate(payload["sections"]):
         if index > 0:
-            lines.append(_output_line("", "fake-spacer"))
-        lines.append(_output_line(f"{section['title']}:", "fake-section"))
+            lines.append(_output_line("", "builtin-spacer"))
+        lines.append(_output_line(f"{section['title']}:", "builtin-section"))
         for item in section["items"]:
             lines.append(
                 _output_line(
                     _format_native_record(item["key"], item["description"], width),
-                    "fake-shortcut",
+                    "builtin-shortcut",
                 )
             )
     return lines
 
 
-def _run_fake_man_for_synthetic_topic(topic: str) -> list[dict[str, str]]:
+def _run_builtin_man_for_synthetic_topic(topic: str) -> list[dict[str, str]]:
     topic_help = {
         "man": "Show the real man page for an allowed command, or built-in help for a native command.",
         "uname": "Describe the web shell environment.",
@@ -1024,37 +1034,37 @@ def _run_fake_man_for_synthetic_topic(topic: str) -> list[dict[str, str]]:
                 "Built-in commands:",
                 f"  {name:<10} {topic_help.get(topic, description)}",
             ])
-    return _run_fake_help()
+    return _run_builtin_help()
 
 
-def _run_fake_banner() -> list[dict[str, str]]:
+def _run_builtin_banner() -> list[dict[str, str]]:
     art = load_ascii_art()
     if not art:
         return [{"type": "output", "text": CFG["app_name"]}]
     return _text_lines(art.splitlines())
 
 
-def _run_fake_clear() -> list[dict[str, str]]:
+def _run_builtin_clear() -> list[dict[str, str]]:
     return [{"type": "clear"}]
 
 
-def _run_fake_date() -> list[dict[str, str]]:
+def _run_builtin_date() -> list[dict[str, str]]:
     now = datetime.now().astimezone()
     return [{"type": "output", "text": now.strftime("%a %b %d %H:%M:%S %Z %Y")}]
 
 
-def _run_fake_env(session_id: str) -> list[dict[str, str]]:
+def _run_builtin_env(session_id: str) -> list[dict[str, str]]:
     lines = [
-        _output_line("Environment:", "fake-section"),
-        _output_line(f"APP_NAME={CFG['app_name']}", "fake-plain"),
-        _output_line(f"SESSION_ID={session_id or 'anonymous'}", "fake-plain"),
-        _output_line("SHELL=/bin/bash", "fake-plain"),
-        _output_line("TERM=xterm-256color", "fake-plain"),
+        _output_line("Environment:", "builtin-section"),
+        _output_line(f"APP_NAME={CFG['app_name']}", "builtin-plain"),
+        _output_line(f"SESSION_ID={session_id or 'anonymous'}", "builtin-plain"),
+        _output_line("SHELL=/bin/bash", "builtin-plain"),
+        _output_line("TERM=xterm-256color", "builtin-plain"),
     ]
     return lines
 
 
-def _run_fake_faq() -> list[dict[str, str]]:
+def _run_builtin_faq() -> list[dict[str, str]]:
     entries = load_all_faq(CFG["app_name"], PROJECT_README)
     if not entries:
         return _text_lines([
@@ -1062,21 +1072,21 @@ def _run_fake_faq() -> list[dict[str, str]]:
             f"README: {_format_terminal_link(PROJECT_README, PROJECT_README)}",
         ])
 
-    lines = [_output_line("Configured FAQ entries:", "fake-section")]
+    lines = [_output_line("Configured FAQ entries:", "builtin-section")]
     for entry in entries:
         question = str(entry.get("question", "")).strip()
         answer = str(entry.get("answer", "")).strip()
         if question:
-            lines.append(_output_line(f"Q  {question}", "fake-faq-q"))
+            lines.append(_output_line(f"Q  {question}", "builtin-faq-q"))
         if answer:
-            lines.append(_output_line(f"A  {answer}", "fake-faq-a"))
-        lines.append(_output_line("", "fake-spacer"))
+            lines.append(_output_line(f"A  {answer}", "builtin-faq-a"))
+        lines.append(_output_line("", "builtin-spacer"))
     if lines and lines[-1].get("text", "") == "":
         lines.pop()
     return lines
 
 
-def _run_fake_fortune() -> list[dict[str, str]]:
+def _run_builtin_fortune() -> list[dict[str, str]]:
     fortunes = [
         "Trust the output, not the hunch.",
         "A green terminal does not make the command a good idea.",
@@ -1145,7 +1155,7 @@ def _run_fake_fortune() -> list[dict[str, str]]:
     return [{"type": "output", "text": random.choice(fortunes)}]
 
 
-def _run_fake_groups() -> list[dict[str, str]]:
+def _run_builtin_groups() -> list[dict[str, str]]:
     return [{"type": "output", "text": f"{CFG['app_name']} operators"}]
 
 
@@ -1159,14 +1169,14 @@ def _normalize_man_text(text: str) -> list[str]:
     return lines or ["No man page content was returned."]
 
 
-def _run_fake_man(command: str) -> list[dict[str, str]]:
+def _run_builtin_man(command: str) -> list[dict[str, str]]:
     parts = _split_command(command)
     if len(parts) != 2:
         return [{"type": "output", "text": "Usage: man <allowed-command>"}]
 
     topic = parts[1].strip().lower()
-    if topic in _active_fake_command_roots() and topic not in _SYNTHETIC_MAN_EXCLUDED_ROOTS:
-        return _run_fake_man_for_synthetic_topic(topic)
+    if topic in _active_builtin_command_roots() and topic not in _SYNTHETIC_MAN_EXCLUDED_ROOTS:
+        return _run_builtin_man_for_synthetic_topic(topic)
 
     allowed_topics = _allowed_man_topics()
     if not allowed_topics:
@@ -1204,38 +1214,38 @@ def _run_fake_man(command: str) -> list[dict[str, str]]:
     return _text_lines(_normalize_man_text(output))
 
 
-def _run_fake_whoami() -> list[dict[str, str]]:
+def _run_builtin_whoami() -> list[dict[str, str]]:
     return [
-        _output_line("Shell identity:", "fake-section"),
-        _output_line(CFG["app_name"], "fake-identity"),
-        _output_line("A web terminal for remote diagnostics and security tooling against allowed commands.", "fake-plain"),
-        _output_line("", "fake-spacer"),
-        _output_line(f"README: see the project README at {PROJECT_README}", "fake-note"),
+        _output_line("Shell identity:", "builtin-section"),
+        _output_line(CFG["app_name"], "builtin-identity"),
+        _output_line("A web terminal for remote diagnostics and security tooling against allowed commands.", "builtin-plain"),
+        _output_line("", "builtin-spacer"),
+        _output_line(f"README: see the project README at {PROJECT_README}", "builtin-note"),
     ]
 
 
-def _run_fake_history(session_id: str) -> list[dict[str, str]]:
+def _run_builtin_history(session_id: str) -> list[dict[str, str]]:
     rows = list(reversed(_recent_runs(session_id)))
     if not rows:
         return [{"type": "output", "text": "No history for this session yet."}]
 
     width = len(str(len(rows)))
-    lines = [_output_line("Recent commands:", "fake-section")]
+    lines = [_output_line("Recent commands:", "builtin-section")]
     for index, row in enumerate(rows, start=1):
-        lines.append(_output_line(f"{index:>{width}}  {str(row['command']).strip()}", "fake-history-row"))
+        lines.append(_output_line(f"{index:>{width}}  {str(row['command']).strip()}", "builtin-history-row"))
     return lines
 
 
-def _run_fake_hostname() -> list[dict[str, str]]:
+def _run_builtin_hostname() -> list[dict[str, str]]:
     return [{"type": "output", "text": CFG["app_name"]}]
 
 
-def _run_fake_id() -> list[dict[str, str]]:
+def _run_builtin_id() -> list[dict[str, str]]:
     text = f"uid=1000({CFG['app_name']}) gid=1000({CFG['app_name']}) groups=1000({CFG['app_name']})"
     return [{"type": "output", "text": text}]
 
 
-def _run_fake_ip_addr() -> list[dict[str, str]]:
+def _run_builtin_ip_addr() -> list[dict[str, str]]:
     return _text_lines([
         "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000",
         "    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00",
@@ -1348,11 +1358,11 @@ def _active_run_json_rows(runs: list[dict]) -> list[dict[str, object]]:
     return rows
 
 
-def _active_run_monitor_hint() -> dict[str, str]:
-    return _output_line("Tip: click STATUS in the HUD for real-time CPU/MEM monitoring.", "fake-note")
+def _active_status_monitor_hint() -> dict[str, str]:
+    return _output_line("Tip: click STATUS in the HUD for real-time CPU/MEM monitoring.", "builtin-note")
 
 
-def _run_fake_runs(command: str, session_id: str) -> list[dict[str, str]]:
+def _run_builtin_runs(command: str, session_id: str) -> list[dict[str, str]]:
     parts = _split_command(command)
     flags = set(parts[1:])
     valid_flags = {"-v", "--verbose", "--json"}
@@ -1362,10 +1372,10 @@ def _run_fake_runs(command: str, session_id: str) -> list[dict[str, str]]:
 
     runs = active_runs_for_session(session_id)
     if not runs:
-        return [_output_line("No active runs.", "fake-note")]
+        return [_output_line("No active runs.", "builtin-note")]
 
     if "--json" in flags:
-        return [_output_line(json.dumps({"runs": _active_run_json_rows(runs)}, sort_keys=True), "fake-plain")]
+        return [_output_line(json.dumps({"runs": _active_run_json_rows(runs)}, sort_keys=True), "builtin-plain")]
 
     if "-v" in flags or "--verbose" in flags:
         run_labels = [str(run.get("run_id", "")) or "-" for run in runs]
@@ -1386,7 +1396,7 @@ def _run_fake_runs(command: str, session_id: str) -> list[dict[str, str]]:
         started_width = max(7, *(len(label) for label in started_labels))
         source_width = max(6, *(len(label) for label in source_labels))
         lines = [
-            _output_line("Active runs:", "fake-section"),
+            _output_line("Active runs:", "builtin-section"),
             _output_line(
                 "  "
                 f"{_ansi_cell('run', run_width, '<', _ansi_underline)}  "
@@ -1398,7 +1408,7 @@ def _run_fake_runs(command: str, session_id: str) -> list[dict[str, str]]:
                 f"{_ansi_cell('started', started_width, '<', _ansi_underline)}  "
                 f"{_ansi_cell('source', source_width, '<', _ansi_underline)}  "
                 f"{_ansi_underline('command')}",
-                "fake-help-row",
+                "builtin-help-row",
             ),
         ]
         for (
@@ -1435,9 +1445,9 @@ def _run_fake_runs(command: str, session_id: str) -> list[dict[str, str]]:
                 f"{_ansi_cell(started_label, started_width, '<', _ansi_dim)}  "
                 f"{_ansi_cell(source_label, source_width, '<', _ansi_cyan)}  "
                 f"{command_text}",
-                "fake-plain",
+                "builtin-plain",
             ))
-        lines.append(_active_run_monitor_hint())
+        lines.append(_active_status_monitor_hint())
         return lines
 
     run_labels = [str(run.get("run_id", ""))[:8] or "-" for run in runs]
@@ -1452,7 +1462,7 @@ def _run_fake_runs(command: str, session_id: str) -> list[dict[str, str]]:
     cpu_width = max(3, *(len(label) for label in cpu_labels))
     memory_width = max(3, *(len(label) for label in memory_labels))
     lines = [
-        _output_line("Active runs:", "fake-section"),
+        _output_line("Active runs:", "builtin-section"),
         _output_line(
             "  "
             f"{_ansi_cell('run', run_width, '<', _ansi_underline)}  "
@@ -1461,7 +1471,7 @@ def _run_fake_runs(command: str, session_id: str) -> list[dict[str, str]]:
             f"{_ansi_cell('cpu', cpu_width, '>', _ansi_underline)}  "
             f"{_ansi_cell('mem', memory_width, '>', _ansi_underline)}  "
             f"{_ansi_underline('command')}",
-            "fake-help-row",
+            "builtin-help-row",
         ),
     ]
     for run, run_label, pid_label, elapsed_label, cpu_label, memory_label in zip(
@@ -1482,52 +1492,52 @@ def _run_fake_runs(command: str, session_id: str) -> list[dict[str, str]]:
             f"{_ansi_cell(cpu_label, cpu_width, '>', _ansi_amber)}  "
             f"{_ansi_cell(memory_label, memory_width, '>', _ansi_dim)}  "
             f"{command}",
-            "fake-plain",
+            "builtin-plain",
         ))
-    lines.append(_active_run_monitor_hint())
+    lines.append(_active_status_monitor_hint())
     return lines
 
 
-def _run_fake_last(session_id: str) -> list[dict[str, str]]:
+def _run_builtin_last(session_id: str) -> list[dict[str, str]]:
     rows = _recent_runs(session_id)
     if not rows:
         return [{"type": "output", "text": "No completed runs for this session yet."}]
 
-    lines = [_output_line("Recent runs:", "fake-section")]
+    lines = [_output_line("Recent runs:", "builtin-section")]
     for row in rows:
         started = _parse_dt(row["started"]).astimezone().strftime("%Y-%m-%d %H:%M:%S")
         exit_code = row["exit_code"]
         exit_label = _ansi_exit_code(exit_code)
-        cls = "fake-last-row"
+        cls = "builtin-last-row"
         if exit_code == 0:
-            cls += " fake-last-ok"
+            cls += " builtin-last-ok"
         elif exit_code is not None:
-            cls += " fake-last-fail"
+            cls += " builtin-last-fail"
         lines.append(_output_line(f"{started}  [{exit_label}]  {str(row['command']).strip()}", cls))
     return lines
 
 
-def _run_fake_limits() -> list[dict[str, str]]:
+def _run_builtin_limits() -> list[dict[str, str]]:
     width = 20
     workspace_enabled = bool(CFG.get("workspace_enabled", False))
     return [
-        _output_line("Configured limits:", "fake-section"),
+        _output_line("Configured limits:", "builtin-section"),
         _output_line(
             _format_native_record(
                 "command timeout",
                 f"{CFG['command_timeout_seconds'] or 0}s (0 = unlimited)",
                 width,
             ),
-            "fake-kv",
+            "builtin-kv",
         ),
-        _output_line(_format_native_record("live preview lines", str(CFG['max_output_lines']), width), "fake-kv"),
+        _output_line(_format_native_record("live preview lines", str(CFG['max_output_lines']), width), "builtin-kv"),
         _output_line(
             _format_native_record(
                 "full output save",
                 _ansi_yes_no(bool(CFG.get('persist_full_run_output', False))),
                 width,
             ),
-            "fake-kv",
+            "builtin-kv",
         ),
         _output_line(
             _format_native_record(
@@ -1535,18 +1545,18 @@ def _run_fake_limits() -> list[dict[str, str]]:
                 f"{CFG.get('full_output_max_mb', 0)} MB (0 = unlimited)",
                 width,
             ),
-            "fake-kv",
+            "builtin-kv",
         ),
-        _output_line(_format_native_record("history panel limit", str(CFG['history_panel_limit']), width), "fake-kv"),
-        _output_line(_format_native_record("recent commands", str(CFG['recent_commands_limit']), width), "fake-kv"),
-        _output_line(_format_native_record("tab limit", f"{CFG['max_tabs'] or 0} (0 = unlimited)", width), "fake-kv"),
+        _output_line(_format_native_record("history panel limit", str(CFG['history_panel_limit']), width), "builtin-kv"),
+        _output_line(_format_native_record("recent commands", str(CFG['recent_commands_limit']), width), "builtin-kv"),
+        _output_line(_format_native_record("tab limit", f"{CFG['max_tabs'] or 0} (0 = unlimited)", width), "builtin-kv"),
         _output_line(
             _format_native_record(
                 "retention",
                 f"{CFG['permalink_retention_days']} days (0 = unlimited)",
                 width,
             ),
-            "fake-kv",
+            "builtin-kv",
         ),
         _output_line(
             _format_native_record(
@@ -1554,23 +1564,23 @@ def _run_fake_limits() -> list[dict[str, str]]:
                 f"{CFG['rate_limit_per_minute']}/min, {CFG['rate_limit_per_second']}/sec",
                 width,
             ),
-            "fake-kv",
+            "builtin-kv",
         ),
         _output_line(
             _format_native_record("files enabled", _ansi_yes_no(workspace_enabled), width),
-            "fake-kv",
+            "builtin-kv",
         ),
         _output_line(
             _format_native_record("files quota", f"{CFG.get('workspace_quota_mb', 0)} MB", width),
-            "fake-kv",
+            "builtin-kv",
         ),
         _output_line(
             _format_native_record("files max size", f"{CFG.get('workspace_max_file_mb', 0)} MB", width),
-            "fake-kv",
+            "builtin-kv",
         ),
         _output_line(
             _format_native_record("files max count", str(CFG.get('workspace_max_files', 0)), width),
-            "fake-kv",
+            "builtin-kv",
         ),
         _output_line(
             _format_native_record(
@@ -1582,22 +1592,22 @@ def _run_fake_limits() -> list[dict[str, str]]:
                 ),
                 width,
             ),
-            "fake-kv",
+            "builtin-kv",
         ),
     ]
 
 
-def _run_fake_retention() -> list[dict[str, str]]:
+def _run_builtin_retention() -> list[dict[str, str]]:
     width = 22
     return [
-        _output_line("Retention policy:", "fake-section"),
+        _output_line("Retention policy:", "builtin-section"),
         _output_line(
             _format_native_record(
                 "run preview retention",
                 f"{_format_limit_value(CFG['permalink_retention_days'])} days",
                 width,
             ),
-            "fake-kv",
+            "builtin-kv",
         ),
         _output_line(
             _format_native_record(
@@ -1605,7 +1615,7 @@ def _run_fake_retention() -> list[dict[str, str]]:
                 _ansi_yes_no(bool(CFG.get('persist_full_run_output', False))),
                 width,
             ),
-            "fake-kv",
+            "builtin-kv",
         ),
         _output_line(
             _format_native_record(
@@ -1613,16 +1623,16 @@ def _run_fake_retention() -> list[dict[str, str]]:
                 f"{_format_limit_value(CFG.get('full_output_max_mb'))} MB",
                 width,
             ),
-            "fake-kv",
+            "builtin-kv",
         ),
     ]
 
 
-def _run_fake_ps(session_id: str, command: str) -> list[dict[str, str]]:
+def _run_builtin_ps(session_id: str, command: str) -> list[dict[str, str]]:
     active = active_runs_for_session(session_id)
     current = command.strip() or "ps"
     lines = [
-        _output_line("Process view:", "fake-section"),
+        _output_line("Process view:", "builtin-section"),
         _output_line(
             "  "
             f"{_ansi_underline('PID')} "
@@ -1630,9 +1640,9 @@ def _run_fake_ps(session_id: str, command: str) -> list[dict[str, str]]:
             f"{_ansi_underline('STAT')} "
             f"{_ansi_underline('START')}    "
             f"{_ansi_underline('CMD')}",
-            "fake-ps-header",
+            "builtin-ps-header",
         ),
-        _output_line(f"{9000:5d} pts/0    R    -        {current}", "fake-ps-row"),
+        _output_line(f"{9000:5d} pts/0    R    -        {current}", "builtin-ps-row"),
     ]
     for job in active:
         cmd = str(job.get("command", "")).strip()
@@ -1640,12 +1650,12 @@ def _run_fake_ps(session_id: str, command: str) -> list[dict[str, str]]:
         started_clock = _format_clock(job["started"]) if job.get("started") else "-"
         lines.append(_output_line(
             f"{str(pid):>5} pts/0    S    {started_clock:<8} {cmd}",
-            "fake-ps-row",
+            "builtin-ps-row",
         ))
     return lines
 
 
-def _run_fake_pwd() -> list[dict[str, str]]:
+def _run_builtin_pwd() -> list[dict[str, str]]:
     if CFG.get("workspace_enabled"):
         return [{"type": "output", "text": "/"}]
     return [{"type": "output", "text": f"/app/{CFG['app_name']}/bin"}]
@@ -1803,31 +1813,31 @@ def _underline_text(text: str) -> str:
     return _ansi_underline(text)
 
 
-def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
+def _run_builtin_workspace(command: str, session_id: str) -> list[dict[str, str]]:
     parts = _split_command(command)
     subcommand = parts[1].lower() if len(parts) > 1 else "help"
 
     if subcommand in {"help", "--help", "-h"}:
         return [
-            _output_line("Session file commands:", "fake-section"),
-            _output_line("  file list [-lR] [folder]", "fake-help-row"),
-            _output_line("  file ls [-lR] [folder]", "fake-help-row"),
-            _output_line("  file show <file>", "fake-help-row"),
-            _output_line("  file add [file]", "fake-help-row"),
-            _output_line("  file edit <file>", "fake-help-row"),
-            _output_line("  file download <file>", "fake-help-row"),
-            _output_line("  file rm <file-or-folder>", "fake-help-row"),
-            _output_line("", "fake-spacer"),
-            _output_line("Aliases:", "fake-section"),
-            _output_line("  ls [-lR]    -> file list [-lR]", "fake-help-row"),
-            _output_line("  ll [-R]     -> file list -l [-R]", "fake-help-row"),
-            _output_line("  cat <file>  -> file show <file>", "fake-help-row"),
-            _output_line("  rm <file-or-folder>   -> file rm <file-or-folder>", "fake-help-row"),
-            _output_line("", "fake-spacer"),
-            _output_line("Example flow:", "fake-section"),
-            _output_line("  Create targets.txt from the Files panel.", "fake-note"),
-            _output_line("  Run: nmap -iL targets.txt", "fake-help-row"),
-            _output_line("  Run: curl -o response.html https://ip.darklab.sh", "fake-help-row"),
+            _output_line("Session file commands:", "builtin-section"),
+            _output_line("  file list [-lR] [folder]", "builtin-help-row"),
+            _output_line("  file ls [-lR] [folder]", "builtin-help-row"),
+            _output_line("  file show <file>", "builtin-help-row"),
+            _output_line("  file add [file]", "builtin-help-row"),
+            _output_line("  file edit <file>", "builtin-help-row"),
+            _output_line("  file download <file>", "builtin-help-row"),
+            _output_line("  file rm <file-or-folder>", "builtin-help-row"),
+            _output_line("", "builtin-spacer"),
+            _output_line("Aliases:", "builtin-section"),
+            _output_line("  ls [-lR]    -> file list [-lR]", "builtin-help-row"),
+            _output_line("  ll [-R]     -> file list -l [-R]", "builtin-help-row"),
+            _output_line("  cat <file>  -> file show <file>", "builtin-help-row"),
+            _output_line("  rm <file-or-folder>   -> file rm <file-or-folder>", "builtin-help-row"),
+            _output_line("", "builtin-spacer"),
+            _output_line("Example flow:", "builtin-section"),
+            _output_line("  Create targets.txt from the Files panel.", "builtin-note"),
+            _output_line("  Run: nmap -iL targets.txt", "builtin-help-row"),
+            _output_line("  Run: curl -o response.html https://ip.darklab.sh", "builtin-help-row"),
         ]
 
     if subcommand in {"list", "ls"}:
@@ -1844,42 +1854,42 @@ def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
 
         remaining_bytes = max(0, settings.quota_bytes - usage.bytes_used)
         lines = [
-            _output_line("Session files:", "fake-section"),
-            _output_line(_format_native_record("files", f"{usage.file_count}/{settings.max_files}", 11), "fake-kv"),
+            _output_line("Session files:", "builtin-section"),
+            _output_line(_format_native_record("files", f"{usage.file_count}/{settings.max_files}", 11), "builtin-kv"),
             _output_line(
                 _format_native_record(
                     "usage",
                     f"{_format_bytes(usage.bytes_used)} / {_format_bytes(settings.quota_bytes)}",
                     11,
                 ),
-                "fake-kv",
+                "builtin-kv",
             ),
-            _output_line(_format_native_record("remaining", _format_bytes(remaining_bytes), 11), "fake-kv"),
+            _output_line(_format_native_record("remaining", _format_bytes(remaining_bytes), 11), "builtin-kv"),
         ]
         rows = _workspace_list_rows(files, directories, recursive=recursive, target=target)
         if not rows:
-            lines.append(_output_line("  No session files yet.", "fake-note"))
+            lines.append(_output_line("  No session files yet.", "builtin-note"))
             return lines
 
         if not long:
             names = [str(row.get("display") or row["path"]).strip() for row in rows]
-            lines.append(_output_line(" ".join(name for name in names if name), "fake-help-row"))
+            lines.append(_output_line(" ".join(name for name in names if name), "builtin-help-row"))
             return lines
 
         width = max((len(str(item.get("display") or item["path"])) for item in rows), default=4)
         path_header = f"{_underline_text('path')}{' ' * max(0, width - len('path'))}"
         size_header = f"{_underline_text('size')}{' ' * (8 - len('size'))}"
         modified_header = _underline_text("modified")
-        lines.append(_output_line(f"  {path_header}  {size_header}  {modified_header}", "fake-help-row"))
+        lines.append(_output_line(f"  {path_header}  {size_header}  {modified_header}", "builtin-help-row"))
         for row in rows:
             path = str(row.get("display") or row["path"])
             if row["kind"] == "directory":
-                lines.append(_output_line(f"  {path:<{width}}  folder", "fake-help-row"))
+                lines.append(_output_line(f"  {path:<{width}}  folder", "builtin-help-row"))
                 continue
             item = cast(dict[str, object], row["item"])
             size = _format_bytes(_workspace_item_size(item))
             mtime = _format_clock(str(item.get("mtime") or ""))
-            lines.append(_output_line(f"  {path:<{width}}  {size:<8}  {mtime}", "fake-help-row"))
+            lines.append(_output_line(f"  {path:<{width}}  {size:<8}  {mtime}", "builtin-help-row"))
         return lines
 
     if subcommand in {"show", "cat"}:
@@ -1890,7 +1900,7 @@ def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
         except Exception as exc:
             return _workspace_command_error(exc)
         file_lines = text.splitlines() or [""]
-        return [_output_line(f"file: {parts[2]}", "fake-section")] + _text_lines(file_lines)
+        return [_output_line(f"file: {parts[2]}", "builtin-section")] + _text_lines(file_lines)
 
     if subcommand in {"add", "edit", "download"}:
         expected = (
@@ -1927,21 +1937,21 @@ def _run_fake_workspace(command: str, session_id: str) -> list[dict[str, str]]:
     ]
 
 
-def _run_fake_workspace_alias(command: str, session_id: str) -> list[dict[str, str]]:
+def _run_builtin_workspace_alias(command: str, session_id: str) -> list[dict[str, str]]:
     parts = _split_command(command)
     root = parts[0].lower() if parts else ""
     if root == "ls":
-        return _run_fake_workspace("file list " + " ".join(parts[1:]), session_id)
+        return _run_builtin_workspace("file list " + " ".join(parts[1:]), session_id)
     if root == "ll":
-        return _run_fake_workspace("file list -l " + " ".join(parts[1:]), session_id)
+        return _run_builtin_workspace("file list -l " + " ".join(parts[1:]), session_id)
     if root == "cat":
         if len(parts) != 2:
             return [_output_line("Usage: cat <file>")]
-        return _run_fake_workspace(f"file show {parts[1]}", session_id)
+        return _run_builtin_workspace(f"file show {parts[1]}", session_id)
     if root == "rm":
         if len(parts) != 2:
             return [_output_line("Usage: rm <file-or-folder>")]
-        return _run_fake_workspace(f"file rm {parts[1]}", session_id)
+        return _run_builtin_workspace(f"file rm {parts[1]}", session_id)
     if root in {"cd", "grep", "head", "mkdir", "sort", "tail", "uniq", "wc"}:
         return [_output_line(f"{root}: handled in the browser workspace terminal")]
     return [_output_line(
@@ -1950,19 +1960,19 @@ def _run_fake_workspace_alias(command: str, session_id: str) -> list[dict[str, s
     )]
 
 
-def _run_fake_poweroff() -> list[dict[str, str]]:
+def _run_builtin_poweroff() -> list[dict[str, str]]:
     return [{"type": "output", "text": random.choice(_SNARKY_POWEROFF_RESPONSES)}]
 
 
-def _run_fake_reboot() -> list[dict[str, str]]:
+def _run_builtin_reboot() -> list[dict[str, str]]:
     return [{"type": "output", "text": random.choice(_SNARKY_REBOOT_RESPONSES)}]
 
 
-def _run_fake_rm_root() -> list[dict[str, str]]:
+def _run_builtin_rm_root() -> list[dict[str, str]]:
     return [{"type": "output", "text": random.choice(_SNARKY_RM_ROOT_RESPONSES)}]
 
 
-def _run_fake_route() -> list[dict[str, str]]:
+def _run_builtin_route() -> list[dict[str, str]]:
     return _text_lines([
         "Kernel IP routing table",
         (
@@ -1980,28 +1990,28 @@ def _run_fake_route() -> list[dict[str, str]]:
     ])
 
 
-def _run_fake_status(session_id: str) -> list[dict[str, str]]:
+def _run_builtin_status(session_id: str) -> list[dict[str, str]]:
     width = 18
     session_label = _mask_session_token(session_id) if session_id else "anonymous"
     lines = [
-        _output_line("Shell status:", "fake-section"),
-        _output_line(_format_native_record("app", CFG['app_name'], width), "fake-kv"),
-        _output_line(_format_native_record("session", _ansi_dim(session_label), width), "fake-kv"),
+        _output_line("Shell status:", "builtin-section"),
+        _output_line(_format_native_record("app", CFG['app_name'], width), "builtin-kv"),
+        _output_line(_format_native_record("session", _ansi_dim(session_label), width), "builtin-kv"),
         _output_line(
             _format_native_record("session type", _ansi_status_label(_session_type_label(session_id)), width),
-            "fake-kv",
+            "builtin-kv",
         ),
-        _output_line(_format_native_record("database", _ansi_status_label(_status_db_label()), width), "fake-kv"),
-        _output_line(_format_native_record("redis", _ansi_status_label(_status_redis_label()), width), "fake-kv"),
-        _output_line(_format_native_record("runs in session", str(_session_run_count(session_id)), width), "fake-kv"),
-        _output_line(_format_native_record("snapshots", str(_session_snapshot_count(session_id)), width), "fake-kv"),
+        _output_line(_format_native_record("database", _ansi_status_label(_status_db_label()), width), "builtin-kv"),
+        _output_line(_format_native_record("redis", _ansi_status_label(_status_redis_label()), width), "builtin-kv"),
+        _output_line(_format_native_record("runs in session", str(_session_run_count(session_id)), width), "builtin-kv"),
+        _output_line(_format_native_record("snapshots", str(_session_snapshot_count(session_id)), width), "builtin-kv"),
         _output_line(
             _format_native_record(
                 "starred commands",
                 str(_session_starred_command_count(session_id)),
                 width,
             ),
-            "fake-kv",
+            "builtin-kv",
         ),
         _output_line(
             _format_native_record(
@@ -2009,16 +2019,16 @@ def _run_fake_status(session_id: str) -> list[dict[str, str]]:
                 _ansi_yes_no(_session_has_saved_preferences(session_id)),
                 width,
             ),
-            "fake-kv",
+            "builtin-kv",
         ),
-        _output_line(_format_native_record("variables", str(_session_variable_count(session_id)), width), "fake-kv"),
+        _output_line(_format_native_record("variables", str(_session_variable_count(session_id)), width), "builtin-kv"),
         _output_line(
             _format_native_record(
                 "active runs",
                 str(len(active_runs_for_session(session_id))),
                 width,
             ),
-            "fake-kv",
+            "builtin-kv",
         ),
         _output_line(
             _format_native_record(
@@ -2026,10 +2036,20 @@ def _run_fake_status(session_id: str) -> list[dict[str, str]]:
                 _ansi_yes_no(bool(CFG.get('persist_full_run_output', False))),
                 width,
             ),
-            "fake-kv",
+            "builtin-kv",
         ),
-        _output_line(_format_native_record("tab limit", _format_limit_value(CFG['max_tabs']), width), "fake-kv"),
-        _output_line(_format_native_record("retention", _format_limit_value(CFG['permalink_retention_days']), width), "fake-kv"),
+        _output_line(
+            _format_native_record("tab limit", _format_limit_value(CFG['max_tabs']), width),
+            "builtin-kv",
+        ),
+        _output_line(
+            _format_native_record(
+                "retention",
+                _format_limit_value(CFG['permalink_retention_days']),
+                width,
+            ),
+            "builtin-kv",
+        ),
     ]
     if bool(CFG.get("workspace_enabled", False)):
         try:
@@ -2041,11 +2061,11 @@ def _run_fake_status(session_id: str) -> list[dict[str, str]]:
             )
         except Exception:
             files_label = "unavailable"
-        lines.append(_output_line(_format_native_record("files", files_label, width), "fake-kv"))
+        lines.append(_output_line(_format_native_record("files", files_label, width), "builtin-kv"))
     return lines
 
 
-def _run_fake_stats(session_id: str) -> list[dict[str, str]]:
+def _run_builtin_stats(session_id: str) -> list[dict[str, str]]:
     with db_connect() as conn:
         raw_rows = conn.execute(
             """
@@ -2072,7 +2092,7 @@ def _run_fake_stats(session_id: str) -> list[dict[str, str]]:
     for row in raw_rows:
         command = str(row["command"] or "")
         root = command_root(command) or command.split(maxsplit=1)[0].lower() or "unknown"
-        is_builtin_root = root in _active_fake_command_roots()
+        is_builtin_root = root in _active_builtin_command_roots()
 
         exit_code = row["exit_code"]
         if exit_code is None:
@@ -2121,39 +2141,39 @@ def _run_fake_stats(session_id: str) -> list[dict[str, str]]:
         f"({_ansi_green(f'{success_total} ok')} / {_ansi_red(f'{failed_total} failed')})"
     )
     lines = [
-        _output_line("Session stats:", "fake-section"),
-        _output_line(_format_native_record("session", _ansi_dim(session_label), width), "fake-kv"),
+        _output_line("Session stats:", "builtin-section"),
+        _output_line(_format_native_record("session", _ansi_dim(session_label), width), "builtin-kv"),
         _output_line(
             _format_native_record("session type", _ansi_status_label(_session_type_label(session_id)), width),
-            "fake-kv",
+            "builtin-kv",
         ),
-        _output_line(_format_native_record("runs", str(run_total), width), "fake-kv"),
-        _output_line(_format_native_record("snapshots", str(_session_snapshot_count(session_id)), width), "fake-kv"),
+        _output_line(_format_native_record("runs", str(run_total), width), "builtin-kv"),
+        _output_line(_format_native_record("snapshots", str(_session_snapshot_count(session_id)), width), "builtin-kv"),
         _output_line(
             _format_native_record("starred commands", str(_session_starred_command_count(session_id)), width),
-            "fake-kv",
+            "builtin-kv",
         ),
-        _output_line(_format_native_record("variables", str(_session_variable_count(session_id)), width), "fake-kv"),
-        _output_line(_format_native_record("active runs", str(len(active_runs_for_session(session_id))), width), "fake-kv"),
+        _output_line(_format_native_record("variables", str(_session_variable_count(session_id)), width), "builtin-kv"),
+        _output_line(_format_native_record("active runs", str(len(active_runs_for_session(session_id))), width), "builtin-kv"),
         _output_line(
             _format_native_record(
                 "success rate",
                 success_rate,
                 width,
             ),
-            "fake-kv",
+            "builtin-kv",
         ),
-        _output_line(_format_native_record("average duration", _format_stats_duration(avg_duration), width), "fake-kv"),
+        _output_line(_format_native_record("average duration", _format_stats_duration(avg_duration), width), "builtin-kv"),
     ]
 
     if not by_root:
-        lines.append(_output_line("", "fake-spacer"))
-        lines.append(_output_line("Top commands:", "fake-section"))
-        lines.append(_output_line("  No external tool runs for this session yet.", "fake-note"))
+        lines.append(_output_line("", "builtin-spacer"))
+        lines.append(_output_line("Top commands:", "builtin-section"))
+        lines.append(_output_line("  No external tool runs for this session yet.", "builtin-note"))
         return lines
 
-    lines.append(_output_line("", "fake-spacer"))
-    lines.append(_output_line("Top commands:", "fake-section"))
+    lines.append(_output_line("", "builtin-spacer"))
+    lines.append(_output_line("Top commands:", "builtin-section"))
     sorted_roots = sorted(
         by_root.items(),
         key=lambda item: (-int(item[1]["count"]), item[0]),
@@ -2188,7 +2208,7 @@ def _run_fake_stats(session_id: str) -> list[dict[str, str]]:
         _ansi_cell("ok", ok_width, ">", _ansi_underline),
         _ansi_cell("avg", avg_width, ">", _ansi_underline),
     ))
-    lines.append(_output_line(f"  {header}", "fake-help-row"))
+    lines.append(_output_line(f"  {header}", "builtin-help-row"))
     for row in top_rows:
         rendered = column_gap.join((
             f"{row['root']:<{root_width}}",
@@ -2196,15 +2216,15 @@ def _run_fake_stats(session_id: str) -> list[dict[str, str]]:
             f"{row['ok']:>{ok_width}}",
             f"{row['avg']:>{avg_width}}",
         ))
-        lines.append(_output_line(f"  {rendered}", "fake-help-row"))
+        lines.append(_output_line(f"  {rendered}", "builtin-help-row"))
     return lines
 
 
-def _run_fake_tty() -> list[dict[str, str]]:
+def _run_builtin_tty() -> list[dict[str, str]]:
     return [{"type": "output", "text": "/dev/pts/web"}]
 
 
-def _run_fake_sudo(command: str) -> list[dict[str, str]]:
+def _run_builtin_sudo(command: str) -> list[dict[str, str]]:
     parts = _split_command(command)
     if len(parts) == 1:
         return [{"type": "output", "text": random.choice(_SNARKY_SUDO_RESPONSES)}]
@@ -2213,13 +2233,13 @@ def _run_fake_sudo(command: str) -> list[dict[str, str]]:
     return [{"type": "output", "text": template.format(target=target)}]
 
 
-def _run_fake_su(command: str) -> list[dict[str, str]]:
+def _run_builtin_su(command: str) -> list[dict[str, str]]:
     prefix = "sudo" if command.strip().lower().startswith("sudo") else "su"
     text = random.choice(_SNARKY_SU_RESPONSES).replace("su:", f"{prefix}:")
     return [{"type": "output", "text": text}]
 
 
-def _run_fake_type(command: str) -> list[dict[str, str]]:
+def _run_builtin_type(command: str) -> list[dict[str, str]]:
     parts = _split_command(command)
     if len(parts) != 2:
         return [{"type": "output", "text": "Usage: type <command>"}]
@@ -2235,23 +2255,23 @@ def _run_fake_type(command: str) -> list[dict[str, str]]:
     return [{"type": "output", "text": text}]
 
 
-def _run_fake_uname(command: str) -> list[dict[str, str]]:
+def _run_builtin_uname(command: str) -> list[dict[str, str]]:
     parts = _split_command(command)
     if "-a" in parts[1:]:
         return [{"type": "output", "text": f"{CFG['app_name']} Linux web-terminal x86_64 app-runtime"}]
     return [{"type": "output", "text": "Linux"}]
 
 
-def _run_fake_uptime() -> list[dict[str, str]]:
+def _run_builtin_uptime() -> list[dict[str, str]]:
     elapsed = int((datetime.now(timezone.utc) - _STARTED_AT).total_seconds())
     return [{"type": "output", "text": f"up {_format_duration(elapsed)}"}]
 
 
-def _run_fake_xyzzy() -> list[dict[str, str]]:
+def _run_builtin_xyzzy() -> list[dict[str, str]]:
     return [{"type": "output", "text": "Nothing happens."}]
 
 
-def _run_fake_coffee() -> list[dict[str, str]]:
+def _run_builtin_coffee() -> list[dict[str, str]]:
     return _text_lines([
         "HTTP/1.1 418 I'm a teapot",
         "Content-Type: text/plain",
@@ -2260,14 +2280,14 @@ def _run_fake_coffee() -> list[dict[str, str]]:
     ])
 
 
-def _run_fake_fork_bomb() -> list[dict[str, str]]:
+def _run_builtin_fork_bomb() -> list[dict[str, str]]:
     return _text_lines([
         "bash: fork bomb politely declined",
         "system remains operational",
     ])
 
 
-def _run_fake_df(command: str) -> list[dict[str, str]]:
+def _run_builtin_df(command: str) -> list[dict[str, str]]:
     return _text_lines([
         (
             f"{_ansi_underline('Filesystem')}      "
@@ -2283,7 +2303,7 @@ def _run_fake_df(command: str) -> list[dict[str, str]]:
     ])
 
 
-def _run_fake_free(command: str) -> list[dict[str, str]]:
+def _run_builtin_free(command: str) -> list[dict[str, str]]:
     return _text_lines([
         (
             "               "
@@ -2299,22 +2319,22 @@ def _run_fake_free(command: str) -> list[dict[str, str]]:
     ])
 
 
-def _run_fake_version() -> list[dict[str, str]]:
+def _run_builtin_version() -> list[dict[str, str]]:
     try:
         flask_version = package_version("flask")
     except PackageNotFoundError:
         flask_version = "unknown"
     lines = [
-        _output_line("Version info:", "fake-section"),
-        _output_line(f"{CFG['app_name']} web shell", "fake-plain"),
-        _output_line(f"App {APP_VERSION}", "fake-plain"),
-        _output_line(f"Flask {flask_version}", "fake-plain"),
-        _output_line(f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}", "fake-plain"),
+        _output_line("Version info:", "builtin-section"),
+        _output_line(f"{CFG['app_name']} web shell", "builtin-plain"),
+        _output_line(f"App {APP_VERSION}", "builtin-plain"),
+        _output_line(f"Flask {flask_version}", "builtin-plain"),
+        _output_line(f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}", "builtin-plain"),
     ]
     return lines
 
 
-def _run_fake_which(command: str) -> list[dict[str, str]]:
+def _run_builtin_which(command: str) -> list[dict[str, str]]:
     parts = _split_command(command)
     if len(parts) != 2:
         return [{"type": "output", "text": "Usage: which <command>"}]
@@ -2330,7 +2350,7 @@ def _run_fake_which(command: str) -> list[dict[str, str]]:
     return [{"type": "output", "text": text}]
 
 
-def _run_fake_who(session_id: str) -> list[dict[str, str]]:
+def _run_builtin_who(session_id: str) -> list[dict[str, str]]:
     return [{"type": "output", "text": f"{CFG['app_name']}  pts/web  {session_id or 'anonymous'}"}]
 
 

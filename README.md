@@ -578,6 +578,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── session.py          # /session/token/*, /session/preferences, /session/variables, /session/workflows*, /session/recent-domains, /session/migrate, /session/starred*
 │   │   └── workspace.py        # /workspace/files* app-mediated session file routes
 │   ├── builtin_autocomplete.yaml # App-owned built-in command autocomplete grammar (not operator config)
+│   ├── builtin_commands.py     # App-owned built-in shell helpers handled before external process spawn
 │   ├── commands.py             # Command loading, validation (is_command_allowed), and registry-driven rewrites
 │   ├── conf/                   # Operator-configurable files — edit these to customize the deployment
 │   │   ├── app_hints.txt           # Rotating footer hints for the welcome animation (optional)
@@ -597,7 +598,6 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── config.py               # load_config(), CFG defaults, SCANNER_PREFIX detection, theme registry
 │   ├── database.py             # SQLite connection, schema init, retention pruning
 │   ├── extensions.py           # Flask-Limiter singleton (init_app deferred to app.py)
-│   ├── fake_commands.py        # Synthetic shell helpers handled through the run lifecycle before spawn
 │   ├── favicon.ico             # Site favicon
 │   ├── helpers.py              # Trusted-proxy IP resolver and session-ID extractor (used by all blueprints)
 │   ├── logging_setup.py        # structured logging formatters and logger configuration
@@ -640,7 +640,6 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── output.js       # ANSI rendering and line management
 │   │       ├── output_core.js  # Pure output prompt/signal helpers shared by output.js and unit harnesses
 │   │       ├── permalink.js    # Permalink page controller — loaded only on /history/<id> and /share/<id>
-│   │       ├── run_monitor.js  # Status Monitor modal/sheet controller
 │   │       ├── runner.js       # Command execution, SSE stream, kill, stall detection
 │   │       ├── runner_core.js  # Pure runner duration and synthetic pipe helpers shared by runner.js and unit harnesses
 │   │       ├── search.js       # In-output search (with case-sensitive and regex modes)
@@ -649,6 +648,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── session_core.js # Pure session identity helpers shared by session.js and unit harnesses
 │   │       ├── shell_chrome.js # Desktop rail (Recent, Workflows, nav) and bottom HUD controller (loads last)
 │   │       ├── state.js        # Shared app-state store/accessors
+│   │       ├── status_monitor.js  # Status Monitor modal/sheet controller
 │   │       ├── tabs.js         # Tab lifecycle management
 │   │       ├── ui_confirm.js   # showConfirm primitive — shared confirmation-dialog surface (promise-based, Enter-to-cancel default, stacks actions on narrow viewports)
 │   │       ├── ui_disclosure.js # bindDisclosure helper — aria-expanded + panel class lifecycle for expandable/collapsible controls, composed atop bindPressable
@@ -785,12 +785,12 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │       ├── mobile_running_indicator.test.js # mobile running-indicator chip + edge-glow contract — mount, ?ri=off/?ri=0 kill switch, chip count, active-tab exclusion, cycle-tap dispatch
     │       ├── output.test.js      # ANSI rendering, timestamp/line-number mode, HTML export
     │       ├── permalink.test.js   # Permalink page controller — render paths, toggles, save action delegation
-    │       ├── run_monitor.test.js # Status Monitor modal/sheet rendering, including active-run resource telemetry
     │       ├── runner.test.js      # elapsed formatting, run/kill edge cases, stall recovery
     │       ├── search.test.js      # search helper, regex/case modes, mixed-content line regression
     │       ├── session.test.js     # session ID persistence, apiFetch() header injection, and session-switch preference reloads
     │       ├── shell_chrome.test.js  # Desktop HUD status/Redis pill behavior
     │       ├── state.test.js       # composer state store accessors and reset behavior
+    │       ├── status_monitor.test.js # Status Monitor modal/sheet rendering, including active-run resource telemetry
     │       ├── tabs.test.js        # tab lifecycle, rename, overflow, export guards, permalink copy
     │       ├── ui_confirm.test.js   # showConfirm primitive coverage — guards, promise resolution, body rendering, tone, button classes, default-focus (role:cancel / id / Node), stacking breakpoint, content slot rendering/cleanup, onActivate gating (sync/async truthy/falsy/throw/reject)
     │       ├── ui_disclosure.test.js # bindDisclosure helper coverage — aria-expanded sync, panel class lifecycle, onToggle emission rules, imperative handle API

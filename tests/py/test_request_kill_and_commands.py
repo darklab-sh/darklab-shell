@@ -11,11 +11,11 @@ import unittest.mock as mock
 
 import app as shell_app
 import commands
-from fake_commands import (
-    _DOCUMENTED_FAKE_COMMANDS,
-    _FAKE_COMMAND_DISPATCH,
-    _SPECIAL_FAKE_COMMANDS,
-    resolve_fake_command,
+from builtin_commands import (
+    _DOCUMENTED_BUILTIN_COMMANDS,
+    _BUILTIN_COMMAND_DISPATCH,
+    _SPECIAL_BUILTIN_COMMANDS,
+    resolve_builtin_command,
 )
 from commands import (
     load_welcome,
@@ -621,67 +621,67 @@ class TestIsCommandAllowedEdges:
         assert "Session file targets.txt contains restricted IP/CIDR value: 10.9.8.7" in result.reason
 
 
-class TestFakeCommandResolution:
-    def test_documented_fake_commands_are_backed_by_runtime_dispatch(self):
-        for entry in _DOCUMENTED_FAKE_COMMANDS:
+class TestBuiltinCommandResolution:
+    def test_documented_builtin_commands_are_backed_by_runtime_dispatch(self):
+        for entry in _DOCUMENTED_BUILTIN_COMMANDS:
             if "root" in entry:
-                assert entry["root"] in _FAKE_COMMAND_DISPATCH
+                assert entry["root"] in _BUILTIN_COMMAND_DISPATCH
             if "exact" in entry:
                 exact = entry["exact"]
-                assert exact in _SPECIAL_FAKE_COMMANDS
-                assert _SPECIAL_FAKE_COMMANDS[exact] in _FAKE_COMMAND_DISPATCH
+                assert exact in _SPECIAL_BUILTIN_COMMANDS
+                assert _SPECIAL_BUILTIN_COMMANDS[exact] in _BUILTIN_COMMAND_DISPATCH
 
-    def test_resolves_supported_fake_commands(self):
-        assert resolve_fake_command("banner") == "banner"
-        assert resolve_fake_command("clear") == "clear"
-        assert resolve_fake_command("commands") == "commands"
-        assert resolve_fake_command("date") == "date"
-        assert resolve_fake_command("env") == "env"
-        assert resolve_fake_command("faq") == "faq"
-        assert resolve_fake_command("fortune") == "fortune"
-        assert resolve_fake_command("groups") == "groups"
-        assert resolve_fake_command("help") == "help"
-        assert resolve_fake_command("history") == "history"
-        assert resolve_fake_command("hostname") == "hostname"
-        assert resolve_fake_command("id") == "id"
-        assert resolve_fake_command("last") == "last"
-        assert resolve_fake_command("limits") == "limits"
-        assert resolve_fake_command("man curl") == "man"
-        assert resolve_fake_command("pwd") == "pwd"
-        assert resolve_fake_command("reboot") == "reboot"
-        assert resolve_fake_command("retention") == "retention"
-        assert resolve_fake_command("rm -fr /") == "rm_root"
-        assert resolve_fake_command(":(){ :|:& };:") == "fork_bomb"
-        assert resolve_fake_command(":(){:|:&};:") == "fork_bomb"
-        assert resolve_fake_command("status") == "status"
-        assert resolve_fake_command("sudo") == "sudo"
-        assert resolve_fake_command("tty") == "tty"
-        assert resolve_fake_command("type curl") == "type"
-        assert resolve_fake_command("uname -a") == "uname"
-        assert resolve_fake_command("uptime") == "uptime"
-        assert resolve_fake_command("version") == "version"
-        assert resolve_fake_command("which curl") == "which"
-        assert resolve_fake_command("who") == "who"
-        assert resolve_fake_command("whoami") == "whoami"
-        assert resolve_fake_command("ps aux") == "ps"
+    def test_resolves_supported_builtin_commands(self):
+        assert resolve_builtin_command("banner") == "banner"
+        assert resolve_builtin_command("clear") == "clear"
+        assert resolve_builtin_command("commands") == "commands"
+        assert resolve_builtin_command("date") == "date"
+        assert resolve_builtin_command("env") == "env"
+        assert resolve_builtin_command("faq") == "faq"
+        assert resolve_builtin_command("fortune") == "fortune"
+        assert resolve_builtin_command("groups") == "groups"
+        assert resolve_builtin_command("help") == "help"
+        assert resolve_builtin_command("history") == "history"
+        assert resolve_builtin_command("hostname") == "hostname"
+        assert resolve_builtin_command("id") == "id"
+        assert resolve_builtin_command("last") == "last"
+        assert resolve_builtin_command("limits") == "limits"
+        assert resolve_builtin_command("man curl") == "man"
+        assert resolve_builtin_command("pwd") == "pwd"
+        assert resolve_builtin_command("reboot") == "reboot"
+        assert resolve_builtin_command("retention") == "retention"
+        assert resolve_builtin_command("rm -fr /") == "rm_root"
+        assert resolve_builtin_command(":(){ :|:& };:") == "fork_bomb"
+        assert resolve_builtin_command(":(){:|:&};:") == "fork_bomb"
+        assert resolve_builtin_command("status") == "status"
+        assert resolve_builtin_command("sudo") == "sudo"
+        assert resolve_builtin_command("tty") == "tty"
+        assert resolve_builtin_command("type curl") == "type"
+        assert resolve_builtin_command("uname -a") == "uname"
+        assert resolve_builtin_command("uptime") == "uptime"
+        assert resolve_builtin_command("version") == "version"
+        assert resolve_builtin_command("which curl") == "which"
+        assert resolve_builtin_command("who") == "who"
+        assert resolve_builtin_command("whoami") == "whoami"
+        assert resolve_builtin_command("ps aux") == "ps"
         with mock.patch.dict("config.CFG", {"workspace_enabled": True}):
-            assert resolve_fake_command("file list") == "file"
-            assert resolve_fake_command("workspace list") is None
-            assert resolve_fake_command("ls") == "ls"
-            assert resolve_fake_command("cat targets.txt") == "cat"
-            assert resolve_fake_command("rm targets.txt") == "rm"
+            assert resolve_builtin_command("file list") == "file"
+            assert resolve_builtin_command("workspace list") is None
+            assert resolve_builtin_command("ls") == "ls"
+            assert resolve_builtin_command("cat targets.txt") == "cat"
+            assert resolve_builtin_command("rm targets.txt") == "rm"
 
-    def test_workspace_fake_commands_are_hidden_when_disabled(self):
+    def test_workspace_builtin_commands_are_hidden_when_disabled(self):
         with mock.patch.dict("config.CFG", {"workspace_enabled": False}):
-            assert resolve_fake_command("file list") is None
-            assert resolve_fake_command("ls") is None
-            assert resolve_fake_command("cat targets.txt") is None
-            assert resolve_fake_command("rm targets.txt") is None
+            assert resolve_builtin_command("file list") is None
+            assert resolve_builtin_command("ls") is None
+            assert resolve_builtin_command("cat targets.txt") is None
+            assert resolve_builtin_command("rm targets.txt") is None
 
-    def test_rejects_non_fake_commands(self):
-        assert resolve_fake_command("ping darklab.sh") is None
-        assert resolve_fake_command("cat /etc/passwd") is None
-        assert resolve_fake_command("rm /tmp/file") is None
-        assert resolve_fake_command("rm ../file") is None
-        assert resolve_fake_command("ls /tmp") is None
-        assert resolve_fake_command("") is None
+    def test_rejects_non_builtin_commands(self):
+        assert resolve_builtin_command("ping darklab.sh") is None
+        assert resolve_builtin_command("cat /etc/passwd") is None
+        assert resolve_builtin_command("rm /tmp/file") is None
+        assert resolve_builtin_command("rm ../file") is None
+        assert resolve_builtin_command("ls /tmp") is None
+        assert resolve_builtin_command("") is None

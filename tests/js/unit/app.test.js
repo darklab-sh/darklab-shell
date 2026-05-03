@@ -482,14 +482,14 @@ describe('app helpers', () => {
   })
 
   it('opens Status Monitor from the mobile menu and closes the sheet', async () => {
-    const openRunMonitor = vi.fn(() => Promise.resolve(true))
-    await loadAppFns({ openRunMonitor })
+    const openStatusMonitor = vi.fn(() => Promise.resolve(true))
+    await loadAppFns({ openStatusMonitor })
     const sheet = document.getElementById('mobile-menu-sheet')
     sheet.classList.remove('u-hidden')
 
-    document.querySelector('#mobile-menu-sheet [data-menu-action="run-monitor"]').click()
+    document.querySelector('#mobile-menu-sheet [data-menu-action="status-monitor"]').click()
 
-    expect(openRunMonitor).toHaveBeenCalledWith({ source: 'mobile-menu' })
+    expect(openStatusMonitor).toHaveBeenCalledWith({ source: 'mobile-menu' })
     expect(sheet.classList.contains('u-hidden')).toBe(true)
   })
 
@@ -1391,7 +1391,7 @@ describe('app helpers', () => {
         </div>
         <button data-menu-action="search"></button>
         <button data-menu-action="history"></button>
-        <button data-menu-action="run-monitor"></button>
+        <button data-menu-action="status-monitor"></button>
         <button data-menu-action="theme"></button>
         <button data-menu-action="faq"></button>
       </div>
@@ -3334,15 +3334,15 @@ describe('app helpers', () => {
   })
 
   it('supports Alt+M to open the status monitor from the terminal prompt', async () => {
-    const openRunMonitor = vi.fn(() => Promise.resolve(true))
+    const openStatusMonitor = vi.fn(() => Promise.resolve(true))
     const { cmdInput } = await loadAppFns({
-      openRunMonitor,
+      openStatusMonitor,
       tabs: [{ id: 'tab-1', st: 'idle' }],
     })
 
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', altKey: true, bubbles: true }))
 
-    expect(openRunMonitor).toHaveBeenCalledWith({ source: 'shortcut' })
+    expect(openStatusMonitor).toHaveBeenCalledWith({ source: 'shortcut' })
   })
 
   it('supports Alt+Shift+F to open the Files modal from the terminal prompt', async () => {

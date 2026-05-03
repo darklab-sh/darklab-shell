@@ -371,9 +371,9 @@ To update suggestions, edit `conf/commands.yaml` and/or `conf/commands.local.yam
 
 **Limits:** browser-native combos like `Cmd+T`, `Cmd+W`, and `Ctrl+Tab` are optional fallbacks only — browser interception is inconsistent across environments, especially on macOS.
 
-**Configuration:** none — the chord list is defined in `app/fake_commands.py` and not user-tunable.
+**Configuration:** none — the chord list is defined in `app/builtin_commands.py` and not user-tunable.
 
-**Related files:** `app/static/js/app.js` (`handleTabShortcut` / `handleChromeShortcut` / `handleActionShortcut`), `app/static/js/controller.js` (document keydown cascade), `app/fake_commands.py` (`_CURRENT_SHORTCUTS`), `app/blueprints/content.py` (`GET /shortcuts`).
+**Related files:** `app/static/js/app.js` (`handleTabShortcut` / `handleChromeShortcut` / `handleActionShortcut`), `app/static/js/controller.js` (document keydown cascade), `app/builtin_commands.py` (`_CURRENT_SHORTCUTS`), `app/blueprints/content.py` (`GET /shortcuts`).
 
 Shipped app-safe shortcuts:
 
@@ -785,7 +785,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** none. The built-in command surface is defined in application code, not in operator config.
 
-**Related files:** `app/fake_commands.py` (built-in command registry + output rendering), `app/commands.py` (dispatch, autocomplete loading, and man routing), `app/builtin_autocomplete.yaml` (built-in autocomplete grammar), `app/static/js/app.js` (dynamic autocomplete hooks, client-side command flows, and Options/theme command handling), `app/static/js/runner.js` (client-side command interception).
+**Related files:** `app/builtin_commands.py` (built-in command registry + output rendering), `app/commands.py` (dispatch, autocomplete loading, and man routing), `app/builtin_autocomplete.yaml` (built-in autocomplete grammar), `app/static/js/app.js` (dynamic autocomplete hooks, client-side command flows, and Options/theme command handling), `app/static/js/runner.js` (client-side command interception).
 
 ---
 
@@ -797,7 +797,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 - `var set NAME value` stores a value for the current session. Names must match `[A-Z][A-Z0-9_]{0,31}`.
 - `var list` prints the current session variables, and `var unset NAME` removes one.
-- Commands can reference variables as `$NAME` or `${NAME}`. The app expands those references before fake-command dispatch, built-in pipe handling, command policy validation, workspace rewrites, and subprocess launch.
+- Commands can reference variables as `$NAME` or `${NAME}`. The app expands those references before built-in command dispatch, built-in pipe handling, command policy validation, workspace rewrites, and subprocess launch.
 - Undefined variables or unsupported `$...` syntax are denied before a process is spawned.
 - Run history keeps the typed command, while the transcript emits a `[vars] expanded ...` notice so the expanded command remains visible.
 - Autocomplete suggests defined variable names when typing `$...` and suggests existing names plus common `HOST`, `PORT`, and `IP_ADDR` starters for `var set`.
@@ -805,7 +805,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Limits:** variables are intended for targets, ports, and paths, not secrets. Values are not redacted and are visible in `var list`, autocomplete descriptions, and the expansion notice.
 
-**Related files:** `app/session_variables.py`, `app/fake_commands.py`, `app/blueprints/run.py`, `app/static/js/app.js`.
+**Related files:** `app/session_variables.py`, `app/builtin_commands.py`, `app/blueprints/run.py`, `app/static/js/app.js`.
 
 ---
 
@@ -832,7 +832,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** `workspace_enabled`, `workspace_backend`, `workspace_root`, `workspace_quota_mb`, `workspace_max_file_mb`, `workspace_max_files`, and `workspace_inactivity_ttl_hours` in `conf/config.yaml`; per-command `workspace_flags` in `conf/commands.yaml`.
 
-**Related files:** `app/workspace.py` (path, quota, permission, and cleanup helpers), `app/blueprints/workspace.py` (workspace file routes), `app/static/js/workspace.js` (Files panel), `app/fake_commands.py` (`file` built-in), `app/commands.py` (workspace flag validation and rewrite).
+**Related files:** `app/workspace.py` (path, quota, permission, and cleanup helpers), `app/blueprints/workspace.py` (workspace file routes), `app/static/js/workspace.js` (Files panel), `app/builtin_commands.py` (`file` built-in), `app/commands.py` (workspace flag validation and rewrite).
 
 ---
 

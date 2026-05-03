@@ -58,9 +58,9 @@
   const show = (el) => el && el.classList && el.classList.remove('u-hidden');
   const hide = (el) => el && el.classList && el.classList.add('u-hidden');
   const isRunning = () => !!(statusPillEl && statusPillEl.classList && statusPillEl.classList.contains('running'));
-  const RUN_MONITOR_PEEK_PULSE_KEY = 'run_monitor_mobile_peek_seen';
-  let _runMonitorPeekHoldUntil = 0;
-  let _runMonitorPeekTimer = 0;
+  const STATUS_MONITOR_PEEK_PULSE_KEY = 'status_monitor_mobile_peek_seen';
+  let _statusMonitorPeekHoldUntil = 0;
+  let _statusMonitorPeekTimer = 0;
 
   // ── 2A+2B: Status-driven progress bar and composer ring ─────────
   function syncRunState() {
@@ -422,28 +422,28 @@
     const remainder = String(seconds % 60).padStart(2, '0');
     return `${minutes}:${remainder}`;
   }
-  function _syncRunMonitorPeekTimer(activeRunning) {
+  function _syncStatusMonitorPeekTimer(activeRunning) {
     if (activeRunning) {
-      if (!_runMonitorPeekTimer) {
-        _runMonitorPeekTimer = window.setInterval(() => {
+      if (!_statusMonitorPeekTimer) {
+        _statusMonitorPeekTimer = window.setInterval(() => {
           try { renderRecentPeek(); } catch (_) { /* non-critical */ }
         }, 1000);
       }
       return;
     }
-    if (_runMonitorPeekTimer) {
-      window.clearInterval(_runMonitorPeekTimer);
-      _runMonitorPeekTimer = 0;
+    if (_statusMonitorPeekTimer) {
+      window.clearInterval(_statusMonitorPeekTimer);
+      _statusMonitorPeekTimer = 0;
     }
   }
   function renderRecentPeek() {
     if (!recentPeek) return;
     const activeTab = typeof global.getActiveTab === 'function' ? global.getActiveTab() : null;
     const activeRunning = !!(activeTab && activeTab.st === 'running');
-    _syncRunMonitorPeekTimer(activeRunning);
-    const holdRunMonitor = !activeRunning && _runMonitorPeekHoldUntil && Date.now() < _runMonitorPeekHoldUntil;
-    if (activeRunning || holdRunMonitor) {
-      recentPeek.dataset.peekMode = 'run-monitor';
+    _syncStatusMonitorPeekTimer(activeRunning);
+    const holdStatusMonitor = !activeRunning && _statusMonitorPeekHoldUntil && Date.now() < _statusMonitorPeekHoldUntil;
+    if (activeRunning || holdStatusMonitor) {
+      recentPeek.dataset.peekMode = 'status-monitor';
       recentPeek.setAttribute('aria-label', 'Open Status Monitor');
       const elapsed = activeRunning ? _formatPeekElapsed(activeTab.runStart) : '';
       if (recentPeekCount) recentPeekCount.textContent = activeRunning ? (elapsed || 'live') : 'done';
@@ -457,16 +457,16 @@
       show(recentPeek);
       if (activeRunning && !_prefersReducedMotion()) {
         try {
-          if (sessionStorage.getItem(RUN_MONITOR_PEEK_PULSE_KEY) !== '1') {
-            sessionStorage.setItem(RUN_MONITOR_PEEK_PULSE_KEY, '1');
-            recentPeek.classList.add('recent-peek-run-monitor-wiggle');
-            window.setTimeout(() => recentPeek.classList.remove('recent-peek-run-monitor-wiggle'), 1900);
+          if (sessionStorage.getItem(STATUS_MONITOR_PEEK_PULSE_KEY) !== '1') {
+            sessionStorage.setItem(STATUS_MONITOR_PEEK_PULSE_KEY, '1');
+            recentPeek.classList.add('recent-peek-status-monitor-wiggle');
+            window.setTimeout(() => recentPeek.classList.remove('recent-peek-status-monitor-wiggle'), 1900);
           }
         } catch (_) {
-          if (recentPeek.dataset.runMonitorWiggled !== '1') {
-            recentPeek.dataset.runMonitorWiggled = '1';
-            recentPeek.classList.add('recent-peek-run-monitor-wiggle');
-            window.setTimeout(() => recentPeek.classList.remove('recent-peek-run-monitor-wiggle'), 1900);
+          if (recentPeek.dataset.statusMonitorWiggled !== '1') {
+            recentPeek.dataset.statusMonitorWiggled = '1';
+            recentPeek.classList.add('recent-peek-status-monitor-wiggle');
+            window.setTimeout(() => recentPeek.classList.remove('recent-peek-status-monitor-wiggle'), 1900);
           }
         }
       }
@@ -1156,8 +1156,8 @@
 
   // Peek: tap opens the sheet; vertical swipe-up also opens it.
   function openPeekSurface() {
-    if (recentPeek && recentPeek.dataset.peekMode === 'run-monitor') {
-      if (typeof global.openRunMonitor === 'function') void global.openRunMonitor({ source: 'mobile-peek' });
+    if (recentPeek && recentPeek.dataset.peekMode === 'status-monitor') {
+      if (typeof global.openStatusMonitor === 'function') void global.openStatusMonitor({ source: 'mobile-peek' });
       return;
     }
     showRecentsSheet();
@@ -1197,7 +1197,7 @@
       const activeId = typeof global.getActiveTabId === 'function' ? global.getActiveTabId() : null;
       const detail = e && e.detail ? e.detail : {};
       if (detail.id === activeId && detail.status && detail.status !== 'running') {
-        _runMonitorPeekHoldUntil = Date.now() + 2500;
+        _statusMonitorPeekHoldUntil = Date.now() + 2500;
         window.setTimeout(() => {
           try { renderRecentPeek(); } catch (_) { /* non-critical */ }
         }, 2550);
@@ -1205,7 +1205,7 @@
       try { renderRecentPeek(); } catch (_) { /* non-critical */ }
     });
     onUiEvent('app:tab-activated', () => {
-      _runMonitorPeekHoldUntil = 0;
+      _statusMonitorPeekHoldUntil = 0;
       try { renderRecentPeek(); } catch (_) { /* non-critical */ }
     });
   }

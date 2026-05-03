@@ -265,7 +265,7 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 | `panel_border` | `#3c3c3c` | `rgba(0,0,0,0.28)` | Panel borders |
 | `panel_shadow` | `rgba(170,170,170,0.12)` | `rgba(0,0,0,0.22)` | Panel drop shadow |
 | `terminal_bar_bg` | `#000000` | `#b8c4d0` | Top terminal bar background |
-| `chrome_bg` | `#0c0c0c` | `#b8c4d0` | Shared shell chrome background for the rail, HUD, History drawer, Run Monitor, mobile recents, and mobile menu |
+| `chrome_bg` | `#0c0c0c` | `#b8c4d0` | Shared shell chrome background for the rail, HUD, History drawer, Status Monitor, mobile recents, and mobile menu |
 | `chrome_header_bg` | `#0c0c0c` | `#b8c4d0` | Header bands inside shell chrome surfaces |
 | `chrome_row_bg` | `#0c0c0c` | `#b8c4d0` | Rows inside shell chrome surfaces |
 | `chrome_row_hover_bg` | `rgba(57,255,20,0.12)` | `rgba(26,90,170,0.06)` | Hover/focus rows inside shell chrome surfaces |

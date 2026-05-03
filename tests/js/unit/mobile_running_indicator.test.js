@@ -70,7 +70,7 @@ function mountModule({
   activateTab = vi.fn(),
   includePeek = false,
   recentPreviewHistory = [],
-  openRunMonitor = vi.fn(() => Promise.resolve(true)),
+  openStatusMonitor = vi.fn(() => Promise.resolve(true)),
   reducedMotion = false,
 } = {}) {
   buildHarness({ includePeek })
@@ -88,7 +88,7 @@ function mountModule({
   injectedGlobal.getActiveTab = () => tabs.find(tab => tab.id === activeTabId) || null
   injectedGlobal.activateTab = activateTab
   injectedGlobal.recentPreviewHistory = recentPreviewHistory
-  injectedGlobal.openRunMonitor = openRunMonitor
+  injectedGlobal.openStatusMonitor = openStatusMonitor
   const origMatchMedia = window.matchMedia
   window.matchMedia = vi.fn((query) => ({
     matches: reducedMotion && String(query).includes('prefers-reduced-motion'),
@@ -122,7 +122,7 @@ function mountModule({
 
   return {
     activateTab,
-    openRunMonitor,
+    openStatusMonitor,
     tabs,
     restore() {
       window.requestAnimationFrame = origRaf
@@ -247,25 +247,25 @@ describe('mobile running-state indicator', () => {
 
     const peek = document.getElementById('mobile-recent-peek')
     expect(peek.classList.contains('u-hidden')).toBe(false)
-    expect(peek.dataset.peekMode).toBe('run-monitor')
+    expect(peek.dataset.peekMode).toBe('status-monitor')
     expect(document.getElementById('mobile-recent-peek-count').textContent).toBe('live')
     expect(document.querySelector('.recent-peek-label').textContent).toBe('Status Monitor')
     expect(document.getElementById('mobile-recent-peek-preview').textContent).toBe('sleep 30')
-    expect(peek.classList.contains('recent-peek-run-monitor-wiggle')).toBe(true)
+    expect(peek.classList.contains('recent-peek-status-monitor-wiggle')).toBe(true)
   })
 
   it('opens Status Monitor from the running peek instead of the recents sheet', () => {
-    const openRunMonitor = vi.fn(() => Promise.resolve(true))
+    const openStatusMonitor = vi.fn(() => Promise.resolve(true))
     ctx = mountModule({
       includePeek: true,
-      openRunMonitor,
+      openStatusMonitor,
       tabs: [{ id: 'tab-a', st: 'running', command: 'sleep 30' }],
       activeTabId: 'tab-a',
     })
 
     document.getElementById('mobile-recent-peek').click()
 
-    expect(openRunMonitor).toHaveBeenCalledWith({ source: 'mobile-peek' })
+    expect(openStatusMonitor).toHaveBeenCalledWith({ source: 'mobile-peek' })
   })
 
   it('shows elapsed time for the active mobile Status Monitor peek when runStart is known', () => {
@@ -297,7 +297,7 @@ describe('mobile running-state indicator', () => {
       activeTabId: 'tab-a',
     })
 
-    expect(document.getElementById('mobile-recent-peek').classList.contains('recent-peek-run-monitor-wiggle')).toBe(false)
+    expect(document.getElementById('mobile-recent-peek').classList.contains('recent-peek-status-monitor-wiggle')).toBe(false)
   })
 
   it('returns the peek to recents after the active run finalization hold expires', () => {
@@ -314,7 +314,7 @@ describe('mobile running-state indicator', () => {
       detail: { id: 'tab-a', status: 'ok', activeTabId: 'tab-a' },
     }))
 
-    expect(document.getElementById('mobile-recent-peek').dataset.peekMode).toBe('run-monitor')
+    expect(document.getElementById('mobile-recent-peek').dataset.peekMode).toBe('status-monitor')
 
     vi.advanceTimersByTime(2600)
 

@@ -35,10 +35,10 @@ from commands import (
 from config import CFG, SCANNER_PREFIX
 from database import db_connect
 from extensions import limiter
-from fake_commands import (
-    execute_fake_command,
-    resolve_fake_command,
-    resolves_exact_special_fake_command,
+from builtin_commands import (
+    execute_builtin_command,
+    resolve_builtin_command,
+    resolves_exact_special_builtin_command,
 )
 from helpers import get_client_ip, get_log_session_id, get_session_id
 from process import (
@@ -722,7 +722,7 @@ def _prepare_command_input(
     )
 
 
-def _filter_fake_command_events(events, variable_notice: str, postfilter: _SyntheticPostFilterProcessor):
+def _filter_builtin_command_events(events, variable_notice: str, postfilter: _SyntheticPostFilterProcessor):
     if variable_notice:
         events = [{"type": "output", "text": variable_notice, "cls": "notice"}] + events
     filtered_events = []
@@ -1085,8 +1085,8 @@ def start_brokered_run():
     if not original_command:
         return jsonify({"error": "No command provided"}), 400
 
-    if resolves_exact_special_fake_command(original_command):
-        events, exit_code = execute_fake_command(original_command, session_id)
+    if resolves_exact_special_builtin_command(original_command):
+        events, exit_code = execute_builtin_command(original_command, session_id)
         run_id = _brokered_synthetic_run(original_command, session_id, client_ip, events, exit_code)
         return jsonify({"run_id": run_id, "stream": f"/runs/{run_id}/stream"}), 202
 
@@ -1095,9 +1095,9 @@ def start_brokered_run():
     except _RunPreparationError as exc:
         return _preparation_error_response(exc)
 
-    if resolve_fake_command(prepared_input.execution_command):
-        events, exit_code = execute_fake_command(prepared_input.execution_command, session_id)
-        filtered_events = _filter_fake_command_events(
+    if resolve_builtin_command(prepared_input.execution_command):
+        events, exit_code = execute_builtin_command(prepared_input.execution_command, session_id)
+        filtered_events = _filter_builtin_command_events(
             events,
             prepared_input.variable_notice,
             prepared_input.postfilter,

@@ -4,11 +4,11 @@
 var DarklabOutputCore = (function (global) {
   const OUTPUT_SIGNAL_SCOPES = Object.freeze(['findings', 'warnings', 'errors', 'summaries']);
   const OUTPUT_SIGNAL_SUMMARY_CLASSES = Object.freeze([
-    'fake-signal-summary-header',
-    'fake-signal-summary-section',
-    'fake-signal-summary-row',
-    'fake-signal-summary-note',
-    'fake-signal-summary-sep',
+    'builtin-signal-summary-header',
+    'builtin-signal-summary-section',
+    'builtin-signal-summary-row',
+    'builtin-signal-summary-note',
+    'builtin-signal-summary-sep',
   ]);
 
   function promptIdentityPrefix(rawPrefix = '') {

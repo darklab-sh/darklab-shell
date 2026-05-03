@@ -33,7 +33,7 @@ darklab_shell is a web-based shell for running network diagnostic and vulnerabil
 At a high level, it works like this:
 
 - A browser-based terminal UI loads a Flask-rendered shell page, then hydrates itself from focused read routes such as `/config`, `/themes`, `/faq`, `/autocomplete`, and `/welcome*`.
-- Command execution flows through brokered `POST /runs` starts plus replayable `/runs/<run_id>/stream` SSE subscriptions, which validate and rewrite commands, resolve app-native fake commands, start isolated scanner subprocesses when needed, and publish output events.
+- Command execution flows through brokered `POST /runs` starts plus replayable `/runs/<run_id>/stream` SSE subscriptions, which validate and rewrite commands, resolve app-native built-in commands, start isolated scanner subprocesses when needed, and publish output events.
 - `Redis` provides the shared state that must work correctly across multiple Gunicorn workers: rate limiting, active run PID tracking for `/kill`, and production run-broker event replay.
 - `SQLite` persists completed run metadata, preview output, snapshots, and full-output artifact metadata so history, canonical run permalinks, and snapshot permalinks survive restarts.
 - The browser client stays build-step-free. Classic scripts share one global runtime, while browser cookies and storage cover local continuity and cache layers around session identity, session-scoped preferences, and reload restore.
@@ -62,7 +62,7 @@ flowchart TB
   subgraph App["Python Web Application"]
     Flask["Flask + Gunicorn"]
     Routing["HTTP routes + template rendering"]
-    Orchestration["Validation + fake-command handling + run orchestration"]
+    Orchestration["Validation + built-in command handling + run orchestration"]
   end
 
   subgraph Runtime["Execution + Persistence Services"]
@@ -89,7 +89,7 @@ flowchart TB
 This diagram is intentionally framework- and runtime-oriented rather than app-module-oriented. It is meant to answer the “which layer owns which responsibility?” question without duplicating the more detailed app diagrams later in the document.
 
 - the browser runtime owns rendering, local interaction state, and web-platform APIs such as cookies, `localStorage`, `sessionStorage`, `fetch`, and SSE consumption
-- the Python web application owns routing, template rendering, config/theme loading, request validation, fake-command handling, and orchestration of real command execution
+- the Python web application owns routing, template rendering, config/theme loading, request validation, built-in command handling, and orchestration of real command execution
 - Redis owns the cross-worker coordination that cannot safely live inside one Gunicorn worker process
 - SQLite and artifact files own the durable run/share state that must survive reloads and restarts
 - scanner subprocesses are a distinct execution boundary rather than an in-process extension of the Flask app
@@ -144,7 +144,7 @@ sequenceDiagram
 
   B->>R: POST /runs
   R->>X: register run_id -> pid
-  R->>P: spawn fake command or real process
+  R->>P: spawn built-in command or real process
   R->>X: publish started/output/exit events
   B->>R: GET /runs/<run_id>/stream
   R-->>B: replay + live SSE events
@@ -350,7 +350,7 @@ Within that non-module shell, repeated tab/history/FAQ-limit surfaces are built 
 
 External dependencies: local vendor routes serving committed builds of `ansi_up` and `jspdf` from `app/static/js/vendor/`, and committed font files from `app/static/fonts/`. Both JS libraries are tracked in `package.json` under `dependencies`. `scripts/build_vendor.mjs` generates `app/static/js/vendor/ansi_up.js` (an IIFE-wrapped browser global, because `ansi_up` v6 is ESM-only) and `app/static/js/vendor/jspdf.umd.min.js` (copied directly from the npm UMD build). The generated files are committed so local development and docker-compose runs never need an explicit build step. Run `npm run vendor:sync` to regenerate after a version bump; `npm run vendor:check` verifies the committed files in `app/static/js/vendor/` match what `build_vendor.mjs` would produce from the current `node_modules/` packages. Fonts are committed to `app/static/fonts/` and served through `/vendor/fonts/`.
 
-**JS module load order:** `session.js` → `state.js` → `utils.js` → `export_html.js` → `config.js` → `dom.js` → `ui_helpers.js` → `ui_pressable.js` → `ui_disclosure.js` → `ui_dismissible.js` → `ui_focus_trap.js` → `ui_confirm.js` → `ui_outside_click.js` → `export_pdf.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `workspace.js` → `welcome.js` → `run_monitor.js` → `runner.js` → `app.js` → `mobile_sheet.js` → `controller.js` → `shell_chrome.js` → `mobile_chrome.js`. `state.js` owns the shared store boundary, `ui_helpers.js` owns DOM-facing setters/getters and visibility helpers, the `ui_*` helper modules form the shared UI interaction layer (see **UI Interaction Helpers** below), `app.js` still provides reusable browser helpers, `controller.js` owns the composition root, and `shell_chrome.js` / `mobile_chrome.js` load last so their rail, tabbar, HUD, and mobile-sheet wiring can attach after all tab, search, and action helpers are defined. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
+**JS module load order:** `session.js` → `state.js` → `utils.js` → `export_html.js` → `config.js` → `dom.js` → `ui_helpers.js` → `ui_pressable.js` → `ui_disclosure.js` → `ui_dismissible.js` → `ui_focus_trap.js` → `ui_confirm.js` → `ui_outside_click.js` → `export_pdf.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `workspace.js` → `welcome.js` → `status_monitor.js` → `runner.js` → `app.js` → `mobile_sheet.js` → `controller.js` → `shell_chrome.js` → `mobile_chrome.js`. `state.js` owns the shared store boundary, `ui_helpers.js` owns DOM-facing setters/getters and visibility helpers, the `ui_*` helper modules form the shared UI interaction layer (see **UI Interaction Helpers** below), `app.js` still provides reusable browser helpers, `controller.js` owns the composition root, and `shell_chrome.js` / `mobile_chrome.js` load last so their rail, tabbar, HUD, and mobile-sheet wiring can attach after all tab, search, and action helpers are defined. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
 
 **UI Interaction Helpers.** A five-helper family in `static/js/ui_helpers.js` + four sibling `ui_*.js` modules is the single contract for chrome-surface interaction. Every module loads before the domain scripts that consume it, so every downstream module sees the helpers as plain globals — no wiring glue at call sites.
 
@@ -553,7 +553,7 @@ flowchart TB
 
   subgraph Commands["Command Layer"]
     CommandRules["commands.py"]
-    FakeCommands["fake_commands.py"]
+    BuiltinCommands["builtin_commands.py"]
   end
 
   subgraph Http["HTTP Layer"]
@@ -578,14 +578,14 @@ flowchart TB
   Permalinks --> Http
   OutputStore --> Http
   CommandRules --> Run
-  FakeCommands --> Run
+  BuiltinCommands --> Run
   Http --> App
 ```
 
 - `config.py` is the root configuration/theme layer and stays free of Flask app dependencies.
 - `logging_setup.py` must initialize before the rest of the app because module-import-time startup work, especially Redis setup, can log immediately.
 - The infrastructure/helper layer owns shared concerns like request metadata, persistence, process tracking, permalink shaping, artifact storage, and the Flask-Limiter singleton.
-- `commands.py` and `fake_commands.py` stay logically adjacent to the run path but remain separate from the Flask factory so command policy and shell-helper behavior can be tested in isolation.
+- `commands.py` and `builtin_commands.py` stay logically adjacent to the run path but remain separate from the Flask factory so command policy and shell-helper behavior can be tested in isolation.
 - The HTTP layer owns the actual request/response surface, and `app.py` remains a thin factory that composes logging, limiter setup, blueprint registration, and request hooks.
 
 ### Backend Runtime Boundaries
@@ -630,7 +630,7 @@ Synthetic post-filters also sit on this run-lifecycle boundary rather than on th
 
 ### Spawn And Stream
 
-Commands flow through `POST /runs`, which validates and rewrites the request, resolves any app-native fake commands, starts brokered execution, and returns a run id plus stream URL. The browser then subscribes to `GET /runs/<run_id>/stream`, which replays available broker events and follows live output over SSE. Production deployments require Redis for cross-worker replay; single-process local development can opt into the in-memory broker fallback.
+Commands flow through `POST /runs`, which validates and rewrites the request, resolves any app-native built-in commands, starts brokered execution, and returns a run id plus stream URL. The browser then subscribes to `GET /runs/<run_id>/stream`, which replays available broker events and follows live output over SSE. Production deployments require Redis for cross-worker replay; single-process local development can opt into the in-memory broker fallback.
 
 Fast output bursts are rendered in small batches instead of forcing a full DOM update per line. The batching keeps commands like `man curl` responsive enough for the browser to repaint while output is streaming, and the terminal stays pinned to the bottom only while the user has not scrolled away. If the user scrolls up, live following stops until they return to the tail.
 
@@ -638,7 +638,7 @@ The brokered stream keeps the transport alive with heartbeat comments during idl
 
 Active-run metadata is also the source for the Status Monitor's run section. `/history/active` returns the current run IDs, PIDs, commands, start times, metadata source, origin fields, and best-effort `psutil` resource telemetry when available. The backend reports summed RSS bytes and cumulative process-tree CPU seconds for the tracked process plus recursive children. `/history/insights` supplies bounded visual history payloads for the monitor's constellation, activity heatmap, command treemap, and event ticker without overfetching full history rows; the browser loads that heavier payload once on monitor open and refreshes it exactly once when the active-run count transitions `>0 → 0` in the same session, so a freshly completed run lands in the heatmap "today" cell, the treemap percentages, and the constellation without a polling timer. The desktop Status Monitor is a centered modal available from the rail, HUD cells, and `Alt+M`; mobile exposes the same monitor as a bottom sheet from the normal menu and running-tab peek. Both surfaces can open while idle and render system health, workspace quota, session statistics, visual history, a continuous glowing CPU-driven heartbeat strip, app-native constellation/day heatmap popovers, a seeded ambient constellation sky for sparse history, labeled calendar heat, and a `No active runs` row at the bottom. To avoid browser connection starvation when many tabs already hold live SSE streams, opening Status Monitor pauses non-active tab subscriptions and resubscribes them from the last broker event id on close; `/history/active` polling refreshes same-client origin liveness while those streams are paused. Runs already open in a local tab activate that tab when clicked; other visible current-session runs expose Attach to open a subscribed tab and Kill to terminate the backend process group intentionally. Closing a running tab opens a confirmation modal with `Keep running`, `Kill run`, and `Cancel`; `Keep running` detaches only that browser tab and leaves the backend run visible in Status Monitor for later reattach. The monitor calculates the displayed CPU percentage from adjacent poll samples in the browser and caps the display at 100%, which avoids per-worker CPU sample caches and keeps multi-worker deployments from flickering when successive polls land on different workers. Memory fill is normalized client-side against a 1 GB scale while the label continues to show the actual RSS value. Telemetry failures are intentionally non-fatal and omitted from the response rather than breaking reload recovery, stall checks, or the terminal `runs` command.
 
-Two compact history endpoints feed the Status Monitor dashboard without exposing full run bodies. `/history/stats` returns current-session counters: `runs.total`, `runs.succeeded`, `runs.failed`, `runs.incomplete`, `runs.average_elapsed_seconds`, plus `snapshots`, `starred_commands`, and `active_runs`. SIGTERM-style `-15` exits are retained in totals but excluded from `failed` so user-killed, timeout-cleaned, or supervisor-stopped runs do not inflate failure visuals. `/history/insights` accepts `days=auto` or an integer clamped to 28-365 days. It returns `activity` day buckets for the selected window, `max_day_count`, capped `command_mix` data, capped recent-run `constellation` data, recent `events`, and a `windows` object that records the resolved activity, command-mix, and constellation ranges. Command mix uses 30 days, expanding to 90 days when fewer than 25 runs exist; constellation uses 30 days, expanding to 90 days when fewer than 40 plotted runs exist, and caps plotted stars at 350. Those resolved windows are part of the response so the UI can label sparse or expanded panels honestly. Synthetic app built-ins (the command roots routed by the `fake_commands` layer — `pwd`, `whoami`, `help`, …) are filtered server-side from `/history/insights` so all Status Monitor visualizations reflect real recon work only without each consumer reimplementing the filter.
+Two compact history endpoints feed the Status Monitor dashboard without exposing full run bodies. `/history/stats` returns current-session counters: `runs.total`, `runs.succeeded`, `runs.failed`, `runs.incomplete`, `runs.average_elapsed_seconds`, plus `snapshots`, `starred_commands`, and `active_runs`. SIGTERM-style `-15` exits are retained in totals but excluded from `failed` so user-killed, timeout-cleaned, or supervisor-stopped runs do not inflate failure visuals. `/history/insights` accepts `days=auto` or an integer clamped to 28-365 days. It returns `activity` day buckets for the selected window, `max_day_count`, capped `command_mix` data, capped recent-run `constellation` data, recent `events`, and a `windows` object that records the resolved activity, command-mix, and constellation ranges. Command mix uses 30 days, expanding to 90 days when fewer than 25 runs exist; constellation uses 30 days, expanding to 90 days when fewer than 40 plotted runs exist, and caps plotted stars at 350. Those resolved windows are part of the response so the UI can label sparse or expanded panels honestly. App built-ins (the command roots routed by the `builtin_commands` layer — `pwd`, `whoami`, `help`, …) are filtered server-side from `/history/insights` so all Status Monitor visualizations reflect real recon work only without each consumer reimplementing the filter.
 
 ### Output Prefixes And Follow State
 

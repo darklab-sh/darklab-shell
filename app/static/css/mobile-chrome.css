@@ -129,11 +129,11 @@ body.mobile-terminal-mode {
   .recent-peek:active {
     background: var(--theme-chrome-row-hover-bg);
   }
-  .recent-peek[data-peek-mode="run-monitor"] {
+  .recent-peek[data-peek-mode="status-monitor"] {
     border-top-color: color-mix(in srgb, var(--green) 42%, var(--border));
     box-shadow: inset 0 1px 0 color-mix(in srgb, var(--green) 18%, transparent);
   }
-  .recent-peek[data-peek-mode="run-monitor"]::before {
+  .recent-peek[data-peek-mode="status-monitor"]::before {
     background: color-mix(in srgb, var(--green) 12%, transparent);
     opacity: 0.65;
   }
@@ -165,19 +165,19 @@ body.mobile-terminal-mode {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .recent-peek[data-peek-mode="run-monitor"] .recent-peek-handle {
+  .recent-peek[data-peek-mode="status-monitor"] .recent-peek-handle {
     background: color-mix(in srgb, var(--green) 72%, var(--border-bright));
   }
-  .recent-peek[data-peek-mode="run-monitor"] .recent-peek-label {
+  .recent-peek[data-peek-mode="status-monitor"] .recent-peek-label {
     color: var(--green);
   }
-  .recent-peek[data-peek-mode="run-monitor"] .recent-peek-count {
+  .recent-peek[data-peek-mode="status-monitor"] .recent-peek-count {
     color: var(--green);
   }
-  .recent-peek.recent-peek-run-monitor-wiggle {
-    animation: mobile-run-monitor-peek-wiggle 0.62s ease-in-out 3;
+  .recent-peek.recent-peek-status-monitor-wiggle {
+    animation: mobile-status-monitor-peek-wiggle 0.62s ease-in-out 3;
   }
-  @keyframes mobile-run-monitor-peek-wiggle {
+  @keyframes mobile-status-monitor-peek-wiggle {
     0%, 100% { transform: translateY(0); }
     38% { transform: translateY(-7px); }
     62% { transform: translateY(2px); }

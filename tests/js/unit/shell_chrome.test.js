@@ -10,7 +10,7 @@ function tick() {
   return new Promise(resolve => setTimeout(resolve, 0))
 }
 
-function loadShellChrome({ fetch, preferences = {}, openRunMonitor = vi.fn(() => Promise.resolve(true)) } = {}) {
+function loadShellChrome({ fetch, preferences = {}, openStatusMonitor = vi.fn(() => Promise.resolve(true)) } = {}) {
   document.body.innerHTML = `
     <aside id="rail">
       <button id="rail-collapse-btn"></button>
@@ -57,7 +57,7 @@ function loadShellChrome({ fetch, preferences = {}, openRunMonitor = vi.fn(() =>
     recentPreviewHistory: [],
     renderHudClock: null,
     toggleRailCollapsed: null,
-    openRunMonitor,
+    openStatusMonitor,
   }
 
   new Function(
@@ -90,7 +90,7 @@ function loadShellChrome({ fetch, preferences = {}, openRunMonitor = vi.fn(() =>
     'renderWorkflowItems',
     'openWorkflows',
     'showWorkflowsOverlay',
-    'openRunMonitor',
+    'openStatusMonitor',
     `
       const globalThis = global;
       ${SHELL_CHROME_SRC}
@@ -138,7 +138,7 @@ function loadShellChrome({ fetch, preferences = {}, openRunMonitor = vi.fn(() =>
     () => {},
     () => {},
     () => {},
-    openRunMonitor,
+    openStatusMonitor,
   )
 
   return {
@@ -150,20 +150,20 @@ function loadShellChrome({ fetch, preferences = {}, openRunMonitor = vi.fn(() =>
     railWorkflowsHeader: document.getElementById('rail-workflows-header'),
     railSectionWorkflows: document.getElementById('rail-section-workflows'),
     preferences,
-    openRunMonitor,
+    openStatusMonitor,
   }
 }
 
 describe('shell chrome rail sections', () => {
   it('opens Status Monitor from the desktop rail nav item', () => {
-    const openRunMonitor = vi.fn(() => Promise.resolve(true))
-    const shell = loadShellChrome({ openRunMonitor })
+    const openStatusMonitor = vi.fn(() => Promise.resolve(true))
+    const shell = loadShellChrome({ openStatusMonitor })
     const nav = document.getElementById('rail-nav')
-    nav.innerHTML = '<button data-action="run-monitor" type="button"></button>'
+    nav.innerHTML = '<button data-action="status-monitor" type="button"></button>'
 
-    nav.querySelector('[data-action="run-monitor"]').click()
+    nav.querySelector('[data-action="status-monitor"]').click()
 
-    expect(shell.openRunMonitor).toHaveBeenCalledWith({ source: 'rail' })
+    expect(shell.openStatusMonitor).toHaveBeenCalledWith({ source: 'rail' })
   })
 
   it('keeps the default split when workflows is closed and reopened before resizing', async () => {

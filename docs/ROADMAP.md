@@ -799,7 +799,7 @@ These fit the model, but should not block the core roadmap.
 - Full interactive PTY mode.
 - Full reconnectable live stream. Still valuable, but separate from the project
   workspace model.
-- Plugin-style helper command registry. Revisit when command/fake-command
+- Plugin-style helper command registry. Revisit when command/built-in command
   internals need it, not as part of projects.
 
 ---

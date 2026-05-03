@@ -28,10 +28,12 @@ test.describe('runner stall handling', () => {
     await page.addInitScript(() => {
       const originalFetch = window.fetch.bind(window)
       const encoder = new TextEncoder()
+      let runActive = false
 
       window.fetch = async (input, init) => {
         const url = typeof input === 'string' ? input : input.url
         if (url.endsWith('/runs') && init?.method === 'POST') {
+          runActive = true
           return new Response(JSON.stringify({
             run_id: 'stall-test-run',
             stream: '/runs/stall-test-run/stream',
@@ -57,12 +59,12 @@ test.describe('runner stall handling', () => {
         }
         if (url.endsWith('/history/active')) {
           return new Response(JSON.stringify({
-            runs: [{
+            runs: runActive ? [{
               run_id: 'stall-test-run',
               pid: 4242,
               command: 'curl http://localhost:5001/health',
               started: '2026-01-01T00:00:00Z',
-            }],
+            }] : [],
           }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
@@ -90,9 +92,11 @@ test.describe('runner stall handling', () => {
     await page.addInitScript(() => {
       const originalFetch = window.fetch.bind(window)
       const encoder = new TextEncoder()
+      let runActive = false
       window.fetch = async (input, init) => {
         const url = typeof input === 'string' ? input : input.url
         if (url.endsWith('/runs') && init?.method === 'POST') {
+          runActive = true
           return new Response(JSON.stringify({
             run_id: 'stall-recover-run',
             stream: '/runs/stall-recover-run/stream',
@@ -113,6 +117,7 @@ test.describe('runner stall handling', () => {
                 )
               }, 200)
               setTimeout(() => {
+                runActive = false
                 controller.enqueue(
                   encoder.encode('data: {"type":"exit","code":0,"elapsed":0.3}\n\n'),
                 )
@@ -127,12 +132,12 @@ test.describe('runner stall handling', () => {
         }
         if (url.endsWith('/history/active')) {
           return new Response(JSON.stringify({
-            runs: [{
+            runs: runActive ? [{
               run_id: 'stall-recover-run',
               pid: 4243,
               command: 'curl http://localhost:5001/health',
               started: '2026-01-01T00:00:00Z',
-            }],
+            }] : [],
           }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },

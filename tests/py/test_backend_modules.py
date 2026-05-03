@@ -34,7 +34,7 @@ import database
 import app as shell_app
 import config as app_config
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
-import fake_commands
+import builtin_commands
 import session_variables
 import workspace as workspace_module
 import wordlists
@@ -3767,7 +3767,7 @@ class TestSessionVariables:
                     session_variables.expand_session_variables("curl https://${HOST:-darklab.sh}", "sess-vars")
 
 
-class TestFakeStatus:
+class TestBuiltinStatus:
     def test_includes_session_summary_counts(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "status.db")
@@ -3800,9 +3800,9 @@ class TestFakeStatus:
             conn.close()
 
             with mock.patch("database.DB_PATH", db_path):
-                with mock.patch("fake_commands.active_runs_for_session", return_value=[{"id": "job-1"}]):
-                    with mock.patch("fake_commands.redis_client", None):
-                        lines = fake_commands._run_fake_status("tok_statusdemo")
+                with mock.patch("builtin_commands.active_runs_for_session", return_value=[{"id": "job-1"}]):
+                    with mock.patch("builtin_commands.redis_client", None):
+                        lines = builtin_commands._run_builtin_status("tok_statusdemo")
 
         text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", line["text"]) for line in lines)
         assert re.search(r"session\s+tok_stat••••", text)
@@ -3817,7 +3817,7 @@ class TestFakeStatus:
         assert re.search(r"active runs\s+1", text)
 
 
-class TestFakeStats:
+class TestBuiltinStats:
     def test_reports_session_activity_and_command_breakdown(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "stats.db")
@@ -3908,8 +3908,8 @@ class TestFakeStats:
             conn.close()
 
             with mock.patch("database.DB_PATH", db_path):
-                with mock.patch("fake_commands.active_runs_for_session", return_value=[{"id": "job-1"}]):
-                    lines = fake_commands._run_fake_stats("tok_statsdemo")
+                with mock.patch("builtin_commands.active_runs_for_session", return_value=[{"id": "job-1"}]):
+                    lines = builtin_commands._run_builtin_stats("tok_statsdemo")
 
         text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", line["text"]) for line in lines)
         assert re.search(r"session\s+tok_stat••••", text)
@@ -3953,7 +3953,7 @@ class TestFakeStats:
             conn.close()
 
             with mock.patch("database.DB_PATH", db_path):
-                lines = fake_commands._run_fake_stats("tok_builtinonly")
+                lines = builtin_commands._run_builtin_stats("tok_builtinonly")
 
         text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", line["text"]) for line in lines)
         assert re.search(r"runs\s+1", text)

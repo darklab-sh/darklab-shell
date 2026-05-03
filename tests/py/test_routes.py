@@ -1495,7 +1495,7 @@ class TestShortcutsRoute:
         assert "?" in keys, "shortcuts overlay trigger should be self-documenting"
 
     def test_matches_shortcuts_builtin_source(self):
-        from fake_commands import get_current_shortcuts
+        from builtin_commands import get_current_shortcuts
         direct = get_current_shortcuts(is_mac=False)
         client = get_client()
         data = json.loads(client.get("/shortcuts").data)
@@ -2131,8 +2131,8 @@ class TestRunRoute:
                     "command": "theme list",
                     "exit_code": 0,
                     "lines": [
-                        {"text": "Available themes:", "cls": "fake-section"},
-                        {"text": "Dark themes:", "cls": "fake-section"},
+                        {"text": "Available themes:", "cls": "builtin-section"},
+                        {"text": "Dark themes:", "cls": "builtin-section"},
                     ],
                 },
             )

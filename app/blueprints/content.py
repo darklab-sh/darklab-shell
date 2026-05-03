@@ -18,7 +18,7 @@ from commands import (
     load_welcome,
     load_welcome_hints,
 )
-from fake_commands import get_current_shortcuts, get_fake_command_roots, get_special_command_keys
+from builtin_commands import get_current_shortcuts, get_builtin_command_roots, get_special_command_keys
 from helpers import get_client_ip, get_log_session_id, get_session_id, ip_is_in_cidrs, resolve_theme
 from user_workflows import list_user_workflows
 from wordlists import wordlist_autocomplete_items
@@ -250,7 +250,7 @@ def shortcuts():
 def autocomplete():
     """Return external-tool autocomplete context from the command registry."""
     context = load_autocomplete_context_from_commands_registry(_config.CFG)
-    builtin_command_roots = get_fake_command_roots()
+    builtin_command_roots = get_builtin_command_roots()
     special_commands = get_special_command_keys()
     _log_content_view("/autocomplete")
     return jsonify({

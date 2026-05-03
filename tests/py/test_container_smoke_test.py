@@ -5,7 +5,7 @@ This suite builds a fresh image, starts the web app container, and runs every
 user-facing command from the shared container smoke corpus through /runs:
 autocomplete examples plus workflow steps. Each command is checked against expected output recorded in
 tests/py/fixtures/container_smoke_test-expectations.json so missing apt/pip/go/gem
-tools, broken fake-command wiring, or changed command output surface before an
+tools, broken built-in command wiring, or changed command output surface before an
 image or dependency update lands.
 
 Run with:

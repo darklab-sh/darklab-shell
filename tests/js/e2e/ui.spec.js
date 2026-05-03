@@ -123,21 +123,21 @@ test.describe('Status Monitor', () => {
   })
 
   test('desktop rail opens the idle Status Monitor modal', async ({ page }) => {
-    await expect(page.locator('.rail-nav [data-action="run-monitor"] .rail-nav-label')).toHaveText('status')
+    await expect(page.locator('.rail-nav [data-action="status-monitor"] .rail-nav-label')).toHaveText('status')
 
-    await page.locator('.rail-nav [data-action="run-monitor"]').click()
+    await page.locator('.rail-nav [data-action="status-monitor"]').click()
 
-    await expect(page.locator('#run-monitor')).toBeVisible()
-    await expect(page.locator('#run-monitor')).toHaveClass(/\brun-monitor-modal\b/)
-    await expect(page.locator('#run-monitor-title')).toHaveText('Status Monitor')
-    await expect(page.locator('.run-monitor-summary')).toContainText('0 active')
-    await expect(page.locator('.run-monitor-summary')).toContainText('uptime')
+    await expect(page.locator('#status-monitor')).toBeVisible()
+    await expect(page.locator('#status-monitor')).toHaveClass(/\bstatus-monitor-modal\b/)
+    await expect(page.locator('#status-monitor-title')).toHaveText('Status Monitor')
+    await expect(page.locator('.status-monitor-summary')).toContainText('0 active')
+    await expect(page.locator('.status-monitor-summary')).toContainText('uptime')
     await expect(page.locator('.status-monitor-section-title').filter({ hasText: 'System' })).toBeVisible()
     await expect(page.locator('.status-monitor-runs-section')).toBeVisible()
     await expect(page.locator('.status-monitor-showcase > .status-monitor-runs-section')).toBeVisible()
 
     await page.keyboard.press('Escape')
-    await expect(page.locator('#run-monitor')).toBeHidden()
+    await expect(page.locator('#status-monitor')).toBeHidden()
   })
 
   test('desktop Status Monitor loads dashboard endpoints together without route stubs', async ({ page }) => {
@@ -147,8 +147,8 @@ test.describe('Status Monitor', () => {
       return response.request().method() === 'GET' && url.pathname === path
     }))
 
-    await page.locator('.rail-nav [data-action="run-monitor"]').click()
-    await expect(page.locator('#run-monitor')).toBeVisible()
+    await page.locator('.rail-nav [data-action="status-monitor"]').click()
+    await expect(page.locator('#status-monitor')).toBeVisible()
 
     const observed = await Promise.all(responses)
     expect(Object.fromEntries(observed.map((response) => [
@@ -186,19 +186,19 @@ test.describe('Status Monitor', () => {
       })
     })
 
-    await page.locator('.rail-nav [data-action="run-monitor"]').click()
-    await expect(page.locator('#run-monitor')).toBeVisible()
+    await page.locator('.rail-nav [data-action="status-monitor"]').click()
+    await expect(page.locator('#status-monitor')).toBeVisible()
 
     const showcase = page.locator('.status-monitor-showcase')
     await expect(showcase.locator(':scope > .status-monitor-pulse-strip')).toBeVisible()
     await expect(showcase.locator(':scope > .status-monitor-runs-section')).toBeVisible()
     await expect(showcase.locator(':scope > .status-monitor-showcase-grid')).toBeVisible()
-    await expect(showcase.locator(':scope > .status-monitor-runs-section').locator('.run-monitor-command')).toContainText('ping -c 1000')
-    await expect(showcase.locator('.run-monitor-meta-chip').filter({ hasText: 'started here' })).toBeVisible()
-    await expect(showcase.locator('.run-monitor-spark-panel')).toContainText('CPU/MEM 60s')
-    await expect(showcase.locator('.run-monitor-spark-values')).toHaveCount(0)
-    await expect(showcase.locator('.run-monitor-meter-mem')).toContainText('12 MB')
-    await expect(showcase.locator('.run-monitor-meter-rail')).toBeVisible()
+    await expect(showcase.locator(':scope > .status-monitor-runs-section').locator('.status-monitor-command')).toContainText('ping -c 1000')
+    await expect(showcase.locator('.status-monitor-meta-chip').filter({ hasText: 'started here' })).toBeVisible()
+    await expect(showcase.locator('.status-monitor-spark-panel')).toContainText('CPU/MEM 60s')
+    await expect(showcase.locator('.status-monitor-spark-values')).toHaveCount(0)
+    await expect(showcase.locator('.status-monitor-meter-mem')).toContainText('12 MB')
+    await expect(showcase.locator('.status-monitor-meter-rail')).toBeVisible()
 
     const showcaseOrder = await showcase.evaluate((el) => (
       [...el.children].slice(0, 3).map(child => [...child.classList][0])
@@ -220,8 +220,8 @@ test.describe('Status Monitor', () => {
       return (data.command_mix || []).map(item => item.root)
     })).toContain('ping')
 
-    await page.locator('.rail-nav [data-action="run-monitor"]').click()
-    await expect(page.locator('#run-monitor')).toBeVisible()
+    await page.locator('.rail-nav [data-action="status-monitor"]').click()
+    await expect(page.locator('#status-monitor')).toBeVisible()
 
     const tile = page.locator('.status-monitor-treemap-tile', { hasText: 'ping' }).first()
     await expect(tile).toBeVisible()
@@ -235,11 +235,11 @@ test.describe('Status Monitor', () => {
     await page.locator('#history-close').click()
     await expect(page.locator('#history-panel')).not.toHaveClass(/\bopen\b/)
 
-    await page.locator('.rail-nav [data-action="run-monitor"]').click()
-    await expect(page.locator('#run-monitor')).toBeVisible()
+    await page.locator('.rail-nav [data-action="status-monitor"]').click()
+    await expect(page.locator('#status-monitor')).toBeVisible()
     await page.locator('.status-monitor-star-node[aria-label^="ping "]').first().click()
 
-    await expect(page.locator('#run-monitor')).toBeHidden()
+    await expect(page.locator('#status-monitor')).toBeHidden()
     await page.waitForFunction((expectedCommand) => {
       const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
       return !!tab && tab.command === expectedCommand && !!tab.historyRunId

@@ -1143,7 +1143,7 @@ function handleChromeShortcut(e) {
   // All remaining chrome chords are shift-free.
   if (e.shiftKey) return false;
   if (eventMatchesLetter(e, 'm')) {
-    if (typeof openRunMonitor === 'function') void openRunMonitor({ source: 'shortcut' });
+    if (typeof openStatusMonitor === 'function') void openStatusMonitor({ source: 'shortcut' });
     e.preventDefault();
     return true;
   }
@@ -1946,18 +1946,18 @@ async function handleThemeCommand(cmd, tabId = null) {
 
   if (parts.length === 1 || sub === 'list') {
     const current = _cliCurrentThemeEntry();
-    _cliAppendLine(_formatCliRecord('current theme', _cliThemeDescription(current)), 'fake-kv', tabId);
-    _cliAppendLine('', 'fake-spacer', tabId);
-    _cliAppendLine('Available themes:', 'fake-section', tabId);
+    _cliAppendLine(_formatCliRecord('current theme', _cliThemeDescription(current)), 'builtin-kv', tabId);
+    _cliAppendLine('', 'builtin-spacer', tabId);
+    _cliAppendLine('Available themes:', 'builtin-section', tabId);
     const grouped = _cliThemeEntriesByColorScheme();
     ['dark', 'light', 'other'].forEach((scheme) => {
       const entries = grouped[scheme] || [];
       if (!entries.length) return;
-      _cliAppendLine(_cliThemeColorSchemeLabel(scheme), 'fake-section', tabId);
+      _cliAppendLine(_cliThemeColorSchemeLabel(scheme), 'builtin-section', tabId);
       entries.forEach((entry) => {
         const slug = _cliThemeSlug(entry);
         const marker = slug === _cliCurrentThemeSlug() ? '*' : ' ';
-        _cliAppendLine(`  ${marker} ${slug.padEnd(24)}  ${String(entry.label || slug)}`, 'fake-help-row', tabId);
+        _cliAppendLine(`  ${marker} ${slug.padEnd(24)}  ${String(entry.label || slug)}`, 'builtin-help-row', tabId);
       });
     });
     _cliRecordSuccess(cmd);
@@ -1966,7 +1966,7 @@ async function handleThemeCommand(cmd, tabId = null) {
   }
 
   if (sub === 'current') {
-    _cliAppendLine(_formatCliRecord('current theme', _cliThemeDescription(_cliCurrentThemeEntry())), 'fake-kv', tabId);
+    _cliAppendLine(_formatCliRecord('current theme', _cliThemeDescription(_cliCurrentThemeEntry())), 'builtin-kv', tabId);
     _cliRecordSuccess(cmd);
     _cliSetStatus('ok');
     return true;
@@ -2086,13 +2086,13 @@ function _cliConfigDisplayValue(value) {
 function _printCliConfigEntry(entry, tabId) {
   _cliAppendLine(
     _formatCliRecord(entry.key, _cliConfigDisplayValue(entry.get()), 19),
-    'fake-kv',
+    'builtin-kv',
     tabId,
   );
 }
 
 function _printCliConfigList(tabId) {
-  _cliAppendLine('Current user config:', 'fake-section', tabId);
+  _cliAppendLine('Current user config:', 'builtin-section', tabId);
   _cliConfigEntries().forEach(entry => _printCliConfigEntry(entry, tabId));
 }
 
@@ -3821,11 +3821,11 @@ async function handleWorkflowTerminalCommand(cmd, tabId = activeTabId) {
     return true;
   }
   if (sub === 'list' || parts.length === 1) {
-    append('Workflows:', 'fake-section');
+    append('Workflows:', 'builtin-section');
     workflowCatalogItems.forEach((workflow) => {
       const kind = workflow.source === 'user' ? 'user' : 'built-in';
       const idHint = workflow.source === 'user' && workflow.id ? `, id: ${workflow.id}` : '';
-      append(`  ${workflowCliName(workflow)}  ${workflow.title} (${workflow.steps?.length || 0} steps, ${kind}${idHint})`, 'fake-help-row');
+      append(`  ${workflowCliName(workflow)}  ${workflow.title} (${workflow.steps?.length || 0} steps, ${kind}${idHint})`, 'builtin-help-row');
     });
     _workflowCliFinish(cmd, lines, 'ok', tabId, { record: true });
     return true;
@@ -3838,12 +3838,12 @@ async function handleWorkflowTerminalCommand(cmd, tabId = activeTabId) {
       _workflowCliFinish(cmd, lines, 'fail', tabId);
       return true;
     }
-    append(`${workflow.title} (${workflowCliName(workflow)})`, 'fake-section');
-    if (workflow.description) append(workflow.description, 'fake-note');
-    (workflow.inputs || []).forEach(input => append(`  --${input.id.replace(/_/g, '-')}  ${input.label || input.id}`, 'fake-help-row'));
+    append(`${workflow.title} (${workflowCliName(workflow)})`, 'builtin-section');
+    if (workflow.description) append(workflow.description, 'builtin-note');
+    (workflow.inputs || []).forEach(input => append(`  --${input.id.replace(/_/g, '-')}  ${input.label || input.id}`, 'builtin-help-row'));
     (workflow.steps || []).forEach((step, index) => {
-      append(`  ${index + 1}. ${step.cmd}`, 'fake-help-row');
-      if (step.note) append(`     ${step.note}`, 'fake-note');
+      append(`  ${index + 1}. ${step.cmd}`, 'builtin-help-row');
+      if (step.note) append(`     ${step.note}`, 'builtin-note');
     });
     _workflowCliFinish(cmd, lines, 'ok', tabId, { record: true });
     return true;

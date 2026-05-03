@@ -306,8 +306,8 @@
       global.toggleHistoryPanelSurface();
       return;
     }
-    if (action === 'run-monitor' && typeof global.openRunMonitor === 'function') {
-      void global.openRunMonitor({ source: 'rail' });
+    if (action === 'status-monitor' && typeof global.openStatusMonitor === 'function') {
+      void global.openStatusMonitor({ source: 'rail' });
       return;
     }
     if (action === 'options' && typeof global.openOptions === 'function') {

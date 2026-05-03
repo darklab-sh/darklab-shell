@@ -29,7 +29,7 @@
   const POLL_MS = 3000;
   const CLOSED_POLL_MS = 8000;
   const CPU_SAMPLE_WARMUP_MS = 900;
-  const STATUS_AFFORDANCE_PULSE_KEY = 'run_monitor_status_affordance_seen';
+  const STATUS_AFFORDANCE_PULSE_KEY = 'status_monitor_status_affordance_seen';
   const resourceStateByRunId = new Map();
   const resourceTrendByRunId = new Map();
   const pulseStateByStrip = new WeakMap();
@@ -78,7 +78,7 @@
     return `exit ${code}`;
   }
 
-  function _isMobileRunMonitor() {
+  function _isMobileStatusMonitor() {
     return !!(
       document.body?.classList?.contains('mobile-terminal-mode')
       || (window.matchMedia && window.matchMedia('(max-width: 600px)').matches)
@@ -190,7 +190,7 @@
 
   function _runMetaChip(text, className = '') {
     const chip = document.createElement('span');
-    chip.className = `run-monitor-meta-chip ${className}`.trim();
+    chip.className = `status-monitor-meta-chip ${className}`.trim();
     chip.textContent = text;
     return chip;
   }
@@ -198,17 +198,17 @@
   function _runSparklinePanel(run, usage) {
     const samples = _recordResourceTrend(run, usage);
     const panel = document.createElement('div');
-    panel.className = 'run-monitor-spark-panel';
+    panel.className = 'status-monitor-spark-panel';
 
     const header = document.createElement('div');
-    header.className = 'run-monitor-spark-header';
+    header.className = 'status-monitor-spark-header';
     const title = document.createElement('span');
-    title.className = 'run-monitor-spark-title';
+    title.className = 'status-monitor-spark-title';
     title.textContent = 'CPU/MEM 60s';
     header.append(title);
 
     const svg = _svgEl('svg', {
-      class: 'run-monitor-sparkline',
+      class: 'status-monitor-sparkline',
       viewBox: '0 0 160 34',
       role: 'img',
       'aria-label': 'CPU and memory trend',
@@ -216,11 +216,11 @@
     });
     svg.append(
       _svgEl('path', {
-        class: 'run-monitor-sparkline-grid',
+        class: 'status-monitor-sparkline-grid',
         d: 'M0 17 L160 17 M40 0 L40 34 M80 0 L80 34 M120 0 L120 34',
       }),
-      _svgEl('path', { class: 'run-monitor-sparkline-cpu', d: _trendPath(samples, 'cpu') }),
-      _svgEl('path', { class: 'run-monitor-sparkline-mem', d: _trendPath(samples, 'mem') }),
+      _svgEl('path', { class: 'status-monitor-sparkline-cpu', d: _trendPath(samples, 'cpu') }),
+      _svgEl('path', { class: 'status-monitor-sparkline-mem', d: _trendPath(samples, 'mem') }),
     );
 
     panel.append(header, svg);
@@ -743,21 +743,21 @@
     return Math.min(100, Math.max(0, Number(value)));
   }
 
-  function _runMonitorMeter({ label, value, percent, className = '', collecting = false, ariaValue = value }) {
+  function _statusMonitorMeter({ label, value, percent, className = '', collecting = false, ariaValue = value }) {
     const meter = document.createElement('div');
-    meter.className = `run-monitor-meter ${className} ${collecting ? 'run-monitor-meter-collecting' : ''}`.trim();
+    meter.className = `status-monitor-meter ${className} ${collecting ? 'status-monitor-meter-collecting' : ''}`.trim();
     meter.style.setProperty('--meter-percent', `${collecting ? 75 : _meterPercent(percent)}%`);
     meter.setAttribute('aria-label', `${label} ${ariaValue}`);
 
     const labelEl = document.createElement('span');
-    labelEl.className = 'run-monitor-meter-label';
+    labelEl.className = 'status-monitor-meter-label';
     labelEl.textContent = label;
 
     const ring = document.createElement('span');
-    ring.className = 'run-monitor-meter-ring';
+    ring.className = 'status-monitor-meter-ring';
 
     const valueEl = document.createElement('span');
-    valueEl.className = 'run-monitor-meter-value';
+    valueEl.className = 'status-monitor-meter-value';
     valueEl.textContent = value;
 
     ring.append(valueEl);
@@ -765,8 +765,8 @@
     return meter;
   }
 
-  function _updateRunMonitorMeter(meter, { label, value, percent, collecting = false, ariaValue = value }) {
-    meter.classList.toggle('run-monitor-meter-collecting', collecting);
+  function _updateStatusMonitorMeter(meter, { label, value, percent, collecting = false, ariaValue = value }) {
+    meter.classList.toggle('status-monitor-meter-collecting', collecting);
     const nextPercent = `${collecting ? 75 : _meterPercent(percent)}%`;
     if (meter.style.getPropertyValue('--meter-percent') !== nextPercent) {
       meter.style.setProperty('--meter-percent', nextPercent);
@@ -775,7 +775,7 @@
     if (meter.getAttribute('aria-label') !== ariaLabel) {
       meter.setAttribute('aria-label', ariaLabel);
     }
-    const valueEl = meter.querySelector('.run-monitor-meter-value');
+    const valueEl = meter.querySelector('.status-monitor-meter-value');
     if (valueEl && valueEl.textContent !== String(value)) {
       valueEl.textContent = String(value);
     }
@@ -796,10 +796,10 @@
     return String(tab.label || tab.command || tab.id || '').trim();
   }
 
-  function _runMonitorActionButton(label, title, onClick, options = {}) {
+  function _statusMonitorActionButton(label, title, onClick, options = {}) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'btn btn-secondary btn-compact run-monitor-action-btn';
+    btn.className = 'btn btn-secondary btn-compact status-monitor-action-btn';
     if (options.className) btn.classList.add(...String(options.className).split(/\s+/).filter(Boolean));
     btn.textContent = label;
     btn.title = title;
@@ -808,7 +808,7 @@
       event.stopPropagation();
       const result = onClick();
       Promise.resolve(result).then(attached => {
-        if (attached && options.closeOnSuccess !== false) closeRunMonitor();
+        if (attached && options.closeOnSuccess !== false) closeStatusMonitor();
       }).catch(err => {
         if (typeof showToast === 'function') {
           showToast(err?.message || 'Could not complete run action', 'error');
@@ -826,7 +826,7 @@
       return false;
     }
     window.openHistoryWithFilters({ type: 'runs', commandRoot });
-    closeRunMonitor();
+    closeStatusMonitor();
     return true;
   }
 
@@ -839,7 +839,7 @@
     }
     return Promise.resolve(window.restoreHistoryRun(runId, { hidePanelOnSuccess: false }))
       .then(() => {
-        closeRunMonitor();
+        closeStatusMonitor();
         return true;
       })
       .catch(err => {
@@ -862,13 +862,13 @@
     const right = rail ? Math.ceil(rail.getBoundingClientRect().right) : 0;
     const hud = document.getElementById('hud');
     const hudBottom = hud ? Math.ceil(window.innerHeight - hud.getBoundingClientRect().top) : 46;
-    document.documentElement.style.setProperty('--run-monitor-left', `${right}px`);
-    document.documentElement.style.setProperty('--run-monitor-bottom', `${hudBottom}px`);
+    document.documentElement.style.setProperty('--status-monitor-left', `${right}px`);
+    document.documentElement.style.setProperty('--status-monitor-bottom', `${hudBottom}px`);
   }
 
   function _updateElapsedTimers() {
-    document.querySelectorAll('[data-run-monitor-started]').forEach(el => {
-      el.textContent = _formatElapsed(el.getAttribute('data-run-monitor-started'));
+    document.querySelectorAll('[data-status-monitor-started]').forEach(el => {
+      el.textContent = _formatElapsed(el.getAttribute('data-status-monitor-started'));
     });
   }
 
@@ -957,49 +957,49 @@
     if (monitorEl && scrimEl && listEl && summaryEl) return;
 
     scrimEl = document.createElement('div');
-    scrimEl.className = 'run-monitor-scrim u-hidden';
+    scrimEl.className = 'status-monitor-scrim u-hidden';
     scrimEl.setAttribute('aria-hidden', 'true');
-    scrimEl.addEventListener('click', () => closeRunMonitor());
+    scrimEl.addEventListener('click', () => closeStatusMonitor());
 
     monitorEl = document.createElement('aside');
-    monitorEl.id = 'run-monitor';
-    monitorEl.className = 'run-monitor run-monitor-modal chrome-drawer mobile-sheet-surface u-hidden';
+    monitorEl.id = 'status-monitor';
+    monitorEl.className = 'status-monitor status-monitor-modal chrome-drawer mobile-sheet-surface u-hidden';
     monitorEl.setAttribute('role', 'dialog');
     monitorEl.setAttribute('aria-modal', 'true');
-    monitorEl.setAttribute('aria-labelledby', 'run-monitor-title');
+    monitorEl.setAttribute('aria-labelledby', 'status-monitor-title');
 
     const header = document.createElement('div');
-    header.className = 'run-monitor-header surface-header';
+    header.className = 'status-monitor-header surface-header';
 
     const titleWrap = document.createElement('div');
     const title = document.createElement('div');
-    title.id = 'run-monitor-title';
-    title.className = 'run-monitor-title';
+    title.id = 'status-monitor-title';
+    title.className = 'status-monitor-title';
     title.textContent = 'Status Monitor';
     summaryEl = document.createElement('div');
-    summaryEl.className = 'run-monitor-summary';
+    summaryEl.className = 'status-monitor-summary';
     summaryEl.textContent = 'Loading...';
     titleWrap.append(title, summaryEl);
 
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
-    closeBtn.className = 'run-monitor-close';
+    closeBtn.className = 'status-monitor-close';
     closeBtn.setAttribute('aria-label', 'Close status monitor');
     const closeIcon = document.createElement('span');
-    closeIcon.className = 'run-monitor-collapse-glyph';
+    closeIcon.className = 'status-monitor-collapse-glyph';
     closeIcon.setAttribute('aria-hidden', 'true');
     closeIcon.textContent = '✕';
     closeBtn.appendChild(closeIcon);
     closeBtn.addEventListener('click', event => {
       event.preventDefault();
       event.stopPropagation();
-      closeRunMonitor();
+      closeStatusMonitor();
     });
 
     header.append(titleWrap, closeBtn);
 
     listEl = document.createElement('div');
-    listEl.className = 'run-monitor-list surface-body';
+    listEl.className = 'status-monitor-list surface-body';
 
     monitorEl.append(header, listEl);
     monitorEl.addEventListener('click', event => event.stopPropagation());
@@ -1009,13 +1009,13 @@
       bindDismissible(monitorEl, {
         level: 'modal',
         isOpen: () => isOpen,
-        onClose: () => closeRunMonitor(),
+        onClose: () => closeStatusMonitor(),
         backdropEl: scrimEl,
         closeButtons: closeBtn,
       });
     }
     if (typeof bindMobileSheet === 'function') {
-      bindMobileSheet(monitorEl, { onClose: () => closeRunMonitor() });
+      bindMobileSheet(monitorEl, { onClose: () => closeStatusMonitor() });
     }
   }
 
@@ -1295,7 +1295,7 @@
   }
 
   function _pulseGlowRenderScale() {
-    if (!_isMobileRunMonitor()) {
+    if (!_isMobileStatusMonitor()) {
       return {
         glowWidth: 1,
         glowOpacity: 1,
@@ -1379,7 +1379,7 @@
     if (!broadGroup || !beatGroup) return;
     const groups = _pulseGlowGroups(beats);
     const scale = _pulseGlowRenderScale();
-    if (_isMobileRunMonitor()) {
+    if (_isMobileStatusMonitor()) {
       _renderMobilePulseGlowEllipses(broadGroup, beats, strip.dataset.pulseGlowGradientId || '');
     } else {
       _syncPulseGlowGroup(broadGroup, groups, 'status-monitor-pulse-glow', group => [
@@ -2806,8 +2806,8 @@
   function _populateActiveRunMeta(meta, run) {
     const tabLabel = _tabLabelForRun(run);
     const elapsed = document.createElement('span');
-    elapsed.className = 'run-monitor-meta-chip run-monitor-elapsed';
-    elapsed.setAttribute('data-run-monitor-started', String(run?.started || ''));
+    elapsed.className = 'status-monitor-meta-chip status-monitor-elapsed';
+    elapsed.setAttribute('data-status-monitor-started', String(run?.started || ''));
     elapsed.textContent = _formatElapsed(run?.started);
     const chips = [
       _runMetaChip(`run ${_shortRunId(run)}`),
@@ -2815,12 +2815,12 @@
       elapsed,
     ];
     if (tabLabel) {
-      chips.push(_runMetaChip(tabLabel, 'run-monitor-meta-chip-tab'));
+      chips.push(_runMetaChip(tabLabel, 'status-monitor-meta-chip-tab'));
     }
     if (run?.has_live_owner && !run?.owned_by_this_client) {
-      chips.push(_runMetaChip('another browser', 'run-monitor-meta-chip-warn'));
+      chips.push(_runMetaChip('another browser', 'status-monitor-meta-chip-warn'));
     } else if (run?.owned_by_this_client) {
-      chips.push(_runMetaChip('started here', 'run-monitor-meta-chip-ok'));
+      chips.push(_runMetaChip('started here', 'status-monitor-meta-chip-ok'));
     }
     meta.replaceChildren(...chips);
     meta.dataset.metaSignature = [
@@ -2861,45 +2861,45 @@
 
   function _renderActiveRunActions(run) {
     const actions = document.createElement('div');
-    actions.className = 'run-monitor-actions';
+    actions.className = 'status-monitor-actions';
     actions.dataset.actionsSignature = _activeRunActionsSignature(run);
     if ((typeof activateTab === 'function' && !!_tabForRun(run)) || typeof attachActiveRunFromMonitor === 'function') {
-      actions.append(_runMonitorActionButton('Attach', 'Open or attach this run in a tab', () => {
-        const latest = activeRunByRow.get(actions.closest('.run-monitor-item')) || run;
+      actions.append(_statusMonitorActionButton('Attach', 'Open or attach this run in a tab', () => {
+        const latest = activeRunByRow.get(actions.closest('.status-monitor-item')) || run;
         return _openOrAttachActiveRun(latest);
       }));
     }
     if (typeof killActiveRunFromMonitor === 'function') {
-      actions.append(_runMonitorActionButton('Kill', 'Kill this active run', () => {
-        const latest = activeRunByRow.get(actions.closest('.run-monitor-item')) || run;
+      actions.append(_statusMonitorActionButton('Kill', 'Kill this active run', () => {
+        const latest = activeRunByRow.get(actions.closest('.status-monitor-item')) || run;
         return killActiveRunFromMonitor(latest);
-      }, { className: 'run-monitor-action-btn-kill', closeOnSuccess: false }));
+      }, { className: 'status-monitor-action-btn-kill', closeOnSuccess: false }));
     }
     return actions;
   }
 
   function _renderActiveRunRow(run) {
     const item = document.createElement('article');
-    item.className = 'run-monitor-item chrome-row row-accent-green';
+    item.className = 'status-monitor-item chrome-row row-accent-green';
     item.dataset.runId = String(run?.run_id || run?.id || '');
     activeRunByRow.set(item, run);
 
     const openRun = () => {
       const latest = activeRunByRow.get(item) || run;
       return _openOrAttachActiveRun(latest).then(attached => {
-        if (attached) closeRunMonitor();
+        if (attached) closeStatusMonitor();
         return attached;
       });
     };
 
     const tab = _tabForRun(run);
     if (tab || typeof attachActiveRunFromMonitor === 'function') {
-      item.classList.add('run-monitor-item-clickable', 'chrome-row-clickable');
+      item.classList.add('status-monitor-item-clickable', 'chrome-row-clickable');
       item.setAttribute('role', 'button');
       item.setAttribute('tabindex', '0');
       item.setAttribute('aria-label', `${tab ? 'Open tab for' : 'Attach to'} ${String(run?.command || 'active run')}`);
       item.addEventListener('click', event => {
-        if (event.target && event.target.closest && event.target.closest('.run-monitor-action-btn')) return;
+        if (event.target && event.target.closest && event.target.closest('.status-monitor-action-btn')) return;
         openRun().catch(err => {
           if (typeof showToast === 'function') showToast(err?.message || 'Could not open run', 'error');
         });
@@ -2914,15 +2914,15 @@
     }
 
     const command = document.createElement('div');
-    command.className = 'run-monitor-command';
+    command.className = 'status-monitor-command';
     command.textContent = String(run?.command || '').trim() || '(unknown command)';
 
     const meta = document.createElement('div');
-    meta.className = 'run-monitor-meta';
+    meta.className = 'status-monitor-meta';
     _populateActiveRunMeta(meta, run);
 
     const details = document.createElement('div');
-    details.className = 'run-monitor-details';
+    details.className = 'status-monitor-details';
     details.append(command, meta);
 
     const usage = _runResourceUsage(run);
@@ -2930,26 +2930,26 @@
     const cpuValue = _formatCpuPercent(usage.cpu_percent);
     const cpuCollecting = cpuValue === 'collecting';
     const meters = document.createElement('div');
-    meters.className = 'run-monitor-meters';
+    meters.className = 'status-monitor-meters';
     meters.append(
-      _runMonitorMeter({
+      _statusMonitorMeter({
         label: 'CPU',
         value: cpuCollecting ? '' : cpuValue,
         percent: usage.cpu_percent,
-        className: 'run-monitor-meter-cpu',
+        className: 'status-monitor-meter-cpu',
         collecting: cpuCollecting,
         ariaValue: cpuValue,
       }),
-      _runMonitorMeter({
+      _statusMonitorMeter({
         label: 'MEM',
         value: _formatMemoryBytes(usage.memory_bytes),
         percent: _memoryPercent(usage.memory_bytes),
-        className: 'run-monitor-meter-mem',
+        className: 'status-monitor-meter-mem',
       }),
     );
 
     const meterRail = document.createElement('div');
-    meterRail.className = 'run-monitor-meter-rail';
+    meterRail.className = 'status-monitor-meter-rail';
     meterRail.appendChild(meters);
     const actions = _renderActiveRunActions(run);
     if (actions.childElementCount) meterRail.append(actions);
@@ -2960,18 +2960,18 @@
   function _updateActiveRunRow(row, run) {
     activeRunByRow.set(row, run);
 
-    const meta = row.querySelector(':scope > .run-monitor-details > .run-monitor-meta');
+    const meta = row.querySelector(':scope > .status-monitor-details > .status-monitor-meta');
     if (meta && meta.dataset.metaSignature !== _activeRunMetaSignature(run)) {
       _populateActiveRunMeta(meta, run);
     } else if (meta) {
       // Signature unchanged but the elapsed chip's data attribute should still
       // track the run's started time in case the API ever rewrites it; the
       // 1s tick timer rewrites textContent.
-      const elapsed = meta.querySelector('.run-monitor-elapsed');
+      const elapsed = meta.querySelector('.status-monitor-elapsed');
       if (elapsed) {
         const started = String(run?.started || '');
-        if (elapsed.getAttribute('data-run-monitor-started') !== started) {
-          elapsed.setAttribute('data-run-monitor-started', started);
+        if (elapsed.getAttribute('data-status-monitor-started') !== started) {
+          elapsed.setAttribute('data-status-monitor-started', started);
           elapsed.textContent = _formatElapsed(run?.started);
         }
       }
@@ -2979,16 +2979,16 @@
 
     const usage = _runResourceUsage(run);
     const samples = _recordResourceTrend(run, usage);
-    const cpuPath = row.querySelector('.run-monitor-sparkline-cpu');
-    const memPath = row.querySelector('.run-monitor-sparkline-mem');
+    const cpuPath = row.querySelector('.status-monitor-sparkline-cpu');
+    const memPath = row.querySelector('.status-monitor-sparkline-mem');
     if (cpuPath) cpuPath.setAttribute('d', _trendPath(samples, 'cpu'));
     if (memPath) memPath.setAttribute('d', _trendPath(samples, 'mem'));
 
     const cpuValue = _formatCpuPercent(usage.cpu_percent);
     const cpuCollecting = cpuValue === 'collecting';
-    const cpuMeter = row.querySelector('.run-monitor-meter-cpu');
+    const cpuMeter = row.querySelector('.status-monitor-meter-cpu');
     if (cpuMeter) {
-      _updateRunMonitorMeter(cpuMeter, {
+      _updateStatusMonitorMeter(cpuMeter, {
         label: 'CPU',
         value: cpuCollecting ? '' : cpuValue,
         percent: usage.cpu_percent,
@@ -2996,19 +2996,19 @@
         ariaValue: cpuValue,
       });
     }
-    const memMeter = row.querySelector('.run-monitor-meter-mem');
+    const memMeter = row.querySelector('.status-monitor-meter-mem');
     if (memMeter) {
-      _updateRunMonitorMeter(memMeter, {
+      _updateStatusMonitorMeter(memMeter, {
         label: 'MEM',
         value: _formatMemoryBytes(usage.memory_bytes),
         percent: _memoryPercent(usage.memory_bytes),
       });
     }
 
-    const meterRail = row.querySelector(':scope > .run-monitor-meter-rail');
+    const meterRail = row.querySelector(':scope > .status-monitor-meter-rail');
     if (meterRail) {
       const expectedSig = _activeRunActionsSignature(run);
-      const existingActions = meterRail.querySelector(':scope > .run-monitor-actions');
+      const existingActions = meterRail.querySelector(':scope > .status-monitor-actions');
       if (!expectedSig) {
         if (existingActions) existingActions.remove();
       } else if (!existingActions) {
@@ -3055,13 +3055,13 @@
     runList.classList.toggle('status-monitor-runs-list-medium', runs.length >= 3 && runs.length < 5);
 
     if (loading) {
-      const existingEmpty = runList.querySelector(':scope > .run-monitor-empty');
+      const existingEmpty = runList.querySelector(':scope > .status-monitor-empty');
       if (existingEmpty && existingEmpty.textContent === 'Loading active runs...'
           && runList.children.length === 1) {
         return;
       }
       const empty = document.createElement('div');
-      empty.className = 'run-monitor-empty status-monitor-runs-empty';
+      empty.className = 'status-monitor-empty status-monitor-runs-empty';
       empty.textContent = 'Loading active runs...';
       runList.replaceChildren(empty);
       return;
@@ -3069,20 +3069,20 @@
 
     _gcResourceStateForRuns(runs);
 
-    const emptyNode = runList.querySelector(':scope > .run-monitor-empty');
+    const emptyNode = runList.querySelector(':scope > .status-monitor-empty');
     if (emptyNode) emptyNode.remove();
 
     if (!runs.length) {
-      runList.querySelectorAll(':scope > .run-monitor-item').forEach(node => node.remove());
+      runList.querySelectorAll(':scope > .status-monitor-item').forEach(node => node.remove());
       const empty = document.createElement('div');
-      empty.className = 'run-monitor-empty status-monitor-runs-empty';
+      empty.className = 'status-monitor-empty status-monitor-runs-empty';
       empty.textContent = 'No active runs.';
       runList.appendChild(empty);
       return;
     }
 
     const existingRows = new Map();
-    runList.querySelectorAll(':scope > .run-monitor-item').forEach(node => {
+    runList.querySelectorAll(':scope > .status-monitor-item').forEach(node => {
       const id = node.dataset.runId || '';
       if (id) existingRows.set(id, node);
     });
@@ -3129,7 +3129,7 @@
     _updateElapsedTimers();
   }
 
-  async function refreshRunMonitor(options = {}) {
+  async function refreshStatusMonitor(options = {}) {
     _ensureMonitor();
     try {
       const previousRunCount = cachedRuns.length;
@@ -3150,7 +3150,7 @@
       if (listEl) {
         listEl.replaceChildren();
         const error = document.createElement('div');
-        error.className = 'run-monitor-empty run-monitor-error';
+        error.className = 'status-monitor-empty status-monitor-error';
         error.textContent = err?.message || 'Status monitor failed to load.';
         listEl.appendChild(error);
       }
@@ -3172,7 +3172,7 @@
     if (!isOpen || !_runsNeedCpuFollowup(runs)) return;
     openFollowupTimer = setTimeout(() => {
       openFollowupTimer = null;
-      if (isOpen && document.visibilityState === 'visible') void refreshRunMonitor();
+      if (isOpen && document.visibilityState === 'visible') void refreshStatusMonitor();
     }, CPU_SAMPLE_WARMUP_MS);
   }
 
@@ -3189,7 +3189,7 @@
     closedPollTimer = null;
   }
 
-  function _primeRunMonitorSamples() {
+  function _primeStatusMonitorSamples() {
     _clearWarmupTimer();
     if (document.visibilityState !== 'visible') {
       _startClosedPolling();
@@ -3213,7 +3213,7 @@
     _stopClosedPolling();
     if (pollTimer) clearInterval(pollTimer);
     pollTimer = setInterval(() => {
-      if (isOpen && document.visibilityState === 'visible') void refreshRunMonitor();
+      if (isOpen && document.visibilityState === 'visible') void refreshStatusMonitor();
     }, POLL_MS);
     if (tickTimer) clearInterval(tickTimer);
     tickTimer = setInterval(() => {
@@ -3232,16 +3232,16 @@
     _stopPulseAnimation();
   }
 
-  async function openRunMonitor(options = {}) {
+  async function openStatusMonitor(options = {}) {
     const source = String(options.source || 'command');
     _ensureMonitor();
     isOpen = true;
     _positionMonitor();
-    const mobile = _isMobileRunMonitor();
-    document.body.classList.toggle('run-monitor-mobile-open', mobile);
-    document.body.classList.toggle('run-monitor-desktop-open', !mobile);
+    const mobile = _isMobileStatusMonitor();
+    document.body.classList.toggle('status-monitor-mobile-open', mobile);
+    document.body.classList.toggle('status-monitor-desktop-open', !mobile);
     monitorEl?.classList.toggle('chrome-drawer', !mobile);
-    monitorEl?.classList.toggle('run-monitor-modal', !mobile);
+    monitorEl?.classList.toggle('status-monitor-modal', !mobile);
     scrimEl?.classList.remove('u-hidden');
     monitorEl?.classList.remove('u-hidden');
     if (monitorEl) monitorEl.dataset.source = source;
@@ -3258,7 +3258,7 @@
       runs = await _refreshActiveRunCache({ render: false, renderWhileOpen: false });
     } catch (err) {
       suppressPulseLoadUntilFresh = false;
-      closeRunMonitor();
+      closeStatusMonitor();
       if (typeof showToast === 'function') showToast(err?.message || 'Status monitor failed to load', 'error');
       return false;
     }
@@ -3270,7 +3270,7 @@
     return true;
   }
 
-  function closeRunMonitor() {
+  function closeStatusMonitor() {
     isOpen = false;
     _stopPolling();
     _clearOpenFollowupTimer();
@@ -3278,25 +3278,25 @@
     if (typeof resumeBackgroundRunStreamsAfterStatusMonitor === 'function') {
       resumeBackgroundRunStreamsAfterStatusMonitor();
     }
-    document.body.classList.remove('run-monitor-mobile-open');
-    document.body.classList.remove('run-monitor-desktop-open');
+    document.body.classList.remove('status-monitor-mobile-open');
+    document.body.classList.remove('status-monitor-desktop-open');
     scrimEl?.classList.add('u-hidden');
     monitorEl?.classList.add('u-hidden');
   }
 
   function _makeHudCellOpenMonitor(cell, source, label) {
-    if (!cell || cell.dataset.runMonitorTrigger === '1') return;
-    cell.dataset.runMonitorTrigger = '1';
+    if (!cell || cell.dataset.statusMonitorTrigger === '1') return;
+    cell.dataset.statusMonitorTrigger = '1';
     cell.classList.add('hud-cell-clickable', 'hud-action-cell');
     cell.setAttribute('role', 'button');
     cell.setAttribute('tabindex', '0');
     cell.setAttribute('aria-haspopup', 'dialog');
     cell.setAttribute('aria-label', label);
-    cell.addEventListener('click', () => { void openRunMonitor({ source }); });
+    cell.addEventListener('click', () => { void openStatusMonitor({ source }); });
     cell.addEventListener('keydown', event => {
       if (event.key !== 'Enter' && event.key !== ' ') return;
       event.preventDefault();
-      void openRunMonitor({ source });
+      void openStatusMonitor({ source });
     });
   }
 
@@ -3305,8 +3305,8 @@
       if (sessionStorage.getItem(STATUS_AFFORDANCE_PULSE_KEY) === '1') return;
       sessionStorage.setItem(STATUS_AFFORDANCE_PULSE_KEY, '1');
     } catch (_) {
-      if (cell.dataset.runMonitorAffordancePulsed === '1') return;
-      cell.dataset.runMonitorAffordancePulsed = '1';
+      if (cell.dataset.statusMonitorAffordancePulsed === '1') return;
+      cell.dataset.statusMonitorAffordancePulsed = '1';
     }
     cell.classList.add('hud-status-affordance-pulse');
     window.setTimeout(() => {
@@ -3315,10 +3315,10 @@
   }
 
   function _ensureStatusAffordanceGlyph(cell) {
-    let glyph = cell.querySelector('.run-monitor-status-glyph');
+    let glyph = cell.querySelector('.status-monitor-status-glyph');
     if (glyph) return glyph;
     glyph = document.createElement('span');
-    glyph.className = 'run-monitor-status-glyph';
+    glyph.className = 'status-monitor-status-glyph';
     glyph.setAttribute('aria-hidden', 'true');
     glyph.textContent = '»';
     cell.appendChild(glyph);
@@ -3359,23 +3359,23 @@
   }
 
   document.addEventListener('keydown', event => {
-    if (event.key === 'Escape' && isOpen) closeRunMonitor();
+    if (event.key === 'Escape' && isOpen) closeStatusMonitor();
   });
   document.addEventListener('visibilitychange', () => {
     if (isOpen && document.visibilityState === 'visible') {
       _startPulseAnimation();
-      void refreshRunMonitor();
+      void refreshStatusMonitor();
     } else if (isOpen) {
       _stopPulseAnimation();
     } else if (document.visibilityState === 'visible' && cachedRuns.length) {
-      _primeRunMonitorSamples();
+      _primeStatusMonitorSamples();
     }
   });
   document.addEventListener('app:status-changed', event => {
     const status = String(event?.detail?.status || '').trim().toLowerCase();
     _syncStatusAffordance(status);
     if (status === 'running') {
-      _primeRunMonitorSamples();
+      _primeStatusMonitorSamples();
     } else if (!isOpen) {
       _clearWarmupTimer();
       _stopClosedPolling();
@@ -3393,7 +3393,7 @@
     document.addEventListener('DOMContentLoaded', _bindHudTriggers, { once: true });
   }
 
-  window.openRunMonitor = openRunMonitor;
-  window.closeRunMonitor = closeRunMonitor;
-  window.refreshRunMonitor = refreshRunMonitor;
+  window.openStatusMonitor = openStatusMonitor;
+  window.closeStatusMonitor = closeStatusMonitor;
+  window.refreshStatusMonitor = refreshStatusMonitor;
 }());

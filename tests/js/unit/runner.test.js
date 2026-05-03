@@ -442,10 +442,10 @@ describe('client-side synthetic post-filters', () => {
   it('applies chained synthetic helpers to captured client-side output', () => {
     const parsed = _parseSyntheticPostFilterCommand('theme list | grep light | sort -r | head -n 2')
     const lines = _applySyntheticPostFilterLines([
-      { text: 'theme_dark_amber', cls: 'fake-help-row' },
-      { text: 'theme_light_blue', cls: 'fake-help-row' },
-      { text: 'theme_light_olive', cls: 'fake-help-row' },
-      { text: 'theme_dark_green', cls: 'fake-help-row' },
+      { text: 'theme_dark_amber', cls: 'builtin-help-row' },
+      { text: 'theme_light_blue', cls: 'builtin-help-row' },
+      { text: 'theme_light_olive', cls: 'builtin-help-row' },
+      { text: 'theme_dark_green', cls: 'builtin-help-row' },
     ], parsed)
 
     expect(lines.map(line => line.text)).toEqual([
@@ -464,9 +464,9 @@ describe('client-side UI command pipe helpers', () => {
       runnerInitCode: `
         async function handleThemeCommand(cmd, tabId) {
           appendCommandEcho(cmd, tabId);
-          appendLine('theme_dark_amber', 'fake-help-row', tabId);
-          appendLine('theme_light_blue', 'fake-help-row', tabId);
-          appendLine('theme_light_olive', 'fake-help-row', tabId);
+          appendLine('theme_dark_amber', 'builtin-help-row', tabId);
+          appendLine('theme_light_blue', 'builtin-help-row', tabId);
+          appendLine('theme_light_olive', 'builtin-help-row', tabId);
         }
       `,
     })
@@ -475,7 +475,7 @@ describe('client-side UI command pipe helpers', () => {
     await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('2', '', 'tab-1'))
 
     expect(appendLine).toHaveBeenCalledWith('theme list | grep light | wc -l', 'prompt-echo', 'tab-1')
-    expect(appendLine).not.toHaveBeenCalledWith('theme_light_blue', 'fake-help-row', 'tab-1')
+    expect(appendLine).not.toHaveBeenCalledWith('theme_light_blue', 'builtin-help-row', 'tab-1')
   })
 
   it('filters terminal-native config output through chained pipe helpers', async () => {
@@ -486,20 +486,20 @@ describe('client-side UI command pipe helpers', () => {
       runnerInitCode: `
         async function handleConfigCommand(cmd, tabId) {
           appendCommandEcho(cmd, tabId);
-          appendLine('line-numbers        off', 'fake-kv', tabId);
-          appendLine('timestamps          off', 'fake-kv', tabId);
-          appendLine('welcome             static', 'fake-kv', tabId);
+          appendLine('line-numbers        off', 'builtin-kv', tabId);
+          appendLine('timestamps          off', 'builtin-kv', tabId);
+          appendLine('welcome             static', 'builtin-kv', tabId);
         }
       `,
     })
 
     await submitCommand('config list | tail -n 2 | head -n 1')
     await vi.waitFor(() =>
-      expect(appendLine).toHaveBeenCalledWith('timestamps          off', 'fake-kv', 'tab-1'),
+      expect(appendLine).toHaveBeenCalledWith('timestamps          off', 'builtin-kv', 'tab-1'),
     )
 
     expect(appendLine).toHaveBeenCalledWith('config list | tail -n 2 | head -n 1', 'prompt-echo', 'tab-1')
-    expect(appendLine).not.toHaveBeenCalledWith('line-numbers        off', 'fake-kv', 'tab-1')
+    expect(appendLine).not.toHaveBeenCalledWith('line-numbers        off', 'builtin-kv', 'tab-1')
   })
 
   it('persists terminal-native built-ins to server-backed history', async () => {
@@ -517,8 +517,8 @@ describe('client-side UI command pipe helpers', () => {
       runnerInitCode: `
         async function handleThemeCommand(cmd, tabId) {
           appendCommandEcho(cmd, tabId);
-          appendLine('Available themes:', 'fake-section', tabId);
-          appendLine('Dark themes:', 'fake-section', tabId);
+          appendLine('Available themes:', 'builtin-section', tabId);
+          appendLine('Dark themes:', 'builtin-section', tabId);
         }
       `,
     })
@@ -535,8 +535,8 @@ describe('client-side UI command pipe helpers', () => {
       command: 'theme list',
       exit_code: 0,
       lines: [
-        { text: 'Available themes:', cls: 'fake-section' },
-        { text: 'Dark themes:', cls: 'fake-section' },
+        { text: 'Available themes:', cls: 'builtin-section' },
+        { text: 'Dark themes:', cls: 'builtin-section' },
       ],
     })
   })
@@ -565,7 +565,7 @@ describe('client-side UI command pipe helpers', () => {
       runnerInitCode: `
         async function handleThemeCommand(cmd, tabId) {
           appendCommandEcho(cmd, tabId);
-          appendLine('current theme      Darklab Obsidian', 'fake-kv', tabId);
+          appendLine('current theme      Darklab Obsidian', 'builtin-kv', tabId);
           setStatus('ok');
         }
       `,
@@ -1404,11 +1404,11 @@ describe('runner helpers', () => {
     expect(addToRecentPreview).toHaveBeenCalledWith('ping -c 1 nope.darklab')
   })
 
-  it('does not add unsupported fake commands to the preview recents', async () => {
+  it('does not add unsupported built-in commands to the preview recents', async () => {
     const addToRecentPreview = vi.fn()
     const apiFetch = brokerApiFetch(
       'data: {"type":"started","run_id":"run-3"}\n\n' +
-      'data: {"type":"output","text":"Unsupported fake command: pign darklab.sh"}\n\n' +
+      'data: {"type":"output","text":"Unsupported built-in command: pign darklab.sh"}\n\n' +
       'data: {"type":"exit","code":1,"elapsed":"0.1"}\n\n',
       { runId: 'run-3' },
     )
@@ -1752,8 +1752,8 @@ describe('runner helpers', () => {
     const apiFetch = brokerApiFetch(
       [
         'data: {"type":"started","run_id":"run-faq"}',
-        'data: {"type":"output","text":"Q  Example question\\n","cls":"fake-faq-q"}',
-        'data: {"type":"output","text":"A  Example answer\\n","cls":"fake-faq-a"}',
+        'data: {"type":"output","text":"Q  Example question\\n","cls":"builtin-faq-q"}',
+        'data: {"type":"output","text":"A  Example answer\\n","cls":"builtin-faq-a"}',
         'data: {"type":"exit","code":0,"elapsed":0.1}',
       ].join('\n\n') + '\n\n',
       { runId: 'run-faq' },
@@ -1768,8 +1768,8 @@ describe('runner helpers', () => {
     loaded.runCommand()
     await flushPromises()
 
-    expect(appendLine).toHaveBeenCalledWith('Q  Example question', 'fake-faq-q', 'tab-1')
-    expect(appendLine).toHaveBeenCalledWith('A  Example answer', 'fake-faq-a', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('Q  Example question', 'builtin-faq-q', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('A  Example answer', 'builtin-faq-a', 'tab-1')
   })
 
   it('runCommand suppresses nc inverse-host-lookup noise while keeping the open-port result', async () => {
@@ -3071,7 +3071,7 @@ describe('session-token pipe helpers', () => {
 
     await submitCommand('session-token list | grep status')
     await vi.waitFor(() =>
-      expect(appendLine).toHaveBeenCalledWith('status          active', 'fake-kv', 'tab-1'),
+      expect(appendLine).toHaveBeenCalledWith('status          active', 'builtin-kv', 'tab-1'),
     )
 
     expect(appendLine).toHaveBeenCalledWith(

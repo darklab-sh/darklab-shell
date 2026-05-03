@@ -48,7 +48,7 @@ async function runFastCaptureCommand(page) {
   )
 }
 
-async function prepareRunMonitorTelemetryScene(page) {
+async function prepareStatusMonitorTelemetryScene(page) {
   let activePollCount = 0
   await page.unroute('**/history/active').catch(() => {})
   await page.route('**/history/active', route => {
@@ -73,17 +73,17 @@ async function prepareRunMonitorTelemetryScene(page) {
   })
 }
 
-async function waitForRunMonitorTelemetry(page) {
-  await expect(page.locator('#run-monitor')).toBeVisible()
+async function waitForStatusMonitorTelemetry(page) {
+  await expect(page.locator('#status-monitor')).toBeVisible()
   await page.evaluate(async () => {
-    if (typeof window.refreshRunMonitor === 'function') {
-      await window.refreshRunMonitor()
+    if (typeof window.refreshStatusMonitor === 'function') {
+      await window.refreshStatusMonitor()
       await new Promise(resolve => window.setTimeout(resolve, 1100))
-      await window.refreshRunMonitor()
+      await window.refreshStatusMonitor()
     }
   })
-  await expect(page.locator('.run-monitor-meter-cpu').first()).toHaveAttribute('aria-label', /CPU (?!n\/a|collecting)/)
-  await expect(page.locator('.run-monitor-meter-mem').first()).toHaveAttribute('aria-label', /MEM (?!n\/a)/)
+  await expect(page.locator('.status-monitor-meter-cpu').first()).toHaveAttribute('aria-label', /CPU (?!n\/a|collecting)/)
+  await expect(page.locator('.status-monitor-meter-mem').first()).toHaveAttribute('aria-label', /MEM (?!n\/a)/)
 }
 
 async function openScopedWorkflow(page) {
@@ -513,15 +513,15 @@ const scenes = [
     },
   },
   {
-    slug: 'run-monitor-active-telemetry',
+    slug: 'status-monitor-active-telemetry',
     title: 'Main UI - Status Monitor with active telemetry',
     route: '/',
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
-      await prepareRunMonitorTelemetryScene(page)
+      await prepareStatusMonitorTelemetryScene(page)
       await runLongCaptureCommand(page)
       await page.locator('#hud-status-cell').click()
-      await waitForRunMonitorTelemetry(page)
+      await waitForStatusMonitorTelemetry(page)
     },
   },
   {

@@ -30,7 +30,7 @@ export async function loadAppFns({
   navigateCmdHistory: navigateCmdHistoryOverride = vi.fn(() => false),
   enterHistSearch: enterHistSearchOverride = vi.fn(),
   openWorkspace: openWorkspaceOverride = vi.fn(),
-  openRunMonitor: openRunMonitorOverride = vi.fn(() => Promise.resolve(false)),
+  openStatusMonitor: openStatusMonitorOverride = vi.fn(() => Promise.resolve(false)),
   activeTabId = 'tab-1',
   acFiltered: acFilteredOverride = [],
   acSuggestions: acSuggestionsOverride = [],
@@ -101,7 +101,7 @@ export async function loadAppFns({
           <button data-menu-action="search"></button>
           <button data-menu-action="clear"></button>
           <button data-menu-action="history"></button>
-          <button data-menu-action="run-monitor"></button>
+          <button data-menu-action="status-monitor"></button>
           <button data-menu-action="options"></button>
           <button data-menu-action="theme"></button>
           <button data-menu-action="faq"></button>
@@ -471,7 +471,7 @@ export async function loadAppFns({
       cancelWelcome: cancelWelcomeOverride,
       enterHistSearch: enterHistSearchOverride,
       openWorkspace: openWorkspaceOverride,
-      openRunMonitor: openRunMonitorOverride,
+      openStatusMonitor: openStatusMonitorOverride,
       interruptPromptLine: interruptPromptLineOverride,
       _welcomeActive: welcomeActive,
       welcomeOwnsTab: welcomeOwnsTabOverride,

@@ -62,7 +62,7 @@ Server-Sent Events are simpler to implement with Flask, work correctly behind ng
 
 **Command execution is broker-owned instead of request-owned.**
 
-Earlier command streaming tied subprocess stdout draining directly to the browser's HTTP request. That made the first browser connection special: if the page reloaded, another browser opened the same session token, or the request stream failed, the backend had to choose between losing live output, continuing detached work with a separate drain path, or waiting for completed history. Those paths were hard to reason about and became especially awkward once Run Monitor needed read-only attach and explicit takeover semantics.
+Earlier command streaming tied subprocess stdout draining directly to the browser's HTTP request. That made the first browser connection special: if the page reloaded, another browser opened the same session token, or the request stream failed, the backend had to choose between losing live output, continuing detached work with a separate drain path, or waiting for completed history. Those paths were hard to reason about and became especially awkward once Status Monitor needed cross-browser attach and kill semantics.
 
 The current model starts commands with `POST /runs`, records active-run ownership metadata, and has a backend worker drain stdout exactly once. The worker publishes normalized events (`started`, `notice`, `output`, `error`, `exit`) to a run stream. Browsers subscribe with `GET /runs/<run_id>/stream`, optionally replaying from an event id. This makes subscribers replaceable: the owning tab, a reloaded tab, a phone on the same session token, and a read-only attached tab all consume the same processed output stream.
 
@@ -164,7 +164,7 @@ Header sync alone is not sufficient, though. Passive tabs also need to refresh s
 
 **4. Session-token subcommands are intercepted client-side; bare `session-token` is not**
 
-`generate`, `set`, `copy`, `clear`, `rotate`, `list`, and `revoke` are intercepted in `submitCommand()` after `addToHistory()` and never reach the server. This keeps sensitive token values out of the server command log. Bare `session-token` (status only) passes to the server as a normal fake command so the server-side rendering path handles the output consistently with other status commands. The intercept check is `cmd.trim().toLowerCase().startsWith('session-token ')` — the trailing space ensures it only fires when a subcommand is present. Token-bearing local history entries are masked before storage so the local history/recents surfaces stay useful without echoing raw token values.
+`generate`, `set`, `copy`, `clear`, `rotate`, `list`, and `revoke` are intercepted in `submitCommand()` after `addToHistory()` and never reach the server. This keeps sensitive token values out of the server command log. Bare `session-token` (status only) passes to the server as a normal bulit-in command so the server-side rendering path handles the output consistently with other status commands. The intercept check is `cmd.trim().toLowerCase().startsWith('session-token ')` — the trailing space ensures it only fires when a subcommand is present. Token-bearing local history entries are masked before storage so the local history/recents surfaces stay useful without echoing raw token values.
 
 **5. Revocation is enforced at the API layer, not just client-side**
 

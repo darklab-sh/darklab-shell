@@ -110,11 +110,11 @@ function _lineMatchesSearchScopeForRoot(line, scope, root = null) {
   const serverSignals = _lineServerSignals(line);
   if (!serverSignals.includes(scope)) return false;
   if (
-    line.classList.contains('fake-signal-summary-header')
-    || line.classList.contains('fake-signal-summary-section')
-    || line.classList.contains('fake-signal-summary-row')
-    || line.classList.contains('fake-signal-summary-note')
-    || line.classList.contains('fake-signal-summary-sep')
+    line.classList.contains('builtin-signal-summary-header')
+    || line.classList.contains('builtin-signal-summary-section')
+    || line.classList.contains('builtin-signal-summary-row')
+    || line.classList.contains('builtin-signal-summary-note')
+    || line.classList.contains('builtin-signal-summary-sep')
   ) {
     return false;
   }
@@ -682,11 +682,11 @@ function _collectSearchCommandBlocks(out) {
   lines.forEach((line) => {
     if (!(line instanceof Element)) return;
     if (
-      line.classList.contains('fake-signal-summary-header')
-      || line.classList.contains('fake-signal-summary-section')
-      || line.classList.contains('fake-signal-summary-row')
-      || line.classList.contains('fake-signal-summary-note')
-      || line.classList.contains('fake-signal-summary-sep')
+      line.classList.contains('builtin-signal-summary-header')
+      || line.classList.contains('builtin-signal-summary-section')
+      || line.classList.contains('builtin-signal-summary-row')
+      || line.classList.contains('builtin-signal-summary-note')
+      || line.classList.contains('builtin-signal-summary-sep')
     ) {
       return;
     }
@@ -789,16 +789,16 @@ function _summaryAppendSections(sections) {
     const compactLines = _summaryCompactLines(lines);
     appendLine(
       `${_SEARCH_SCOPE_LABELS[scope]} (${compactLines.length})`,
-      'fake-signal-summary-section',
+      'builtin-signal-summary-section',
       activeTabId,
     );
     compactLines.slice(0, _SEARCH_SUMMARY_LIMIT).forEach((line) => {
-      appendLine(`- ${line}`, 'fake-signal-summary-row', activeTabId);
+      appendLine(`- ${line}`, 'builtin-signal-summary-row', activeTabId);
     });
     if (compactLines.length > _SEARCH_SUMMARY_LIMIT) {
       appendLine(
         `… ${compactLines.length - _SEARCH_SUMMARY_LIMIT} more ${_searchScopeUnitLabel(scope, compactLines.length - _SEARCH_SUMMARY_LIMIT)} not shown`,
-        'fake-signal-summary-note',
+        'builtin-signal-summary-note',
         activeTabId,
       );
     }
@@ -828,23 +828,23 @@ function _summaryRenderGroupedItems(items) {
   let renderedSections = 0;
   const groups = _summaryGroupedItems(groupedItems);
   groups.forEach((rootGroup) => {
-    if (renderedSections > 0) appendLine('------------', 'fake-signal-summary-sep', activeTabId);
-    appendLine(`command             ${rootGroup.root}`, 'fake-kv', activeTabId);
+    if (renderedSections > 0) appendLine('------------', 'builtin-signal-summary-sep', activeTabId);
+    appendLine(`command             ${rootGroup.root}`, 'builtin-kv', activeTabId);
     rootGroup.targets.forEach((targetGroup, targetIndex) => {
-      if (targetIndex > 0) appendLine('------------', 'fake-signal-summary-sep', activeTabId);
-      appendLine(`target              ${targetGroup.target}`, 'fake-kv', activeTabId);
+      if (targetIndex > 0) appendLine('------------', 'builtin-signal-summary-sep', activeTabId);
+      appendLine(`target              ${targetGroup.target}`, 'builtin-kv', activeTabId);
       if (targetGroup.items.length > 1) {
         const commandLabels = _summaryCommandLabels(targetGroup.items);
         appendLine(
           `full commands (${commandLabels.length})`,
-          'fake-signal-summary-section',
+          'builtin-signal-summary-section',
           activeTabId,
         );
         commandLabels.forEach((command) => {
-          appendLine(`- ${command}`, 'fake-signal-summary-row', activeTabId);
+          appendLine(`- ${command}`, 'builtin-signal-summary-row', activeTabId);
         });
       } else {
-        appendLine(`full command        ${targetGroup.items[0].command}`, 'fake-kv', activeTabId);
+        appendLine(`full command        ${targetGroup.items[0].command}`, 'builtin-kv', activeTabId);
       }
       _summaryAppendSections(_summaryMergeSections(targetGroup.items));
       rendered += targetGroup.items.length;
@@ -856,8 +856,8 @@ function _summaryRenderGroupedItems(items) {
 
 function _summaryRenderCommandItems(items) {
   items.forEach((item, index) => {
-    if (index > 0) appendLine('------------', 'fake-signal-summary-sep', activeTabId);
-    appendLine(`full command        ${item.command}`, 'fake-kv', activeTabId);
+    if (index > 0) appendLine('------------', 'builtin-signal-summary-sep', activeTabId);
+    appendLine(`full command        ${item.command}`, 'builtin-kv', activeTabId);
     _summaryAppendSections(item.sections);
   });
 }
@@ -875,18 +875,18 @@ function summarizeCurrentOutputSignals() {
     });
   }
 
-  appendLine('Command Findings:', 'fake-signal-summary-header', activeTabId);
+  appendLine('Command Findings:', 'builtin-signal-summary-header', activeTabId);
 
   const items = _summaryBuildItems(blocks, tab);
   const groupedCount = _summaryRenderGroupedItems(items);
   const ungroupedItems = items.filter((item) => !(item.root && item.target));
-  if (groupedCount && ungroupedItems.length) appendLine('------------', 'fake-signal-summary-sep', activeTabId);
+  if (groupedCount && ungroupedItems.length) appendLine('------------', 'builtin-signal-summary-sep', activeTabId);
   _summaryRenderCommandItems(ungroupedItems);
 
   if (!items.length) {
     appendLine(
       'No findings, warnings, errors, or summary lines detected in this tab.',
-      'fake-signal-summary-note',
+      'builtin-signal-summary-note',
       activeTabId,
     );
   }

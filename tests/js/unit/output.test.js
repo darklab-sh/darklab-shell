@@ -259,9 +259,9 @@ describe('appendLine', () => {
       },
     })
 
-    appendLine('synthetic line', 'fake-plain', 'tab-1')
+    appendLine('synthetic line', 'builtin-plain', 'tab-1')
 
-    const line = document.querySelector('.line.fake-plain')
+    const line = document.querySelector('.line.builtin-plain')
     expect(line?.dataset.tsE).toBe('+0.0s')
   })
 
@@ -311,9 +311,9 @@ describe('appendLine', () => {
 
     _setLnMode('on')
     _setTsMode('elapsed')
-    appendLine('Command Findings:', 'fake-signal-summary-header', 'tab-1')
-    appendLine('findings (2)', 'fake-signal-summary-section', 'tab-1')
-    appendLine('- 443/tcp open https', 'fake-signal-summary-row', 'tab-1')
+    appendLine('Command Findings:', 'builtin-signal-summary-header', 'tab-1')
+    appendLine('findings (2)', 'builtin-signal-summary-section', 'tab-1')
+    appendLine('- 443/tcp open https', 'builtin-signal-summary-row', 'tab-1')
 
     const lines = document.querySelectorAll('.line')
     expect(lines[0]?.dataset.prefix || '').toBe('')

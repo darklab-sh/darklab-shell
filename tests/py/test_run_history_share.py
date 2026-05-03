@@ -776,17 +776,17 @@ class TestRunStreaming:
         assert fake_proc.stdout.closed is True
         assert fake_proc.wait_calls == 1
 
-    def test_fake_commands_streams_grouped_catalog_and_persists_history(self):
+    def test_builtin_commands_streams_grouped_catalog_and_persists_history(self):
         client = get_client()
 
-        with mock.patch("fake_commands.load_commands_registry", return_value={
+        with mock.patch("builtin_commands.load_commands_registry", return_value={
             "commands": [
                 {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
                 {"root": "dig", "category": "Networking", "policy": {"allow": ["dig"], "deny": []}},
             ],
             "pipe_helpers": [],
         }):
-            resp = _post_run(client, json={"command": "commands"}, headers={"X-Session-ID": "sess-fake-commands"})
+            resp = _post_run(client, json={"command": "commands"}, headers={"X-Session-ID": "sess-built-in-commands"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -799,11 +799,11 @@ class TestRunStreaming:
         assert "dig\\n" in body
         assert '"type": "exit"' in body
 
-        hist = client.get("/history", headers={"X-Session-ID": "sess-fake-commands"})
+        hist = client.get("/history", headers={"X-Session-ID": "sess-built-in-commands"})
         data = json.loads(hist.data)
         assert [r["command"] for r in data["runs"]] == ["commands"]
 
-    def test_fake_clear_emits_clear_event_and_persists_history(self):
+    def test_builtin_clear_emits_clear_event_and_persists_history(self):
         client = get_client()
 
         resp = _post_run(client, json={"command": "clear"}, headers={"X-Session-ID": "sess-clear"})
@@ -818,7 +818,7 @@ class TestRunStreaming:
         data = json.loads(hist.data)
         assert [r["command"] for r in data["runs"]] == ["clear"]
 
-    def test_fake_env_returns_web_environment(self):
+    def test_builtin_env_returns_web_environment(self):
         client = get_client()
 
         resp = _post_run(client, json={"command": "env"}, headers={"X-Session-ID": "sess-env"})
@@ -831,7 +831,7 @@ class TestRunStreaming:
         assert "TERM=xterm-256color\\n" in body
         assert '"type": "exit"' in body
 
-    def test_fake_help_lists_available_helpers(self):
+    def test_builtin_help_lists_available_helpers(self):
         client = get_client()
 
         resp = _post_run(client, json={"command": "help"})
@@ -847,17 +847,17 @@ class TestRunStreaming:
         assert "Autocomplete appears as you type; press Tab to accept or cycle suggestions.\\n" in body
         assert '"type": "exit"' in body
 
-    def test_fake_commands_lists_built_in_and_external_catalogs(self):
+    def test_builtin_commands_lists_built_in_and_external_catalogs(self):
         client = get_client()
 
-        with mock.patch("fake_commands.load_commands_registry", return_value={
+        with mock.patch("builtin_commands.load_commands_registry", return_value={
             "commands": [
                 {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
                 {"root": "dig", "category": "Networking", "policy": {"allow": ["dig +short", "dig MX"], "deny": []}},
             ],
             "pipe_helpers": [],
         }):
-            resp = _post_run(client, json={"command": "commands"}, headers={"X-Session-ID": "sess-fake-commands"})
+            resp = _post_run(client, json={"command": "commands"}, headers={"X-Session-ID": "sess-built-in-commands"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -871,11 +871,11 @@ class TestRunStreaming:
         assert "dig +short\\n" not in body
         assert '"type": "exit"' in body
 
-        hist = client.get("/history", headers={"X-Session-ID": "sess-fake-commands"})
+        hist = client.get("/history", headers={"X-Session-ID": "sess-built-in-commands"})
         data = json.loads(hist.data)
         assert [r["command"] for r in data["runs"]] == ["commands"]
 
-    def test_fake_commands_supports_built_in_only_filter(self):
+    def test_builtin_commands_supports_built_in_only_filter(self):
         client = get_client()
 
         resp = _post_run(client, json={"command": "commands --built-in"})
@@ -885,10 +885,10 @@ class TestRunStreaming:
         assert "Built-in commands:\\n" in body
         assert "Allowed external commands:\\n" not in body
 
-    def test_fake_commands_supports_external_only_filter(self):
+    def test_builtin_commands_supports_external_only_filter(self):
         client = get_client()
 
-        with mock.patch("fake_commands.load_commands_registry", return_value={
+        with mock.patch("builtin_commands.load_commands_registry", return_value={
             "commands": [
                 {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
                 {"root": "curl", "category": "Networking", "policy": {"allow": ["curl -I"], "deny": []}},
@@ -906,7 +906,7 @@ class TestRunStreaming:
         assert "curl -I\\n" not in body
         assert '"type": "exit"' in body
 
-    def test_fake_wordlist_lists_searches_and_prints_paths(self):
+    def test_builtin_wordlist_lists_searches_and_prints_paths(self):
         client = get_client()
         catalog = {
             "root": "/usr/share/wordlists/seclists",
@@ -924,7 +924,7 @@ class TestRunStreaming:
             ],
             "all_items": None,
         }
-        with mock.patch("fake_commands.load_wordlist_catalog", return_value=catalog):
+        with mock.patch("builtin_commands.load_wordlist_catalog", return_value=catalog):
             listed = _post_run(
                 client,
                 json={"command": "wordlist list dns"},
@@ -945,9 +945,9 @@ class TestRunStreaming:
         assert "Discovery/DNS/subdomains-top1million-5000.txt" in searched.get_data(as_text=True)
         assert "/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt" in path.get_data(as_text=True)
 
-    def test_fake_wordlist_reports_missing_catalog(self):
+    def test_builtin_wordlist_reports_missing_catalog(self):
         client = get_client()
-        with mock.patch("fake_commands.load_wordlist_catalog", return_value={
+        with mock.patch("builtin_commands.load_wordlist_catalog", return_value={
             "root": "/usr/share/wordlists/seclists",
             "categories": [],
             "items": [],
@@ -963,7 +963,7 @@ class TestRunStreaming:
         assert "Installed SecLists wordlists were not found.\\n" in body
         assert "Expected path: /usr/share/wordlists/seclists\\n" in body
 
-    def test_fake_workspace_lists_shows_and_removes_session_files(self, tmp_path):
+    def test_builtin_workspace_lists_shows_and_removes_session_files(self, tmp_path):
         client = get_client()
         session = "sess-workspace-command"
         workspace_cfg = {
@@ -1058,7 +1058,7 @@ class TestRunStreaming:
         assert "darklab.sh\\n" in show_body
         assert "ip.darklab.sh\\n" in show_body
 
-    def test_fake_workspace_aliases_list_and_show_session_files(self, tmp_path):
+    def test_builtin_workspace_aliases_list_and_show_session_files(self, tmp_path):
         client = get_client()
         session = "sess-workspace-aliases"
         workspace_cfg = {
@@ -1112,7 +1112,7 @@ class TestRunStreaming:
         assert "Create targets.txt from the Files panel.\\n" in help_body
         assert "curl -o response.html https://ip.darklab.sh\\n" in help_body
 
-    def test_fake_workspace_show_reports_binary_files(self, tmp_path):
+    def test_builtin_workspace_show_reports_binary_files(self, tmp_path):
         client = get_client()
         session = "sess-workspace-binary"
         workspace_cfg = {
@@ -1156,7 +1156,7 @@ class TestRunStreaming:
         assert "file: file appears to be binary; download it instead\\n" in cat_body
         assert "[server error]" not in cat_body
 
-    def test_fake_shortcuts_lists_current_shortcuts(self):
+    def test_builtin_shortcuts_lists_current_shortcuts(self):
         client = get_client()
 
         resp = _post_run(client, json={"command": "shortcuts"})
@@ -1173,7 +1173,7 @@ class TestRunStreaming:
         assert "Option+" not in body
         assert '"type": "exit"' in body
 
-    def test_fake_shortcuts_renders_mac_keys_for_mac_user_agent(self):
+    def test_builtin_shortcuts_renders_mac_keys_for_mac_user_agent(self):
         client = get_client()
         client.environ_base["HTTP_USER_AGENT"] = (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -1189,10 +1189,10 @@ class TestRunStreaming:
         assert "Ctrl+U" in body
         assert "Alt+" not in body
 
-    def test_fake_banner_renders_ascii_art(self):
+    def test_builtin_banner_renders_ascii_art(self):
         client = get_client()
 
-        with mock.patch("fake_commands.load_ascii_art", return_value="line one\nline two"):
+        with mock.patch("builtin_commands.load_ascii_art", return_value="line one\nline two"):
             resp = _post_run(client, json={"command": "banner"})
             body = resp.get_data(as_text=True)
 
@@ -1201,10 +1201,10 @@ class TestRunStreaming:
         assert "line two\\n" in body
         assert '"type": "exit"' in body
 
-    def test_fake_which_and_type_describe_commands(self):
+    def test_builtin_which_and_type_describe_commands(self):
         client = get_client()
 
-        with mock.patch("fake_commands.resolve_runtime_command", return_value="/usr/bin/curl"):
+        with mock.patch("builtin_commands.resolve_runtime_command", return_value="/usr/bin/curl"):
             which_resp = _post_run(client, json={"command": "which curl"})
             which_body = which_resp.get_data(as_text=True)
             type_resp = _post_run(client, json={"command": "type history"})
@@ -1215,7 +1215,7 @@ class TestRunStreaming:
         assert type_resp.status_code == 200
         assert "history is a built-in command\\n" in type_body
 
-    def test_fake_limits_and_status_show_configuration(self, tmp_path):
+    def test_builtin_limits_and_status_show_configuration(self, tmp_path):
         client = get_client()
         with db_connect() as conn:
             conn.execute(
@@ -1295,7 +1295,7 @@ class TestRunStreaming:
         assert "\\u001b[4mcommand\\u001b[0m" in stats_body
         assert "\\u001b[4mruns\\u001b[0m" in stats_body
 
-    def test_fake_last_lists_recent_completed_runs(self):
+    def test_builtin_last_lists_recent_completed_runs(self):
         client = get_client()
         with db_connect() as conn:
             conn.execute(
@@ -1327,7 +1327,7 @@ class TestRunStreaming:
             "[\\u001b[32m0\\u001b[0m]  ping darklab.sh\\n"
         ) in body
 
-    def test_fake_who_tty_groups_and_version_render_shell_identity(self):
+    def test_builtin_who_tty_groups_and_version_render_shell_identity(self):
         client = get_client()
 
         who_resp = _post_run(client, json={"command": "who"}, headers={"X-Session-ID": "sess-who"})
@@ -1351,10 +1351,10 @@ class TestRunStreaming:
         assert "Flask " in version_body
         assert "Python " in version_body
 
-    def test_fake_faq_renders_builtin_and_configured_entries(self):
+    def test_builtin_faq_renders_builtin_and_configured_entries(self):
         client = get_client()
 
-        with mock.patch("fake_commands.load_all_faq", return_value=[
+        with mock.patch("builtin_commands.load_all_faq", return_value=[
             {"question": "Built-in question?", "answer": "Built-in answer."},
             {"question": "What is this?", "answer": "A browser-based shell."},
             {"question": "How do I stop a command?", "answer": "Use Kill."},
@@ -1371,10 +1371,10 @@ class TestRunStreaming:
         assert "Q  How do I stop a command?\\n" in body
         assert "A  Use Kill.\\n" in body
 
-    def test_fake_retention_reports_preview_and_full_output_policy(self):
+    def test_builtin_retention_reports_preview_and_full_output_policy(self):
         client = get_client()
 
-        with mock.patch("fake_commands.CFG", {
+        with mock.patch("builtin_commands.CFG", {
             **shell_app.CFG,
             "permalink_retention_days": 365,
             "persist_full_run_output": True,
@@ -1392,17 +1392,17 @@ class TestRunStreaming:
         assert "full output max" in body
         assert "5 MB\\n" in body
 
-    def test_fake_fortune_returns_configured_line(self):
+    def test_builtin_fortune_returns_configured_line(self):
         client = get_client()
 
-        with mock.patch("fake_commands.random.choice", return_value="Trust the output, not the hunch."):
+        with mock.patch("builtin_commands.random.choice", return_value="Trust the output, not the hunch."):
             resp = _post_run(client, json={"command": "fortune"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
         assert "Trust the output, not the hunch.\\n" in body
 
-    def test_fake_sudo_reports_web_shell_restriction(self):
+    def test_builtin_sudo_reports_web_shell_restriction(self):
         client = get_client()
 
         resp = _post_run(client, json={"command": "sudo ping darklab.sh"})
@@ -1423,7 +1423,7 @@ class TestRunStreaming:
             or "sudo: 'ping darklab.sh' was rejected before it could become a plan.\\n" in body
         )
 
-    def test_fake_sudo_without_arguments_uses_the_snark_pool(self):
+    def test_builtin_sudo_without_arguments_uses_the_snark_pool(self):
         client = get_client()
 
         resp = _post_run(client, json={"command": "sudo"})
@@ -1443,7 +1443,7 @@ class TestRunStreaming:
             or "sudo: request denied by the web shell's sense of self-preservation.\\n" in body
         )
 
-    def test_fake_reboot_reports_web_shell_restriction(self):
+    def test_builtin_reboot_reports_web_shell_restriction(self):
         client = get_client()
 
         resp = _post_run(client, json={"command": "reboot"})
@@ -1467,7 +1467,7 @@ class TestRunStreaming:
         ("halt", "poweroff:"),
         ("shutdown now", "poweroff:"),
     ])
-    def test_fake_poweroff_variants_use_poweroff_snark_pool(self, command, prefix):
+    def test_builtin_poweroff_variants_use_poweroff_snark_pool(self, command, prefix):
         client = get_client()
 
         resp = _post_run(client, json={"command": command})
@@ -1481,7 +1481,7 @@ class TestRunStreaming:
         ("sudo su", "sudo:"),
         ("sudo -s", "sudo:"),
     ])
-    def test_fake_su_variants_use_shell_escalation_pool(self, command, prefix):
+    def test_builtin_su_variants_use_shell_escalation_pool(self, command, prefix):
         client = get_client()
 
         resp = _post_run(client, json={"command": command})
@@ -1503,7 +1503,7 @@ class TestRunStreaming:
         "rm -r -f /",
         "rm -f -r /",
     ])
-    def test_fake_rm_root_refuses_exact_root_delete_pattern(self, command):
+    def test_builtin_rm_root_refuses_exact_root_delete_pattern(self, command):
         client = get_client()
 
         resp = _post_run(client, json={"command": command})
@@ -1519,7 +1519,7 @@ class TestRunStreaming:
             or "rm: the / would like to remain.\\n" in body
         )
 
-    def test_fake_date_hostname_and_uptime_render_shell_style_information(self):
+    def test_builtin_date_hostname_and_uptime_render_shell_style_information(self):
         client = get_client()
 
         date_resp = _post_run(client, json={"command": "date"})
@@ -1536,7 +1536,7 @@ class TestRunStreaming:
         assert uptime_resp.status_code == 200
         assert "up " in uptime_body
 
-    def test_fake_ip_route_df_and_free_render_shell_style_summaries(self):
+    def test_builtin_ip_route_df_and_free_render_shell_style_summaries(self):
         client = get_client()
 
         ip_resp = _post_run(client, json={"command": "ip a"})
@@ -1564,10 +1564,10 @@ class TestRunStreaming:
         assert "\\u001b[4mfree\\u001b[0m" in free_body
         assert "Mem:" in free_body
 
-    def test_fake_jobs_aliases_runs_metadata(self):
+    def test_builtin_jobs_aliases_runs_metadata(self):
         client = get_client()
 
-        with mock.patch("fake_commands.active_runs_for_session", return_value=[
+        with mock.patch("builtin_commands.active_runs_for_session", return_value=[
             {
                 "run_id": "run-abcdef123456",
                 "pid": 4242,
@@ -1596,20 +1596,20 @@ class TestRunStreaming:
         assert "ffuf -u https://darklab.sh/FUZZ -w words.txt\\n" in body
         assert "Tip: click STATUS in the HUD for real-time CPU/MEM monitoring.\\n" in body
 
-    def test_fake_jobs_alias_reports_when_no_active_runs_exist(self):
+    def test_builtin_jobs_alias_reports_when_no_active_runs_exist(self):
         client = get_client()
 
-        with mock.patch("fake_commands.active_runs_for_session", return_value=[]):
+        with mock.patch("builtin_commands.active_runs_for_session", return_value=[]):
             resp = _post_run(client, json={"command": "jobs"}, headers={"X-Session-ID": "sess-jobs"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
         assert "No active runs.\\n" in body
 
-    def test_fake_runs_lists_active_run_metadata(self):
+    def test_builtin_runs_lists_active_run_metadata(self):
         client = get_client()
 
-        with mock.patch("fake_commands.active_runs_for_session", return_value=[
+        with mock.patch("builtin_commands.active_runs_for_session", return_value=[
             {
                 "run_id": "run-abcdef123456",
                 "pid": 4242,
@@ -1664,23 +1664,23 @@ class TestRunStreaming:
         assert '\\"elapsed\\":' in json_body
         assert '\\"resource_usage\\": {\\"cpu_seconds\\": 12.345, \\"memory_bytes\\": 1536, \\"process_count\\": 2}' in json_body
 
-    def test_fake_runs_reports_when_no_active_runs_exist(self):
+    def test_builtin_runs_reports_when_no_active_runs_exist(self):
         client = get_client()
 
-        with mock.patch("fake_commands.active_runs_for_session", return_value=[]):
+        with mock.patch("builtin_commands.active_runs_for_session", return_value=[]):
             resp = _post_run(client, json={"command": "runs"}, headers={"X-Session-ID": "sess-runs"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
         assert "No active runs.\\n" in body
 
-    def test_fake_man_renders_real_page_for_allowed_topic(self):
+    def test_builtin_man_renders_real_page_for_allowed_topic(self):
         client = get_client()
 
         fake_proc = mock.Mock(returncode=0, stdout="NAME\ncurl - transfer a URL\n", stderr="")
-        with mock.patch("fake_commands.runtime_missing_command_name", side_effect=[None, None]), \
-             mock.patch("fake_commands.resolve_runtime_command", return_value="/usr/bin/man"), \
-             mock.patch("fake_commands.subprocess.run", return_value=fake_proc):
+        with mock.patch("builtin_commands.runtime_missing_command_name", side_effect=[None, None]), \
+             mock.patch("builtin_commands.resolve_runtime_command", return_value="/usr/bin/man"), \
+             mock.patch("builtin_commands.subprocess.run", return_value=fake_proc):
             resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
@@ -1689,14 +1689,14 @@ class TestRunStreaming:
         assert "curl - transfer a URL\\n" in body
         assert '"type": "exit"' in body
 
-    def test_fake_man_does_not_clip_to_max_output_lines(self):
+    def test_builtin_man_does_not_clip_to_max_output_lines(self):
         client = get_client()
         man_text = "\n".join(f"line {index}" for index in range(1, 6)) + "\n"
         fake_proc = mock.Mock(returncode=0, stdout=man_text, stderr="")
-        with mock.patch("fake_commands.runtime_missing_command_name", side_effect=[None, None]), \
-             mock.patch("fake_commands.resolve_runtime_command", return_value="/usr/bin/man"), \
-             mock.patch("fake_commands.subprocess.run", return_value=fake_proc), \
-             mock.patch("fake_commands.CFG", {**shell_app.CFG, "max_output_lines": 2}):
+        with mock.patch("builtin_commands.runtime_missing_command_name", side_effect=[None, None]), \
+             mock.patch("builtin_commands.resolve_runtime_command", return_value="/usr/bin/man"), \
+             mock.patch("builtin_commands.subprocess.run", return_value=fake_proc), \
+             mock.patch("builtin_commands.CFG", {**shell_app.CFG, "max_output_lines": 2}):
             resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
@@ -1705,10 +1705,10 @@ class TestRunStreaming:
         assert "man page clipped" not in body
         assert '"type": "exit"' in body
 
-    def test_fake_man_reports_when_helper_binary_is_unavailable(self):
+    def test_builtin_man_reports_when_helper_binary_is_unavailable(self):
         client = get_client()
 
-        with mock.patch("fake_commands.runtime_missing_command_name", return_value="man"):
+        with mock.patch("builtin_commands.runtime_missing_command_name", return_value="man"):
             resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
@@ -1716,12 +1716,12 @@ class TestRunStreaming:
         assert "Command is not installed on this instance: man\\n" in body
         assert '"type": "exit"' in body
 
-    def test_fake_man_reports_when_allowlisted_topic_is_missing(self):
+    def test_builtin_man_reports_when_allowlisted_topic_is_missing(self):
         client = get_client()
 
-        with mock.patch("fake_commands.runtime_missing_command_name", side_effect=[None, "curl"]), \
-             mock.patch("fake_commands.resolve_runtime_command", return_value="/usr/bin/man"), \
-             mock.patch("fake_commands.subprocess.run") as run_cmd:
+        with mock.patch("builtin_commands.runtime_missing_command_name", side_effect=[None, "curl"]), \
+             mock.patch("builtin_commands.resolve_runtime_command", return_value="/usr/bin/man"), \
+             mock.patch("builtin_commands.subprocess.run") as run_cmd:
             resp = _post_run(client, json={"command": "man curl"})
             body = resp.get_data(as_text=True)
 
@@ -1730,7 +1730,7 @@ class TestRunStreaming:
         assert '"type": "exit"' in body
         run_cmd.assert_not_called()
 
-    def test_fake_man_rejects_topics_outside_allowlist(self):
+    def test_builtin_man_rejects_topics_outside_allowlist(self):
         client = get_client()
 
         resp = _post_run(client, json={"command": "man rm"})
@@ -1740,7 +1740,7 @@ class TestRunStreaming:
         assert "man is only available for allowed commands. Topic not allowed: rm\\n" in body
         assert '"type": "exit"' in body
 
-    def test_fake_man_for_built_in_topic_returns_shell_help(self):
+    def test_builtin_man_for_built_in_topic_returns_shell_help(self):
         client = get_client()
 
         resp = _post_run(client, json={"command": "man history"})
@@ -1751,7 +1751,7 @@ class TestRunStreaming:
         assert "Built-in commands:\\n" in body
         assert "history    List recent commands from this session.\\n" in body
 
-    def test_fake_man_for_shortcuts_topic_returns_web_shell_help(self):
+    def test_builtin_man_for_shortcuts_topic_returns_web_shell_help(self):
         client = get_client()
 
         resp = _post_run(client, json={"command": "man shortcuts"})
@@ -1762,7 +1762,7 @@ class TestRunStreaming:
         assert "shortcuts  Show current keyboard shortcuts.\\n" in body
         assert '"type": "exit"' in body
 
-    def test_fake_history_lists_recent_session_commands(self):
+    def test_builtin_history_lists_recent_session_commands(self):
         client = get_client()
         with db_connect() as conn:
             conn.execute(
@@ -1786,7 +1786,7 @@ class TestRunStreaming:
         assert "2  dig darklab.sh A\\n" in body
         assert '"type": "exit"' in body
 
-    def test_fake_history_honors_recent_commands_limit(self):
+    def test_builtin_history_honors_recent_commands_limit(self):
         client = get_client()
         with db_connect() as conn:
             for index in range(1, 6):
@@ -1805,7 +1805,7 @@ class TestRunStreaming:
                 )
             conn.commit()
 
-        with mock.patch.dict("fake_commands.CFG", {"recent_commands_limit": 3}):
+        with mock.patch.dict("builtin_commands.CFG", {"recent_commands_limit": 3}):
             resp = _post_run(
                 client,
                 json={"command": "history"},
@@ -1821,10 +1821,10 @@ class TestRunStreaming:
         assert "cmd 2\\n" not in body
         assert '"type": "exit"' in body
 
-    def test_fake_pwd_returns_synthetic_path(self):
+    def test_builtin_pwd_returns_synthetic_path(self):
         client = get_client()
 
-        with mock.patch("fake_commands.CFG", {**shell_app.CFG, "workspace_enabled": False}):
+        with mock.patch("builtin_commands.CFG", {**shell_app.CFG, "workspace_enabled": False}):
             resp = _post_run(client, json={"command": "pwd"})
         body = resp.get_data(as_text=True)
 
@@ -1832,10 +1832,10 @@ class TestRunStreaming:
         assert f"/app/{shell_app.CFG['app_name']}/bin\\n" in body
         assert '"type": "exit"' in body
 
-    def test_fake_pwd_returns_workspace_root_when_workspace_enabled(self):
+    def test_builtin_pwd_returns_workspace_root_when_workspace_enabled(self):
         client = get_client()
 
-        with mock.patch("fake_commands.CFG", {**shell_app.CFG, "workspace_enabled": True}):
+        with mock.patch("builtin_commands.CFG", {**shell_app.CFG, "workspace_enabled": True}):
             resp = _post_run(client, json={"command": "pwd"})
         body = resp.get_data(as_text=True)
 
@@ -1844,7 +1844,7 @@ class TestRunStreaming:
         assert f"/app/{shell_app.CFG['app_name']}/bin\\n" not in body
         assert '"type": "exit"' in body
 
-    def test_fake_uname_a_returns_web_shell_environment(self):
+    def test_builtin_uname_a_returns_web_shell_environment(self):
         client = get_client()
 
         resp = _post_run(client, json={"command": "uname -a"})
@@ -1854,7 +1854,7 @@ class TestRunStreaming:
         assert f"{shell_app.CFG['app_name']} Linux web-terminal x86_64 app-runtime\\n" in body
         assert '"type": "exit"' in body
 
-    def test_fake_uname_without_flags_returns_kernel_name(self):
+    def test_builtin_uname_without_flags_returns_kernel_name(self):
         client = get_client()
 
         resp = _post_run(client, json={"command": "uname"})
@@ -1864,7 +1864,7 @@ class TestRunStreaming:
         assert "Linux\\n" in body
         assert '"type": "exit"' in body
 
-    def test_fake_xyzzy_coffee_and_fork_bomb_easter_eggs(self):
+    def test_builtin_xyzzy_coffee_and_fork_bomb_easter_eggs(self):
         client = get_client()
 
         xyzzy_resp = _post_run(client, json={"command": "xyzzy"})
@@ -1883,7 +1883,7 @@ class TestRunStreaming:
         assert "bash: fork bomb politely declined\\n" in fork_body
         assert "system remains operational\\n" in fork_body
 
-    def test_fake_id_returns_synthetic_identity(self):
+    def test_builtin_id_returns_synthetic_identity(self):
         client = get_client()
 
         resp = _post_run(client, json={"command": "id"})
@@ -1896,7 +1896,7 @@ class TestRunStreaming:
         ) in body
         assert '"type": "exit"' in body
 
-    def test_fake_whoami_streams_project_description(self):
+    def test_builtin_whoami_streams_project_description(self):
         client = get_client()
 
         resp = _post_run(client, json={"command": "whoami"})
@@ -1907,7 +1907,7 @@ class TestRunStreaming:
         assert f"README: see the project README at {PROJECT_README}\\n" in body
         assert '"type": "exit"' in body
 
-    def test_fake_ps_lists_active_session_processes(self):
+    def test_builtin_ps_lists_active_session_processes(self):
         client = get_client()
 
         resp = _post_run(client, json={"command": "ps aux"}, headers={"X-Session-ID": "sess-ps"})

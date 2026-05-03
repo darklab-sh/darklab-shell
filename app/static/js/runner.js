@@ -699,7 +699,7 @@ function _handleRunStreamMessage(msg, tabId) {
     if (t) t.syntheticClear = true;
   } else if (msg.type === 'output') {
     const t = getTab(tabId);
-    if (t && typeof msg.text === 'string' && /^Unsupported fake command: /.test(msg.text)) {
+    if (t && typeof msg.text === 'string' && /^Unsupported built-in command: /.test(msg.text)) {
       t.unknownCommand = true;
     }
     String(msg.text || '').split('\n').forEach((line, i, arr) => {
@@ -1112,7 +1112,7 @@ function _isExactSpecialBuiltInCommand(cmd) {
 
 function _isSessionTokenSubcommand(cmd) {
   // Only intercept subcommand variants; bare 'session-token' (status) goes to
-  // the server so it can be handled as a normal fake command with ANSI styling.
+  // the server so it can be handled as a normal built-in command with ANSI styling.
   const lower = (cmd || '').trim().toLowerCase();
   return lower.startsWith('session-token ');
 }
@@ -1923,19 +1923,19 @@ async function _sessionTokenList(tabId) {
     const w = 14;
     const kv = (k, v) => k.padEnd(w) + '  ' + v;
     if (data.token) {
-      appendLine(kv('session token', maskSessionToken(data.token)), 'fake-kv', tabId);
-      appendLine(kv('status', 'active'), 'fake-kv', tabId);
-      if (data.created) appendLine(kv('created', data.created + ' UTC'), 'fake-kv', tabId);
-      appendLine(kv('storage', 'localStorage (session_token)'), 'fake-kv', tabId);
+      appendLine(kv('session token', maskSessionToken(data.token)), 'builtin-kv', tabId);
+      appendLine(kv('status', 'active'), 'builtin-kv', tabId);
+      if (data.created) appendLine(kv('created', data.created + ' UTC'), 'builtin-kv', tabId);
+      appendLine(kv('storage', 'localStorage (session_token)'), 'builtin-kv', tabId);
     } else {
-      appendLine(kv('session', maskSessionToken(SESSION_ID)), 'fake-kv', tabId);
-      appendLine(kv('status', 'anonymous (no session token set)'), 'fake-kv', tabId);
-      appendLine(kv('tip', "run 'session-token generate' to create a persistent token"), 'fake-kv', tabId);
+      appendLine(kv('session', maskSessionToken(SESSION_ID)), 'builtin-kv', tabId);
+      appendLine(kv('status', 'anonymous (no session token set)'), 'builtin-kv', tabId);
+      appendLine(kv('tip', "run 'session-token generate' to create a persistent token"), 'builtin-kv', tabId);
     }
     _recordSuccessfulLocalCommand('session-token list');
     _persistSessionTokenRun('session-token list', [
-      { text: data.token ? `session token  ${maskSessionToken(data.token)}` : `session  ${maskSessionToken(SESSION_ID)}`, cls: 'fake-kv' },
-      { text: data.token ? 'status          active' : 'status          anonymous (no session token set)', cls: 'fake-kv' },
+      { text: data.token ? `session token  ${maskSessionToken(data.token)}` : `session  ${maskSessionToken(SESSION_ID)}`, cls: 'builtin-kv' },
+      { text: data.token ? 'status          active' : 'status          anonymous (no session token set)', cls: 'builtin-kv' },
     ]);
     setStatus('ok');
   } catch (err) {

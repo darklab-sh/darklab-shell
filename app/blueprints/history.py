@@ -273,16 +273,16 @@ def _command_category_map() -> dict[str, str]:
 
 
 def _app_builtin_command_roots() -> frozenset[str]:
-    # App built-ins (the synthetic command layer in fake_commands.py) finish
+    # App built-ins (the synthetic command layer in builtin_commands.py) finish
     # instantly and would smear the constellation baseline, inflate Activity
     # Heatmap day counts, and steal share from real recon categories in the
     # treemap. Filter them out at the source so all Status Monitor widgets see
     # the same recon-only view.
     try:
-        from fake_commands import get_fake_command_roots
+        from builtin_commands import get_builtin_command_roots
     except Exception:  # noqa: BLE001
         return frozenset()
-    return frozenset(get_fake_command_roots())
+    return frozenset(get_builtin_command_roots())
 
 
 def _history_run_root(command: str) -> str:
