@@ -12,7 +12,7 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {} } = {}) {
   }
 
   return fromDomScripts(
-    ['app/static/js/output.js'],
+    ['app/static/js/output_core.js', 'app/static/js/output.js'],
     {
       document,
       AnsiUp: FakeAnsiUp,
@@ -90,7 +90,7 @@ describe('appendLine', () => {
 
   it('falls back to plain-text rendering when AnsiUp is unavailable', () => {
     const { appendLine } = fromDomScripts(
-      ['app/static/js/utils.js', 'app/static/js/output.js'],
+      ['app/static/js/utils.js', 'app/static/js/output_core.js', 'app/static/js/output.js'],
       {
         document,
         activeTabId: 'tab-1',

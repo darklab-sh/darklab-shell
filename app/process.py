@@ -241,6 +241,20 @@ def _active_run_owner_stale_seconds() -> int:
     return max(1, int(CFG.get("run_broker_owner_stale_seconds", 75) or 75))
 
 
+def fallback_pid_snapshot() -> dict[str, int]:
+    """Diagnostic snapshot of the in-process PID/active-run/session maps.
+
+    These maps are only used when Redis is not configured (`redis_client is
+    None`); when Redis is in play the maps stay empty regardless of load.
+    """
+    with _pid_lock:
+        return {
+            "pid_count":        len(_pid_map),
+            "active_run_count": len(_active_run_meta),
+            "session_count":    len(_session_run_ids),
+        }
+
+
 def _load_active_run_payload(raw: object) -> dict[str, Any] | None:
     """Best-effort parse of a Redis-stored active-run JSON payload."""
     if not isinstance(raw, (str, bytes, bytearray)):

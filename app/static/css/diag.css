@@ -78,30 +78,41 @@ body.diag-page::before { display: none; }
 /* ── Status bar (freshness + auto-refresh) ────────────────────────────────── */
 .diag-status-bar {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
+  align-items: center;
+  gap: 8px;
   flex: 0 0 auto;
   font-size: 11px;
   line-height: 1.25;
   color: var(--muted);
   font-family: var(--font-mono);
 }
-.diag-generated-at time {
+.diag-refreshed-at time {
   color: var(--text);
   opacity: 0.85;
 }
-/* Scoped compaction of the shared .form-check primitive for the status strip:
-   tighter gap + inherited 11px/mono so it reads as metadata, not a form row. */
-.diag-status-bar .form-check.diag-refresh-toggle {
+
+/* Live indicator: subtle "we're polling" dot beside the refreshed-at line.
+   Pulses while a refresh is in flight so the operator can see the cadence
+   without staring at the timestamp. */
+.diag-live-indicator {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  font-size: inherit;
-  font-family: inherit;
-  user-select: none;
+  color: var(--muted);
+  letter-spacing: 0.4px;
 }
-.diag-status-bar .form-check.diag-refresh-toggle input[type="checkbox"] {
-  width: 12px;
-  height: 12px;
+.diag-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green-glow);
+  opacity: 0.6;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.diag-live-indicator.refreshing .diag-live-dot {
+  opacity: 1;
+  transform: scale(1.25);
 }
 
 /* `.diag-header` reverts to its simple pre-ship layout when hosted inside
@@ -116,17 +127,17 @@ body.diag-page::before { display: none; }
 
 .diag-main {
   display: grid;
-  /* 4 equal columns for the top cards; Stats/Config/Tools break out full-width */
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   grid-template-areas:
-    "app     db       redis    assets"
-    "cfg     cfg      cfg      cfg"
-    "usage   usage    outcomes outcomes"
-    "cmds    cmds     cmds     cmds"
-    "tools   tools    tools    tools";
+    "app      db       redis    assets"
+    "dbd      dbd      redisd   redisd"
+    "cfg      cfg      cfg      cfg"
+    "usage    usage    outcomes outcomes"
+    "cmds     cmds     cmds     cmds"
+    "tools    tools    tools    tools";
   gap: 16px;
   padding: 24px 24px 40px;
-  max-width: 1200px;
+  max-width: 1380px;
   width: 100%;
   box-sizing: border-box;
 }
@@ -143,11 +154,74 @@ body.diag-page::before { display: none; }
 .diag-section.s-db       { grid-area: db; }
 .diag-section.s-redis    { grid-area: redis; }
 .diag-section.s-assets   { grid-area: assets; }
+.diag-section.s-db-details { grid-area: dbd; }
+.diag-section.s-redis-details { grid-area: redisd; }
 .diag-section.s-config   { grid-area: cfg; }
 .diag-section.s-usage    { grid-area: usage; }
 .diag-section.s-outcomes { grid-area: outcomes; }
 .diag-section.s-cmds     { grid-area: cmds; }
 .diag-section.s-tools    { grid-area: tools; }
+
+.diag-summary-card {
+  min-height: 128px;
+}
+
+.diag-summary-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px 18px;
+}
+
+.diag-summary-value {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 30px;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 23px;
+  font-weight: 650;
+  line-height: 1.15;
+}
+
+.diag-summary-meta {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.diag-summary-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.diag-summary-pills span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--theme-panel-border) 84%, transparent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--theme-chrome-bg) 72%, transparent);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.diag-summary-pills .diag-ok {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 28%, var(--theme-panel-border));
+}
+
+.diag-summary-pills .diag-fail {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 32%, var(--theme-panel-border));
+}
 
 .diag-section-title {
   font-size: 10px;
@@ -198,6 +272,91 @@ body.diag-page::before { display: none; }
 .diag-fail  { color: var(--red); }
 .diag-muted { color: var(--muted); }
 
+/* Inline latency tag beside an online/error label */
+.diag-latency {
+  margin-left: 6px;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+}
+
+/* Trailing size readout on a vendor asset row, e.g. "loaded · 12.4 KB". */
+.diag-asset-size {
+  margin-left: 6px;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+}
+
+/* Trailing reason text on the broker row when the broker is unavailable —
+   wraps below the status word instead of overflowing the narrow card. */
+.diag-broker-reason {
+  display: inline-block;
+  margin-left: 4px;
+}
+
+/* Namespace count chips: dense one-line breakdown of counts per labelled
+   bucket. Used by Redis (key counts per prefix) and the database card
+   (row counts per table). The `.capped` modifier on the count is amber
+   for SCAN-trip notices in the Redis card. */
+.diag-namespace-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.diag-namespace-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.diag-namespace-chip-name {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+.diag-namespace-chip-count {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.diag-namespace-chip-count.capped,
+.diag-count-value.capped {
+  color: var(--amber);
+}
+
+.diag-count-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 6px 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.diag-count-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.diag-count-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.diag-count-value {
+  flex: 0 0 auto;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Dot indicator beside status text */
 .diag-dot {
   display: inline-block;
@@ -213,13 +372,40 @@ body.diag-page::before { display: none; }
 .diag-dot.warn { background: var(--amber); }
 .diag-dot.fail { background: var(--red); }
 
-/* ── Config: two-column internal layout ────────────────────────────────────── */
+/* ── Config: themed groups in a two-column grid ──────────────────────────── */
 .diag-config-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
 }
-.diag-config-grid .diag-table:first-child {
-  border-right: 1px solid var(--theme-panel-border);
+.diag-config-group {
+  background: var(--theme-panel-bg);
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 4px;
+  overflow: hidden;
+  min-width: 0;
+}
+.diag-config-group-label {
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 8px 14px 6px;
+  border-bottom: 1px solid var(--theme-panel-border);
+  background: var(--theme-terminal-bar-bg);
+}
+
+.diag-section.s-config {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+}
+
+.diag-section.s-config > .diag-section-title {
+  margin-bottom: 10px;
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 4px;
 }
 
 /* ── Tools chip grid ────────────────────────────────────────────────────────── */
@@ -290,6 +476,20 @@ body.diag-page::before { display: none; }
   font-size: 12px;
   color: var(--text) !important;
   padding-right: 12px !important;
+  cursor: pointer;
+}
+.diag-cmd-cell:focus-visible {
+  outline: 1px solid color-mix(in srgb, var(--green) 65%, transparent);
+  outline-offset: -1px;
+}
+/* Toggled on tap/Enter/Space — drops the single-line truncation so the full
+   command wraps inside the cell. word-break:break-all handles long pipe
+   chains and URLs that have no whitespace to wrap on. */
+.diag-cmd-cell.expanded {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: break-all;
 }
 .diag-stat-val {
   white-space: nowrap;
@@ -306,15 +506,16 @@ body.diag-page::before { display: none; }
   .diag-main {
     grid-template-columns: 1fr 1fr;
     grid-template-areas:
-      "app      db"
-      "redis    assets"
-      "cfg      cfg"
-      "usage    outcomes"
-      "cmds     cmds"
-      "tools    tools";
+      "app       db"
+      "redis     assets"
+      "dbd       dbd"
+      "redisd    redisd"
+      "cfg       cfg"
+      "usage     outcomes"
+      "cmds      cmds"
+      "tools     tools";
   }
   .diag-config-grid { grid-template-columns: 1fr; }
-  .diag-config-grid .diag-table:first-child { border-right: none; border-bottom: 1px solid var(--theme-panel-border); }
   .diag-cmd-cols { grid-template-columns: 1fr; }
   .diag-cmd-cols > * + * { border-left: none; border-top: 1px solid var(--theme-panel-border); }
 }

@@ -1,24 +1,18 @@
 import { fromScript, fromDomScript, fromDomScripts, MemoryStorage } from './helpers/extract.js'
 
-const { _formatElapsed } = fromScript('app/static/js/runner.js', '_formatElapsed')
-const { _isSyntheticGrepCommand } = fromScript('app/static/js/runner.js', '_isSyntheticGrepCommand')
-const { _isSyntheticHeadCommand } = fromScript('app/static/js/runner.js', '_isSyntheticHeadCommand')
-const { _isSyntheticTailCommand } = fromScript('app/static/js/runner.js', '_isSyntheticTailCommand')
-const { _isSyntheticWcLineCountCommand } = fromScript(
-  'app/static/js/runner.js',
-  '_isSyntheticWcLineCountCommand',
-)
-const { _isSyntheticSortCommand } = fromScript('app/static/js/runner.js', '_isSyntheticSortCommand')
-const { _isSyntheticUniqCommand } = fromScript('app/static/js/runner.js', '_isSyntheticUniqCommand')
-const { _isSyntheticPostFilterCommand } = fromScript(
-  'app/static/js/runner.js',
-  '_isSyntheticPostFilterCommand',
-)
-const { _parseSyntheticPostFilterCommand, _applySyntheticPostFilterLines } = fromScript(
-  'app/static/js/runner.js',
-  '_parseSyntheticPostFilterCommand',
-  '_applySyntheticPostFilterLines',
-)
+const { DarklabRunnerCore } = fromScript('app/static/js/runner_core.js', 'DarklabRunnerCore')
+const {
+  formatElapsed: _formatElapsed,
+  isSyntheticGrepCommand: _isSyntheticGrepCommand,
+  isSyntheticHeadCommand: _isSyntheticHeadCommand,
+  isSyntheticTailCommand: _isSyntheticTailCommand,
+  isSyntheticWcLineCountCommand: _isSyntheticWcLineCountCommand,
+  isSyntheticSortCommand: _isSyntheticSortCommand,
+  isSyntheticUniqCommand: _isSyntheticUniqCommand,
+  isSyntheticPostFilterCommand: _isSyntheticPostFilterCommand,
+  parseSyntheticPostFilterCommand: _parseSyntheticPostFilterCommand,
+  applySyntheticPostFilterLines: _applySyntheticPostFilterLines,
+} = DarklabRunnerCore
 
 async function flushPromises(times = 6) {
   for (let i = 0; i < times; i += 1) await Promise.resolve()
@@ -703,7 +697,7 @@ function loadRunnerFns({
   const showToast = showToastOverride || vi.fn()
 
   const fns = fromDomScripts(
-    ['app/static/js/runner.js'],
+    ['app/static/js/runner_core.js', 'app/static/js/runner.js'],
     {
       document,
       Map,

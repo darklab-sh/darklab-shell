@@ -1,4 +1,6 @@
 // ── Shared output logic ──
+const _outputCore = typeof DarklabOutputCore !== 'undefined' ? DarklabOutputCore : null;
+
 function createAnsiUpRenderer() {
   // ANSI rendering is optional. If the vendored parser fails to load, fall back
   // to escaped plain text rather than breaking transcript rendering entirely.
@@ -39,7 +41,7 @@ const _OUTPUT_BATCH_SIZE = 300;
 const _OUTPUT_APPEND_LINES_CHUNK_SIZE = 300;
 const _OUTPUT_RESTORE_TAIL_DELAYS = [0, 16, 64, 160, 320];
 const _pendingOutputBatches = new Map();
-const _OUTPUT_SIGNAL_SCOPES = ['findings', 'warnings', 'errors', 'summaries'];
+const _OUTPUT_SIGNAL_SCOPES = _outputCore.OUTPUT_SIGNAL_SCOPES;
 
 function promptIdentityPrefix(rawPrefix = null) {
   const configured = rawPrefix !== null
@@ -47,10 +49,7 @@ function promptIdentityPrefix(rawPrefix = null) {
     : (typeof APP_CONFIG !== 'undefined' && APP_CONFIG && typeof APP_CONFIG.prompt_prefix === 'string'
         ? APP_CONFIG.prompt_prefix
         : '');
-  let prefix = String(configured || '').trim() || 'anon@darklab';
-  if (prefix.endsWith('$')) prefix = prefix.slice(0, -1).trimEnd();
-  prefix = prefix.replace(/:[^\s:]+$/, '').trim() || 'anon@darklab';
-  return prefix;
+  return _outputCore.promptIdentityPrefix(configured);
 }
 
 function currentPromptWorkspacePath() {
@@ -62,29 +61,25 @@ function currentPromptWorkspacePath() {
     const rawPath = typeof _workspaceCwd === 'function'
       ? _workspaceCwd(typeof activeTabId !== 'undefined' ? activeTabId : undefined)
       : '';
-    const parts = String(rawPath || '').split('/').map(part => String(part || '').trim()).filter(Boolean);
-    const normalized = parts.join('/');
+    const normalized = _outputCore.normalizeWorkspaceCwd(rawPath);
     if (typeof workspaceDisplayPath === 'function') return workspaceDisplayPath(normalized);
-    return normalized ? `/${normalized}` : '/';
+    return _outputCore.workspaceDisplayPath(normalized);
   }
   return '~';
 }
 
 function buildPromptLabel(rawPrefix = null, path = null) {
   const promptPath = path === null ? currentPromptWorkspacePath() : String(path || '~');
-  return `${promptIdentityPrefix(rawPrefix)}:${promptPath} $`;
+  const configured = rawPrefix !== null
+    ? String(rawPrefix || '')
+    : (typeof APP_CONFIG !== 'undefined' && APP_CONFIG && typeof APP_CONFIG.prompt_prefix === 'string'
+        ? APP_CONFIG.prompt_prefix
+        : '');
+  return _outputCore.buildPromptLabel(configured, promptPath);
 }
 
 function stripPromptLabelFromEchoText(text = '') {
-  const value = String(text || '');
-  const current = buildPromptLabel();
-  if (value.startsWith(current)) return value.slice(current.length).replace(/^\s+/, '');
-  const identity = promptIdentityPrefix();
-  const legacyPattern = new RegExp(`^${identity.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:[^\\s]+\\$\\s*`);
-  if (legacyPattern.test(value)) return value.replace(legacyPattern, '');
-  if (value === '$') return '';
-  if (value.startsWith('$ ')) return value.slice(2);
-  return value;
+  return _outputCore.stripPromptLabelFromEchoText(text, buildPromptLabel(), promptIdentityPrefix());
 }
 
 function _outputPromptPrefix() {
@@ -104,12 +99,7 @@ function _outputPromptPrefix() {
 }
 
 function _formatOutputPrefix(index, tsText, includeTimestamp) {
-  const parts = [];
-  if (lnMode === 'on') parts.push(String(index));
-  if (includeTimestamp && tsText && (tsMode === 'elapsed' || tsMode === 'clock')) {
-    parts.push(tsText);
-  }
-  return parts.join(' ');
+  return _outputCore.formatOutputPrefix(index, tsText, includeTimestamp, lnMode, tsMode);
 }
 
 function _outputPrefixesActive() {
@@ -203,45 +193,33 @@ function _syncOutputLinePrefixMetadata(out, tab = null) {
 }
 
 function _emptyOutputSignalCounts() {
-  return { findings: 0, warnings: 0, errors: 0, summaries: 0 };
+  return _outputCore.emptySignalCounts();
 }
 
 function _isOutputSignalSummaryClassName(cls) {
-  return [
-    'fake-signal-summary-header',
-    'fake-signal-summary-section',
-    'fake-signal-summary-row',
-    'fake-signal-summary-note',
-    'fake-signal-summary-sep',
-  ].includes(cls);
+  return _outputCore.isSignalSummaryClassName(cls);
 }
 
 function _outputLineHasClass(rawLine, className) {
-  const cls = String(rawLine?.cls || '');
-  return cls.split(/\s+/).filter(Boolean).includes(className);
+  return _outputCore.lineHasClass(rawLine, className);
 }
 
 function _isOutputSignalCountableLine(rawLine) {
-  if (!rawLine || _outputLineHasClass(rawLine, 'prompt-echo')) return false;
-  const classes = String(rawLine.cls || '').split(/\s+/).filter(Boolean);
-  return !classes.some(cls => _isOutputSignalSummaryClassName(cls));
+  return _outputCore.isSignalCountableLine(rawLine);
 }
 
 function _isOutputBuiltinCommandRoot(root) {
   const builtinRoots = (
     typeof acBuiltinCommandRoots !== 'undefined' && Array.isArray(acBuiltinCommandRoots)
   ) ? acBuiltinCommandRoots : [];
-  return !!root && builtinRoots.includes(root);
+  return _outputCore.isBuiltinCommandRoot(root, builtinRoots);
 }
 
 function _countableOutputSignalScopes(rawLine) {
-  if (!_isOutputSignalCountableLine(rawLine)) return [];
-  const commandRoot = String(rawLine?.command_root || '').trim();
-  if (_isOutputBuiltinCommandRoot(commandRoot)) return [];
-  const signals = _normalizeOutputSignals(rawLine?.signals);
-  if (!signals.length) return [];
-  const uniqueScopes = new Set(signals.filter(scope => _OUTPUT_SIGNAL_SCOPES.includes(scope)));
-  return Array.from(uniqueScopes);
+  const builtinRoots = (
+    typeof acBuiltinCommandRoots !== 'undefined' && Array.isArray(acBuiltinCommandRoots)
+  ) ? acBuiltinCommandRoots : [];
+  return _outputCore.countableSignalScopes(rawLine, builtinRoots);
 }
 
 function _ensureTabOutputSignalCounts(tab) {
@@ -368,9 +346,7 @@ function _schedulePendingOutputFlush(tabId) {
 }
 
 function _normalizeOutputSignals(signals) {
-  return Array.isArray(signals)
-    ? signals.map(signal => String(signal || '')).filter(Boolean)
-    : [];
+  return _outputCore.normalizeSignals(signals);
 }
 
 function _applyOutputSignalMetadata(span, rawLine, metadata) {

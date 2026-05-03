@@ -1,5 +1,11 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, openHistoryWithEntries, makeTestIp, createShareSnapshot } from './helpers.js'
+import {
+  runCommand,
+  openHistoryWithEntries,
+  makeTestIp,
+  createShareSnapshot,
+  ensurePromptReady,
+} from './helpers.js'
 
 const CMD = 'hostname'
 const MOBILE = { width: 375, height: 812 }
@@ -86,11 +92,9 @@ test.describe('permalink / share', () => {
   })
 
   test('permalink button on a fresh tab shows "No output" toast', async ({ page }) => {
-    // Wait for the welcome sequence to finish before opening a new tab.
-    // If the welcome animation has a scheduled step that fires after the new
-    // tab is created it can switch the active panel back to the welcome tab,
-    // leaving the new tab's permalink button in a non-active (invisible) panel.
-    await page.waitForFunction(() => window._welcomeDone === true, { timeout: 15_000 })
+    // Settle welcome before opening a new tab so scheduled welcome steps cannot
+    // switch focus back to the original tab while this assertion runs.
+    await ensurePromptReady(page)
     await page.locator('#new-tab-btn').click()
     await page.locator('.hud-actions [data-action="permalink"]').click()
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })

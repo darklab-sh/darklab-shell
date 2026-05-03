@@ -79,7 +79,7 @@ function mountHistoryHarness() {
   })
 
   const fns = fromDomScripts(
-    ['app/static/js/history.js'],
+    ['app/static/js/history_core.js', 'app/static/js/history.js'],
     {
       document,
       window,

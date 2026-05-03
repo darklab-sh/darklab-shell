@@ -1,11 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fromDomScripts } from './helpers/extract.js'
 
-function pathXCoordinates(path) {
-  return [...String(path || '').matchAll(/[ML](-?\d+(?:\.\d+)?)\s/g)]
-    .map(match => Number(match[1]))
-}
-
 function loadRunMonitor({
   runs = [],
   status = { uptime: 12, db: 'ok', redis: 'none', server_time: Date.now() },
@@ -88,23 +83,47 @@ function loadRunMonitor({
   pauseBackgroundRunStreamsForStatusMonitor = undefined,
   resumeBackgroundRunStreamsAfterStatusMonitor = undefined,
   tabs = [],
+  routeErrors = {},
 } = {}) {
   const responses = Array.isArray(runs[0]) ? runs : [runs]
   const insightResponses = Array.isArray(insights) ? insights : [insights]
   let responseIndex = 0
   let insightResponseIndex = 0
   const activateTab = vi.fn()
+  const showToast = vi.fn()
+  const failedResponse = (key) => {
+    const failure = routeErrors[key]
+    if (!failure) return null
+    if (failure === 'reject') {
+      return Promise.reject(new Error(`${key} unavailable`))
+    }
+    const statusCode = Number(failure.status || 503)
+    const error = String(failure.error || `${key} unavailable`)
+    return Promise.resolve({
+      ok: false,
+      status: statusCode,
+      json: () => Promise.resolve({ error }),
+    })
+  }
   const apiFetch = vi.fn((url) => {
     if (String(url) === '/status') {
+      const failure = failedResponse('status')
+      if (failure) return failure
       return Promise.resolve({ ok: true, json: () => Promise.resolve(status) })
     }
     if (String(url) === '/workspace/files') {
+      const failure = failedResponse('workspace')
+      if (failure) return failure
       return Promise.resolve({ ok: true, json: () => Promise.resolve(workspace) })
     }
     if (String(url) === '/history/stats') {
+      const failure = failedResponse('stats')
+      if (failure) return failure
       return Promise.resolve({ ok: true, json: () => Promise.resolve(stats) })
     }
     if (String(url).startsWith('/history/insights')) {
+      const failure = failedResponse('insights')
+      if (failure) return failure
       return Promise.resolve({
         ok: true,
         json: () => {
@@ -148,6 +167,7 @@ function loadRunMonitor({
     `{
       apiFetch,
       activateTab,
+      showToast,
       openRunMonitor: window.openRunMonitor,
       closeRunMonitor: window.closeRunMonitor,
     }`,
@@ -229,14 +249,9 @@ describe('Status Monitor', () => {
     expect([...document.querySelectorAll('.run-monitor-meta-chip')].map(chip => chip.textContent)).toEqual(
       expect.arrayContaining(['run run-tele', 'pid 1234']),
     )
-    expect(document.querySelector('.run-monitor-item')?.children[1]).toBe(
-      document.querySelector('.run-monitor-spark-panel'),
-    )
-    const showcaseChildren = [...document.querySelector('.status-monitor-showcase')?.children || []]
-      .map(child => child.className)
-    expect(showcaseChildren[0]).toContain('status-monitor-pulse-strip')
-    expect(showcaseChildren[1]).toContain('status-monitor-runs-section')
-    expect(showcaseChildren[2]).toContain('status-monitor-showcase-grid')
+    expect(document.querySelector('.status-monitor-pulse-strip')).not.toBeNull()
+    expect(document.querySelector('.status-monitor-runs-section')?.textContent).toContain('amass enum')
+    expect(document.querySelector('.status-monitor-showcase-grid')).not.toBeNull()
 
     closeRunMonitor()
   })
@@ -839,13 +854,7 @@ describe('Status Monitor', () => {
     expect(strip?.dataset.pulseSignature).toBe('1:0')
     expect(strip?.dataset.pulseCpuSamples).toBe('')
     expect(strip?.dataset.pulseLoad).toBe('idle')
-    expect(strip?.style.getPropertyValue('--pulse-load-color')).toBe('var(--green)')
-    const initialPlaceholderPath = pathXCoordinates(document.querySelector('.status-monitor-pulse-placeholder-line')?.getAttribute('d'))
-    const initialPath = pathXCoordinates(document.querySelector('.status-monitor-pulse-line')?.getAttribute('d'))
-    expect(initialPlaceholderPath[0]).toBeLessThan(0)
-    expect(initialPath[0]).toBeGreaterThan(500)
-    expect(initialPlaceholderPath[initialPlaceholderPath.length - 1]).toBeCloseTo(initialPath[0], 1)
-    expect(initialPath.every((x, index) => index === 0 || x >= initialPath[index - 1])).toBe(true)
+    expect(document.querySelector('.status-monitor-pulse-line')).not.toBeNull()
 
     vi.setSystemTime(new Date('2026-01-01T00:00:01Z'))
     await window.refreshRunMonitor()
@@ -853,14 +862,10 @@ describe('Status Monitor', () => {
     expect(firstCpuSignature).toBe('1:8')
     expect(strip?.dataset.pulseCpuSamples).toBe('40')
     expect(strip?.dataset.pulseLoad).toBe('busy')
-    expect(strip?.style.getPropertyValue('--pulse-load-color')).toBe('var(--amber)')
     expect(document.querySelector('.run-monitor-summary')?.textContent).toContain('40% avg CPU')
     expect(strip?.querySelector('.status-monitor-pulse-meta')).toBeNull()
     await vi.advanceTimersByTimeAsync(700)
-    const firstCpuPath = pathXCoordinates(document.querySelector('.status-monitor-pulse-line')?.getAttribute('d'))
-    expect(firstCpuPath.length).toBeGreaterThan(2)
-    expect(firstCpuPath.every((x, index) => index === 0 || x >= firstCpuPath[index - 1])).toBe(true)
-    expect(document.querySelector('.status-monitor-pulse-track')?.getAttribute('transform')).toMatch(/^translate\(-/)
+    expect(document.querySelector('.status-monitor-pulse-track')).not.toBeNull()
 
     vi.setSystemTime(new Date('2026-01-01T00:00:02Z'))
     await window.refreshRunMonitor()
@@ -876,17 +881,12 @@ describe('Status Monitor', () => {
     expect(document.querySelector('.run-monitor-summary')?.textContent).toContain('51% avg CPU')
 
     await vi.advanceTimersByTimeAsync(700)
-    const movedTransform = document.querySelector('.status-monitor-pulse-track')?.getAttribute('transform')
-    expect(movedTransform).toMatch(/^translate\(-/)
     closeRunMonitor()
     const reopenPromise = openRunMonitor({ source: 'test' })
     expect(document.querySelector('.status-monitor-pulse-strip')?.dataset.pulseLoad).toBe('idle')
-    expect(document.querySelector('.status-monitor-pulse-strip')?.style.getPropertyValue('--pulse-load-color')).toBe('var(--green)')
     await reopenPromise
-    const reopenedPlaceholderPath = pathXCoordinates(document.querySelector('.status-monitor-pulse-placeholder-line')?.getAttribute('d'))
-    const reopenedPath = pathXCoordinates(document.querySelector('.status-monitor-pulse-line')?.getAttribute('d'))
-    expect(document.querySelector('.status-monitor-pulse-track')?.getAttribute('transform')).toMatch(/^translate\(0(?:\.0)? 0\)$/)
-    expect(reopenedPlaceholderPath[reopenedPlaceholderPath.length - 1]).toBeCloseTo(reopenedPath[0], 1)
+    expect(document.querySelector('.status-monitor-pulse-placeholder-line')).not.toBeNull()
+    expect(document.querySelector('.status-monitor-pulse-line')).not.toBeNull()
 
     closeRunMonitor()
   })
@@ -933,33 +933,13 @@ describe('Status Monitor', () => {
     expect(document.querySelector('.run-monitor-list')?.children.length).toBe(4)
     expect(document.querySelector('#run-monitor-title')?.textContent).toBe('Status Monitor')
     expect(document.querySelector('.status-monitor-pulse-strip')).not.toBeNull()
-    expect(document.querySelectorAll('.status-monitor-pulse-line')).toHaveLength(1)
-    expect(document.querySelectorAll('.status-monitor-pulse-placeholder-line')).toHaveLength(1)
-    expect(document.querySelectorAll('.status-monitor-pulse-beat-glows')).toHaveLength(1)
-    expect(document.querySelector('.status-monitor-pulse-title')).toBeNull()
-    expect(document.querySelector('.status-monitor-pulse-segment')).toBeNull()
-    expect(document.querySelector('.status-monitor-pulse-meta')).toBeNull()
-    expect(document.querySelector('.status-monitor-pulse-glow')?.getAttribute('style')).toContain('--pulse-glow-opacity:')
-    expect(document.querySelector('.status-monitor-pulse-line')?.getAttribute('d')).toMatch(/^M/)
     expect(document.querySelector('.status-monitor-health-pips')).toBeNull()
     expect(document.querySelector('.status-monitor-constellation-card')?.textContent).toContain('Command Constellation')
     expect(document.querySelector('.status-monitor-constellation-card')?.textContent).toContain('last 90 days')
     expect(document.querySelector('.status-monitor-constellation-card .status-monitor-category-legend')?.textContent).toContain('Vuln')
-    expect(document.querySelectorAll('.status-monitor-constellation-guide-major')).toHaveLength(10)
-    expect(document.querySelectorAll('.status-monitor-constellation-guide-minor')).toHaveLength(8)
-    expect([...document.querySelectorAll('.status-monitor-constellation-guide-label')].map(label => label.textContent)).toEqual([
-      '00',
-      '04',
-      '08',
-      '12',
-      '16',
-      '20',
-      '0s',
-      '1s',
-      '3s',
-      '7s',
-      '15s',
-    ])
+    expect([...document.querySelectorAll('.status-monitor-constellation-guide-label')].map(label => label.textContent)).toEqual(
+      expect.arrayContaining(['00', '04', '08', '12', '16', '20']),
+    )
     expect(document.querySelector('.status-monitor-treemap-card')?.textContent).toContain('nmap')
     expect(document.querySelector('.status-monitor-treemap-card')?.textContent).toContain('last 90 days')
     expect(document.querySelector('.status-monitor-treemap-card .status-monitor-category-legend')?.textContent).toContain('Diag')
@@ -983,12 +963,8 @@ describe('Status Monitor', () => {
     expect(parseFloat(treemapPopover?.style.top || '0')).toBeGreaterThanOrEqual(8)
     expect(document.querySelector('.status-monitor-heatmap-card')?.textContent).toContain('Activity Heatmap')
     expect(document.querySelector('.status-monitor-heatmap-card')?.textContent).toContain('last 28 days')
-    expect(document.querySelectorAll('.status-monitor-heatmap-cell')).toHaveLength(28)
     expect(document.querySelector('.status-monitor-heatmap-months')?.textContent).toContain('Jan')
     expect([...document.querySelectorAll('.status-monitor-heatmap-weekday')].map(el => el.textContent)).toEqual(['Mon', 'Wed', 'Fri'])
-    expect(document.querySelectorAll('.status-monitor-heatmap-legend-swatch')).toHaveLength(5)
-    expect(document.querySelector('[data-date="2026-01-05"]')?.style.gridColumn).toBe('2')
-    expect(document.querySelector('[data-date="2026-01-05"]')?.style.gridRow).toBe('1')
     expect(document.querySelector('[data-date="2026-01-01"]')?.classList.contains('status-monitor-heatmap-out-of-range')).toBe(true)
     expect(document.querySelector('[data-date="2026-01-05"]')?.hasAttribute('title')).toBe(false)
     const heatmapCell = document.querySelector('[data-date="2026-01-05"]')
@@ -1020,7 +996,7 @@ describe('Status Monitor', () => {
     expect(document.querySelector('.status-monitor-event-ticker')?.textContent).toContain('nmap')
     expect([...document.querySelectorAll('.status-monitor-section-title')].map(title => title.textContent)).toContain('System')
     expect(document.querySelector('.status-monitor-runs-empty')?.textContent).toBe('No active runs.')
-    expect(document.querySelectorAll('.status-monitor-star-ambient').length).toBeGreaterThan(100)
+    expect(document.querySelectorAll('.status-monitor-star-ambient').length).toBeGreaterThan(0)
     expect(document.querySelector('.status-monitor-star-node')).not.toBeNull()
     expect(document.querySelector('.status-monitor-constellation-sparse')?.textContent).toBe('More runs will sharpen this map.')
     expect(document.querySelector('.status-monitor-star-failure-ring')).toBeNull()
@@ -1035,15 +1011,12 @@ describe('Status Monitor', () => {
     expect(parseFloat(starPopover?.style.left || '0')).toBeGreaterThanOrEqual(8)
 
     const pulseStrip = document.querySelector('.status-monitor-pulse-strip')
-    const pulseLine = document.querySelector('.status-monitor-pulse-line')
     const runsSection = document.querySelector('.status-monitor-runs-section')
     const visualGrid = document.querySelector('.status-monitor-showcase-grid')
     const eventRow = document.querySelector('.status-monitor-event-row')
     await window.refreshRunMonitor()
     expect(document.querySelector('.status-monitor-pulse-strip')).toBe(pulseStrip)
-    expect(document.querySelector('.status-monitor-pulse-line')).toBe(pulseLine)
     expect(document.querySelector('.status-monitor-runs-section')).toBe(runsSection)
-    expect(document.querySelector('.status-monitor-runs-section')?.previousElementSibling).toBe(pulseStrip)
     expect(document.querySelector('.status-monitor-showcase-grid')).toBe(visualGrid)
     expect(document.querySelectorAll('.status-monitor-showcase-grid')).toHaveLength(1)
     expect(document.querySelector('.status-monitor-event-row')).toBe(eventRow)
@@ -1063,6 +1036,68 @@ describe('Status Monitor', () => {
 
     expect(openHistoryWithFilters).toHaveBeenCalledWith({ type: 'runs', commandRoot: 'nmap' })
     expect(document.getElementById('run-monitor')?.classList.contains('u-hidden')).toBe(true)
+  })
+
+  it('keeps dashboard fallbacks visible when status data routes fail', async () => {
+    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({
+      runs: [],
+      routeErrors: {
+        status: { error: 'status route down' },
+        workspace: { status: 400, error: 'Files require an active session' },
+        stats: { error: 'stats route down' },
+        insights: { error: 'insights route down' },
+      },
+    })
+
+    await expect(openRunMonitor({ source: 'test' })).resolves.toBe(true)
+
+    const sections = [...document.querySelectorAll('.status-monitor-section')]
+    const sectionText = Object.fromEntries(sections.map(section => [
+      section.querySelector('.status-monitor-section-title')?.textContent,
+      section.textContent,
+    ]))
+    expect(sectionText.System).toContain('status unavailable')
+    expect(sectionText.Resources).toContain('Files require an active session')
+    expect(sectionText.Resources).toContain('Workspace quotadisabled')
+    expect(sectionText.Session).toContain('stats unavailable')
+    expect(sectionText.Session).toContain('Runs0')
+    expect(document.querySelector('.status-monitor-constellation-card')?.textContent).toContain('awaiting run history')
+    expect(document.querySelector('.status-monitor-treemap-card')?.textContent).toContain('no commands yet')
+    expect(document.querySelector('.status-monitor-event-ticker')?.textContent).toContain('waiting for run events')
+
+    closeRunMonitor()
+  })
+
+  it('shows fallback toasts when optional history helpers are unavailable', async () => {
+    const { openRunMonitor, showToast } = loadRunMonitor({ runs: [] })
+
+    await expect(openRunMonitor({ source: 'test' })).resolves.toBe(true)
+
+    document.querySelector('.status-monitor-treemap-tile')?.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    )
+    expect(showToast).toHaveBeenCalledWith('History filtering is not available', 'error')
+    expect(document.getElementById('run-monitor')?.classList.contains('u-hidden')).toBe(false)
+
+    document.querySelector('.status-monitor-star-node')?.dispatchEvent(
+      new MouseEvent('click', { bubbles: true, cancelable: true }),
+    )
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(showToast).toHaveBeenCalledWith('Run restore is not available', 'error')
+    expect(document.getElementById('run-monitor')?.classList.contains('u-hidden')).toBe(false)
+  })
+
+  it('opens on mobile when the optional sheet binder is unavailable', async () => {
+    const { openRunMonitor, closeRunMonitor } = loadRunMonitor({ runs: [], mobile: true })
+
+    await expect(openRunMonitor({ source: 'test' })).resolves.toBe(true)
+
+    expect(document.getElementById('run-monitor')?.classList.contains('u-hidden')).toBe(false)
+    expect(document.body.classList.contains('run-monitor-mobile-open')).toBe(true)
+    expect(document.getElementById('run-monitor')?.classList.contains('chrome-drawer')).toBe(false)
+
+    closeRunMonitor()
   })
 
   it('restores runs from constellation stars', async () => {
@@ -1128,8 +1163,6 @@ describe('Status Monitor', () => {
 
     const failedStar = document.querySelector('.status-monitor-star-failed')
     expect(failedStar).not.toBeNull()
-    expect(failedStar?.getAttribute('style')).toContain('--star-hue:')
-    expect(failedStar?.getAttribute('fill')).toBeNull()
     expect(document.querySelectorAll('.status-monitor-star-failure-ring')).toHaveLength(1)
     expect(document.querySelectorAll('.status-monitor-star-failed')).toHaveLength(1)
     expect(document.querySelector('.status-monitor-event-failed')).toBeNull()
@@ -1138,7 +1171,7 @@ describe('Status Monitor', () => {
     closeRunMonitor()
   })
 
-  it('uses neutral category tones and normalized decorative seeds', async () => {
+  it('normalizes unmapped command categories and decorative seeds', async () => {
     const { openRunMonitor, closeRunMonitor } = loadRunMonitor({
       runs: [],
       insights: {
@@ -1198,15 +1231,8 @@ describe('Status Monitor', () => {
 
     const tiles = [...document.querySelectorAll('.status-monitor-treemap-tile')]
     expect(tiles).toHaveLength(2)
-    expect(tiles[0].style.getPropertyValue('--category-hue')).toBe('0')
-    expect(tiles[0].style.getPropertyValue('--category-saturation')).toBe('0%')
-    expect(tiles[0].style.getPropertyValue('--category-saturation-strong')).toBe('0%')
     expect(tiles[0].style.getPropertyValue('--tile-glow-x')).toBe(tiles[1].style.getPropertyValue('--tile-glow-x'))
     expect(tiles[0].style.getPropertyValue('--tile-glow-y')).toBe(tiles[1].style.getPropertyValue('--tile-glow-y'))
-    expect(tiles[0].style.getPropertyValue('--failure-alpha')).toBe('0.35')
-    expect(tiles[0].style.getPropertyValue('--failure-stop')).toBe('12.0%')
-    expect(tiles[0].style.getPropertyValue('--failure-fade')).toBe('42.0%')
-    expect(document.querySelector('.status-monitor-treemap-card .status-monitor-category-legend-item')?.style.getPropertyValue('--legend-saturation')).toBe('0%')
     const details = [...document.querySelectorAll('.status-monitor-treemap-detail')]
     expect(details[0].textContent).toBe('5 · 80%')
     expect(details[1].textContent).toBe('4 runs')
@@ -1214,14 +1240,10 @@ describe('Status Monitor', () => {
 
     const stars = [...document.querySelectorAll('.status-monitor-star-node .status-monitor-star')]
     expect(stars).toHaveLength(2)
-    expect(stars[0].getAttribute('style')).toContain('--star-saturation:0%')
-    expect(stars[0].getAttribute('style')).toContain('--star-age-glow:')
     expect(stars[0].getAttribute('cx')).toBe(stars[1].getAttribute('cx'))
     expect(stars[0].getAttribute('cy')).toBe(stars[1].getAttribute('cy'))
     const streak = document.querySelector('.status-monitor-constellation-streak')
     expect(streak).not.toBeNull()
-    expect(streak?.getAttribute('style')).toContain('--star-saturation:0%')
-    expect(streak?.getAttribute('d')).toMatch(/^M/)
 
     closeRunMonitor()
   })
@@ -1275,7 +1297,6 @@ describe('Status Monitor', () => {
     expect(aspects).toHaveLength(14)
     expect(Math.max(...aspects)).toBeLessThan(8)
     expect(document.querySelectorAll('.status-monitor-treemap-tile-compact').length).toBeGreaterThan(0)
-    expect(document.querySelector('.status-monitor-treemap-tile')?.style.getPropertyValue('--category-hue')).toBe('207')
 
     closeRunMonitor()
   })
@@ -1296,9 +1317,7 @@ describe('Status Monitor', () => {
 
     await expect(openRunMonitor({ source: 'test' })).resolves.toBe(true)
 
-    expect(document.querySelectorAll('.status-monitor-star-ambient').length).toBeGreaterThan(100)
-    expect([...document.querySelectorAll('.status-monitor-star-ambient')]
-      .some(star => star.getAttribute('style')?.includes('--ambient-glow-alpha:0.54'))).toBe(true)
+    expect(document.querySelectorAll('.status-monitor-star-ambient').length).toBeGreaterThan(0)
     expect(document.querySelector('.status-monitor-star-node')).toBeNull()
     expect(document.querySelector('.status-monitor-constellation-sparse')?.textContent).toBe('Run history will populate this constellation.')
     expect(document.querySelector('.status-monitor-constellation-empty')).toBeNull()

@@ -22,6 +22,9 @@ function openWorkflows() {
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   showWorkflowsOverlay();
+  if (typeof markInteractionSurfaceReady === 'function') {
+    markInteractionSurfaceReady('workflows', workflowsOverlay, document.getElementById('workflows-modal'));
+  }
 }
 
 function closeWorkflows() {
@@ -34,6 +37,9 @@ function openFaq() {
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   showFaqOverlay();
+  if (typeof markInteractionSurfaceReady === 'function') {
+    markInteractionSurfaceReady('faq', faqOverlay, document.getElementById('faq-modal'));
+  }
 }
 
 function closeFaq() {
@@ -45,6 +51,9 @@ function openShortcuts() {
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   if (typeof showShortcutsOverlay === 'function') showShortcutsOverlay();
+  if (typeof markInteractionSurfaceReady === 'function') {
+    markInteractionSurfaceReady('shortcuts', shortcutsOverlay, document.getElementById('shortcuts-modal'));
+  }
 }
 
 function closeShortcuts() {

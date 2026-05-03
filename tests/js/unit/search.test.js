@@ -15,7 +15,7 @@ function loadSearchFns({
     out.appendChild(line)
   }
   return fromDomScripts(
-    ['app/static/js/utils.js', 'app/static/js/search.js'],
+    ['app/static/js/utils.js', 'app/static/js/search_core.js', 'app/static/js/search.js'],
     {
       document,
       activeTabId: 'tab-1',
@@ -140,7 +140,7 @@ describe('search helpers', () => {
 
   it('runSearch is a no-op when the active tab has no output', () => {
     const { runSearch } = fromDomScripts(
-      ['app/static/js/utils.js', 'app/static/js/search.js'],
+      ['app/static/js/utils.js', 'app/static/js/search_core.js', 'app/static/js/search.js'],
       {
         document,
         activeTabId: 'tab-1',
@@ -180,7 +180,7 @@ describe('search helpers', () => {
 
   it('clearHighlights is safe when no output has been rendered', () => {
     const { clearHighlights } = fromDomScripts(
-      ['app/static/js/utils.js', 'app/static/js/search.js'],
+      ['app/static/js/utils.js', 'app/static/js/search_core.js', 'app/static/js/search.js'],
       {
         document,
         activeTabId: 'tab-1',

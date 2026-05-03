@@ -18,12 +18,12 @@ The suites are intentionally layered:
 
 Current totals:
 
-- behavior tests: 2,312
+- behavior tests: 2,350
 - docs/inventory meta-tests: 30
-- `pytest`: 1145 (1115 behavior + 30 meta)
-- `vitest`: 962
-- `playwright`: 235
-- total: 2,342
+- `pytest`: 1179 (1149 behavior + 30 meta)
+- `vitest`: 965
+- `playwright`: 236
+- total: 2,380
 
 This document is organized in two parts:
 
@@ -115,9 +115,10 @@ bash scripts/run_playwright.sh tests/js/e2e/failure-paths.spec.js --grep "histor
 
 Playwright notes:
 
-- `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps quiet local Playwright output by default, and uses [config/playwright.parallel.config.js](../config/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when app/server logs are needed, `--ci` for CI-style retries, or `--force-color` when color must be forced through non-TTY output.
+- `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps quiet local Playwright output by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. It uses [config/playwright.parallel.config.js](../config/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
 - plain `npx playwright test` uses [config/playwright.config.js](../config/playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
 - each parallel project gets its own Flask server port plus isolated `APP_DATA_DIR` state, so SQLite history, run-output artifacts, and limiter/process state do not leak between workers
+- modal interaction specs wait for app-level `data-interaction-ready` markers before driving real keyboard focus movement, keeping focus-trap coverage browser-native without fixed sleeps or synthetic key events
 
 ---
 
@@ -154,6 +155,8 @@ The sections below stay intentionally short. The exhaustive per-test appendix fo
 ### Vitest
 
 `tests/js/unit/` covers browser-module logic in jsdom, including shared composer state, tab/output/history behavior, welcome sequencing, autocomplete, search, and export helpers.
+
+Large jsdom setup lives in focused helper modules under `tests/js/unit/helpers/` so high-change areas such as app chrome, session identity, and Files/workspace behavior can share setup without growing individual spec files.
 
 ### Playwright
 
@@ -864,17 +867,47 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestDiagRoute.test_response_has_expected_top_level_keys` | Checks that response has expected top level keys. |
 | `TestDiagRoute.test_app_section_has_version_and_name` | Checks that app section has version and name. |
 | `TestDiagRoute.test_config_section_contains_operational_keys` | Checks that config section contains operational keys. |
+| `TestDiagRoute.test_every_config_key_belongs_to_a_group` | Drift guard: every key emitted into `result['config']` must be listed in exactly one `_DIAG_CONFIG_GROUPS` entry, otherwise it would render nowhere on the page. |
+| `TestDiagRoute.test_html_response_renders_config_group_labels` | Checks that the HTML diag page renders each config group label and the `.diag-config-group-label` styling hook. |
 | `TestDiagRoute.test_db_section_ok_and_has_counts` | Checks that database section ok and has counts. |
 | `TestDiagRoute.test_db_section_error_on_db_failure` | Checks that database section error on database failure. |
 | `TestDiagRoute.test_redis_section_reflects_client_presence` | Checks that Redis section reflects client presence. |
+| `TestDiagRoute.test_redis_stats_present_when_client_reachable` | Checks that the Redis stats snapshot (ping latency, namespace counts, INFO sections, orphan probe) populates when the client is reachable. |
+| `TestDiagRoute.test_redis_stats_absent_when_ping_fails` | Checks that a failing ping surfaces an error and the rich stats block is omitted. |
+| `TestDiagRoute.test_redis_orphan_count_flags_dangling_procmeta` | Checks that procmeta entries whose session set no longer references them are counted as orphans. |
+| `TestDiagRoute.test_redis_namespace_count_marks_capped_when_scan_hits_limit` | Checks that bounded SCAN flags a namespace as `capped` once it hits the diagnostic key cap. |
+| `TestDiagRoute.test_broker_section_reports_in_process_mode_when_redis_unconfigured` | Checks that the broker section reports `in_process` mode and an attached fallback snapshot when Redis is not configured. |
+| `TestDiagRoute.test_broker_section_omits_fallback_when_redis_configured` | Checks that the broker section reports `redis` mode and omits the fallback snapshot when a Redis client is configured. |
+| `TestDiagRoute.test_broker_section_reports_unavailable_when_disabled` | Checks that the broker section reports `available=False` with a reason string when `run_broker_enabled` is false. |
+| `TestDiagRoute.test_broker_fallback_snapshot_reflects_published_events` | Checks that the in-memory broker snapshot counts events, bytes, and active streams after a publish round-trip. |
+| `TestDiagRoute.test_db_section_reports_file_size_and_human` | Checks that the database section reports the file size in bytes plus a human-readable form (` B`, ` KB`, ` MB`, ` GB`) and a non-negative WAL size. |
+| `TestDiagRoute.test_db_section_reports_journal_mode` | Checks that the database section reports `journal_mode` as one of SQLite's documented values (`delete`, `truncate`, `persist`, `memory`, `wal`, `off`). |
+| `TestDiagRoute.test_db_section_reports_freelist_and_reclaimable_bytes` | Checks that `page_count`, `page_size`, `freelist_count`, and `reclaimable_size = freelist × page_size` are surfaced for VACUUM-headroom visibility. |
+| `TestDiagRoute.test_db_section_reports_per_table_row_counts` | Checks that the per-table row count list is populated, includes the `runs` table, and excludes `sqlite_*` internal tables and FTS5 shadow tables (`runs_fts_*`). |
+| `TestDiagRoute.test_db_section_quotes_metadata_table_names_for_row_counts` | Verifies that diagnostics quote and escape SQLite metadata-derived table names before row-count probes. |
+| `TestDiagRoute.test_diag_sqlite_identifier_rejects_empty_or_nul_names` | Checks that the diagnostics SQLite identifier helper escapes double quotes and rejects empty or NUL-containing names. |
+| `TestDiagRoute.test_db_section_runs_and_snapshots_remain_at_top_level` | Backward-compat check: the original /diag schema's `runs` and `snapshots` top-level keys are still present and match the new `tables` row counts. |
+| `TestDiagRoute.test_db_section_reports_fts_orphan_count` | Checks that the FTS5 orphan probe (`runs_fts` rows whose parent `runs.rowid` is gone) returns a non-negative integer. |
+| `TestDiagRoute.test_db_fts_orphan_probe_uses_sqlite_rowid_not_uuid_id` | Verifies that the diagnostics FTS orphan probe compares `runs_fts.rowid` to SQLite `runs.rowid` rather than the UUID/text `runs.id`, so valid indexed rows are not reported as orphans. |
+| `TestDiagRoute.test_db_section_reports_query_latency` | Checks that the database section reports a non-negative `query_ms` for the count probes. |
 | `TestDiagRoute.test_assets_section_reports_loaded_when_files_present` | Checks that assets section reports loaded when committed files are present. |
 | `TestDiagRoute.test_assets_section_reports_missing_when_files_absent` | Checks that assets section reports missing when static asset files are absent. |
+| `TestDiagRoute.test_assets_probe_size_matches_served_content_length` | Checks that the in-process HEAD probe surfaces the actual served `Content-Length` for ansi_up and jspdf, matching a direct GET against the same URL. |
+| `TestDiagRoute.test_assets_probe_reports_size_human_in_short_form` | Checks that each vendor asset probe reports a human-readable size string (` B`, ` KB`, ` MB`, ` GB`). |
+| `TestDiagRoute.test_diag_fmt_bytes_buckets` | Checks that the `_diag_fmt_bytes` formatter buckets bytes into B, KB, MB, GB short forms. |
 | `TestDiagRoute.test_tools_section_has_present_and_missing_lists` | Checks that tools section has present and missing lists. |
 | `TestDiagRoute.test_tools_present_contains_known_binary` | Checks that tools present contains known binary. |
+| `TestDiagRoute.test_tools_present_entries_carry_name_and_path_only` | Checks that each present-tool entry carries only the command root `name` and resolved `path`, avoiding noisy binary-age metadata. |
+| `TestDiagRoute.test_tools_probe_does_not_read_binary_mtime` | Verifies that the diagnostics tool probe does not inspect binary mtimes, so stable-but-old system tools are not reported as stale. |
+| `TestDiagRoute.test_tools_html_omits_stale_counts_and_age_suffixes` | Checks that the rendered Tools card omits stale counts, stale chip classes, and age suffixes. |
+| `TestDiagRoute.test_diag_tool_entry_returns_name_and_path_only` | Checks that `_diag_tool_entry` returns only the command root name and resolved binary path. |
 | `TestDiagRoute.test_honors_forwarded_for_header_from_trusted_proxy` | Checks that honors forwarded for header from trusted proxy. |
 | `TestDiagRoute.test_ignores_forwarded_for_header_from_untrusted_proxy` | Checks that ignores forwarded for header from untrusted proxy. |
 | `TestDiagRoute.test_diag_viewed_logged_on_success` | Checks that diagnostics viewed logged on success. |
 | `TestDiagRoute.test_html_response_contains_expected_content` | Checks that HTML response contains expected content. |
+| `TestDiagRoute.test_top_command_cells_are_keyboard_expandable` | Checks that Top Commands cells render as accessible toggle buttons (`tabindex=0`, `role=button`, `aria-expanded=false`) with a delegated tap handler so mobile operators can read the full command without `title=` hover. |
+| `TestDiagRoute.test_top_command_cells_render_full_untruncated_command` | Checks that the 48-char server-side `truncate` is gone — full command text reaches the DOM so the JS expand handler can show it. |
+| `TestDiagRoute.test_html_response_carries_live_indicator_and_no_refresh_toggle` | Checks that the page renders the always-on live indicator and no longer ships the auto-refresh checkbox or its localStorage-backed toggle. |
 | `TestDiagRoute.test_html_response_renders_zero_custom_redaction_rule_count_as_numeric_zero` | Checks that the HTML diagnostics page renders a zero custom redaction rule count as the numeric zero rather than a falsy blank. |
 | `TestDiagRoute.test_json_format_param_returns_json` | Checks that JSON format param returns JSON. |
 | `TestAllowedCommandsRoute.test_returns_200` | Checks returns 200 handling. |
@@ -942,7 +975,11 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestHistoryRoute.test_get_returns_200` | Checks get returns 200 handling. |
 | `TestHistoryRoute.test_get_returns_runs_list` | Checks that get returns runs list. |
 | `TestHistoryRoute.test_stats_returns_compact_session_counters` | Verifies that `/history/stats` returns compact session counters for the Status Monitor dashboard. |
+| `TestHistoryRoute.test_stats_tolerates_missing_optional_counter_tables` | Verifies that `/history/stats` returns zero optional counters when `snapshots` or `starred_commands` tables are unavailable. |
+| `TestHistoryRoute.test_insights_empty_session_and_explicit_day_clamps` | Verifies that `/history/insights` handles empty sessions, explicit `days=auto`, and large day-window clamps. |
 | `TestHistoryRoute.test_insights_returns_visual_history_payloads` | Verifies that `/history/insights` returns heatmap, command mix, constellation, and event ticker data. |
+| `TestHistoryRoute.test_insights_falls_back_to_other_when_command_registry_fails` | Verifies that `/history/insights` keeps rendering command data with the `Other` category when command registry loading fails. |
+| `TestHistoryRoute.test_insights_adaptive_windows_switch_at_command_and_constellation_thresholds` | Verifies that `/history/insights` switches command mix and constellation windows at the 25-run and 40-run thresholds. |
 | `TestHistoryRoute.test_insights_filters_app_builtin_commands` | Verifies that synthetic app built-ins (`pwd`, `whoami`, `help`, …) are filtered from the constellation, treemap, heatmap, events, and `max_day_count` returned by `/history/insights`. |
 | `TestHistoryRoute.test_delete_all_returns_ok` | Checks that delete all returns ok. |
 | `TestHistoryRoute.test_delete_specific_nonexistent_run_returns_ok` | Checks that delete specific nonexistent run returns ok. |
@@ -1798,13 +1835,16 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `only connects same-root stars within 2h on the same calendar date` | Verifies that the Command Constellation streak connectors require same-root, ≤2h between consecutive starts, and the same calendar date — sessions split at midnight and large gaps drop the line. |
 | `omits the 24 axis label so the rightmost cluster reads as 20:00 to midnight` | Verifies that the Command Constellation drops the misleading `24` axis label, since the X mapping caps at 23:59 and the rightmost cluster is unambiguous as 20:00 to midnight. |
 | `does not poll history insights on a timer while the monitor is open` | Verifies that the Status Monitor does not run a `/history/insights` polling timer while open; insights are loaded once on open and only refreshed on the active-run drain transition. |
-| `uses CPU hysteresis and recent samples for the pulse strip` | Verifies that the Status Monitor pulse strip preserves raw CPU readouts while damping small pulse-signature changes, keeping a recent CPU sample window, and scrolling via a translated SVG track. |
+| `uses CPU hysteresis and recent samples for the pulse strip` | Verifies that the Status Monitor pulse strip preserves raw CPU readouts while damping small pulse-signature changes and keeping a recent CPU sample window. |
 | `shows active-run loading state on open instead of stale cached rows` | Verifies that opening the Status Monitor shows an active-run loading row until fresh active-run data arrives instead of flashing stale cached rows. |
 | `opens as a status dashboard when there are no active runs` | Verifies that the desktop Status Monitor opens to a dashboard with a `0 active runs` runs section when no commands are running. |
 | `opens history from command territory tiles` | Verifies that Command Territory tiles open History with the clicked command root filter applied. |
+| `keeps dashboard fallbacks visible when status data routes fail` | Verifies that the Status Monitor keeps rendering dashboard fallback copy when status, workspace, stats, or insights requests fail. |
+| `shows fallback toasts when optional history helpers are unavailable` | Verifies that missing optional history filter and run restore helpers show user-visible fallback toasts instead of throwing. |
+| `opens on mobile when the optional sheet binder is unavailable` | Verifies that the mobile Status Monitor still opens when the shared mobile sheet binder is not present. |
 | `restores runs from constellation stars` | Verifies that Command Constellation stars restore the matching run through the shared history restore helper. |
 | `keeps failed constellation stars category-colored with a failure ring` | Verifies that failed constellation stars keep their command-category hue and use a separate red failure ring. |
-| `uses neutral category tones and normalized decorative seeds` | Verifies that unknown Status Monitor categories render neutrally and normalized seeds keep decorative jitter and treemap glow placement stable across casing and whitespace variants. |
+| `normalizes unmapped command categories and decorative seeds` | Verifies that unmapped Status Monitor categories still render useful command details and that normalized seeds keep decorative jitter and treemap glow placement stable across casing and whitespace variants. |
 | `uses a squarified command territory layout for small tiles` | Verifies that Command Territory uses a squarified treemap layout so small command tiles remain reasonably rectangular instead of collapsing into thin slivers. |
 | `keeps an ambient constellation visible before real run history exists` | Verifies that the Status Monitor keeps the ambient constellation visible and uses calm sparse-state copy when no real runs are plotted. |
 | `uses mobile sheet chrome and shared sheet binding on mobile` | Verifies that the mobile Status Monitor opens with sheet chrome and shared mobile-sheet dismissal behavior. |
@@ -2583,7 +2623,7 @@ Desktop demo recording spec. Drives a tightened README-first interaction sequenc
 | Test | Description |
 | --- | --- |
 | `a quiet SSE stream keeps the tab running while the backend run is active` | Verifies that a quiet SSE stream checks active-run state before changing the tab out of the running state. |
-| `a real quiet command recovers in the same tab when output resumes` | Verifies that a real quiet command shows the active-run warning, resumes live output, and exits in the same tab. |
+| `a quiet command recovers in the same tab when output resumes` | Verifies that a quiet command shows the active-run warning, resumes live output, and exits in the same tab. |
 
 #### `search.spec.js`
 
@@ -2733,6 +2773,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | `clicking the overlay backdrop closes the FAQ modal` | Verifies that clicking the overlay backdrop closes the FAQ modal. |
 | `renders backend-driven FAQ content and allowlist chips` | Verifies that renders backend-driven FAQ content and allowlist chips. |
 | `desktop rail opens the idle Status Monitor modal` | Verifies that the desktop rail opens Status Monitor as a centered modal when no commands are active. |
+| `desktop Status Monitor loads dashboard endpoints together without route stubs` | Verifies that the Status Monitor opens against real dashboard endpoints for status, workspace files, history stats, and history insights. |
 | `active rows sit under the pulse strip with wide telemetry` | Verifies that active Status Monitor rows render directly under the pulse strip with wide telemetry and meter rails. |
 | `visual cards open filtered history and restore constellation runs` | Verifies that Status Monitor visual cards can open filtered History and restore a run from the constellation. |
 | `creates, views, edits, downloads, and consumes session files` | Verifies that the workspace modal can create, view, edit, and download a session file, and that the terminal can consume it through `cat`. |

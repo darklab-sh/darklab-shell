@@ -17,6 +17,7 @@
     "dropdown-item",
     "control-row",
     "hud-action-cell",
+    "diag-cmd-cell",
     "gesture-handle"
   ],
 

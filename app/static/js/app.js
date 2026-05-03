@@ -175,9 +175,10 @@ const _mobileHeaderActionsHomeParent = typeof mobileHeaderActions !== 'undefined
 const TAB_SESSION_STATE_KEY = `tab_session_state:${typeof SESSION_ID !== 'undefined' ? SESSION_ID : 'session'}`;
 let _tabSessionPersistTimer = null;
 let _tabSessionRestoreInProgress = false;
-const _welcomeIntroModes = ['animated', 'disable_animation', 'remove'];
-const _shareRedactionDefaultModes = ['unset', 'redacted', 'raw'];
-const _hudClockModes = ['utc', 'local'];
+const PreferenceCore = window.DarklabPreferenceCore;
+const _welcomeIntroModes = PreferenceCore.WELCOME_INTRO_MODES;
+const _shareRedactionDefaultModes = PreferenceCore.SHARE_REDACTION_DEFAULT_MODES;
+const _hudClockModes = PreferenceCore.HUD_CLOCK_MODES;
 
 function _moveComposerNode(node, target, anchor = null) {
   if (!node || !target || node.parentElement === target) return;
@@ -421,15 +422,7 @@ function dismissMobileKeyboardAfterSubmit() {
 }
 
 const PREF_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
-const _sessionPreferenceKeys = [
-  'pref_theme_name',
-  'pref_timestamps',
-  'pref_line_numbers',
-  'pref_welcome_intro',
-  'pref_share_redaction_default',
-  'pref_run_notify',
-  'pref_hud_clock',
-];
+const _sessionPreferenceKeys = PreferenceCore.SESSION_PREFERENCE_KEYS;
 let _sessionPreferenceOverrides = null;
 if (typeof window !== 'undefined') {
   window.__sessionPreferencesLoadState = 'idle';
@@ -462,45 +455,17 @@ function getPreference(name) {
 
 function _defaultSessionPreferences() {
   const defaultTheme = _defaultThemeEntry?.()?.name || APP_CONFIG.default_theme || 'darklab_obsidian.yaml';
-  return {
-    pref_theme_name: defaultTheme,
-    pref_timestamps: 'off',
-    pref_line_numbers: 'off',
-    pref_welcome_intro: 'animated',
-    pref_share_redaction_default: 'unset',
-    pref_run_notify: 'off',
-    pref_hud_clock: 'utc',
-  };
+  return PreferenceCore.defaultSessionPreferences(defaultTheme);
 }
 
 function _normalizeSessionPreferences(raw) {
-  const defaults = _defaultSessionPreferences();
-  const prefs = { ...defaults };
-  const source = (raw && typeof raw === 'object') ? raw : {};
-  if (typeof source.pref_theme_name === 'string' && source.pref_theme_name.trim()) {
-    prefs.pref_theme_name = source.pref_theme_name.trim();
-  }
-  if (_tsModes.includes(source.pref_timestamps)) prefs.pref_timestamps = source.pref_timestamps;
-  if (source.pref_line_numbers === 'on' || source.pref_line_numbers === 'off') {
-    prefs.pref_line_numbers = source.pref_line_numbers;
-  }
-  if (_welcomeIntroModes.includes(source.pref_welcome_intro)) {
-    prefs.pref_welcome_intro = source.pref_welcome_intro;
-  }
-  if (_shareRedactionDefaultModes.includes(source.pref_share_redaction_default)) {
-    prefs.pref_share_redaction_default = source.pref_share_redaction_default;
-  }
-  if (source.pref_run_notify === 'on' || source.pref_run_notify === 'off') {
-    prefs.pref_run_notify = source.pref_run_notify;
-  }
-  if (_hudClockModes.includes(source.pref_hud_clock)) {
-    prefs.pref_hud_clock = source.pref_hud_clock;
-  }
-  return prefs;
+  return PreferenceCore.normalizeSessionPreferences(raw, _defaultSessionPreferences(), {
+    timestampModes: _tsModes,
+  });
 }
 
 function _sessionPreferenceCacheKey(sessionId = SESSION_ID) {
-  return `session_pref_cache:${sessionId || ''}`;
+  return PreferenceCore.sessionPreferenceCacheKey(sessionId);
 }
 
 function _readCachedSessionPreferences(sessionId = SESSION_ID) {
@@ -614,22 +579,19 @@ async function loadSessionPreferences() {
 }
 
 function getWelcomeIntroPreference() {
-  const value = getPreference('pref_welcome_intro');
-  return _welcomeIntroModes.includes(value) ? value : 'animated';
+  return PreferenceCore.coerceWelcomeIntroMode(getPreference('pref_welcome_intro'));
 }
 
 function getShareRedactionDefaultPreference() {
-  const value = getPreference('pref_share_redaction_default');
-  return _shareRedactionDefaultModes.includes(value) ? value : 'unset';
+  return PreferenceCore.coerceShareRedactionDefaultMode(getPreference('pref_share_redaction_default'));
 }
 
 function getRunNotifyPreference() {
-  return getPreference('pref_run_notify') === 'on' ? 'on' : 'off';
+  return PreferenceCore.coerceRunNotifyMode(getPreference('pref_run_notify'));
 }
 
 function getHudClockPreference() {
-  const value = getPreference('pref_hud_clock');
-  return _hudClockModes.includes(value) ? value : 'utc';
+  return PreferenceCore.coerceHudClockMode(getPreference('pref_hud_clock'));
 }
 
 async function applyRunNotifyPreference(mode, persist = true) {
@@ -655,7 +617,7 @@ async function applyRunNotifyPreference(mode, persist = true) {
 }
 
 function applyHudClockPreference(mode, persist = true) {
-  const nextMode = _hudClockModes.includes(mode) ? mode : 'utc';
+  const nextMode = PreferenceCore.coerceHudClockMode(mode);
   if (persist) {
     _primePreferenceValue('pref_hud_clock', nextMode);
     try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist HUD clock preference', err); }
@@ -686,7 +648,7 @@ function applyThemePreference(theme, persist = true) {
 }
 
 function applyTimestampPreference(mode, persist = true) {
-  const nextMode = _tsModes.includes(mode) ? mode : 'off';
+  const nextMode = PreferenceCore.coerceTimestampMode(mode, _tsModes);
   _setTsMode(nextMode);
   if (persist) {
     _primePreferenceValue('pref_timestamps', nextMode);
@@ -696,7 +658,7 @@ function applyTimestampPreference(mode, persist = true) {
 }
 
 function applyLineNumberPreference(mode, persist = true) {
-  const nextMode = mode === 'on' ? 'on' : 'off';
+  const nextMode = PreferenceCore.coerceLineNumberMode(mode);
   _setLnMode(nextMode);
   if (persist) {
     _primePreferenceValue('pref_line_numbers', nextMode);
@@ -706,7 +668,7 @@ function applyLineNumberPreference(mode, persist = true) {
 }
 
 function applyWelcomeIntroPreference(mode, persist = true) {
-  const nextMode = _welcomeIntroModes.includes(mode) ? mode : 'animated';
+  const nextMode = PreferenceCore.coerceWelcomeIntroMode(mode);
   if (persist) {
     _primePreferenceValue('pref_welcome_intro', nextMode);
     try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist welcome-intro preference', err); }
@@ -715,7 +677,7 @@ function applyWelcomeIntroPreference(mode, persist = true) {
 }
 
 function applyShareRedactionDefaultPreference(mode, persist = true) {
-  const nextMode = _shareRedactionDefaultModes.includes(mode) ? mode : 'unset';
+  const nextMode = PreferenceCore.coerceShareRedactionDefaultMode(mode);
   if (persist) {
     _primePreferenceValue('pref_share_redaction_default', nextMode);
     try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist share-redaction preference', err); }
@@ -749,6 +711,9 @@ function openOptions() {
   syncOptionsControls();
   if (typeof _updateOptionsSessionTokenStatus === 'function') _updateOptionsSessionTokenStatus();
   showOptionsOverlay();
+  if (typeof markInteractionSurfaceReady === 'function') {
+    markInteractionSurfaceReady('options', optionsOverlay, document.getElementById('options-modal'));
+  }
 }
 
 function closeOptions() {
@@ -765,8 +730,12 @@ function openThemeSelector() {
   setTimeout(() => {
     const selectedCard = themeSelect && themeSelect.querySelector('.theme-card-active');
     const target = selectedCard || themeSelect?.querySelector('[data-theme-name]');
-    if (focusElement(target, { preventScroll: true })) return;
-    focusElement(themeSelect, { preventScroll: true });
+    if (!focusElement(target, { preventScroll: true })) {
+      focusElement(themeSelect, { preventScroll: true });
+    }
+    if (typeof markInteractionSurfaceReady === 'function') {
+      markInteractionSurfaceReady('theme', themeOverlay, document.getElementById('theme-modal'));
+    }
   }, 0);
 }
 

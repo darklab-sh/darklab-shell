@@ -175,12 +175,12 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1145 pytest + 962 Vitest + 235 Playwright = 2,342 tests**.
-That total includes 2,312 behavior tests plus 30 docs/inventory meta-tests.
+Current totals: **1179 pytest + 965 Vitest + 236 Playwright = 2,380 tests**.
+That total includes 2,350 behavior tests plus 30 docs/inventory meta-tests.
 
 Playwright notes:
 
-- `npm run test:e2e` delegates to `bash scripts/run_playwright.sh`, which keeps quiet local Playwright output by default, clears the configured e2e ports, and currently balances the browser suite across 5 isolated Chromium projects. Add `--debug-logs` when app/server logs are needed, `--ci` for CI-style retries, or `--force-color` when color must be forced through non-TTY output.
+- `npm run test:e2e` delegates to `bash scripts/run_playwright.sh`, which keeps quiet local Playwright output by default, clears the configured e2e ports, captures isolated server logs under `test-results/e2e-server-logs/`, and currently balances the browser suite across 5 isolated Chromium projects. On failure it prints the server log tails automatically. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
 - plain `npx playwright test` uses the default single-project config, which is the intended path for VS Code Test Explorer and focused local debugging
 - the parallel projects each get their own Flask server port and isolated local app state so history, run-output artifacts, and limiter/process state do not collide between workers
 

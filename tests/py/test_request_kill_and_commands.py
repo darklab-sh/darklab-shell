@@ -10,6 +10,7 @@ import uuid
 import unittest.mock as mock
 
 import app as shell_app
+import commands
 from fake_commands import (
     _DOCUMENTED_FAKE_COMMANDS,
     _FAKE_COMMAND_DISPATCH,
@@ -21,6 +22,22 @@ from commands import (
     is_command_allowed,
     validate_command,
 )
+
+
+_COMMAND_VALIDATION_HELPERS = None
+
+
+def _command_validation_helpers():
+    global _COMMAND_VALIDATION_HELPERS
+    if _COMMAND_VALIDATION_HELPERS is None:
+        registry = commands.load_commands_registry()
+        with mock.patch("commands.load_commands_registry", return_value=registry):
+            _COMMAND_VALIDATION_HELPERS = {
+                "allow_grouping": commands.load_allow_grouping_flags(),
+                "workspace_flags": commands._workspace_flag_specs_by_root(),
+                "runtime_adaptations": commands._runtime_adaptations_by_root(),
+            }
+    return _COMMAND_VALIDATION_HELPERS
 
 
 def get_client(*, use_forwarded_for=True):
@@ -189,7 +206,11 @@ class TestIsCommandAllowedEdges:
     def _check(self, cmd, allow=None, deny=None):
         a = allow if allow is not None else ["ls", "curl", "echo", "nmap"]
         d = deny if deny is not None else []
-        with mock.patch("commands.load_command_policy", return_value=(a, d)):
+        helpers = _command_validation_helpers()
+        with mock.patch("commands.load_command_policy", return_value=(a, d)), \
+             mock.patch("commands.load_allow_grouping_flags", return_value=helpers["allow_grouping"]), \
+             mock.patch("commands._workspace_flag_specs_by_root", return_value=helpers["workspace_flags"]), \
+             mock.patch("commands._runtime_adaptations_by_root", return_value=helpers["runtime_adaptations"]):
             return is_command_allowed(cmd)
 
     def test_prefix_exactness_ls_does_not_allow_lsblk(self):
@@ -437,32 +458,43 @@ class TestIsCommandAllowedEdges:
                 ),
             ]
 
-            results = [
-                (validate_command(command, session_id="session-1", cfg=cfg), reads, writes)
-                for command, reads, writes in cases
-            ]
+            registry = commands.load_commands_registry()
+            with mock.patch("commands.load_commands_registry", return_value=registry):
+                command_policy = commands.load_command_policy()
+                allow_grouping = commands.load_allow_grouping_flags()
+                workspace_flags = commands._workspace_flag_specs_by_root()
+                runtime_adaptations = commands._runtime_adaptations_by_root()
+
+            with mock.patch("commands.load_command_policy", return_value=command_policy), \
+                 mock.patch("commands.load_allow_grouping_flags", return_value=allow_grouping), \
+                 mock.patch("commands._workspace_flag_specs_by_root", return_value=workspace_flags), \
+                 mock.patch("commands._runtime_adaptations_by_root", return_value=runtime_adaptations):
+                results = [
+                    (validate_command(command, session_id="session-1", cfg=cfg), reads, writes)
+                    for command, reads, writes in cases
+                ]
+
+                denied = validate_command(
+                    "amass subs -d darklab.sh -names -dir custom-amass-db",
+                    session_id="session-1",
+                    cfg=cfg,
+                )
+                assert not denied.allowed
+                assert "managed amass session directory" in denied.reason
+
+                denied = validate_command(
+                    "amass enum -d darklab.sh -o unmanaged.txt",
+                    session_id="session-1",
+                    cfg=cfg,
+                )
+                assert not denied.allowed
+                assert "Command not allowed" in denied.reason
 
         for result, reads, writes in results:
             assert result.allowed, result.reason
             assert result.workspace_reads == reads
             assert result.workspace_writes == writes
             assert str(tmp) in result.exec_command
-
-        denied = validate_command(
-            "amass subs -d darklab.sh -names -dir custom-amass-db",
-            session_id="session-1",
-            cfg=cfg,
-        )
-        assert not denied.allowed
-        assert "managed amass session directory" in denied.reason
-
-        denied = validate_command(
-            "amass enum -d darklab.sh -o unmanaged.txt",
-            session_id="session-1",
-            cfg=cfg,
-        )
-        assert not denied.allowed
-        assert "Command not allowed" in denied.reason
 
     def test_restricted_command_input_cidrs_block_inline_literal_targets(self):
         registry = {

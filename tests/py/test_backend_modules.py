@@ -1055,37 +1055,48 @@ class TestDerivedCommandRegistry:
                 ),
             }
 
-            for command, (reads, writes) in cases.items():
-                result = commands.validate_command(command, session_id=session_id, cfg=cfg)
-                assert result.allowed, f"{command!r} should be workspace-allowed: {result.reason}"
-                assert result.workspace_reads == reads
-                assert result.workspace_writes == writes
-                exec_tokens = commands.split_command_argv(result.exec_command)
-                if command.startswith("amass "):
-                    assert exec_tokens[0] == "env"
-                    assert exec_tokens[1].startswith("XDG_CONFIG_HOME=")
-                    assert exec_tokens[2] == "amass"
-                    assert "-dir" in exec_tokens
-                for original in reads + writes:
-                    if command.startswith("amass ") and original == commands.AMASS_DEFAULT_WORKSPACE_DIR:
-                        continue
-                    assert original not in exec_tokens
+            registry = commands.load_commands_registry()
+            with mock.patch("commands.load_commands_registry", return_value=registry):
+                command_policy = commands.load_command_policy()
+                allow_grouping = commands.load_allow_grouping_flags()
+                workspace_flags = commands._workspace_flag_specs_by_root()
+                runtime_adaptations = commands._runtime_adaptations_by_root()
 
-            result = commands.validate_command(
-                "amass subs -d darklab.sh -names -dir custom-amass-db",
-                session_id=session_id,
-                cfg=cfg,
-            )
-            assert not result.allowed
-            assert "managed amass session directory" in result.reason
+            with mock.patch("commands.load_command_policy", return_value=command_policy), \
+                 mock.patch("commands.load_allow_grouping_flags", return_value=allow_grouping), \
+                 mock.patch("commands._workspace_flag_specs_by_root", return_value=workspace_flags), \
+                 mock.patch("commands._runtime_adaptations_by_root", return_value=runtime_adaptations):
+                for command, (reads, writes) in cases.items():
+                    result = commands.validate_command(command, session_id=session_id, cfg=cfg)
+                    assert result.allowed, f"{command!r} should be workspace-allowed: {result.reason}"
+                    assert result.workspace_reads == reads
+                    assert result.workspace_writes == writes
+                    exec_tokens = commands.split_command_argv(result.exec_command)
+                    if command.startswith("amass "):
+                        assert exec_tokens[0] == "env"
+                        assert exec_tokens[1].startswith("XDG_CONFIG_HOME=")
+                        assert exec_tokens[2] == "amass"
+                        assert "-dir" in exec_tokens
+                    for original in reads + writes:
+                        if command.startswith("amass ") and original == commands.AMASS_DEFAULT_WORKSPACE_DIR:
+                            continue
+                        assert original not in exec_tokens
 
-            result = commands.validate_command(
-                "amass enum -d darklab.sh -o unmanaged.txt",
-                session_id=session_id,
-                cfg=cfg,
-            )
-            assert not result.allowed
-            assert "Command not allowed" in result.reason
+                result = commands.validate_command(
+                    "amass subs -d darklab.sh -names -dir custom-amass-db",
+                    session_id=session_id,
+                    cfg=cfg,
+                )
+                assert not result.allowed
+                assert "managed amass session directory" in result.reason
+
+                result = commands.validate_command(
+                    "amass enum -d darklab.sh -o unmanaged.txt",
+                    session_id=session_id,
+                    cfg=cfg,
+                )
+                assert not result.allowed
+                assert "Command not allowed" in result.reason
 
     def test_workspace_rewrites_quote_shell_sensitive_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1102,11 +1113,12 @@ class TestDerivedCommandRegistry:
             session_id = "quote-sensitive-paths"
             write_workspace_text_file(session_id, "targets & dollars $.txt", "ip.darklab.sh\n", cfg)
 
-            result = commands.validate_command(
-                "masscan -iL 'targets & dollars $.txt' -oL 'masscan output $.txt' -p 80",
-                session_id=session_id,
-                cfg=cfg,
-            )
+            with _patched_command_validation_helpers():
+                result = commands.validate_command(
+                    "masscan -iL 'targets & dollars $.txt' -oL 'masscan output $.txt' -p 80",
+                    session_id=session_id,
+                    cfg=cfg,
+                )
 
             assert result.allowed, result.reason
             assert result.workspace_reads == ["targets & dollars $.txt"]
@@ -1137,11 +1149,12 @@ class TestDerivedCommandRegistry:
                 "workspace_inactivity_ttl_hours": 1,
             }
 
-            result = commands.validate_command(
-                "amass subs -d darklab.sh -names",
-                session_id="amass-quote-sensitive-paths",
-                cfg=cfg,
-            )
+            with _patched_command_validation_helpers():
+                result = commands.validate_command(
+                    "amass subs -d darklab.sh -names",
+                    session_id="amass-quote-sensitive-paths",
+                    cfg=cfg,
+                )
 
             assert result.allowed, result.reason
             assert result.exec_command.startswith("env ")
@@ -1928,10 +1941,36 @@ class TestThemeRegistry:
 
 # ── Path blocking edge cases ──────────────────────────────────────────────────
 
+_COMMAND_VALIDATION_HELPERS = None
+
+
+def _command_validation_helpers():
+    global _COMMAND_VALIDATION_HELPERS
+    if _COMMAND_VALIDATION_HELPERS is None:
+        registry = commands.load_commands_registry()
+        with mock.patch("commands.load_commands_registry", return_value=registry):
+            _COMMAND_VALIDATION_HELPERS = {
+                "allow_grouping": commands.load_allow_grouping_flags(),
+                "workspace_flags": commands._workspace_flag_specs_by_root(),
+                "runtime_adaptations": commands._runtime_adaptations_by_root(),
+            }
+    return _COMMAND_VALIDATION_HELPERS
+
+
+@contextmanager
+def _patched_command_validation_helpers():
+    helpers = _command_validation_helpers()
+    with mock.patch("commands.load_allow_grouping_flags", return_value=helpers["allow_grouping"]), \
+         mock.patch("commands._workspace_flag_specs_by_root", return_value=helpers["workspace_flags"]), \
+         mock.patch("commands._runtime_adaptations_by_root", return_value=helpers["runtime_adaptations"]):
+        yield
+
+
 def _check(cmd, allow=None, deny=None):
     a = allow if allow is not None else ["curl", "nmap", "ls"]
     d = deny if deny is not None else []
-    with mock.patch("commands.load_command_policy", return_value=(a, d)):
+    with mock.patch("commands.load_command_policy", return_value=(a, d)), \
+         _patched_command_validation_helpers():
         return is_command_allowed(cmd)
 
 

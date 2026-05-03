@@ -15,6 +15,7 @@ let _workspaceViewerRefreshSpinTimer = null;
 let _workspaceViewerRefreshInFlight = false;
 let _workspaceViewerAutoRefreshEnabled = false;
 let _workspaceViewedSize = null;
+const WorkspaceCore = window.DarklabWorkspaceCore;
 
 const WORKSPACE_PREVIEW_LINE_LIMIT = 10000;
 const WORKSPACE_PREVIEW_TABLE_LIMIT = 250;
@@ -34,10 +35,7 @@ function isWorkspaceEnabled() {
 }
 
 function _formatWorkspaceBytes(bytes) {
-  const value = Number(bytes) || 0;
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1).replace(/\.0$/, '')} KB`;
-  return `${(value / (1024 * 1024)).toFixed(1).replace(/\.0$/, '')} MB`;
+  return WorkspaceCore.formatBytes(bytes);
 }
 
 function _workspaceErrorMessage(err, fallback = 'Files request failed') {
@@ -785,46 +783,23 @@ async function refreshWorkspaceViewedFile({ auto = false, suppressErrorToast = f
 }
 
 function _normalizeWorkspaceDir(path = '') {
-  const parts = String(path || '').split('/').map(part => part.trim()).filter(Boolean);
-  return parts.join('/');
+  return WorkspaceCore.normalizeDir(path);
 }
 
 function normalizeWorkspaceCommandPath(path = '', cwd = '') {
-  const raw = String(path ?? '').trim();
-  const baseParts = raw.startsWith('/') ? [] : _normalizeWorkspaceDir(cwd).split('/').filter(Boolean);
-  const rawParts = raw.split('/').filter(part => part !== '');
-  for (const part of rawParts) {
-    const trimmed = String(part || '').trim();
-    if (!trimmed || trimmed === '.') continue;
-    if (trimmed === '..') {
-      if (baseParts.length) {
-        baseParts.pop();
-        continue;
-      }
-      throw new Error('path escapes the session workspace');
-    }
-    if (trimmed.includes('\\') || trimmed.includes('\x00')) {
-      throw new Error('file name contains unsupported characters');
-    }
-    baseParts.push(trimmed);
-  }
-  return baseParts.join('/');
+  return WorkspaceCore.normalizeCommandPath(path, cwd);
 }
 
 function workspaceDisplayPath(path = '') {
-  const normalized = _normalizeWorkspaceDir(path);
-  return normalized ? `/${normalized}` : '/';
+  return WorkspaceCore.displayPath(path);
 }
 
 function _workspaceParentDir(path = '') {
-  const parts = _normalizeWorkspaceDir(path).split('/').filter(Boolean);
-  parts.pop();
-  return parts.join('/');
+  return WorkspaceCore.parentDir(path);
 }
 
 function _workspaceFileBasename(path = '') {
-  const parts = String(path || '').split('/').filter(Boolean);
-  return parts[parts.length - 1] || String(path || '');
+  return WorkspaceCore.basename(path);
 }
 
 function _activateWorkspaceFolderRow(path, event = null) {
@@ -1309,6 +1284,9 @@ async function openWorkspace() {
     if (workspaceFileList) workspaceFileList.textContent = '';
     if (workspaceSummary) workspaceSummary.textContent = 'Unavailable';
     setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to load files'), 'error');
+  }
+  if (typeof markInteractionSurfaceReady === 'function') {
+    markInteractionSurfaceReady('workspace', workspaceOverlay, workspaceModal);
   }
 }
 

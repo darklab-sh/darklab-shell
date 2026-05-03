@@ -140,6 +140,27 @@ test.describe('Status Monitor', () => {
     await expect(page.locator('#run-monitor')).toBeHidden()
   })
 
+  test('desktop Status Monitor loads dashboard endpoints together without route stubs', async ({ page }) => {
+    const endpointPaths = ['/status', '/workspace/files', '/history/stats', '/history/insights']
+    const responses = endpointPaths.map((path) => page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'GET' && url.pathname === path
+    }))
+
+    await page.locator('.rail-nav [data-action="run-monitor"]').click()
+    await expect(page.locator('#run-monitor')).toBeVisible()
+
+    const observed = await Promise.all(responses)
+    expect(Object.fromEntries(observed.map((response) => [
+      new URL(response.url()).pathname,
+      response.ok(),
+    ]))).toEqual(Object.fromEntries(endpointPaths.map((path) => [path, true])))
+    await expect(page.locator('.status-monitor-section-title').filter({ hasText: 'System' })).toBeVisible()
+    await expect(page.locator('.status-monitor-section-title').filter({ hasText: 'Resources' })).toBeVisible()
+    await expect(page.locator('.status-monitor-section-title').filter({ hasText: 'Session' })).toBeVisible()
+    await expect(page.locator('.status-monitor-showcase-grid')).toBeVisible()
+  })
+
   test('active rows sit under the pulse strip with wide telemetry', async ({ page }) => {
     await page.route('**/history/active', async (route) => {
       await route.fulfill({
@@ -357,10 +378,20 @@ test.describe('workflows modal', () => {
   async function openWorkflowsModal(page) {
     await page.keyboard.press('Alt+g')
     await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
-    const firstCard = page.locator('.workflow-card').first()
+    const firstCard = page.locator('#workflows-overlay .workflow-card').first()
     await expect(firstCard).toBeVisible()
     await expect(firstCard.locator('.workflow-input-control')).toBeVisible()
     return firstCard
+  }
+
+  async function saveWorkflowEditorAndWait(page, method) {
+    const saveResponse = page.waitForResponse((response) => (
+      response.url().includes('/session/workflows')
+      && response.request().method() === method
+    ))
+    await page.locator('#workflow-editor-save-btn').click()
+    expect((await saveResponse).ok()).toBe(true)
+    await expect(page.locator('#workflow-editor-overlay')).not.toHaveClass(/\bopen\b/)
   }
 
   test('input-driven workflows render prefilled form fields and runnable rendered steps', async ({ page }) => {
@@ -450,10 +481,9 @@ test.describe('workflows modal', () => {
     await page.locator('#workflow-editor-title-input').fill('Saved Whois')
     await page.locator('.workflow-editor-step-command').first().fill('whois {{domain}}')
     await page.locator('.workflow-editor-step-note').first().fill('Lookup registration')
-    await page.locator('#workflow-editor-save-btn').click()
+    await saveWorkflowEditorAndWait(page, 'POST')
 
-    await expect(page.locator('#workflow-editor-overlay')).not.toHaveClass(/\bopen\b/)
-    const userCard = page.locator('.workflow-card').first()
+    const userCard = page.locator('#workflows-overlay .workflow-card.is-user-workflow').first()
     await expect(userCard).toHaveClass(/\bis-user-workflow\b/)
     await expect(userCard.locator('.workflow-title')).toHaveText('Saved Whois')
     await expect(userCard.locator('.workflow-edit-btn')).toBeVisible()
@@ -462,10 +492,9 @@ test.describe('workflows modal', () => {
     await userCard.locator('.workflow-edit-btn').click()
     await expect(page.locator('#workflow-editor-title')).toHaveText('EDIT WORKFLOW')
     await page.locator('.workflow-editor-step-command').first().fill('dig {{domain}} A')
-    await page.locator('#workflow-editor-save-btn').click()
+    await saveWorkflowEditorAndWait(page, 'PUT')
 
-    await expect(page.locator('#workflow-editor-overlay')).not.toHaveClass(/\bopen\b/)
-    await expect(page.locator('.workflow-card').first().locator('.workflow-step-cmd').first()).toContainText('dig {{domain}} A')
+    await expect(userCard.locator('.workflow-step-cmd').first()).toContainText('dig {{domain}} A')
   })
 
   test('rail workflow plus opens the new workflow editor without toggling the section', async ({ page }) => {

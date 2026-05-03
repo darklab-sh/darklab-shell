@@ -8,6 +8,124 @@ All notable changes to darklab_shell are documented here.
 
 ### Added
 
+- **`/diag` Database card now mirrors the depth of the Redis card** — file/WAL size, last write age, journal mode, reclaimable bytes via VACUUM, per-table row counts, and an FTS5 orphan probe.
+  - **Why:**
+    - The Database card was lean by accident — three rows (status + runs count + snapshots count) against the Redis card's dozen. The two big SQLite ops failure modes (file growth without GC, FTS5 index drift) had no operator-visible signal.
+  - **What:**
+    - Added `_diag_db_stats()` (`app/blueprints/assets.py`) — a single snapshot that gathers file-system stats (size, last-write age, WAL sidecar size) plus a single-connection batch of pragma reads and table queries:
+      - `PRAGMA journal_mode` exposes the durability config (`delete` / `wal` / etc.) so an operator can verify a deploy.
+      - `PRAGMA page_count` × `page_size` × `freelist_count` produces a "reclaimable bytes" number that surfaces a forgotten VACUUM (the row goes amber when non-zero).
+      - Per-table row counts iterate `sqlite_master`. Detected FTS5 virtual tables synthesize their shadow names (`<vt>_data` / `_idx` / `_content` / `_docsize` / `_config`) so those leak-prone helpers are dropped from the visible list — only the user tables (`runs`, `snapshots`, `runs_fts`, …) are surfaced.
+      - Per-table count probes now route metadata-derived table names through `_diag_sqlite_identifier()`, rejecting empty/NUL names and double-quote escaping identifiers before SQLite's unavoidable identifier interpolation.
+      - FTS5 orphan probe: `SELECT COUNT(*) FROM runs_fts WHERE rowid NOT IN (SELECT id FROM runs)` — same operator value as the Redis procmeta orphan probe, surfaces cleanup that has fallen behind.
+    - Each subsection is independently guarded so a missing pragma or absent FTS table never blanks the whole panel.
+    - Backward compatibility: `data.db.runs` and `data.db.snapshots` stay at the top level even though they also appear inside the new `tables` array — external JSON consumers that read those keys keep working.
+    - `diag.html` Database card renders six new rows: size + WAL suffix, last-write age, journal mode, reclaimable bytes (amber when non-zero) + free-pages-of-total breakdown, table row chips, and FTS orphan count (red when non-zero, green at zero).
+    - Renamed the Redis namespace chip CSS classes from `.diag-redis-namespaces` / `-ns` / `-ns-name` / `-ns-count` to `.diag-namespace-chips` / `-chip` / `-chip-name` / `-chip-count` so the same primitive can host the Database tables row without semantic confusion.
+  - **Tests:**
+    - `TestDiagRoute.test_db_section_reports_file_size_and_human` confirms `size` + `size_human` populate and that `wal_size` is always an integer.
+    - `test_db_section_reports_journal_mode` confirms the value is one of SQLite's documented modes.
+    - `test_db_section_reports_freelist_and_reclaimable_bytes` confirms the page-count/page-size/freelist trio matches `reclaimable_size = freelist × page_size`.
+    - `test_db_section_reports_per_table_row_counts` confirms the table list is populated, includes `runs`, and excludes both `sqlite_*` internal tables and FTS5 shadow tables.
+    - `test_db_section_quotes_metadata_table_names_for_row_counts` confirms table names containing quotes are safely counted.
+    - `test_diag_sqlite_identifier_rejects_empty_or_nul_names` covers escaping and invalid identifier rejection.
+    - `test_db_section_runs_and_snapshots_remain_at_top_level` is a backward-compat guard for the original `data.db.runs` + `data.db.snapshots` schema.
+    - `test_db_section_reports_fts_orphan_count` confirms the FTS5 orphan probe returns a non-negative integer.
+- **`/diag` Vendor Assets card now does an in-process HEAD against the served URL instead of a file-existence check** — proves the route is wired up, the file resolves through `send_file`, and reports the served byte size.
+  - **Why:**
+    - The previous probe was `Path.exists()` only, so a wrong-path bind mount whose symlink resolves locally but breaks under `send_file`, an accidentally unregistered route, or a zero-byte file would have all reported `loaded`.
+  - **What:**
+    - `_diag_vendor_probe(url)` (`app/blueprints/assets.py`) calls `current_app.test_client().head(url)` to dispatch through the WSGI stack in-process (no socket, no rate-limit hit). Returns `{url, ok, status, size, size_human}`.
+    - `FileNotFoundError` is collapsed to a synthetic 404 because `TESTING=True` makes Flask propagate the exception out of the test client instead of converting it to the 404 response a production worker would return.
+    - Fonts probe uses the first entry from `FONT_FILES` so it exercises the `/vendor/fonts/<filename>` route, not just `_FONT_DIR.iterdir()`.
+    - `data.assets.<name>` schema migrated from a `"loaded"`/`"missing"` string to a dict — `data.assets.ansi_up.ok` is the new boolean. The diag template extracts the row markup into a `diag_asset_row()` macro and renders the served size as a trailing muted suffix (`loaded · 12.4 KB`).
+    - Added `_diag_fmt_bytes()` (B / KB / MB / GB short form) and a `.diag-asset-size` CSS rule.
+  - **Tests:**
+    - Updated `TestDiagRoute.test_assets_section_reports_loaded_when_files_present` and `test_assets_section_reports_missing_when_files_absent` for the new dict schema (asserting `ok`, `status`, `size`, `size_human`).
+    - `test_assets_probe_size_matches_served_content_length` confirms the probe's reported size matches a direct GET against the same URL.
+    - `test_assets_probe_reports_size_human_in_short_form` confirms every vendor entry carries a non-empty `size_human` ending in a unit suffix.
+    - `test_diag_fmt_bytes_buckets` exercises the byte-formatter buckets directly.
+- **`/diag` Top Commands cells expand on tap so mobile operators can read long command lines** — `title=` hover is desktop-only, so it was a dead affordance on the device that needs it most.
+  - **Why:**
+    - Top Commands cells truncated to 48 chars server-side, then again visually with `text-overflow: ellipsis`. The full command was only available through the desktop-only `title` tooltip; mobile users could not see anything past the ellipsis.
+  - **What:**
+    - Removed the server-side `truncate(48, killwords=True, end='…')` filter from `app/templates/diag.html` — the full command now reaches the DOM, and CSS handles visual truncation with `text-overflow: ellipsis`.
+    - Cells now render as accessible toggle buttons: `tabindex="0"`, `role="button"`, `aria-expanded="false"`. A delegated `click` and `keydown` handler on `document` toggles `.expanded` (which drops the `white-space: nowrap` and lets the command wrap with `word-break: break-all` for pipe chains/URLs without whitespace). Delegation survives the 10s `.diag-main` swap from the live-refresh loop.
+    - Added `cursor: pointer` and a `:focus-visible` outline on `.diag-cmd-cell` so the affordance reads on both desktop and keyboard navigation.
+  - **Tests:**
+    - `TestDiagRoute.test_top_command_cells_are_keyboard_expandable` confirms the cells carry the `tabindex=0` / `role=button` / `aria-expanded=false` attrs and that the delegated `toggleCmdCell` handler is wired up in the page script.
+    - `test_top_command_cells_render_full_untruncated_command` inserts a synthetic 100+ char command into the runs table and confirms it appears at least twice in the rendered HTML (in `title=` and as cell text), proving the server-side truncate is gone.
+- **`/diag` Config card is now grouped by feature instead of an alphabetical wall of keys** — easier to scan and locate what you need.
+  - **Why:**
+    - The 16-key config table mixed rate-limiting, run execution, persistence, sharing, and logging in a flat alphabetical layout. Operators had to read every key to find the one they wanted.
+  - **What:**
+    - Added `_DIAG_CONFIG_GROUPS` in `app/blueprints/assets.py` — five themed groups (Rate limiting, Run execution, Persistence, Sharing and redaction, Network and logging) with explicit per-key membership.
+    - The view now passes the group structure to the template as `config_groups`; the JSON `data.config` payload stays flat for external consumers.
+    - `diag.html` Config section iterates groups, each with a `.diag-config-group-label` subheading; renders only keys present in `data.config` so a removed-but-still-listed key collapses gracefully.
+    - The Jinja value-formatting (none, list, true, false, scalar) was extracted into a `diag_config_value()` macro to remove the duplicated chain that previously sat in two halves of the split table.
+    - `diag.css` replaces the old `.diag-table:first-child` divider with per-group rules: vertical divider between left/right column groups (skipped when an odd group count leaves the last group alone in its row), horizontal divider between rows of groups, and a clean single-column collapse on `<760px`.
+  - **Tests:**
+    - `TestDiagRoute.test_every_config_key_belongs_to_a_group` is a drift guard — every key emitted into `result['config']` must be listed in exactly one group, otherwise it would render nowhere on the page. The test also rejects keys that appear in multiple groups.
+    - `test_html_response_renders_config_group_labels` confirms each group label and the `.diag-config-group-label` styling hook reach the rendered HTML.
+- **`/diag` Tools card now stamps each present binary with its mtime and flags stale ones** — image-rebuild freshness is visible without shelling in.
+  - **Why:**
+    - The Tools card showed only present/missing chips, so a container or dev box that had not been rebuilt in months looked identical to a freshly built one. With recon binaries (`nmap`, `nuclei`, `wpscan`, etc.) updating frequently, that's a real footgun.
+  - **What:**
+    - `_diag_tool_entry()` (`app/blueprints/assets.py`) resolves each allowlisted command root through `shutil.which()`, reads the binary's mtime, and decorates the entry with `path`, `mtime`, a short age string (`today`, `Nd`, `Nmo`, `Ny`), and a `stale` boolean.
+    - Stale threshold is hardcoded at 180 days (`_DIAG_TOOL_STALE_THRESHOLD_DAYS`) — long enough that most apt/container updates reset it, short enough to surface a forgotten box. Hardcoded rather than CFG-plumbed since the value is ops-only.
+    - `data.tools.present` is now a list of dicts (was a list of strings); `missing` stays a list of strings.
+    - `diag.html` renders chips as `name·age` with the resolved path in the `title` attribute, applies an amber `.diag-chip.present.stale` modifier when the flag is set, and adds a `(N stale)` count to the section title when any binaries are flagged.
+    - `diag.css` adds `.diag-chip.present.stale` (amber background/border/text) and `.diag-chip-age` (muted age suffix, slightly louder when the chip is stale).
+    - mtime read failures (permissions, races, /proc-style synthetic paths) collapse to mtime=0 and render as `today` without tripping the stale flag — the chip stays green so a probe error does not masquerade as a freshness signal.
+  - **Tests:**
+    - Updated `TestDiagRoute.test_tools_present_contains_known_binary` to read entries as dicts.
+    - `test_tools_present_entries_carry_path_age_and_stale_keys` confirms each present entry carries the expected schema.
+    - `test_tools_stale_flag_trips_on_old_mtime` mocks mtime past the threshold and confirms `stale=True`.
+    - `test_tools_stale_flag_clear_on_recent_mtime` confirms a recent mtime renders as `today`/`1d` and stays clear of the stale flag.
+    - `test_diag_fmt_age_short_buckets` exercises the `today`/`Nd`/`Nmo`/`Ny` bucketing of the age formatter.
+- **`/diag` Redis card now also reports run-broker mode and in-process fallback usage** — when Redis is unconfigured the card shows what the in-memory store is actually carrying.
+  - **Why:**
+    - The Redis card said `no — in-process fallback` when Redis was absent but surfaced no state, so a leak in the in-memory broker (event lists, byte accounting, expired-but-not-purged streams) or in the fallback PID/active-run/session maps would have been invisible.
+    - There was also no operator-visible signal of whether the broker itself was enabled by config or globally unavailable (e.g. `run_broker_enabled=False`).
+  - **What:**
+    - Added `_MemoryRunBrokerStore.snapshot()` (`app/run_broker.py`) — a read-only diagnostic that returns stream count, active vs closed split, expired-pending-purge count, total event count, and total bytes. Acquires the store's existing lock so the read is consistent.
+    - Added module helpers `memory_store_snapshot()` and `broker_mode()` in `app/run_broker.py`, and `fallback_pid_snapshot()` in `app/process.py`, which exposes the `_pid_map` / `_active_run_meta` / `_session_run_ids` sizes when Redis is not in use.
+    - `/diag` JSON now always includes a `broker` block: `mode` (`redis` | `in_process`), `enabled`, `requires_redis`, `available`, `unavailable_reason`. When `mode == "in_process"`, a `fallback` sub-object attaches the memory-store snapshot plus the fallback PID-map snapshot.
+    - `diag.html` Redis card now renders a broker row (mode badge plus an unavailable reason when applicable) and, when in-process is the active mode, three additional rows: stream split (active/closed/expired-pending-purge), event total + bytes, and PID/run/session map sizes.
+    - Added a `.diag-broker-reason` CSS rule so a long reason string wraps cleanly under the broker status word instead of overflowing the card.
+  - **Tests:**
+    - `TestDiagRoute.test_broker_section_reports_in_process_mode_when_redis_unconfigured` confirms the `broker` block reports `in_process` mode and attaches the fallback snapshot when Redis is unconfigured.
+    - `test_broker_section_omits_fallback_when_redis_configured` confirms the fallback sub-object is omitted when a Redis client is configured.
+    - `test_broker_section_reports_unavailable_when_disabled` confirms the `available` flag flips to `False` and the reason string is populated when `run_broker_enabled=False`.
+    - `test_broker_fallback_snapshot_reflects_published_events` confirms the in-memory snapshot counts events, bytes, and active streams after a publish round-trip.
+- **`/diag` is now always-live with in-place updates instead of a localStorage-backed full-page reload** — every 10s the dynamic sections refresh without losing scroll position.
+  - **Why:**
+    - The localStorage-backed auto-refresh checkbox was opt-in, defaulted off, and only useful as a full-page `window.location.reload()` — operators staring at the page for actual diagnostics had to remember to enable it, and once enabled it dropped scroll position and re-fetched every static asset every 10s.
+  - **What:**
+    - Replaced the auto-refresh checkbox with a small "live · 10s" indicator beside the Generated-at line; the indicator pulses while a refresh is in flight so the cadence is visible.
+    - Added a small refresh loop to `diag.html` that fetches `/diag` with the existing query string every 10s, parses the response, and swaps only `.diag-main` and the Generated-at timestamp — the topbar (header, status bar, indicator) stays mounted so scroll position is preserved.
+    - Refresh pauses while the tab is hidden (`document.visibilityState !== 'visible'`) so background tabs do not keep hitting `/diag`, and refreshes immediately on `visibilitychange` so an operator returning to the tab does not stare at a stale snapshot.
+    - Removed the now-unused `.diag-refresh-toggle` CSS scoping; added `.diag-live-indicator` + `.diag-live-dot` rules.
+  - **Tests:**
+    - `TestDiagRoute.test_html_response_carries_live_indicator_and_no_refresh_toggle` confirms the page renders the always-on live indicator and no longer ships the auto-refresh checkbox or its localStorage-backed toggle.
+- **Operator `/diag` page now surfaces Redis growth, persistence, and probe latency** — a quick read on whether key cleanup is keeping up and whether persistence is doing its job.
+  - **Why:**
+    - The Redis card only showed `configured` + a ping result, so unbounded key accumulation, capped runstream growth, evictions, or stalled RDB saves were invisible from the operator surface.
+    - With persistence enabled, an unnoticed leak in `proc:`/`procmeta:`/`sessionprocs:`/`runstream:` namespaces could quietly bloat the on-disk dataset until a restart.
+    - The Database card likewise lacked any sense of how slow the count probes were getting under load.
+  - **What:**
+    - Added `_diag_redis_stats()` in `app/blueprints/assets.py` — a single bounded snapshot per page-load that returns ping latency, `DBSIZE`, per-prefix key counts via SCAN (capped at 5000 per prefix, COUNT=500), `XLEN` distribution across up to 50 sampled `runstream:*` keys, an orphan probe (procmeta entries whose `sessionprocs:{session_id}` set no longer references them), and `INFO memory`/`persistence`/`stats`/`clients` summaries.
+    - Each subsection is independently guarded so a denied or unsupported probe (e.g. ACL'd `INFO`) only drops that row, not the panel.
+    - Database card now reports `query_ms` for the runs/snapshots count probes alongside the existing ok/error label.
+    - `diag.html` Redis card renders the new fields as additional rows: ping ms beside `online`, dbsize, memory used/peak/max/fragmentation, AOF on/off + RDB last-save age + changes since, eviction (red when non-zero) + expired keys, connected/rejected clients, namespace count chips (amber when SCAN hit the cap), stream length p50/p95/max, and an orphan count (green at zero, red otherwise).
+    - `diag.css` adds compact namespace chip rules and a `.diag-latency` tag style.
+  - **Tests:**
+    - Added pytest coverage in `TestDiagRoute.test_redis_stats_present_when_client_reachable` exercising the full snapshot path through a `MagicMock` client.
+    - `test_redis_stats_absent_when_ping_fails` confirms a failing ping surfaces an error and omits the rich stats block.
+    - `test_redis_orphan_count_flags_dangling_procmeta` confirms procmeta entries whose session set no longer references them are counted as orphans.
+    - `test_redis_namespace_count_marks_capped_when_scan_hits_limit` confirms bounded SCAN flags namespaces as `capped` once they hit `_DIAG_REDIS_SCAN_KEY_CAP`.
+    - `test_db_section_reports_query_latency` confirms the database card returns a non-negative `query_ms`.
+    - Updated test totals across `tests/README.md`, `CONTRIBUTING.md`, `ARCHITECTURE.md`, and the in-repo release drafts.
 - **Status Monitor Command Constellation polish** — the constellation now reads cleaner, the Y axis uses its space, and historical insights load without a polling timer.
   - **Why:**
     - The constellation Y axis was anchored to actual `max(elapsed_seconds)`, so a single multi-hour scan flattened every other star into the bottom third of the canvas.
@@ -149,6 +267,50 @@ All notable changes to darklab_shell are documented here.
 
 ### Changed
 
+- **Status Monitor visual tests now focus on behavior instead of fragile drawing internals** — the unit suite still verifies dashboard copy, endpoint fallbacks, active-run controls, popovers, history/restore actions, CPU hysteresis, and sparse states, but no longer locks exact SVG path geometry, guide-line counts, DOM sibling order, or low-level glow/color CSS variables that are better reviewed through capture output.
+  - **Why:** the Status Monitor dashboard is intentionally visual and still being tuned. Tests that failed on cosmetic SVG/CSS structure made useful design iteration noisier than it needed to be.
+  - **What:** loosened `tests/js/unit/run_monitor.test.js` around pulse-strip SVG internals, constellation guide counts, heatmap grid placement, exact ambient-star intensity, failure-star style attributes, and layout sibling order while keeping user-visible text, accessibility/action hooks, popover clamping, endpoint-fallback behavior, and deterministic seed contracts covered.
+  - **Tests:** refreshed the `run_monitor.test.js` appendix descriptions and kept docs drift coverage green.
+- **Race-prone Playwright interaction tests now wait on app readiness instead of synthetic keyboard dispatch** — modal focus-trap coverage uses the browser's real Tab / Shift+Tab behavior again.
+  - **Why:** the interaction-contract spec had to dispatch synthetic `KeyboardEvent` objects because some overlay open paths scheduled default focus on a zero-delay timer. Under parallel load that timer could land between `focus()` and a real Tab keypress, so the test avoided browser input entirely.
+  - **What:** app-level overlays now expose `data-interaction-ready="1"` and emit `app:interaction-surface-ready` after the surface is open and default focus work has finished. The interaction-contract Playwright helper waits for that marker, then focuses real boundary elements and uses `page.keyboard.press('Tab')` / `Shift+Tab`.
+  - **Tests:** updated `tests/js/e2e/interaction-contract.spec.js` to remove the synthetic focus-trap workaround while preserving the end-to-end focus containment assertions.
+- **Large JS unit harnesses now live in shared helper modules** — app chrome, session identity, and Files/workspace specs no longer carry their own synthetic browser setup inline.
+  - **Why:** `app.test.js` and `workspace.test.js` had grown large jsdom harness blocks beside the actual assertions, making high-change areas harder to review and easier to accidentally fork.
+  - **What:** extracted the app/controller harness into `tests/js/unit/helpers/app_harness.js`, the workspace/Files harness into `workspace_harness.js`, and the session storage/fetch harness into `session_harness.js`. The specs now import those setup seams directly while keeping test names and behavior unchanged.
+  - **Tests:** verified the focused Vitest files (`app.test.js`, `workspace.test.js`, and `session.test.js`) after extraction.
+- **Autocomplete matching and ranking now have a production source seam** — core autocomplete transforms moved out of the dropdown controller.
+  - **Why:** autocomplete tests still had to load the full browser script to exercise matching behavior, even though scoring, fuzzy matching, shared-prefix calculation, placeholder detection, and display limiting are pure logic.
+  - **What:** added `app/static/js/autocomplete_core.js`, loaded it before `autocomplete.js`, and delegated item text/insert helpers, token-context parsing, item building, exact/prefix/boundary/substring/fuzzy scoring, highlight rendering, shared-prefix calculation, recent-domain normalization, wordlist-category normalization, and display-limit handling to that namespace.
+  - **Tests:** updated `tests/js/unit/autocomplete.test.js` to load the production core seam before the dropdown controller while preserving the existing behavioral assertions.
+- **Session identity logic now has a production source seam** — UUID generation, session-token masking, fetch-error wording, and session/client header construction live in `session_core.js` instead of being embedded directly in the browser bootstrap script.
+  - **Why:** the session unit tests were still tied to private functions extracted from `session.js`, and that script loads first enough that small helpers could be separated without disturbing the rest of the classic bundle.
+  - **What:** added `app/static/js/session_core.js` as a small global namespace loaded before `session.js`; `session.js` now delegates the pure identity helpers to that namespace while keeping the same browser-visible globals (`SESSION_ID`, `CLIENT_ID`, `apiFetch`, `maskSessionToken`, and `describeFetchError`).
+  - **Tests:** verified `tests/js/unit/session.test.js` and the app harness specs after the split.
+- **Options preference normalization now has a production source seam** — supported preference modes and session-preference snapshot coercion moved out of the large app controller.
+  - **Why:** Options tests were still coupled to private helpers inside `app.js`, and preference mode validation is pure logic that does not need the app chrome, modal DOM, or route wiring.
+  - **What:** added `app/static/js/app_preferences_core.js`, loaded before `app.js`, and delegated timestamp, line-number, welcome-intro, share-redaction, notification, HUD-clock, default snapshot, normalization, and cache-key helpers to that namespace.
+  - **Tests:** verified the focused app Vitest suite after the split.
+- **Files/workspace path helpers now have a production source seam** — byte formatting and workspace path normalization/display logic moved out of the modal controller.
+  - **Why:** the Files panel mixes route calls, DOM rendering, preview state, and small pure path transforms. Keeping the pure transforms in a shared core file makes future command/helper tests less dependent on extracting private functions from the full modal script.
+  - **What:** added `app/static/js/workspace_core.js` and loaded it before `workspace.js`; `workspace.js` now delegates `_formatWorkspaceBytes`, directory normalization, command-path normalization, display paths, parent directories, and basenames to the shared namespace.
+  - **Tests:** verified the focused workspace/app Vitest files after the split.
+- **Runner elapsed and synthetic pipe helpers now have a production source seam** — duration formatting and client-side pipe parsing/filtering moved out of the large command runner.
+  - **Why:** `runner.test.js` still extracted pure helper functions directly from `runner.js`, coupling small deterministic assertions to the full stream/tab controller source.
+  - **What:** added `app/static/js/runner_core.js`, loaded it before `runner.js`, and delegated `_formatElapsed`, synthetic `grep` / `head` / `tail` / `wc -l` / `sort` / `uniq` detection, post-filter parsing, and captured-output filtering to the shared namespace.
+  - **Tests:** updated `tests/js/unit/runner.test.js` to exercise the supported core seam for those pure helpers while keeping the browser runner wrappers intact.
+- **History filter and metadata helpers now have a production source seam** — deterministic History drawer and run-comparison transforms moved out of the DOM-heavy history controller.
+  - **Why:** History unit coverage still loaded the full drawer/controller script to exercise small pure helpers such as filter-chip labels, request URL construction, relative-time buckets, exit/elapsed labels, and compare date/duration formatting.
+  - **What:** added `app/static/js/history_core.js`, loaded it before `history.js`, and delegated the pure filter, root suggestion, pagination URL, exit status, elapsed time, relative time, and run-comparison formatting helpers to that namespace.
+  - **Tests:** updated `tests/js/unit/history.test.js` to load the production core seam before `history.js`; the focused History Vitest suite remains green.
+- **Search label and summary helpers now have a production source seam** — deterministic search scope, signal-count, and summary grouping transforms moved out of the large search controller.
+  - **Why:** Search tests still loaded the full highlighting/controller script for small formatting behavior such as scope button labels, no-match copy, normalized signal counts, compacted summary lines, and grouped command labels.
+  - **What:** added `app/static/js/search_core.js`, loaded it before `search.js`, and delegated scope labels, count normalization, finding-summary text, summary command roots, section totals, compact-line deduplication, merged sections, grouped items, and repeated command labels to that namespace.
+  - **Tests:** updated the search/unit workspace harnesses to load the production core seam before `search.js`; the focused Search Vitest suite remains green.
+- **Output prompt and signal helpers now have a production source seam** — transcript prompt-label, prefix, and signal-count transforms moved out of the renderer/batching controller.
+  - **Why:** Output tests still loaded the full transcript renderer to exercise deterministic helpers such as prompt identity normalization, workspace prompt labels, prefix text, signal scope filtering, and signal metadata normalization.
+  - **What:** added `app/static/js/output_core.js`, loaded it before `output.js`, and delegated prompt identity/path formatting, prompt echo stripping, line/timestamp prefix formatting, output signal count defaults, signal-summary class filtering, built-in command root suppression, and signal normalization to that namespace.
+  - **Tests:** updated output, tabs, and app harnesses to load the production core seam before `output.js`; the focused Output/Tabs Vitest suites remain green.
 - **Active-run rows update in place instead of rebuilding the section every poll** — Status Monitor active-run rendering no longer churns CPU/GPU on each 3-second telemetry refresh.
   - **Why:**
     - Each refresh was destroying and recreating the entire `.status-monitor-runs-section` subtree — ~30 DOM nodes per run, listener re-attachments, conic-gradient meter re-rasterization, and SVG `drop-shadow` filter recomputation — even when nothing about the run had actually changed.
@@ -221,7 +383,7 @@ All notable changes to darklab_shell are documented here.
   - **Tests:** `npm run test:pytest` and `tests/py/test_docs.py`.
 - **Local Playwright entry points now use a stable wrapper script** — `npm run test:e2e` and `npm run test:e2e:ui` delegate to `bash scripts/run_playwright.sh`.
   - **Before:** local browser-test commands repeated inline port cleanup, config selection, and environment defaults, which made permission-rule matching brittle for automated coding sessions.
-  - **After:** the wrapper clears configured e2e ports, defaults to the parallel Playwright config, keeps quiet local output by default, supports `--debug-logs` / `--webserver-logs` for app server output, supports `--ci` for CI-style retries, supports `--force-color` for non-TTY color forcing, respects explicit `--config`, and passes through focused spec paths, `--grep`, `--ui`, and other Playwright arguments.
+  - **After:** the wrapper clears configured e2e ports, defaults to the parallel Playwright config, keeps quiet local output by default, supports `--debug-logs` / `--webserver-logs` for app server output, writes timestamped isolated-server logs without masking `date` failures, supports `--ci` for CI-style retries, supports `--force-color` for non-TTY color forcing, respects explicit `--config`, and passes through focused spec paths, `--grep`, `--ui`, and other Playwright arguments.
   - **Tests:** validated wrapper syntax, focused Playwright listing, docs drift, and shell lint where available.
 - **The shared theme system now exposes dedicated divider and welcome-ASCII tokens** — theme authors can tune shell separators and the welcome mark directly instead of borrowing nearby surface tokens that only happened to work on the original dark set.
   - **Before:** the desktop HUD borrowed generic panel alternate backgrounds, `border`, and `muted`, and the welcome ASCII always inherited `--green`, so light-theme polish had to fight shared component assumptions instead of adjusting explicit theme slots.

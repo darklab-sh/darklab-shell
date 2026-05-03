@@ -1,14 +1,8 @@
 // ── Shared search logic ──
 
-const _SEARCH_SCOPE_LABELS = {
-  text: 'text',
-  findings: 'findings',
-  warnings: 'warnings',
-  errors: 'errors',
-  summaries: 'summaries',
-};
-
-const _SEARCH_SUMMARY_LIMIT = 25;
+const _searchCore = typeof DarklabSearchCore !== 'undefined' ? DarklabSearchCore : null;
+const _SEARCH_SCOPE_LABELS = _searchCore.SEARCH_SCOPE_LABELS;
+const _SEARCH_SUMMARY_LIMIT = _searchCore.SEARCH_SUMMARY_LIMIT;
 const _TERMINAL_SEARCH_DELAY_MS = 200;
 const _TERMINAL_LARGE_SEARCH_DELAY_MS = 600;
 const _TERMINAL_LARGE_SEARCH_LINE_THRESHOLD = 2000;
@@ -31,23 +25,15 @@ function _setSearchCount(text) {
 }
 
 function _searchScopeButtonLabel(scope, count) {
-  if (scope === 'text') return 'text';
-  return `${_SEARCH_SCOPE_LABELS[scope]} (${count})`;
+  return _searchCore.searchScopeButtonLabel(scope, count);
 }
 
 function _searchScopeUnitLabel(scope, count) {
-  if (scope === 'summaries') return count === 1 ? 'summary' : 'summaries';
-  const base = _SEARCH_SCOPE_LABELS[scope] || 'matches';
-  return count === 1 ? base.replace(/s$/, '') : base;
+  return _searchCore.searchScopeUnitLabel(scope, count);
 }
 
 function _formatFindingSummary(counts) {
-  const parts = [];
-  if (counts.findings > 0) parts.push(`${counts.findings} finding${counts.findings === 1 ? '' : 's'}`);
-  if (counts.warnings > 0) parts.push(`${counts.warnings} warning${counts.warnings === 1 ? '' : 's'}`);
-  if (counts.errors > 0) parts.push(`${counts.errors} error${counts.errors === 1 ? '' : 's'}`);
-  if (counts.summaries > 0) parts.push(`${counts.summaries} summar${counts.summaries === 1 ? 'y' : 'ies'}`);
-  return parts.join(' • ');
+  return _searchCore.formatFindingSummary(counts);
 }
 
 function _renderCompactSignalSummary(container, counts) {
@@ -88,13 +74,11 @@ function _clearSearchDiscoverabilityPulse() {
 }
 
 function _searchNoMatchesLabel(scope) {
-  return scope === 'text' ? 'no matches' : `no ${_SEARCH_SCOPE_LABELS[scope] || 'matches'}`;
+  return _searchCore.searchNoMatchesLabel(scope);
 }
 
 function _searchInputPlaceholder(scope) {
-  if (scope === 'text') return 'Search output…';
-  if (scope === 'summaries') return 'Jump between summary lines…';
-  return `Jump between ${_SEARCH_SCOPE_LABELS[scope] || 'matches'}…`;
+  return _searchCore.searchInputPlaceholder(scope);
 }
 
 function syncSearchScopeUi() {
@@ -141,12 +125,7 @@ function _lineMatchesSearchScopeForRoot(line, scope, root = null) {
 }
 
 function _normalizeSearchSignalCounts(counts) {
-  return {
-    findings: Math.max(0, Number(counts?.findings || 0)),
-    warnings: Math.max(0, Number(counts?.warnings || 0)),
-    errors: Math.max(0, Number(counts?.errors || 0)),
-    summaries: Math.max(0, Number(counts?.summaries || 0)),
-  };
+  return _searchCore.normalizeSignalCounts(counts);
 }
 
 function _getCachedSearchSignalCounts() {
@@ -670,7 +649,7 @@ function _promptEchoCommandText(line) {
 }
 
 function _summaryCommandRoot(command) {
-  return String(command || '').trim().split(/\s+/, 1)[0]?.toLowerCase() || '';
+  return _searchCore.summaryCommandRoot(command);
 }
 
 function _lineCommandRoot(line) {
@@ -747,7 +726,7 @@ function _summaryFirstLineDatasetValue(lines, name) {
 }
 
 function _summarySectionsTotal(sections) {
-  return sections.reduce((sum, [, lines]) => sum + lines.length, 0);
+  return _searchCore.summarySectionsTotal(sections);
 }
 
 function _summaryBuildItems(blocks, tab) {
@@ -827,69 +806,19 @@ function _summaryAppendSections(sections) {
 }
 
 function _summaryCompactLines(lines) {
-  const counts = new Map();
-  const ordered = [];
-  (Array.isArray(lines) ? lines : []).forEach((line) => {
-    const text = String(line || '').trim();
-    if (!text) return;
-    if (!counts.has(text)) {
-      ordered.push(text);
-      counts.set(text, 0);
-    }
-    counts.set(text, counts.get(text) + 1);
-  });
-  return ordered.map((line) => {
-    const count = counts.get(line) || 0;
-    return count > 1 ? `${line} (${count})` : line;
-  });
+  return _searchCore.summaryCompactLines(lines);
 }
 
 function _summaryMergeSections(items) {
-  return ['findings', 'warnings', 'errors', 'summaries'].map((scope) => {
-    const lines = [];
-    items.forEach((item) => {
-      const section = item.sections.find(([candidate]) => candidate === scope);
-      if (section) lines.push(...section[1]);
-    });
-    return [scope, lines];
-  });
+  return _searchCore.summaryMergeSections(items);
 }
 
 function _summaryGroupedItems(items) {
-  const groups = [];
-  items.forEach((item) => {
-    if (!item.root || !item.target) return;
-    let rootGroup = groups.find((group) => group.root === item.root);
-    if (!rootGroup) {
-      rootGroup = { root: item.root, targets: [] };
-      groups.push(rootGroup);
-    }
-    let targetGroup = rootGroup.targets.find((group) => group.target === item.target);
-    if (!targetGroup) {
-      targetGroup = { target: item.target, items: [] };
-      rootGroup.targets.push(targetGroup);
-    }
-    targetGroup.items.push(item);
-  });
-  return groups;
+  return _searchCore.summaryGroupedItems(items);
 }
 
 function _summaryCommandLabels(items) {
-  const counts = new Map();
-  const ordered = [];
-  items.forEach((item) => {
-    const command = String(item?.command || '').trim();
-    if (!command) return;
-    if (!counts.has(command)) {
-      ordered.push(command);
-      counts.set(command, 0);
-    }
-    counts.set(command, counts.get(command) + 1);
-  });
-  return ordered.map((command) => {
-    const count = counts.get(command) || 0;
-    return count > 1 ? `${command} (${count})` : command;
-  });
+  return _searchCore.summaryCommandLabels(items);
 }
 
 function _summaryRenderGroupedItems(items) {

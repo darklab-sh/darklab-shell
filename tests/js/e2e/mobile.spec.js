@@ -284,6 +284,12 @@ test.describe('mobile menu', () => {
     })
     expect(gap).not.toBeNull()
     expect(gap).toBeGreaterThanOrEqual(2)
+
+    const rowHeights = await dropdown.locator('.ac-item').evaluateAll((items) =>
+      items.slice(0, 5).map((item) => Math.round(item.getBoundingClientRect().height)),
+    )
+    expect(rowHeights.length).toBeGreaterThanOrEqual(5)
+    expect(Math.max(...rowHeights)).toBeLessThanOrEqual(42)
   })
 
   test('mobile contextual autocomplete shows value hints after accepting a value-taking flag', async ({

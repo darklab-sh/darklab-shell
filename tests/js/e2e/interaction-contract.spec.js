@@ -15,9 +15,13 @@ const OVERLAYS = [
   { name: 'shortcuts', id: '#shortcuts-overlay', open: 'openShortcuts',      close: '.shortcuts-close' },
 ]
 
-async function openOverlay(page, openFn) {
+async function openOverlay(page, openFn, overlayId = null) {
   await page.locator('#cmd').focus()
-  await page.evaluate((fn) => window[fn]?.(), openFn)
+  await page.waitForFunction((fn) => typeof window[fn] === 'function', openFn)
+  await page.evaluate((fn) => window[fn](), openFn)
+  if (overlayId) {
+    await expect(page.locator(overlayId)).toHaveAttribute('data-interaction-ready', '1')
+  }
 }
 
 test.describe('UI interaction contract — scrim overlays', () => {
@@ -29,21 +33,21 @@ test.describe('UI interaction contract — scrim overlays', () => {
   for (const overlay of OVERLAYS) {
     test(`${overlay.name} overlay closes via button, backdrop, and Escape — each path refocuses the composer`, async ({ page }) => {
       // Close via explicit close button.
-      await openOverlay(page, overlay.open)
+      await openOverlay(page, overlay.open, overlay.id)
       await expect(page.locator(overlay.id)).toHaveClass(/\bopen\b/)
       await page.locator(overlay.close).click()
       await expect(page.locator(overlay.id)).not.toHaveClass(/\bopen\b/)
       await expect(page.locator('#cmd')).toBeFocused()
 
       // Close via backdrop click (overlay element itself, outside the modal content box).
-      await openOverlay(page, overlay.open)
+      await openOverlay(page, overlay.open, overlay.id)
       await expect(page.locator(overlay.id)).toHaveClass(/\bopen\b/)
       await page.locator(overlay.id).click({ position: { x: 10, y: 10 } })
       await expect(page.locator(overlay.id)).not.toHaveClass(/\bopen\b/)
       await expect(page.locator('#cmd')).toBeFocused()
 
       // Close via Escape (routes through closeTopmostDismissible).
-      await openOverlay(page, overlay.open)
+      await openOverlay(page, overlay.open, overlay.id)
       await expect(page.locator(overlay.id)).toHaveClass(/\bopen\b/)
       await page.keyboard.press('Escape')
       await expect(page.locator(overlay.id)).not.toHaveClass(/\bopen\b/)
@@ -123,7 +127,7 @@ test.describe('UI interaction contract — modal focus trap', () => {
 
   for (const modal of MODALS) {
     test(`${modal.name} modal wraps Tab and Shift+Tab at its card boundary`, async ({ page }) => {
-      await openOverlay(page, modal.open)
+      await openOverlay(page, modal.open, modal.overlay)
       await expect(page.locator(modal.overlay)).toHaveClass(/\bopen\b/)
 
       // Content for FAQ and workflows loads async from /faq and /workflows
@@ -147,51 +151,35 @@ test.describe('UI interaction contract — modal focus trap', () => {
         })
         .toBeGreaterThanOrEqual(2)
 
-      // Run the whole focus-trap exercise inside a single page.evaluate
-      // so focus() and the Tab keydown dispatch happen in one
-      // synchronous JS turn. An earlier version used real
-      // page.keyboard.press('Tab') and proved flaky under parallel e2e
-      // load: some modal open handlers (notably openThemeSelector)
-      // schedule a setTimeout(0) default-focus that can land between
-      // our focus() and the Tab keydown, stealing focus and breaking
-      // the `active === last` branch of the trap. Dispatching the
-      // keydown as a synthetic KeyboardEvent on the card eliminates
-      // that race — bundled macrotask flushes + synchronous dispatch
-      // means no other handler can run in between. This still
-      // verifies the integration contract: that `setupModalFocusTraps`
-      // bound the trap on the real mounted card (the
-      // data-focus-trap-bound attribute test above covers presence;
-      // this test covers behavior). The per-helper unit suite in
-      // ui_focus_trap.test.js covers the trap's own keydown logic.
-      const result = await page.evaluate((selector) => {
+      await page.evaluate((selector) => {
         const card = document.querySelector(selector)
         const SEL = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
         const list = Array.from(card.querySelectorAll(SEL))
           .filter((el) => !el.hidden
             && !(typeof el.closest === 'function' && el.closest('[hidden]'))
             && window.getComputedStyle(el).display !== 'none')
+        card.querySelectorAll('[data-focustest-first], [data-focustest-last]').forEach((el) => {
+          delete el.dataset.focustestFirst
+          delete el.dataset.focustestLast
+        })
         const first = list[0]
         const last = list[list.length - 1]
         first.dataset.focustestFirst = '1'
         last.dataset.focustestLast = '1'
-
-        last.focus()
-        card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
-        const afterTab = document.activeElement?.dataset?.focustestFirst === '1'
-
-        // For Shift+Tab, explicitly re-focus first — the trap's
-        // forward-tab path calls first.focus() which should have left
-        // us there, but re-focusing makes the Shift+Tab assertion
-        // independent of the forward assertion's outcome.
-        first.focus()
-        card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
-        const afterShiftTab = document.activeElement?.dataset?.focustestLast === '1'
-
-        return { afterTab, afterShiftTab }
       }, modal.modal)
 
-      expect(result.afterTab).toBe(true)
-      expect(result.afterShiftTab).toBe(true)
+      const first = page.locator(`${modal.modal} [data-focustest-first="1"]`)
+      const last = page.locator(`${modal.modal} [data-focustest-last="1"]`)
+
+      await last.focus()
+      await expect(last).toBeFocused()
+      await page.keyboard.press('Tab')
+      await expect(first).toBeFocused()
+
+      await first.focus()
+      await expect(first).toBeFocused()
+      await page.keyboard.press('Shift+Tab')
+      await expect(last).toBeFocused()
     })
   }
 })

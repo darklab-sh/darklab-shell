@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import { MemoryStorage, fromDomScript, fromDomScripts } from './helpers/extract.js'
+import { MemoryStorage, fromDomScripts } from './helpers/extract.js'
 
 const _noopFetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ commands: [] }) })
 
@@ -9,10 +9,15 @@ const _noopFetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve
  */
 function loadStarHelpers(mockApiFetch = _noopFetch) {
   const storage = new MemoryStorage()
-  const fns = fromDomScript(
-    'app/static/js/history.js',
+  const fns = fromDomScripts(
+    ['app/static/js/history_core.js', 'app/static/js/history.js'],
     { localStorage: storage, APP_CONFIG: { recent_commands_limit: 20 }, apiFetch: mockApiFetch },
-    '_getStarred', '_saveStarred', '_toggleStar', 'loadStarredFromServer'
+    `({
+      _getStarred,
+      _saveStarred,
+      _toggleStar,
+      loadStarredFromServer,
+    })`,
   )
   return { ...fns, _storage: storage }
 }
@@ -198,7 +203,7 @@ describe('command history hydration', () => {
     }
 
     return fromDomScripts(
-      ['app/static/js/history.js'],
+      ['app/static/js/history_core.js', 'app/static/js/history.js'],
       {
         document,
         localStorage: new MemoryStorage(),
@@ -392,7 +397,7 @@ describe('command history hydration', () => {
     `
 
     const helpers = fromDomScripts(
-      ['app/static/js/history.js'],
+      ['app/static/js/history_core.js', 'app/static/js/history.js'],
       {
         document,
         localStorage: new MemoryStorage(),
@@ -431,7 +436,7 @@ describe('command history hydration', () => {
     `
 
     const helpers = fromDomScripts(
-      ['app/static/js/history.js'],
+      ['app/static/js/history_core.js', 'app/static/js/history.js'],
       {
         document,
         localStorage: new MemoryStorage(),
@@ -610,7 +615,7 @@ describe('history panel actions', () => {
 
     return {
       ...fromDomScripts(
-        ['app/static/js/utils.js', 'app/static/js/history.js'],
+        ['app/static/js/utils.js', 'app/static/js/history_core.js', 'app/static/js/history.js'],
         {
           document,
           localStorage: new MemoryStorage(),
@@ -2107,7 +2112,7 @@ describe('Ctrl+R reverse-history search', () => {
     const submitComposerCommand = submitMock ?? vi.fn()
 
     return fromDomScripts(
-      ['app/static/js/history.js'],
+      ['app/static/js/history_core.js', 'app/static/js/history.js'],
       {
         document,
         localStorage: new MemoryStorage(),
@@ -2607,7 +2612,7 @@ describe('Ctrl+R reverse-history search', () => {
     const apiFetch = vi.fn(() => fetchPromise)
 
     const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput } = fromDomScripts(
-      ['app/static/js/history.js'],
+      ['app/static/js/history_core.js', 'app/static/js/history.js'],
       {
         document,
         localStorage: new MemoryStorage(),
@@ -2675,7 +2680,7 @@ describe('Ctrl+R reverse-history search', () => {
     }))
 
     const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput } = fromDomScripts(
-      ['app/static/js/history.js'],
+      ['app/static/js/history_core.js', 'app/static/js/history.js'],
       {
         document,
         localStorage: new MemoryStorage(),

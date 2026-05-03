@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { ensurePromptReady, makeTestIp } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
-const QUIET_THEN_OUTPUT_CMD = 'ping -c 2 -i 1 darklab.sh'
+const QUIET_THEN_OUTPUT_CMD = 'curl http://localhost:5001/health'
 const TEST_IP = makeTestIp(69)
 
 test.describe('runner stall handling', () => {
@@ -86,7 +86,62 @@ test.describe('runner stall handling', () => {
     await expect(page.locator('#run-btn')).toHaveJSProperty('disabled', true)
   })
 
-  test('a real quiet command recovers in the same tab when output resumes', async ({ page }) => {
+  test('a quiet command recovers in the same tab when output resumes', async ({ page }) => {
+    await page.addInitScript(() => {
+      const originalFetch = window.fetch.bind(window)
+      const encoder = new TextEncoder()
+      window.fetch = async (input, init) => {
+        const url = typeof input === 'string' ? input : input.url
+        if (url.endsWith('/runs') && init?.method === 'POST') {
+          return new Response(JSON.stringify({
+            run_id: 'stall-recover-run',
+            stream: '/runs/stall-recover-run/stream',
+          }), {
+            status: 202,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        if (url.includes('/runs/stall-recover-run/stream')) {
+          const body = new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                encoder.encode('data: {"type":"started","run_id":"stall-recover-run"}\n\n'),
+              )
+              setTimeout(() => {
+                controller.enqueue(
+                  encoder.encode('data: {"type":"output","text":"resumed output\\n"}\n\n'),
+                )
+              }, 200)
+              setTimeout(() => {
+                controller.enqueue(
+                  encoder.encode('data: {"type":"exit","code":0,"elapsed":0.3}\n\n'),
+                )
+              }, 250)
+            },
+          })
+
+          return new Response(body, {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          })
+        }
+        if (url.endsWith('/history/active')) {
+          return new Response(JSON.stringify({
+            runs: [{
+              run_id: 'stall-recover-run',
+              pid: 4243,
+              command: 'curl http://localhost:5001/health',
+              started: '2026-01-01T00:00:00Z',
+            }],
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+        return originalFetch(input, init)
+      }
+    })
+
     await openShellWithShortStallTimer(page)
     await ensurePromptReady(page)
     await page.locator('#cmd').fill(QUIET_THEN_OUTPUT_CMD)

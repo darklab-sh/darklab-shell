@@ -8,6 +8,7 @@ Run with: pytest tests/ (from the repo root)
 
 import unittest.mock as mock
 
+import commands
 from commands import (
     command_root,
     is_command_allowed,
@@ -23,13 +24,31 @@ from commands import (
 
 ALLOW = ["ping", "nmap", "dig", "curl", "mtr", "traceroute", "nuclei"]
 DENY  = []
+_VALIDATION_REGISTRY_HELPERS = None
+
+
+def _validation_registry_helpers():
+    global _VALIDATION_REGISTRY_HELPERS
+    if _VALIDATION_REGISTRY_HELPERS is None:
+        registry = commands.load_commands_registry()
+        with mock.patch("commands.load_commands_registry", return_value=registry):
+            _VALIDATION_REGISTRY_HELPERS = {
+                "allow_grouping": commands.load_allow_grouping_flags(),
+                "workspace_flags": commands._workspace_flag_specs_by_root(),
+                "runtime_adaptations": commands._runtime_adaptations_by_root(),
+            }
+    return _VALIDATION_REGISTRY_HELPERS
 
 
 def _check(cmd, allow=None, deny=None):
     """Call is_command_allowed with a mocked allowlist."""
     a = allow if allow is not None else ALLOW
     d = deny  if deny  is not None else DENY
-    with mock.patch("commands.load_command_policy", return_value=(a, d)):
+    helpers = _validation_registry_helpers()
+    with mock.patch("commands.load_command_policy", return_value=(a, d)), \
+         mock.patch("commands.load_allow_grouping_flags", return_value=helpers["allow_grouping"]), \
+         mock.patch("commands._workspace_flag_specs_by_root", return_value=helpers["workspace_flags"]), \
+         mock.patch("commands._runtime_adaptations_by_root", return_value=helpers["runtime_adaptations"]):
         return is_command_allowed(cmd)
 
 

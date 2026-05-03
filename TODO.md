@@ -29,31 +29,10 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Technical Debt
 
-- **JS unit harness modularization**
-  - Gradually reduce implementation-coupled unit tests that extract private functions from browser scripts via `tests/js/unit/helpers/extract.js`.
-  - Move high-value pure logic into importable modules before changing tests, so the tests can target supported module boundaries rather than source-string extraction.
-  - Split the largest feature areas out of `tests/js/unit/app.test.js` and `tests/js/unit/runner.test.js` only when the underlying source seams exist; avoid churn-only file shuffles.
-  - Prefer browser-visible Playwright assertions for flows already covered at the UI layer, and keep unit tests focused on pure transforms, edge-case branch logic, and fast failure localization.
-  - Start with session-token, Options, mobile shell, and workspace command helpers because those are high-change areas with large synthetic DOM harnesses.
-
-- **Playwright readiness hooks for race-prone UI flows**
-  - Continue replacing fixed sleeps with state-aware waits on server-backed history, DOM readiness, or explicit UI state.
-  - Review the remaining synthetic-event workaround in `tests/js/e2e/interaction-contract.spec.js` and add a small app/test readiness signal if the product surface can expose one cleanly.
-  - Prefer tiny observable hooks over lower-level event synthesis when validating focus, modal, or keyboard contracts under parallel load.
-
-- **Test-suite follow-up from the run broker and Status Monitor merge**
-  - Improve full Playwright suite stability diagnostics:
-    - Add automatic server crash diagnostics when isolated worker servers fail, refuse connections, or stop responding.
-    - Consider a health-check/retry wrapper for local full-suite runs.
-    - Rebalance or temporarily serialize noisy worker buckets if intermittent `ERR_CONNECTION_REFUSED` failures continue under parallel load.
-  - Add broader Status Monitor integration coverage:
-    - Add a real-data Playwright spec that seeds history and opens Status Monitor without route stubs, verifying `/history/stats`, `/history/insights`, `/status`, and `/workspace/files` together.
-    - Add unit tests for partial-fetch failures from `/status`, `/history/stats`, `/history/insights`, workspace disabled/missing responses, and missing optional UI helpers.
-  - Expand analytics route pytest coverage beyond happy paths:
-    - Cover empty sessions, `days=auto`, `<28` and `>365` clamps, missing optional `snapshots` / `starred_commands` tables, command-registry load failure, and exact 30/90-day adaptive window thresholds for command mix and constellation data.
-  - Reduce Status Monitor visual-test brittleness once the dashboard settles:
-    - Keep the current SVG/CSS/DOM-order assertions while the visual contracts are still changing quickly.
-    - Later, move more visual structure checks to capture/audit tests and keep unit/e2e tests focused on user-visible behavior and accessibility.
+- **Stale internal naming cleanup**
+  - Rename remaining `fake` command terminology in the codebase to `built-in` command terminology.
+  - Rename remaining `run monitor` / `Run Monitor` code identifiers, comments, tests, and docs to `status monitor` / `Status Monitor` where they now refer to the redesigned Status Monitor surface.
+  - Keep compatibility aliases only where they are still needed for persisted data, route contracts, or existing configuration keys; otherwise prefer one canonical name per concept.
 
 ---
 

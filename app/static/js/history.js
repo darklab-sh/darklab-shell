@@ -4,6 +4,7 @@
 // loads, render code sees an empty Set rather than reading localStorage —
 // a stale localStorage value from before stars moved server-side would
 // silently mask the user's server-side stars.
+const _historyCore = typeof DarklabHistoryCore !== 'undefined' ? DarklabHistoryCore : null;
 
 let _starredCache = null; // null = not yet loaded from server
 
@@ -93,7 +94,7 @@ let _historyCompareState = {
 };
 
 function _normalizeHistoryFilterValue(value) {
-  return typeof value === 'string' ? value.trim() : '';
+  return _historyCore.normalizeFilterValue(value);
 }
 
 function _syncHistoryFilterControls() {
@@ -127,47 +128,27 @@ function _syncHistoryFilterControls() {
 }
 
 function _historyHasActiveServerFilters() {
-  return Boolean(
-    _historyFilters.type !== 'all'
-    || _historyFilters.q
-    || _historyFilters.commandRoot
-    || _historyFilters.exitCode !== 'all'
-    || _historyFilters.dateRange !== 'all'
-  );
+  return _historyCore.hasActiveServerFilters(_historyFilters);
 }
 
 function _historyHasAnyFilters() {
-  return _historyHasActiveServerFilters() || !!_historyFilters.starredOnly;
+  return _historyCore.hasAnyFilters(_historyFilters);
 }
 
 function _historyResetRunOnlyFilters() {
-  _historyFilters.commandRoot = '';
-  _historyFilters.exitCode = 'all';
-  _historyFilters.starredOnly = false;
+  _historyFilters = _historyCore.resetRunOnlyFilters(_historyFilters);
 }
 
 function _historyLabelForType(type = _historyFilters.type) {
-  if (type === 'runs') return 'runs';
-  if (type === 'snapshots') return 'snapshots';
-  return 'history items';
+  return _historyCore.labelForType(type);
 }
 
 function _historySummaryLabel(totalCount = _historyPaging.totalCount) {
-  const singular = totalCount === 1;
-  if (_historyFilters.type === 'runs') return singular ? 'stored run' : 'stored runs';
-  if (_historyFilters.type === 'snapshots') return singular ? 'stored snapshot' : 'stored snapshots';
-  return singular ? 'stored item' : 'stored items';
+  return _historyCore.summaryLabel(_historyFilters.type, totalCount);
 }
 
 function _historyCommandRootsFromRuns(runs) {
-  const roots = new Set();
-  for (const run of Array.isArray(runs) ? runs : []) {
-    const root = typeof run === 'string'
-      ? run.trim()
-      : (run && typeof run.command === 'string' ? run.command.trim().split(/\s+/, 1)[0] : '');
-    if (root) roots.add(root);
-  }
-  return [...roots].sort((a, b) => a.localeCompare(b));
+  return _historyCore.commandRootsFromRuns(runs);
 }
 
 function _renderHistoryRootSuggestions(runs) {
@@ -227,11 +208,7 @@ function _hideHistoryRootDropdown() {
 }
 
 function _historyRootMatches(query) {
-  const value = _normalizeHistoryFilterValue(query).toLowerCase();
-  if (!value) return [];
-  return _historyRootSuggestions
-    .filter(root => root.toLowerCase().startsWith(value))
-    .slice(0, 12);
+  return _historyCore.rootMatches(_historyRootSuggestions, query, 12);
 }
 
 function _acceptHistoryRootSuggestion(root) {
@@ -293,17 +270,7 @@ function _historyRefreshRootDropdown() {
 }
 
 function _historyActiveFilterItems() {
-  const items = [];
-  if (_historyFilters.type !== 'all') items.push({ key: 'type', label: `type: ${_historyFilters.type}` });
-  if (_historyFilters.q) items.push({ key: 'q', label: `search: ${_historyFilters.q}` });
-  if (_historyFilters.commandRoot) items.push({ key: 'commandRoot', label: `command: ${_historyFilters.commandRoot}` });
-  if (_historyFilters.exitCode === '0') items.push({ key: 'exitCode', label: 'exit: 0' });
-  else if (_historyFilters.exitCode === 'nonzero') items.push({ key: 'exitCode', label: 'exit: failed' });
-  else if (_historyFilters.exitCode === '-15') items.push({ key: 'exitCode', label: 'exit: terminated' });
-  else if (_historyFilters.exitCode === 'incomplete') items.push({ key: 'exitCode', label: 'exit: incomplete' });
-  if (_historyFilters.dateRange !== 'all') items.push({ key: 'dateRange', label: `date: ${_historyFilters.dateRange}` });
-  if (_historyFilters.starredOnly) items.push({ key: 'starredOnly', label: 'starred' });
-  return items;
+  return _historyCore.activeFilterItems(_historyFilters);
 }
 
 function _historySetPage(nextPage, { refresh = true } = {}) {
@@ -390,18 +357,7 @@ function _renderHistoryActiveFilters() {
 }
 
 function _buildHistoryRequestUrl() {
-  const params = new URLSearchParams();
-  params.set('page', String(_historyPaging.page || 1));
-  params.set('page_size', String(_historyPaging.pageSize || 1));
-  params.set('include_total', '1');
-  if (_historyFilters.type !== 'all') params.set('type', _historyFilters.type);
-  if (_historyFilters.q) params.set('q', _historyFilters.q);
-  if (_historyFilters.commandRoot) params.set('command_root', _historyFilters.commandRoot);
-  if (_historyFilters.exitCode !== 'all') params.set('exit_code', _historyFilters.exitCode);
-  if (_historyFilters.dateRange !== 'all') params.set('date_range', _historyFilters.dateRange);
-  if (_historyFilters.starredOnly) params.set('starred_only', '1');
-  const query = params.toString();
-  return query ? `/history?${query}` : '/history';
+  return _historyCore.buildRequestUrl(_historyFilters, _historyPaging);
 }
 
 function _applyHistoryClientFilters(runs) {
@@ -535,21 +491,11 @@ function _activeTabCommandHistoryState() {
 }
 
 function _historyLimit() {
-  return Math.max(1, Number(APP_CONFIG.recent_commands_limit) || 50);
+  return _historyCore.historyLimit(APP_CONFIG);
 }
 
 function _commandRecallHistory(tab) {
-  const limit = _historyLimit();
-  const seen = new Set();
-  const local = tab && Array.isArray(tab.commandHistory) ? tab.commandHistory : [];
-  return [...local, ...cmdHistory]
-    .map(cmd => String(cmd || ''))
-    .filter(cmd => {
-      if (!cmd || seen.has(cmd)) return false;
-      seen.add(cmd);
-      return true;
-    })
-    .slice(0, limit);
+  return _historyCore.commandRecallHistory(tab, cmdHistory, _historyLimit());
 }
 
 function resetCmdHistoryNav() {
@@ -784,13 +730,7 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 
 
 function _historyRelativeTime(startedAt, now = new Date()) {
-  if (!(startedAt instanceof Date) || Number.isNaN(startedAt.getTime())) return '';
-  const diffSec = Math.round((now.getTime() - startedAt.getTime()) / 1000);
-  if (diffSec < 45) return 'just now';
-  if (diffSec < 60 * 60) return `${Math.round(diffSec / 60)}m ago`;
-  if (diffSec < 60 * 60 * 24) return `${Math.round(diffSec / 3600)}h ago`;
-  if (diffSec < 60 * 60 * 24 * 7) return `${Math.round(diffSec / 86400)}d ago`;
-  return startedAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return _historyCore.relativeTime(startedAt, now);
 }
 
 function _historyMetaKindBadge(kind, label = kind.toUpperCase()) {
@@ -801,60 +741,32 @@ function _historyMetaKindBadge(kind, label = kind.toUpperCase()) {
   return badge;
 }
 
-const HISTORY_GRACEFUL_TERMINATION_EXIT_CODES = new Set([-15]);
-
 function _historyExitCodeNumber(exitCode) {
-  if (exitCode === null || exitCode === undefined || exitCode === '') return null;
-  const number = Number(exitCode);
-  return Number.isFinite(number) ? number : null;
+  return _historyCore.exitCodeNumber(exitCode);
 }
 
 function _historyIsGracefulTerminationExitCode(exitCode) {
-  const code = _historyExitCodeNumber(exitCode);
-  return code !== null && HISTORY_GRACEFUL_TERMINATION_EXIT_CODES.has(code);
+  return _historyCore.isGracefulTerminationExitCode(exitCode);
 }
 
 function _historyIsFailedExitCode(exitCode) {
-  const code = _historyExitCodeNumber(exitCode);
-  return code !== null && code !== 0 && !HISTORY_GRACEFUL_TERMINATION_EXIT_CODES.has(code);
+  return _historyCore.isFailedExitCode(exitCode);
 }
 
 function _historyExitLabel(exitCode) {
-  const code = _historyExitCodeNumber(exitCode);
-  if (code === null) return 'exit —';
-  return _historyIsGracefulTerminationExitCode(code) ? 'terminated' : `exit ${code}`;
+  return _historyCore.exitLabel(exitCode);
 }
 
 function _historyExitClass(exitCode) {
-  const code = _historyExitCodeNumber(exitCode);
-  if (code === 0) return 'exit-ok';
-  if (_historyIsFailedExitCode(code)) return 'exit-fail';
-  return 'exit-neutral';
+  return _historyCore.exitClass(exitCode);
 }
 
 function _historyElapsedSeconds(run) {
-  const explicit = Number(run?.elapsed_seconds ?? run?.duration_seconds);
-  if (Number.isFinite(explicit) && explicit >= 0) return explicit;
-  const started = new Date(run?.started);
-  const finished = new Date(run?.finished);
-  if (Number.isNaN(started.getTime()) || Number.isNaN(finished.getTime())) return null;
-  return Math.max(0, (finished.getTime() - started.getTime()) / 1000);
+  return _historyCore.elapsedSeconds(run);
 }
 
 function _historyElapsedLabel(run) {
-  const total = _historyElapsedSeconds(run);
-  if (total === null) return '';
-  if (total >= 3600) {
-    const hours = Math.floor(total / 3600);
-    const minutes = Math.floor((total % 3600) / 60);
-    return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
-  }
-  if (total >= 60) {
-    const minutes = Math.floor(total / 60);
-    const seconds = Math.round(total % 60);
-    return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
-  }
-  return `${total.toFixed(total >= 10 ? 0 : 1)}s`;
+  return _historyCore.elapsedLabel(run);
 }
 
 function _createHistoryEntry(run, isStarred) {
@@ -1026,40 +938,19 @@ function _historyActionKeepsPanelOpen(action) {
 }
 
 function _compareFormatDate(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString();
+  return _historyCore.compareFormatDate(value);
 }
 
 function _compareDateGroupLabel(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Undated';
-  const today = new Date();
-  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const dateStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const ageDays = Math.round((todayStart.getTime() - dateStart.getTime()) / 86400000);
-  if (ageDays === 0) return 'Today';
-  if (ageDays === 1) return 'Yesterday';
-  return date.toLocaleDateString(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: date.getFullYear() === today.getFullYear() ? undefined : 'numeric',
-  });
+  return _historyCore.compareDateGroupLabel(value);
 }
 
 function _compareFormatDuration(seconds) {
-  if (seconds === null || seconds === undefined || Number.isNaN(Number(seconds))) return 'n/a';
-  const value = Number(seconds);
-  if (value < 1) return `${Math.round(value * 1000)}ms`;
-  if (value < 60) return `${value.toFixed(value < 10 ? 1 : 0)}s`;
-  return `${Math.floor(value / 60)}m ${Math.round(value % 60)}s`;
+  return _historyCore.compareFormatDuration(seconds);
 }
 
 function _compareFormatDelta(value, suffix = '') {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number === 0) return `0${suffix}`;
-  return `${number > 0 ? '+' : ''}${number}${suffix}`;
+  return _historyCore.compareFormatDelta(value, suffix);
 }
 
 function _ensureHistoryCompareOverlay() {

@@ -402,19 +402,24 @@ header .version {
   z-index: 65;
   max-width: none;
   border-radius: 6px 6px 0 0;
-  padding: 4px 0;
+  padding: 3px 0;
 }
 
 .ac-dropdown.ac-mobile .ac-item {
-  padding: 10px 14px;
-  font-size: 14px;
-  min-height: 44px;
+  padding: 6px 12px;
+  font-size: 13px;
+  line-height: 1.2;
+  min-height: 38px;
   display: flex;
   align-items: flex-start;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
+}
+
+.ac-dropdown.ac-mobile .ac-item-main {
+  line-height: 1.2;
 }
 
 .ac-dropdown.ac-mobile .ac-item::before {
@@ -423,8 +428,12 @@ header .version {
 
 .ac-dropdown.ac-mobile .ac-item-desc {
   margin-left: 0;
-  font-size: 11px;
-  white-space: normal;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 10px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ac-dropdown.ac-up {

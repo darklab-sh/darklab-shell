@@ -10,7 +10,10 @@ import os
 import re
 import sqlite3
 import tempfile
+import time
 import uuid
+
+import pytest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -587,6 +590,35 @@ class TestDiagRoute:
                     "share_redaction_enabled", "custom_redaction_rule_count"):
             assert key in cfg, f"missing config key: {key}"
 
+    def test_every_config_key_belongs_to_a_group(self):
+        """Drift guard: every key emitted into result['config'] must be
+        listed in exactly one `_DIAG_CONFIG_GROUPS` entry, otherwise it
+        renders nowhere on the page."""
+        grouped: set[str] = set()
+        seen_twice: set[str] = set()
+        for _label, keys in shell_assets._DIAG_CONFIG_GROUPS:
+            for key in keys:
+                if key in grouped:
+                    seen_twice.add(key)
+                grouped.add(key)
+        assert not seen_twice, f"config keys appear in multiple groups: {seen_twice}"
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        emitted = set(data["config"].keys())
+        missing_from_groups = emitted - grouped
+        assert not missing_from_groups, (
+            f"config keys not in any group (would be invisible on /diag): {missing_from_groups}"
+        )
+
+    def test_html_response_renders_config_group_labels(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            body = client.get("/diag").get_data(as_text=True)
+        for label, _keys in shell_assets._DIAG_CONFIG_GROUPS:
+            assert label in body, f"config group label '{label}' not rendered"
+        assert "diag-config-group-label" in body
+
     def test_db_section_ok_and_has_counts(self):
         client = self._allowed_client()
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
@@ -609,13 +641,349 @@ class TestDiagRoute:
             data = json.loads(client.get("/diag?format=json").data)
         assert "configured" in data["redis"]
 
+    def _fake_redis_client(self, *, ping_exc=None, scan_keys=None, info_data=None,
+                           sismember_map=None, get_map=None, dbsize=None,
+                           xlen_map=None):
+        """Build a MagicMock that mimics the redis-py methods _diag_redis_stats uses."""
+        scan_keys = scan_keys or {}
+        info_data = info_data or {}
+        sismember_map = sismember_map or {}
+        get_map = get_map or {}
+        xlen_map = xlen_map or {}
+
+        fake = mock.MagicMock()
+        if ping_exc is None:
+            fake.ping.return_value = True
+        else:
+            fake.ping.side_effect = ping_exc
+        fake.dbsize.return_value = dbsize if dbsize is not None else sum(
+            len(keys) for keys in scan_keys.values()
+        )
+
+        def scan(cursor=0, match=None, count=None):  # noqa: ARG001
+            keys = scan_keys.get(match, [])
+            return (0, list(keys))
+        fake.scan.side_effect = scan
+        fake.xlen.side_effect = lambda key: xlen_map.get(key, 0)
+        fake.get.side_effect = lambda key: get_map.get(key)
+        fake.sismember.side_effect = lambda key, member: bool(
+            member in sismember_map.get(key, set())
+        )
+        fake.info.side_effect = lambda section: info_data.get(section, {})
+        return fake
+
+    def test_redis_stats_present_when_client_reachable(self):
+        client = self._allowed_client()
+        run_id = "r1"
+        meta_payload = json.dumps({"session_id": "s1", "run_id": run_id})
+        fake = self._fake_redis_client(
+            scan_keys={
+                "runstream:*":     [f"runstream:{run_id}"],
+                "proc:*":          [f"proc:{run_id}"],
+                "procmeta:*":      [f"procmeta:{run_id}"],
+                "sessionprocs:*":  ["sessionprocs:s1"],
+            },
+            xlen_map={f"runstream:{run_id}": 17},
+            get_map={f"procmeta:{run_id}": meta_payload},
+            sismember_map={"sessionprocs:s1": {run_id}},
+            info_data={
+                "memory":      {"used_memory_human": "1.2M", "used_memory_peak_human": "2.0M",
+                                "maxmemory_human": "0", "mem_fragmentation_ratio": 1.05},
+                "persistence": {"aof_enabled": 1, "rdb_last_save_time": int(time.time()) - 90,
+                                "rdb_changes_since_last_save": 4},
+                "stats":       {"evicted_keys": 0, "expired_keys": 12},
+                "clients":     {"connected_clients": 3, "rejected_connections": 0},
+            },
+        )
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.object(shell_assets, "redis_client", fake):
+                data = json.loads(client.get("/diag?format=json").data)
+        stats = data["redis"]["stats"]
+        assert data["redis"]["ok"] is True
+        assert isinstance(stats["ping_ms"], (int, float))
+        assert stats["dbsize"] == 4
+        names = {ns["name"]: ns for ns in stats["namespaces"]}
+        assert names["runstream"]["count"] == 1
+        assert names["procmeta"]["count"] == 1
+        assert "capped" not in names["runstream"]
+        assert stats["stream_length"]["max"] == 17
+        assert stats["orphans"] == {"probed": 1, "orphaned": 0}
+        assert stats["memory"]["used"] == "1.2M"
+        assert stats["persistence"]["aof_enabled"] is True
+        assert stats["persistence"]["rdb_last_save_human"].endswith(" ago")
+        assert stats["evicted_keys"] == 0
+        assert stats["clients"]["connected"] == 3
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.object(shell_assets, "redis_client", fake):
+                body = client.get("/diag").get_data(as_text=True)
+        assert "RDB saved" in body
+        assert "changes since save" in body
+        assert "AOF on" not in body
+        assert "AOF off" not in body
+
+    def test_redis_stats_absent_when_ping_fails(self):
+        client = self._allowed_client()
+        fake = self._fake_redis_client(ping_exc=ConnectionError("redis unreachable"))
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.object(shell_assets, "redis_client", fake):
+                data = json.loads(client.get("/diag?format=json").data)
+        assert data["redis"]["ok"] is False
+        assert "redis unreachable" in data["redis"]["error"]
+        assert "stats" not in data["redis"]
+
+    def test_redis_orphan_count_flags_dangling_procmeta(self):
+        client = self._allowed_client()
+        # procmeta:r2 references session s2, but sessionprocs:s2 has no member r2 → orphan.
+        fake = self._fake_redis_client(
+            scan_keys={
+                "runstream:*":    [],
+                "proc:*":         [],
+                "procmeta:*":     ["procmeta:r2"],
+                "sessionprocs:*": ["sessionprocs:s2"],
+            },
+            get_map={"procmeta:r2": json.dumps({"session_id": "s2", "run_id": "r2"})},
+            sismember_map={"sessionprocs:s2": set()},
+        )
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.object(shell_assets, "redis_client", fake):
+                data = json.loads(client.get("/diag?format=json").data)
+        assert data["redis"]["stats"]["orphans"] == {"probed": 1, "orphaned": 1}
+
+    def test_redis_namespace_count_marks_capped_when_scan_hits_limit(self):
+        client = self._allowed_client()
+        cap = shell_assets._DIAG_REDIS_SCAN_KEY_CAP
+        # Return cap+1 fake runstream keys so the bounded scan trips the capped flag.
+        many_streams = [f"runstream:r{i}" for i in range(cap + 5)]
+        fake = self._fake_redis_client(
+            scan_keys={
+                "runstream:*":    many_streams,
+                "proc:*":         [],
+                "procmeta:*":     [],
+                "sessionprocs:*": [],
+            },
+        )
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.object(shell_assets, "redis_client", fake):
+                data = json.loads(client.get("/diag?format=json").data)
+        runstream_ns = next(ns for ns in data["redis"]["stats"]["namespaces"]
+                            if ns["name"] == "runstream")
+        assert runstream_ns["capped"] is True
+        assert runstream_ns["count"] == cap
+
+    def test_broker_section_reports_in_process_mode_when_redis_unconfigured(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.object(shell_assets, "redis_client", None):
+                data = json.loads(client.get("/diag?format=json").data)
+        broker = data["broker"]
+        assert broker["mode"] == "in_process"
+        assert "fallback" in broker
+        for key in ("streams", "active", "closed", "expired_pending_purge",
+                    "events", "bytes", "pid_count", "active_run_count",
+                    "session_count"):
+            assert key in broker["fallback"], f"missing fallback key: {key}"
+
+    def test_broker_section_omits_fallback_when_redis_configured(self):
+        client = self._allowed_client()
+        fake = self._fake_redis_client()
+        # `broker_mode()` reads from run_broker's own module-level reference,
+        # so patch both the assets-blueprint binding and the broker module.
+        import run_broker as shell_broker
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.object(shell_assets, "redis_client", fake):
+                with mock.patch.object(shell_broker, "redis_client", fake):
+                    data = json.loads(client.get("/diag?format=json").data)
+        broker = data["broker"]
+        assert broker["mode"] == "redis"
+        assert "fallback" not in broker
+
+    def test_broker_section_reports_unavailable_when_disabled(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+            "run_broker_enabled": False,
+        }):
+            data = json.loads(client.get("/diag?format=json").data)
+        broker = data["broker"]
+        assert broker["available"] is False
+        assert "disabled" in broker["unavailable_reason"].lower()
+
+    def test_broker_fallback_snapshot_reflects_published_events(self):
+        client = self._allowed_client()
+        # Publish two events to the in-memory store so the snapshot is non-empty.
+        # Use a dedicated module import to avoid leaking state across tests.
+        import run_broker as shell_broker
+        run_id = f"diag-test-{uuid.uuid4().hex}"
+        try:
+            shell_broker._memory_store.publish(run_id, "stdout", {"line": "hi"})
+            shell_broker._memory_store.publish(run_id, "stdout", {"line": "again"})
+            with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+                with mock.patch.object(shell_assets, "redis_client", None):
+                    data = json.loads(client.get("/diag?format=json").data)
+            fb = data["broker"]["fallback"]
+            assert fb["streams"] >= 1
+            assert fb["events"] >= 2
+            assert fb["active"] >= 1
+            assert fb["bytes"] > 0
+        finally:
+            # Trip the snapshot's purge: drop the test run from the in-memory
+            # store so we don't leak state into later tests.
+            with shell_broker._memory_store._lock:
+                shell_broker._memory_store._events.pop(run_id, None)
+                shell_broker._memory_store._bytes.pop(run_id, None)
+                shell_broker._memory_store._closed.discard(run_id)
+                shell_broker._memory_store._expires_at.pop(run_id, None)
+
+    def test_db_section_reports_file_size_and_human(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        db = data["db"]
+        assert isinstance(db["size"], int) and db["size"] > 0
+        assert db["size_human"]
+        assert any(db["size_human"].endswith(unit) for unit in (" B", " KB", " MB", " GB"))
+        # WAL size key is always populated (zero if no -wal sidecar exists)
+        assert isinstance(db["wal_size"], int)
+        assert db["wal_size_human"]
+
+    def test_db_section_reports_journal_mode(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        # SQLite returns one of: delete, truncate, persist, memory, wal, off.
+        assert data["db"]["journal_mode"] in {
+            "delete", "truncate", "persist", "memory", "wal", "off",
+        }
+
+    def test_db_section_reports_freelist_and_reclaimable_bytes(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        db = data["db"]
+        assert isinstance(db["page_count"], int) and db["page_count"] > 0
+        assert isinstance(db["page_size"], int) and db["page_size"] > 0
+        assert isinstance(db["freelist_count"], int) and db["freelist_count"] >= 0
+        assert db["reclaimable_size"] == db["freelist_count"] * db["page_size"]
+        assert db["reclaimable_size_human"]
+
+    def test_db_section_reports_per_table_row_counts(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        tables = data["db"]["tables"]
+        assert isinstance(tables, list) and tables
+        names = {t["name"] for t in tables}
+        # Core schema tables are present and FTS5 shadow tables are not.
+        assert "runs" in names
+        assert not any(name.startswith("sqlite_") for name in names)
+        assert not any(name.startswith("runs_fts_") for name in names), (
+            f"FTS5 shadow tables leaked into the table list: {names}"
+        )
+        for entry in tables:
+            assert isinstance(entry["name"], str) and entry["name"]
+            assert isinstance(entry["rows"], int) and entry["rows"] >= 0
+
+    def test_db_section_quotes_metadata_table_names_for_row_counts(self, tmp_path):
+        db_path = tmp_path / "diag_tables.db"
+        with sqlite3.connect(db_path) as conn:
+            conn.execute('CREATE TABLE "odd""table" (id INTEGER PRIMARY KEY)')
+            conn.execute('INSERT INTO "odd""table" DEFAULT VALUES')
+            conn.execute('INSERT INTO "odd""table" DEFAULT VALUES')
+            conn.commit()
+
+        def connect_tmp_db():
+            return sqlite3.connect(db_path)
+
+        with mock.patch.object(shell_assets, "DB_PATH", str(db_path)), \
+             mock.patch.object(shell_assets, "db_connect", connect_tmp_db):
+            info = shell_assets._diag_db_stats()
+
+        assert {"name": 'odd"table', "rows": 2} in info["tables"]
+
+    def test_diag_sqlite_identifier_rejects_empty_or_nul_names(self):
+        assert shell_assets._diag_sqlite_identifier('odd"table') == '"odd""table"'
+        with pytest.raises(ValueError):
+            shell_assets._diag_sqlite_identifier("")
+        with pytest.raises(ValueError):
+            shell_assets._diag_sqlite_identifier("bad\x00name")
+
+    def test_db_section_runs_and_snapshots_remain_at_top_level(self):
+        """Backward-compat for the original /diag schema — `runs` and
+        `snapshots` are still surfaced at db.* even though they are also
+        listed inside `tables`."""
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert isinstance(data["db"]["runs"], int)
+        assert isinstance(data["db"]["snapshots"], int)
+        # Match the per-table row count.
+        runs_in_table = next(
+            (t["rows"] for t in data["db"]["tables"] if t["name"] == "runs"), None
+        )
+        assert data["db"]["runs"] == runs_in_table
+
+    def test_db_section_reports_fts_orphan_count(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert isinstance(data["db"]["fts_orphans"], int)
+        assert data["db"]["fts_orphans"] >= 0
+
+    def test_db_fts_orphan_probe_uses_sqlite_rowid_not_uuid_id(self, tmp_path):
+        db_path = tmp_path / "diag_fts.db"
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "CREATE TABLE runs ("
+                "id TEXT PRIMARY KEY, command TEXT NOT NULL, "
+                "output_search_text TEXT)"
+            )
+            conn.execute(
+                "CREATE VIRTUAL TABLE runs_fts USING fts5("
+                "command, output_search_text, content=runs, content_rowid=rowid)"
+            )
+            conn.execute(
+                "INSERT INTO runs (id, command, output_search_text) VALUES (?, ?, ?)",
+                ("run-uuid-1", "ping darklab.sh", "ok"),
+            )
+            rowid = conn.execute(
+                "SELECT rowid FROM runs WHERE id = ?",
+                ("run-uuid-1",),
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO runs_fts(rowid, command, output_search_text) "
+                "VALUES (?, ?, ?)",
+                (rowid, "ping darklab.sh", "ok"),
+            )
+            conn.commit()
+
+        def connect_tmp_db():
+            return sqlite3.connect(db_path)
+
+        with mock.patch.object(shell_assets, "DB_PATH", str(db_path)), \
+             mock.patch.object(shell_assets, "db_connect", connect_tmp_db):
+            info = shell_assets._diag_db_stats()
+
+        assert info["runs"] == 1
+        assert info["fts_orphans"] == 0
+
+    def test_db_section_reports_query_latency(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert data["db"]["ok"] is True
+        assert isinstance(data["db"]["query_ms"], (int, float))
+        assert data["db"]["query_ms"] >= 0
+
     def test_assets_section_reports_loaded_when_files_present(self):
         client = self._allowed_client()
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
-        assert data["assets"]["ansi_up"] == "loaded"
-        assert data["assets"]["jspdf"] == "loaded"
-        assert data["assets"]["fonts"] == "loaded"
+        for label in ("ansi_up", "jspdf", "fonts"):
+            entry = data["assets"][label]
+            assert entry["ok"] is True, f"{label} probe should be ok: {entry!r}"
+            assert entry["status"] == 200
+            assert entry["size"] > 0, f"{label} HEAD reported zero bytes"
+            assert entry["size_human"]
 
     def test_assets_section_reports_missing_when_files_absent(self, tmp_path, monkeypatch):
         client = self._allowed_client()
@@ -624,9 +992,46 @@ class TestDiagRoute:
         monkeypatch.setattr(shell_assets, "_FONT_DIR", tmp_path / "missing_fonts")
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
-        assert data["assets"]["ansi_up"] == "missing"
-        assert data["assets"]["jspdf"] == "missing"
-        assert data["assets"]["fonts"] == "missing"
+        for label in ("ansi_up", "jspdf", "fonts"):
+            entry = data["assets"][label]
+            assert entry["ok"] is False, f"{label} probe should fail: {entry!r}"
+            assert entry["status"] == 404
+
+    def test_assets_probe_size_matches_served_content_length(self):
+        """The HEAD probe surfaces the actual served Content-Length, so
+        a zero-byte or partial file is visible without shelling in."""
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        # The size reported by the probe matches a direct GET against the URL.
+        for label in ("ansi_up", "jspdf"):
+            entry = data["assets"][label]
+            direct = client.get(entry["url"])
+            assert direct.status_code == 200
+            served_size = int(direct.headers.get("Content-Length") or len(direct.data))
+            assert entry["size"] == served_size, (
+                f"{label} probe size {entry['size']} != served size {served_size}"
+            )
+
+    def test_assets_probe_reports_size_human_in_short_form(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        for label in ("ansi_up", "jspdf", "fonts"):
+            human = data["assets"][label]["size_human"]
+            assert human, f"{label} probe missing size_human"
+            assert any(human.endswith(unit) for unit in (" B", " KB", " MB", " GB")), (
+                f"unexpected size_human format: {human!r}"
+            )
+
+    def test_diag_fmt_bytes_buckets(self):
+        f = shell_assets._diag_fmt_bytes
+        assert f(0) == "0 B"
+        assert f(512) == "512 B"
+        assert f(1024) == "1.0 KB"
+        assert f(1536) == "1.5 KB"
+        assert f(1024 * 1024) == "1.0 MB"
+        assert f(1024 * 1024 * 1024) == "1.0 GB"
 
     def test_tools_section_has_present_and_missing_lists(self):
         client = self._allowed_client()
@@ -643,10 +1048,54 @@ class TestDiagRoute:
         # At minimum, basic tools available in dev should appear in present
         present = data["tools"]["present"]
         assert isinstance(present, list)
-        # Every entry in present must actually resolve via which()
+        # Every entry in present is a dict with a name that resolves via which()
         import shutil as _shutil
-        for tool in present:
-            assert _shutil.which(tool) is not None, f"{tool} in present but not found by which()"
+        for entry in present:
+            assert isinstance(entry, dict), f"present entry is not a dict: {entry!r}"
+            assert _shutil.which(entry["name"]) is not None, (
+                f"{entry['name']} in present but not found by which()"
+            )
+
+    def test_tools_present_entries_carry_name_and_path_only(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        present = data["tools"]["present"]
+        if not present:
+            pytest.skip("dev environment has no allowlisted binaries on PATH")
+        for entry in present:
+            assert set(entry.keys()) == {"name", "path"}
+            assert isinstance(entry["name"], str) and entry["name"]
+            assert isinstance(entry["path"], str) and entry["path"].startswith("/")
+
+    def test_tools_probe_does_not_read_binary_mtime(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch("blueprints.assets.shutil.which", return_value="/fake/bin/tool"):
+                with mock.patch(
+                    "blueprints.assets.os.path.getmtime",
+                    side_effect=AssertionError("tool mtime should not be probed"),
+                ):
+                    data = json.loads(client.get("/diag?format=json").data)
+        present = data["tools"]["present"]
+        assert present, "expected synthetic which() to populate the present list"
+        assert all(set(entry.keys()) == {"name", "path"} for entry in present)
+
+    def test_tools_html_omits_stale_counts_and_age_suffixes(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch("blueprints.assets.shutil.which", return_value="/fake/bin/tool"):
+                body = client.get("/diag").get_data(as_text=True)
+        assert "diag-chip-age" not in body
+        assert " stale)" not in body
+        assert 'class="diag-chip present stale"' not in body
+
+    def test_diag_tool_entry_returns_name_and_path_only(self):
+        with mock.patch("blueprints.assets.shutil.which", return_value="/fake/bin/tool"):
+            assert shell_assets._diag_tool_entry("curl") == {
+                "name": "curl",
+                "path": "/fake/bin/tool",
+            }
 
     def test_honors_forwarded_for_header_from_trusted_proxy(self):
         client = self._allowed_client()
@@ -691,6 +1140,65 @@ class TestDiagRoute:
         assert 'href="/"' in body
         assert "back to shell" in body
         assert "<!DOCTYPE html>" in body or "<html" in body.lower()
+
+    def test_top_command_cells_are_keyboard_expandable(self):
+        """Top Commands cells render as accessible toggle buttons (tabindex=0,
+        role=button, aria-expanded=false) with a delegated tap handler so
+        an operator on mobile can read the full command without `title=`
+        hover affordances."""
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            body = client.get("/diag").get_data(as_text=True)
+        if "diag-cmd-cell" not in body:
+            pytest.skip("no top-command rows in the dev DB to assert against")
+        assert (
+            'class="diag-cmd-cell" tabindex="0" role="button" aria-expanded="false"'
+            in body
+        ), "top-command cells must carry the expand-button accessibility attrs"
+        assert "toggleCmdCell" in body, "tap-to-expand handler missing from page script"
+
+    def test_top_command_cells_render_full_untruncated_command(self):
+        """The 48-char server-side `truncate` is gone — full text reaches
+        the DOM so the JS expand handler can show it."""
+        long_command = (
+            "nmap -sT -p 1-65535 -T4 --max-retries 5 --host-timeout 30m "
+            "-oA /workspace/scan-output ip.darklab.sh"
+        )
+        assert len(long_command) > 48, "fixture must exceed the old truncate length"
+        from database import db_connect
+        run_id = f"diag-long-cmd-{uuid.uuid4().hex}"
+        started = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, exit_code) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (run_id, "diag-test", long_command, started, 0),
+                )
+                conn.commit()
+            client = self._allowed_client()
+            with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+                body = client.get("/diag").get_data(as_text=True)
+            # Full command appears at least twice: in `title=` and as cell text.
+            # If the old truncate were still in play we would only see it in title.
+            assert body.count(long_command) >= 2, (
+                "full command should appear in both title and cell text"
+            )
+            assert "…" not in body or long_command in body
+        finally:
+            with db_connect() as conn:
+                conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+                conn.commit()
+
+    def test_html_response_carries_live_indicator_and_no_refresh_toggle(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            body = client.get("/diag").get_data(as_text=True)
+        assert "diag-live-indicator" in body
+        assert "Refreshed at" in body
+        assert "Generated at" not in body
+        assert "diag-refresh-checkbox" not in body
+        assert "Auto-refresh" not in body
 
     def test_html_response_renders_zero_custom_redaction_rule_count_as_numeric_zero(self):
         client = self._allowed_client()
@@ -1745,6 +2253,71 @@ class TestHistoryRoute:
                 conn.execute("DELETE FROM starred_commands WHERE session_id = ?", (session,))
                 conn.commit()
 
+    def test_stats_tolerates_missing_optional_counter_tables(self):
+        client = get_client()
+        session = "history-stats-missing-tables-" + uuid.uuid4().hex[:8]
+        run_id = f"{session}-ok"
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        run_id,
+                        session,
+                        "nmap -sT ip.darklab.sh",
+                        "2026-01-01T00:00:00",
+                        "2026-01-01T00:00:10",
+                        0,
+                        "[]",
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
+                    (f"{session}-snapshot", session, "snap", "2026-01-01T00:00:00", "[]"),
+                )
+                conn.execute(
+                    "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                    (session, "nmap -sT ip.darklab.sh"),
+                )
+                conn.commit()
+
+            with mock.patch("blueprints.history._history_table_exists", return_value=False):
+                data = json.loads(client.get("/history/stats", headers={"X-Session-ID": session}).data)
+
+            assert data["runs"]["total"] == 1
+            assert data["runs"]["succeeded"] == 1
+            assert data["snapshots"] == 0
+            assert data["starred_commands"] == 0
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+                conn.execute("DELETE FROM snapshots WHERE session_id = ?", (session,))
+                conn.execute("DELETE FROM starred_commands WHERE session_id = ?", (session,))
+                conn.commit()
+
+    def test_insights_empty_session_and_explicit_day_clamps(self):
+        client = get_client()
+        session = "history-insights-empty-" + uuid.uuid4().hex[:8]
+
+        auto = json.loads(client.get("/history/insights?days=auto", headers={"X-Session-ID": session}).data)
+        assert auto["days"] == 28
+        assert len(auto["activity"]) == 28
+        assert auto["first_run_date"] is None
+        assert auto["command_mix"] == []
+        assert auto["constellation"] == []
+        assert auto["events"] == []
+        assert auto["windows"]["activity"]["total_runs"] == 0
+        assert auto["windows"]["command_mix"]["days"] == 90
+        assert auto["windows"]["command_mix"]["sparse"] is True
+        assert auto["windows"]["constellation"]["days"] == 90
+        assert auto["windows"]["constellation"]["sparse"] is True
+
+        long_window = json.loads(client.get("/history/insights?days=999", headers={"X-Session-ID": session}).data)
+        assert long_window["days"] == 365
+        assert len(long_window["activity"]) == 365
+        assert long_window["windows"]["activity"]["days"] == 365
+
     def test_insights_returns_visual_history_payloads(self):
         client = get_client()
         session = "history-insights-" + uuid.uuid4().hex[:8]
@@ -1822,6 +2395,89 @@ class TestHistoryRoute:
         finally:
             with sqlite3.connect(DB_PATH) as conn:
                 conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+                conn.commit()
+
+    def test_insights_falls_back_to_other_when_command_registry_fails(self):
+        client = get_client()
+        session = "history-insights-category-fallback-" + uuid.uuid4().hex[:8]
+        run_id = f"{session}-nmap"
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        run_id,
+                        session,
+                        "nmap -sT ip.darklab.sh",
+                        now.isoformat(),
+                        (now + timedelta(seconds=2)).isoformat(),
+                        0,
+                        "[]",
+                        4,
+                    ),
+                )
+                conn.commit()
+
+            with mock.patch("commands.load_commands_registry", side_effect=RuntimeError("registry down")):
+                data = json.loads(client.get("/history/insights", headers={"X-Session-ID": session}).data)
+
+            assert data["command_mix"][0]["root"] == "nmap"
+            assert data["command_mix"][0]["category"] == "Other"
+            assert data["constellation"][0]["category"] == "Other"
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+                conn.commit()
+
+    def test_insights_adaptive_windows_switch_at_command_and_constellation_thresholds(self):
+        client = get_client()
+        session_25 = "history-insights-window-25-" + uuid.uuid4().hex[:8]
+        session_40 = "history-insights-window-40-" + uuid.uuid4().hex[:8]
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+
+        def insert_runs(conn, session, count):
+            for index in range(count):
+                started = now - timedelta(days=index % 20, minutes=index)
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        f"{session}-{index}",
+                        session,
+                        f"nmap -sT 198.51.100.{index % 250}",
+                        started.isoformat(),
+                        (started + timedelta(seconds=1)).isoformat(),
+                        0,
+                        "[]",
+                        index + 1,
+                    ),
+                )
+
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                insert_runs(conn, session_25, 25)
+                insert_runs(conn, session_40, 40)
+                conn.commit()
+
+            data_25 = json.loads(client.get("/history/insights", headers={"X-Session-ID": session_25}).data)
+            assert data_25["windows"]["command_mix"]["days"] == 30
+            assert data_25["windows"]["command_mix"]["total_runs"] == 25
+            assert data_25["windows"]["command_mix"]["sparse"] is False
+            assert data_25["windows"]["constellation"]["days"] == 90
+            assert data_25["windows"]["constellation"]["total_runs"] == 25
+            assert data_25["windows"]["constellation"]["sparse"] is True
+
+            data_40 = json.loads(client.get("/history/insights", headers={"X-Session-ID": session_40}).data)
+            assert data_40["windows"]["command_mix"]["days"] == 30
+            assert data_40["windows"]["constellation"]["days"] == 30
+            assert data_40["windows"]["constellation"]["total_runs"] == 40
+            assert data_40["windows"]["constellation"]["plotted_runs"] == 40
+            assert data_40["windows"]["constellation"]["sparse"] is False
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("DELETE FROM runs WHERE session_id IN (?, ?)", (session_25, session_40))
                 conn.commit()
 
     def test_insights_filters_app_builtin_commands(self):

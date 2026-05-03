@@ -215,6 +215,36 @@ class _MemoryRunBrokerStore:
             events.insert(0, notice)
             self._bytes[run_id] += _event_size(notice)
 
+    def snapshot(self) -> dict[str, int]:
+        """Diagnostic snapshot of in-memory broker state. Read-only — does
+        not purge or trim. Used by `/diag` to surface fallback usage when
+        Redis is not configured."""
+        with self._lock:
+            now = time.time()
+            active = 0
+            closed = 0
+            expired_pending_purge = 0
+            total_events = 0
+            total_bytes = 0
+            for run_id, events in self._events.items():
+                total_events += len(events)
+                total_bytes += self._bytes.get(run_id, 0)
+                if run_id in self._closed:
+                    closed += 1
+                else:
+                    active += 1
+                expires_at = self._expires_at.get(run_id)
+                if expires_at is not None and expires_at <= now:
+                    expired_pending_purge += 1
+            return {
+                "streams":               len(self._events),
+                "active":                active,
+                "closed":                closed,
+                "expired_pending_purge": expired_pending_purge,
+                "events":                total_events,
+                "bytes":                 total_bytes,
+            }
+
 
 class _RedisRunBrokerStore:
     def publish(
@@ -379,6 +409,17 @@ def broker_unavailable_reason() -> str:
 
 
 _memory_store = _MemoryRunBrokerStore()
+
+
+def memory_store_snapshot() -> dict[str, int]:
+    """Public accessor for the in-memory broker snapshot — used by `/diag`."""
+    return _memory_store.snapshot()
+
+
+def broker_mode() -> str:
+    """`redis` when the configured Redis client is in use, `in_process` when
+    the in-memory fallback is the active backend."""
+    return "redis" if redis_client else "in_process"
 
 
 def _store():

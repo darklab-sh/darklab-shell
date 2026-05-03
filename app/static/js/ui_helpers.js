@@ -406,9 +406,24 @@
   };
   global.showPanelOverlay = (el) => {
     if (el && el.classList) el.classList.add('open');
+    if (el && el.dataset) el.dataset.interactionReady = '0';
   };
   global.hidePanelOverlay = (el) => {
     if (el && el.classList) el.classList.remove('open');
+    if (el && el.dataset) delete el.dataset.interactionReady;
+  };
+  global.markInteractionSurfaceReady = (surface, overlay, card = null) => {
+    if (overlay && overlay.dataset) overlay.dataset.interactionReady = '1';
+    if (card && card.dataset) card.dataset.interactionReady = '1';
+    if (typeof emitUiEvent === 'function') {
+      emitUiEvent('app:interaction-surface-ready', {
+        surface: surface || '',
+        overlayId: overlay && overlay.id ? overlay.id : '',
+        cardId: card && card.id ? card.id : '',
+        activeElementId: document.activeElement && document.activeElement.id ? document.activeElement.id : '',
+        focusTrapBound: !!(card && card.dataset && card.dataset.focusTrapBound === '1'),
+      });
+    }
   };
   // Canonical post-action refocus path for chrome interactions. Every
   // "return focus to the terminal after a button/overlay/sheet action" call

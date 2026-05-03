@@ -625,21 +625,28 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── fonts/              # Vendored local font files used by the app's vendor routes and permalink/export fallbacks
 │   │   └── js/
 │   │       ├── app.js          # Shared UI helpers, overlays, and mobile-layout glue
+│   │       ├── app_preferences_core.js # Pure app preference coercion/snapshot helpers shared by app.js and unit harnesses
 │   │       ├── autocomplete.js # Command autocomplete dropdown
+│   │       ├── autocomplete_core.js # Pure autocomplete matching/ranking helpers shared by autocomplete.js and unit harnesses
 │   │       ├── config.js       # APP_CONFIG bootstrap reader
 │   │       ├── controller.js   # Initialization and event wiring (loads after app.js)
 │   │       ├── dom.js          # Shared DOM element references
 │   │       ├── export_html.js  # Shared export HTML builder / embedded-font helper
 │   │       ├── export_pdf.js   # Shared PDF export module — used by the desktop tab bar and permalink page
 │   │       ├── history.js      # Command history chips and drawer (with starring)
+│   │       ├── history_core.js # Pure history filter/label/format helpers shared by history.js and unit harnesses
 │   │       ├── mobile_chrome.js # Mobile shell chrome — recents sheet, viewport mode, pull-to-refresh suppression
 │   │       ├── mobile_sheet.js # Shared bottom-sheet helper — drag/tap/keyboard close for every mobile sheet
 │   │       ├── output.js       # ANSI rendering and line management
+│   │       ├── output_core.js  # Pure output prompt/signal helpers shared by output.js and unit harnesses
 │   │       ├── permalink.js    # Permalink page controller — loaded only on /history/<id> and /share/<id>
 │   │       ├── run_monitor.js  # Status Monitor modal/sheet controller
 │   │       ├── runner.js       # Command execution, SSE stream, kill, stall detection
+│   │       ├── runner_core.js  # Pure runner duration and synthetic pipe helpers shared by runner.js and unit harnesses
 │   │       ├── search.js       # In-output search (with case-sensitive and regex modes)
-│   │       ├── session.js      # Session UUID + apiFetch wrapper (loads first)
+│   │       ├── search_core.js  # Pure search labels/counts/summary helpers shared by search.js and unit harnesses
+│   │       ├── session.js      # Session UUID + apiFetch wrapper (loads after session_core.js)
+│   │       ├── session_core.js # Pure session identity helpers shared by session.js and unit harnesses
 │   │       ├── shell_chrome.js # Desktop rail (Recent, Workflows, nav) and bottom HUD controller (loads last)
 │   │       ├── state.js        # Shared app-state store/accessors
 │   │       ├── tabs.js         # Tab lifecycle management
@@ -656,7 +663,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       │   ├── ansi_up.js          # ANSI-to-HTML (ansi_up v6, ESM-only — wrapped as IIFE browser global)
 │   │       │   └── jspdf.umd.min.js    # PDF generation (jsPDF UMD build, copied as-is from npm)
 │   │       ├── welcome.js      # Welcome startup animation (ASCII, status lines, samples, hints)
-│   │       └── workspace.js    # Session Files panel — list/create/edit/delete/download helpers
+│   │       ├── workspace.js    # Session Files panel — list/create/edit/delete/download helpers
+│   │       └── workspace_core.js # Pure workspace path/format helpers shared by workspace.js and unit harnesses
 │   ├── templates/
 │   │   ├── diag.html           # Operator diagnostics page (IP-gated, uses active theme)
 │   │   ├── index.html          # Frontend HTML shell rendered by Flask
@@ -769,7 +777,10 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │       ├── config.test.js      # frontend APP_CONFIG bootstrap coverage
     │       ├── export_pdf.test.js  # PDF export rendering — header layout, ANSI escape handling, theme color resolution
     │       ├── helpers/
-    │       │   └── extract.js  # fromScript() helper — loads browser JS into jsdom via new Function
+    │       │   ├── app_harness.js # Shared jsdom harness for app/controller tests, including Options/mobile shell globals
+    │       │   ├── extract.js  # fromScript() helper — loads browser JS into jsdom via new Function
+    │       │   ├── session_harness.js # Shared session.js localStorage/fetch harness
+    │       │   └── workspace_harness.js # Shared Files/workspace modal harness and response helpers
     │       ├── history.test.js     # starring, clipboard, delete/clear failures, mobile chip behavior, draft restore
     │       ├── mobile_running_indicator.test.js # mobile running-indicator chip + edge-glow contract — mount, ?ri=off/?ri=0 kill switch, chip count, active-tab exclusion, cycle-tap dispatch
     │       ├── output.test.js      # ANSI rendering, timestamp/line-number mode, HTML export

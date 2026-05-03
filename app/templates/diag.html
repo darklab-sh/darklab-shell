@@ -34,48 +34,164 @@
     <a href="/" class="btn btn-secondary btn-compact diag-back-btn">back to shell</a>
   </header>
   <div class="diag-status-bar">
-    <span class="diag-generated-at">Generated at <time datetime="{{ generated_at }}">{{ generated_at }}</time></span>
-    <label class="form-check diag-refresh-toggle">
-      <input type="checkbox" id="diag-refresh-checkbox">
-      <span>Auto-refresh (10s)</span>
-    </label>
+    <span class="diag-live-indicator diag-refreshed-at" aria-live="polite">
+      <span class="diag-live-dot"></span>
+      <span>Refreshed at <time datetime="{{ generated_at }}">{{ generated_at }}</time></span>
+    </span>
   </div>
 </div>
 
 <main class="diag-main">
 
-  {# ── App ───────────────────────────────────────────────────────────────── #}
-  <section class="diag-section s-app">
+  {% set rstats = data.redis.stats or {} %}
+  {% set broker = data.broker or {} %}
+  {% set fb = broker.fallback or {} %}
+  {% set assets_loaded = (1 if data.assets.ansi_up.ok else 0) + (1 if data.assets.jspdf.ok else 0) + (1 if data.assets.fonts.ok else 0) %}
+
+  {% macro diag_config_value(value) -%}
+    {% if value is none %}<span class="diag-muted">—</span>
+    {%- elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}
+    {%- elif value is sameas true %}true
+    {%- elif value is sameas false %}<span class="diag-muted">false</span>
+    {%- else %}{{ value }}{% endif %}
+  {%- endmacro %}
+
+  {# ── Health Summary ────────────────────────────────────────────────────── #}
+  <section class="diag-section diag-summary-card s-app">
     <div class="diag-section-title">App</div>
-    <table class="diag-table">
-      <tr><td>version</td><td>{{ data.app.version }}</td></tr>
-      <tr><td>name</td><td>{{ data.app.name }}</td></tr>
-    </table>
+    <div class="diag-summary-body">
+      <div class="diag-summary-value">v{{ data.app.version }}</div>
+      <div class="diag-summary-meta">{{ data.app.name }}</div>
+    </div>
   </section>
 
-  {# ── Database ──────────────────────────────────────────────────────────── #}
-  <section class="diag-section s-db">
+  <section class="diag-section diag-summary-card s-db">
     <div class="diag-section-title">Database</div>
+    <div class="diag-summary-body">
+      <div class="diag-summary-value">
+        <span class="diag-dot {{ 'ok' if data.db.ok else 'fail' }}"></span>
+        <span class="{{ 'diag-ok' if data.db.ok else 'diag-fail' }}">{{ 'online' if data.db.ok else 'error' }}</span>
+      </div>
+      <div class="diag-summary-meta">
+        {% if data.db.ok and data.db.query_ms is not none %}{{ '%g'|format(data.db.query_ms) }} ms{% else %}query unavailable{% endif %}
+        {% if data.db.ok and data.db.size_human %}<span>· {{ data.db.size_human }}</span>{% endif %}
+      </div>
+      {% if data.db.ok %}
+      <div class="diag-summary-pills">
+        <span>{{ '{:,}'.format(data.db.runs) }} runs</span>
+        <span>{{ data.db.snapshots }} snapshots</span>
+        {% if data.db.fts_orphans is not none %}
+        <span class="{{ 'diag-fail' if data.db.fts_orphans else 'diag-ok' }}">{{ data.db.fts_orphans }} fts orphans</span>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="diag-section diag-summary-card s-redis">
+    <div class="diag-section-title">Redis</div>
+    <div class="diag-summary-body">
+      <div class="diag-summary-value">
+        {% if data.redis.configured and data.redis.ok %}
+          <span class="diag-dot ok"></span><span class="diag-ok">online</span>
+        {% elif data.redis.configured %}
+          <span class="diag-dot fail"></span><span class="diag-fail">error</span>
+        {% else %}
+          <span class="diag-dot warn"></span><span class="diag-warn">fallback</span>
+        {% endif %}
+      </div>
+      <div class="diag-summary-meta">
+        broker {{ broker.mode|default('unknown')|replace('_', '-') }}
+        {% if data.redis.ok and rstats.ping_ms is not none %}<span>· {{ '%g'|format(rstats.ping_ms) }} ms</span>{% endif %}
+      </div>
+      <div class="diag-summary-pills">
+        {% if rstats.clients %}<span>{{ rstats.clients.connected }} clients</span>{% endif %}
+        {% if rstats.dbsize is defined and rstats.dbsize is not none %}<span>{{ rstats.dbsize }} keys</span>{% endif %}
+        {% if fb.streams is defined %}<span>{{ fb.streams }} fallback streams</span>{% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section class="diag-section diag-summary-card s-assets">
+    <div class="diag-section-title">Vendor Assets</div>
+    <div class="diag-summary-body">
+      <div class="diag-summary-value">
+        <span class="diag-dot {{ 'ok' if assets_loaded == 3 else 'fail' }}"></span>
+        <span class="{{ 'diag-ok' if assets_loaded == 3 else 'diag-fail' }}">{{ assets_loaded }}/3 loaded</span>
+      </div>
+      <div class="diag-summary-meta">ansi_up · jspdf · fonts</div>
+      <div class="diag-summary-pills">
+        <span class="{{ 'diag-ok' if data.assets.ansi_up.ok else 'diag-fail' }}">ansi_up{% if data.assets.ansi_up.size %} {{ data.assets.ansi_up.size_human }}{% endif %}</span>
+        <span class="{{ 'diag-ok' if data.assets.jspdf.ok else 'diag-fail' }}">jspdf{% if data.assets.jspdf.size %} {{ data.assets.jspdf.size_human }}{% endif %}</span>
+        <span class="{{ 'diag-ok' if data.assets.fonts.ok else 'diag-fail' }}">fonts{% if data.assets.fonts.size %} {{ data.assets.fonts.size_human }}{% endif %}</span>
+      </div>
+    </div>
+  </section>
+
+  {# ── Database Details ──────────────────────────────────────────────────── #}
+  <section class="diag-section s-db-details">
+    <div class="diag-section-title">Database Details</div>
     <table class="diag-table">
+      {% if data.db.ok %}
+      {% if data.db.size_human %}
       <tr>
-        <td>status</td>
+        <td>size</td>
         <td>
-          <span class="diag-dot {{ 'ok' if data.db.ok else 'fail' }}"></span>
-          <span class="{{ 'diag-ok' if data.db.ok else 'diag-fail' }}">{{ 'online' if data.db.ok else 'error' }}</span>
+          {{ data.db.size_human }}
+          {% if data.db.wal_size %}<span class="diag-muted">· WAL {{ data.db.wal_size_human }}</span>{% endif %}
         </td>
       </tr>
-      {% if data.db.ok %}
-      <tr><td>runs</td><td>{{ data.db.runs }}</td></tr>
-      <tr><td>snapshots</td><td>{{ data.db.snapshots }}</td></tr>
+      {% endif %}
+      {% if data.db.mtime_age_human %}
+      <tr><td>last write</td><td>{{ data.db.mtime_age_human }}</td></tr>
+      {% endif %}
+      {% if data.db.journal_mode %}
+      <tr><td>journal</td><td>{{ data.db.journal_mode }}</td></tr>
+      {% endif %}
+      {% if data.db.reclaimable_size_human is not none %}
+      <tr>
+        <td>reclaimable</td>
+        <td>
+          {% if data.db.reclaimable_size %}
+            <span class="diag-warn">{{ data.db.reclaimable_size_human }}</span>
+          {% else %}
+            {{ data.db.reclaimable_size_human }}
+          {% endif %}
+          <span class="diag-muted">· {{ data.db.freelist_count }} free pages of {{ data.db.page_count }}</span>
+        </td>
+      </tr>
+      {% endif %}
+      {% if data.db.tables %}
+      <tr>
+        <td>tables</td>
+        <td class="diag-count-list">
+          {% for tbl in data.db.tables %}
+          <span class="diag-count-item">
+            <span class="diag-count-name">{{ tbl.name }}</span>
+            <span class="diag-count-value">{{ '{:,}'.format(tbl.rows) }}</span>
+          </span>
+          {% endfor %}
+        </td>
+      </tr>
+      {% endif %}
+      {% if data.db.fts_orphans is not none %}
+      <tr>
+        <td>fts orphans</td>
+        <td>
+          <span class="{{ 'diag-fail' if data.db.fts_orphans else 'diag-ok' }}">{{ data.db.fts_orphans }}</span>
+          {% if data.db.fts_orphans %}<span class="diag-muted">· runs_fts rows without a parent run</span>{% endif %}
+        </td>
+      </tr>
+      {% endif %}
       {% else %}
       <tr><td>error</td><td class="diag-fail">{{ data.db.error }}</td></tr>
       {% endif %}
     </table>
   </section>
 
-  {# ── Redis ─────────────────────────────────────────────────────────────── #}
-  <section class="diag-section s-redis">
-    <div class="diag-section-title">Redis</div>
+  {# ── Redis Details ─────────────────────────────────────────────────────── #}
+  <section class="diag-section s-redis-details">
+    <div class="diag-section-title">Redis Details</div>
     <table class="diag-table">
       <tr>
         <td>configured</td>
@@ -87,71 +203,146 @@
           {% endif %}
         </td>
       </tr>
+      <tr>
+        <td>broker</td>
+        <td>
+          {% if broker.available %}
+            <span class="diag-dot ok"></span><span class="diag-ok">{{ broker.mode|replace('_', '-') }}</span>
+          {% else %}
+            <span class="diag-dot warn"></span><span class="diag-warn">unavailable</span>
+            {% if broker.unavailable_reason %}<span class="diag-muted diag-broker-reason">· {{ broker.unavailable_reason }}</span>{% endif %}
+          {% endif %}
+        </td>
+      </tr>
+      {% if broker.mode == 'in_process' and broker.fallback %}
+      <tr>
+        <td>fb streams</td>
+        <td>
+          {{ fb.streams }}
+          <span class="diag-muted">· {{ fb.active }} active · {{ fb.closed }} closed{% if fb.expired_pending_purge %} · <span class="diag-warn">{{ fb.expired_pending_purge }} expired pending purge</span>{% endif %}</span>
+        </td>
+      </tr>
+      <tr>
+        <td>fb events</td>
+        <td>
+          {{ fb.events }}
+          <span class="diag-muted">· {{ '{:,}'.format(fb.bytes) }} bytes</span>
+        </td>
+      </tr>
+      <tr>
+        <td>fb pid maps</td>
+        <td>
+          {{ fb.pid_count }} pid · {{ fb.active_run_count }} run · {{ fb.session_count }} session
+        </td>
+      </tr>
+      {% endif %}
       {% if data.redis.configured %}
       <tr>
         <td>status</td>
         <td>
           <span class="diag-dot {{ 'ok' if data.redis.ok else 'fail' }}"></span>
           <span class="{{ 'diag-ok' if data.redis.ok else 'diag-fail' }}">{{ 'online' if data.redis.ok else 'error' }}</span>
+          {% if data.redis.ok and rstats.ping_ms is not none %}<span class="diag-muted diag-latency">· {{ '%g'|format(rstats.ping_ms) }} ms</span>{% endif %}
         </td>
       </tr>
       {% if not data.redis.ok and data.redis.error %}
       <tr><td>error</td><td class="diag-fail">{{ data.redis.error }}</td></tr>
       {% endif %}
+      {% if data.redis.ok %}
+      {% if rstats.dbsize is not none %}
+      <tr><td>dbsize</td><td>{{ rstats.dbsize }}</td></tr>
+      {% endif %}
+      {% if rstats.memory %}
+      <tr>
+        <td>memory</td>
+        <td>
+          {{ rstats.memory.used or '—' }}
+          <span class="diag-muted">used · peak {{ rstats.memory.peak or '—' }} · max {{ rstats.memory.max or '0' }}{% if rstats.memory.fragmentation is not none %} · frag {{ '%.2f'|format(rstats.memory.fragmentation|float) }}{% endif %}</span>
+        </td>
+      </tr>
+      {% endif %}
+      {% if rstats.persistence %}
+      <tr>
+        <td>persistence</td>
+        <td>
+          {% if rstats.persistence.rdb_last_save_human %}RDB saved {{ rstats.persistence.rdb_last_save_human }}{% else %}RDB never saved{% endif %}
+          <span class="diag-muted">· {{ rstats.persistence.rdb_changes_since_last_save }} change{{ '' if rstats.persistence.rdb_changes_since_last_save == 1 else 's' }} since save</span>
+        </td>
+      </tr>
+      {% endif %}
+      {% if rstats.evicted_keys is not none or rstats.expired_keys is not none %}
+      <tr>
+        <td>eviction</td>
+        <td>
+          <span class="{{ 'diag-fail' if rstats.evicted_keys else '' }}">{{ rstats.evicted_keys or 0 }} evicted</span>
+          <span class="diag-muted">· {{ rstats.expired_keys or 0 }} expired</span>
+        </td>
+      </tr>
+      {% endif %}
+      {% if rstats.clients %}
+      <tr>
+        <td>clients</td>
+        <td>
+          {{ rstats.clients.connected }} connected
+          <span class="{{ 'diag-fail' if rstats.clients.rejected else 'diag-muted' }}">· {{ rstats.clients.rejected }} rejected</span>
+        </td>
+      </tr>
+      {% endif %}
+      {% if rstats.namespaces %}
+      <tr>
+        <td>namespaces</td>
+        <td class="diag-count-list">
+          {% for ns in rstats.namespaces %}
+          <span class="diag-count-item">
+            <span class="diag-count-name">{{ ns.name }}</span>
+            <span class="diag-count-value{% if ns.capped %} capped{% endif %}">{{ ns.count }}{% if ns.capped %}+{% endif %}</span>
+          </span>
+          {% endfor %}
+        </td>
+      </tr>
+      {% endif %}
+      {% if rstats.stream_length %}
+      <tr>
+        <td>streams</td>
+        <td>
+          p50 {{ rstats.stream_length.p50 }} · p95 {{ rstats.stream_length.p95 }} · max {{ rstats.stream_length.max }}
+          <span class="diag-muted">· {{ rstats.stream_length.samples }} sampled</span>
+        </td>
+      </tr>
+      {% endif %}
+      {% if rstats.orphans %}
+      <tr>
+        <td>orphans</td>
+        <td>
+          <span class="{{ 'diag-fail' if rstats.orphans.orphaned else 'diag-ok' }}">{{ rstats.orphans.orphaned }}</span>
+          <span class="diag-muted">of {{ rstats.orphans.probed }} probed</span>
+        </td>
+      </tr>
+      {% endif %}
+      {% endif %}
       {% endif %}
     </table>
   </section>
 
-  {# ── Vendor Assets ─────────────────────────────────────────────────────── #}
-  <section class="diag-section s-assets">
-    <div class="diag-section-title">Vendor Assets</div>
-    <table class="diag-table">
-      <tr>
-        <td>ansi_up</td>
-        <td>
-          <span class="diag-dot {{ 'ok' if data.assets.ansi_up == 'loaded' else 'fail' }}"></span>
-          <span class="{{ 'diag-ok' if data.assets.ansi_up == 'loaded' else 'diag-fail' }}">{{ data.assets.ansi_up }}</span>
-        </td>
-      </tr>
-      <tr>
-        <td>jspdf</td>
-        <td>
-          <span class="diag-dot {{ 'ok' if data.assets.jspdf == 'loaded' else 'fail' }}"></span>
-          <span class="{{ 'diag-ok' if data.assets.jspdf == 'loaded' else 'diag-fail' }}">{{ data.assets.jspdf }}</span>
-        </td>
-      </tr>
-      <tr>
-        <td>fonts</td>
-        <td>
-          <span class="diag-dot {{ 'ok' if data.assets.fonts == 'loaded' else 'fail' }}"></span>
-          <span class="{{ 'diag-ok' if data.assets.fonts == 'loaded' else 'diag-fail' }}">{{ data.assets.fonts }}</span>
-        </td>
-      </tr>
-    </table>
-  </section>
-
   {# ── Config ────────────────────────────────────────────────────────────── #}
-  {% set cfg_items = data.config.items() | list %}
-  {% set mid = ((cfg_items | length) + 1) // 2 %}
   <section class="diag-section s-config">
     <div class="diag-section-title">Config</div>
     <div class="diag-config-grid">
-      <table class="diag-table">
-        {% for key, value in cfg_items[:mid] %}
-        <tr>
-          <td>{{ key }}</td>
-          <td>{% if value is none %}<span class="diag-muted">—</span>{% elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}{% elif value is sameas true %}true{% elif value is sameas false %}<span class="diag-muted">false</span>{% else %}{{ value }}{% endif %}</td>
-        </tr>
-        {% endfor %}
-      </table>
-      <table class="diag-table">
-        {% for key, value in cfg_items[mid:] %}
-        <tr>
-          <td>{{ key }}</td>
-          <td>{% if value is none %}<span class="diag-muted">—</span>{% elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}{% elif value is sameas true %}true{% elif value is sameas false %}<span class="diag-muted">false</span>{% else %}{{ value }}{% endif %}</td>
-        </tr>
-        {% endfor %}
-      </table>
+      {% for label, keys in config_groups %}
+      <section class="diag-config-group">
+        <div class="diag-config-group-label">{{ label }}</div>
+        <table class="diag-table">
+          {% for key in keys %}
+            {% if key in data.config %}
+            <tr>
+              <td>{{ key }}</td>
+              <td>{{ diag_config_value(data.config[key]) }}</td>
+            </tr>
+            {% endif %}
+          {% endfor %}
+        </table>
+      </section>
+      {% endfor %}
     </div>
   </section>
 
@@ -196,7 +387,7 @@
         <table class="diag-table">
           {% for row in data.stats.top_by_freq %}
           <tr>
-            <td class="diag-cmd-cell" title="{{ row.command | e }}">{{ row.command | truncate(48, killwords=True, end='…') }}</td>
+            <td class="diag-cmd-cell" tabindex="0" role="button" aria-expanded="false" title="{{ row.command | e }}">{{ row.command }}</td>
             <td class="diag-stat-val">× {{ row.count }}</td>
           </tr>
           {% endfor %}
@@ -211,7 +402,7 @@
         <table class="diag-table">
           {% for row in data.stats.top_by_duration %}
           <tr>
-            <td class="diag-cmd-cell" title="{{ row.command | e }}">{{ row.command | truncate(48, killwords=True, end='…') }}</td>
+            <td class="diag-cmd-cell" tabindex="0" role="button" aria-expanded="false" title="{{ row.command | e }}">{{ row.command }}</td>
             <td class="diag-stat-val">{{ row.elapsed }}</td>
           </tr>
           {% endfor %}
@@ -228,7 +419,9 @@
   <section class="diag-section s-tools">
     <div class="diag-section-title">
       Tools
-      <span class="diag-section-title-count">{{ data.tools.present | length }} present · {{ data.tools.missing | length }} missing</span>
+      <span class="diag-section-title-count">
+        {{ data.tools.present | length }} present · {{ data.tools.missing | length }} missing
+      </span>
     </div>
     {% if not data.tools.present and not data.tools.missing %}
       <div class="diag-empty">No allowlist configured — all commands permitted.</div>
@@ -237,7 +430,7 @@
       <div class="diag-tools-block">
         <div class="diag-tools-sublabel">present</div>
         <div class="diag-chips">
-          {% for tool in data.tools.present %}<span class="diag-chip present">{{ tool }}</span>{% endfor %}
+          {% for tool in data.tools.present %}<span class="diag-chip present" title="{{ tool.path }}">{{ tool.name }}</span>{% endfor %}
         </div>
       </div>
       {% endif %}
@@ -254,28 +447,78 @@
 
 </main>
 <script>
-  // Auto-refresh toggle: persists in localStorage and reloads the page every
-  // 10s while enabled. Preserves the tz_offset query redirect.
+  // Always-on live refresh: every 10s, fetch the same /diag URL (preserving
+  // the tz_offset query string the initial-load redirect set) and swap only
+  // the <main> body and the refreshed timestamp. The topbar (header,
+  // status bar, live indicator) stays mounted so scroll position is
+  // preserved and the indicator does not flash. Pauses while the tab is
+  // hidden so background tabs do not keep hitting /diag.
   (function () {
-    var KEY = 'darklab:diag:autorefresh';
     var INTERVAL_MS = 10000;
-    var box = document.getElementById('diag-refresh-checkbox');
-    if (!box) return;
-    var enabled = false;
-    try { enabled = localStorage.getItem(KEY) === '1'; } catch (_) {}
-    box.checked = enabled;
-    var timer = null;
-    function start() {
-      if (timer) return;
-      timer = window.setTimeout(function () { window.location.reload(); }, INTERVAL_MS);
+    var inFlight = false;
+    var indicator = document.querySelector('.diag-live-indicator');
+
+    async function refreshDiag() {
+      if (inFlight || document.visibilityState !== 'visible') return;
+      inFlight = true;
+      if (indicator) indicator.classList.add('refreshing');
+      try {
+        var resp = await fetch('/diag' + window.location.search, {
+          cache: 'no-store',
+          credentials: 'same-origin',
+        });
+        if (!resp.ok) return;
+        var html = await resp.text();
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        var newMain = doc.querySelector('.diag-main');
+        var oldMain = document.querySelector('.diag-main');
+        if (newMain && oldMain) oldMain.replaceWith(newMain);
+        var newGen = doc.querySelector('.diag-refreshed-at time');
+        var oldGen = document.querySelector('.diag-refreshed-at time');
+        if (newGen && oldGen) {
+          oldGen.textContent = newGen.textContent;
+          var dt = newGen.getAttribute('datetime');
+          if (dt) oldGen.setAttribute('datetime', dt);
+        }
+      } catch (_) {
+        // Soft-fail: the next interval will try again.
+      } finally {
+        inFlight = false;
+        if (indicator) indicator.classList.remove('refreshing');
+      }
     }
-    function stop() {
-      if (timer) { window.clearTimeout(timer); timer = null; }
+
+    setInterval(refreshDiag, INTERVAL_MS);
+    document.addEventListener('visibilitychange', function () {
+      // Refresh immediately when the tab becomes visible again so the
+      // operator does not stare at a stale snapshot for up to 10s.
+      if (document.visibilityState === 'visible') refreshDiag();
+    });
+  })();
+
+  // Tap-to-expand for Top Commands cells. Delegated on document so it
+  // survives the 10s refresh swap of `.diag-main`. Single click toggles;
+  // Enter and Space do the same for keyboard users (cells are
+  // tabindex=0, role=button, aria-expanded).
+  (function () {
+    function toggleCmdCell(cell) {
+      var expanded = cell.classList.toggle('expanded');
+      cell.setAttribute('aria-expanded', expanded ? 'true' : 'false');
     }
-    if (enabled) start();
-    box.addEventListener('change', function () {
-      try { localStorage.setItem(KEY, box.checked ? '1' : '0'); } catch (_) {}
-      if (box.checked) { start(); } else { stop(); }
+    document.addEventListener('click', function (event) {
+      var cell = event.target && event.target.closest
+        ? event.target.closest('.diag-cmd-cell')
+        : null;
+      if (cell) toggleCmdCell(cell);
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      var cell = event.target && event.target.closest
+        ? event.target.closest('.diag-cmd-cell')
+        : null;
+      if (!cell) return;
+      event.preventDefault();
+      toggleCmdCell(cell);
     });
   })();
 </script>
