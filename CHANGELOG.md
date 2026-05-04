@@ -6,6 +6,16 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
+## [1.7] — Unreleased
+
+### Added
+
+### Changed
+
+### Fixed
+
+---
+
 ## [1.6] — 2026-05-04
 
 ### Added

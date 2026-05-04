@@ -9,7 +9,7 @@ from pathlib import Path
 import yaml
 from redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
 
-APP_VERSION = "1.6"
+APP_VERSION = "1.7"
 PROJECT_NAME = "darklab_shell"
 
 PROJECT_README = "https://gitlab.com/darklab.sh/darklab_shell#darklab_shell"

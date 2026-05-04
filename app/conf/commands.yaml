@@ -2885,6 +2885,7 @@ commands:
         - nmap
       deny:
         - nmap -sS
+        - nmap -O
         - nmap --privileged
         - nmap -oN
         - nmap -oX

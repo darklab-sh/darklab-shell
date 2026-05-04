@@ -703,7 +703,10 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── docker-compose.yml
 ├── docs/
 │   ├── ROADMAP.md              # Product roadmap for projects, annotations, artifacts, notes, exports, and target context
-│   └── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
+│   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
+│   └── release-drafts/
+│       ├── v1.7-merge-request.md # Draft merge request summary for the v1.7 release
+│       └── v1.7-release-notes.md # Draft release notes for the v1.7 release
 ├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser
 ├── examples/
 │   ├── docker-compose.prod.yml  # Optional production Docker Compose override (GELF, proxy env, external network)

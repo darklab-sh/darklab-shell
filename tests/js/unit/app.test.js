@@ -300,7 +300,7 @@ describe('app helpers', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
 
-    await loadAppFns({
+    const { getHudClockPreference } = await loadAppFns({
       apiFetch,
       cookies: { pref_timestamps: 'off', pref_line_numbers: 'off', pref_hud_clock: 'utc' },
       themeRegistry: {
@@ -335,6 +335,7 @@ describe('app helpers', () => {
     expect(document.getElementById('options-welcome-select').value).toBe('disable_animation')
     expect(document.getElementById('options-share-redaction-select').value).toBe('redacted')
     expect(document.getElementById('options-hud-clock-select').value).toBe('local')
+    expect(getHudClockPreference()).toBe('local')
   })
 
   it('switches the visible prompt into confirmation mode when requested', async () => {

@@ -642,6 +642,8 @@ function applyHudClockPreference(mode, persist = true) {
   if (persist) {
     _primePreferenceValue('pref_hud_clock', nextMode);
     try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist HUD clock preference', err); }
+  } else {
+    _primePreferenceValue('pref_hud_clock', nextMode);
   }
   syncOptionsControls();
   if (typeof globalThis.renderHudClock === 'function') globalThis.renderHudClock();
