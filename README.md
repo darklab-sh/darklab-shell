@@ -7,10 +7,10 @@ The backend runs on Flask/Gunicorn, Redis, and SQLite. Commands go through allow
 The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile shell, session Files, sharing/redaction, themes, and coverage across pytest, Vitest, Playwright, and container smoke tests. A live instance is available at [shell.darklab.sh](https://shell.darklab.sh/).
 
 <div align="center">
-<b>Desktop Demo</b>
+<b>Desktop Demo</b><br>
 ![Desktop demo](assets/darklab_shell_demo.mp4)
 <br>
-<b>Mobile Demo</b>
+<b>Mobile Demo</b><br>
  ![Mobile demo](assets/darklab_shell_mobile_demo.mp4){width=360px}
 </div>
 
