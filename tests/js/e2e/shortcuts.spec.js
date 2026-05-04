@@ -383,9 +383,10 @@ test.describe('Ctrl+R reverse-history search', () => {
     page,
   }) => {
     await runCommand(page, 'hostname')
-    await runCommand(page, 'dig darklab.sh A')
+    await runCommand(page, 'whoami')
+    await waitForHistoryRuns(page, 2)
     await page.locator('#cmd').press('Control+r')
-    // 'host' only matches 'hostname', not 'dig darklab.sh A'
+    // 'host' only matches 'hostname', not the other seeded history row.
     await page.locator('#cmd').type('host')
     await expect(page.locator('#hist-search-dropdown .hist-search-item')).toHaveCount(1)
 
