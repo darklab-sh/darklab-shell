@@ -1012,6 +1012,7 @@ function setTabStatus(id, st) {
       mountShellPrompt(id);
     }
     if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
+    if (typeof refreshSearchDiscoverabilityUi === 'function') refreshSearchDiscoverabilityUi();
   }
   updateOutputFollowButton(id);
   if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();

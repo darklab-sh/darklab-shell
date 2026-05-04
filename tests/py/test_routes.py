@@ -253,7 +253,7 @@ class TestConfigRoute:
         client = get_client()
         data = json.loads(client.get("/config").data)
         for key in (
-            "app_name", "project_readme", "prompt_prefix", "default_theme",
+            "app_name", "project_readme", "prompt_username", "prompt_domain", "default_theme",
             "max_tabs", "max_output_lines", "workspace_enabled",
         ):
             assert key in data
@@ -307,11 +307,12 @@ class TestConfigRoute:
             data = json.loads(client.get("/config").data)
         assert data["command_timeout_seconds"] == 300
 
-    def test_prompt_prefix_reflects_cfg(self):
+    def test_prompt_identity_reflects_cfg(self):
         client = get_client()
-        with mock.patch.dict("config.CFG", {"prompt_prefix": "ops@darklab:~$"}):
+        with mock.patch.dict("config.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             data = json.loads(client.get("/config").data)
-        assert data["prompt_prefix"] == "ops@darklab:~$"
+        assert data["prompt_username"] == "ops"
+        assert data["prompt_domain"] == "darklab"
 
     def test_project_readme_is_constant(self):
         client = get_client()

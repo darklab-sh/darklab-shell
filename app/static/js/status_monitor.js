@@ -3284,6 +3284,10 @@
     monitorEl?.classList.add('u-hidden');
   }
 
+  function isStatusMonitorOpen() {
+    return isOpen;
+  }
+
   function _makeHudCellOpenMonitor(cell, source, label) {
     if (!cell || cell.dataset.statusMonitorTrigger === '1') return;
     cell.dataset.statusMonitorTrigger = '1';
@@ -3395,5 +3399,6 @@
 
   window.openStatusMonitor = openStatusMonitor;
   window.closeStatusMonitor = closeStatusMonitor;
+  window.isStatusMonitorOpen = isStatusMonitorOpen;
   window.refreshStatusMonitor = refreshStatusMonitor;
 }());

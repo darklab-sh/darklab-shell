@@ -36,7 +36,7 @@ function _applyComposerPromptMode() {
   const isConfirm = _composerPromptMode === 'confirm';
   const defaultPromptLabel = typeof buildPromptLabel === 'function'
     ? buildPromptLabel()
-    : (_defaultDesktopPromptLabel || 'anon@darklab:~ $');
+    : (_defaultDesktopPromptLabel || 'anon@darklab.sh:~ $');
   const desktopLabel = isConfirm ? '[yes/no]:' : defaultPromptLabel;
   const mobileLabel = isConfirm ? '[yes/no]:' : '';
   const promptPrefix = typeof shellPromptWrap !== 'undefined' && shellPromptWrap
@@ -508,6 +508,7 @@ function _buildCurrentSessionPreferenceSnapshot() {
     pref_share_redaction_default: getShareRedactionDefaultPreference(),
     pref_run_notify: getRunNotifyPreference(),
     pref_hud_clock: getHudClockPreference(),
+    pref_prompt_username: getPromptUsernamePreference(),
   });
 }
 
@@ -566,6 +567,7 @@ async function loadSessionPreferences() {
     applyWelcomeIntroPreference(prefs.pref_welcome_intro, false);
     applyShareRedactionDefaultPreference(prefs.pref_share_redaction_default, false);
     applyHudClockPreference(prefs.pref_hud_clock, false);
+    applyPromptUsernamePreference(prefs.pref_prompt_username, false);
     if (typeof applyRunNotifyPreference === 'function') {
       await applyRunNotifyPreference(prefs.pref_run_notify, false);
     }
@@ -592,6 +594,25 @@ function getRunNotifyPreference() {
 
 function getHudClockPreference() {
   return PreferenceCore.coerceHudClockMode(getPreference('pref_hud_clock'));
+}
+
+function getPromptUsernamePreference() {
+  return PreferenceCore.normalizePromptUsername(getPreference('pref_prompt_username'));
+}
+
+function _promptUsernameInputValid(value) {
+  const username = String(value || '').trim();
+  return !username || PreferenceCore.normalizePromptUsername(username) === username;
+}
+
+function syncPromptUsernameValidation() {
+  if (!optionsPromptUsernameInput) return true;
+  const valid = _promptUsernameInputValid(optionsPromptUsernameInput.value);
+  optionsPromptUsernameInput.setAttribute('aria-invalid', valid ? 'false' : 'true');
+  if (optionsPromptUsernameError) {
+    optionsPromptUsernameError.classList.toggle('u-hidden', valid);
+  }
+  return valid;
 }
 
 async function applyRunNotifyPreference(mode, persist = true) {
@@ -635,6 +656,12 @@ function syncOptionsControls() {
   if (optionsShareRedactionSelect) optionsShareRedactionSelect.value = getShareRedactionDefaultPreference();
   if (optionsNotifyToggle) optionsNotifyToggle.checked = getRunNotifyPreference() === 'on';
   if (optionsHudClockSelect) optionsHudClockSelect.value = getHudClockPreference();
+  if (optionsPromptUsernameInput) {
+    optionsPromptUsernameInput.value = getPromptUsernamePreference();
+    const defaultUsername = String(APP_CONFIG?.prompt_username || 'anon').trim() || 'anon';
+    optionsPromptUsernameInput.placeholder = `Use server default (${defaultUsername})`;
+    syncPromptUsernameValidation();
+  }
   if (typeof syncAppSelect === 'function') {
     syncAppSelect(optionsTsSelect);
     syncAppSelect(optionsWelcomeSelect);
@@ -683,6 +710,25 @@ function applyShareRedactionDefaultPreference(mode, persist = true) {
     try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist share-redaction preference', err); }
   }
   syncOptionsControls();
+}
+
+function applyPromptUsernamePreference(username, persist = true) {
+  const rawUsername = String(username || '').trim();
+  const nextUsername = PreferenceCore.normalizePromptUsername(rawUsername);
+  if (rawUsername && !nextUsername) {
+    syncPromptUsernameValidation();
+    return false;
+  }
+  if (persist) {
+    _primePreferenceValue('pref_prompt_username', nextUsername);
+    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist prompt username preference', err); }
+  } else {
+    _primePreferenceValue('pref_prompt_username', nextUsername);
+  }
+  syncOptionsControls();
+  if (typeof setComposerPromptMode === 'function') setComposerPromptMode(_composerPromptMode);
+  else if (typeof syncShellPrompt === 'function') syncShellPrompt();
+  return true;
 }
 
 function _closeMajorOverlays() {
@@ -789,6 +835,12 @@ function clearActiveShortcutTab() {
   cancelWelcome(activeTabId);
   const activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
   clearTab(activeTabId, { preserveRunState: !!(activeTab && activeTab.st === 'running') });
+}
+
+function isStatusMonitorShortcutOpen() {
+  if (typeof isStatusMonitorOpen === 'function') return isStatusMonitorOpen();
+  const monitor = document.getElementById('status-monitor');
+  return !!(monitor && !monitor.classList.contains('u-hidden'));
 }
 
 function _buildShareRedactionRememberField() {
@@ -1107,6 +1159,11 @@ function handleActionShortcut(e) {
     e.preventDefault();
     return true;
   }
+  if (e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'd' || e.key === 'D')) {
+    closeActiveShortcutTab();
+    e.preventDefault();
+    return true;
+  }
   return false;
 }
 
@@ -1143,7 +1200,8 @@ function handleChromeShortcut(e) {
   // All remaining chrome chords are shift-free.
   if (e.shiftKey) return false;
   if (eventMatchesLetter(e, 'm')) {
-    if (typeof openStatusMonitor === 'function') void openStatusMonitor({ source: 'shortcut' });
+    if (isStatusMonitorShortcutOpen() && typeof closeStatusMonitor === 'function') closeStatusMonitor();
+    else if (typeof openStatusMonitor === 'function') void openStatusMonitor({ source: 'shortcut' });
     e.preventDefault();
     return true;
   }
@@ -1711,7 +1769,7 @@ function _buildThemePreviewCard(theme) {
   prompt.className = 'theme-card-preview-prompt';
   prompt.textContent = typeof buildPromptLabel === 'function'
     ? buildPromptLabel()
-    : 'anon@darklab:~ $';
+    : 'anon@darklab.sh:~ $';
   content.appendChild(prompt);
   for (let index = 0; index < 4; index += 1) {
     const line = document.createElement('span');
@@ -2005,6 +2063,13 @@ function _cliNormalizeValue(value) {
   return String(value || '').trim().toLowerCase().replace(/_/g, '-');
 }
 
+function _cliNormalizePromptUsernameValue(value) {
+  const raw = String(value || '').trim();
+  const normalized = _cliNormalizeValue(raw);
+  if (['default', 'clear', 'unset', 'server-default'].includes(normalized)) return '';
+  return PreferenceCore.normalizePromptUsername(raw) || null;
+}
+
 function _cliConfigEntries() {
   return [
     {
@@ -2063,6 +2128,15 @@ function _cliConfigEntries() {
       get: () => getHudClockPreference(),
       set: (value) => applyHudClockPreference(value),
     },
+    {
+      key: 'prompt-username',
+      description: 'Username shown before the prompt domain',
+      values: null,
+      valueHelp: '<username> | default',
+      get: () => getPromptUsernamePreference() || 'default',
+      normalize: _cliNormalizePromptUsernameValue,
+      set: (value) => applyPromptUsernamePreference(value),
+    },
   ];
 }
 
@@ -2072,6 +2146,10 @@ function _findCliConfigEntry(key) {
 }
 
 function _normalizeCliConfigEntryValue(entry, value) {
+  if (typeof entry.normalize === 'function') {
+    const normalized = entry.normalize(value);
+    return normalized === '' || normalized ? normalized : null;
+  }
   const normalized = _cliNormalizeValue(value);
   const aliased = entry.aliases && Object.prototype.hasOwnProperty.call(entry.aliases, normalized)
     ? entry.aliases[normalized]
@@ -2136,9 +2214,9 @@ async function handleConfigCommand(cmd, tabId = null) {
   }
 
   const normalizedValue = _normalizeCliConfigEntryValue(entry, value);
-  if (!normalizedValue) {
+  if (normalizedValue === null) {
     _cliAppendLine(`config: invalid value '${value}' for ${entry.key}`, 'exit-fail', tabId);
-    _cliAppendLine(`allowed values: ${entry.values.join(', ')}`, '', tabId);
+    _cliAppendLine(`allowed values: ${entry.values ? entry.values.join(', ') : entry.valueHelp}`, '', tabId);
     _cliSetStatus('fail');
     return true;
   }
@@ -2449,9 +2527,11 @@ function _runtimeConfigContext() {
   };
   const sequenceArgHints = {};
   entries.forEach((entry) => {
-    sequenceArgHints[`set ${entry.key}`] = entry.values.map(value => _runtimeHint(value, entry.description));
+    sequenceArgHints[`set ${entry.key}`] = Array.isArray(entry.values)
+      ? entry.values.map(value => _runtimeHint(value, entry.description))
+      : [_runtimeHint(entry.valueHelp || '<value>', entry.description)];
     sequenceArgHints[`get ${entry.key}`] = [];
-    entry.values.forEach(value => { argHints[value] = []; });
+    if (Array.isArray(entry.values)) entry.values.forEach(value => { argHints[value] = []; });
   });
   return _runtimeContextSpec({ expectsValue: ['get', 'set'], argHints, sequenceArgHints });
 }

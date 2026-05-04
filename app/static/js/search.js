@@ -134,6 +134,11 @@ function _getCachedSearchSignalCounts() {
   return _normalizeSearchSignalCounts(tab._outputSignalCounts);
 }
 
+function _isActiveSearchTabRunning() {
+  const tab = typeof getTab === 'function' ? getTab(activeTabId) : null;
+  return !!(tab && tab.st === 'running');
+}
+
 function _getSearchSignalCounts(out) {
   const cached = _getCachedSearchSignalCounts();
   if (cached) return cached;
@@ -221,13 +226,18 @@ function refreshSearchDiscoverabilityUi() {
   }
   if (typeof searchSummaryBtn !== 'undefined' && searchSummaryBtn) {
     const hasSignals = counts.findings > 0 || counts.warnings > 0 || counts.errors > 0 || counts.summaries > 0;
-    searchSummaryBtn.disabled = !hasSignals;
-    searchSummaryBtn.title = hasSignals
+    const tabRunning = _isActiveSearchTabRunning();
+    searchSummaryBtn.disabled = !hasSignals || tabRunning;
+    searchSummaryBtn.title = tabRunning
+      ? 'Summary is unavailable while this tab has a running command'
+      : hasSignals
       ? 'Summarize findings, warnings, errors, and summary lines'
       : 'No findings, warnings, errors, or summary lines yet';
     searchSummaryBtn.setAttribute(
       'aria-label',
-      hasSignals
+      tabRunning
+        ? 'Summary is unavailable while this tab has a running command'
+        : hasSignals
         ? 'Summarize findings, warnings, errors, and summary lines'
         : 'No findings, warnings, errors, or summary lines yet',
     );
@@ -866,6 +876,7 @@ function summarizeCurrentOutputSignals() {
   const out = getOutput(activeTabId);
   if (!out || typeof appendLine !== 'function') return false;
   const tab = typeof getTab === 'function' ? getTab(activeTabId) : null;
+  if (tab && tab.st === 'running') return false;
   const blocks = _collectSearchCommandBlocks(out);
   if (!blocks.length) {
     const transcriptLines = Array.from(out.querySelectorAll('.line')).filter((line) => line instanceof Element);

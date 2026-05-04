@@ -543,7 +543,7 @@ describe('search helpers', () => {
     expect(window.__openedSearchScope).toBe('warnings')
   })
 
-  it('disables summarize when there are no signals', () => {
+  it('disables summarize when there are no signals or the active tab is running', () => {
     const { refreshSearchDiscoverabilityUi } = loadSearchFns()
     document.getElementById('out').innerHTML = [
       '<span class="line">plain output</span>',
@@ -553,6 +553,22 @@ describe('search helpers', () => {
     refreshSearchDiscoverabilityUi()
 
     expect(document.getElementById('searchSummaryBtn').disabled).toBe(true)
+
+    const { refreshSearchDiscoverabilityUi: refreshRunning, summarizeCurrentOutputSignals } = loadSearchFns({
+      tab: { id: 'tab-1', command: 'nmap -sV ip.darklab.sh', st: 'running' },
+    })
+    document.getElementById('out').innerHTML = [
+      '<span class="line" data-signals="findings">443/tcp open https</span>',
+    ].join('')
+
+    refreshRunning()
+
+    expect(document.getElementById('searchSummaryBtn').disabled).toBe(true)
+    expect(document.getElementById('searchSummaryBtn').title).toBe(
+      'Summary is unavailable while this tab has a running command',
+    )
+    expect(summarizeCurrentOutputSignals()).toBe(false)
+    expect(document.getElementById('out').textContent).not.toContain('Command Findings:')
   })
 
   it('uses server-provided signal metadata for scoped counts and highlights', () => {

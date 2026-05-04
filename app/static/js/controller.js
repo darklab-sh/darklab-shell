@@ -425,6 +425,12 @@ optionsNotifyToggle?.addEventListener('change', e => {
 optionsHudClockSelect?.addEventListener('change', e => {
   applyHudClockPreference(e.target.value);
 });
+optionsPromptUsernameInput?.addEventListener('input', () => {
+  syncPromptUsernameValidation();
+});
+optionsPromptUsernameInput?.addEventListener('change', e => {
+  if (syncPromptUsernameValidation()) applyPromptUsernamePreference(e.target.value);
+});
 
 // Session token options panel — UI-native controls
 
@@ -893,15 +899,17 @@ applyLineNumberPreference(getPreference('pref_line_numbers') || 'off', false);
 applyWelcomeIntroPreference(getWelcomeIntroPreference(), false);
 applyShareRedactionDefaultPreference(getShareRedactionDefaultPreference(), false);
 applyHudClockPreference(getHudClockPreference(), false);
+applyPromptUsernamePreference(getPromptUsernamePreference(), false);
 syncOptionsControls();
-if (typeof loadSessionPreferences === 'function') {
-  loadSessionPreferences().catch(err => {
+const sessionPreferencesLoad = typeof loadSessionPreferences === 'function'
+  ? loadSessionPreferences().catch(err => {
     logClientError('failed to apply session preferences', err);
-  });
-}
+  })
+  : Promise.resolve();
 
 const commandHistoryLimit = encodeURIComponent(String(APP_CONFIG.recent_commands_limit || 50));
 Promise.all([
+  sessionPreferencesLoad,
   apiFetch(`/history/commands?limit=${commandHistoryLimit}`).then(r => r.json()).catch(err => {
     logClientError('failed to load /history/commands', err);
     return { runs: [] };
@@ -910,7 +918,7 @@ Promise.all([
     logClientError('failed to load /history/active', err);
     return { runs: [] };
   }),
-]).then(([historyData, activeData]) => {
+]).then(([, historyData, activeData]) => {
   hydrateCmdHistory(historyData.runs || []);
   const restoredTabs = typeof restoreTabSessionState === 'function'
     && restoreTabSessionState();

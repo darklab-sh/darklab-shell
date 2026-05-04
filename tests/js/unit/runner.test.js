@@ -557,6 +557,27 @@ describe('client-side UI command pipe helpers', () => {
     expect(appendCommandEcho).not.toHaveBeenCalled()
   })
 
+  it('routes exit and quit commands to tab close without persisting a run', () => {
+    const closeTab = vi.fn()
+    const addToHistory = vi.fn()
+    const apiFetch = vi.fn()
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      closeTab,
+      addToHistory,
+      apiFetch,
+    })
+
+    expect(submitCommand('exit')).toBe(true)
+    expect(submitCommand('quit')).toBe(true)
+
+    expect(closeTab).toHaveBeenCalledTimes(2)
+    expect(closeTab).toHaveBeenNthCalledWith(1, 'tab-1')
+    expect(closeTab).toHaveBeenNthCalledWith(2, 'tab-1')
+    expect(addToHistory).not.toHaveBeenCalled()
+    expect(apiFetch).not.toHaveBeenCalled()
+  })
+
   it('clears stale failed tab and HUD state after a successful client-side built-in', async () => {
     const appendLine = vi.fn()
     const { submitCommand, tabs, status } = loadRunnerFns({
@@ -616,6 +637,7 @@ function loadRunnerFns({
   handleThemeCommand: handleThemeCommandOverride = undefined,
   handleConfigCommand: handleConfigCommandOverride = undefined,
   handleWorkflowTerminalCommand: handleWorkflowTerminalCommandOverride = undefined,
+  closeTab: closeTabOverride = vi.fn(),
   refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride = undefined,
   openWorkspaceEditorFromCommand: openWorkspaceEditorFromCommandOverride = undefined,
   downloadWorkspaceFile: downloadWorkspaceFileOverride = undefined,
@@ -739,6 +761,7 @@ function loadRunnerFns({
       reloadSessionHistory: reloadSessionHistoryOverride,
       hydrateCmdHistory: hydrateCmdHistoryOverride,
       createTab,
+      closeTab: closeTabOverride,
       clearTab,
       cancelWelcome,
       welcomeOwnsTab,
@@ -829,6 +852,7 @@ function loadRunnerFns({
     storage,
     setTabLabel,
     clearTab,
+    closeTab: closeTabOverride,
     cancelWelcome,
     showToast,
     interruptPromptLine: fns.interruptPromptLine,

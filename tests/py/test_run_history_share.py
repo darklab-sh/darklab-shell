@@ -1169,6 +1169,7 @@ class TestRunStreaming:
         # Default (non-Mac) User-Agent renders Alt-prefixed chords.
         assert "Alt+T" in body
         assert "Alt+Shift+C" in body
+        assert "Ctrl+D" in body
         assert "Ctrl+U" in body
         assert "Option+" not in body
         assert '"type": "exit"' in body
@@ -1186,6 +1187,7 @@ class TestRunStreaming:
         assert resp.status_code == 200
         assert "Option+T" in body
         assert "Option+Shift+C" in body
+        assert "Ctrl+D" in body
         assert "Ctrl+U" in body
         assert "Alt+" not in body
 

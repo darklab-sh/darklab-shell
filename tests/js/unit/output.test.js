@@ -74,7 +74,7 @@ describe('appendLine', () => {
 
   it('renders shell as a normal workspace folder in the prompt', () => {
     const { buildPromptLabel, currentPromptWorkspacePath } = loadOutputFns({
-      appConfig: { workspace_enabled: true, prompt_prefix: 'anon@darklab:~$' },
+      appConfig: { workspace_enabled: true, prompt_username: 'anon', prompt_domain: 'darklab.sh' },
       extraGlobals: {
         _workspaceCwd: () => 'shell',
         workspaceDisplayPath: path => {
@@ -85,7 +85,7 @@ describe('appendLine', () => {
     })
 
     expect(currentPromptWorkspacePath()).toBe('/shell')
-    expect(buildPromptLabel()).toBe('anon@darklab:/shell $')
+    expect(buildPromptLabel()).toBe('anon@darklab.sh:/shell $')
   })
 
   it('falls back to plain-text rendering when AnsiUp is unavailable', () => {

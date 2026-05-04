@@ -68,10 +68,18 @@ describe('autocomplete helpers', () => {
     expect(item.innerHTML).toContain('<span class="ac-match">pi</span>')
     expect(document.getElementById('ac').style.display).toBe('block')
 
-    document.getElementById('cmd').value = 'np'
+    document.getElementById('cmd').value = 'nmp'
     acShow(['nmap'])
     expect(document.querySelector('.ac-item')?.innerHTML).toContain('<span class="ac-match">n</span>')
+    expect(document.querySelector('.ac-item')?.innerHTML).toContain('<span class="ac-match">m</span>')
     expect(document.querySelector('.ac-item')?.innerHTML).toContain('<span class="ac-match">p</span>')
+
+    document.getElementById('cmd').value = 'pign'
+    acShow(['ping'])
+    expect(document.querySelector('.ac-item')?.innerHTML).toContain('<span class="ac-match">p</span>')
+    expect(document.querySelector('.ac-item')?.innerHTML).toContain('<span class="ac-match">i</span>')
+    expect(document.querySelector('.ac-item')?.innerHTML).toContain('<span class="ac-match">n</span>')
+    expect(document.querySelector('.ac-item')?.innerHTML).toContain('<span class="ac-match">g</span>')
   })
 
   it('renders suggestions from the shared composer value accessor when present', () => {
@@ -528,6 +536,37 @@ describe('autocomplete helpers', () => {
       'openssl ciphers -v',
     ])
     expect(getAutocompleteMatches('op', 2).map(item => item.value)).toEqual(['openssl', 'oping'])
+  })
+
+  it('keeps fuzzy root matches tight, supports adjacent swaps, and preserves substring matches', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        acSuggestions: [],
+        acContextRegistry: {
+          ping: { flags: [], expects_value: [], arg_hints: {} },
+          fping: { flags: [], expects_value: [], arg_hints: {} },
+          subfinder: { flags: [], expects_value: [], arg_hints: {} },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('png', 3).map(item => item.value)).toEqual(['ping', 'fping'])
+    expect(getAutocompleteMatches('pign', 4).map(item => item.value)).toEqual(['ping', 'fping'])
+    expect(getAutocompleteMatches('pngi', 4).map(item => item.value)).toEqual([])
+    expect(getAutocompleteMatches('sind', 4).map(item => item.value)).toEqual([])
+    expect(getAutocompleteMatches('find', 4).map(item => item.value)).toEqual(['subfinder'])
   })
 
   it('uses subcommand-scoped flags without leaking sibling flags', () => {
@@ -1086,7 +1125,6 @@ describe('autocomplete helpers', () => {
       '<wordlist>',
     ])
     expect(getAutocompleteMatches('dnsx -w sdm', 11).map(item => item.value)).toEqual([
-      '/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt',
       '<wordlist>',
     ])
     expect(getAutocompleteMatches('legacy -w sub', 13).map(item => item.value)).toEqual(['<wordlist>'])

@@ -9,7 +9,7 @@
 const _welcomeWaiters = new Set();
 const _welcomePrompt = typeof buildPromptLabel === 'function'
   ? buildPromptLabel()
-  : 'anon@darklab:~ $';
+  : 'anon@darklab.sh:~ $';
 const _welcomeGroupOrder = ['basics', 'dns', 'web', 'recon', 'advanced'];
 const _welcomeStatusFrames = ['initializing /', 'initializing -', 'initializing \\', 'initializing |'];
 const _welcomeStatusPendingText = 'initializing...';

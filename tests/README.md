@@ -18,12 +18,12 @@ The suites are layered on purpose:
 
 Current totals:
 
-- behavior tests: 2,354
+- behavior tests: 2,356
 - docs/inventory meta-tests: 30
 - `pytest`: 1182 (1152 behavior + 30 meta)
-- `vitest`: 966
+- `vitest`: 970
 - `playwright`: 236
-- total: 2,384
+- total: 2,388
 
 This document is organized in two parts:
 
@@ -566,8 +566,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestExpiryNote.test_returns_empty_when_already_expired` | Returns empty when already expired. |
 | `TestExpiryNote.test_returns_empty_on_invalid_date` | Returns empty on invalid date. |
 | `TestExpiryNote.test_includes_expiry_date` | Checks includes expiry date handling. |
-| `TestPromptEchoText.test_uses_configured_prompt_prefix` | Checks `_prompt_echo_text` renders the configured `CFG["prompt_prefix"]`. |
-| `TestPromptEchoText.test_falls_back_to_default_identity_when_prefix_missing` | Checks fallback to the default prompt identity when `prompt_prefix` is empty. |
+| `TestPromptEchoText.test_uses_configured_prompt_identity` | Checks `_prompt_echo_text` renders the configured prompt username and domain. |
+| `TestPromptEchoText.test_falls_back_to_default_identity_when_parts_are_missing` | Checks fallback to the default prompt identity when the configured username and domain are empty. |
 | `TestPromptEchoText.test_strips_trailing_space_when_label_empty` | Checks trailing-space strip when the echoed label is empty. |
 | `TestNormalizePermalinkLinesPromptEcho.test_unstructured_content_uses_configured_prefix` | Unstructured content synthesizes a prompt-echo line using the configured prefix. |
 | `TestNormalizePermalinkLinesPromptEcho.test_structured_snapshot_without_echo_gets_configured_prefix` | Structured snapshots without an echo line get one synthesized with the configured prefix. |
@@ -890,7 +890,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestConfigRoute.test_contains_timeout_and_welcome_keys` | Contains timeout and welcome keys. |
 | `TestConfigRoute.test_all_new_keys_are_ints` | Checks that all new keys are ints. |
 | `TestConfigRoute.test_command_timeout_reflects_cfg` | Checks that command timeout reflects CFG. |
-| `TestConfigRoute.test_prompt_prefix_reflects_cfg` | Checks that prompt prefix reflects CFG. |
+| `TestConfigRoute.test_prompt_identity_reflects_cfg` | Checks that prompt username and domain reflect CFG. |
 | `TestConfigRoute.test_project_readme_is_constant` | Checks that project readme is constant. |
 | `TestConfigRoute.test_welcome_timing_reflects_cfg` | Checks that welcome timing reflects CFG. |
 | `TestConfigRoute.test_command_timeout_defaults_to_one_hour` | Checks that command timeout defaults to one hour. |
@@ -1392,6 +1392,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `applies saved timestamp, line number, and HUD clock preferences from cookies at startup` | Verifies that applies saved timestamp, line number, and HUD clock preferences from cookies at startup. |
 | `applies saved session preferences on startup over stale local cookies` | Verifies that session-scoped preferences loaded from `/session/preferences` override stale browser-local cookies during boot. |
 | `switches the visible prompt into confirmation mode when requested` | Verifies that the composer prompt swaps from the normal shell prompt to the transcript-owned `[yes/no]:` confirmation prompt while a terminal confirm is pending. |
+| `applies the saved prompt username preference to the live prompt` | Verifies that the saved prompt username option updates the live shell prompt and persists through the session preference path. |
+| `shows live validation for invalid prompt username input without saving it` | Verifies that invalid prompt username characters show an inline Options error and do not overwrite the saved prompt username. |
 | `uses a compact cwd placeholder instead of the mobile prompt label` | Verifies that the mobile composer hides the full prompt label during normal command entry and uses a compact cwd-aware placeholder instead. |
 | `_setTsMode updates body classes and button labels` | _setTsMode updates body classes and button labels. |
 | `_setLnMode updates body classes and button labels` | _setLnMode updates body classes and button labels. |
@@ -1408,7 +1410,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `applies a theme from the terminal theme command` | Verifies that the terminal-native `theme` command applies a selected theme through the same runtime path as the theme selector. |
 | `groups terminal theme list output by color scheme` | Verifies that `theme list` separates dark, light, and fallback theme entries using the registry `color_scheme` value. |
 | `requires explicit set before applying a theme from the terminal theme command` | Verifies that `theme <theme>` is rejected and only `theme set <theme>` applies a terminal-native theme change. |
-| `updates user options from the terminal config command` | Verifies that the terminal-native `config` command updates user options through the same preference path as the options modal. |
+| `updates user options from the terminal config command` | Verifies that terminal-native `config set/get/list` updates and reports user options, including prompt username, through the same preference path as the options modal. |
 | `requires explicit set before updating user options from the terminal config command` | Verifies that `config <option> <value>` is rejected and only `config set <option> <value>` applies terminal-native option changes. |
 | `keeps config command output pinned to the tail when the tab is already following` | Verifies that terminal-native `config set` output preserves tail-follow state after async preference application. |
 | `serves runtime autocomplete context for theme and config values` | Verifies that theme slugs, config keys, and config values are generated into the shared autocomplete context instead of duplicated static lists. |
@@ -1492,7 +1494,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `uses Ctrl+C to cancel a pending terminal confirmation before opening a fresh prompt` | Verifies that a pending transcript-owned yes/no confirm consumes `Ctrl+C` as a cancel action before the normal fresh-prompt interrupt path runs. |
 | `supports Alt+T to create a new tab from the terminal prompt` | Verifies that supports Alt+T to create a new tab from the terminal prompt. |
 | `supports macOS Option+T to create a new tab via physical key code` | Verifies that supports macOS Option+T to create a new tab via physical key code. |
-| `supports Alt+W to close the active tab` | Verifies that supports Alt+W to close the active tab. |
+| `supports Alt+W and Ctrl+D to close the active tab` | Verifies that both the app-safe Alt+W chord and terminal-style Ctrl+D route through the active tab close path. |
 | `supports macOS Option+W to close the active tab via physical key code` | Verifies that supports macOS Option+W to close the active tab via physical key code. |
 | `supports Alt+ArrowLeft and Alt+ArrowRight to move by word` | Verifies that terminal-style Option/Alt+ArrowLeft and Option/Alt+ArrowRight move the prompt caret by word without cycling tabs. |
 | `supports Shift+Alt+ArrowLeft and Shift+Alt+ArrowRight to cycle between tabs` | Verifies that Shift+Alt+ArrowLeft and Shift+Alt+ArrowRight cycle between tabs. |
@@ -1502,7 +1504,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `supports macOS Option+P to create a permalink via physical key code` | Verifies that supports macOS Option+P to create a permalink via physical key code. |
 | `supports Alt+Shift+C to copy output for the active tab` | Verifies that supports Alt+Shift+C to copy output for the active tab. |
 | `supports macOS Option+Shift+C to copy output via physical key code` | Verifies that supports macOS Option+Shift+C to copy output via physical key code. |
-| `supports Alt+M to open the status monitor from the terminal prompt` | Verifies that Alt+M routes to the Status Monitor shortcut entry point. |
+| `supports Alt+M to toggle the status monitor from the terminal prompt` | Verifies that Alt+M opens the Status Monitor when closed and closes it when already open. |
 | `supports Alt+Shift+F to open the Files modal from the terminal prompt` | Verifies that Alt+Shift+F opens Files while preserving Alt+F for word-forward. |
 | `supports Ctrl+L to clear the active tab without dropping a running command` | Verifies that supports Ctrl+L to clear the active tab without dropping a running command. |
 | `does not apply Alt-based tab shortcuts while typing in non-terminal inputs` | Verifies that does not apply Alt-based tab shortcuts while typing in non-terminal inputs. |
@@ -1569,6 +1571,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `shows nested subcommands and root flags after a command root` | Verifies that nested autocomplete subcommands are suggested alongside root/global flags after a command root. |
 | `shows root and subcommand examples while a unique command root is being typed` | Verifies that root-command discovery includes examples defined on the root and nested subcommands while the root token is being typed. |
 | `shows scoped examples while typing a unique command root prefix` | Verifies that a unique partial root command can surface nested subcommand examples, while ambiguous root prefixes still show command choices. |
+| `keeps fuzzy root matches tight, supports adjacent swaps, and preserves substring matches` | Verifies that ordered-character fuzzy autocomplete allows one skipped character between matched letters, accepts one adjacent swap such as `pign` -> `ping`, and leaves substring matches unchanged. |
 | `uses subcommand-scoped flags without leaking sibling flags` | Verifies that selecting a subcommand narrows flag suggestions to that subcommand plus root/global flags. |
 | `shows subcommand-scoped examples when a subcommand token is complete` | Verifies that exact subcommand tokens such as `amass subs` surface examples from that subcommand and replace the full typed prefix when accepted. |
 | `shows subcommand-scoped examples when a partial subcommand uniquely matches` | Verifies that partial subcommand input such as `amass s` surfaces examples once it uniquely matches one subcommand. |
@@ -1897,6 +1900,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `filters terminal-native config output through chained pipe helpers` | Verifies that terminal-native `config` output supports chained pipe helpers before rendering. |
 | `persists terminal-native built-ins to server-backed history` | Verifies that terminal-native built-ins post their rendered output to `/run/client` so recents and history survive reload. |
 | `routes workflow commands to the client-side workflow handler` | Verifies that `workflow` terminal commands are handled by the client workflow runtime. |
+| `routes exit and quit commands to tab close without persisting a run` | Verifies that `exit` and `quit` close the active tab directly without adding history entries or posting client-side run artifacts. |
 | `clears stale failed tab and HUD state after a successful client-side built-in` | Verifies that successful client-side built-ins reset stale failed tab indicators, tab exit codes, and HUD state. |
 | `setStatus shows RUNNING only while running and IDLE otherwise` | Verifies that setStatus shows RUNNING only while running and IDLE otherwise. |
 | `doKill sends /kill immediately when runId is already known` | Verifies that doKill sends /kill immediately when runId is already known. |
@@ -2028,7 +2032,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders signal summary chips with DOM APIs instead of parsing markup` | Verifies that compact signal chips render unsafe-looking values as text instead of parsing them as HTML. |
 | `clears the discoverability pulse when the active output has no findings` | Verifies that a stale findings pulse is removed when the active tab changes to output with no findings. |
 | `signal chips are clickable and route to the matching scope` | Verifies that F/W/E/S chips open search in the matching scope. |
-| `disables summarize when there are no signals` | Verifies that summarize stays disabled until the current tab has at least one finding, warning, error, or summary line. |
+| `disables summarize when there are no signals or the active tab is running` | Verifies that summarize stays disabled until the current idle tab has at least one finding, warning, error, or summary line. |
 | `uses server-provided signal metadata for scoped counts and highlights` | Verifies that server-provided line signals drive scoped search counts and highlight navigation. |
 | `does not classify plain text without server-provided signal metadata` | Verifies that untagged transcript text is treated as signal-unavailable instead of being reclassified by browser heuristics. |
 | `does not infer command roots for lines without signal metadata` | Verifies that untagged transcript rows do not walk backward through prior output while computing signal scopes. |
@@ -2750,7 +2754,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `Alt+Shift+T opens the theme selector from the composer` | Pressing Alt+Shift+T with the composer focused opens the theme selector without leaking `ˇ`. |
 | `Alt+G opens the workflows overlay from the composer` | Pressing Alt+G with the composer focused opens the guided workflows overlay without leaking `©`. |
 | `Alt+S toggles the transcript search bar from the composer` | Alt+S is the canonical search chord — works from the prompt because `S` has no readline conflict (unlike `F`, which the composer owns as word-forward). |
-| `Alt+M opens the Status Monitor from the composer` | Alt+M opens the status monitor without leaking `µ` into the prompt. |
+| `Alt+M toggles the Status Monitor from the composer` | Alt+M opens and closes the status monitor without leaking `µ` into the prompt. |
 | `Alt+Shift+F opens the Files modal from the composer` | Alt+Shift+F opens Files without stealing the terminal's Alt+F word-forward chord. |
 | `Alt+\ toggles the rail collapsed state from the composer` | Pressing Alt+\ with the composer focused toggles the desktop left rail between collapsed and expanded without leaking `«`. |
 | `Alt+/ toggles the FAQ overlay from the composer` | Alt+/ opens the FAQ overlay from the prompt and closes it on a second press without leaking `÷`. |

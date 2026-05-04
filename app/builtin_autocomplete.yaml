@@ -61,6 +61,10 @@ commands:
     description: "built-in: show core environment values for this shell"
     autocomplete:
       arguments: []
+  - root: exit
+    description: "built-in: close the current tab"
+    autocomplete:
+      arguments: []
   - root: faq
     description: "built-in: show configured FAQ entries"
     autocomplete:
@@ -262,6 +266,10 @@ commands:
           description: "All processes, full format"
   - root: pwd
     description: "built-in: show the session files path"
+    autocomplete:
+      arguments: []
+  - root: quit
+    description: "built-in: close the current tab"
     autocomplete:
       arguments: []
   - root: retention

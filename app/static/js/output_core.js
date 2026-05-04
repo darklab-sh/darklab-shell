@@ -18,6 +18,12 @@ var DarklabOutputCore = (function (global) {
     return prefix;
   }
 
+  function promptIdentityFromParts(username = '', domain = '') {
+    const cleanUsername = String(username || '').trim() || 'anon';
+    const cleanDomain = String(domain || '').trim() || 'darklab.sh';
+    return `${cleanUsername}@${cleanDomain}`;
+  }
+
   function normalizeWorkspaceCwd(rawPath = '') {
     return String(rawPath || '').split('/').map(part => String(part || '').trim()).filter(Boolean).join('/');
   }
@@ -31,6 +37,10 @@ var DarklabOutputCore = (function (global) {
     return `${promptIdentityPrefix(rawPrefix)}:${String(path || '~')} $`;
   }
 
+  function buildPromptLabelFromParts(username = '', domain = '', path = '~') {
+    return `${promptIdentityFromParts(username, domain)}:${String(path || '~')} $`;
+  }
+
   function _escapeRegex(text) {
     return String(text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
@@ -42,6 +52,8 @@ var DarklabOutputCore = (function (global) {
     const identity = promptIdentityPrefix(identityPrefix);
     const legacyPattern = new RegExp(`^${_escapeRegex(identity)}:[^\\s]+\\$\\s*`);
     if (legacyPattern.test(value)) return value.replace(legacyPattern, '');
+    const promptShapedPattern = /^[^\s:]+@[^\s:]+:[^\s]+\$\s*/;
+    if (promptShapedPattern.test(value)) return value.replace(promptShapedPattern, '');
     if (value === '$') return '';
     if (value.startsWith('$ ')) return value.slice(2);
     return value;
@@ -98,6 +110,7 @@ var DarklabOutputCore = (function (global) {
   const api = Object.freeze({
     OUTPUT_SIGNAL_SCOPES,
     buildPromptLabel,
+    buildPromptLabelFromParts,
     countableSignalScopes,
     emptySignalCounts,
     formatOutputPrefix,
@@ -107,6 +120,7 @@ var DarklabOutputCore = (function (global) {
     lineHasClass,
     normalizeSignals,
     normalizeWorkspaceCwd,
+    promptIdentityFromParts,
     promptIdentityPrefix,
     stripPromptLabelFromEchoText,
     workspaceDisplayPath,

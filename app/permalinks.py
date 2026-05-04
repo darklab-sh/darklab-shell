@@ -74,19 +74,14 @@ def _format_retention(days: int) -> str:
 
 def _prompt_echo_text(label: str) -> str:
     # Single server-side source of truth for prompt-echo text on synthesized
-    # history/snapshot lines. Reads CFG["prompt_prefix"] so permalinks render
+    # history/snapshot lines. Reads CFG prompt identity settings so permalinks render
     # the full configured prefix (e.g. "anon@darklab:~ $ ls -la") rather than a
     # reduced "$ ls -la" echo that drifts from the live shell. Paired with the
     # JS export helper (ExportHtmlUtils.renderExportPromptEcho) that consumes
     # this text by splitting on its first space to colorize the prefix.
-    prefix = str(CFG.get("prompt_prefix", "")).strip() or "anon@darklab"
-    if prefix.endswith("$"):
-        prefix = prefix[:-1].rstrip()
-    if ":" in prefix:
-        head, tail = prefix.rsplit(":", 1)
-        if head and tail and not any(ch.isspace() for ch in tail):
-            prefix = head.strip()
-    prefix = f"{prefix or 'anon@darklab'}:~ $"
+    username = str(CFG.get("prompt_username") or "anon").strip() or "anon"
+    domain = str(CFG.get("prompt_domain") or "darklab.sh").strip() or "darklab.sh"
+    prefix = f"{username}@{domain}:~ $"
     return f"{prefix} {label}".rstrip()
 
 

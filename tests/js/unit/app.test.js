@@ -213,6 +213,7 @@ describe('app helpers', () => {
       'pref_line_numbers',
       'pref_welcome_intro',
       'pref_share_redaction_default',
+      'pref_prompt_username',
     ].forEach((name) => {
       document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
     })
@@ -276,7 +277,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
@@ -341,7 +343,7 @@ describe('app helpers', () => {
     const promptPrefix = shellPromptWrap.querySelector('.prompt-prefix')
     const mobilePromptLabel = document.querySelector('#mobile-composer-row .mobile-prompt-label')
 
-    expect(promptPrefix.textContent).toBe('anon@darklab:/ $')
+    expect(promptPrefix.textContent).toBe('anon@darklab.sh:/ $')
     expect(mobilePromptLabel.textContent).toBe('')
     expect(mobilePromptLabel.hidden).toBe(true)
     expect(document.getElementById('mobile-cmd').placeholder).toBe('/ · type command')
@@ -354,11 +356,53 @@ describe('app helpers', () => {
     expect(shellPromptWrap.classList.contains('shell-prompt-confirm')).toBe(true)
 
     setComposerPromptMode(null)
-    expect(promptPrefix.textContent).toBe('anon@darklab:/ $')
+    expect(promptPrefix.textContent).toBe('anon@darklab.sh:/ $')
     expect(mobilePromptLabel.textContent).toBe('')
     expect(mobilePromptLabel.hidden).toBe(true)
     expect(document.getElementById('mobile-cmd').placeholder).toBe('/ · type command')
     expect(shellPromptWrap.classList.contains('shell-prompt-confirm')).toBe(false)
+  })
+
+  it('applies the saved prompt username preference to the live prompt', async () => {
+    const { applyPromptUsernamePreference } = await loadAppFns({
+      cookies: { pref_prompt_username: 'nona' },
+    })
+    const promptPrefix = document.querySelector('#shell-prompt-wrap .prompt-prefix')
+    expect(promptPrefix.textContent).toBe('nona@darklab.sh:/ $')
+    expect(document.getElementById('options-prompt-username-input').value).toBe('nona')
+
+    applyPromptUsernamePreference('ops-user')
+
+    expect(promptPrefix.textContent).toBe('ops-user@darklab.sh:/ $')
+    expect(document.cookie).toContain('pref_prompt_username=ops-user')
+  })
+
+  it('shows live validation for invalid prompt username input without saving it', async () => {
+    await loadAppFns({
+      cookies: { pref_prompt_username: 'nona' },
+    })
+    const input = document.getElementById('options-prompt-username-input')
+    const error = document.getElementById('options-prompt-username-error')
+
+    input.value = 'bad/path'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+    expect(error.classList.contains('u-hidden')).toBe(false)
+
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+
+    expect(document.querySelector('#shell-prompt-wrap .prompt-prefix').textContent).toBe('nona@darklab.sh:/ $')
+    expect(document.cookie).toContain('pref_prompt_username=nona')
+
+    input.value = 'good_user'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+
+    expect(input.getAttribute('aria-invalid')).toBe('false')
+    expect(error.classList.contains('u-hidden')).toBe(true)
+    expect(document.querySelector('#shell-prompt-wrap .prompt-prefix').textContent).toBe('good_user@darklab.sh:/ $')
+    expect(document.cookie).toContain('pref_prompt_username=good_user')
   })
 
   it('uses a compact cwd placeholder instead of the mobile prompt label', async () => {
@@ -782,18 +826,27 @@ describe('app helpers', () => {
           pref_line_numbers: 'off',
           pref_timestamps: 'off',
           pref_welcome_intro: 'animated',
+          pref_prompt_username: '',
         },
       })
 
     await handleConfigCommand('config set line-numbers on', 'tab-1')
     await handleConfigCommand('config set welcome static', 'tab-1')
+    await handleConfigCommand('config set prompt-username nona', 'tab-1')
+    await handleConfigCommand('config get prompt-username', 'tab-1')
+    await handleConfigCommand('config list', 'tab-1')
 
     expect(appendCommandEcho).toHaveBeenCalledWith('config set line-numbers on', 'tab-1')
     expect(document.body.classList.contains('ln-on')).toBe(true)
     expect(document.cookie).toContain('pref_line_numbers=on')
     expect(document.cookie).toContain('pref_welcome_intro=disable_animation')
+    expect(document.cookie).toContain('pref_prompt_username=nona')
+    expect(document.querySelector('#shell-prompt-wrap .prompt-prefix').textContent).toBe('nona@darklab.sh:~ $')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set line-numbers on')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set welcome static')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set prompt-username nona')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config get prompt-username')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config list')
     expect(setStatus).toHaveBeenCalledWith('ok')
   })
 
@@ -806,9 +859,11 @@ describe('app helpers', () => {
       })
 
     await handleConfigCommand('config line-numbers on', 'tab-1')
+    await handleConfigCommand('config set prompt-username bad/path', 'tab-1')
 
     expect(document.body.classList.contains('ln-on')).toBe(false)
     expect(document.cookie).not.toContain('pref_line_numbers=on')
+    expect(document.cookie).not.toContain('pref_prompt_username=bad')
     expect(appendCommandEcho).toHaveBeenCalledWith('config line-numbers on', 'tab-1')
     expect(recordSuccessfulLocalCommand).not.toHaveBeenCalled()
     expect(setStatus).toHaveBeenCalledWith('fail')
@@ -878,7 +933,9 @@ describe('app helpers', () => {
     expect(context.theme.arg_hints.set.find(item => item.value === 'theme_light_blue')?.description)
       .toContain('(current)')
     expect(context.config.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'get', 'set'])
+    expect(context.config.arg_hints.set.map(item => item.value)).toContain('prompt-username')
     expect(context.config.sequence_arg_hints['set line-numbers'].map(item => item.value)).toEqual(['on', 'off'])
+    expect(context.config.sequence_arg_hints['set prompt-username'].map(item => item.value)).toEqual(['<username> | default'])
     expect(context.var.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'set', 'unset'])
     expect(context.var.arg_hints.set.filter(item => item.value === 'HOST')).toEqual([
       { value: 'HOST', description: 'Current value: ip.darklab.sh' },
@@ -1120,9 +1177,9 @@ describe('app helpers', () => {
       [...commandsYaml.matchAll(/^- root: ([a-z0-9_-]+)/gm)].map(match => match[1]),
     )
     const runtimeRoots = [
-      'banner', 'cat', 'cd', 'clear', 'commands', 'config', 'date', 'df', 'env', 'faq', 'fortune', 'free',
+      'banner', 'cat', 'cd', 'clear', 'commands', 'config', 'date', 'df', 'env', 'exit', 'faq', 'fortune', 'free',
       'file', 'grep', 'groups', 'head', 'help', 'history', 'hostname', 'id', 'ip', 'jobs', 'last', 'limits', 'll', 'ls', 'man',
-      'mkdir', 'ps', 'pwd', 'retention', 'rm', 'route', 'runs', 'session-token', 'shortcuts', 'sort', 'stats', 'status',
+      'mkdir', 'ps', 'pwd', 'quit', 'retention', 'rm', 'route', 'runs', 'session-token', 'shortcuts', 'sort', 'stats', 'status',
       'tail', 'theme', 'tty', 'type', 'uname', 'uniq', 'uptime', 'version', 'wc', 'which', 'who', 'whoami',
     ]
 
@@ -1249,7 +1306,8 @@ describe('app helpers', () => {
             json: () =>
               Promise.resolve({
                 app_name: 'darklab_shell',
-                prompt_prefix: 'anon@darklab:~$',
+                prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
                 version: '9.9',
                 default_theme: 'theme_missing.yaml',
                 motd: '',
@@ -2687,7 +2745,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               default_theme: 'darklab_obsidian.yaml',
               motd: '',
@@ -3113,7 +3172,7 @@ describe('app helpers', () => {
     expect(createTab).toHaveBeenCalledWith('shell 2')
   })
 
-  it('supports Alt+W to close the active tab', async () => {
+  it('supports Alt+W and Ctrl+D to close the active tab', async () => {
     const closeTab = vi.fn()
     const { cmdInput } = await loadAppFns({
       closeTab,
@@ -3121,8 +3180,11 @@ describe('app helpers', () => {
     })
 
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', altKey: true, bubbles: true }))
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, bubbles: true }))
 
-    expect(closeTab).toHaveBeenCalledWith('tab-1')
+    expect(closeTab).toHaveBeenCalledTimes(2)
+    expect(closeTab).toHaveBeenNthCalledWith(1, 'tab-1')
+    expect(closeTab).toHaveBeenNthCalledWith(2, 'tab-1')
   })
 
   it('supports macOS Option+W to close the active tab via physical key code', async () => {
@@ -3333,16 +3395,24 @@ describe('app helpers', () => {
     expect(copyTab).toHaveBeenCalledWith('tab-1')
   })
 
-  it('supports Alt+M to open the status monitor from the terminal prompt', async () => {
+  it('supports Alt+M to toggle the status monitor from the terminal prompt', async () => {
     const openStatusMonitor = vi.fn(() => Promise.resolve(true))
+    const closeStatusMonitor = vi.fn()
+    let statusMonitorOpen = false
     const { cmdInput } = await loadAppFns({
       openStatusMonitor,
+      closeStatusMonitor,
+      isStatusMonitorOpen: () => statusMonitorOpen,
       tabs: [{ id: 'tab-1', st: 'idle' }],
     })
 
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', altKey: true, bubbles: true }))
+    statusMonitorOpen = true
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', altKey: true, bubbles: true }))
 
     expect(openStatusMonitor).toHaveBeenCalledWith({ source: 'shortcut' })
+    expect(openStatusMonitor).toHaveBeenCalledTimes(1)
+    expect(closeStatusMonitor).toHaveBeenCalledTimes(1)
   })
 
   it('supports Alt+Shift+F to open the Files modal from the terminal prompt', async () => {
@@ -3759,7 +3829,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
@@ -3835,7 +3906,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
@@ -3928,7 +4000,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
@@ -4057,7 +4130,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
@@ -4173,7 +4247,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               default_theme: 'darklab_obsidian.yaml',
               motd: '',
@@ -4230,7 +4305,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               default_theme: 'darklab_obsidian.yaml',
               motd: '',
@@ -4284,7 +4360,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               default_theme: 'darklab_obsidian.yaml',
               motd: '',
@@ -4341,7 +4418,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               default_theme: 'darklab_obsidian.yaml',
               motd: '',

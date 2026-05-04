@@ -1149,6 +1149,7 @@ class TestSessionPreferences:
                 "pref_theme_name": "theme_light_blue",
                 "pref_timestamps": "clock",
                 "pref_run_notify": "on",
+                "pref_prompt_username": "operator_1",
             }
         }
         save_resp = client.post("/session/preferences", json=payload, headers={"X-Session-ID": session_id})
@@ -1167,6 +1168,7 @@ class TestSessionPreferences:
             json={
                 "preferences": {
                     "pref_theme_name": "theme_light_blue",
+                    "pref_prompt_username": "../bad",
                     "pref_unknown": "x",
                 }
             },

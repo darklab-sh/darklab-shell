@@ -148,7 +148,7 @@ describe('welcome helpers', () => {
 
     expect(out.querySelector('.welcome-ascii-art')?.textContent).toMatch(/ASCII ART|darklab_shell/)
     expect(out.querySelectorAll('.welcome-status-loaded')).toHaveLength(5)
-    expect(out.querySelector('.welcome-command')?.textContent).toContain('anon@darklab:~ $')
+    expect(out.querySelector('.welcome-command')?.textContent).toContain('anon@darklab.sh:~ $')
     expect(out.querySelectorAll('.welcome-command')[0]?.textContent).toContain('ping darklab.sh')
     expect(out.querySelector('.welcome-command-badge')?.textContent).toContain('try this first')
     expect(out.querySelectorAll('.welcome-hint')).toHaveLength(1)

@@ -3,6 +3,7 @@ Content and config routes: main index, config, themes, FAQ, autocomplete, welcom
 """
 
 import logging
+import re
 
 from flask import Blueprint, Response, jsonify, render_template, request
 
@@ -26,6 +27,7 @@ from wordlists import wordlist_autocomplete_items
 log = logging.getLogger("shell")
 
 content_bp = Blueprint("content", __name__)
+_PROMPT_USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
 
 
 def _log_content_view(route: str, **extra):
@@ -85,20 +87,18 @@ def _initial_rail_state():
     }
 
 
-def _prompt_identity_prefix(raw_prefix: str) -> str:
-    prefix = str(raw_prefix or "").strip() or "anon@darklab"
-    if prefix.endswith("$"):
-        prefix = prefix[:-1].rstrip()
-    if ":" in prefix:
-        head, tail = prefix.rsplit(":", 1)
-        if head and tail and not any(ch.isspace() for ch in tail):
-            prefix = head.strip()
-    return prefix or "anon@darklab"
+def _prompt_username_override() -> str:
+    username = str(request.cookies.get("pref_prompt_username") or "").strip()
+    if not username or not _PROMPT_USERNAME_RE.fullmatch(username):
+        return ""
+    return username
 
 
 def _prompt_label(workspace_enabled: bool) -> str:
     path = "/" if workspace_enabled else "~"
-    return f"{_prompt_identity_prefix(_config.CFG.get('prompt_prefix', ''))}:{path} $"
+    username = _prompt_username_override() or str(_config.CFG.get("prompt_username") or "anon").strip() or "anon"
+    domain = str(_config.CFG.get("prompt_domain") or "darklab.sh").strip() or "darklab.sh"
+    return f"{username}@{domain}:{path} $"
 
 
 def _frontend_config_payload():
@@ -108,7 +108,8 @@ def _frontend_config_payload():
         "version":               _config.APP_VERSION,
         "app_name":              cfg["app_name"],
         "project_name":          _config.PROJECT_NAME,
-        "prompt_prefix":         cfg["prompt_prefix"],
+        "prompt_username":       cfg["prompt_username"],
+        "prompt_domain":         cfg["prompt_domain"],
         "project_readme":        _config.PROJECT_README,
         "default_theme":         cfg["default_theme"],
         "share_redaction_enabled": cfg["share_redaction_enabled"],

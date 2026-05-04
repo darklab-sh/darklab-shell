@@ -206,7 +206,8 @@ function loadTabsAndOutputFns({
         max_tabs: maxTabs,
         max_output_lines: maxOutputLines,
         app_name: 'darklab_shell',
-        prompt_prefix: 'anon@darklab:~$',
+        prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
         share_redaction_enabled: shareRedactionEnabled,
         share_redaction_rules: shareRedactionRules,
       },
@@ -752,8 +753,8 @@ describe('tabs helpers', () => {
     ])
 
     const promptLine = document.querySelector(`#output-${id} .line.prompt-echo`)
-    expect(promptLine?.querySelector('.prompt-prefix')?.textContent).toBe('anon@darklab:~ $')
-    expect(promptLine?.textContent).toBe('anon@darklab:~ $dig darklab.sh')
+    expect(promptLine?.querySelector('.prompt-prefix')?.textContent).toBe('anon@darklab.sh:~ $')
+    expect(promptLine?.textContent).toBe('anon@darklab.sh:~ $dig darklab.sh')
   })
 
   it('keeps currentRunStartIndex aligned when old raw lines are pruned from the front', () => {

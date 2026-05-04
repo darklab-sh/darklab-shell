@@ -505,6 +505,16 @@ body #search-toggle-btn.search-discover-pulse {
   border-color: var(--green-dim);
 }
 
+.form-control[aria-invalid="true"] {
+  border-color: color-mix(in srgb, var(--red) 72%, var(--border-bright));
+}
+
+.form-error {
+  color: var(--red);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .control-row {
   display: flex;
   align-items: center;

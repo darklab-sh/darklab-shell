@@ -43,13 +43,39 @@ const _OUTPUT_RESTORE_TAIL_DELAYS = [0, 16, 64, 160, 320];
 const _pendingOutputBatches = new Map();
 const _OUTPUT_SIGNAL_SCOPES = _outputCore.OUTPUT_SIGNAL_SCOPES;
 
+function _promptUsernameOverride() {
+  let value = '';
+  if (typeof getPreference === 'function') {
+    value = getPreference('pref_prompt_username');
+  } else if (typeof document !== 'undefined') {
+    const cookie = document.cookie.split(';').map(part => part.trim()).find(part => part.startsWith('pref_prompt_username='));
+    try {
+      value = cookie ? decodeURIComponent(cookie.slice('pref_prompt_username='.length)) : '';
+    } catch (_) {
+      value = '';
+    }
+  }
+  const username = String(value || '').trim();
+  return /^[A-Za-z0-9._-]{1,32}$/.test(username) ? username : '';
+}
+
+function _configuredPromptUsername() {
+  const configured = typeof APP_CONFIG !== 'undefined' && APP_CONFIG && typeof APP_CONFIG.prompt_username === 'string'
+    ? APP_CONFIG.prompt_username
+    : 'anon';
+  return _promptUsernameOverride() || String(configured || 'anon').trim() || 'anon';
+}
+
+function _configuredPromptDomain() {
+  const configured = typeof APP_CONFIG !== 'undefined' && APP_CONFIG && typeof APP_CONFIG.prompt_domain === 'string'
+    ? APP_CONFIG.prompt_domain
+    : 'darklab.sh';
+  return String(configured || 'darklab.sh').trim() || 'darklab.sh';
+}
+
 function promptIdentityPrefix(rawPrefix = null) {
-  const configured = rawPrefix !== null
-    ? String(rawPrefix || '')
-    : (typeof APP_CONFIG !== 'undefined' && APP_CONFIG && typeof APP_CONFIG.prompt_prefix === 'string'
-        ? APP_CONFIG.prompt_prefix
-        : '');
-  return _outputCore.promptIdentityPrefix(configured);
+  if (rawPrefix !== null) return _outputCore.promptIdentityPrefix(String(rawPrefix || ''));
+  return _outputCore.promptIdentityFromParts(_configuredPromptUsername(), _configuredPromptDomain());
 }
 
 function currentPromptWorkspacePath() {
@@ -70,12 +96,8 @@ function currentPromptWorkspacePath() {
 
 function buildPromptLabel(rawPrefix = null, path = null) {
   const promptPath = path === null ? currentPromptWorkspacePath() : String(path || '~');
-  const configured = rawPrefix !== null
-    ? String(rawPrefix || '')
-    : (typeof APP_CONFIG !== 'undefined' && APP_CONFIG && typeof APP_CONFIG.prompt_prefix === 'string'
-        ? APP_CONFIG.prompt_prefix
-        : '');
-  return _outputCore.buildPromptLabel(configured, promptPath);
+  if (rawPrefix !== null) return _outputCore.buildPromptLabel(String(rawPrefix || ''), promptPath);
+  return _outputCore.buildPromptLabelFromParts(_configuredPromptUsername(), _configuredPromptDomain(), promptPath);
 }
 
 function stripPromptLabelFromEchoText(text = '') {

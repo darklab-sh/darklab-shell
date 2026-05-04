@@ -10,6 +10,14 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Tabs can now be closed from the terminal itself** — `exit`, `quit`, and `Ctrl+D` all use the same tab-close path as the tab close button.
+  - **Why:** terminal users expect `exit` and `Ctrl+D` to leave the current shell, and that maps naturally to closing the active darklab_shell tab.
+  - **What:** added app-owned `exit` and `quit` built-ins, autocomplete entries, shortcut reference text, and a `Ctrl+D` browser shortcut. Running tabs still go through the existing Keep running / Kill run / Cancel confirmation before closing.
+  - **Tests:** added focused runner/app unit coverage and extended the shortcut built-in checks.
+- **Prompt usernames are now user-customizable** — operators configure the default prompt identity with `prompt_username` / `prompt_domain`, and users can override only the username from Options or the terminal-native `config` command.
+  - **Why:** the old single `prompt_prefix` setting made user-level username customization fragile because it assumed every deployment used the same `user@domain` prompt shape.
+  - **What:** replaced the config default with `prompt_username: anon` and `prompt_domain: darklab.sh`, added a persistent `pref_prompt_username` session option, exposed it in Options and `config get/set/list`, added live invalid-character feedback in the Options modal, and wired prompt rendering so the user option wins, then config, then app defaults. Historical prompt echoes remain whatever was captured when the run happened.
+  - **Tests:** added prompt-username preference and live-validation coverage and updated config, permalink, session-preference, terminal config, and prompt-rendering tests for the split prompt identity.
 - **`/diag` Database card now mirrors the depth of the Redis card** — file/WAL size, last write age, journal mode, reclaimable bytes via VACUUM, per-table row counts, and an FTS5 orphan probe.
   - **Why:**
     - The Database card was lean by accident — three rows (status + runs count + snapshots count) against the Redis card's dozen. The two big SQLite ops failure modes (file growth without GC, FTS5 index drift) had no operator-visible signal.
@@ -289,6 +297,10 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Why:** autocomplete tests still had to load the full browser script to exercise matching behavior, even though scoring, fuzzy matching, shared-prefix calculation, placeholder detection, and display limiting are pure logic.
   - **What:** added `app/static/js/autocomplete_core.js`, loaded it before `autocomplete.js`, and delegated item text/insert helpers, token-context parsing, item building, exact/prefix/boundary/substring/fuzzy scoring, highlight rendering, shared-prefix calculation, recent-domain normalization, wordlist-category normalization, and display-limit handling to that namespace.
   - **Tests:** updated `tests/js/unit/autocomplete.test.js` to load the production core seam before the dropdown controller while preserving the existing behavioral assertions.
+- **Autocomplete fuzzy matching is now tighter about skipped letters and adjacent swaps** — ordered-character fuzzy matches can skip at most one character between matched letters and can recover one directly adjacent swapped pair, while exact, prefix, boundary, and substring matches are unchanged.
+  - **Why:** loose fuzzy jumps made short typos too noisy, for example `sind` could match `subfinder` even though the first two matched letters were far apart.
+  - **What:** constrained the fuzzy-only matcher so `png` still matches `ping` / `fping` and `pign` can match `ping`, but broad jumps such as `sind` → `subfinder`, `sdm` → `subdomains...`, and reordered non-adjacent input such as `pngi` no longer appear unless there is a normal substring match.
+  - **Tests:** added autocomplete regression coverage for tight fuzzy root matches, adjacent swapped-character matches, and updated wordlist matching expectations for the narrower fuzzy behavior.
 - **Session identity logic now has a production source seam** — UUID generation, session-token masking, fetch-error wording, and session/client header construction live in `session_core.js` instead of being embedded directly in the browser bootstrap script.
   - **Why:** the session unit tests were still tied to private functions extracted from `session.js`, and that script loads first enough that small helpers could be separated without disturbing the rest of the classic bundle.
   - **What:** added `app/static/js/session_core.js` as a small global namespace loaded before `session.js`; `session.js` now delegates the pure identity helpers to that namespace while keeping the same browser-visible globals (`SESSION_ID`, `CLIENT_ID`, `apiFetch`, `maskSessionToken`, and `describeFetchError`).
@@ -506,6 +518,14 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **The summarize button no longer writes into active command output** — it now stays disabled while the current tab is running a command.
+  - **Root cause:** summarize only checked whether signal metadata existed, so a tab with live output and existing findings could still append a synthetic `Command Findings:` block into the transcript mid-run.
+  - **Fix:** the summary button now includes active-tab running state in its disabled/tooltip logic, refreshes when the active tab status changes, and `summarizeCurrentOutputSignals()` refuses to append while the tab is still running.
+  - **Tests:** extended search unit coverage for running-tab summarize behavior.
+- **The Status Monitor shortcut now behaves like the other modal shortcuts** — `Option+M` / `Alt+M` closes the monitor when it is already open instead of reopening it.
+  - **Root cause:** the shortcut handler always called `openStatusMonitor()` and did not ask the Status Monitor module whether the surface was already visible.
+  - **Fix:** Status Monitor now exposes its open state, and the chrome shortcut path toggles open/close like Theme, Workflows, Options, and FAQ.
+  - **Tests:** updated the app shortcut unit coverage and shortcut docs.
 - **Several v1.6 cleanup items now behave like first-class paths instead of compatibility leftovers** — run replay, run comparison, command policy, workspace prep, and run permalinks all got small hardening passes.
   - **Fixes:**
     - Run-broker trim notices are informational only and no longer advance browser resume cursors with synthetic Redis IDs.

@@ -10,6 +10,7 @@
     'pref_share_redaction_default',
     'pref_run_notify',
     'pref_hud_clock',
+    'pref_prompt_username',
   ]);
   const WELCOME_INTRO_MODES = Object.freeze(['animated', 'disable_animation', 'remove']);
   const SHARE_REDACTION_DEFAULT_MODES = Object.freeze(['unset', 'redacted', 'raw']);
@@ -43,6 +44,11 @@
     return _coerceMode(value, HUD_CLOCK_MODES, 'utc');
   }
 
+  function normalizePromptUsername(value) {
+    const username = String(value || '').trim();
+    return /^[A-Za-z0-9._-]{1,32}$/.test(username) ? username : '';
+  }
+
   function defaultSessionPreferences(defaultTheme = 'darklab_obsidian.yaml') {
     return {
       pref_theme_name: defaultTheme || 'darklab_obsidian.yaml',
@@ -52,6 +58,7 @@
       pref_share_redaction_default: 'unset',
       pref_run_notify: 'off',
       pref_hud_clock: 'utc',
+      pref_prompt_username: '',
     };
   }
 
@@ -67,6 +74,7 @@
     prefs.pref_share_redaction_default = coerceShareRedactionDefaultMode(source.pref_share_redaction_default);
     prefs.pref_run_notify = coerceRunNotifyMode(source.pref_run_notify);
     prefs.pref_hud_clock = coerceHudClockMode(source.pref_hud_clock);
+    prefs.pref_prompt_username = normalizePromptUsername(source.pref_prompt_username);
     return prefs;
   }
 
@@ -85,6 +93,7 @@
     coerceShareRedactionDefaultMode,
     coerceRunNotifyMode,
     coerceHudClockMode,
+    normalizePromptUsername,
     defaultSessionPreferences,
     normalizeSessionPreferences,
     sessionPreferenceCacheKey,

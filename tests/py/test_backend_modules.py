@@ -133,7 +133,8 @@ class TestLoadConfig:
                 f.write(textwrap.dedent(
                     """
                     app_name: base-shell
-                    prompt_prefix: base@local:~$
+                    prompt_username: base
+                    prompt_domain: local
                     default_theme: base-theme.yaml
                     full_output_max_mb: 7MB
                     rate_limit_per_minute: 30
@@ -143,14 +144,15 @@ class TestLoadConfig:
                 f.write(textwrap.dedent(
                     """
                     app_name: local-shell
-                    prompt_prefix: local@local:~$
+                    prompt_username: local
                     rate_limit_per_minute: 99
                     """
                 ))
             cfg = app_config.load_config(tmp)
 
         assert cfg["app_name"] == "local-shell"
-        assert cfg["prompt_prefix"] == "local@local:~$"
+        assert cfg["prompt_username"] == "local"
+        assert cfg["prompt_domain"] == "local"
         assert cfg["default_theme"] == "base-theme.yaml"
         assert cfg["full_output_max_mb"] == 7
         assert cfg["full_output_max_bytes"] == 7 * 1024 * 1024
@@ -3532,27 +3534,27 @@ class TestExpiryNote:
 # ── _prompt_echo_text + synthesized prompt-echo lines ────────────────────────
 
 class TestPromptEchoText:
-    def test_uses_configured_prompt_prefix(self):
-        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
+    def test_uses_configured_prompt_identity(self):
+        with mock.patch.dict("permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             assert _prompt_echo_text("ls -la") == "ops@darklab:~ $ ls -la"
 
-    def test_falls_back_to_default_identity_when_prefix_missing(self):
-        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": ""}):
-            assert _prompt_echo_text("ls -la") == "anon@darklab:~ $ ls -la"
+    def test_falls_back_to_default_identity_when_parts_are_missing(self):
+        with mock.patch.dict("permalinks.CFG", {"prompt_username": "", "prompt_domain": ""}):
+            assert _prompt_echo_text("ls -la") == "anon@darklab.sh:~ $ ls -la"
 
     def test_strips_trailing_space_when_label_empty(self):
-        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "anon@darklab:~$"}):
-            assert _prompt_echo_text("") == "anon@darklab:~ $"
+        with mock.patch.dict("permalinks.CFG", {"prompt_username": "anon", "prompt_domain": "darklab.sh"}):
+            assert _prompt_echo_text("") == "anon@darklab.sh:~ $"
 
 
 class TestNormalizePermalinkLinesPromptEcho:
     """Regression guard: when a history snapshot does not already carry a
     prompt-echo line, the normalizer synthesizes one using the configured
-    prompt_prefix — not a reduced bare `$` — so permalink pages render the
+    prompt identity — not a reduced bare `$` — so permalink pages render the
     same prompt identity as the live shell."""
 
     def test_unstructured_content_uses_configured_prefix(self):
-        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
+        with mock.patch.dict("permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             lines = _normalize_permalink_lines(["hello", "world"], label="echo hello")
         assert lines[0]["cls"] == "prompt-echo"
         assert lines[0]["text"] == "ops@darklab:~ $ echo hello"
@@ -3562,7 +3564,7 @@ class TestNormalizePermalinkLinesPromptEcho:
             {"text": "hello", "cls": "", "tsC": "", "tsE": ""},
             {"text": "[process exited with code 0 in 0.1s]", "cls": "exit-ok"},
         ]
-        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
+        with mock.patch.dict("permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             lines = _normalize_permalink_lines(content, label="echo hello")
         assert lines[0]["cls"] == "prompt-echo"
         assert lines[0]["text"] == "ops@darklab:~ $ echo hello"
@@ -3572,7 +3574,7 @@ class TestNormalizePermalinkLinesPromptEcho:
             {"text": "anon@darklab:~$ echo hello", "cls": "prompt-echo"},
             {"text": "hello", "cls": ""},
         ]
-        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
+        with mock.patch.dict("permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             lines = _normalize_permalink_lines(content, label="echo hello")
         # Existing echo survives; normalizer does not prepend a second one.
         echo_lines = [entry for entry in lines if entry["cls"] == "prompt-echo"]

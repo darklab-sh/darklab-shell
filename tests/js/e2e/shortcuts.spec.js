@@ -584,7 +584,7 @@ test.describe('desktop chrome keyboard shortcuts', () => {
     await expect(page.locator('#search-bar')).not.toBeVisible()
   })
 
-  test('Alt+M opens the Status Monitor from the composer', async ({ page }) => {
+  test('Alt+M toggles the Status Monitor from the composer', async ({ page }) => {
     await page.route('**/history/active', route => route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -601,6 +601,9 @@ test.describe('desktop chrome keyboard shortcuts', () => {
     await dispatchMacOptionKey(page, '#cmd', { key: 'µ', code: 'KeyM', altKey: true })
     await expect(page.locator('#status-monitor')).toBeVisible()
     await expect(page.locator('#status-monitor')).toContainText('sleep 60')
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await dispatchMacOptionKey(page, '#cmd', { key: 'µ', code: 'KeyM', altKey: true })
+    await expect(page.locator('#status-monitor')).toBeHidden()
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 

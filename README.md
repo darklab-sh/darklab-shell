@@ -161,7 +161,8 @@ All application settings live in `app/conf/config.yaml`. The values below are th
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `app_name` | `darklab_shell` | Name shown in the browser tab, header, and permalink pages |
-| `prompt_prefix` | `anon@darklab.sh` | Prompt identity shown in the shell input and welcome samples. The UI appends `:~ $` when workspaces are disabled and `:<workspace path> $` when workspaces are enabled. Can be customized independently of `app_name` |
+| `prompt_username` | `anon` | Default username shown in the shell prompt and welcome samples. Users can override this in Options for their own session |
+| `prompt_domain` | `darklab.sh` | Domain shown after the prompt username. The UI renders `<username>@<domain>:~ $` when workspaces are disabled and `<username>@<domain>:<workspace path> $` when workspaces are enabled |
 | `motd` | _(empty)_ | Optional operator message shown at the top of the welcome sequence as a centered “Message From The Operator” notice. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
 | `default_theme` | `darklab_obsidian.yaml` | Default theme filename for new visitors. Must match a file in `app/conf/themes/`. Overridden by the user's saved preference |
 | `share_redaction_enabled` | `true` | Enables the built-in basic snapshot-share redaction baseline for bearer tokens, email addresses, IPv4 addresses, IPv6 addresses, and hostnames/dotted domains. When enabled, the `share snapshot` action asks whether to share the raw or redacted snapshot until the user sets a persistent default in the Options modal. If the prompt’s checkbox is enabled, the chosen raw/redacted mode is written back to that same persistent default. When disabled, no built-in or custom snapshot-share redaction rules run |

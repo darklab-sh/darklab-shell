@@ -31,6 +31,8 @@ export async function loadAppFns({
   enterHistSearch: enterHistSearchOverride = vi.fn(),
   openWorkspace: openWorkspaceOverride = vi.fn(),
   openStatusMonitor: openStatusMonitorOverride = vi.fn(() => Promise.resolve(false)),
+  closeStatusMonitor: closeStatusMonitorOverride = vi.fn(),
+  isStatusMonitorOpen: isStatusMonitorOpenOverride = vi.fn(() => false),
   activeTabId = 'tab-1',
   acFiltered: acFilteredOverride = [],
   acSuggestions: acSuggestionsOverride = [],
@@ -184,6 +186,8 @@ export async function loadAppFns({
         <option value="utc">utc</option>
         <option value="local">local</option>
       </select>
+      <input id="options-prompt-username-input" />
+      <div id="options-prompt-username-error" class="u-hidden"></div>
       <div id="shell-input-row" data-mobile-label="$">
         <input id="cmd" />
       </div>
@@ -211,7 +215,8 @@ export async function loadAppFns({
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
@@ -273,6 +278,8 @@ export async function loadAppFns({
     optionsShareRedactionSelect: document.getElementById('options-share-redaction-select'),
     optionsNotifyToggle: document.getElementById('options-notify-toggle'),
     optionsHudClockSelect: document.getElementById('options-hud-clock-select'),
+    optionsPromptUsernameInput: document.getElementById('options-prompt-username-input'),
+    optionsPromptUsernameError: document.getElementById('options-prompt-username-error'),
     themeSelect: document.getElementById('theme-select'),
     tsBtn: document.getElementById('ts-btn'),
     lnBtn: document.getElementById('ln-btn'),
@@ -472,6 +479,8 @@ export async function loadAppFns({
       enterHistSearch: enterHistSearchOverride,
       openWorkspace: openWorkspaceOverride,
       openStatusMonitor: openStatusMonitorOverride,
+      closeStatusMonitor: closeStatusMonitorOverride,
+      isStatusMonitorOpen: isStatusMonitorOpenOverride,
       interruptPromptLine: interruptPromptLineOverride,
       _welcomeActive: welcomeActive,
       welcomeOwnsTab: welcomeOwnsTabOverride,
@@ -539,8 +548,10 @@ export async function loadAppFns({
     getShareRedactionDefaultPreference,
     getRunNotifyPreference,
     getHudClockPreference,
+    getPromptUsernamePreference,
     applyRunNotifyPreference,
     applyHudClockPreference,
+    applyPromptUsernamePreference,
     syncOptionsControls,
     handleThemeCommand,
     handleConfigCommand,

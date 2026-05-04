@@ -8,7 +8,8 @@ describe('frontend config bootstrap', () => {
   it('reads APP_CONFIG from the server-rendered bootstrap JSON', () => {
     const bootstrap = {
       app_name: 'darklab_shell',
-      prompt_prefix: 'anon@darklab:~$',
+      prompt_username: 'anon',
+      prompt_domain: 'darklab.sh',
       recent_commands_limit: 50,
       welcome_char_ms: 18,
       welcome_jitter_ms: 12,
@@ -33,7 +34,8 @@ describe('frontend config bootstrap', () => {
 
     expect(APP_CONFIG).toMatchObject({
       app_name: expect.any(String),
-      prompt_prefix: expect.any(String),
+      prompt_username: expect.any(String),
+      prompt_domain: expect.any(String),
       welcome_char_ms: expect.any(Number),
       welcome_jitter_ms: expect.any(Number),
       welcome_post_cmd_ms: expect.any(Number),

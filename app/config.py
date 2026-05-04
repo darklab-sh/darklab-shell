@@ -14,6 +14,21 @@ PROJECT_NAME = "darklab_shell"
 
 PROJECT_README = "https://gitlab.com/darklab.sh/darklab_shell#darklab_shell"
 APP_CONF_DIR = os.environ.get("APP_CONF_DIR", "")
+DEFAULT_PROMPT_IDENTITY = "anon@darklab.sh"
+
+
+def split_prompt_identity(identity):
+    raw = str(identity or DEFAULT_PROMPT_IDENTITY).strip() or DEFAULT_PROMPT_IDENTITY
+    if raw.endswith("$"):
+        raw = raw[:-1].rstrip()
+    if ":" in raw:
+        head, tail = raw.rsplit(":", 1)
+        if head and tail and not any(ch.isspace() for ch in tail):
+            raw = head.strip()
+    username, sep, domain = raw.partition("@")
+    username = username.strip() or "anon"
+    domain = domain.strip() if sep else "darklab.sh"
+    return username, domain or "darklab.sh"
 
 
 def _load_yaml_config(path):
@@ -64,7 +79,8 @@ def load_config(conf_dir=None):
     """
     defaults = {
         "app_name":                   "darklab_shell",
-        "prompt_prefix":              "anon@darklab.sh",
+        "prompt_username":            split_prompt_identity(DEFAULT_PROMPT_IDENTITY)[0],
+        "prompt_domain":              split_prompt_identity(DEFAULT_PROMPT_IDENTITY)[1],
         "motd":                       "",
         "default_theme":              "darklab_obsidian.yaml",
         "history_panel_limit":        50,

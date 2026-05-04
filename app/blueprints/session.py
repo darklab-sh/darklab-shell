@@ -35,7 +35,10 @@ _SESSION_PREFERENCE_KEYS = {
     "pref_share_redaction_default",
     "pref_run_notify",
     "pref_hud_clock",
+    "pref_prompt_username",
 }
+
+_PROMPT_USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
 
 _RECENT_DOMAIN_LIMIT = 10
 _DOMAIN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
@@ -60,6 +63,8 @@ def _normalize_session_preferences(raw):
             value = str(value or "")
         value = value.strip()
         if not value:
+            continue
+        if key == "pref_prompt_username" and not _PROMPT_USERNAME_RE.fullmatch(value):
             continue
         prefs[key] = value
     return prefs

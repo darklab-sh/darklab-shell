@@ -119,20 +119,36 @@ var DarklabAutocompleteCore = (function (global) {
     return -1;
   }
 
+  function _orderedFuzzyMatchIndexes(lower, query) {
+    const indexes = [];
+    let from = 0;
+    let previousFound = -1;
+    for (let index = 0; index < query.length; index += 1) {
+      const found = lower.indexOf(query[index], from);
+      if (found < 0) return null;
+      if (previousFound >= 0 && found - previousFound > 2) return null;
+      indexes.push(found);
+      previousFound = found;
+      from = found + 1;
+    }
+    return indexes;
+  }
+
   function fuzzyMatchIndexes(value, query) {
     const text = String(value || '');
     const q = String(query || '').toLowerCase();
     if (!text || q.length < 2) return null;
     const lower = text.toLowerCase();
-    const indexes = [];
-    let from = 0;
-    for (let index = 0; index < q.length; index += 1) {
-      const found = lower.indexOf(q[index], from);
-      if (found < 0) return null;
-      indexes.push(found);
-      from = found + 1;
+    const ordered = _orderedFuzzyMatchIndexes(lower, q);
+    if (ordered) return ordered;
+
+    for (let index = 0; index < q.length - 1; index += 1) {
+      if (q[index] === q[index + 1]) continue;
+      const swapped = `${q.slice(0, index)}${q[index + 1]}${q[index]}${q.slice(index + 2)}`;
+      const transposed = _orderedFuzzyMatchIndexes(lower, swapped);
+      if (transposed) return transposed;
     }
-    return indexes;
+    return null;
   }
 
   function _scoreField(value, query) {

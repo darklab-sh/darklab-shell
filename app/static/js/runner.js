@@ -1122,6 +1122,10 @@ function _isClientSideUiCommand(cmd) {
   return root === 'theme' || root === 'config';
 }
 
+function _isTabCloseCommand(cmd) {
+  return /^(exit|quit)$/i.test(String(cmd || '').trim());
+}
+
 function _workspaceDeleteCommand(cmd) {
   const parts = _workspaceCommandTokens(cmd);
   const root = (parts[0] || '').toLowerCase();
@@ -2640,6 +2644,11 @@ function submitCommand(rawCmd) {
     appendLine('[denied] Access to /data and /tmp is not permitted.', 'denied');
     setStatus('fail');
     return false;
+  }
+
+  if (_isTabCloseCommand(cmd)) {
+    if (typeof closeTab === 'function') closeTab(activeTabId);
+    return true;
   }
 
   addToHistory(_historySafeCommand(cmd));
