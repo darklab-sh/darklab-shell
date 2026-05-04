@@ -5,7 +5,6 @@
 Use the history panel to reopen saved runs.
 Click a permalink to share command output.
 Autocomplete only suggests allowed diagnostics commands.
-The run button executes the current command in the prompt.
 Long output is trimmed so the terminal stays responsive.
 Arrow Up/Down cycles command history when autocomplete is not active.
 The welcome banner uses sampled examples from the allowlist.

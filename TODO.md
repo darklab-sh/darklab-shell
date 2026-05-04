@@ -17,7 +17,26 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 
 ## Open TODOs
 
-No active TODOs are currently tracked.
+- **Workspace file and folder move support**
+  - Add a first-class move flow for Files so users can reorganize workspace contents without downloading/re-uploading or using command output paths.
+  - User flows:
+    - Files modal action: add a `Move` button/action for file and folder rows that opens an app-native destination picker.
+    - Files modal drag-and-drop: allow dragging a file or folder onto another folder to move it there.
+    - CLI command: add `file move <source> <destination>` with `mv` as an alias.
+  - Behavior:
+    - Moving a file to a folder keeps the original filename.
+    - Moving to a full destination path supports rename-on-move.
+    - Moving folders must reject recursive/self moves such as moving `reports/` into `reports/archive/`.
+    - Validate both source and destination paths through the existing workspace path validation layer so moves are limited to the user's valid session workspace.
+    - Existing workspace quota checks and session scoping must apply.
+    - If the destination exists, require confirmation or reject with a clear message rather than silently overwriting.
+  - Backend/API:
+    - Add an app-mediated move operation so UI and CLI share the same validation and filesystem behavior.
+    - Preserve workspace ownership/mode expectations for app-created and scanner-created files.
+  - Tests:
+    - Python route/helper coverage for file move, folder move, rename-on-move, destination exists, missing source, invalid source path, invalid destination path, cross-workspace escape attempts, and recursive folder rejection.
+    - JS unit coverage for Files modal move button, destination picker state, and drag/drop intent handling.
+    - E2E coverage for at least one modal move flow and one `file move`/`mv` command flow.
 
 ---
 

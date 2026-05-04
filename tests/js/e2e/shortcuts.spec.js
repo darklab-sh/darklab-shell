@@ -344,42 +344,42 @@ test.describe('Ctrl+R reverse-history search', () => {
     await expect(page.locator('#hist-search-dropdown .hist-search-item')).toContainText('hostname')
   })
 
-  test('Enter in hist-search accepts the match and runs the command', async ({ page }) => {
+  test('Enter in hist-search accepts the match into the input without running the command', async ({ page }) => {
     await runCommand(page, 'hostname')
     const linesBefore = await page.locator('.tab-panel.active .output .line').count()
     await page.locator('#cmd').press('Control+r')
     await page.locator('#cmd').type('host')
     await page.locator('#cmd').press('Enter')
-    // dropdown should close and new output lines should appear from the second run
-    await expect(page.locator('#hist-search-dropdown')).toHaveClass(/u-hidden/)
-    await page.waitForFunction(
-      (before) => document.querySelectorAll('.tab-panel.active .output .line').length > before,
-      linesBefore,
-      { timeout: 15_000 },
-    )
-  })
-
-  test('Tab in hist-search accepts the match into the input without running the command', async ({
-    page,
-  }) => {
-    await runCommand(page, 'hostname')
-    // Ensure the run is committed server-side so the debounced fetch finds it
-    await waitForHistoryRuns(page, 1)
-    const linesBefore = await page.locator('.tab-panel.active .output .line').count()
-    await page.locator('#cmd').press('Control+r')
-    await page.locator('#cmd').type('host')
-    // Wait for the dropdown to show the match before accepting with Tab
-    await expect(page.locator('#hist-search-dropdown .hist-search-item')).toContainText('hostname')
-    await page.locator('#cmd').press('Tab')
-    // dropdown should close, input should have the accepted value
     await expect(page.locator('#hist-search-dropdown')).toHaveClass(/u-hidden/)
     await expect(page.locator('#cmd')).toHaveValue('hostname')
+    const linesAfter = await page.locator('.tab-panel.active .output .line').count()
+    expect(linesAfter).toBe(linesBefore)
+  })
+
+  test('Tab in hist-search walks entries without changing the input', async ({
+    page,
+  }) => {
+    const marker = `histtab-${Date.now()}`
+    await runCommand(page, `echo ${marker}-one`)
+    await runCommand(page, `echo ${marker}-two`)
+    // Ensure the run is committed server-side so the debounced fetch finds it
+    await waitForHistoryRuns(page, 2)
+    const linesBefore = await page.locator('.tab-panel.active .output .line').count()
+    await page.locator('#cmd').press('Control+r')
+    await page.locator('#cmd').type(marker)
+    await expect(page.locator('#hist-search-dropdown .hist-search-item')).toHaveCount(2)
+    const activeBefore = await page.locator('#hist-search-dropdown .hist-search-item.active').textContent()
+    await page.locator('#cmd').press('Tab')
+    await expect(page.locator('#hist-search-dropdown')).not.toHaveClass(/u-hidden/)
+    await expect(page.locator('#cmd')).toHaveValue(marker)
+    const activeAfter = await page.locator('#hist-search-dropdown .hist-search-item.active').textContent()
+    expect(activeAfter).not.toBe(activeBefore)
     // command should not have run — line count stays the same
     const linesAfter = await page.locator('.tab-panel.active .output .line').count()
     expect(linesAfter).toBe(linesBefore)
   })
 
-  test('ArrowDown in hist-search navigates to the next match and fills the input', async ({
+  test('ArrowDown in hist-search navigates without changing the input', async ({
     page,
   }) => {
     await runCommand(page, 'hostname')
@@ -393,8 +393,8 @@ test.describe('Ctrl+R reverse-history search', () => {
     // Before ArrowDown, input has the typed query
     await expect(page.locator('#cmd')).toHaveValue('host')
     await page.locator('#cmd').press('ArrowDown')
-    // Only one match, so ArrowDown clamps — input stays as the current match
-    await expect(page.locator('#cmd')).toHaveValue('hostname')
+    await expect(page.locator('#cmd')).toHaveValue('host')
+    await expect(page.locator('#hist-search-dropdown .hist-search-item.active')).toContainText('hostname')
   })
 
   test('Escape in hist-search closes the dropdown and restores the pre-search draft', async ({

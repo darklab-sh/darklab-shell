@@ -2059,6 +2059,18 @@ function _hideHistSearchDropdown() {
   if (histSearchDropdown) histSearchDropdown.classList.add('u-hidden');
 }
 
+function _moveHistSearchSelection(delta) {
+  const matches = _histSearchMatches();
+  if (!matches.length) return false;
+  if (_histSearchIndex < 0) {
+    _histSearchIndex = delta < 0 ? matches.length - 1 : 0;
+  } else {
+    _histSearchIndex = (_histSearchIndex + delta + matches.length) % matches.length;
+  }
+  _renderHistSearch();
+  return true;
+}
+
 function _renderHistSearch() {
   // Reverse-i-search intentionally mirrors shell behavior: current query at the
   // top, most relevant match preselected, and wraparound keyboard navigation.
@@ -2144,14 +2156,7 @@ function _renderHistSearch() {
 function enterHistSearch() {
   if (_histSearchMode) {
     // Ctrl+R again: cycle to next match
-    const matches = _histSearchMatches();
-    if (matches.length > 0) {
-      _histSearchIndex = (_histSearchIndex + 1) % matches.length;
-      if (typeof setComposerValue === 'function') {
-        setComposerValue(matches[_histSearchIndex], matches[_histSearchIndex].length, matches[_histSearchIndex].length, { dispatch: false });
-      }
-      _renderHistSearch();
-    }
+    _moveHistSearchSelection(1);
     return;
   }
   _histSearchMode = true;
@@ -2222,53 +2227,28 @@ function handleHistSearchKey(e) {
   }
   if (e.key === 'Enter') {
     e.preventDefault();
-    // Accept the selected match (if any) then run it. If nothing matched, keep
-    // the typed query in the input and run that instead of restoring the pre-draft.
+    // Accept the selected match (if any) into the prompt without running it,
+    // matching the autocomplete menu's Enter behavior.
     if (_histSearchIndex >= 0) {
       exitHistSearch(true);
     } else {
       exitHistSearch(false, { keepCurrent: true });
-    }
-    const currentValue = (typeof getComposerValue === 'function') ? getComposerValue() : '';
-    if (typeof submitComposerCommand === 'function') {
-      submitComposerCommand(currentValue, { dismissKeyboard: true });
-    } else if (typeof runCommand === 'function') {
-      runCommand();
     }
     return true;
   }
-  if (e.key === 'Tab') {
+  if (e.key === 'Tab' && !e.altKey && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
-    // Accept the selected match without running; fall back to keeping the query.
-    if (_histSearchIndex >= 0) {
-      exitHistSearch(true);
-    } else {
-      exitHistSearch(false, { keepCurrent: true });
-    }
+    _moveHistSearchSelection(e.shiftKey ? -1 : 1);
     return true;
   }
   if (e.key === 'ArrowDown') {
     e.preventDefault();
-    const matches = _histSearchMatches();
-    if (matches.length > 0) {
-      _histSearchIndex = (_histSearchIndex + 1) % matches.length;
-      if (typeof setComposerValue === 'function') {
-        setComposerValue(matches[_histSearchIndex], matches[_histSearchIndex].length, matches[_histSearchIndex].length, { dispatch: false });
-      }
-      _renderHistSearch();
-    }
+    _moveHistSearchSelection(1);
     return true;
   }
   if (e.key === 'ArrowUp') {
     e.preventDefault();
-    const matches = _histSearchMatches();
-    if (matches.length > 0) {
-      _histSearchIndex = _histSearchIndex <= 0 ? matches.length - 1 : _histSearchIndex - 1;
-      if (typeof setComposerValue === 'function') {
-        setComposerValue(matches[_histSearchIndex], matches[_histSearchIndex].length, matches[_histSearchIndex].length, { dispatch: false });
-      }
-      _renderHistSearch();
-    }
+    _moveHistSearchSelection(-1);
     return true;
   }
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'r' || e.key === 'R')) {

@@ -1755,18 +1755,18 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `exitHistSearch(true) accepts the currently selected match` | Verifies that exitHistSearch(true) accepts the currently selected match. |
 | `exitHistSearch(false) cancels and restores the pre-draft` | Verifies that exitHistSearch(false) cancels and restores the pre-draft. |
 | `handleHistSearchKey Escape cancels search and returns true` | Verifies that handleHistSearchKey Escape cancels search and returns true. |
-| `handleHistSearchKey Enter accepts the match, exits search, and runs the command` | Verifies that handleHistSearchKey Enter accepts the match, exits search, and runs the command. |
-| `handleHistSearchKey Enter with no matches keeps typed query and runs it` | Verifies that handleHistSearchKey Enter with no matches keeps typed query and runs it. |
-| `handleHistSearchKey Tab accepts the match without running the command` | Verifies that handleHistSearchKey Tab accepts the match without running the command. |
-| `handleHistSearchKey ArrowDown navigates to the next match and fills the input` | Verifies that handleHistSearchKey ArrowDown navigates to the next match and fills the input. |
+| `handleHistSearchKey Enter accepts the match into the prompt without running it` | Verifies that handleHistSearchKey Enter accepts the match into the prompt without running it. |
+| `handleHistSearchKey Enter with no matches keeps typed query without running it` | Verifies that handleHistSearchKey Enter with no matches keeps typed query without running it. |
+| `handleHistSearchKey Tab moves through matches without changing the input` | Verifies that handleHistSearchKey Tab moves through matches without changing the input. |
+| `handleHistSearchKey ArrowDown navigates to the next match without changing the input` | Verifies that handleHistSearchKey ArrowDown navigates to the next match without changing the input. |
 | `handleHistSearchKey ArrowUp navigates to the previous match` | Verifies that handleHistSearchKey ArrowUp navigates to the previous match. |
 | `handleHistSearchKey Ctrl+R cycles to the next match` | Verifies that handleHistSearchKey Ctrl+R cycles to the next match. |
 | `handleHistSearchKey returns false for printable characters to allow input to proceed` | Verifies that handleHistSearchKey returns false for printable characters to allow input to proceed. |
 | `handleHistSearchKey Ctrl+C exits search keeping the typed query in input (not restoring pre-draft)` | Verifies that handleHistSearchKey Ctrl+C exits search keeping the typed query in input (not restoring pre-draft). |
 | `handleHistSearchKey ArrowDown wraps from the last match back to the first` | Verifies that handleHistSearchKey ArrowDown wraps from the last match back to the first. |
 | `handleHistSearchKey ArrowUp wraps from the first match back to the last` | Verifies that handleHistSearchKey ArrowUp wraps from the first match back to the last. |
-| `handleHistSearchKey Tab with no matches exits keeping the typed query in input` | Verifies that handleHistSearchKey Tab with no matches exits keeping the typed query in input. |
-| `handleHistSearchKey Enter after ArrowDown runs the navigated-to match` | Verifies that handleHistSearchKey Enter after ArrowDown runs the navigated-to match. |
+| `handleHistSearchKey Tab with no matches leaves search open and keeps the typed query` | Verifies that handleHistSearchKey Tab with no matches leaves search open and keeps the typed query. |
+| `handleHistSearchKey Enter after ArrowDown accepts the navigated-to match without running it` | Verifies that handleHistSearchKey Enter after ArrowDown accepts the navigated-to match without running it. |
 | `resetCmdHistoryNav exits hist search mode if active` | Verifies that resetCmdHistoryNav exits hist search mode if active. |
 | `dropdown keeps cmdHistory matches when server fetch returns empty` | Regression: typing a character used to show in-memory recents briefly, then the server response overwrote `_histSearchRuns = []` and the dropdown cleared. Client-side matches must not be dropped by an empty server response. |
 | `dropdown merges cmdHistory matches with unique server-only matches` | Verifies that server-surfaced older runs beyond the in-memory recents cap extend the dropdown list (deduped) rather than replacing the cmdHistory matches. |
@@ -2738,9 +2738,9 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `paste routes to the prompt after copying selected transcript text` | Verifies that paste after selecting transcript text clears the page selection, focuses the command prompt, and inserts clipboard text into the composer. |
 | `Ctrl+R opens the hist-search dropdown after a command has been run` | Ctrl+R opens the hist-search dropdown after a command has been run. |
 | `typing while hist-search is open filters matches in the dropdown` | Verifies that typing while hist-search is open filters matches in the dropdown. |
-| `Enter in hist-search accepts the match and runs the command` | Enter in hist-search accepts the match and runs the command. |
-| `Tab in hist-search accepts the match into the input without running the command` | Tab in hist-search accepts the match into the input without running the command. |
-| `ArrowDown in hist-search navigates to the next match and fills the input` | ArrowDown in hist-search navigates to the next match and fills the input. |
+| `Enter in hist-search accepts the match into the input without running the command` | Enter in hist-search accepts the match into the input without running the command. |
+| `Tab in hist-search walks entries without changing the input` | Tab in hist-search walks entries without changing the input. |
+| `ArrowDown in hist-search navigates without changing the input` | ArrowDown in hist-search navigates without changing the input. |
 | `Escape in hist-search closes the dropdown and restores the pre-search draft` | Escape in hist-search closes the dropdown and restores the pre-search draft. |
 | `Ctrl+C in hist-search closes the dropdown and keeps the typed query in the input` | Ctrl+C in hist-search closes the dropdown and keeps the typed query in the input. |
 | `? opens the overlay when no input is focused` | Pressing `?` outside any input opens the transparent keyboard-shortcuts overlay. |
