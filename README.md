@@ -702,10 +702,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── docker-compose.yml
 ├── docs/
 │   ├── ROADMAP.md              # Product roadmap for projects, annotations, artifacts, notes, exports, and target context
-│   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
-│   ├── release-drafts/       # Temporary release-branch merge-request and release-note drafts; remove before merging to main unless intentionally preserving them
-│   │   ├── v1.6-merge-request.md # Draft GitLab merge request notes for the v1.6 branch
-│   │   └── v1.6-release-notes.md # Draft user/operator release notes for v1.6
+│   └── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
 ├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser
 ├── examples/
 │   ├── docker-compose.prod.yml  # Optional production Docker Compose override (GELF, proxy env, external network)

@@ -41,6 +41,11 @@ COMPARE_MAX_LINES = 20_000
 COMPARE_MAX_BYTES = 3 * 1024 * 1024
 COMPARE_MAX_CHANGED_LINES = 500
 COMPARE_CHANGED_LINE_SIMILARITY = 0.72
+COMPARE_CHANGED_LINE_MAX_PAIR_LENGTH = 4_000
+COMPARE_CHANGED_LINE_INDEX_WINDOW = 40
+COMPARE_CHANGED_LINE_QUICK_RATIO = 0.6
+COMPARE_CHANGED_LINE_CANDIDATES_PER_LINE = 5
+COMPARE_CHANGED_LINE_MAX_CANDIDATES = 5_000
 
 
 def _normalize_history_filter_text(value):
@@ -774,6 +779,20 @@ def _paired_line_similarity(added_text, removed_text):
     return SequenceMatcher(None, added_text, removed_text, autojunk=False).ratio()
 
 
+def _changed_line_pair_prefilter(added_text, removed_text, added_index, removed_index):
+    if abs(added_index - removed_index) > COMPARE_CHANGED_LINE_INDEX_WINDOW:
+        return False
+    longest = max(len(added_text), len(removed_text))
+    shortest = min(len(added_text), len(removed_text))
+    if longest > COMPARE_CHANGED_LINE_MAX_PAIR_LENGTH:
+        return False
+    if longest and shortest / longest < 0.5:
+        return False
+    if added_text == removed_text:
+        return True
+    return SequenceMatcher(None, added_text, removed_text, autojunk=False).quick_ratio() >= COMPARE_CHANGED_LINE_QUICK_RATIO
+
+
 def _pair_similar_changed_lines(added, removed):
     if not added or not removed:
         return [], added, removed
@@ -783,13 +802,20 @@ def _pair_similar_changed_lines(added, removed):
     candidates = []
     for removed_index, removed_line in enumerate(removed):
         removed_text = str(removed_line.get("text") or "")
+        line_candidates = []
         for added_index, added_line in enumerate(added):
             added_text = str(added_line.get("text") or "")
+            if not _changed_line_pair_prefilter(added_text, removed_text, added_index, removed_index):
+                continue
             similarity = _paired_line_similarity(added_text, removed_text)
             if similarity < COMPARE_CHANGED_LINE_SIMILARITY:
                 continue
             distance_penalty = abs(added_index - removed_index) * 0.001
-            candidates.append((similarity - distance_penalty, similarity, removed_index, added_index))
+            line_candidates.append((similarity - distance_penalty, similarity, removed_index, added_index))
+        candidates.extend(sorted(line_candidates, reverse=True)[:COMPARE_CHANGED_LINE_CANDIDATES_PER_LINE])
+        if len(candidates) >= COMPARE_CHANGED_LINE_MAX_CANDIDATES:
+            candidates = candidates[:COMPARE_CHANGED_LINE_MAX_CANDIDATES]
+            break
 
     changed = []
     for _, similarity, removed_index, added_index in sorted(candidates, reverse=True):
@@ -1277,12 +1303,6 @@ def get_run(run_id):
         json_url=f"/history/{run_id}?json",
         meta=meta,
     )
-
-
-@history_bp.route("/history/<run_id>/full")
-def get_run_full_output(run_id):
-    """Backward-compatible alias for the canonical /history/<run_id> permalink."""
-    return get_run(run_id)
 
 
 @history_bp.route("/history/<run_id>", methods=["DELETE"])

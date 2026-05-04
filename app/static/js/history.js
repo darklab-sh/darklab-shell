@@ -1448,8 +1448,18 @@ function _renderHistoryCompareChangedLines(lines) {
   return section;
 }
 
+function _historyCompareHasTabCapacity(count) {
+  const maxTabs = Number((typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.max_tabs) || 0);
+  if (!maxTabs || maxTabs <= 0 || typeof tabs === 'undefined' || !Array.isArray(tabs)) return true;
+  return tabs.length + Number(count || 0) <= maxTabs;
+}
+
 function _restoreBothHistoryCompareRuns(left, right) {
   if (!left || !right) return Promise.reject(new Error('missing comparison runs'));
+  if (!_historyCompareHasTabCapacity(2)) {
+    showToast('Not enough tab capacity to restore both runs', 'error');
+    return Promise.reject(new Error('not enough tab capacity'));
+  }
   const leftTabId = createTab(`A: ${left.command || 'run'}`);
   if (!leftTabId) return Promise.reject(new Error('failed to create Run A tab'));
   const rightTabId = createTab(`B: ${right.command || 'run'}`);
@@ -1515,8 +1525,9 @@ function _renderHistoryComparison(data) {
     restoreBoth.disabled = true;
     _restoreBothHistoryCompareRuns(data.left, data.right)
       .then(() => closeHistoryCompareOverlay())
-      .catch(() => {
+      .catch(err => {
         restoreBoth.disabled = false;
+        if (err && err.message === 'not enough tab capacity') return;
         showToast('Failed to restore both runs', 'error');
       });
   });

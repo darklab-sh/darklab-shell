@@ -2563,6 +2563,10 @@ def _allowed_prefix_matches_with_grouping(
         if token in allow_grouping_flags:
             required_grouped_flags.add(token)
             continue
+        members = _grouped_short_flag_members(token, allow_grouping_flags)
+        if members:
+            required_grouped_flags.update(members)
+            continue
         # Keep non-groupable prefixes on the original exact-prefix path.
         return False
     if not required_grouped_flags:
@@ -2571,9 +2575,8 @@ def _allowed_prefix_matches_with_grouping(
     command_grouped_flags = set()
     for token in command_tokens[1:]:
         members = _grouped_short_flag_members(token, allow_grouping_flags)
-        if members is None:
-            break
-        command_grouped_flags.update(members)
+        if members:
+            command_grouped_flags.update(members)
 
     return required_grouped_flags.issubset(command_grouped_flags)
 

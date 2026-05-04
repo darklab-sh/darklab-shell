@@ -64,6 +64,26 @@ def _make_trim_notice_event() -> "BrokerEvent":
     )
 
 
+def _is_resumable_event(event: "BrokerEvent") -> bool:
+    return not _is_trim_notice(event)
+
+
+def _is_valid_stream_event_id(event_id: str) -> bool:
+    try:
+        left, right = str(event_id).split("-", 1)
+        int(left)
+        int(right)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _normalize_resume_event_id(event_id: str | None) -> str:
+    if _is_beginning_event_id(event_id or ""):
+        return "0-0"
+    return str(event_id) if _is_valid_stream_event_id(str(event_id)) else "0-0"
+
+
 def _is_beginning_event_id(event_id: str) -> bool:
     return not event_id or event_id in ("-", "0-0")
 
@@ -100,7 +120,7 @@ def _is_after(left: str, right: str) -> bool:
         left_ms, left_seq = [int(part) for part in str(left).split("-", 1)]
         right_ms, right_seq = [int(part) for part in str(right).split("-", 1)]
     except (TypeError, ValueError):
-        return str(left) > str(right)
+        return False
     return (left_ms, left_seq) > (right_ms, right_seq)
 
 
@@ -109,10 +129,17 @@ class BrokerEvent:
     event_id: str
     payload: dict[str, Any]
 
-    def as_sse(self) -> str:
+    def as_payload(self) -> dict[str, Any]:
         body = dict(self.payload)
-        body["event_id"] = self.event_id
-        return f"id: {self.event_id}\ndata: {json.dumps(body)}\n\n"
+        if _is_resumable_event(self):
+            body["event_id"] = self.event_id
+        return body
+
+    def as_sse(self) -> str:
+        body = self.as_payload()
+        if _is_resumable_event(self):
+            return f"id: {self.event_id}\ndata: {json.dumps(body)}\n\n"
+        return f"data: {json.dumps(body)}\n\n"
 
 
 class _MemoryRunBrokerStore:
@@ -151,6 +178,7 @@ class _MemoryRunBrokerStore:
         after_id: str = "0-0",
         limit: int = 100,
     ) -> list[BrokerEvent]:
+        after_id = _normalize_resume_event_id(after_id)
         with self._lock:
             self._purge_locked(run_id)
             return self._events_after_locked(run_id, after_id, limit)
@@ -161,6 +189,7 @@ class _MemoryRunBrokerStore:
         after_id: str = "0-0",
         timeout: float = 15.0,
     ) -> list[BrokerEvent]:
+        after_id = _normalize_resume_event_id(after_id)
         deadline = time.time() + max(0.0, float(timeout or 0))
         with self._lock:
             while True:
@@ -181,6 +210,7 @@ class _MemoryRunBrokerStore:
         after_id: str = "0-0",
         limit: int = 100,
     ) -> list[BrokerEvent]:
+        after_id = _normalize_resume_event_id(after_id)
         rows = [event for event in self._events.get(run_id, []) if _is_after(event.event_id, after_id)]
         return rows[: max(0, int(limit or 0))]
 
@@ -270,9 +300,10 @@ class _RedisRunBrokerStore:
     ) -> list[BrokerEvent]:
         if not redis_client:
             return []
+        after_id = _normalize_resume_event_id(after_id)
         rows = cast(
             list[tuple[Any, dict[str, Any]]],
-            redis_client.xrange(_stream_key(run_id), min=after_id or "0-0", count=max(0, int(limit or 0))),
+            redis_client.xrange(_stream_key(run_id), min=after_id, count=max(0, int(limit or 0))),
         )
         events: list[BrokerEvent] = []
         for event_id, fields in rows:
@@ -292,10 +323,11 @@ class _RedisRunBrokerStore:
     ) -> list[BrokerEvent]:
         if not redis_client:
             return []
+        after_id = _normalize_resume_event_id(after_id)
         rows = cast(
             list[tuple[Any, list[tuple[Any, dict[str, Any]]]]],
             redis_client.xread(
-                {_stream_key(run_id): after_id or "0-0"},
+                {_stream_key(run_id): after_id},
                 count=100,
                 block=max(1, int(float(timeout or 0) * 1000)),
             ),
@@ -441,11 +473,12 @@ def replay_run_events(run_id: str) -> list[BrokerEvent]:
 
 
 def stream_run_events(run_id: str, after_id: str = "0-0") -> Iterator[str]:
-    current_id = after_id or "0-0"
+    current_id = _normalize_resume_event_id(after_id)
     block_seconds = max(1.0, float(CFG.get("run_broker_subscriber_block_seconds", 15) or 15))
     if _is_beginning_event_id(current_id):
         for event in replay_run_events(run_id):
-            current_id = event.event_id
+            if _is_resumable_event(event):
+                current_id = event.event_id
             yield event.as_sse()
             if event.payload.get("type") in TERMINAL_EVENT_TYPES:
                 return
@@ -455,7 +488,8 @@ def stream_run_events(run_id: str, after_id: str = "0-0") -> Iterator[str]:
             yield ": heartbeat\n\n"
             continue
         for event in events:
-            current_id = event.event_id
+            if _is_resumable_event(event):
+                current_id = event.event_id
             yield event.as_sse()
             if event.payload.get("type") in TERMINAL_EVENT_TYPES:
                 return

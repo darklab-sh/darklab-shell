@@ -481,7 +481,7 @@ describe('command history hydration', () => {
 })
 
 describe('history panel actions', () => {
-  function loadHistoryPanel({ clipboardImpl, apiFetchImpl, mobileMode = false } = {}) {
+  function loadHistoryPanel({ clipboardImpl, apiFetchImpl, mobileMode = false, appConfig = {} } = {}) {
     document.body.innerHTML = `
       <div id="history-panel"></div>
       <input id="history-search-input" />
@@ -619,7 +619,7 @@ describe('history panel actions', () => {
         {
           document,
           localStorage: new MemoryStorage(),
-          APP_CONFIG: { recent_commands_limit: 50, history_panel_limit: 8 },
+          APP_CONFIG: { recent_commands_limit: 50, history_panel_limit: 8, ...appConfig },
           apiFetch,
           navigator: { clipboard },
           location,
@@ -679,6 +679,7 @@ describe('history panel actions', () => {
         _setHistoryFilter,
         _historySetPage,
         _historyRelativeTime,
+        _restoreBothHistoryCompareRuns,
         resetHistoryMobileFilters,
         toggleHistoryMobileFilters,
         _saveStarred,
@@ -694,6 +695,7 @@ describe('history panel actions', () => {
       setTabStatus,
       hideTabKillBtn,
       showToast,
+      tabs,
       bindDismissible,
       refocusComposerAfterAction,
     }
@@ -1191,6 +1193,22 @@ describe('history panel actions', () => {
     expect(appendLine).toHaveBeenCalledWith('old output', '', 'tab-3')
     expect(activateTab).toHaveBeenCalledWith('tab-3', { focusComposer: false })
     expect(document.getElementById('history-compare-overlay').classList.contains('open')).toBe(false)
+  })
+
+  it('preflights Restore Both tab capacity before creating either tab', async () => {
+    const { _restoreBothHistoryCompareRuns, createTab } = loadHistoryPanel({
+      appConfig: { max_tabs: 2 },
+    })
+
+    await expect(_restoreBothHistoryCompareRuns(
+      { id: 'run-a', command: 'nmap darklab.sh' },
+      { id: 'run-b', command: 'nmap darklab.sh' },
+    )).rejects.toThrow('not enough tab capacity')
+
+    expect(createTab).not.toHaveBeenCalled()
+    expect(document.getElementById('permalink-toast').textContent).toBe(
+      'Not enough tab capacity to restore both runs',
+    )
   })
 
   it('includes the history type filter in the request URL when snapshots are selected', () => {

@@ -2001,6 +2001,7 @@ class TestRunRoute:
     def test_brokered_run_events_returns_session_scoped_backfill(self):
         client = get_client()
         fake_event = mock.Mock(event_id="10-0", payload={"type": "output", "text": "hello"})
+        fake_event.as_payload.return_value = {"event_id": "10-0", "type": "output", "text": "hello"}
         with mock.patch("blueprints.run.active_runs_for_session", return_value=[{"run_id": "run-1"}]), \
              mock.patch("blueprints.run.get_run_events", return_value=[fake_event]) as get_events:
             resp = client.get(
@@ -3105,6 +3106,58 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
+    def test_compare_history_runs_leaves_very_long_lines_unpaired(self):
+        client = get_client()
+        session = "compare-long-lines-" + uuid.uuid4().hex[:8]
+        left_line = "scanner output " + ("a" * 4500) + " old"
+        right_line = "scanner output " + ("a" * 4500) + " new"
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+                "output_preview, output_line_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        "cmp-long-left",
+                        session,
+                        "nmap darklab.sh",
+                        "2026-01-01T00:00:01",
+                        "2026-01-01T00:00:03",
+                        0,
+                        json.dumps([{"text": left_line, "cls": "", "line_index": 0}]),
+                        1,
+                    ),
+                    (
+                        "cmp-long-right",
+                        session,
+                        "nmap darklab.sh",
+                        "2026-01-01T00:00:04",
+                        "2026-01-01T00:00:09",
+                        0,
+                        json.dumps([{"text": right_line, "cls": "", "line_index": 0}]),
+                        1,
+                    ),
+                ],
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                "/history/compare?left=cmp-long-left&right=cmp-long-right",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+
+            assert resp.status_code == 200
+            assert data["sections"]["changed"] == []
+            assert [line["text"] for line in data["sections"]["removed"]] == [left_line]
+            assert [line["text"] for line in data["sections"]["added"]] == [right_line]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
+
 
 # ── /share ────────────────────────────────────────────────────────────────────
 
@@ -3932,86 +3985,6 @@ class TestRunPermalinkRoute:
             assert f"v{APP_VERSION}" in body
         finally:
             self._delete_run(run_id)
-
-
-class TestRunFullOutputRoute:
-    def _insert_run(self, run_id, command):
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute(
-            "INSERT INTO runs (id, session_id, command, started, full_output_available) "
-            "VALUES (?, 'test-session', ?, datetime('now'), 1)",
-            (run_id, command)
-        )
-        conn.execute(
-            "INSERT INTO run_output_artifacts (run_id, rel_path, compression, byte_size, line_count, truncated, created) "
-            "VALUES (?, ?, 'gzip', 12, 2, 0, datetime('now'))",
-            (run_id, f"{run_id}.txt.gz")
-        )
-        conn.commit()
-        conn.close()
-
-        import gzip
-        from run_output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
-        ensure_run_output_dir()
-        with gzip.open(Path(RUN_OUTPUT_DIR) / f"{run_id}.txt.gz", "wt", encoding="utf-8") as f:
-            f.write("line 1\nline 2\n")
-
-    def _delete_run(self, run_id):
-        from run_output_store import RUN_OUTPUT_DIR
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("DELETE FROM run_output_artifacts WHERE run_id = ?", (run_id,))
-        conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
-        conn.commit()
-        conn.close()
-        try:
-            os.unlink(Path(RUN_OUTPUT_DIR) / f"{run_id}.txt.gz")
-        except FileNotFoundError:
-            pass
-
-    def test_full_output_json_returns_artifact_lines(self):
-        run_id = "permalink-full-json-test-run"
-        self._insert_run(run_id, "nmap -sV 10.0.0.1")
-        try:
-            data = json.loads(
-                get_client().get(
-                    f"/history/{run_id}/full?json",
-                    headers={"X-Session-ID": "test-session"},
-                ).data
-            )
-            assert data["command"] == "nmap -sV 10.0.0.1"
-            assert data["output"] == ["line 1", "line 2"]
-        finally:
-            self._delete_run(run_id)
-
-    def test_full_output_html_alias_matches_canonical_permalink(self):
-        run_id = "permalink-full-html-test-run"
-        self._insert_run(run_id, "nmap -sV 10.0.0.1")
-        try:
-            resp = get_client().get(f"/history/{run_id}/full", headers={"X-Session-ID": "test-session"})
-            assert resp.status_code == 200
-            assert b"line 1" in resp.data
-        finally:
-            self._delete_run(run_id)
-
-    def test_full_output_alias_falls_back_to_preview_when_artifact_is_unavailable(self):
-        run_id = "permalink-full-missing-artifact-run"
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute(
-            "INSERT INTO runs (id, session_id, command, started, full_output_available) "
-            "VALUES (?, 'test-session', ?, datetime('now'), 0)",
-            (run_id, "nmap -sV 10.0.0.1"),
-        )
-        conn.commit()
-        conn.close()
-        try:
-            resp = get_client().get(f"/history/{run_id}/full", headers={"X-Session-ID": "test-session"})
-            assert resp.status_code == 200
-            assert b"nmap -sV 10.0.0.1" in resp.data
-        finally:
-            conn = sqlite3.connect(DB_PATH)
-            conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
-            conn.commit()
-            conn.close()
 
 
 # ── Response content types ────────────────────────────────────────────────────

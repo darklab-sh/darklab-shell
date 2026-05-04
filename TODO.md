@@ -17,45 +17,25 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 
 ## Open TODOs
 
+No active TODOs are currently tracked.
+
 ---
 
 ## Research
+
+No research items are currently tracked.
 
 ---
 
 ## Known Issues
 
+No active known issues are currently tracked.
+
 ---
 
 ## Technical Debt
 
-- **Run broker trimmed-replay resume cursor hardening**
-  - Trim notices currently use synthetic event IDs that are not valid Redis stream IDs.
-  - If a browser pauses or reconnects after receiving only the trim notice, that synthetic ID can become the resume cursor and break replay/resume behavior.
-  - Fix by making trim notices non-resumable, or by tying them to a real adjacent broker event ID, then add regression coverage for Redis and in-memory broker replay.
-
-- **Run comparison similar-line pairing guardrails**
-  - Changed-line pairing compares removed lines against added lines with `SequenceMatcher`.
-  - Large noisy outputs can produce a lot of candidate pairs, especially when long scanner lines differ only slightly.
-  - Add cheap prefilters or caps before deep similarity matching, such as line-length limits, nearby-index windows, prefix checks, or `quick_ratio()` gates.
-
-- **Run comparison Restore Both rollback**
-  - `Restore Both` creates the Run A tab before creating the Run B tab.
-  - If the app only has room for one more tab, the action can leave Run A created while Run B fails.
-  - Preflight two-tab capacity and issue a toast message stating there's not enough tab capacity.
-
-- **Command policy grouped-flag order handling**
-  - `nc` grouped flags work for forms like `nc -zv`, but allowed-prefix matching is still order-sensitive once value flags are involved.
-  - Example: `nc -z -w 3 host 80` is allowed, while `nc -w 3 -z host 80` is denied.
-  - Command policies should support normal Unix flag order for allowed grouped flag, update the matcher and tests to reflect.
-
-- **Workspace command directory permission tightening**
-  - Command-managed workspace directories are briefly changed to `0755` before being set back to the intended command directory mode.
-  - Avoid widening permissions during preparation, or document why the temporary mode is required and constrain the behavior.
-
-- **Retire stale compatibility aliases**
-  - `/history/<run_id>/full` remains as a backward-compatible alias for the canonical run permalink.
-  - Since the app is still pre-release and legacy compatibility is not a goal, remove the alias plus its dedicated tests/docs.
+No active technical debt items are currently tracked.
 
 ---
 

@@ -220,7 +220,6 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/history/compare` | Compares two current-session runs and returns metadata deltas plus bounded added/removed output lines. |
 | `GET` | `/history/<run_id>` | Serves an implicit-bearer styled run permalink, or raw JSON with `?json`; uses full-output artifacts when available unless `?preview=1` is set. |
 | `DELETE` | `/history/<run_id>` | Deletes one current-session run and its matching full-output artifact. |
-| `GET` | `/history/<run_id>/full` | Backward-compatible alias for `/history/<run_id>`. |
 | `POST` | `/share` | Saves a tab snapshot, optionally applies share redaction, and returns a snapshot permalink URL. |
 | `GET` | `/share/<share_id>` | Serves a styled snapshot permalink, or raw JSON with `?json`. |
 | `DELETE` | `/share/<share_id>` | Deletes one current-session snapshot permalink. |
@@ -938,12 +937,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,350
+- behavior tests: 2,354
 - docs/inventory meta-tests: 30
-- `pytest`: 1179 (1149 behavior + 30 meta)
-- `vitest`: 965
+- `pytest`: 1182 (1152 behavior + 30 meta)
+- `vitest`: 966
 - `playwright`: 236
-- total: 2,380
+- total: 2,384
 
 ### Testing Architecture
 

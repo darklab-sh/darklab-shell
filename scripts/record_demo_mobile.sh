@@ -137,7 +137,8 @@ if [ "$ARM_BEFORE_RECORDING" = "1" ]; then
   ARM_READY_FILE="${ARMING_FILE}.ready"
   playwright_pid=""
 
-  # shellcheck disable=SC2329
+  # Invoked by EXIT/INT/TERM traps.
+  # shellcheck disable=SC2317,SC2329
   cleanup_armed_demo() {
     if [ -n "$playwright_pid" ] && kill -0 "$playwright_pid" 2>/dev/null; then
       kill "$playwright_pid" 2>/dev/null || true

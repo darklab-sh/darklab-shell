@@ -53,7 +53,7 @@ from workspace import (
     InvalidWorkspacePath, WorkspaceDisabled, WorkspaceQuotaExceeded,
     cleanup_inactive_workspaces, create_workspace_directory, delete_workspace_file, delete_workspace_path,
     ensure_session_workspace, list_workspace_directories, list_workspace_files,
-    prepare_workspace_file_for_command, read_workspace_text_file, resolve_workspace_path,
+    prepare_workspace_directory_for_command, prepare_workspace_file_for_command, read_workspace_text_file, resolve_workspace_path,
     session_workspace_name, workspace_usage,
     touch_session_workspace, workspace_path_info, write_workspace_text_file, WORKSPACE_COMMAND_WRITE_FILE_MODE,
     WORKSPACE_DIR_MODE, WORKSPACE_FILE_MODE,
@@ -316,6 +316,21 @@ class TestSessionWorkspace:
 
             assert (path.stat().st_mode & 0o777) == WORKSPACE_COMMAND_WRITE_FILE_MODE
             assert not path.stat().st_mode & 0o007
+
+    def test_prepare_workspace_directory_for_command_does_not_temporarily_widen_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "amass"
+            path.mkdir()
+
+            with mock.patch("workspace.shutil.which", return_value="/usr/bin/sudo"), \
+                    mock.patch("workspace.pwd.getpwnam", return_value=object()), \
+                    mock.patch("workspace.subprocess.run") as run:
+                prepare_workspace_directory_for_command(path, mode="read_write")
+
+            commands = [call.args[0] for call in run.call_args_list]
+            assert commands == [
+                ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "chmod", "3770", str(path)],
+            ]
 
     def test_delete_workspace_file_falls_back_to_scanner_owner_for_nested_command_files(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1346,8 +1361,11 @@ class TestDerivedCommandRegistry:
                 assert is_command_allowed("nc -zv darklab.sh 80")[0]
                 assert is_command_allowed("nc -vz darklab.sh 80")[0]
                 assert is_command_allowed("nc -n -v -z darklab.sh 80")[0]
+                assert is_command_allowed("nc -w 3 -z darklab.sh 80")[0]
+                assert is_command_allowed("nc -w 3 -vz darklab.sh 80")[0]
                 assert not is_command_allowed("nc -nv darklab.sh 80")[0]
                 assert not is_command_allowed("nc -zve darklab.sh 80")[0]
+                assert not is_command_allowed("nc -w 3 -e /bin/sh -z darklab.sh 80")[0]
                 assert is_command_allowed("nmap -sV darklab.sh")[0]
                 assert not is_command_allowed("nmap -Vs darklab.sh")[0]
 
@@ -2095,6 +2113,23 @@ class TestRunBrokerMemoryStore:
         assert "line 2" in visible_text
         assert "line 3" in visible_text
 
+    def test_trim_notice_sse_does_not_advance_resume_cursor(self):
+        notice = run_broker._make_trim_notice_event()
+        sse = notice.as_sse()
+
+        assert "id:" not in sse
+        assert "event_id" not in sse
+        assert run_broker.REPLAY_TRIM_NOTICE in sse
+        assert "event_id" not in notice.as_payload()
+
+    def test_memory_store_does_not_replay_trim_notice_after_real_cursor(self):
+        store = run_broker._MemoryRunBrokerStore()
+        with mock.patch.dict(run_broker.CFG, {"run_broker_max_replay_bytes": 160}):
+            store.publish("run-1", "output", {"text": "first-" + ("x" * 120)})
+            tail = store.publish("run-1", "output", {"text": "second-" + ("y" * 120)})
+
+        assert store.events_after("run-1", after_id=tail.event_id, limit=10) == []
+
     def test_bounded_replay_keeps_latest_output_and_terminal_event(self):
         events = [
             run_broker.BrokerEvent("1-0", {"type": "started"}),
@@ -2137,6 +2172,31 @@ class TestRunBrokerMemoryStore:
         assert '"type": "exit"' in events[1]
         assert store.wait_after_id == "1-0"
 
+    def test_stream_run_events_skips_trim_notice_when_resuming_live_tail(self):
+        class FakeStore:
+            def __init__(self):
+                self.wait_after_id = ""
+
+            def replay(self, run_id):
+                assert run_id == "run-1"
+                return [
+                    run_broker._make_trim_notice_event(),
+                    run_broker.BrokerEvent("5-0", {"type": "output", "text": "tail"}),
+                ]
+
+            def wait_after(self, run_id, after_id, timeout):
+                self.wait_after_id = after_id
+                return [run_broker.BrokerEvent("6-0", {"type": "exit", "code": 0})]
+
+        store = FakeStore()
+        with mock.patch.object(run_broker, "_store", return_value=store):
+            events = list(run_broker.stream_run_events("run-1"))
+
+        assert events[0].startswith("data: ")
+        assert "id:" not in events[0]
+        assert '"text": "tail"' in events[1]
+        assert store.wait_after_id == "5-0"
+
     def test_decode_payload_accepts_redis_bytes_fields(self):
         payload = run_broker._decode_payload({b"payload": b'{"type":"output","text":"hello"}'})
 
@@ -2155,6 +2215,15 @@ class TestRunBrokerMemoryStore:
         assert [(event.event_id, event.payload) for event in events] == [
             ("2-0", {"type": "output", "text": "hello"}),
         ]
+
+    def test_redis_store_normalizes_invalid_resume_ids(self):
+        fake_redis = mock.Mock()
+        fake_redis.xrange.return_value = []
+
+        with mock.patch.object(run_broker, "redis_client", fake_redis):
+            run_broker._RedisRunBrokerStore().events_after("run-1", after_id="123-trim", limit=10)
+
+        fake_redis.xrange.assert_called_once_with("runstream:run-1", min="0-0", count=10)
 
     def test_redis_replay_marks_tail_fetch_as_trimmed_when_stream_is_longer(self):
         fake_redis = mock.Mock()

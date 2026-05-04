@@ -308,13 +308,6 @@ def prepare_workspace_directory_for_command(path: Path, *, mode: str) -> None:
         if path.exists():
             try:
                 subprocess.run(
-                    [sudo_bin, "-u", "scanner", "-g", "appuser", "chmod", "0755", str(path)],
-                    check=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=5,
-                )  # nosec B603
-                subprocess.run(
                     [sudo_bin, "-u", "scanner", "-g", "appuser", "chmod", f"{WORKSPACE_COMMAND_DIR_MODE:o}", str(path)],
                     check=True,
                     stdout=subprocess.DEVNULL,

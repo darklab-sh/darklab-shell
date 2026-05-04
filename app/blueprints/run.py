@@ -1168,7 +1168,7 @@ def get_brokered_run_events(run_id):
     events = get_run_events(run_id, after_id=after_id, limit=limit)
     return jsonify({
         "run_id": run_id,
-        "events": [{"event_id": event.event_id, **event.payload} for event in events],
+        "events": [event.as_payload() for event in events],
     })
 
 

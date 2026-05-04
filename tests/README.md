@@ -18,12 +18,12 @@ The suites are layered on purpose:
 
 Current totals:
 
-- behavior tests: 2,350
+- behavior tests: 2,354
 - docs/inventory meta-tests: 30
-- `pytest`: 1179 (1149 behavior + 30 meta)
-- `vitest`: 965
+- `pytest`: 1182 (1152 behavior + 30 meta)
+- `vitest`: 966
 - `playwright`: 236
-- total: 2,380
+- total: 2,384
 
 This document is organized in two parts:
 
@@ -388,6 +388,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_session_workspace_logs_chmod_failures_without_blocking_creation` | Verifies that workspace chmod repair failures are logged while keeping best-effort workspace creation available. |
 | `TestSessionWorkspace.test_write_read_list_delete_text_file` | Verifies the backend workspace text-file lifecycle for write, read, list, usage, and delete operations. |
 | `TestSessionWorkspace.test_prepare_workspace_file_for_command_uses_limited_write_mode` | Verifies that command output targets get limited group-write permissions without becoming world-readable. |
+| `TestSessionWorkspace.test_prepare_workspace_directory_for_command_does_not_temporarily_widen_mode` | Verifies that command-managed workspace directories go straight to the scanner-safe directory mode without a temporary world-readable chmod. |
 | `TestSessionWorkspace.test_delete_workspace_file_falls_back_to_scanner_owner_for_nested_command_files` | Verifies that deleting scanner-owned nested workspace files falls back through the validated scanner sudo path when sticky directory permissions block direct unlink. |
 | `TestSessionWorkspace.test_workspace_path_info_and_delete_remove_folders_recursively` | Verifies that workspace path info counts files under folders and recursive folder delete removes nested files and directories. |
 | `TestSessionWorkspace.test_create_and_list_empty_directories_without_file_usage` | Verifies that explicit empty session folders can be created and listed without counting against file usage. |
@@ -469,10 +470,14 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunBrokerMemoryStore.test_memory_store_replays_events_after_saved_event_id` | Verifies that the in-memory run broker replays only events after a saved event ID. |
 | `TestRunBrokerMemoryStore.test_memory_store_marks_trimmed_replay_with_notice` | Verifies that trimmed broker replay starts with a visible transcript notice. |
 | `TestRunBrokerMemoryStore.test_memory_store_uses_max_output_lines_as_replay_event_bound` | Verifies that the in-memory run broker uses `max_output_lines` as the replay line bound. |
+| `TestRunBrokerMemoryStore.test_trim_notice_sse_does_not_advance_resume_cursor` | Verifies that replay trim notices are informational SSE messages and do not carry resumable event IDs. |
+| `TestRunBrokerMemoryStore.test_memory_store_does_not_replay_trim_notice_after_real_cursor` | Verifies that a real broker cursor does not replay the synthetic trim notice again. |
 | `TestRunBrokerMemoryStore.test_bounded_replay_keeps_latest_output_and_terminal_event` | Verifies that bounded replay preserves the latest output plus the terminal event. |
 | `TestRunBrokerMemoryStore.test_stream_run_events_replays_snapshot_before_waiting_for_live_events` | Verifies that broker stream subscriptions replay an initial snapshot before waiting for live events. |
+| `TestRunBrokerMemoryStore.test_stream_run_events_skips_trim_notice_when_resuming_live_tail` | Verifies that broker streams skip trim notices when choosing the live-tail resume cursor. |
 | `TestRunBrokerMemoryStore.test_decode_payload_accepts_redis_bytes_fields` | Verifies that broker Redis payload decoding accepts byte-string stream fields. |
 | `TestRunBrokerMemoryStore.test_redis_store_decodes_bytes_event_ids_and_payloads` | Verifies that the Redis broker store decodes byte-string event IDs and payloads before replay filtering. |
+| `TestRunBrokerMemoryStore.test_redis_store_normalizes_invalid_resume_ids` | Verifies that Redis replay normalizes stale synthetic resume IDs before calling Redis stream APIs. |
 | `TestRunBrokerMemoryStore.test_redis_replay_marks_tail_fetch_as_trimmed_when_stream_is_longer` | Verifies that Redis replay prepends the trim notice when only the stream tail was fetched. |
 | `TestRunBrokerMemoryStore.test_redis_publish_trims_stream_with_replay_derived_maxlen` | Verifies that Redis broker publishes trim streams with a replay-derived maximum length. |
 | `TestRunBrokerMemoryStore.test_broker_requires_redis_when_configured` | Verifies that broker availability fails with an operator-facing message when Redis is required but unavailable. |
@@ -1043,6 +1048,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestHistoryRoute.test_active_history_returns_running_runs_for_this_session` | Checks that `/history/active` returns the current session's in-flight run metadata. |
 | `TestHistoryRoute.test_compare_candidates_rank_exact_command_before_same_target` | Verifies that run comparison candidates prefer exact command matches before same-target and same-command-only matches. |
 | `TestHistoryRoute.test_compare_history_runs_returns_metadata_and_changed_lines` | Verifies that run comparison returns metadata deltas, changed-line pairs, and added/removed output while ignoring terminal chrome. |
+| `TestHistoryRoute.test_compare_history_runs_leaves_very_long_lines_unpaired` | Verifies that run comparison avoids expensive similar-line pairing for very long changed lines. |
 | `TestShareRoute.test_post_creates_snapshot` | Checks post creates snapshot handling. |
 | `TestShareRoute.test_post_rejects_non_string_label` | Checks that post rejects non string label. |
 | `TestShareRoute.test_post_rejects_non_list_content` | Checks that post rejects non list content. |
@@ -1095,9 +1101,6 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunPermalinkRoute.test_html_view_shows_duration` | Checks that HTML view shows duration. |
 | `TestRunPermalinkRoute.test_html_view_shows_line_count` | Checks that HTML view shows line count. |
 | `TestRunPermalinkRoute.test_html_view_shows_app_version` | Checks that HTML view shows app version. |
-| `TestRunFullOutputRoute.test_full_output_json_returns_artifact_lines` | Checks that full output JSON returns artifact lines. |
-| `TestRunFullOutputRoute.test_full_output_html_alias_matches_canonical_permalink` | Checks that full output HTML alias matches canonical permalink. |
-| `TestRunFullOutputRoute.test_full_output_alias_falls_back_to_preview_when_artifact_is_unavailable` | Checks that full output alias falls back to preview when artifact is unavailable. |
 | `TestContentTypes.test_config_returns_json` | Checks config returns JSON handling. |
 | `TestContentTypes.test_health_returns_json` | Checks health returns JSON handling. |
 | `TestContentTypes.test_faq_returns_json` | Checks FAQ returns JSON handling. |
@@ -1715,6 +1718,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `opens the run comparison launcher from a history row` | Verifies that the history row compare action opens the comparison launcher with the suggested previous run. |
 | `replaces manual comparison choices when searching the compare launcher` | Verifies that compare launcher search replaces the manual candidate list instead of merging stale suggested runs into the search results. |
 | `renders changed added and removed lines after choosing a comparison candidate` | Verifies that choosing a comparison candidate renders paired changed lines plus added/removed output. |
+| `preflights Restore Both tab capacity before creating either tab` | Verifies that Restore Both checks available tab capacity before creating comparison restore tabs. |
 | `includes the history type filter in the request URL when snapshots are selected` | Verifies that switching the desktop history surface to snapshots adds the `type=snapshots` filter to the `/history` request. |
 | `renders snapshot rows with open and copy-link actions` | Verifies that snapshot-only history responses render the `SNAPSHOT` row treatment and expose the snapshot action set. |
 | `shows a date in history metadata when the run is not from today` | Verifies that older history entries include a date token in their metadata row. |

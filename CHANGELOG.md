@@ -506,6 +506,15 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Several v1.6 cleanup items now behave like first-class paths instead of compatibility leftovers** — run replay, run comparison, command policy, workspace prep, and run permalinks all got small hardening passes.
+  - **Fixes:**
+    - Run-broker trim notices are informational only and no longer advance browser resume cursors with synthetic Redis IDs.
+    - Run comparison now uses cheap guardrails before deep similar-line pairing, and `Restore Both` checks that two tab slots are available before creating either tab.
+    - Grouped `nc` allow flags can appear after value flags, so `nc -w 3 -z host 80` works like normal Unix option ordering while deny flags still win.
+    - Command-managed workspace directories no longer briefly widen to `0755` before settling on the scanner-safe command directory mode.
+    - The stale `/history/<run_id>/full` alias and its dedicated tests/docs were removed; `/history/<run_id>` remains the canonical permalink path and still serves full output when available.
+    - OBS demo recording cleanup functions now carry narrow ShellCheck annotations for trap-invoked code instead of leaving the scripts noisy under normal lint checks.
+  - **Tests:** focused backend coverage in `tests/py/test_backend_modules.py` and `tests/py/test_routes.py`, Vitest coverage in `tests/js/unit/history.test.js`, and full shell-script lint coverage with `shellcheck`.
 - **Workspace startup repair no longer resets command-owned session folders before scanner repair** — persisted tool databases such as the managed Amass workspace directory are less likely to drift back to `appuser` ownership after restarts.
   - **Root cause:** the Docker entrypoint recursively changed the whole workspace root to `appuser:appuser` before the scanner-owned child repair pass. If a stale image, interrupted startup, or failed second pass left that intermediate state behind, Amass could still read the directory through group permissions but fail its own `chmod` because the directory owner was no longer `scanner`.
   - **Fix:** startup now changes ownership only on the workspace root and top-level `sess_*` directories before repairing nested session children to `scanner:appuser`.
