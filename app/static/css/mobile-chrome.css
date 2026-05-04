@@ -70,13 +70,13 @@ body.mobile-terminal-mode {
     animation: shell-m-progress-slide 1.4s ease-in-out infinite;
   }
 
-  /* Single source of truth for every mobile bottom-sheet drag handle.
+  /* Single source of truth for every mobile bottom-sheet gesture handle.
      Behavior is wired in app/static/js/mobile_sheet.js::bindMobileSheet —
      visual + cursor + touch-action + brighten on press all live here so the
      menu, recents, history panel, workflows, FAQ, options, kill, hist-del,
      and share-redaction sheets cannot drift. Outside mobile-terminal-mode the
      scope above keeps the bar invisible on desktop modals. */
-  .sheet-grab {
+  .gesture-handle {
     display: flex;
     justify-content: center;
     align-items: center;
@@ -88,8 +88,8 @@ body.mobile-terminal-mode {
     touch-action: none;
     flex-shrink: 0;
   }
-  .sheet-grab:active { cursor: grabbing; }
-  .sheet-grab::before {
+  .gesture-handle:active { cursor: grabbing; }
+  .gesture-handle::before {
     content: '';
     width: 40px;
     height: 4px;
@@ -97,8 +97,8 @@ body.mobile-terminal-mode {
     background: var(--border-bright);
     transition: background 120ms ease;
   }
-  .sheet-grab:hover::before,
-  .sheet-grab:active::before {
+  .gesture-handle:hover::before,
+  .gesture-handle:active::before {
     background: var(--text);
   }
 
@@ -110,7 +110,7 @@ body.mobile-terminal-mode {
     gap: 10px;
     padding: 9px 14px;
     border-top: 1px solid var(--border);
-    background: var(--theme-panel-alt-bg);
+    background: var(--theme-chrome-bg);
     position: relative;
     cursor: pointer;
     user-select: none;
@@ -127,7 +127,15 @@ body.mobile-terminal-mode {
   .recent-peek:hover::before { opacity: 0.6; }
   .recent-peek:active::before { opacity: 1; }
   .recent-peek:active {
-    background: color-mix(in srgb, var(--green) 2%, var(--theme-panel-alt-bg));
+    background: var(--theme-chrome-row-hover-bg);
+  }
+  .recent-peek[data-peek-mode="status-monitor"] {
+    border-top-color: color-mix(in srgb, var(--green) 42%, var(--border));
+    box-shadow: inset 0 1px 0 color-mix(in srgb, var(--green) 18%, transparent);
+  }
+  .recent-peek[data-peek-mode="status-monitor"]::before {
+    background: color-mix(in srgb, var(--green) 12%, transparent);
+    opacity: 0.65;
   }
   .recent-peek .recent-peek-handle {
     width: 32px;
@@ -157,6 +165,23 @@ body.mobile-terminal-mode {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .recent-peek[data-peek-mode="status-monitor"] .recent-peek-handle {
+    background: color-mix(in srgb, var(--green) 72%, var(--border-bright));
+  }
+  .recent-peek[data-peek-mode="status-monitor"] .recent-peek-label {
+    color: var(--green);
+  }
+  .recent-peek[data-peek-mode="status-monitor"] .recent-peek-count {
+    color: var(--green);
+  }
+  .recent-peek.recent-peek-status-monitor-wiggle {
+    animation: mobile-status-monitor-peek-wiggle 0.62s ease-in-out 3;
+  }
+  @keyframes mobile-status-monitor-peek-wiggle {
+    0%, 100% { transform: translateY(0); }
+    38% { transform: translateY(-7px); }
+    62% { transform: translateY(2px); }
+  }
   .recent-peek.hidden { display: none; }
 
   &.mobile-keyboard-open .recent-peek,
@@ -184,20 +209,8 @@ body.mobile-terminal-mode {
   .recents-sheet {
     position: fixed; left: 0; right: 0; bottom: 0;
     z-index: 101;
-    background: var(--surface);
-    border-top: 1px solid var(--border-bright);
-    border-radius: 14px 14px 0 0;
     max-height: 86dvh;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 -20px 50px var(--theme-panel-shadow, rgba(0,0,0,0.55));
     animation: shell-m-sheet-in 240ms ease;
-  }
-  .recents-sheet .sheet-title {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 4px 14px 10px;
   }
   .recents-sheet .sheet-title-label {
     color: var(--green);
@@ -207,26 +220,6 @@ body.mobile-terminal-mode {
     font-weight: 600;
   }
   .recents-sheet .sheet-title-spacer { flex: 1; }
-  .recents-sheet .sheet-clear-btn {
-    appearance: none;
-    -webkit-appearance: none;
-    background: transparent;
-    border: 1px solid var(--border-bright);
-    border-radius: 6px;
-    color: var(--text);
-    font-family: inherit;
-    font-size: 11px;
-    padding: 6px 12px;
-    letter-spacing: 0.4px;
-    cursor: pointer;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .recents-sheet .sheet-clear-btn:hover,
-  .recents-sheet .sheet-clear-btn:active {
-    background: color-mix(in srgb, var(--red, #ff6b6b) 14%, transparent);
-    border-color: color-mix(in srgb, var(--red, #ff6b6b) 55%, transparent);
-    color: var(--red, #ff6b6b);
-  }
   .recents-sheet .sheet-filters {
     padding: 0 14px 10px;
     display: flex;
@@ -237,26 +230,12 @@ body.mobile-terminal-mode {
   .recents-sheet .sheet-filter-row {
     appearance: none;
     -webkit-appearance: none;
-    background: var(--bg);
-    border: 1px solid var(--border-bright);
-    border-radius: 6px;
-    padding: 9px 12px;
-    font-size: 12px;
-    color: var(--text);
-    display: flex;
-    align-items: center;
-    gap: 8px;
     -webkit-tap-highlight-color: transparent;
   }
   /* iOS Safari auto-zooms any input with font-size < 16px on focus. */
   .recents-sheet #mobile-recents-search,
   .recents-sheet #mobile-recents-filter-root {
     font-size: 16px;
-  }
-  .recents-sheet .sheet-filter-row .filter-placeholder {
-    flex: 1;
-    color: var(--muted);
-    opacity: 0.7;
   }
   .recents-sheet .sheet-filter-toggle {
     justify-content: center;
@@ -310,7 +289,8 @@ body.mobile-terminal-mode {
     color: var(--green);
   }
 
-  /* App-style custom dropdown (mirrors .save-menu pattern). */
+  /* App-style custom dropdown. Shared dropdown primitives own the common
+     surface/item treatment; the sheet keeps placement and mobile sizing. */
   .recents-sheet .sheet-filter-dropdown-wrap {
     position: relative;
   }
@@ -333,14 +313,8 @@ body.mobile-terminal-mode {
     top: calc(100% + 4px);
     left: 0;
     right: 0;
-    background: var(--theme-dropdown-bg, var(--surface));
-    border: 1px solid var(--theme-dropdown-border, var(--border-bright));
     border-radius: 6px;
-    box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--theme-dropdown-shadow, rgba(0,0,0,0.4)) 24%, transparent),
-      0 8px 22px var(--theme-dropdown-shadow, rgba(0,0,0,0.45));
     z-index: 60;
-    overflow: hidden;
     flex-direction: column;
   }
   .recents-sheet .sheet-filter-dropdown-wrap.open .sheet-filter-menu {
@@ -349,20 +323,10 @@ body.mobile-terminal-mode {
   .recents-sheet .sheet-filter-menu button {
     display: block;
     width: 100%;
-    text-align: left;
-    background: transparent;
-    border: none;
-    color: color-mix(in srgb, var(--muted) 86%, var(--text));
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0.3px;
-    padding: 9px 14px;
-    cursor: pointer;
     white-space: nowrap;
   }
   .recents-sheet .sheet-filter-menu button:hover,
   .recents-sheet .sheet-filter-menu button[aria-selected="true"] {
-    background: color-mix(in srgb, var(--green) 10%, transparent);
     color: var(--text);
   }
   .recents-sheet .sheet-filter-menu button[aria-selected="true"] {
@@ -408,8 +372,9 @@ body.mobile-terminal-mode {
     transform: rotate(45deg);
   }
   .recents-sheet .sheet-filter-clear {
-    justify-content: center;
-    color: var(--muted);
+    width: 100%;
+    min-height: 40px;
+    font-size: 12px;
   }
   .recents-sheet .filter-chips {
     display: flex;
@@ -422,23 +387,12 @@ body.mobile-terminal-mode {
     display: none;
   }
   .recents-sheet .filter-chip {
-    display: inline-flex;
-    align-items: center;
     gap: 6px;
     padding: 4px 9px 4px 11px;
-    border-radius: 999px;
     background: color-mix(in srgb, var(--green) 10%, transparent);
-    border: 1px solid color-mix(in srgb, var(--green) 42%, transparent);
-    color: var(--green);
+    border-color: color-mix(in srgb, var(--green) 42%, transparent);
     font-size: 10.5px;
     letter-spacing: 0.3px;
-    font-family: var(--font-mono);
-    cursor: pointer;
-  }
-  .recents-sheet .filter-chip:hover,
-  .recents-sheet .filter-chip:active {
-    background: color-mix(in srgb, var(--green) 18%, transparent);
-    border-color: color-mix(in srgb, var(--green) 60%, transparent);
   }
   .recents-sheet .filter-chip-x {
     opacity: 0.7;
@@ -453,13 +407,9 @@ body.mobile-terminal-mode {
   }
   .recents-sheet .sheet-item {
     padding: 12px 16px 13px;
-    border-bottom: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     gap: 7px;
-  }
-  .recents-sheet #mobile-recents-list .sheet-item:nth-of-type(even) {
-    background-color: color-mix(in srgb, var(--surface) 96%, var(--text) 4%);
   }
   .recents-sheet .sheet-item-head {
     display: flex;
@@ -486,24 +436,6 @@ body.mobile-terminal-mode {
     gap: 10px;
     padding-left: 23px;
   }
-  .recents-sheet .sheet-item-kind {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 16px;
-    padding: 0 6px;
-    border: 1px solid var(--border-bright);
-    border-radius: 999px;
-    font-size: 9px;
-    letter-spacing: 0.06em;
-  }
-  .recents-sheet .sheet-item-kind-run {
-    color: var(--green);
-    border-color: var(--green-dim);
-  }
-  .recents-sheet .sheet-item-kind-snapshot {
-    color: color-mix(in srgb, var(--text) 72%, var(--muted));
-  }
   .recents-sheet .sheet-item-time {
     color: var(--muted);
     font-size: 10px;
@@ -521,27 +453,17 @@ body.mobile-terminal-mode {
   }
   .recents-sheet .sheet-item-action {
     flex: 1;
-    text-align: center;
     padding: 6px 4px;
     font-size: 10.5px;
-    color: var(--text);
-    border: 1px solid var(--border-bright);
-    border-radius: 4px;
-    cursor: pointer;
     min-height: 32px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
     /* Reset native <button> chrome — without this the default user-agent
        button fill leaks through and the row actions render as light-gray
        boxes on real devices and on the Chromium demo recorder. */
     appearance: none;
     -webkit-appearance: none;
-    background: transparent;
     font-family: inherit;
     -webkit-tap-highlight-color: transparent;
   }
-
   /* Bottom-sheet menu (hamburger target). Workflows is a normal row that
      opens the existing workflows overlay; no nested surface. */
   .menu-sheet-scrim {
@@ -553,19 +475,7 @@ body.mobile-terminal-mode {
   .menu-sheet {
     position: fixed; left: 0; right: 0; bottom: 0;
     z-index: 101;
-    background: var(--surface);
-    border-top: 1px solid var(--border-bright);
-    border-radius: 14px 14px 0 0;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 -20px 50px var(--theme-panel-shadow, rgba(0,0,0,0.55));
     animation: shell-m-sheet-in 240ms ease;
-  }
-  .menu-sheet .menu-title {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 4px 14px 10px;
   }
   .menu-sheet .menu-title-label {
     color: var(--green);
@@ -580,36 +490,25 @@ body.mobile-terminal-mode {
     flex-direction: column;
   }
   .menu-sheet .menu-group-divider {
-    /* Clear section break without fragmenting the sheet: a --surface band
-       with padded air above/below and a quiet hairline centered inside it,
-       so the divider reads as separation rather than competing with the
-       per-item borders. */
     padding: 22px 0;
-    background: var(--surface);
+    background: var(--theme-chrome-row-bg);
   }
   .menu-sheet .menu-group-divider::before {
     content: '';
     display: block;
     height: 1px;
     margin: 0 16px;
-    background: var(--border);
+    background: var(--theme-chrome-divider-color);
   }
   .menu-sheet .menu-item {
-    display: flex;
-    align-items: center;
     gap: 12px;
     padding: 13px 16px;
     border-bottom: 1px solid var(--border);
-    color: var(--text);
     font-size: 13px;
-    letter-spacing: 0.3px;
     min-height: 48px;
-    background: transparent;
     border-left: none;
     border-right: none;
     border-top: none;
-    text-align: left;
-    width: 100%;
   }
   .menu-sheet .menu-group:first-of-type .menu-item:first-child {
     border-top: 1px solid var(--border);
@@ -619,6 +518,16 @@ body.mobile-terminal-mode {
      <div class="menu-submenu"> follows it as the actual :last-child. */
   .menu-sheet .menu-group .menu-item:last-of-type {
     border-bottom: none;
+  }
+  .menu-sheet .menu-item:hover:not([aria-disabled="true"]):not(:disabled),
+  .menu-sheet .menu-subitem:hover:not([aria-disabled="true"]):not(:disabled) {
+    background: transparent;
+    color: var(--text);
+  }
+  .menu-sheet .menu-item:active:not([aria-disabled="true"]):not(:disabled),
+  .menu-sheet .menu-subitem:active:not([aria-disabled="true"]):not(:disabled) {
+    background: color-mix(in srgb, var(--green) 6%, transparent);
+    color: var(--green);
   }
   .menu-sheet .menu-item.muted { color: var(--muted); }
   .menu-sheet .menu-item-icon {
@@ -659,24 +568,18 @@ body.mobile-terminal-mode {
   .menu-sheet .menu-submenu {
     display: flex;
     flex-direction: column;
-    background: var(--theme-panel-alt-bg);
+    background: var(--theme-chrome-row-bg);
     border-bottom: 1px solid var(--border);
   }
   .menu-sheet .menu-subitem {
-    display: flex;
-    align-items: center;
     gap: 12px;
     padding: 11px 16px 11px 44px;
-    border: none;
     border-bottom: 1px solid var(--border);
-    background: transparent;
-    color: var(--text);
     font-size: 12.5px;
-    letter-spacing: 0.3px;
-    text-align: left;
-    width: 100%;
     min-height: 42px;
-    cursor: pointer;
+    border-left: none;
+    border-right: none;
+    border-top: none;
   }
   .menu-sheet .menu-submenu .menu-subitem:last-child {
     border-bottom: none;
@@ -710,7 +613,6 @@ body.mobile-terminal-mode {
   }
   .menu-sheet .menu-footer {
     padding: 14px 16px 16px;
-    border-top: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -727,37 +629,15 @@ body.mobile-terminal-mode {
     outline: none;
   }
 
-  /* Composer picks up an amber ring while a command is running so typing
-     feels distinct from the idle prompt. Scoped so desktop is untouched. */
-  #mobile-composer.is-running {
-    box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, var(--amber) 35%, transparent),
-      0 0 0 3px color-mix(in srgb, var(--amber) 10%, transparent);
-    transition: box-shadow 160ms ease;
-  }
-  #mobile-composer.is-running #mobile-cmd {
-    caret-color: var(--amber);
-    border-bottom-color: color-mix(in srgb, var(--amber) 40%, var(--border-bright));
-  }
-
   /* Run ↔ Kill swap in the composer. The Kill button mirrors the desktop
      HUD Kill primitive (.btn.btn-destructive.btn-compact) but tuned for the
      tighter mobile row. */
   #mobile-composer.is-running #mobile-run-btn { display: none; }
   #mobile-composer:not(.is-running) #mobile-kill-btn { display: none; }
   #mobile-kill-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: color-mix(in srgb, var(--red) 12%, transparent);
-    color: var(--red);
-    border: 1px solid color-mix(in srgb, var(--red) 55%, transparent);
-    border-radius: 4px;
-    font-family: var(--font-mono);
     font-size: 12px;
     font-weight: 600;
     padding: 0 12px;
-    cursor: pointer;
     flex-shrink: 0;
     min-height: 34px;
     letter-spacing: 0.3px;
@@ -772,13 +652,17 @@ body.mobile-terminal-mode {
 
   /* Edit-helper row above the composer when the soft keyboard is open. */
   .kb-helper {
+    position: relative;
+    z-index: 55;
     flex: 0 0 auto;
-    border-top: 1px solid var(--border);
-    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin: 0 8px 6px;
+    padding: 5px 7px;
     display: flex;
     align-items: center;
     gap: 2px;
-    background: var(--theme-panel-alt-bg);
+    background: var(--surface);
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
@@ -804,7 +688,7 @@ body.mobile-terminal-mode {
     font-size: 11px;
     letter-spacing: 0.2px;
     color: var(--muted);
-    border-radius: 5px;
+    border-radius: 4px;
     user-select: none;
     transition: background 100ms ease, color 100ms ease;
     cursor: pointer;
@@ -821,6 +705,13 @@ body.mobile-terminal-mode {
     flex: 1 1 auto;
     min-width: 0;
     padding: 0 8px;
+  }
+  .kb-key[data-kb-action="word-left"],
+  .kb-key[data-kb-action="word-right"] {
+    font-size: 15px;
+    letter-spacing: -1px;
+    line-height: 1;
+    transform: translateY(-1px);
   }
   .kb-key:active {
     background: color-mix(in srgb, var(--green) 8%, transparent);

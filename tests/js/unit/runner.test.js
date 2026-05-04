@@ -1,24 +1,90 @@
 import { fromScript, fromDomScript, fromDomScripts, MemoryStorage } from './helpers/extract.js'
 
-const { _formatElapsed } = fromScript('app/static/js/runner.js', '_formatElapsed')
-const { _isSyntheticGrepCommand } = fromScript('app/static/js/runner.js', '_isSyntheticGrepCommand')
-const { _isSyntheticHeadCommand } = fromScript('app/static/js/runner.js', '_isSyntheticHeadCommand')
-const { _isSyntheticTailCommand } = fromScript('app/static/js/runner.js', '_isSyntheticTailCommand')
-const { _isSyntheticWcLineCountCommand } = fromScript(
-  'app/static/js/runner.js',
-  '_isSyntheticWcLineCountCommand',
-)
-const { _isSyntheticSortCommand } = fromScript('app/static/js/runner.js', '_isSyntheticSortCommand')
-const { _isSyntheticUniqCommand } = fromScript('app/static/js/runner.js', '_isSyntheticUniqCommand')
-const { _isSyntheticPostFilterCommand } = fromScript(
-  'app/static/js/runner.js',
-  '_isSyntheticPostFilterCommand',
-)
-const { _parseSyntheticPostFilterCommand, _applySyntheticPostFilterLines } = fromScript(
-  'app/static/js/runner.js',
-  '_parseSyntheticPostFilterCommand',
-  '_applySyntheticPostFilterLines',
-)
+const { DarklabRunnerCore } = fromScript('app/static/js/runner_core.js', 'DarklabRunnerCore')
+const {
+  formatElapsed: _formatElapsed,
+  isSyntheticGrepCommand: _isSyntheticGrepCommand,
+  isSyntheticHeadCommand: _isSyntheticHeadCommand,
+  isSyntheticTailCommand: _isSyntheticTailCommand,
+  isSyntheticWcLineCountCommand: _isSyntheticWcLineCountCommand,
+  isSyntheticSortCommand: _isSyntheticSortCommand,
+  isSyntheticUniqCommand: _isSyntheticUniqCommand,
+  isSyntheticPostFilterCommand: _isSyntheticPostFilterCommand,
+  parseSyntheticPostFilterCommand: _parseSyntheticPostFilterCommand,
+  applySyntheticPostFilterLines: _applySyntheticPostFilterLines,
+} = DarklabRunnerCore
+
+async function flushPromises(times = 6) {
+  for (let i = 0; i < times; i += 1) await Promise.resolve()
+}
+
+function brokerStreamResponse(payload) {
+  let done = false
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      getReader: () => ({
+        read: vi.fn(() => {
+          if (done) return Promise.resolve({ done: true, value: undefined })
+          done = true
+          return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
+        }),
+      }),
+    },
+  }
+}
+
+function brokerApiFetch(payload, { runId = 'run-1' } = {}) {
+  return vi.fn((url) => {
+    if (url === '/runs') {
+      return Promise.resolve({
+        ok: true,
+        status: 202,
+        json: () => Promise.resolve({ run_id: runId, stream: `/runs/${runId}/stream` }),
+      })
+    }
+    if (String(url).startsWith(`/runs/${runId}/stream`)) {
+      return Promise.resolve(brokerStreamResponse(payload))
+    }
+    return Promise.reject(new Error(`Unexpected URL: ${url}`))
+  })
+}
+
+function pendingBrokerStreamResponse() {
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      getReader: () => ({
+        read: vi.fn(() => new Promise(() => {})),
+      }),
+    },
+  }
+}
+
+function controllableBrokerStreamResponse() {
+  let resolveRead = null
+  const read = vi.fn(() => new Promise((resolve) => {
+    resolveRead = resolve
+  }))
+  const cancel = vi.fn(() => {
+    if (resolveRead) {
+      resolveRead({ done: true, value: undefined })
+      resolveRead = null
+    }
+    return Promise.resolve()
+  })
+  return {
+    ok: true,
+    status: 200,
+    read,
+    cancel,
+    body: {
+      getReader: () => ({ read, cancel }),
+    },
+  }
+}
 
 // ── _formatElapsed ────────────────────────────────────────────────────────────
 
@@ -46,6 +112,228 @@ describe('_formatElapsed', () => {
 
   it('formats hour + minutes + seconds', () => {
     expect(_formatElapsed(3812.3)).toBe('1h 3m 32.3s')
+  })
+})
+
+describe('stall recovery notices', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('keeps a quiet stalled tab running when the backend still lists the run active', async () => {
+    vi.useFakeTimers()
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ runs: [{ run_id: 'run-1' }] }),
+    }))
+    const {
+      _resetStalledTimeout,
+      status,
+      runBtn,
+      tabs,
+    } = loadRunnerFns({
+      tabs: [{
+        id: 'tab-1',
+        st: 'running',
+        runId: 'run-1',
+        historyRunId: 'run-1',
+        killed: false,
+        pendingKill: false,
+        runStart: Date.now() - 5_000,
+      }],
+      appendLine,
+      apiFetch,
+    })
+
+    _resetStalledTimeout('tab-1')
+    await vi.advanceTimersByTimeAsync(45_000)
+
+    expect(appendLine).toHaveBeenCalledWith(
+      '[stream quiet — no output or heartbeat reached the browser for 45s]',
+      'notice',
+      'tab-1',
+    )
+    expect(appendLine).toHaveBeenCalledWith(
+      '[process is still running; Kill remains available and live output will continue here if the stream resumes]',
+      'notice',
+      'tab-1',
+    )
+    expect(apiFetch).toHaveBeenCalledWith('/history/active')
+    expect(status.textContent).toBe('RUNNING')
+    expect(tabs[0].st).toBe('running')
+    expect(runBtn.disabled).toBe(true)
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(false)
+  })
+
+  it('clears the running state when a stalled stream is no longer active', async () => {
+    vi.useFakeTimers()
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ runs: [] }),
+    }))
+    const {
+      _resetStalledTimeout,
+      status,
+      runBtn,
+      tabs,
+    } = loadRunnerFns({
+      tabs: [{
+        id: 'tab-1',
+        st: 'running',
+        runId: 'run-1',
+        historyRunId: 'run-1',
+        killed: false,
+        pendingKill: false,
+        runStart: Date.now() - 5_000,
+      }],
+      appendLine,
+      apiFetch,
+    })
+
+    _resetStalledTimeout('tab-1')
+    await vi.advanceTimersByTimeAsync(45_000)
+
+    expect(appendLine).toHaveBeenCalledWith(
+      '[connection stalled — no stream activity arrived from the server for 45s]',
+      'denied',
+      'tab-1',
+    )
+    expect(appendLine).toHaveBeenCalledWith(
+      '[process is no longer listed as active; check the history panel for the final result]',
+      'denied',
+      'tab-1',
+    )
+    expect(status.textContent).toBe('IDLE')
+    expect(tabs[0].st).toBe('fail')
+    expect(runBtn.disabled).toBe(false)
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(true)
+  })
+
+  it('does not apply quiet-stall state after the run was killed while the active check was pending', async () => {
+    vi.useFakeTimers()
+    const appendLine = vi.fn()
+    let resolveJson
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => new Promise(resolve => { resolveJson = resolve }),
+    }))
+    const {
+      _resetStalledTimeout,
+      status,
+      runBtn,
+      tabs,
+    } = loadRunnerFns({
+      tabs: [{
+        id: 'tab-1',
+        st: 'running',
+        runId: 'run-1',
+        historyRunId: 'run-1',
+        killed: false,
+        pendingKill: false,
+        runStart: Date.now() - 5_000,
+      }],
+      appendLine,
+      apiFetch,
+    })
+
+    _resetStalledTimeout('tab-1')
+    await vi.advanceTimersByTimeAsync(45_000)
+    tabs[0].killed = true
+    tabs[0].st = 'killed'
+    resolveJson({ runs: [{ run_id: 'run-1' }] })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(appendLine).not.toHaveBeenCalled()
+    expect(status.textContent).not.toBe('RUNNING')
+    expect(tabs[0].st).toBe('killed')
+    expect(runBtn.disabled).toBe(false)
+  })
+
+  it('does not apply stale inactive state after the tab starts a newer run', async () => {
+    vi.useFakeTimers()
+    const appendLine = vi.fn()
+    let resolveJson
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => new Promise(resolve => { resolveJson = resolve }),
+    }))
+    const {
+      _resetStalledTimeout,
+      status,
+      runBtn,
+      tabs,
+    } = loadRunnerFns({
+      tabs: [{
+        id: 'tab-1',
+        st: 'running',
+        runId: 'run-1',
+        historyRunId: 'run-1',
+        killed: false,
+        pendingKill: false,
+        runStart: Date.now() - 5_000,
+      }],
+      appendLine,
+      apiFetch,
+    })
+
+    _resetStalledTimeout('tab-1')
+    await vi.advanceTimersByTimeAsync(45_000)
+    tabs[0].runId = 'run-2'
+    tabs[0].historyRunId = 'run-2'
+    tabs[0].st = 'running'
+    resolveJson({ runs: [] })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(appendLine).not.toHaveBeenCalled()
+    expect(status.textContent).toBe('')
+    expect(tabs[0].st).toBe('running')
+    expect(runBtn.disabled).toBe(false)
+  })
+
+  it('restores the tab to running if stream activity resumes after a quiet warning', async () => {
+    vi.useFakeTimers()
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ runs: [{ run_id: 'run-1' }] }),
+    }))
+    const {
+      _resetStalledTimeout,
+      _recoverStalledRun,
+      runBtn,
+      status,
+      tabs,
+    } = loadRunnerFns({
+      tabs: [{
+        id: 'tab-1',
+        st: 'running',
+        runId: 'run-1',
+        historyRunId: 'run-1',
+        killed: false,
+        pendingKill: false,
+        runStart: Date.now() - 5_000,
+      }],
+      appendLine,
+      apiFetch,
+    })
+
+    _resetStalledTimeout('tab-1')
+    await vi.advanceTimersByTimeAsync(45_000)
+
+    _recoverStalledRun('tab-1')
+
+    expect(appendLine).toHaveBeenCalledWith(
+      '[connection re-established — live output resumed]',
+      'exit-ok',
+      'tab-1',
+    )
+    expect(status.textContent).toBe('RUNNING')
+    expect(tabs[0].st).toBe('running')
+    expect(runBtn.disabled).toBe(true)
   })
 })
 
@@ -154,10 +442,10 @@ describe('client-side synthetic post-filters', () => {
   it('applies chained synthetic helpers to captured client-side output', () => {
     const parsed = _parseSyntheticPostFilterCommand('theme list | grep light | sort -r | head -n 2')
     const lines = _applySyntheticPostFilterLines([
-      { text: 'theme_dark_amber', cls: 'fake-help-row' },
-      { text: 'theme_light_blue', cls: 'fake-help-row' },
-      { text: 'theme_light_olive', cls: 'fake-help-row' },
-      { text: 'theme_dark_green', cls: 'fake-help-row' },
+      { text: 'theme_dark_amber', cls: 'builtin-help-row' },
+      { text: 'theme_light_blue', cls: 'builtin-help-row' },
+      { text: 'theme_light_olive', cls: 'builtin-help-row' },
+      { text: 'theme_dark_green', cls: 'builtin-help-row' },
     ], parsed)
 
     expect(lines.map(line => line.text)).toEqual([
@@ -176,9 +464,9 @@ describe('client-side UI command pipe helpers', () => {
       runnerInitCode: `
         async function handleThemeCommand(cmd, tabId) {
           appendCommandEcho(cmd, tabId);
-          appendLine('theme_dark_amber', 'fake-help-row', tabId);
-          appendLine('theme_light_blue', 'fake-help-row', tabId);
-          appendLine('theme_light_olive', 'fake-help-row', tabId);
+          appendLine('theme_dark_amber', 'builtin-help-row', tabId);
+          appendLine('theme_light_blue', 'builtin-help-row', tabId);
+          appendLine('theme_light_olive', 'builtin-help-row', tabId);
         }
       `,
     })
@@ -187,7 +475,7 @@ describe('client-side UI command pipe helpers', () => {
     await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('2', '', 'tab-1'))
 
     expect(appendLine).toHaveBeenCalledWith('theme list | grep light | wc -l', 'prompt-echo', 'tab-1')
-    expect(appendLine).not.toHaveBeenCalledWith('theme_light_blue', 'fake-help-row', 'tab-1')
+    expect(appendLine).not.toHaveBeenCalledWith('theme_light_blue', 'builtin-help-row', 'tab-1')
   })
 
   it('filters terminal-native config output through chained pipe helpers', async () => {
@@ -198,20 +486,20 @@ describe('client-side UI command pipe helpers', () => {
       runnerInitCode: `
         async function handleConfigCommand(cmd, tabId) {
           appendCommandEcho(cmd, tabId);
-          appendLine('line-numbers        off', 'fake-kv', tabId);
-          appendLine('timestamps          off', 'fake-kv', tabId);
-          appendLine('welcome             static', 'fake-kv', tabId);
+          appendLine('line-numbers        off', 'builtin-kv', tabId);
+          appendLine('timestamps          off', 'builtin-kv', tabId);
+          appendLine('welcome             static', 'builtin-kv', tabId);
         }
       `,
     })
 
     await submitCommand('config list | tail -n 2 | head -n 1')
     await vi.waitFor(() =>
-      expect(appendLine).toHaveBeenCalledWith('timestamps          off', 'fake-kv', 'tab-1'),
+      expect(appendLine).toHaveBeenCalledWith('timestamps          off', 'builtin-kv', 'tab-1'),
     )
 
     expect(appendLine).toHaveBeenCalledWith('config list | tail -n 2 | head -n 1', 'prompt-echo', 'tab-1')
-    expect(appendLine).not.toHaveBeenCalledWith('line-numbers        off', 'fake-kv', 'tab-1')
+    expect(appendLine).not.toHaveBeenCalledWith('line-numbers        off', 'builtin-kv', 'tab-1')
   })
 
   it('persists terminal-native built-ins to server-backed history', async () => {
@@ -229,8 +517,8 @@ describe('client-side UI command pipe helpers', () => {
       runnerInitCode: `
         async function handleThemeCommand(cmd, tabId) {
           appendCommandEcho(cmd, tabId);
-          appendLine('Available themes:', 'fake-section', tabId);
-          appendLine('Dark themes:', 'fake-section', tabId);
+          appendLine('Available themes:', 'builtin-section', tabId);
+          appendLine('Dark themes:', 'builtin-section', tabId);
         }
       `,
     })
@@ -247,10 +535,47 @@ describe('client-side UI command pipe helpers', () => {
       command: 'theme list',
       exit_code: 0,
       lines: [
-        { text: 'Available themes:', cls: 'fake-section' },
-        { text: 'Dark themes:', cls: 'fake-section' },
+        { text: 'Available themes:', cls: 'builtin-section' },
+        { text: 'Dark themes:', cls: 'builtin-section' },
       ],
     })
+  })
+
+  it('routes workflow commands to the client-side workflow handler', async () => {
+    const handleWorkflowTerminalCommand = vi.fn(() => Promise.resolve(true))
+    const appendCommandEcho = vi.fn()
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      handleWorkflowTerminalCommand,
+      appendCommandEcho,
+    })
+
+    submitCommand('workflow list')
+    await vi.waitFor(() =>
+      expect(handleWorkflowTerminalCommand).toHaveBeenCalledWith('workflow list', 'tab-1'),
+    )
+    expect(appendCommandEcho).not.toHaveBeenCalled()
+  })
+
+  it('routes exit and quit commands to tab close without persisting a run', () => {
+    const closeTab = vi.fn()
+    const addToHistory = vi.fn()
+    const apiFetch = vi.fn()
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      closeTab,
+      addToHistory,
+      apiFetch,
+    })
+
+    expect(submitCommand('exit')).toBe(true)
+    expect(submitCommand('quit')).toBe(true)
+
+    expect(closeTab).toHaveBeenCalledTimes(2)
+    expect(closeTab).toHaveBeenNthCalledWith(1, 'tab-1')
+    expect(closeTab).toHaveBeenNthCalledWith(2, 'tab-1')
+    expect(addToHistory).not.toHaveBeenCalled()
+    expect(apiFetch).not.toHaveBeenCalled()
   })
 
   it('clears stale failed tab and HUD state after a successful client-side built-in', async () => {
@@ -261,7 +586,7 @@ describe('client-side UI command pipe helpers', () => {
       runnerInitCode: `
         async function handleThemeCommand(cmd, tabId) {
           appendCommandEcho(cmd, tabId);
-          appendLine('current theme      Darklab Obsidian', 'fake-kv', tabId);
+          appendLine('current theme      Darklab Obsidian', 'builtin-kv', tabId);
           setStatus('ok');
         }
       `,
@@ -282,7 +607,7 @@ function loadRunnerFns({
   tabs = [{ id: 'tab-1', st: 'running', runId: null, killed: false, pendingKill: false }],
   activeTabId = 'tab-1',
   cmdValue = '',
-  appConfig = {},
+  appConfig = { workspace_enabled: true },
   apiFetch = () => Promise.resolve(),
   createTab = () => 'tab-2',
   addToHistory = () => {},
@@ -302,6 +627,7 @@ function loadRunnerFns({
   reloadSessionHistory: reloadSessionHistoryOverride = vi.fn(() => Promise.resolve()),
   hydrateCmdHistory: hydrateCmdHistoryOverride = vi.fn(),
   sessionId = 'session-old',
+  clientId = 'client-1',
   localStorageEntries = {},
   dismissMobileKeyboardAfterSubmit = () => {},
   maybeMountDeferredPrompt = vi.fn(),
@@ -310,6 +636,18 @@ function loadRunnerFns({
   Notification: NotificationOverride = undefined,
   handleThemeCommand: handleThemeCommandOverride = undefined,
   handleConfigCommand: handleConfigCommandOverride = undefined,
+  handleWorkflowTerminalCommand: handleWorkflowTerminalCommandOverride = undefined,
+  closeTab: closeTabOverride = vi.fn(),
+  refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride = undefined,
+  openWorkspaceEditorFromCommand: openWorkspaceEditorFromCommandOverride = undefined,
+  downloadWorkspaceFile: downloadWorkspaceFileOverride = undefined,
+  readWorkspaceFile: readWorkspaceFileOverride = undefined,
+  createWorkspaceDirectory: createWorkspaceDirectoryOverride = undefined,
+  getWorkspaceDirectoryEntries: getWorkspaceDirectoryEntriesOverride = undefined,
+  getWorkspaceAutocompleteDirectoryHints: getWorkspaceAutocompleteDirectoryHintsOverride = undefined,
+  getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride = undefined,
+  normalizeWorkspaceCommandPath: normalizeWorkspaceCommandPathOverride = undefined,
+  workspaceDisplayPath: workspaceDisplayPathOverride = undefined,
   runnerInitCode = '',
 } = {}) {
   const normalizedTabs = tabs.map((tab) => ({
@@ -381,7 +719,7 @@ function loadRunnerFns({
   const showToast = showToastOverride || vi.fn()
 
   const fns = fromDomScripts(
-    ['app/static/js/runner.js'],
+    ['app/static/js/runner_core.js', 'app/static/js/runner.js'],
     {
       document,
       Map,
@@ -412,6 +750,7 @@ function loadRunnerFns({
       localStorage: storage,
       sessionStorage: sessionStore,
       SESSION_ID: sessionId,
+      CLIENT_ID: clientId,
       maskSessionToken: (token) => {
         if (typeof token !== 'string' || !token) return '(none)'
         if (token.startsWith('tok_')) return `tok_${token.slice(4, 8)}••••`
@@ -422,6 +761,7 @@ function loadRunnerFns({
       reloadSessionHistory: reloadSessionHistoryOverride,
       hydrateCmdHistory: hydrateCmdHistoryOverride,
       createTab,
+      closeTab: closeTabOverride,
       clearTab,
       cancelWelcome,
       welcomeOwnsTab,
@@ -444,7 +784,7 @@ function loadRunnerFns({
       describeFetchError: (err, context = 'server') => {
         const message = err && err.message ? err.message : 'unknown network error'
         if (message === 'Failed to fetch' || message === 'network down') {
-          return `Unable to reach the ${context}. Check that it is running and try again.`
+          return `Unable to contact the ${context} right now. Please try again in a moment. If this keeps happening, contact the shell operator.`
         }
         return `Request to the ${context} failed: ${message}`
       },
@@ -455,6 +795,23 @@ function loadRunnerFns({
       getRunNotifyPreference: getRunNotifyPreferenceOverride,
       ...(handleThemeCommandOverride ? { handleThemeCommand: handleThemeCommandOverride } : {}),
       ...(handleConfigCommandOverride ? { handleConfigCommand: handleConfigCommandOverride } : {}),
+      ...(handleWorkflowTerminalCommandOverride
+        ? { handleWorkflowTerminalCommand: handleWorkflowTerminalCommandOverride }
+        : {}),
+      ...(refreshWorkspaceFileCacheOverride ? { refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride } : {}),
+      ...(openWorkspaceEditorFromCommandOverride
+        ? { openWorkspaceEditorFromCommand: openWorkspaceEditorFromCommandOverride }
+        : {}),
+      ...(downloadWorkspaceFileOverride
+        ? { downloadWorkspaceFile: downloadWorkspaceFileOverride }
+        : {}),
+      ...(readWorkspaceFileOverride ? { readWorkspaceFile: readWorkspaceFileOverride } : {}),
+      ...(createWorkspaceDirectoryOverride ? { createWorkspaceDirectory: createWorkspaceDirectoryOverride } : {}),
+      ...(getWorkspaceDirectoryEntriesOverride ? { getWorkspaceDirectoryEntries: getWorkspaceDirectoryEntriesOverride } : {}),
+      ...(getWorkspaceAutocompleteDirectoryHintsOverride ? { getWorkspaceAutocompleteDirectoryHints: getWorkspaceAutocompleteDirectoryHintsOverride } : {}),
+      ...(getWorkspaceAutocompleteFileHintsOverride ? { getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride } : {}),
+      ...(normalizeWorkspaceCommandPathOverride ? { normalizeWorkspaceCommandPath: normalizeWorkspaceCommandPathOverride } : {}),
+      ...(workspaceDisplayPathOverride ? { workspaceDisplayPath: workspaceDisplayPathOverride } : {}),
       ...(NotificationOverride !== undefined ? { Notification: NotificationOverride } : {}),
     },
     `{
@@ -468,9 +825,19 @@ function loadRunnerFns({
     hasPendingTerminalConfirm,
     cancelPendingTerminalConfirm,
     runCommand,
+    attachActiveRunFromMonitor,
+    killActiveRunFromMonitor,
     restoreActiveRunsAfterReload,
     pollActiveRunsAfterReload,
     syncActiveRunTimer,
+    _subscribeRunStream,
+    pauseBackgroundRunStreamsForStatusMonitor,
+    resumeBackgroundRunStreamsAfterStatusMonitor,
+    detachRunStreamForTab,
+    _handleRunStreamMessage,
+    _resetStalledTimeout,
+    _clearStalledTimeout,
+    _recoverStalledRun,
     _getPendingKillTabId: () => pendingKillTabId,
     }`,
     `${runnerInitCode}\nsetTabs(tabs); setActiveTabId(activeTabId);`,
@@ -485,6 +852,7 @@ function loadRunnerFns({
     storage,
     setTabLabel,
     clearTab,
+    closeTab: closeTabOverride,
     cancelWelcome,
     showToast,
     interruptPromptLine: fns.interruptPromptLine,
@@ -492,6 +860,12 @@ function loadRunnerFns({
     cancelPendingTerminalConfirm: fns.cancelPendingTerminalConfirm,
     maybeMountDeferredPrompt,
     restoreHistoryRunIntoTab,
+    attachActiveRunFromMonitor: fns.attachActiveRunFromMonitor,
+    killActiveRunFromMonitor: fns.killActiveRunFromMonitor,
+    _subscribeRunStream: fns._subscribeRunStream,
+    pauseBackgroundRunStreamsForStatusMonitor: fns.pauseBackgroundRunStreamsForStatusMonitor,
+    resumeBackgroundRunStreamsAfterStatusMonitor: fns.resumeBackgroundRunStreamsAfterStatusMonitor,
+    detachRunStreamForTab: fns.detachRunStreamForTab,
   }
 }
 
@@ -516,8 +890,8 @@ describe('runner helpers', () => {
     expect(status.textContent).toBe('IDLE')
   })
 
-  it('doKill sends /kill immediately when runId is already known', () => {
-    const apiFetch = vi.fn(() => Promise.resolve())
+  it('doKill sends /kill immediately when runId is already known', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve({ ok: true, status: 200 }))
     const maybeMountDeferredPrompt = vi.fn()
     const { doKill, tabs, runBtn, status } = loadRunnerFns({
       tabs: [{ id: 'tab-1', st: 'running', runId: 'run-123', killed: false, pendingKill: false }],
@@ -526,6 +900,7 @@ describe('runner helpers', () => {
     })
 
     doKill('tab-1')
+    await flushPromises()
 
     expect(apiFetch).toHaveBeenCalledWith(
       '/kill',
@@ -544,10 +919,55 @@ describe('runner helpers', () => {
     expect(maybeMountDeferredPrompt).toHaveBeenCalledWith('tab-1')
   })
 
-  it('restoreActiveRunsAfterReload marks restored tabs as running placeholders', () => {
+  it('doKill keeps an attached run active when the server denies the kill request', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: false,
+      status: 403,
+      headers: { get: () => 'application/json' },
+      json: () => Promise.resolve({ error: 'No such process' }),
+    }))
+    const appendLine = vi.fn()
+    const { doKill, tabs, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'running', runId: 'run-123', killed: false, pendingKill: false, attachMode: 'attached' }],
+      apiFetch,
+      appendLine,
+    })
+
+    doKill('tab-1')
+    await flushPromises()
+
+    expect(tabs[0].runId).toBe('run-123')
+    expect(tabs[0].killed).toBe(false)
+    expect(tabs[0].attachMode).toBe('attached')
+    expect(document.querySelector('.tab-status').className).toBe('tab-status running')
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(false)
+    expect(status.className).toBe('status-pill running')
+    expect(appendLine).toHaveBeenCalledWith(
+      '[kill request denied] No such process',
+      'notice',
+      'tab-1',
+    )
+  })
+
+  it('restoreActiveRunsAfterReload subscribes restored tabs to brokered live output', async () => {
     const appendLine = vi.fn()
     const createTab = vi.fn(() => 'tab-2')
-    const setTabLabel = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/runs/run-1/stream')) {
+        return Promise.resolve(brokerStreamResponse([
+          'id: 1-0',
+          'data: {"type":"started","run_id":"run-1"}',
+          '',
+          'id: 1-1',
+          'data: {"type":"output","text":"live line","event_id":"1-1"}',
+          '',
+          'id: 1-2',
+          'data: {"type":"exit","code":0,"elapsed":"1.2","event_id":"1-2"}',
+          '',
+        ].join('\n') + '\n'))
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
     const now = Date.now()
     vi.useFakeTimers()
     vi.setSystemTime(new Date(now))
@@ -557,19 +977,154 @@ describe('runner helpers', () => {
       ],
       appendLine,
       createTab,
+      apiFetch,
     })
 
     restoreActiveRunsAfterReload([
       { run_id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z' },
     ])
+    await flushPromises()
+
+    expect(tabs[0].historyRunId).toBe('run-1')
+    expect(tabs[0].lastEventId).toBe('')
+    expect(tabs[0].reconnectedRun).toBe(false)
+    expect(tabs[0].st).toBe('ok')
+    expect(apiFetch).toHaveBeenCalledWith('/runs/run-1/stream?tab_id=tab-1')
+    expect(appendLine).toHaveBeenCalledWith('ping darklab.sh', 'prompt-echo', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('live line', '', 'tab-1')
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(true)
+    expect(status.className).toBe('status-pill ok')
+    vi.useRealTimers()
+  })
+
+  it('restoreActiveRunsAfterReload skips runs owned by another live client', () => {
+    const appendLine = vi.fn()
+    const createTab = vi.fn(() => 'tab-2')
+    const { restoreActiveRunsAfterReload, tabs, status } = loadRunnerFns({
+      tabs: [
+        { id: 'tab-1', st: 'idle', runId: null, rawLines: [], pendingKill: false, killed: false },
+      ],
+      appendLine,
+      createTab,
+    })
+
+    const restored = restoreActiveRunsAfterReload([
+      {
+        run_id: 'run-1',
+        command: 'ping darklab.sh',
+        started: '2026-01-01T00:00:00Z',
+        owned_by_this_client: false,
+        has_live_owner: true,
+        owner_stale: false,
+      },
+    ])
+
+    expect(restored).toBe(false)
+    expect(createTab).not.toHaveBeenCalled()
+    expect(appendLine).not.toHaveBeenCalled()
+    expect(tabs[0].st).toBe('idle')
+    expect(status.className).toBe('')
+  })
+
+  it('restoreActiveRunsAfterReload restores stale-owner runs', () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/runs/run-1/stream')) {
+        return Promise.resolve(brokerStreamResponse([
+          'id: 1-6',
+          'data: {"type":"output","text":"resumed"}',
+          '',
+          'id: 1-7',
+          'data: {"type":"exit","code":0}',
+          '',
+        ].join('\n') + '\n'))
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
+    const { restoreActiveRunsAfterReload, tabs } = loadRunnerFns({
+      tabs: [
+        { id: 'tab-1', st: 'idle', runId: null, rawLines: [], pendingKill: false, killed: false },
+      ],
+      appendLine,
+      apiFetch,
+    })
+
+    restoreActiveRunsAfterReload([
+      {
+        run_id: 'run-1',
+        command: 'ping darklab.sh',
+        started: '2026-01-01T00:00:00Z',
+        owned_by_this_client: false,
+        has_live_owner: false,
+        owner_stale: true,
+        last_event_id: '1-5',
+      },
+    ])
 
     expect(tabs[0].historyRunId).toBe('run-1')
     expect(tabs[0].reconnectedRun).toBe(true)
     expect(tabs[0].st).toBe('running')
+    expect(apiFetch).toHaveBeenCalledWith('/runs/run-1/stream?tab_id=tab-1&after=1-5')
     expect(appendLine).toHaveBeenCalledWith('ping darklab.sh', 'prompt-echo', 'tab-1')
-    expect(document.querySelector('.tab-kill-btn').hidden).toBe(false)
-    expect(status.className).toBe('status-pill running')
-    vi.useRealTimers()
+  })
+
+  it('pauses background run streams for Status Monitor API calls and resumes from the last event id', async () => {
+    const activeStream = controllableBrokerStreamResponse()
+    const backgroundStream = controllableBrokerStreamResponse()
+    const resumedStream = controllableBrokerStreamResponse()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/runs/run-active/stream?tab_id=tab-1') return Promise.resolve(activeStream)
+      if (url === '/runs/run-bg/stream?tab_id=tab-2') return Promise.resolve(backgroundStream)
+      if (url === '/runs/run-bg/stream?tab_id=tab-2&after=1-9') return Promise.resolve(resumedStream)
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
+    const {
+      _subscribeRunStream,
+      pauseBackgroundRunStreamsForStatusMonitor,
+      resumeBackgroundRunStreamsAfterStatusMonitor,
+    } = loadRunnerFns({
+      activeTabId: 'tab-1',
+      tabs: [
+        {
+          id: 'tab-1',
+          st: 'running',
+          runId: 'run-active',
+          historyRunId: 'run-active',
+          lastEventId: '1-2',
+          pendingKill: false,
+          killed: false,
+        },
+        {
+          id: 'tab-2',
+          st: 'running',
+          runId: 'run-bg',
+          historyRunId: 'run-bg',
+          lastEventId: '1-9',
+          pendingKill: false,
+          killed: false,
+        },
+      ],
+      apiFetch,
+    })
+
+    await expect(_subscribeRunStream('run-active', 'tab-1')).resolves.toBe(true)
+    await expect(_subscribeRunStream('run-bg', 'tab-2')).resolves.toBe(true)
+    await flushPromises()
+
+    expect(activeStream.read).toHaveBeenCalled()
+    expect(backgroundStream.read).toHaveBeenCalled()
+
+    expect(pauseBackgroundRunStreamsForStatusMonitor()).toBe(1)
+    expect(activeStream.cancel).not.toHaveBeenCalled()
+    expect(backgroundStream.cancel).toHaveBeenCalledTimes(1)
+
+    await flushPromises()
+    resumeBackgroundRunStreamsAfterStatusMonitor()
+    await flushPromises()
+
+    expect(apiFetch).toHaveBeenCalledWith('/runs/run-bg/stream?tab_id=tab-2&after=1-9')
+    expect(resumedStream.read).toHaveBeenCalled()
+    expect(apiFetch).toHaveBeenCalledTimes(3)
   })
 
   it('restoreActiveRunsAfterReload does not overwrite a restored non-running tab', () => {
@@ -600,6 +1155,88 @@ describe('runner helpers', () => {
 
     expect(createTab).toHaveBeenCalledWith()
     expect(tabs[0].historyRunId).toBe('run-old')
+  })
+
+  it('attachActiveRunFromMonitor opens an attached subscribed tab with kill controls', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/runs/run-other/stream')) {
+        return Promise.resolve(pendingBrokerStreamResponse())
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
+    const { attachActiveRunFromMonitor, tabs } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, rawLines: [], pendingKill: false, killed: false }],
+      createTab: vi.fn(() => 'tab-1'),
+      appendLine,
+      apiFetch,
+    })
+
+    await expect(attachActiveRunFromMonitor({
+      run_id: 'run-other',
+      command: 'ping darklab.sh',
+      started: '2026-01-01T00:00:00Z',
+    })).resolves.toBe(true)
+
+    expect(tabs[0].attachMode).toBe('attached')
+    expect(tabs[0].st).toBe('running')
+    expect(apiFetch).toHaveBeenCalledWith('/runs/run-other/stream?tab_id=tab-1')
+    expect(appendLine).toHaveBeenCalledWith(
+      expect.stringContaining('[attached to active run started at'),
+      'notice',
+      'tab-1',
+    )
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(false)
+  })
+
+  it('attachActiveRunFromMonitor subscribes without claiming ownership', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/runs/run-other/stream')) {
+        return Promise.resolve(pendingBrokerStreamResponse())
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
+    const { attachActiveRunFromMonitor, tabs } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, rawLines: [], pendingKill: false, killed: false }],
+      createTab: vi.fn(() => 'tab-1'),
+      apiFetch,
+    })
+
+    await expect(attachActiveRunFromMonitor({
+      run_id: 'run-other',
+      command: 'ping darklab.sh',
+      started: '2026-01-01T00:00:00Z',
+    })).resolves.toBe(true)
+
+    expect(apiFetch).toHaveBeenCalledTimes(1)
+    expect(apiFetch).toHaveBeenCalledWith('/runs/run-other/stream?tab_id=tab-1')
+    expect(tabs[0].attachMode).toBe('attached')
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(false)
+  })
+
+  it('keeps subscribed tabs killable on owner metadata and reports remote kills', () => {
+    const appendLine = vi.fn()
+    const { _handleRunStreamMessage, tabs } = loadRunnerFns({
+      clientId: 'client-1',
+      tabs: [{ id: 'tab-1', st: 'running', runId: 'run-1', pendingKill: false, killed: false, attachMode: 'attached' }],
+      appendLine,
+    })
+
+    _handleRunStreamMessage({ type: 'owner', owner_client_id: 'client-2', owner_tab_id: 'tab-9' }, 'tab-1')
+
+    expect(tabs[0].attachMode).toBe('attached')
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(false)
+    expect(appendLine).not.toHaveBeenCalled()
+
+    _handleRunStreamMessage({ type: 'killed', killer_client_id: 'client-2', killer_tab_id: 'tab-9' }, 'tab-1')
+
+    expect(tabs[0].killed).toBe(true)
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(true)
+    expect(appendLine).toHaveBeenCalledWith(
+      '[killed by another browser]',
+      'notice',
+      'tab-1',
+    )
   })
 
   it('pollActiveRunsAfterReload restores a completed reconnected run through history', async () => {
@@ -642,6 +1279,50 @@ describe('runner helpers', () => {
       { targetTabId: 'tab-1', hidePanelOnSuccess: false },
     )
     expect(tabs[0].reconnectedRun).toBe(false)
+  })
+
+  it('pollActiveRunsAfterReload fails a missing reconnected run with no saved history', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/history/active') {
+        return Promise.resolve({ json: () => Promise.resolve({ runs: [] }) })
+      }
+      if (url === '/history/run-123?json&preview=1') {
+        return Promise.resolve({ ok: false })
+      }
+      return Promise.reject(new Error(`unexpected ${url}`))
+    })
+    const { pollActiveRunsAfterReload, tabs, status, runBtn } = loadRunnerFns({
+      tabs: [
+        {
+          id: 'tab-1',
+          st: 'running',
+          runId: 'run-123',
+          historyRunId: 'run-123',
+          reconnectedRun: true,
+          rawLines: [],
+          pendingKill: false,
+          killed: false,
+        },
+      ],
+      appendLine,
+      apiFetch,
+    })
+
+    await pollActiveRunsAfterReload()
+
+    expect(appendLine).toHaveBeenCalledWith('[reconnected run is no longer active]', 'denied', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith(
+      '[no saved result is available; the app may have restarted while the command was running]',
+      'denied',
+      'tab-1',
+    )
+    expect(tabs[0].st).toBe('fail')
+    expect(tabs[0].reconnectedRun).toBe(false)
+    expect(tabs[0].runId).toBeNull()
+    expect(status.className).toBe('status-pill fail')
+    expect(runBtn.disabled).toBe(false)
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(true)
   })
 
   it('doKill marks pendingKill when runId is not yet available', () => {
@@ -711,29 +1392,10 @@ describe('runner helpers', () => {
   })
 
   it('adds commands to the preview recents even when they exit non-zero', async () => {
-    let readCount = 0
     const addToRecentPreview = vi.fn()
-    const apiFetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        body: {
-          getReader: () => ({
-            read: vi.fn(() => {
-              readCount += 1
-              if (readCount === 1) {
-                return Promise.resolve({
-                  done: false,
-                  value: new TextEncoder().encode(
-                    'data: {"type":"started","run_id":"run-1"}\n\n' +
-                    'data: {"type":"exit","code":0,"elapsed":"0.1"}\n\n',
-                  ),
-                })
-              }
-              return Promise.resolve({ done: true })
-            }),
-          }),
-        },
-      }),
+    const apiFetch = brokerApiFetch(
+      'data: {"type":"started","run_id":"run-1"}\n\n' +
+      'data: {"type":"exit","code":0,"elapsed":"0.1"}\n\n',
     )
     const { runCommand } = loadRunnerFns({
       cmdValue: 'ping -c 1 darklab.sh',
@@ -743,34 +1405,15 @@ describe('runner helpers', () => {
     })
 
     runCommand()
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromises()
 
     expect(addToRecentPreview).toHaveBeenCalledWith('ping -c 1 darklab.sh')
 
-    readCount = 0
     addToRecentPreview.mockClear()
-    const failedFetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        body: {
-          getReader: () => ({
-            read: vi.fn(() => {
-              readCount += 1
-              if (readCount === 1) {
-                return Promise.resolve({
-                  done: false,
-                  value: new TextEncoder().encode(
-                    'data: {"type":"started","run_id":"run-2"}\n\n' +
-                    'data: {"type":"exit","code":1,"elapsed":"0.1"}\n\n',
-                  ),
-                })
-              }
-              return Promise.resolve({ done: true })
-            }),
-          }),
-        },
-      }),
+    const failedFetch = brokerApiFetch(
+      'data: {"type":"started","run_id":"run-2"}\n\n' +
+      'data: {"type":"exit","code":1,"elapsed":"0.1"}\n\n',
+      { runId: 'run-2' },
     )
     const failedHarness = loadRunnerFns({
       cmdValue: 'ping -c 1 nope.darklab',
@@ -780,37 +1423,18 @@ describe('runner helpers', () => {
     })
 
     failedHarness.runCommand()
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromises()
 
     expect(addToRecentPreview).toHaveBeenCalledWith('ping -c 1 nope.darklab')
   })
 
-  it('does not add unsupported fake commands to the preview recents', async () => {
-    let readCount = 0
+  it('does not add unsupported built-in commands to the preview recents', async () => {
     const addToRecentPreview = vi.fn()
-    const apiFetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        body: {
-          getReader: () => ({
-            read: vi.fn(() => {
-              readCount += 1
-              if (readCount === 1) {
-                return Promise.resolve({
-                  done: false,
-                  value: new TextEncoder().encode(
-                    'data: {"type":"started","run_id":"run-3"}\n\n' +
-                    'data: {"type":"output","text":"Unsupported fake command: pign darklab.sh"}\n\n' +
-                    'data: {"type":"exit","code":1,"elapsed":"0.1"}\n\n',
-                  ),
-                })
-              }
-              return Promise.resolve({ done: true })
-            }),
-          }),
-        },
-      }),
+    const apiFetch = brokerApiFetch(
+      'data: {"type":"started","run_id":"run-3"}\n\n' +
+      'data: {"type":"output","text":"Unsupported built-in command: pign darklab.sh"}\n\n' +
+      'data: {"type":"exit","code":1,"elapsed":"0.1"}\n\n',
+      { runId: 'run-3' },
     )
     const { runCommand } = loadRunnerFns({
       cmdValue: 'pign darklab.sh',
@@ -820,8 +1444,7 @@ describe('runner helpers', () => {
     })
 
     runCommand()
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromises()
 
     expect(addToRecentPreview).not.toHaveBeenCalled()
   })
@@ -932,7 +1555,7 @@ describe('runner helpers', () => {
     expect(status.className).toBe('status-pill fail')
   })
 
-  it('runCommand shows a fetch error when the /run request rejects', async () => {
+  it('runCommand shows a fetch error when the /runs request rejects', async () => {
     const apiFetch = vi.fn(() => Promise.reject(new Error('Failed to fetch')))
     const appendLine = vi.fn()
     const { runCommand, status, runBtn } = loadRunnerFns({
@@ -947,14 +1570,14 @@ describe('runner helpers', () => {
     await Promise.resolve()
 
     expect(apiFetch).toHaveBeenCalledWith(
-      '/run',
+      '/runs',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       }),
     )
     expect(appendLine).toHaveBeenLastCalledWith(
-      '[connection error] Unable to reach the server. Check that it is running and try again.',
+      '[connection error] Unable to contact the server right now. Please try again in a moment. If this keeps happening, contact the shell operator.',
       'exit-fail',
       'tab-1',
     )
@@ -1080,7 +1703,7 @@ describe('runner helpers', () => {
     expect(cancelWelcome).toHaveBeenCalledWith('tab-1')
     expect(clearTab).toHaveBeenCalledWith('tab-1')
     expect(apiFetch).toHaveBeenCalledWith(
-      '/run',
+      '/runs',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1091,29 +1714,13 @@ describe('runner helpers', () => {
   it('runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line', async () => {
     const appendLine = vi.fn()
     const clearTab = vi.fn()
-    const apiFetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        body: {
-          getReader: () => {
-            let done = false
-            return {
-              read: () => {
-                if (done) return Promise.resolve({ done: true, value: undefined })
-                done = true
-                const payload =
-                  [
-                    'data: {"type":"started","run_id":"run-clear"}',
-                    'data: {"type":"clear"}',
-                    'data: {"type":"exit","code":0,"elapsed":0.1}',
-                  ].join('\n\n') + '\n\n'
-                return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
-              },
-            }
-          },
-        },
-      }),
+    const apiFetch = brokerApiFetch(
+      [
+        'data: {"type":"started","run_id":"run-clear"}',
+        'data: {"type":"clear"}',
+        'data: {"type":"exit","code":0,"elapsed":0.1}',
+      ].join('\n\n') + '\n\n',
+      { runId: 'run-clear' },
     )
     const loaded = loadRunnerFns({
       cmdValue: 'clear',
@@ -1124,9 +1731,7 @@ describe('runner helpers', () => {
     })
 
     loaded.runCommand()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromises()
 
     expect(clearTab).toHaveBeenCalledWith('tab-1')
     expect(appendLine).not.toHaveBeenCalledWith(
@@ -1139,29 +1744,13 @@ describe('runner helpers', () => {
 
   it('runCommand appends a count-aware preview truncation notice on exit', async () => {
     const appendLine = vi.fn()
-    const apiFetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        body: {
-          getReader: () => {
-            let done = false
-            return {
-              read: () => {
-                if (done) return Promise.resolve({ done: true, value: undefined })
-                done = true
-                const payload =
-                  [
-                    'data: {"type":"started","run_id":"run-man"}',
-                    'data: {"type":"output","text":"line 1"}',
-                    'data: {"type":"exit","code":0,"elapsed":0.1,"preview_truncated":true,"output_line_count":5104,"full_output_available":true}',
-                  ].join('\n\n') + '\n\n'
-                return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
-              },
-            }
-          },
-        },
-      }),
+    const apiFetch = brokerApiFetch(
+      [
+        'data: {"type":"started","run_id":"run-man"}',
+        'data: {"type":"output","text":"line 1"}',
+        'data: {"type":"exit","code":0,"elapsed":0.1,"preview_truncated":true,"output_line_count":5104,"full_output_available":true}',
+      ].join('\n\n') + '\n\n',
+      { runId: 'run-man' },
     )
     const loaded = loadRunnerFns({
       cmdValue: 'man curl',
@@ -1172,9 +1761,7 @@ describe('runner helpers', () => {
     })
 
     loaded.runCommand()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromises()
 
     expect(appendLine).toHaveBeenCalledWith(
       "[preview truncated — only the last 5000 lines are shown here, but the full output had 5104 lines. To view the full output, use either permalink button now; after another command, use this command's history permalink]",
@@ -1186,30 +1773,14 @@ describe('runner helpers', () => {
 
   it('runCommand preserves output classes from streamed events', async () => {
     const appendLine = vi.fn()
-    const apiFetch = vi.fn(() =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        body: {
-          getReader: () => {
-            let done = false
-            return {
-              read: () => {
-                if (done) return Promise.resolve({ done: true, value: undefined })
-                done = true
-                const payload =
-                  [
-                    'data: {"type":"started","run_id":"run-faq"}',
-                    'data: {"type":"output","text":"Q  Example question\\n","cls":"fake-faq-q"}',
-                    'data: {"type":"output","text":"A  Example answer\\n","cls":"fake-faq-a"}',
-                    'data: {"type":"exit","code":0,"elapsed":0.1}',
-                  ].join('\n\n') + '\n\n'
-                return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
-              },
-            }
-          },
-        },
-      }),
+    const apiFetch = brokerApiFetch(
+      [
+        'data: {"type":"started","run_id":"run-faq"}',
+        'data: {"type":"output","text":"Q  Example question\\n","cls":"builtin-faq-q"}',
+        'data: {"type":"output","text":"A  Example answer\\n","cls":"builtin-faq-a"}',
+        'data: {"type":"exit","code":0,"elapsed":0.1}',
+      ].join('\n\n') + '\n\n',
+      { runId: 'run-faq' },
     )
     const loaded = loadRunnerFns({
       cmdValue: 'faq',
@@ -1219,12 +1790,42 @@ describe('runner helpers', () => {
     })
 
     loaded.runCommand()
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromises()
 
-    expect(appendLine).toHaveBeenCalledWith('Q  Example question', 'fake-faq-q', 'tab-1')
-    expect(appendLine).toHaveBeenCalledWith('A  Example answer', 'fake-faq-a', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('Q  Example question', 'builtin-faq-q', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('A  Example answer', 'builtin-faq-a', 'tab-1')
+  })
+
+  it('runCommand suppresses nc inverse-host-lookup noise while keeping the open-port result', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = brokerApiFetch(
+      [
+        'data: {"type":"started","run_id":"run-nc"}',
+        'data: {"type":"output","text":"Warning: inverse host lookup failed for 107.178.109.44: No address associated with name\\nip.darklab.sh [107.178.109.44] 80 (http) open\\n"}',
+        'data: {"type":"exit","code":0,"elapsed":0.1}',
+      ].join('\n\n') + '\n\n',
+      { runId: 'run-nc' },
+    )
+    const loaded = loadRunnerFns({
+      cmdValue: 'nc -zv ip.darklab.sh 80',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+    })
+
+    loaded.runCommand()
+    await flushPromises()
+
+    expect(appendLine).not.toHaveBeenCalledWith(
+      'Warning: inverse host lookup failed for 107.178.109.44: No address associated with name',
+      '',
+      'tab-1',
+    )
+    expect(appendLine).toHaveBeenCalledWith(
+      'ip.darklab.sh [107.178.109.44] 80 (http) open',
+      '',
+      'tab-1',
+    )
   })
 
   it('doKill shows a notice when the kill request fails', async () => {
@@ -1244,7 +1845,7 @@ describe('runner helpers', () => {
       'Failed to send kill request; command may still be running',
     )
     expect(appendLine).toHaveBeenCalledWith(
-      '[kill request failed] Unable to reach the server. Check that it is running and try again.',
+      '[kill request failed] Unable to contact the server right now. Please try again in a moment. If this keeps happening, contact the shell operator.',
       'notice',
       'tab-1',
     )
@@ -1332,11 +1933,11 @@ describe('submitCommand return contract', () => {
     submitVisibleComposerCommand({ dismissKeyboard: true, focusAfterSubmit: false })
 
     expect(apiFetch).toHaveBeenCalledWith(
-      '/run',
+      '/runs',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: 'curl darklab.sh' }),
+        body: JSON.stringify({ command: 'curl darklab.sh', tab_id: 'tab-1' }),
       }),
     )
   })
@@ -1355,11 +1956,11 @@ describe('submitCommand return contract', () => {
     })
 
     expect(apiFetch).toHaveBeenCalledWith(
-      '/run',
+      '/runs',
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: 'curl explicit.sh' }),
+        body: JSON.stringify({ command: 'curl explicit.sh', tab_id: 'tab-1' }),
       }),
     )
   })
@@ -1633,7 +2234,7 @@ describe('_sessionTokenSet verify failure behavior', () => {
     await _sessionTokenSet('tok_abcd1234efgh5678ijkl9012mnop3456', 'tab-1')
 
     expect(appendLine).toHaveBeenCalledWith(
-      'you have 1 run(s) in your current session. migrate history to this session token?',
+      'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
       '',
       'tab-1',
     )
@@ -1775,6 +2376,656 @@ describe('session-token clear', () => {
   })
 })
 
+describe('workspace file delete confirmation', () => {
+  const normalizeWorkspaceCommandPath = (path = '', cwd = '') => {
+    const raw = String(path || '').trim()
+    const base = raw.startsWith('/') ? [] : String(cwd || '').split('/').filter(Boolean)
+    for (const part of String(raw || '.').split('/').filter(Boolean)) {
+      if (part === '.') continue
+      if (part === '..') {
+        if (!base.length) throw new Error('path escapes the session workspace')
+        base.pop()
+      } else {
+        base.push(part)
+      }
+    }
+    return base.join('/')
+  }
+  const workspaceDisplayPath = path => {
+    const normalized = String(path || '').split('/').filter(Boolean).join('/')
+    return normalized ? `/${normalized}` : '/'
+  }
+
+  it('treats the empty workspace cwd as root for pwd, cd, and mkdir', async () => {
+    const appendLine = vi.fn()
+    const createWorkspaceDirectory = vi.fn(path => Promise.resolve({ directory: { path } }))
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand, tabs } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: '' }],
+      appendLine,
+      createWorkspaceDirectory,
+      refreshWorkspaceFileCache,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [
+        { value: 'tmp', description: 'session folder' },
+        { value: 'tmp/tmptmp', description: 'session folder' },
+      ],
+    })
+
+    await submitCommand('pwd')
+    await submitCommand('mkdir tmp')
+    await submitCommand('cd tmp')
+    await vi.waitFor(() => expect(tabs[0].workspaceCwd).toBe('tmp'))
+    await submitCommand('mkdir tmptmp')
+
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('/', '', 'tab-1'))
+    expect(createWorkspaceDirectory).toHaveBeenCalledWith('tmp')
+    expect(appendLine).toHaveBeenCalledWith('/tmp', '', 'tab-1')
+    expect(createWorkspaceDirectory).toHaveBeenCalledWith('tmp/tmptmp')
+  })
+
+  it('tracks a workspace current directory per tab and resolves relative file commands', async () => {
+    const appendLine = vi.fn()
+    const readWorkspaceFile = vi.fn(path => Promise.resolve({ path, text: 'alpha\nbeta\n' }))
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand, tabs, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: '' }],
+      appendLine,
+      readWorkspaceFile,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [{ value: 'reports', description: 'session folder' }],
+    })
+
+    await submitCommand('cd reports')
+    await vi.waitFor(() => expect(tabs[0].workspaceCwd).toBe('reports'))
+    expect(appendLine).toHaveBeenCalledWith('/reports', '', 'tab-1')
+
+    await submitCommand('cat output.txt')
+    await vi.waitFor(() => expect(readWorkspaceFile).toHaveBeenCalledWith('reports/output.txt'))
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('alpha', '', 'tab-1'))
+    expect(appendLine).toHaveBeenCalledWith('beta', '', 'tab-1')
+    expect(tabs[0].command).toBe('cat output.txt')
+    expect(status.className).toBe('status-pill ok')
+  })
+
+  it('resolves nested cd commands from the current workspace folder', async () => {
+    const appendLine = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand, tabs } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: '' }],
+      appendLine,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [
+        { value: 'reports', description: 'session folder' },
+        { value: 'reports/nested', description: 'session folder' },
+      ],
+    })
+
+    await submitCommand('cd reports')
+    await vi.waitFor(() => expect(tabs[0].workspaceCwd).toBe('reports'))
+    await submitCommand('cd nested')
+
+    await vi.waitFor(() => expect(tabs[0].workspaceCwd).toBe('reports/nested'))
+    expect(appendLine).toHaveBeenCalledWith('/reports/nested', '', 'tab-1')
+  })
+
+  it('does not double-prefix a root-relative autocomplete path from a workspace folder', async () => {
+    const appendLine = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand, tabs } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'reports' }],
+      appendLine,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [
+        { value: 'reports', description: 'session folder' },
+        { value: 'reports/nested', description: 'session folder' },
+      ],
+    })
+
+    await submitCommand('cd reports/nested')
+
+    await vi.waitFor(() => expect(tabs[0].workspaceCwd).toBe('reports/nested'))
+    expect(appendLine).toHaveBeenCalledWith('/reports/nested', '', 'tab-1')
+  })
+
+  it('lists the current workspace folder non-recursively on one short line', async () => {
+    const appendLine = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'reports' }],
+      appendLine,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [{ value: 'reports', description: 'session folder' }],
+      getWorkspaceAutocompleteFileHints: () => [{ value: 'reports/a.txt', description: 'session file · 1 B' }],
+      getWorkspaceDirectoryEntries: () => ({
+        folders: [
+          { name: 'nested', path: 'reports/nested' },
+          { name: 'deeper', path: 'reports/nested/deeper' },
+        ],
+        files: [
+          { name: 'a.txt', path: 'reports/a.txt', size: 1, mtime: 'now' },
+          { name: 'deep.txt', path: 'reports/nested/deep.txt', size: 2, mtime: 'later' },
+        ],
+      }),
+    })
+
+    await submitCommand('ls')
+
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('nested/ a.txt', '', 'tab-1'))
+    expect(appendLine).not.toHaveBeenCalledWith('nested/', '', 'tab-1')
+    expect(appendLine).not.toHaveBeenCalledWith('a.txt', '', 'tab-1')
+    expect(appendLine).not.toHaveBeenCalledWith(expect.stringContaining('deep.txt'), '', 'tab-1')
+  })
+
+  it('lists workspace folders recursively only when -R is present with flags in any order', async () => {
+    const appendLine = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const directoryEntries = {
+      reports: {
+        folders: [{ name: 'nested', path: 'reports/nested' }],
+        files: [{ name: 'a.txt', path: 'reports/a.txt', size: 1, mtime: 'now' }],
+      },
+      'reports/nested': {
+        folders: [],
+        files: [{ name: 'deep.txt', path: 'reports/nested/deep.txt', size: 2, mtime: 'later' }],
+      },
+    }
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'reports' }],
+      appendLine,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [
+        { value: 'reports', description: 'session folder' },
+        { value: 'reports/nested', description: 'session folder' },
+      ],
+      getWorkspaceAutocompleteFileHints: () => [
+        { value: 'reports/a.txt', description: 'session file · 1 B' },
+        { value: 'reports/nested/deep.txt', description: 'session file · 2 B' },
+      ],
+      getWorkspaceDirectoryEntries: path => directoryEntries[path || 'reports'] || { folders: [], files: [] },
+    })
+
+    await submitCommand('file ls -Rl')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('nested/          dir   -', '', 'tab-1'))
+    expect(appendLine).toHaveBeenCalledWith('nested/deep.txt  file  2 B   later', '', 'tab-1')
+  })
+
+  it('lists workspace folders in long format with ll', async () => {
+    const appendLine = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'reports' }],
+      appendLine,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [{ value: 'reports', description: 'session folder' }],
+      getWorkspaceAutocompleteFileHints: () => [{ value: 'reports/a.txt', description: 'session file · 1 B' }],
+      getWorkspaceDirectoryEntries: () => ({
+        folders: [{ name: 'nested', path: 'reports/nested' }],
+        files: [{ name: 'a.txt', path: 'reports/a.txt', size: 1, mtime: 'now' }],
+      }),
+    })
+
+    await submitCommand('ll')
+
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('../      dir   -', '', 'tab-1'))
+    expect(appendLine).toHaveBeenCalledWith('nested/  dir   -', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('a.txt    file  1 B   now', '', 'tab-1')
+  })
+
+  it('pipes short ls output to grep as one workspace entry per line', async () => {
+    const appendLine = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: '' }],
+      appendLine,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [{ value: 'reports', description: 'session folder' }],
+      getWorkspaceAutocompleteFileHints: () => [
+        { value: 'alpha.txt', description: 'session file · 1 B' },
+        { value: 'beta.log', description: 'session file · 2 B' },
+        { value: 'notes.txt', description: 'session file · 3 B' },
+      ],
+      getWorkspaceDirectoryEntries: () => ({
+        folders: [{ name: 'reports', path: 'reports' }],
+        files: [
+          { name: 'alpha.txt', path: 'alpha.txt', size: 1, mtime: 'now' },
+          { name: 'beta.log', path: 'beta.log', size: 2, mtime: 'now' },
+          { name: 'notes.txt', path: 'notes.txt', size: 3, mtime: 'now' },
+        ],
+      }),
+    })
+
+    await submitCommand('ls | grep txt')
+
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('alpha.txt', '', 'tab-1'))
+    expect(appendLine).toHaveBeenCalledWith('notes.txt', '', 'tab-1')
+    expect(appendLine).not.toHaveBeenCalledWith('reports/ alpha.txt beta.log notes.txt', '', 'tab-1')
+  })
+
+  it('creates workspace directories with mkdir and file add-dir', async () => {
+    const appendLine = vi.fn()
+    const createWorkspaceDirectory = vi.fn(path => Promise.resolve({ directory: { path } }))
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'reports' }],
+      appendLine,
+      createWorkspaceDirectory,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+    })
+
+    await submitCommand('mkdir scans')
+    await submitCommand('file add-dir /shared')
+
+    await vi.waitFor(() => expect(createWorkspaceDirectory).toHaveBeenCalledWith('reports/scans'))
+    expect(createWorkspaceDirectory).toHaveBeenCalledWith('shared')
+    expect(appendLine).toHaveBeenCalledWith('file: created folder reports/scans', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('file: created folder shared', '', 'tab-1')
+  })
+
+  it('runs standalone pipe helpers against workspace files', async () => {
+    const appendLine = vi.fn()
+    const readWorkspaceFile = vi.fn(path => Promise.resolve({ path, text: 'beta\nalpha\nbeta\n' }))
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: '' }],
+      appendLine,
+      readWorkspaceFile,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+    })
+
+    await submitCommand('grep beta targets.txt')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('beta', '', 'tab-1'))
+    await submitCommand('wc -l targets.txt')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('3', '', 'tab-1'))
+    await submitCommand('sort -u targets.txt')
+
+    await vi.waitFor(() => expect(readWorkspaceFile).toHaveBeenCalledWith('targets.txt'))
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('alpha', '', 'tab-1'))
+    expect(appendLine).toHaveBeenCalledWith('beta', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('3', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('alpha', '', 'tab-1')
+  })
+
+  it('does not intercept workspace delete aliases when Files are disabled', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve())
+    const appendCommandEcho = vi.fn()
+    const { submitCommand } = loadRunnerFns({
+      appConfig: { workspace_enabled: false },
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      appendCommandEcho,
+    })
+
+    await submitCommand('rm targets.txt')
+
+    expect(appendCommandEcho).not.toHaveBeenCalledWith('rm targets.txt')
+    expect(apiFetch).not.toHaveBeenCalledWith(
+      '/workspace/files?path=targets.txt',
+      expect.objectContaining({ method: 'DELETE' }),
+    )
+  })
+
+  it('shows usage for bare rm and file delete commands', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve(new Response('{}', { status: 404 })))
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      apiFetch,
+    })
+
+    await submitCommand('rm')
+    await submitCommand('file delete')
+
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('Usage: rm [-r|-f|-rf] <file-or-folder>', 'exit-fail', 'tab-1'))
+    expect(appendLine).toHaveBeenCalledWith('Usage: file delete [-r|-f|-rf] <file-or-folder>', 'exit-fail', 'tab-1')
+    expect(apiFetch).not.toHaveBeenCalledWith('/runs', expect.anything())
+    expect(status.className).toBe('status-pill fail')
+  })
+
+  it('opens a terminal yes/no confirmation before deleting a workspace file', async () => {
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/workspace/files/info?path=targets.txt')) {
+        return Promise.resolve(new Response(JSON.stringify({ path: 'targets.txt', kind: 'file', file_count: 1 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      return Promise.resolve(new Response('{}', { status: 404 }))
+    })
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      setComposerPromptMode,
+      apiFetch,
+    })
+
+    await submitCommand('file rm targets.txt')
+
+    expect(appendLine).toHaveBeenNthCalledWith(1, 'file rm targets.txt', 'prompt-echo', 'tab-1')
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenNthCalledWith(2, "delete session file 'targets.txt'?", '', 'tab-1'),
+    )
+    expect(setComposerPromptMode).toHaveBeenCalledWith('confirm')
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/info?path=targets.txt')
+    expect(status.className).toBe('status-pill idle')
+  })
+
+  it('requires recursive rm flags before deleting a workspace folder', async () => {
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/workspace/files/info?path=reports')) {
+        return Promise.resolve(new Response(JSON.stringify({ path: 'reports', kind: 'directory', file_count: 2 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      return Promise.resolve(new Response('{}', { status: 404 }))
+    })
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      setComposerPromptMode,
+      apiFetch,
+    })
+
+    await submitCommand('rm reports')
+
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith(
+        '[error] reports is a folder; use rm -r reports or file delete -r reports',
+        'exit-fail',
+        'tab-1',
+      ),
+    )
+    expect(setComposerPromptMode).not.toHaveBeenCalledWith('confirm')
+    expect(status.className).toBe('status-pill fail')
+  })
+
+  it('opens a warning terminal confirmation before recursively deleting a workspace folder with files', async () => {
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/workspace/files/info?path=reports')) {
+        return Promise.resolve(new Response(JSON.stringify({ path: 'reports', kind: 'directory', file_count: 2 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      return Promise.resolve(new Response('{}', { status: 404 }))
+    })
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      setComposerPromptMode,
+      apiFetch,
+    })
+
+    await submitCommand('rm -fr reports')
+
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith("delete session folder 'reports'?", '', 'tab-1'),
+    )
+    expect(appendLine).toHaveBeenCalledWith(
+      'warning: this will also delete 2 files in this folder.',
+      'warning',
+      'tab-1',
+    )
+    expect(setComposerPromptMode).toHaveBeenCalledWith('confirm')
+    expect(status.className).toBe('status-pill idle')
+  })
+
+  it('does not prompt before deleting a missing workspace file or folder', async () => {
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/workspace/files/info?path=missing.txt')) {
+        return Promise.resolve(new Response(JSON.stringify({ error: 'session file or folder was not found' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      return Promise.resolve(new Response('{}', { status: 404 }))
+    })
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      setComposerPromptMode,
+      apiFetch,
+    })
+
+    await submitCommand('file rm missing.txt')
+
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith('[error] session file or folder was not found', 'exit-fail', 'tab-1'),
+    )
+    expect(appendLine).not.toHaveBeenCalledWith("delete session file 'missing.txt'?", '', 'tab-1')
+    expect(setComposerPromptMode).not.toHaveBeenCalledWith('confirm')
+    expect(status.className).toBe('status-pill fail')
+  })
+
+  it('deletes the workspace file only after answering yes', async () => {
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn()
+    const apiFetch = vi.fn((url, opts) => {
+      if (String(url).startsWith('/workspace/files/info?path=targets.txt')) {
+        return Promise.resolve(new Response(JSON.stringify({ path: 'targets.txt', kind: 'file', file_count: 1 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      if (String(url).startsWith('/workspace/files?path=targets.txt') && opts?.method === 'DELETE') {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      if (url === '/run/client') {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      return Promise.resolve(new Response('{}', { status: 404 }))
+    })
+    const { submitCommand, status, tabs } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      setComposerPromptMode,
+      apiFetch,
+      refreshWorkspaceFileCache,
+    })
+
+    await submitCommand('rm targets.txt')
+    await vi.waitFor(() => expect(setComposerPromptMode).toHaveBeenCalledWith('confirm'))
+    await submitCommand('yes')
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith(
+      '/workspace/files?path=targets.txt',
+      { method: 'DELETE' },
+    ))
+
+    expect(appendLine).toHaveBeenCalledWith('file: removed targets.txt', '', 'tab-1')
+    expect(refreshWorkspaceFileCache).toHaveBeenCalled()
+    expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
+    await vi.waitFor(() => expect(tabs[0].st).toBe('ok'))
+    expect(status.className).toBe('status-pill ok')
+  })
+
+  it('deletes the workspace folder only after answering yes', async () => {
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn()
+    const apiFetch = vi.fn((url, opts) => {
+      if (String(url).startsWith('/workspace/files/info?path=reports')) {
+        return Promise.resolve(new Response(JSON.stringify({ path: 'reports', kind: 'directory', file_count: 0 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      if (String(url).startsWith('/workspace/files?path=reports') && opts?.method === 'DELETE') {
+        return Promise.resolve(new Response(JSON.stringify({
+          ok: true,
+          deleted: { path: 'reports', kind: 'directory', file_count: 0 },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      if (url === '/run/client') {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      return Promise.resolve(new Response('{}', { status: 404 }))
+    })
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      setComposerPromptMode,
+      apiFetch,
+      refreshWorkspaceFileCache,
+    })
+
+    await submitCommand('file delete -r reports')
+    await vi.waitFor(() => expect(setComposerPromptMode).toHaveBeenCalledWith('confirm'))
+    await submitCommand('yes')
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith(
+      '/workspace/files?path=reports',
+      { method: 'DELETE' },
+    ))
+
+    expect(appendLine).toHaveBeenCalledWith('file: removed folder reports', '', 'tab-1')
+    expect(refreshWorkspaceFileCache).toHaveBeenCalled()
+    expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
+    expect(status.className).toBe('status-pill ok')
+  })
+
+  it('leaves the workspace file untouched when the user answers no', async () => {
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/workspace/files/info?path=targets.txt')) {
+        return Promise.resolve(new Response(JSON.stringify({ path: 'targets.txt', kind: 'file', file_count: 1 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      return Promise.resolve(new Response('{}', { status: 404 }))
+    })
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      setComposerPromptMode,
+      apiFetch,
+    })
+
+    await submitCommand('file rm targets.txt')
+    await vi.waitFor(() => expect(setComposerPromptMode).toHaveBeenCalledWith('confirm'))
+    await submitCommand('no')
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith('Session file delete canceled.', '', 'tab-1'),
+    )
+
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/info?path=targets.txt')
+    expect(apiFetch).not.toHaveBeenCalledWith(
+      '/workspace/files?path=targets.txt',
+      { method: 'DELETE' },
+    )
+    expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
+    expect(status.className).toBe('status-pill ok')
+  })
+
+  it('opens the Files editor from file add and file edit commands', async () => {
+    const appendLine = vi.fn()
+    const openWorkspaceEditorFromCommand = vi.fn(() => Promise.resolve(true))
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      openWorkspaceEditorFromCommand,
+    })
+
+    await submitCommand('file add')
+    await vi.waitFor(() => expect(openWorkspaceEditorFromCommand).toHaveBeenCalledWith('add', ''))
+    await submitCommand('file add targets.txt')
+    await vi.waitFor(() => expect(openWorkspaceEditorFromCommand).toHaveBeenCalledWith('add', 'targets.txt'))
+    await submitCommand('file edit response.html')
+
+    expect(openWorkspaceEditorFromCommand).toHaveBeenCalledWith('add', 'targets.txt')
+    await vi.waitFor(() => expect(openWorkspaceEditorFromCommand).toHaveBeenCalledWith('edit', 'response.html'))
+    expect(appendLine).toHaveBeenCalledWith('file: opened in the file editor', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('file: opened targets.txt in the file editor', '', 'tab-1')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('file: opened response.html in the file editor', '', 'tab-1'))
+    expect(status.className).toBe('status-pill ok')
+  })
+
+  it('keeps file edit usage strict when no filename is provided', async () => {
+    const appendLine = vi.fn()
+    const openWorkspaceEditorFromCommand = vi.fn(() => Promise.resolve(true))
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      openWorkspaceEditorFromCommand,
+    })
+
+    await submitCommand('file edit')
+
+    expect(openWorkspaceEditorFromCommand).not.toHaveBeenCalled()
+    expect(appendLine).toHaveBeenCalledWith('Usage: file edit <file>', 'exit-fail', 'tab-1')
+    expect(status.className).toBe('status-pill fail')
+  })
+
+  it('downloads workspace files from file download commands', async () => {
+    const appendLine = vi.fn()
+    const downloadWorkspaceFile = vi.fn(() => Promise.resolve(true))
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      downloadWorkspaceFile,
+    })
+
+    await submitCommand('file download reports/output.json')
+
+    await vi.waitFor(() => expect(downloadWorkspaceFile).toHaveBeenCalledWith('reports/output.json'))
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('file: downloading reports/output.json', '', 'tab-1'))
+    expect(status.className).toBe('status-pill ok')
+  })
+
+  it('keeps file download usage strict when no filename is provided', async () => {
+    const appendLine = vi.fn()
+    const downloadWorkspaceFile = vi.fn(() => Promise.resolve(true))
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      downloadWorkspaceFile,
+    })
+
+    await submitCommand('file download')
+
+    expect(downloadWorkspaceFile).not.toHaveBeenCalled()
+    expect(appendLine).toHaveBeenCalledWith('Usage: file download <file>', 'exit-fail', 'tab-1')
+    expect(status.className).toBe('status-pill fail')
+  })
+})
+
 describe('session-token copy', () => {
   it('copies the active token to the clipboard from the terminal', async () => {
     const appendLine = vi.fn()
@@ -1844,7 +3095,7 @@ describe('session-token pipe helpers', () => {
 
     await submitCommand('session-token list | grep status')
     await vi.waitFor(() =>
-      expect(appendLine).toHaveBeenCalledWith('status          active', 'fake-kv', 'tab-1'),
+      expect(appendLine).toHaveBeenCalledWith('status          active', 'builtin-kv', 'tab-1'),
     )
 
     expect(appendLine).toHaveBeenCalledWith(
@@ -1892,7 +3143,7 @@ describe('session-token set pending prompt', () => {
     await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 1 run(s) in your current session. migrate history to this session token?',
+        'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
         '',
         'tab-1',
       ),
@@ -1906,7 +3157,7 @@ describe('session-token set pending prompt', () => {
     )
     expect(appendLine).toHaveBeenNthCalledWith(
       2,
-      'you have 1 run(s) in your current session. migrate history to this session token?',
+      'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
       '',
       'tab-1',
     )
@@ -1939,7 +3190,7 @@ describe('session-token set pending prompt', () => {
       '',
       'tab-1',
     )
-    expect(appendLine).toHaveBeenCalledWith('History migration skipped.', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('History, file, workflow, and recent-domain migration skipped.', '', 'tab-1')
     expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
   })
 
@@ -1967,7 +3218,7 @@ describe('session-token set pending prompt', () => {
     await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 1 run(s) in your current session. migrate history to this session token?',
+        'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
         '',
         'tab-1',
       ),
@@ -2011,7 +3262,7 @@ describe('session-token set pending prompt', () => {
     await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 1 run(s) in your current session. migrate history to this session token?',
+        'you have 1 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
         '',
         'tab-1',
       ),
@@ -2049,11 +3300,118 @@ describe('session-token set pending prompt', () => {
 
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'you have 73 run(s) in your current session. migrate history to this session token?',
+        'you have 73 run(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
         '',
         'tab-1',
       ),
     )
+  })
+
+  it('prompts for migration when the current session only has workspace files', async () => {
+    const appendLine = vi.fn()
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      localStorageEntries: { session_id: 'uuid-base-session' },
+      apiFetch: vi.fn((url) => {
+        if (url === '/session/token/verify') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ exists: true }) })
+        }
+        if (url === '/session/run-count') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ count: 0, workspace_files: 2 }) })
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+      }),
+    })
+
+    await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
+
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith(
+        'you have 2 workspace file(s) in your current session. migrate history, files, workflows, and recent domains to this session token?',
+        '',
+        'tab-1',
+      ),
+    )
+  })
+})
+
+describe('session-token revoke confirmation', () => {
+  it('requires yes before revoking a session token', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/session/token/revoke') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      apiFetch,
+    })
+
+    await submitCommand('session-token revoke tok_abcd1234efgh5678ijkl9012mnop3456')
+
+    expect(appendLine).toHaveBeenCalledWith('revoke session token tok_abcd••••?', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith(
+      "warning: this token's history and workspace files will not be recoverable from the app after revocation.",
+      'warning',
+      'tab-1',
+    )
+    expect(apiFetch).not.toHaveBeenCalledWith(
+      '/session/token/revoke',
+      expect.anything(),
+    )
+
+    await submitCommand('yes')
+
+    await vi.waitFor(() =>
+      expect(apiFetch).toHaveBeenCalledWith(
+        '/session/token/revoke',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ token: 'tok_abcd1234efgh5678ijkl9012mnop3456' }),
+        }),
+      ),
+    )
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith('session token revoked: tok_abcd••••', '', 'tab-1'),
+    )
+  })
+
+  it('cancels session-token revoke on no without calling the API', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) }))
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      apiFetch,
+    })
+
+    await submitCommand('session-token revoke tok_abcd1234efgh5678ijkl9012mnop3456')
+    await submitCommand('no')
+
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(appendLine).toHaveBeenCalledWith('Session token revoke canceled.', '', 'tab-1')
+  })
+
+  it('treats Ctrl+C as cancel for session-token revoke', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) }))
+    const { submitCommand, cancelPendingTerminalConfirm } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      apiFetch,
+    })
+
+    await submitCommand('session-token revoke tok_abcd1234efgh5678ijkl9012mnop3456')
+
+    expect(cancelPendingTerminalConfirm()).toBe(true)
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith('Session token revoke canceled.', '', 'tab-1'),
+    )
+    expect(apiFetch).not.toHaveBeenCalled()
   })
 })
 

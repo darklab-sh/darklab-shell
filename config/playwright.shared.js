@@ -8,6 +8,10 @@ const rootDir = resolve(configDir, '..')
 export const __dirname = rootDir
 export const testDir = resolve(rootDir, 'tests/js/e2e')
 const showWebServerLogs = !!process.env.PW_WEBSERVER_LOGS
+const webServerTimeout = Math.max(
+  5_000,
+  Number.parseInt(process.env.PLAYWRIGHT_WEB_SERVER_TIMEOUT || '30000', 10) || 30_000,
+)
 
 export function buildIsolatedWebServer(port, slot) {
   return {
@@ -18,6 +22,6 @@ export function buildIsolatedWebServer(port, slot) {
     gracefulShutdown: { signal: 'SIGTERM', timeout: 5_000 },
     stdout: showWebServerLogs ? 'pipe' : 'ignore',
     stderr: showWebServerLogs ? 'pipe' : 'ignore',
-    timeout: 30_000,
+    timeout: webServerTimeout,
   }
 }

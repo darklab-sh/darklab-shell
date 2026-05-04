@@ -8,6 +8,7 @@ Run with: pytest tests/ (from the repo root)
 
 import unittest.mock as mock
 
+import commands
 from commands import (
     command_root,
     is_command_allowed,
@@ -21,15 +22,33 @@ from commands import (
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-ALLOW = ["ping", "nmap", "dig", "curl", "mtr", "traceroute", "nuclei", "wapiti"]
+ALLOW = ["ping", "nmap", "dig", "curl", "mtr", "traceroute", "nuclei"]
 DENY  = []
+_VALIDATION_REGISTRY_HELPERS = None
+
+
+def _validation_registry_helpers():
+    global _VALIDATION_REGISTRY_HELPERS
+    if _VALIDATION_REGISTRY_HELPERS is None:
+        registry = commands.load_commands_registry()
+        with mock.patch("commands.load_commands_registry", return_value=registry):
+            _VALIDATION_REGISTRY_HELPERS = {
+                "allow_grouping": commands.load_allow_grouping_flags(),
+                "workspace_flags": commands._workspace_flag_specs_by_root(),
+                "runtime_adaptations": commands._runtime_adaptations_by_root(),
+            }
+    return _VALIDATION_REGISTRY_HELPERS
 
 
 def _check(cmd, allow=None, deny=None):
     """Call is_command_allowed with a mocked allowlist."""
     a = allow if allow is not None else ALLOW
     d = deny  if deny  is not None else DENY
-    with mock.patch("commands.load_allowed_commands", return_value=(a, d)):
+    helpers = _validation_registry_helpers()
+    with mock.patch("commands.load_command_policy", return_value=(a, d)), \
+         mock.patch("commands.load_allow_grouping_flags", return_value=helpers["allow_grouping"]), \
+         mock.patch("commands._workspace_flag_specs_by_root", return_value=helpers["workspace_flags"]), \
+         mock.patch("commands._runtime_adaptations_by_root", return_value=helpers["runtime_adaptations"]):
         return is_command_allowed(cmd)
 
 
@@ -168,7 +187,7 @@ class TestAllowlist:
         assert not ok
 
     def test_unrestricted_when_no_file(self):
-        with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
+        with mock.patch("commands.load_command_policy", return_value=(None, [])):
             ok, _ = is_command_allowed("anything goes")
         assert ok
 
@@ -350,6 +369,9 @@ class TestDenyPrefix:
     def test_deny_takes_priority(self):
         ok, _ = _check("nmap -sU 10.0.0.1", allow=["nmap"], deny=["nmap -sU"])
         assert not ok
+        raw_ok, raw_reason = _check("nmap -sSV 10.0.0.1", allow=["nmap"], deny=[])
+        assert not raw_ok
+        assert "-sS" in raw_reason
 
     def test_allow_still_works_without_denied_flag(self):
         ok, _ = _check("nmap -sT 10.0.0.1", allow=["nmap"], deny=["nmap -sU"])
@@ -471,14 +493,15 @@ class TestRewrites:
         assert "--report-wide" not in cmd
         assert notice is None
 
-    def test_nmap_adds_privileged(self):
+    def test_nmap_adds_connect_scan(self):
         cmd, notice = rewrite_command("nmap -sV 10.0.0.1")
-        assert "--privileged" in cmd
+        assert "-sT" in cmd
+        assert "--privileged" not in cmd
         assert notice is None  # silent rewrite
 
-    def test_nmap_no_double_privileged(self):
-        cmd, _ = rewrite_command("nmap --privileged -sV 10.0.0.1")
-        assert cmd.count("--privileged") == 1
+    def test_nmap_no_double_connect_scan(self):
+        cmd, _ = rewrite_command("nmap -sT -sV 10.0.0.1")
+        assert cmd.count("-sT") == 1
 
     def test_nuclei_adds_template_dir(self):
         cmd, notice = rewrite_command("nuclei -u https://darklab.sh")
@@ -488,17 +511,6 @@ class TestRewrites:
     def test_nuclei_no_rewrite_if_ud_present(self):
         cmd, _ = rewrite_command("nuclei -ud /tmp/my-templates -u https://darklab.sh")
         assert cmd.count("-ud") == 1
-
-    def test_wapiti_adds_stdout_redirect(self):
-        cmd, notice = rewrite_command("wapiti http://darklab.sh")
-        assert "-f txt" in cmd
-        assert "/dev/stdout" in cmd
-        assert notice is not None
-
-    def test_wapiti_no_rewrite_if_output_set(self):
-        cmd, notice = rewrite_command("wapiti http://darklab.sh -o /tmp/report.txt")
-        assert "/dev/stdout" not in cmd
-        assert notice is None
 
     def test_no_rewrite_for_other_commands(self):
         cmd, notice = rewrite_command("dig google.com")
@@ -527,6 +539,13 @@ class TestRuntimeCommandHelpers:
     def test_runtime_missing_command_name_returns_root_when_missing(self):
         with mock.patch("commands.resolve_runtime_command", return_value=None):
             assert runtime_missing_command_name("nmap -sV darklab.sh") == "nmap"
+
+    def test_runtime_missing_command_name_skips_env_assignments(self):
+        def fake_resolve(name):
+            return "/usr/bin/env" if name == "env" else None
+
+        with mock.patch("commands.resolve_runtime_command", side_effect=fake_resolve):
+            assert runtime_missing_command_name("env XDG_CONFIG_HOME=/tmp nmap -sV darklab.sh") == "nmap"
 
     def test_runtime_missing_command_message_is_stable(self):
         assert runtime_missing_command_message("nmap") == "Command is not installed on this instance: nmap"

@@ -1,8 +1,8 @@
 # Contributor Guide
 
-This document is for developers and contributors working on darklab_shell locally: development setup, test workflow, lint and security checks, and the expected Git/GitLab merge request flow.
+This guide is for developers and contributors working on darklab_shell locally. It covers setup, tests, lint/security checks, and the expected Git/GitLab merge request flow.
 
-For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite inventory and focused test commands, use [tests/README.md](tests/README.md). For documentation structure and canonical writing templates, use [DOCS_STANDARDS.md](DOCS_STANDARDS.md).
+For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite inventory and focused test commands, use [tests/README.md](tests/README.md). For doc structure and preferred writing templates, use [DOCS_STANDARDS.md](DOCS_STANDARDS.md).
 
 ---
 
@@ -10,6 +10,7 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
 
 - [Local Setup](#local-setup)
 - [Branch Workflow](#branch-workflow)
+- [Release Branch Merge Checklist](#release-branch-merge-checklist)
 - [Code Style](#code-style)
 - [Running Tests](#running-tests)
 - [Linting and Security Scanning](#linting-and-security-scanning)
@@ -23,11 +24,29 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
 
 1. Install the base tools:
    - `python3`
-   - `pip3`
-   - Node.js `22` (the repo pins this in [`.nvmrc`](.nvmrc))
-   - `npm`
-   - `shellcheck`, `hadolint`, `yamllint` (via Homebrew on macOS: `brew install shellcheck hadolint yamllint`)
-   - CSS linting uses the npm-managed `stylelint` dependency; no separate system package is needed
+   - `npm` (Node.js 24 LTS or newer is recommended.)
+
+   Platform-specific lint tools:
+
+   macOS:
+
+   ```bash
+   brew install shellcheck hadolint
+   ```
+
+   Linux:
+
+   ```bash
+   # Shell script linting
+   sudo apt-get update
+   sudo apt-get install -y shellcheck
+
+   # Dockerfile linting
+   curl -fsSL -o /tmp/hadolint \
+     https://github.com/hadolint/hadolint/releases/latest/download/hadolint-Linux-x86_64
+   chmod +x /tmp/hadolint
+   sudo mv /tmp/hadolint /usr/local/bin/hadolint
+   ```
 
 2. Create and activate a local virtual environment from the repo root:
 
@@ -47,6 +66,8 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
 
    ```bash
    npm install
+   npx playwright install-deps
+   npx playwright install
    ```
 
 5. Activate the pre-commit hook:
@@ -55,12 +76,12 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
    git config core.hooksPath scripts/hooks
    ```
 
-Use the virtual environment for all local Python work:
+Keep the virtual environment installed for all local Python work. The npm pytest
+scripts pick `.venv/bin/pytest` automatically when it exists, while direct app,
+lint, and debugging commands should still run from the virtualenv:
 
 - app runs
-- `pytest`
-- `flake8`
-- `bandit`
+- `npm run lint` which runs flake8
 - ad hoc backend debugging
 
 ### VS Code Setup
@@ -106,9 +127,30 @@ Recommended branch naming:
 - `docs/contributor-guide`
 - `test/playwright-parallel-balance`
 
-Keep branches focused. If the work changes product behavior, tests, and docs, include all three in the same branch only when they are part of one coherent change.
+Keep branches focused. If the work changes product behavior, tests, and docs, include all three in the same branch only when they are part of one clear change.
 
 Commit messages should describe the intent of the change, not just what files were touched. Lead with the affected area when it helps narrow scope — for example, `fix(mobile): restore scroll position on tab switch` or `feat(autocomplete): add positional hints for nmap`. Keep the subject line under 72 characters.
+
+Release branches may carry temporary merge-request and release-note drafts under `docs/release-drafts/`. Keep those drafts updated with user-facing features, fixes, risks, and validation as the branch changes so release bookkeeping is visible in normal review. Remove the draft directory before merging back to `main` unless the project intentionally wants to keep that release's draft files.
+
+---
+
+## Release Branch Merge Checklist
+
+Before merging a version branch back to `main`:
+
+- Confirm the branch is current with the target `main` branch, or intentionally document why it is not.
+- Ensure the new version is updated in [app/config.py](app/config.py) and [package.json](package.json).
+- Ensure the PROJECT_README variable in [app/config.py](app/config.py) is accurate and not branch-specific.
+- If the version bump changes tracked browser dependencies, regenerate and verify committed vendor assets with `npm run vendor:sync` and `npm run vendor:check`.
+- Ensure the matching [CHANGELOG.md](CHANGELOG.md) version section is marked released with the release date instead of `Unreleased`.
+- Ensure `docs/release-drafts/` draft files are removed from git unless the project intentionally keeps that release's draft artifacts.
+- Ensure all project docs are up to date with the released version section from [CHANGELOG.md](CHANGELOG.md), including README, FEATURES, ARCHITECTURE, CONTRIBUTING, tests docs, external-command notes, and any decision docs touched by the release.
+- Ensure generated screenshots, demo media, smoke fixtures, vendor files, and docs inventories are refreshed when the release changed those surfaces.
+- Ensure all test suites, linting, and audit tools are passing locally, or document the exact narrower validation used and why it is sufficient.
+- Run container smoke validation when the release changes packaged tools, Dockerfile/base images, command examples, workspace file handling, or workflow command steps.
+- Ensure GitLab CI jobs are passing, including test, lint, audit, and build stages.
+- Review the final diff for temporary debug code, local-only config, stale TODO completions, unchecked review docs, and files that should not merge to `main`.
 
 ---
 
@@ -118,9 +160,9 @@ Commit messages should describe the intent of the change, not just what files we
 
 **JavaScript** — the frontend has no transpiler or bundler. Keep the classic-script pattern: no ES modules, no framework dependencies. New logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the composition root that loads last. Match the existing style of the file you are editing. ESLint enforces 2-space indentation, single quotes, and no semicolons for config and test files ([`config/eslint.config.js`](config/eslint.config.js)).
 
-**General** — avoid speculative abstractions. Add helpers only when a pattern recurs across at least two real call sites. Prefer editing the relevant existing file over creating new ones.
+**General** — avoid speculative abstractions. Add helpers only when a pattern shows up in at least two real call sites. Prefer editing the relevant existing file over creating new ones.
 
-**Frontend UI rules** — cross-cutting UI rules (button primitive family, disclosure glyph mapping, semantic color contract, confirmation dialog contract) live in [ARCHITECTURE.md § Frontend Design System](ARCHITECTURE.md#frontend-design-system). New pressable surfaces, modals, disclosures, and color decisions must follow those rules or add an explicit exception to the relevant contract test.
+**Frontend UI rules** — shared UI rules (button primitive family, disclosure glyph mapping, semantic color contract, confirmation dialog contract) live in [ARCHITECTURE.md § Frontend Design System](ARCHITECTURE.md#frontend-design-system). New buttons, modals, disclosures, and color decisions must follow those rules or add an explicit exception to the relevant contract test.
 
 ---
 
@@ -129,16 +171,17 @@ Commit messages should describe the intent of the change, not just what files we
 Run the three suites directly:
 
 ```bash
-python3 -m pytest tests/py/ -v
+npm run test:pytest
 npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **887 pytest + 753 Vitest + 200 Playwright = 1,840 tests**.
+Current totals: **1182 pytest + 970 Vitest + 236 Playwright = 2,388 tests**.
+That total includes 2,356 behavior tests plus 30 docs/inventory meta-tests.
 
 Playwright notes:
 
-- `npm run test:e2e` uses the parallel config and currently balances the browser suite across 5 isolated Chromium projects
+- `npm run test:e2e` delegates to `bash scripts/run_playwright.sh`, which keeps local Playwright output quiet by default, clears the configured e2e ports, captures isolated server logs under `test-results/e2e-server-logs/`, and currently balances the browser suite across 5 isolated Chromium projects. On failure it prints the server log tails automatically. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
 - plain `npx playwright test` uses the default single-project config, which is the intended path for VS Code Test Explorer and focused local debugging
 - the parallel projects each get their own Flask server port and isolated local app state so history, run-output artifacts, and limiter/process state do not collide between workers
 
@@ -164,7 +207,7 @@ The checks and their scope:
 |---|---|---|---|
 | Python style | `flake8` | `app/`, `tests/py/` | `python -m flake8 app/ tests/py/` |
 | Python security | `bandit` | `app/` | `python -m bandit -r app/ -ll -q` |
-| Python tests | `pytest` | `tests/py/` | `npm run test:unit` |
+| Python tests | `pytest` | `tests/py/` | `npm run test:pytest` |
 | Python dep CVEs | `pip-audit` | `app/requirements.txt`, `requirements-dev.txt` | `python -m pip_audit -r app/requirements.txt -r requirements-dev.txt` |
 | JS unit tests | `vitest` | `tests/js/unit/` | `npm run test:unit` |
 | JS style | `eslint` | `tests/js/`, `config/`, `scripts/` | `npm run lint:js` |
@@ -269,7 +312,7 @@ When choosing the test layer:
 - use `Vitest` for browser-module logic that can be covered in jsdom
 - use `Playwright` for real browser behavior such as focus, mobile layout, drag/drop, scrolling, and end-to-end flows
 
-After a Dockerfile or packaged-tool change, run the container smoke test before merging. It builds the container, runs every command from `app/conf/autocomplete.yaml` examples, and compares output against the stored expectations:
+After a Dockerfile, packaged-tool, or workspace file-flag change, run the container smoke test before merging. It builds the container, runs every command from the shared smoke corpus (`app/conf/commands.yaml` examples plus workflow steps), compares output against the stored expectations, and verifies selected workspace read/write flags through the Files API:
 
 ```bash
 ./scripts/container_smoke_test.sh

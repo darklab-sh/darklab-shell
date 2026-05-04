@@ -3,8 +3,8 @@
 # Changes to this file take effect after a container restart (docker compose restart).
 # No rebuild is needed.
 # Optional: add sibling *.local.* files for untracked server-specific overrides.
-# Examples: app/conf/config.local.yaml, app/conf/allowed_commands.local.txt,
-# app/conf/ascii.local.txt, app/conf/autocomplete_context.local.yaml,
+# Examples: app/conf/config.local.yaml, app/conf/commands.local.yaml,
+# app/conf/ascii.local.txt,
 # app/conf/app_hints.local.txt, app/conf/faq.local.yaml,
 # app/conf/welcome.local.yaml, app/conf/themes/<name>.local.yaml.
 # If present, each local overlay is applied after its checked-in base file.
@@ -17,9 +17,12 @@
 # Server default if unset: "darklab_shell"
 # app_name: "darklab_shell"
 
-# Prompt prefix shown at the start of the terminal prompt and welcome samples.
-# Server default if unset: "anon@darklab:~$"
-# prompt_prefix: "anon@darklab:~$"
+# Prompt identity shown at the start of the terminal prompt and welcome samples.
+# The UI renders "<username>@<domain>:~ $" when workspaces are disabled and
+# "<username>@<domain>:<workspace path> $" when workspaces are enabled.
+# Server defaults if unset: "anon" and "darklab.sh"
+# prompt_username: "anon"
+# prompt_domain: "darklab.sh"
 
 # Optional message shown at the top of the terminal on page load.
 # Leave empty to disable.
@@ -44,8 +47,15 @@
 # Server default if unset: 50
 # recent_commands_limit: 50
 
-# Enable the built-in basic redaction model for snapshot permalinks and local
-# export actions (`save txt` / `save html`). When enabled, the app applies a
+# Directory used for SQLite history and compressed full-output artifacts.
+# Leave unset for auto-detect: use /data when it is writable, otherwise fall
+# back to /tmp for local/dev runs. If set explicitly, startup requires the
+# directory to be writable.
+# Server default if unset: auto (/data if writable, otherwise /tmp)
+# data_dir: /data
+
+# Enable the built-in basic redaction model for snapshot sharing. When enabled,
+# the app applies a
 # conservative built-in baseline before any operator-defined rules:
 #   - bearer tokens / Authorization: Bearer ...
 #   - email addresses
@@ -53,11 +63,12 @@
 #   - IPv6 addresses
 #   - hostnames / dotted domains
 # The app then appends any operator-defined rules from `share_redaction_rules`.
-# Normal run history remains unchanged in this first version.
+# Normal run history, history permalinks, and local `save txt` / `save html` /
+# `save pdf` exports remain raw.
 # Server default if unset: true
 # share_redaction_enabled: true
 #
-# Optional operator-defined regex rules appended after the built-in share/export
+# Optional operator-defined regex rules appended after the built-in snapshot-share
 # redaction rules.
 # Each rule supports:
 #   label:       optional human-readable name
@@ -78,6 +89,48 @@
 # deleted from the database on startup. Set to 0 for unlimited retention.
 # Server default if unset: 365
 # permalink_retention_days: 365
+
+# ── Per-session Workspace Storage ────────────────────────────────────────────
+#
+# Optional app-mediated file storage for file-enabled commands and UI.
+# helpers. This does not enable shell navigation or redirection by itself.
+# Server default if unset: false
+# workspace_enabled: false
+#
+# Storage backend label. `tmpfs` is intended for short-lived in-memory storage;
+# `volume` is intended for a Docker-mounted bind mount or named volume.
+# The backend value documents operator intent; `workspace_root` controls the
+# actual filesystem location and does not create a Docker mount by itself.
+# Server default if unset: tmpfs
+# workspace_backend: tmpfs
+#
+# Root directory that will contain hashed per-session workspace directories.
+# Never point this at the app source tree, SQLite data directory, or host root.
+# Session directories are created sticky + setgid, and files are group-readable
+# for the app/scanner shared group without being world-readable.
+# The Docker entrypoint normalizes WORKSPACE_ROOT ownership and permissions
+# before dropping to appuser. If you change this value, also update the matching
+# WORKSPACE_ROOT environment variable in docker-compose.yml, a Compose override,
+# or .env. .env is optional; it only supplies values consumed by Compose.
+# Server default if unset: /tmp/darklab_shell-workspaces
+# workspace_root: /tmp/darklab_shell-workspaces
+#
+# Per-session byte quota expressed in megabytes.
+# Server default if unset: 50
+# workspace_quota_mb: 50
+#
+# Maximum size for a single app-mediated text file in megabytes.
+# Server default if unset: 5
+# workspace_max_file_mb: 5
+#
+# Maximum number of files in one session workspace.
+# Server default if unset: 100
+# workspace_max_files: 100
+#
+# Remove inactive session workspaces after this many hours. Set to 0 to disable
+# age-based cleanup, though quotas still apply.
+# Server default if unset: 1
+# workspace_inactivity_ttl_hours: 1
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -131,18 +184,36 @@
 # diagnostics_allowed_cidrs:
 #   - 172.16.0.0/12
 
+# ── Restricted Command Inputs ────────────────────────────────────────────────
+
+# IPs or CIDR ranges that should be rejected when supplied as command targets.
+# This applies only to command slots explicitly marked with host/domain/IP/CIDR
+# value metadata in commands.yaml, including inspectable workspace input files
+# passed through declared read flags. Domain names are not DNS-resolved here;
+# this policy blocks literal IP/CIDR values and literal IPs embedded in URLs or
+# host:port values.
+#
+# Typical values:
+#   169.254.169.254/32 — cloud metadata service
+#   127.0.0.0/8        — IPv4 loopback range
+#   ::1/128            — IPv6 loopback address
+#
+# Server default if unset: [] (disabled)
+# restricted_command_input_cidrs:
+#   - 169.254.169.254/32
+
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 
-# Whether the /run rate limiter is active at all. Set to false for test-only or
+# Whether the /runs rate limiter is active at all. Set to false for test-only or
 # maintenance overlays where you want the app to accept runs without throttling.
 # Server default if unset: true
 # rate_limit_enabled: true
 
-# Maximum number of /run requests per minute per IP
+# Maximum number of /runs requests per minute per IP
 # Server default if unset: 30
 # rate_limit_per_minute: 30
 
-# Maximum number of /run requests per second per IP
+# Maximum number of /runs requests per second per IP
 # Server default if unset: 5
 # rate_limit_per_second: 5
 
@@ -181,6 +252,47 @@
 # to prevent nginx and the browser from dropping the connection.
 # Server default if unset: 20
 # heartbeat_interval_seconds: 20
+
+# ── Run Broker ────────────────────────────────────────────────────────────────
+
+# Enable the Redis-backed run broker that lets command output be replayed and
+# reattached independently of the HTTP request that started the command.
+# Server default if unset: true
+# run_broker_enabled: true
+
+# Require Redis when the run broker is enabled. Production Docker deployments
+# should keep this enabled; local single-process development can set this to
+# false for a limited in-memory fallback.
+# Server default if unset: true
+# run_broker_require_redis: true
+
+# Safety TTL for active broker streams, refreshed while the run is active.
+# Server default if unset: 14400
+# run_broker_active_stream_ttl_seconds: 14400
+
+# TTL for completed broker streams after history finalization. Completed run
+# restore falls back to SQLite/history artifacts after this window.
+# Server default if unset: 3600
+# run_broker_completed_stream_ttl_seconds: 3600
+
+# Maximum replay payload retained per run stream, in bytes. Line replay is also
+# bounded by max_output_lines; there is no separate run_broker_max_replay_lines.
+# Server default if unset: 10485760
+# run_broker_max_replay_bytes: 10485760
+
+# How long stream subscribers block waiting for new events before the server
+# emits a heartbeat and checks again.
+# Server default if unset: 15
+# run_broker_subscriber_block_seconds: 15
+
+# How often broker workers emit heartbeat events while a process is idle.
+# Server default if unset: 20
+# run_broker_heartbeat_seconds: 20
+
+# How long an origin browser can go without touching a run before that origin
+# is considered stale and another browser can reconnect/restore it.
+# Server default if unset: 75
+# run_broker_owner_stale_seconds: 75
 
 # ── Welcome Animation ─────────────────────────────────────────────────────────
 

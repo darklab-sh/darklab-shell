@@ -1,7 +1,5 @@
 // ── Desktop UI module ──
 let _tabsScrollControlsBound = false;
-let _draggedTabId = null;
-let _dragMoved = false;
 let _tabDragSuppressClickUntil = 0;
 let _touchDragState = null;
 let _tabSeq = 0;
@@ -9,6 +7,7 @@ const _TOUCH_TAB_DRAG_THRESHOLD = 14;
 const _TOUCH_TAB_DRAG_HOLD_MS = 180;
 const _POINTER_TAB_DRAG_THRESHOLD = 6;
 const _RUNNING_LABEL_DELAY_MS = 500;
+const _OUTPUT_USER_SCROLL_GRACE_MS = 800;
 
 function _syncTabDraggable(tab) {
   if (!tab) return;
@@ -31,9 +30,18 @@ function _getTabLabelEl(id) {
   return _getTabEl(id)?.querySelector('.tab-label') || null;
 }
 
+function _nextDefaultTabNumber() {
+  const numbers = (Array.isArray(tabs) ? tabs : [])
+    .map(tab => String(tab && tab.label || '').trim().match(/^shell\s+(\d+)$/i))
+    .filter(Boolean)
+    .map(match => Number(match[1]))
+    .filter(Number.isFinite);
+  return numbers.length ? Math.max(...numbers) + 1 : 1;
+}
+
 function createDefaultTabLabel(index = null) {
   const explicitIndex = index !== null && index !== undefined && index !== '';
-  const next = explicitIndex && Number.isFinite(Number(index)) ? Number(index) : tabs.length + 1;
+  const next = explicitIndex && Number.isFinite(Number(index)) ? Number(index) : _nextDefaultTabNumber();
   return `shell ${Math.max(1, next)}`;
 }
 
@@ -64,6 +72,12 @@ function _getTabOutputEl(id) {
   return _getTabPanelEl(id)?.querySelector('.output') || null;
 }
 
+function _markOutputUserScrollIntent(id) {
+  const tab = getTab(id);
+  if (!tab) return;
+  tab.outputUserScrollUntil = Date.now() + _OUTPUT_USER_SCROLL_GRACE_MS;
+}
+
 
 function _clearTabDropIndicators() {
   if (!tabsBar) return;
@@ -88,10 +102,18 @@ function updateTabScrollButtons() {
   if (!leftBtn || !rightBtn || !tabsBar) return;
   const maxScroll = Math.max(0, tabsBar.scrollWidth - tabsBar.clientWidth);
   if (maxScroll <= 1) {
+    leftBtn.classList.add('u-hidden');
+    rightBtn.classList.add('u-hidden');
+    leftBtn.setAttribute('aria-hidden', 'true');
+    rightBtn.setAttribute('aria-hidden', 'true');
     leftBtn.disabled = true;
     rightBtn.disabled = true;
     return;
   }
+  leftBtn.classList.remove('u-hidden');
+  rightBtn.classList.remove('u-hidden');
+  leftBtn.setAttribute('aria-hidden', 'false');
+  rightBtn.setAttribute('aria-hidden', 'false');
   leftBtn.disabled = tabsBar.scrollLeft <= 1;
   rightBtn.disabled = tabsBar.scrollLeft >= (maxScroll - 1);
 }
@@ -367,6 +389,7 @@ function bindTabDragReorder(tab, id) {
 function unmountShellPrompt() {
   if (typeof shellPromptWrap === 'undefined' || !shellPromptWrap) return;
   const prevParent = shellPromptWrap.parentElement;
+  shellPromptWrap.classList.add('u-hidden');
   if (shellPromptWrap.parentElement) shellPromptWrap.remove();
   if (prevParent && prevParent.classList && prevParent.classList.contains('output') && typeof syncOutputPrefixes === 'function') {
     syncOutputPrefixes(prevParent);
@@ -378,6 +401,10 @@ function mountShellPrompt(tabId, force = false) {
   // prompt state continuous when switching tabs instead of cloning inputs.
   if (typeof shellPromptWrap === 'undefined' || !shellPromptWrap) return;
   const mobileMode = !!(document.body && document.body.classList.contains('mobile-terminal-mode'));
+  if (!force && typeof _tabSessionRestoreInProgress !== 'undefined' && _tabSessionRestoreInProgress) {
+    unmountShellPrompt();
+    return;
+  }
   if (!force && !mobileMode && _welcomeBootPending) {
     unmountShellPrompt();
     return;
@@ -408,6 +435,7 @@ function mountShellPrompt(tabId, force = false) {
   if (prevParent !== out) {
     out.appendChild(shellPromptWrap);
   }
+  shellPromptWrap.classList.remove('u-hidden');
   out.scrollTop = out.scrollHeight;
   if (prevParent && prevParent.classList && prevParent.classList.contains('output') && typeof syncOutputPrefixes === 'function') {
     syncOutputPrefixes(prevParent);
@@ -553,10 +581,11 @@ function _createTabPanel(id) {
   saveBtn.dataset.tab = id;
   saveBtn.textContent = 'save';
   const saveMenu = document.createElement('div');
-  saveMenu.className = 'save-menu';
+  saveMenu.className = 'save-menu dropdown-surface dropdown-up';
   [['save-txt', 'Plain text (.txt)'], ['save-html', 'Styled HTML (.html)'], ['save-pdf', 'PDF document (.pdf)']].forEach(([action, label]) => {
     const item = document.createElement('button');
     item.type = 'button';
+    item.className = 'dropdown-item dropdown-item-compact';
     item.dataset.action = action;
     item.dataset.tab = id;
     item.textContent = label;
@@ -622,10 +651,23 @@ function createTab(label) {
 
   const { panel, output: outputEl, terminalBody } = _createTabPanel(id);
   if (outputEl) {
+    const markUserScrollIntent = () => _markOutputUserScrollIntent(id);
+    outputEl.addEventListener('wheel', markUserScrollIntent, { passive: true });
+    outputEl.addEventListener('touchmove', markUserScrollIntent, { passive: true });
+    outputEl.addEventListener('pointermove', e => {
+      if (e.pointerType === 'touch' || e.pointerType === 'pen') markUserScrollIntent();
+    }, { passive: true });
     outputEl.addEventListener('scroll', () => {
       const t = getTab(id);
       if (!t || t.suppressOutputScrollTracking) return;
-      t.followOutput = _isOutputAtTail(outputEl);
+      const atTail = _isOutputAtTail(outputEl);
+      const userScrolling = Date.now() <= Number(t.outputUserScrollUntil || 0);
+      if (!userScrolling && t.st === 'running' && t.followOutput !== false) {
+        if (atTail) t.followOutput = true;
+        updateOutputFollowButton(id);
+        return;
+      }
+      t.followOutput = atTail;
       updateOutputFollowButton(id);
     }, { passive: true });
   }
@@ -679,6 +721,8 @@ function createTab(label) {
     command: '',
     runId: null,
     historyRunId: null,
+    lastEventId: '',
+    attachMode: '',
     reconnectedRun: false,
     runStart: null,
     currentRunStartIndex: null,
@@ -688,6 +732,7 @@ function createTab(label) {
     fullOutputAvailable: false,
     fullOutputLoaded: false,
     followOutput: true,
+    outputUserScrollUntil: 0,
     suppressOutputScrollTracking: false,
     deferPromptMount: false,
     closing: false,
@@ -695,7 +740,11 @@ function createTab(label) {
     pendingKill: false,
     st: 'idle',
     renamed: false,
+    workspaceCwd: '',
     draftInput: '',
+    commandHistory: [],
+    historyNavIndex: -1,
+    historyNavDraft: '',
   });
   updateOutputFollowButton(id);
   activateTab(id);
@@ -731,6 +780,14 @@ function activateTab(id, { focusComposer = true } = {}) {
   mountShellPrompt(id);
   const t = getTab(id);
   setStatus(t ? (t.st || 'idle') : 'idle');
+  if (t && t.followOutput !== false) {
+    const out = getOutput(id);
+    if (out && typeof _restoreOutputTailAfterLayout === 'function') {
+      _restoreOutputTailAfterLayout(out, t);
+    } else if (out && typeof _stickOutputToBottom === 'function') {
+      _stickOutputToBottom(out, t);
+    }
+  }
   ensureActiveTabVisible(id);
   updateTabScrollButtons();
   clearSearch();
@@ -738,7 +795,11 @@ function activateTab(id, { focusComposer = true } = {}) {
   // suggestions from the previous tab's typing session don't persist.
   if (typeof acHide === 'function') acHide();
   if (typeof acFiltered !== 'undefined') acFiltered = [];
-  const draft = (t && t.st !== 'running') ? (t.draftInput || '') : '';
+  let draft = (t && t.st !== 'running') ? (t.draftInput || '') : '';
+  if (!prevId && !draft && typeof getComposerValue === 'function') {
+    const liveDraft = getComposerValue();
+    if (liveDraft && liveDraft.trim()) draft = liveDraft;
+  }
   if (typeof setComposerValue === 'function') {
     setComposerValue(draft, draft.length, draft.length, { dispatch: false });
   }
@@ -746,11 +807,152 @@ function activateTab(id, { focusComposer = true } = {}) {
   if (typeof syncActiveRunTimer === 'function') syncActiveRunTimer(id);
   if (focusComposer) refocusComposerAfterAction({ preventScroll: true });
   if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
+  if (typeof _applyComposerPromptMode === 'function') _applyComposerPromptMode();
   updateOutputFollowButton(id);
+  if (typeof scheduleSearchDiscoverabilityRefresh === 'function') scheduleSearchDiscoverabilityRefresh();
+  else if (typeof refreshSearchDiscoverabilityUi === 'function') refreshSearchDiscoverabilityUi();
   if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
   if (typeof emitUiEvent === 'function') {
     emitUiEvent('app:tab-activated', { id, prevId, activeTabId });
   }
+}
+
+function _resetPreservedSingleTabState(tab) {
+  if (!tab) return;
+  tab.command = '';
+  tab.runId = null;
+  tab.historyRunId = null;
+  tab.lastEventId = '';
+  tab.attachMode = '';
+  tab.reconnectedRun = false;
+  tab.runStart = null;
+  tab.currentRunStartIndex = null;
+  tab.exitCode = null;
+  tab.previewTruncated = false;
+  tab.fullOutputAvailable = false;
+  tab.fullOutputLoaded = false;
+  tab.followOutput = true;
+  tab.outputUserScrollUntil = 0;
+  tab.suppressOutputScrollTracking = false;
+  tab.deferPromptMount = false;
+  tab.closing = false;
+  tab.killed = false;
+  tab.pendingKill = false;
+  tab.renamed = false;
+  tab.workspaceCwd = '';
+  tab.draftInput = '';
+  tab.commandHistory = [];
+  tab.historyNavIndex = -1;
+  tab.historyNavDraft = '';
+  tab._outputLineCounter = 0;
+  _clearTabRunningLabelTimer(tab);
+  tab.runningLabel = '';
+}
+
+function _activateNeighborAfterClose(idx, id) {
+  if (activeTabId !== id) return;
+  const nextId = _getNeighborTabIdAfterClose(Math.min(idx, tabs.length), id);
+  if (nextId) activateTab(nextId, { focusComposer: false });
+  if (typeof document !== 'undefined'
+    && document.body
+    && document.body.classList
+    && document.body.classList.contains('mobile-terminal-mode')
+    && typeof window !== 'undefined'
+    && typeof window.scrollTo === 'function') {
+    setTimeout(() => {
+      try {
+        window.scrollTo({ top: 0, behavior: 'auto' });
+      } catch (_) {
+        // jsdom does not implement scrollTo; browsers do.
+      }
+    }, 0);
+  }
+}
+
+function _removeClosedTabView(id, idx) {
+  tabs.splice(idx, 1);
+  _getTabEl(id)?.remove();
+  _getTabPanelEl(id)?.remove();
+  _activateNeighborAfterClose(idx, id);
+  updateNewTabBtn();
+  updateTabScrollButtons();
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:tab-closed', { id, activeTabId });
+  }
+}
+
+function detachRunningTabAndClose(id) {
+  const idx = tabs.findIndex(t => t.id === id);
+  if (idx < 0) return false;
+  const tab = tabs[idx];
+  if (!tab || tab.st !== 'running') return false;
+  if (typeof detachRunStreamForTab === 'function') detachRunStreamForTab(id);
+  tab.closing = false;
+  if (tabs.length === 1) {
+    _resetPreservedSingleTabState(tab);
+    clearTab(id);
+    setTabLabel(id, createDefaultTabLabel(1));
+    blurActiveElement();
+    if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+    if (typeof emitUiEvent === 'function') {
+      emitUiEvent('app:tab-detached', { id, activeTabId, preservedSingleTab: true });
+      emitUiEvent('app:tab-closed', { id, activeTabId, preservedSingleTab: true });
+    }
+    return true;
+  }
+  _removeClosedTabView(id, idx);
+  if (typeof emitUiEvent === 'function') emitUiEvent('app:tab-detached', { id, activeTabId });
+  return true;
+}
+
+function _deferRunningTabCloseForKill(id, idx) {
+  const closingTab = tabs[idx];
+  if (!closingTab || closingTab.st !== 'running') return false;
+  closingTab.closing = true;
+  if (typeof doKill === 'function') doKill(id);
+  if (activeTabId === id && tabs.length > 1) {
+    const nextId = _getNeighborTabIdAfterClose(idx, id);
+    if (nextId) activateTab(nextId, { focusComposer: false });
+  }
+  if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
+  updateNewTabBtn();
+  updateTabScrollButtons();
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:tab-closing-deferred', { id, activeTabId });
+  }
+  return true;
+}
+
+function confirmCloseRunningTab(id) {
+  const idx = tabs.findIndex(t => t.id === id);
+  const tab = tabs[idx];
+  if (!tab || tab.st !== 'running') return Promise.resolve(false);
+  const canDetach = !!(tab.runId || tab.historyRunId);
+  const kill = () => _deferRunningTabCloseForKill(id, idx);
+  if (typeof showConfirm !== 'function') {
+    return Promise.resolve(canDetach ? detachRunningTabAndClose(id) : kill());
+  }
+  const actions = [
+    ...(canDetach ? [{ id: 'detach', label: 'Keep running', role: 'primary' }] : []),
+    { id: 'kill', label: 'Kill run', role: 'destructive' },
+    { id: 'cancel', label: 'Cancel', role: 'cancel' },
+  ];
+  return showConfirm({
+    body: {
+      text: 'Close this running tab?',
+      note: canDetach
+        ? 'Keep running detaches this tab only. The command keeps running and can be reopened from Status Monitor.'
+        : 'The command is still starting, so it cannot be detached yet.',
+    },
+    tone: 'danger',
+    actions,
+  }).then(result => {
+    if (result === 'detach') return detachRunningTabAndClose(id);
+    if (result === 'kill') return kill();
+    return false;
+  });
 }
 
 function closeTab(id) {
@@ -766,35 +968,14 @@ function closeTab(id) {
     closingTab.deferPromptMount = false;
   }
   if (closingTab && closingTab.st === 'running') {
-    closingTab.closing = true;
-    if (typeof doKill === 'function') doKill(id);
-    if (activeTabId === id && tabs.length > 1) {
-      const nextId = _getNeighborTabIdAfterClose(idx, id);
-      if (nextId) activateTab(nextId, { focusComposer: false });
-    }
-    if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
-    updateNewTabBtn();
-    updateTabScrollButtons();
-    if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
-    if (typeof emitUiEvent === 'function') {
-      emitUiEvent('app:tab-closing-deferred', { id, activeTabId });
-    }
+    confirmCloseRunningTab(id);
     return;
   }
   if (tabs.length === 1) {
     // Last tab: reset to blank instead of closing
+    _resetPreservedSingleTabState(tabs[0]);
     clearTab(id);
     setTabLabel(id, createDefaultTabLabel(1));
-    const t = tabs[0];
-    t.runId = null;
-    t.runStart = null;
-    t.exitCode = null;
-    t.command = '';
-    _clearTabRunningLabelTimer(t);
-    t.runningLabel = '';
-    t.renamed = false;
-    t.killed = false;
-    t.pendingKill = false;
     if (typeof useMobileTerminalViewportMode === 'function'
       && useMobileTerminalViewportMode()
       && typeof blurVisibleComposerInputIfMobile === 'function') {
@@ -807,33 +988,7 @@ function closeTab(id) {
     }
     return;
   }
-  tabs.splice(idx, 1);
-  _getTabEl(id)?.remove();
-  _getTabPanelEl(id)?.remove();
-  if (activeTabId === id) {
-    const nextId = _getNeighborTabIdAfterClose(Math.min(idx, tabs.length), id);
-    if (nextId) activateTab(nextId, { focusComposer: false });
-    if (typeof document !== 'undefined'
-      && document.body
-      && document.body.classList
-      && document.body.classList.contains('mobile-terminal-mode')
-      && typeof window !== 'undefined'
-      && typeof window.scrollTo === 'function') {
-      setTimeout(() => {
-        try {
-          window.scrollTo({ top: 0, behavior: 'auto' });
-        } catch (_) {
-          // jsdom does not implement scrollTo; browsers do.
-        }
-      }, 0);
-    }
-  }
-  updateNewTabBtn();
-  updateTabScrollButtons();
-  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
-  if (typeof emitUiEvent === 'function') {
-    emitUiEvent('app:tab-closed', { id, activeTabId });
-  }
+  _removeClosedTabView(id, idx);
 }
 
 function setTabStatus(id, st) {
@@ -849,9 +1004,15 @@ function setTabStatus(id, st) {
   }
   _renderTabLabel(id);
   if (id === activeTabId) {
-    if (st === 'running') unmountShellPrompt();
-    else mountShellPrompt(id);
+    if (typeof _tabSessionRestoreInProgress !== 'undefined' && _tabSessionRestoreInProgress) {
+      unmountShellPrompt();
+    } else if (st === 'running') {
+      unmountShellPrompt();
+    } else {
+      mountShellPrompt(id);
+    }
     if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
+    if (typeof refreshSearchDiscoverabilityUi === 'function') refreshSearchDiscoverabilityUi();
   }
   updateOutputFollowButton(id);
   if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
@@ -897,14 +1058,19 @@ function getOutput(id) {
 function clearTab(id, { preserveRunState = false } = {}) {
   if (typeof _cancelPendingOutputBatch === 'function') _cancelPendingOutputBatch(id);
   const out = getOutput(id);
-  if (out) out.innerHTML = '';
+  if (out) {
+    out.innerHTML = '';
+    out.dataset.outputLineCounter = '0';
+  }
   const t = getTab(id);
   const wasRunning = !!(t && t.st === 'running');
   if (t) {
     t._outputFollowToken = (t._outputFollowToken || 0) + 1;
+    t._outputLineCounter = 0;
     t.suppressOutputScrollTracking = false;
     t.deferPromptMount = false;
     t.rawLines = [];
+    if (typeof _resetTabOutputSignalCounts === 'function') _resetTabOutputSignalCounts(t);
     t.followOutput = true;
     t.suppressOutputScrollTracking = false;
     t.deferPromptMount = false;
@@ -938,6 +1104,9 @@ function clearTab(id, { preserveRunState = false } = {}) {
     if (id === activeTabId) { setStatus('idle'); clearSearch(); }
   }
   updateOutputFollowButton(id);
+  if (id === activeTabId && typeof refreshSearchDiscoverabilityUi === 'function') {
+    refreshSearchDiscoverabilityUi();
+  }
   if (typeof document !== 'undefined'
     && document.body
     && document.body.classList
@@ -955,13 +1124,9 @@ function finalizeClosingTab(id) {
   if (!tab || !tab.closing) return false;
 
   if (tabs.length === 1) {
-    tab.closing = false;
+    _resetPreservedSingleTabState(tab);
     clearTab(id);
     setTabLabel(id, createDefaultTabLabel(1));
-    tab.command = '';
-    _clearTabRunningLabelTimer(tab);
-    tab.runningLabel = '';
-    tab.renamed = false;
     if (typeof document !== 'undefined'
       && document.body
       && document.body.classList
@@ -1059,7 +1224,10 @@ function saveTab(id) {
 // toggles so exports match what the user sees in the terminal.
 function _exportPrefix(line, zeroBasedIndex) {
   const parts = [];
-  if (typeof lnMode !== 'undefined' && lnMode === 'on') parts.push(String(zeroBasedIndex + 1));
+  if (typeof lnMode !== 'undefined' && lnMode === 'on') {
+    const absoluteLineNumber = Number(line && line.line_number || 0);
+    parts.push(String(absoluteLineNumber > 0 ? absoluteLineNumber : zeroBasedIndex + 1));
+  }
   if (typeof tsMode !== 'undefined') {
     if (tsMode === 'clock' && line.tsC) parts.push(line.tsC);
     else if (tsMode === 'elapsed' && line.tsE) parts.push(line.tsE);
@@ -1080,6 +1248,7 @@ function _normalizeTabTranscriptLine(line) {
       cls: String(line.cls || ''),
       tsC: String(line.tsC || ''),
       tsE: String(line.tsE || ''),
+      line_number: Number.isInteger(line.line_number) ? line.line_number : undefined,
     };
   }
   return null;

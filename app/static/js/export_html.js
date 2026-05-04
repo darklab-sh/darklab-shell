@@ -29,7 +29,6 @@
     '--theme-panel-border',
     '--theme-panel-shadow',
     '--theme-terminal-bar-bg',
-    '--theme-terminal-bar-border',
     '--terminal-font-size',
     '--terminal-line-height',
   ];
@@ -72,6 +71,7 @@
         cls: String(line.cls || ''),
         tsC: String(line.tsC || ''),
         tsE: String(line.tsE || ''),
+        line_number: Number.isInteger(line.line_number) ? line.line_number : undefined,
       };
     }
     return null;

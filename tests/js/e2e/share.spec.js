@@ -1,5 +1,11 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, openHistoryWithEntries, makeTestIp, createShareSnapshot } from './helpers.js'
+import {
+  runCommand,
+  openHistoryWithEntries,
+  makeTestIp,
+  createShareSnapshot,
+  ensurePromptReady,
+} from './helpers.js'
 
 const CMD = 'hostname'
 const MOBILE = { width: 375, height: 812 }
@@ -66,10 +72,10 @@ test.describe('permalink / share', () => {
 
     await page
       .context()
-      .addCookies([{ name: 'pref_theme_name', value: 'blue_paper', url: 'http://localhost:5001' }])
+      .addCookies([{ name: 'pref_theme_name', value: 'apricot_sand', url: 'http://localhost:5001' }])
     await page.goto(data.url)
 
-    await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
+    await expect(page.locator('body')).toHaveAttribute('data-theme', 'apricot_sand')
     await expect(page.locator('body')).toContainText('hostname', { timeout: 10_000 })
 
     await page.locator('#perm-save-btn').click()
@@ -82,15 +88,13 @@ test.describe('permalink / share', () => {
     for await (const chunk of htmlStream) htmlChunks.push(chunk)
     const html = Buffer.concat(htmlChunks).toString('utf8')
     expect(html).toContain('<body')
-    expect(html).toContain('--theme-bg: #eef4fa')
+    expect(html).toContain('--theme-bg: #fbf2e8')
   })
 
   test('permalink button on a fresh tab shows "No output" toast', async ({ page }) => {
-    // Wait for the welcome sequence to finish before opening a new tab.
-    // If the welcome animation has a scheduled step that fires after the new
-    // tab is created it can switch the active panel back to the welcome tab,
-    // leaving the new tab's permalink button in a non-active (invisible) panel.
-    await page.waitForFunction(() => window._welcomeDone === true, { timeout: 15_000 })
+    // Settle welcome before opening a new tab so scheduled welcome steps cannot
+    // switch focus back to the original tab while this assertion runs.
+    await ensurePromptReady(page)
     await page.locator('#new-tab-btn').click()
     await page.locator('.hud-actions [data-action="permalink"]').click()
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
@@ -172,7 +176,7 @@ test.describe('permalink / share', () => {
   }) => {
     await runCommand(page, CMD)
 
-    const shareResp = await createShareSnapshot(page)
+    const shareResp = await createShareSnapshot(page, { choice: 'raw' })
     const data = await shareResp.json()
 
     await page.goto(data.url)
@@ -246,7 +250,7 @@ test.describe('permalink / share', () => {
   }) => {
     await runCommand(page, CMD)
 
-    const shareResp = await createShareSnapshot(page)
+    const shareResp = await createShareSnapshot(page, { choice: 'raw' })
     const data = await shareResp.json()
 
     await page.goto(data.url)
@@ -263,8 +267,8 @@ test.describe('permalink / share', () => {
     for await (const chunk of txtStream) txtChunks.push(chunk)
     const txt = Buffer.concat(txtChunks).toString('utf8')
 
-    expect(txt).toContain('anon@darklab:~$ hostname')
-    expect(txt).toMatch(/1\s+anon@darklab:~\$ hostname/)
+    expect(txt).toContain('anon@darklab.sh:/ $ hostname')
+    expect(txt).toMatch(/1\s+\+0\.0s\s+anon@darklab\.sh:\/ \$ hostname/)
     expect(txt).toContain('+')
 
     await page.locator('#perm-save-btn').click()

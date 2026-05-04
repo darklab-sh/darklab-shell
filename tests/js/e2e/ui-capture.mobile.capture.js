@@ -23,6 +23,8 @@ const freshCaptureHome = (page, opts = {}) => freshHome(page, {
   guardrailMode: 'mobile',
 })
 
+const WORKSPACE_CAPTURE_CMD = 'curl -L -o response.html https://noc.darklab.sh'
+
 async function runCommandMobile(page, cmd) {
   await setComposerValueForTest(page, cmd, { mobile: true })
   await page.locator('#mobile-run-btn').click()
@@ -64,6 +66,18 @@ async function openRecentsSheet(page) {
   await openMenu(page)
   await page.locator('#mobile-menu-sheet [data-menu-action="history"]').click()
   await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
+}
+
+async function createAndOpenWorkspaceResponseFileMobile(page) {
+  await runCommandMobile(page, WORKSPACE_CAPTURE_CMD)
+  await openMenu(page)
+  await page.locator('#mobile-menu-sheet [data-menu-action="workspace"]').click()
+  await expect(page.locator('#workspace-modal')).toBeVisible()
+  const row = page.locator('.workspace-file-row', { hasText: 'response.html' }).first()
+  await expect(row).toBeVisible()
+  await row.locator('[data-workspace-action="view"]').click()
+  await expect(page.locator('#workspace-viewer')).toBeVisible()
+  await expect(page.locator('#workspace-viewer-title')).toHaveText('response.html')
 }
 
 const scenes = [
@@ -165,6 +179,15 @@ const scenes = [
     },
   },
   {
+    slug: 'files-panel-response-file',
+    title: 'Main UI - Files panel with captured response file',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await createAndOpenWorkspaceResponseFileMobile(page)
+    },
+  },
+  {
     slug: 'line-numbers-enabled',
     title: 'Main UI - line numbers enabled',
     route: '/',
@@ -172,7 +195,7 @@ const scenes = [
       await freshCaptureHome(page, { themeName })
       await seedOutput(page, [
         { text: '$ hostname' },
-        { text: 'darklab-shell' },
+        { text: 'darklab_shell' },
         { text: '[process exited with code 0]', cls: 'exit-ok' },
       ])
       await page.evaluate(() => {
@@ -389,7 +412,13 @@ const scenes = [
       await runCommandMobile(page, 'hostname')
       await waitForHistoryRuns(page, 1)
       await openRecentsSheet(page)
-      await page.locator('#mobile-recents-list .sheet-item').first().locator('.sheet-item-action', { hasText: 'permalink' }).click()
+      const runItem = page
+        .locator('#mobile-recents-list .sheet-item')
+        .filter({
+          has: page.locator('.sheet-item-action', { hasText: 'permalink' }),
+        })
+        .first()
+      await runItem.locator('.sheet-item-action', { hasText: 'permalink' }).click()
       const copied = await page.evaluate(() => window.__clipboardText || '')
       await page.goto(copied, { waitUntil: 'domcontentloaded' })
       await expect(page.locator('body.permalink-page')).toBeVisible()

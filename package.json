@@ -1,14 +1,14 @@
 {
-  "name": "darklab-shell",
-  "version": "1.5.0",
+  "name": "darklab_shell",
+  "version": "1.6.0",
   "type": "module",
   "scripts": {
-    "test": "pytest && npm run test:unit && npm run test:e2e",
-    "test:pytest": "pytest",
+    "test": "npm run test:pytest && npm run test:unit && npm run test:e2e",
+    "test:pytest": "bash scripts/run_pytest.sh -c config/pytest.ini --rootdir=. tests/py",
     "test:unit": "vitest run --config config/vitest.config.js",
     "test:unit:watch": "vitest --config config/vitest.config.js",
-    "test:e2e": "./scripts/playwright/stop_e2e_servers.sh ${PLAYWRIGHT_PROJECT_COUNT:-5} ${PLAYWRIGHT_BASE_PORT:-5001}; playwright test --config config/playwright.parallel.config.js",
-    "test:e2e:ui": "./scripts/playwright/stop_e2e_servers.sh ${PLAYWRIGHT_PROJECT_COUNT:-5} ${PLAYWRIGHT_BASE_PORT:-5001}; playwright test --config config/playwright.parallel.config.js --ui",
+    "test:e2e": "bash scripts/run_playwright.sh",
+    "test:e2e:ui": "bash scripts/run_playwright.sh --ui",
     "capture:container-smoke-test": "node scripts/capture_output_for_smoke_test.mjs",
     "capture:ui-screenshots": "./scripts/capture_ui_screenshots.sh",
     "lint": "npm run lint:py && npm run lint:js && npm run lint:css && npm run lint:shell && npm run lint:docker && npm run lint:yaml && npm run lint:json && npm run lint:md && npm run vendor:check",
@@ -32,11 +32,11 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.52.0",
-    "@vitest/coverage-v8": "^4.1.4",
-    "eslint": "^10.2.0",
+    "@vitest/coverage-v8": "^4.1.5",
+    "eslint": "^10.2.1",
     "jsdom": "^29.0.2",
     "markdownlint-cli2": "^0.22.0",
-    "stylelint": "^17.8.0",
-    "vitest": "^4.1.4"
+    "stylelint": "^17.9.0",
+    "vitest": "^4.1.5"
   }
 }

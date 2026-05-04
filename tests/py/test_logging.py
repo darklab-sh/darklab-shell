@@ -19,6 +19,7 @@ import io
 import json
 import logging
 import sqlite3
+import time
 import uuid
 import unittest.mock as mock
 
@@ -52,6 +53,23 @@ def get_client(*, use_forwarded_for=True):
     if use_forwarded_for:
         client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
     return client
+
+
+def _post_brokered_run(client, command, *, headers=None):
+    request_headers = dict(headers or {})
+    request_headers.setdefault("X-Session-ID", "log-test-session")
+    with mock.patch("blueprints.run.broker_available", return_value=True):
+        start_resp = client.post("/runs", json={"command": command}, headers=request_headers)
+    if start_resp.status_code != 202:
+        return start_resp
+    stream = json.loads(start_resp.data)["stream"]
+    stream_resp = client.get(stream, headers=request_headers)
+    for _ in range(10):
+        if stream_resp.status_code != 404:
+            return stream_resp
+        time.sleep(0.01)
+        stream_resp = client.get(stream, headers=request_headers)
+    return stream_resp
 
 
 class _FakeStdout:
@@ -404,15 +422,15 @@ class TestCmdDeniedEvent:
     _IP = "192.0.2.10"
 
     def _post_run(self, client, command):
-        return client.post(
-            "/run", json={"command": command},
+        return _post_brokered_run(
+            client, command,
             headers={"X-Forwarded-For": self._IP},
         )
 
     def test_cmd_denied_emits_warning(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with mock.patch("commands.load_allowed_commands", return_value=(["ping"], [])):
+            with mock.patch("commands.load_command_policy", return_value=(["ping"], [])):
                 self._post_run(client, "cat /etc/passwd")
         denied = [c for c in mock_warn.call_args_list if c[0][0] == "CMD_DENIED"]
         assert len(denied) == 1
@@ -420,7 +438,7 @@ class TestCmdDeniedEvent:
     def test_cmd_denied_extra_has_ip(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with mock.patch("commands.load_allowed_commands", return_value=(["ping"], [])):
+            with mock.patch("commands.load_command_policy", return_value=(["ping"], [])):
                 self._post_run(client, "cat /etc/passwd")
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "CMD_DENIED")
         assert "ip" in call.kwargs["extra"]
@@ -428,7 +446,7 @@ class TestCmdDeniedEvent:
     def test_cmd_denied_extra_has_reason(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with mock.patch("commands.load_allowed_commands", return_value=(["ping"], [])):
+            with mock.patch("commands.load_command_policy", return_value=(["ping"], [])):
                 self._post_run(client, "cat /etc/passwd")
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "CMD_DENIED")
         assert "reason" in call.kwargs["extra"]
@@ -437,7 +455,7 @@ class TestCmdDeniedEvent:
     def test_cmd_denied_extra_has_cmd(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with mock.patch("commands.load_allowed_commands", return_value=(["ping"], [])):
+            with mock.patch("commands.load_command_policy", return_value=(["ping"], [])):
                 self._post_run(client, "cat /etc/passwd")
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "CMD_DENIED")
         assert call.kwargs["extra"]["cmd"] == "cat /etc/passwd"
@@ -446,7 +464,7 @@ class TestCmdDeniedEvent:
         # Shell operator blocks are a special case of is_command_allowed returning False
         client = get_client()
         with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with mock.patch("commands.load_allowed_commands", return_value=(["ping"], [])):
+            with mock.patch("commands.load_command_policy", return_value=(["ping"], [])):
                 self._post_run(client, "ping google.com | cat /etc/passwd")
         denied = [c for c in mock_warn.call_args_list if c[0][0] == "CMD_DENIED"]
         assert len(denied) == 1
@@ -460,7 +478,7 @@ class TestRateLimitEvent:
         e = TooManyRequests()
         e.description = "5 per 1 second"
         with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with shell_app.app.test_request_context("/run", method="POST"):
+            with shell_app.app.test_request_context("/runs", method="POST"):
                 shell_app._rate_limit_handler(e)
         rl_calls = [c for c in mock_warn.call_args_list if c[0][0] == "RATE_LIMIT"]
         assert len(rl_calls) == 1
@@ -470,7 +488,7 @@ class TestRateLimitEvent:
         e = TooManyRequests()
         e.description = "5 per 1 second"
         with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with shell_app.app.test_request_context("/run", method="POST"):
+            with shell_app.app.test_request_context("/runs", method="POST"):
                 shell_app._rate_limit_handler(e)
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "RATE_LIMIT")
         assert "ip" in call.kwargs["extra"]
@@ -480,7 +498,7 @@ class TestRateLimitEvent:
         e = TooManyRequests()
         e.description = "5 per 1 second"
         with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with shell_app.app.test_request_context("/run", method="POST"):
+            with shell_app.app.test_request_context("/runs", method="POST"):
                 shell_app._rate_limit_handler(e)
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "RATE_LIMIT")
         assert call.kwargs["extra"]["limit"] == "5 per 1 second"
@@ -489,7 +507,7 @@ class TestRateLimitEvent:
         from werkzeug.exceptions import TooManyRequests
         e = TooManyRequests()
         e.description = "30 per 1 minute"
-        with shell_app.app.test_request_context("/run", method="POST"):
+        with shell_app.app.test_request_context("/runs", method="POST"):
             response, status = shell_app._rate_limit_handler(e)
         assert status == 429
         data = json.loads(response.data)
@@ -569,17 +587,17 @@ class TestCmdRewriteEvent:
     _IP = "203.0.113.42"
 
     def _post_run(self, client, command):
-        return client.post(
-            "/run", json={"command": command},
+        return _post_brokered_run(
+            client, command,
             headers={"X-Forwarded-For": self._IP},
         )
 
     def test_nmap_rewrite_emits_info(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "info") as mock_info:
-            with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
+            with mock.patch("commands.load_command_policy", return_value=(None, [])):
                 # Popen raises so we don't actually spawn — CMD_REWRITE fires before Popen
-                with mock.patch("subprocess.Popen", side_effect=OSError("no spawn")):
+                with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "nmap 8.8.8.8")
         rewrite_calls = [c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE"]
         assert len(rewrite_calls) == 1
@@ -587,27 +605,28 @@ class TestCmdRewriteEvent:
     def test_nmap_rewrite_extra_has_original(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "info") as mock_info:
-            with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
-                with mock.patch("subprocess.Popen", side_effect=OSError("no spawn")):
+            with mock.patch("commands.load_command_policy", return_value=(None, [])):
+                with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "nmap 8.8.8.8")
         call = next(c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE")
         assert call.kwargs["extra"]["original"] == "nmap 8.8.8.8"
 
-    def test_nmap_rewrite_extra_has_privileged_flag(self):
+    def test_nmap_rewrite_extra_has_connect_scan_flag(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "info") as mock_info:
-            with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
-                with mock.patch("subprocess.Popen", side_effect=OSError("no spawn")):
+            with mock.patch("commands.load_command_policy", return_value=(None, [])):
+                with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "nmap 8.8.8.8")
         call = next(c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE")
-        assert "--privileged" in call.kwargs["extra"]["rewritten"]
+        assert "-sT" in call.kwargs["extra"]["rewritten"]
+        assert "--privileged" not in call.kwargs["extra"]["rewritten"]
 
     def test_unrewritten_command_does_not_emit_cmd_rewrite(self):
         # A plain allowed command (ping) is not rewritten — no CMD_REWRITE log
         client = get_client()
         with mock.patch.object(shell_app.log, "info") as mock_info:
-            with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
-                with mock.patch("subprocess.Popen", side_effect=OSError("no spawn")):
+            with mock.patch("commands.load_command_policy", return_value=(None, [])):
+                with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "ping google.com")
         rewrite_calls = [c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE"]
         assert len(rewrite_calls) == 0
@@ -624,7 +643,7 @@ class TestRunLifecycleEvents:
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
              mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
-            resp = client.post("/run", json={"command": "echo hello"})
+            resp = _post_brokered_run(client, "echo hello")
             _ = resp.get_data(as_text=True)
 
         calls = [c for c in mock_info.call_args_list if c[0][0] == "RUN_START"]
@@ -641,7 +660,7 @@ class TestRunLifecycleEvents:
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
              mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
-            resp = client.post("/run", json={"command": "echo hello"}, headers={"X-Session-ID": token})
+            resp = _post_brokered_run(client, "echo hello", headers={"X-Session-ID": token})
             _ = resp.get_data(as_text=True)
 
         call = next(c for c in mock_info.call_args_list if c[0][0] == "RUN_START")
@@ -660,7 +679,7 @@ class TestRunLifecycleEvents:
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
              mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
-            resp = client.post("/run", json={"command": "echo hello"})
+            resp = _post_brokered_run(client, "echo hello")
             _ = resp.get_data(as_text=True)
 
         call = next(c for c in mock_info.call_args_list if c[0][0] == "RUN_END")
@@ -670,7 +689,7 @@ class TestRunLifecycleEvents:
         client = get_client()
 
         with mock.patch.object(shell_app.log, "info") as mock_info, \
-             mock.patch("blueprints.run.pid_pop", return_value=1234), \
+             mock.patch("blueprints.run.pid_pop_for_session", return_value=1234), \
              mock.patch("blueprints.run.os.getpgid", return_value=4321), \
              mock.patch("blueprints.run.os.killpg"):
             resp = client.post("/kill", json={"run_id": "run-123"})
@@ -683,7 +702,7 @@ class TestRunLifecycleEvents:
         client = get_client()
 
         with mock.patch.object(shell_app.log, "debug") as mock_debug, \
-             mock.patch("blueprints.run.pid_pop", return_value=None):
+             mock.patch("blueprints.run.pid_pop_for_session", return_value=None):
             resp = client.post("/kill", json={"run_id": "missing-run"})
 
         assert resp.status_code == 404
@@ -704,7 +723,7 @@ class TestRunFailureEvents:
              mock.patch("blueprints.run.os.getpgid", return_value=4321), \
              mock.patch("blueprints.run.os.killpg"), \
              mock.patch.dict("config.CFG", {"command_timeout_seconds": -1}):
-            resp = client.post("/run", json={"command": "sleep forever"})
+            resp = _post_brokered_run(client, "sleep forever")
             _ = resp.get_data(as_text=True)
 
         calls = [c for c in mock_warn.call_args_list if c[0][0] == "CMD_TIMEOUT"]
@@ -721,7 +740,7 @@ class TestRunFailureEvents:
              mock.patch("blueprints.run.pid_pop"), \
              mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]), \
              mock.patch("blueprints.run.db_connect", side_effect=Exception("db write failed")):
-            resp = client.post("/run", json={"command": "echo saved"})
+            resp = _post_brokered_run(client, "echo saved")
             _ = resp.get_data(as_text=True)
 
         calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_SAVED_ERROR"]
@@ -737,10 +756,10 @@ class TestRunFailureEvents:
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
              mock.patch("blueprints.run._stdout_ready", side_effect=RuntimeError("stream exploded")):
-            resp = client.post("/run", json={"command": "echo boom"})
+            resp = _post_brokered_run(client, "echo boom")
             _ = resp.get_data(as_text=True)
 
-        calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_STREAM_ERROR"]
+        calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_BROKER_STREAM_ERROR"]
         assert len(calls) == 1
 
 
@@ -987,8 +1006,8 @@ class TestKillFailedEvent:
 
     def test_kill_failed_emits_warning_on_os_error(self):
         client = get_client()
-        with mock.patch("blueprints.run.pid_pop", return_value=99999):
-            with mock.patch("os.getpgid", side_effect=ProcessLookupError("no such process")):
+        with mock.patch("blueprints.run.pid_pop_for_session", return_value=99999):
+            with mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError("no such process")):
                 with mock.patch.object(shell_app.log, "warning") as mock_warn:
                     client.post("/kill", json={"run_id": "fake-run-id"})
         kill_failed = [c for c in mock_warn.call_args_list if c[0][0] == "KILL_FAILED"]
@@ -996,8 +1015,8 @@ class TestKillFailedEvent:
 
     def test_kill_failed_extra_has_run_id(self):
         client = get_client()
-        with mock.patch("blueprints.run.pid_pop", return_value=99999):
-            with mock.patch("os.getpgid", side_effect=ProcessLookupError("no such process")):
+        with mock.patch("blueprints.run.pid_pop_for_session", return_value=99999):
+            with mock.patch("blueprints.run.os.killpg", side_effect=ProcessLookupError("no such process")):
                 with mock.patch.object(shell_app.log, "warning") as mock_warn:
                     client.post("/kill", json={"run_id": "test-run-xyz"})
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "KILL_FAILED")
@@ -1073,7 +1092,7 @@ class TestRunViewedEvent:
         self._insert_run(run_id, "ping test")
         try:
             with mock.patch.object(shell_app.log, "info") as mock_info:
-                get_client().get(f"/history/{run_id}")
+                get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "rv-session"})
             viewed = [c for c in mock_info.call_args_list if c[0][0] == "RUN_VIEWED"]
             assert len(viewed) == 1
         finally:
@@ -1084,7 +1103,7 @@ class TestRunViewedEvent:
         self._insert_run(run_id, "ping test")
         try:
             with mock.patch.object(shell_app.log, "info") as mock_info:
-                get_client().get(f"/history/{run_id}")
+                get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "rv-session"})
             call = next(c for c in mock_info.call_args_list if c[0][0] == "RUN_VIEWED")
             assert call.kwargs["extra"]["run_id"] == run_id
         finally:
@@ -1095,7 +1114,7 @@ class TestRunViewedEvent:
         self._insert_run(run_id, "nmap 8.8.8.8")
         try:
             with mock.patch.object(shell_app.log, "info") as mock_info:
-                get_client().get(f"/history/{run_id}")
+                get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "rv-session"})
             call = next(c for c in mock_info.call_args_list if c[0][0] == "RUN_VIEWED")
             assert call.kwargs["extra"]["cmd"] == "nmap 8.8.8.8"
         finally:
@@ -1366,9 +1385,14 @@ class TestContentViewedEvents:
 
     def test_allowed_commands_viewed_extra_reflects_restricted_list(self):
         with mock.patch.object(shell_app.log, "info") as mock_info:
-            with mock.patch("blueprints.content.load_allowed_commands", return_value=(["ping", "curl"], [])):
-                with mock.patch("blueprints.content.load_allowed_commands_grouped", return_value=[]):
-                    get_client().get("/allowed-commands", headers={"X-Session-ID": "ac-session"})
+            with mock.patch("blueprints.content.load_commands_registry", return_value={
+                "commands": [
+                    {"root": "ping", "category": "Network", "policy": {"allow": ["ping"], "deny": []}},
+                    {"root": "curl", "category": "Web", "policy": {"allow": ["curl"], "deny": []}},
+                ],
+                "pipe_helpers": [],
+            }):
+                get_client().get("/allowed-commands", headers={"X-Session-ID": "ac-session"})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "CONTENT_VIEWED")
         assert call.kwargs["extra"]["route"] == "/allowed-commands"
         assert call.kwargs["extra"]["session"] == "ac-session"
@@ -1377,7 +1401,7 @@ class TestContentViewedEvents:
 
     def test_allowed_commands_viewed_extra_reflects_unrestricted_mode(self):
         with mock.patch.object(shell_app.log, "info") as mock_info:
-            with mock.patch("blueprints.content.load_allowed_commands", return_value=(None, [])):
+            with mock.patch("blueprints.content.load_commands_registry", return_value={"commands": [], "pipe_helpers": []}):
                 get_client().get("/allowed-commands", headers={"X-Session-ID": "ac-session"})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "CONTENT_VIEWED")
         assert call.kwargs["extra"]["route"] == "/allowed-commands"
@@ -1415,7 +1439,7 @@ class TestNotFoundEvents:
             conn.commit()
         try:
             with mock.patch.object(shell_app.log, "warning") as mock_warn:
-                get_client().get(f"/history/{run_id}")
+                get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "pnf-session"})
             calls = [c for c in mock_warn.call_args_list if c[0][0] == "RUN_NOT_FOUND"]
             assert len(calls) == 0
         finally:
@@ -1571,19 +1595,19 @@ class TestSessionStateEvents:
 class TestRunSpawnErrorEvent:
     """RUN_SPAWN_ERROR is emitted at ERROR when subprocess.Popen raises."""
 
-    # RFC 5737 TEST-NET-3 — never routed, gives this class its own rate-limit bucket
-    _IP = "203.0.113.99"
-
     def _post_run(self, client, cmd):
-        return client.post(
-            "/run",
-            json={"command": cmd},
-            headers={"X-Forwarded-For": self._IP, "X-Session-ID": "rse-session"},
+        # RFC 5737 TEST-NET-3 — never routed, unique per request so Flask-Limiter's
+        # in-memory counter cannot leak into this class during full-suite runs.
+        ip = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
+        return _post_brokered_run(
+            client,
+            cmd,
+            headers={"X-Forwarded-For": ip, "X-Session-ID": "rse-session"},
         )
 
     def test_spawn_error_returns_500(self):
         client = get_client()
-        with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
+        with mock.patch("commands.load_command_policy", return_value=(None, [])):
             with mock.patch("blueprints.run.runtime_missing_command_name", return_value=None):
                 with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("spawn failed")):
                     resp = self._post_run(client, "ping 8.8.8.8")
@@ -1592,7 +1616,7 @@ class TestRunSpawnErrorEvent:
     def test_spawn_error_emits_error_log(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "error") as mock_error:
-            with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
+            with mock.patch("commands.load_command_policy", return_value=(None, [])):
                 with mock.patch("blueprints.run.runtime_missing_command_name", return_value=None):
                     with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("spawn failed")):
                         self._post_run(client, "ping 8.8.8.8")
@@ -1602,7 +1626,7 @@ class TestRunSpawnErrorEvent:
     def test_spawn_error_extra_has_ip(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "error") as mock_error:
-            with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
+            with mock.patch("commands.load_command_policy", return_value=(None, [])):
                 with mock.patch("blueprints.run.runtime_missing_command_name", return_value=None):
                     with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("spawn failed")):
                         self._post_run(client, "ping 8.8.8.8")
@@ -1612,7 +1636,7 @@ class TestRunSpawnErrorEvent:
     def test_spawn_error_extra_has_cmd(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "error") as mock_error:
-            with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
+            with mock.patch("commands.load_command_policy", return_value=(None, [])):
                 with mock.patch("blueprints.run.runtime_missing_command_name", return_value=None):
                     with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("spawn failed")):
                         self._post_run(client, "ping 8.8.8.8")

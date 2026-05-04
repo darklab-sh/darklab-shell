@@ -4,6 +4,7 @@
 // loads, render code sees an empty Set rather than reading localStorage —
 // a stale localStorage value from before stars moved server-side would
 // silently mask the user's server-side stars.
+const _historyCore = typeof DarklabHistoryCore !== 'undefined' ? DarklabHistoryCore : null;
 
 let _starredCache = null; // null = not yet loaded from server
 
@@ -67,6 +68,7 @@ let _historyRootSuggestions = [];
 let _historyRootFiltered = [];
 let _historyRootIndex = -1;
 let _historyRootSuppressInputOnce = false;
+let _historyRootInputFocused = false;
 let _historyPaging = {
   page: 1,
   pageSize: (typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.history_panel_limit)
@@ -77,9 +79,22 @@ let _historyPaging = {
   hasPrev: false,
   hasNext: false,
 };
+let _historyCompareState = {
+  source: null,
+  candidates: [],
+  manualCandidates: [],
+  manualLoaded: false,
+  manualRequestId: 0,
+  manualPage: 1,
+  manualHasNext: false,
+  manualLoading: false,
+  manualCollapsedGroups: new Set(),
+  selected: null,
+  manualQuery: '',
+};
 
 function _normalizeHistoryFilterValue(value) {
-  return typeof value === 'string' ? value.trim() : '';
+  return _historyCore.normalizeFilterValue(value);
 }
 
 function _syncHistoryFilterControls() {
@@ -102,57 +117,55 @@ function _syncHistoryFilterControls() {
   if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.disabled = !runOnlyEnabled;
   if (typeof historyExitFilter !== 'undefined' && historyExitFilter) historyExitFilter.disabled = !runOnlyEnabled;
   if (typeof historyStarredToggle !== 'undefined' && historyStarredToggle) historyStarredToggle.disabled = !runOnlyEnabled;
+  if (typeof syncAppSelect === 'function') {
+    if (typeof historyTypeFilter !== 'undefined') syncAppSelect(historyTypeFilter);
+    if (typeof historyExitFilter !== 'undefined') syncAppSelect(historyExitFilter);
+    if (typeof historyDateFilter !== 'undefined') syncAppSelect(historyDateFilter);
+  }
   if (typeof histClearAllBtn !== 'undefined' && histClearAllBtn) {
     histClearAllBtn.classList.toggle('u-hidden', _historyFilters.type === 'snapshots');
   }
 }
 
 function _historyHasActiveServerFilters() {
-  return Boolean(
-    _historyFilters.type !== 'all'
-    || _historyFilters.q
-    || _historyFilters.commandRoot
-    || _historyFilters.exitCode !== 'all'
-    || _historyFilters.dateRange !== 'all'
-  );
+  return _historyCore.hasActiveServerFilters(_historyFilters);
 }
 
 function _historyHasAnyFilters() {
-  return _historyHasActiveServerFilters() || !!_historyFilters.starredOnly;
+  return _historyCore.hasAnyFilters(_historyFilters);
 }
 
 function _historyResetRunOnlyFilters() {
-  _historyFilters.commandRoot = '';
-  _historyFilters.exitCode = 'all';
-  _historyFilters.starredOnly = false;
+  _historyFilters = _historyCore.resetRunOnlyFilters(_historyFilters);
 }
 
 function _historyLabelForType(type = _historyFilters.type) {
-  if (type === 'runs') return 'runs';
-  if (type === 'snapshots') return 'snapshots';
-  return 'history items';
+  return _historyCore.labelForType(type);
 }
 
 function _historySummaryLabel(totalCount = _historyPaging.totalCount) {
-  const singular = totalCount === 1;
-  if (_historyFilters.type === 'runs') return singular ? 'stored run' : 'stored runs';
-  if (_historyFilters.type === 'snapshots') return singular ? 'stored snapshot' : 'stored snapshots';
-  return singular ? 'stored item' : 'stored items';
+  return _historyCore.summaryLabel(_historyFilters.type, totalCount);
 }
 
 function _historyCommandRootsFromRuns(runs) {
-  const roots = new Set();
-  for (const run of Array.isArray(runs) ? runs : []) {
-    const root = typeof run === 'string'
-      ? run.trim()
-      : (run && typeof run.command === 'string' ? run.command.trim().split(/\s+/, 1)[0] : '');
-    if (root) roots.add(root);
-  }
-  return [...roots].sort((a, b) => a.localeCompare(b));
+  return _historyCore.commandRootsFromRuns(runs);
 }
 
 function _renderHistoryRootSuggestions(runs) {
-  _historyRootSuggestions = _historyCommandRootsFromRuns(runs);
+  const nextSuggestions = _historyCommandRootsFromRuns(runs);
+  const currentQuery = typeof historyRootInput !== 'undefined' && historyRootInput
+    ? _normalizeHistoryFilterValue(historyRootInput.value)
+    : _historyFilters.commandRoot;
+  if (_historyRootInputFocused && currentQuery) {
+    // The server-side command_root filter is exact-root oriented. While the
+    // user is typing a partial root, a refresh can legitimately return no
+    // matching rows; do not let that transient response erase the suggestion
+    // pool the user is actively choosing from.
+    const merged = new Set([..._historyRootSuggestions, ...nextSuggestions]);
+    _historyRootSuggestions = [...merged].sort((a, b) => a.localeCompare(b));
+  } else {
+    _historyRootSuggestions = nextSuggestions;
+  }
   _historyRefreshRootDropdown();
 }
 
@@ -164,6 +177,28 @@ function _appendHistoryCommandEcho(tabId, command) {
   appendLine(command, 'prompt-echo', tabId);
 }
 
+function _historyOutputLineMetadata(entry) {
+  if (!entry || typeof entry !== 'object') return null;
+  const metadata = {};
+  if (Array.isArray(entry.signals) && entry.signals.length) metadata.signals = entry.signals;
+  if (Number.isInteger(entry.line_index)) metadata.line_index = entry.line_index;
+  if (typeof entry.command_root === 'string' && entry.command_root) metadata.command_root = entry.command_root;
+  if (typeof entry.target === 'string' && entry.target) metadata.target = entry.target;
+  return Object.keys(metadata).length ? metadata : null;
+}
+
+function _appendHistoryOutputLine(entry, tabId) {
+  if (entry && typeof entry === 'object') {
+    const text = String(entry.text || '');
+    const cls = String(entry.cls || '');
+    const metadata = _historyOutputLineMetadata(entry);
+    if (metadata) appendLine(text, cls, tabId, metadata);
+    else appendLine(text, cls, tabId);
+    return;
+  }
+  appendLine(String(entry || ''), '', tabId);
+}
+
 function _hideHistoryRootDropdown() {
   if (typeof historyRootDropdown === 'undefined' || !historyRootDropdown) return;
   historyRootDropdown.replaceChildren();
@@ -173,11 +208,7 @@ function _hideHistoryRootDropdown() {
 }
 
 function _historyRootMatches(query) {
-  const value = _normalizeHistoryFilterValue(query).toLowerCase();
-  if (!value) return [];
-  return _historyRootSuggestions
-    .filter(root => root.toLowerCase().startsWith(value))
-    .slice(0, 12);
+  return _historyCore.rootMatches(_historyRootSuggestions, query, 12);
 }
 
 function _acceptHistoryRootSuggestion(root) {
@@ -206,7 +237,8 @@ function _renderHistoryRootDropdown(items, query) {
   historyRootDropdown.classList.toggle('ac-mobile', mobileMode);
   items.forEach((root, index) => {
     const item = document.createElement('div');
-    item.className = 'ac-item' + (index === _historyRootIndex ? ' ac-active' : '');
+    item.className = 'ac-item dropdown-item dropdown-item-dense'
+      + (index === _historyRootIndex ? ' ac-active dropdown-item-active' : '');
     const matchIndex = normalizedQuery ? root.toLowerCase().indexOf(normalizedQuery) : -1;
     if (matchIndex >= 0 && normalizedQuery) {
       item.innerHTML = escapeHtml(root.slice(0, matchIndex))
@@ -238,16 +270,7 @@ function _historyRefreshRootDropdown() {
 }
 
 function _historyActiveFilterItems() {
-  const items = [];
-  if (_historyFilters.type !== 'all') items.push({ key: 'type', label: `type: ${_historyFilters.type}` });
-  if (_historyFilters.q) items.push({ key: 'q', label: `search: ${_historyFilters.q}` });
-  if (_historyFilters.commandRoot) items.push({ key: 'commandRoot', label: `command: ${_historyFilters.commandRoot}` });
-  if (_historyFilters.exitCode === '0') items.push({ key: 'exitCode', label: 'exit: 0' });
-  else if (_historyFilters.exitCode === 'nonzero') items.push({ key: 'exitCode', label: 'exit: non-zero' });
-  else if (_historyFilters.exitCode === 'incomplete') items.push({ key: 'exitCode', label: 'exit: incomplete' });
-  if (_historyFilters.dateRange !== 'all') items.push({ key: 'dateRange', label: `date: ${_historyFilters.dateRange}` });
-  if (_historyFilters.starredOnly) items.push({ key: 'starredOnly', label: 'starred' });
-  return items;
+  return _historyCore.activeFilterItems(_historyFilters);
 }
 
 function _historySetPage(nextPage, { refresh = true } = {}) {
@@ -312,7 +335,7 @@ function _renderHistoryActiveFilters() {
   historyActiveFilters.classList.toggle('u-hidden', !items.length);
   items.forEach(item => {
     const chip = document.createElement('div');
-    chip.className = 'history-active-filter-chip';
+    chip.className = 'history-active-filter-chip chip chip-removable';
     chip.dataset.filterKey = item.key;
     const label = document.createElement('span');
     label.textContent = item.label;
@@ -334,18 +357,7 @@ function _renderHistoryActiveFilters() {
 }
 
 function _buildHistoryRequestUrl() {
-  const params = new URLSearchParams();
-  params.set('page', String(_historyPaging.page || 1));
-  params.set('page_size', String(_historyPaging.pageSize || 1));
-  params.set('include_total', '1');
-  if (_historyFilters.type !== 'all') params.set('type', _historyFilters.type);
-  if (_historyFilters.q) params.set('q', _historyFilters.q);
-  if (_historyFilters.commandRoot) params.set('command_root', _historyFilters.commandRoot);
-  if (_historyFilters.exitCode !== 'all') params.set('exit_code', _historyFilters.exitCode);
-  if (_historyFilters.dateRange !== 'all') params.set('date_range', _historyFilters.dateRange);
-  if (_historyFilters.starredOnly) params.set('starred_only', '1');
-  const query = params.toString();
-  return query ? `/history?${query}` : '/history';
+  return _historyCore.buildRequestUrl(_historyFilters, _historyPaging);
 }
 
 function _applyHistoryClientFilters(runs) {
@@ -401,6 +413,42 @@ function _setHistoryFilter(key, value, { debounce = false } = {}) {
   else refreshHistoryPanel();
 }
 
+function openHistoryWithFilters(filters = {}) {
+  const selection = window.getSelection?.();
+  if (selection && typeof selection.removeAllRanges === 'function') {
+    selection.removeAllRanges();
+  }
+  const nextFilters = {
+    ..._historyFilters,
+    ...filters,
+  };
+  if (Object.prototype.hasOwnProperty.call(filters, 'commandRoot')) {
+    nextFilters.commandRoot = _normalizeHistoryFilterValue(filters.commandRoot);
+    if (nextFilters.commandRoot && (!filters.type || filters.type === 'all')) {
+      nextFilters.type = 'runs';
+    }
+  }
+  _historyFilters = {
+    type: _normalizeHistoryFilterValue(nextFilters.type) || 'all',
+    q: _normalizeHistoryFilterValue(nextFilters.q),
+    commandRoot: _normalizeHistoryFilterValue(nextFilters.commandRoot),
+    exitCode: _normalizeHistoryFilterValue(nextFilters.exitCode) || 'all',
+    dateRange: _normalizeHistoryFilterValue(nextFilters.dateRange) || 'all',
+    starredOnly: !!nextFilters.starredOnly,
+  };
+  _historyPaging.page = 1;
+  _syncHistoryFilterControls();
+  _renderHistoryActiveFilters();
+  _hideHistoryRootDropdown();
+  if (typeof toggleHistoryPanelSurface === 'function') {
+    toggleHistoryPanelSurface(true);
+  } else {
+    if (typeof showHistoryPanel === 'function') showHistoryPanel();
+    refreshHistoryPanel();
+  }
+  return true;
+}
+
 function clearHistoryFilters() {
   _historyFilters = {
     type: 'all',
@@ -433,43 +481,78 @@ function toggleHistoryMobileFilters(force = null) {
 
 // ── Command history chips ──
 
+function _activeTabCommandHistoryState() {
+  const tab = typeof getActiveTab === 'function' ? getActiveTab() : null;
+  if (!tab) return null;
+  if (!Array.isArray(tab.commandHistory)) tab.commandHistory = [];
+  if (!Number.isInteger(tab.historyNavIndex)) tab.historyNavIndex = -1;
+  if (typeof tab.historyNavDraft !== 'string') tab.historyNavDraft = '';
+  return tab;
+}
+
+function _historyLimit() {
+  return _historyCore.historyLimit(APP_CONFIG);
+}
+
+function _commandRecallHistory(tab) {
+  return _historyCore.commandRecallHistory(tab, cmdHistory, _historyLimit());
+}
+
 function resetCmdHistoryNav() {
-  _cmdHistoryNavIndex = -1;
-  _cmdHistoryNavDraft = '';
+  const tab = _activeTabCommandHistoryState();
+  if (tab) {
+    tab.historyNavIndex = -1;
+    tab.historyNavDraft = '';
+  } else {
+    _cmdHistoryNavIndex = -1;
+    _cmdHistoryNavDraft = '';
+  }
   if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
     exitHistSearch(false);
   }
 }
 
 function navigateCmdHistory(delta) {
-  if (!cmdHistory.length) return false;
+  const tab = _activeTabCommandHistoryState();
+  const history = tab ? _commandRecallHistory(tab) : cmdHistory;
+  if (!history.length) return false;
 
   if (delta > 0) {
-    if (_cmdHistoryNavIndex === -1) {
-      _cmdHistoryNavDraft = (typeof getComposerValue === 'function')
+    const currentIndex = tab ? tab.historyNavIndex : _cmdHistoryNavIndex;
+    if (currentIndex === -1) {
+      const draft = (typeof getComposerValue === 'function')
         ? getComposerValue()
         : (cmdInput ? cmdInput.value : '');
-      _cmdHistoryNavIndex = 0;
-    } else if (_cmdHistoryNavIndex < cmdHistory.length - 1) {
-      _cmdHistoryNavIndex++;
+      if (tab) {
+        tab.historyNavDraft = draft;
+        tab.historyNavIndex = 0;
+      } else {
+        _cmdHistoryNavDraft = draft;
+        _cmdHistoryNavIndex = 0;
+      }
+    } else if (currentIndex < history.length - 1) {
+      if (tab) tab.historyNavIndex++;
+      else _cmdHistoryNavIndex++;
     } else {
       return true;
     }
     _suspendCmdHistoryNavReset = true;
-    setComposerValue(cmdHistory[_cmdHistoryNavIndex]);
+    setComposerValue(history[tab ? tab.historyNavIndex : _cmdHistoryNavIndex]);
     return true;
   }
 
   if (delta < 0) {
-    if (_cmdHistoryNavIndex === -1) return false;
-    if (_cmdHistoryNavIndex > 0) {
-      _cmdHistoryNavIndex--;
+    const currentIndex = tab ? tab.historyNavIndex : _cmdHistoryNavIndex;
+    if (currentIndex === -1) return false;
+    if (currentIndex > 0) {
+      if (tab) tab.historyNavIndex--;
+      else _cmdHistoryNavIndex--;
       _suspendCmdHistoryNavReset = true;
-      setComposerValue(cmdHistory[_cmdHistoryNavIndex]);
+      setComposerValue(history[tab ? tab.historyNavIndex : _cmdHistoryNavIndex]);
       return true;
     }
     _suspendCmdHistoryNavReset = true;
-    setComposerValue(_cmdHistoryNavDraft);
+    setComposerValue(tab ? tab.historyNavDraft : _cmdHistoryNavDraft);
     resetCmdHistoryNav();
     return true;
   }
@@ -478,7 +561,12 @@ function navigateCmdHistory(delta) {
 }
 
 function addToHistory(cmd) {
-  cmdHistory = [cmd, ...cmdHistory.filter(c => c !== cmd)].slice(0, APP_CONFIG.recent_commands_limit);
+  const limit = _historyLimit();
+  cmdHistory = [cmd, ...cmdHistory.filter(c => c !== cmd)].slice(0, limit);
+  const tab = _activeTabCommandHistoryState();
+  if (tab) {
+    tab.commandHistory = [cmd, ...tab.commandHistory.filter(c => c !== cmd)].slice(0, limit);
+  }
   resetCmdHistoryNav();
   renderHistory();
 }
@@ -515,7 +603,7 @@ function hydrateCmdHistory(runs) {
 
 function _makeOverflowChip(_count) {
   const chip = document.createElement('button');
-  chip.className = 'hist-chip hist-chip-overflow';
+  chip.className = 'hist-chip hist-chip-overflow chip chip-action';
   chip.textContent = '+ more';
   chip.title = 'Open history panel';
   chip.addEventListener('click', () => {
@@ -593,7 +681,7 @@ function renderHistory() {
   visible.forEach(cmd => {
     const isStarred = starred.has(cmd);
     const chip = document.createElement('button');
-    chip.className = 'hist-chip' + (isStarred ? ' starred' : '');
+    chip.className = 'hist-chip chip chip-action' + (isStarred ? ' starred' : '');
     chip.title = cmd;
 
     const textEl = document.createElement('span');
@@ -642,26 +730,49 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 
 
 function _historyRelativeTime(startedAt, now = new Date()) {
-  if (!(startedAt instanceof Date) || Number.isNaN(startedAt.getTime())) return '';
-  const diffSec = Math.round((now.getTime() - startedAt.getTime()) / 1000);
-  if (diffSec < 45) return 'just now';
-  if (diffSec < 60 * 60) return `${Math.round(diffSec / 60)}m ago`;
-  if (diffSec < 60 * 60 * 24) return `${Math.round(diffSec / 3600)}h ago`;
-  if (diffSec < 60 * 60 * 24 * 7) return `${Math.round(diffSec / 86400)}d ago`;
-  return startedAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return _historyCore.relativeTime(startedAt, now);
 }
 
 function _historyMetaKindBadge(kind, label = kind.toUpperCase()) {
   const badge = document.createElement('span');
-  badge.className = `history-entry-kind history-entry-kind-${kind}`;
+  const tone = kind === 'run' ? 'badge-tone-green' : 'badge-tone-muted';
+  badge.className = `history-entry-kind history-entry-kind-${kind} badge ${tone}`;
   badge.textContent = label;
   return badge;
 }
 
+function _historyExitCodeNumber(exitCode) {
+  return _historyCore.exitCodeNumber(exitCode);
+}
+
+function _historyIsGracefulTerminationExitCode(exitCode) {
+  return _historyCore.isGracefulTerminationExitCode(exitCode);
+}
+
+function _historyIsFailedExitCode(exitCode) {
+  return _historyCore.isFailedExitCode(exitCode);
+}
+
+function _historyExitLabel(exitCode) {
+  return _historyCore.exitLabel(exitCode);
+}
+
+function _historyExitClass(exitCode) {
+  return _historyCore.exitClass(exitCode);
+}
+
+function _historyElapsedSeconds(run) {
+  return _historyCore.elapsedSeconds(run);
+}
+
+function _historyElapsedLabel(run) {
+  return _historyCore.elapsedLabel(run);
+}
+
 function _createHistoryEntry(run, isStarred) {
   const entry = document.createElement('div');
-  entry.className = 'history-entry' + (isStarred ? ' starred' : '');
-  const exitCls = run.exit_code === 0 ? 'exit-ok' : 'exit-fail';
+  entry.className = 'history-entry chrome-row chrome-row-clickable' + (isStarred ? ' starred row-accent-amber' : '');
+  const exitCls = _historyExitClass(run.exit_code);
   const startedAt = new Date(run.started);
   const now = new Date();
   const validDate = !Number.isNaN(startedAt.getTime());
@@ -705,9 +816,16 @@ function _createHistoryEntry(run, isStarred) {
     dateEl.textContent = startedAt.toLocaleDateString();
     meta.appendChild(dateEl);
   }
+  const elapsedLabel = _historyElapsedLabel(run);
+  if (elapsedLabel) {
+    const elapsedEl = document.createElement('span');
+    elapsedEl.className = 'history-entry-elapsed';
+    elapsedEl.textContent = elapsedLabel;
+    meta.appendChild(elapsedEl);
+  }
   const exitEl = document.createElement('span');
   exitEl.className = exitCls;
-  exitEl.textContent = `exit ${run.exit_code}`;
+  exitEl.textContent = _historyExitLabel(run.exit_code);
   meta.appendChild(exitEl);
   entry.appendChild(meta);
 
@@ -715,19 +833,29 @@ function _createHistoryEntry(run, isStarred) {
   actions.className = 'history-actions';
 
   const restoreBtn = document.createElement('button');
-  restoreBtn.className = 'history-action-btn';
+  restoreBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+  restoreBtn.type = 'button';
   restoreBtn.dataset.action = 'restore';
   restoreBtn.textContent = 'restore';
   actions.appendChild(restoreBtn);
 
   const permalinkBtn = document.createElement('button');
-  permalinkBtn.className = 'history-action-btn';
+  permalinkBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+  permalinkBtn.type = 'button';
   permalinkBtn.dataset.action = 'permalink';
   permalinkBtn.textContent = 'permalink';
   actions.appendChild(permalinkBtn);
 
+  const compareBtn = document.createElement('button');
+  compareBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+  compareBtn.type = 'button';
+  compareBtn.dataset.action = 'compare';
+  compareBtn.textContent = 'compare';
+  actions.appendChild(compareBtn);
+
   const deleteBtn = document.createElement('button');
-  deleteBtn.className = 'history-action-btn';
+  deleteBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+  deleteBtn.type = 'button';
   deleteBtn.dataset.action = 'delete';
   deleteBtn.textContent = 'delete';
   actions.appendChild(deleteBtn);
@@ -738,7 +866,7 @@ function _createHistoryEntry(run, isStarred) {
 
 function _createSnapshotHistoryEntry(snapshot) {
   const entry = document.createElement('div');
-  entry.className = 'history-entry history-entry-snapshot';
+  entry.className = 'history-entry history-entry-snapshot chrome-row chrome-row-clickable';
 
   const header = document.createElement('div');
   header.className = 'history-entry-header';
@@ -765,19 +893,22 @@ function _createSnapshotHistoryEntry(snapshot) {
   actions.className = 'history-actions';
 
   const openBtn = document.createElement('button');
-  openBtn.className = 'history-action-btn';
+  openBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+  openBtn.type = 'button';
   openBtn.dataset.action = 'open';
   openBtn.textContent = 'open';
   actions.appendChild(openBtn);
 
   const linkBtn = document.createElement('button');
-  linkBtn.className = 'history-action-btn';
+  linkBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+  linkBtn.type = 'button';
   linkBtn.dataset.action = 'link';
   linkBtn.textContent = 'copy link';
   actions.appendChild(linkBtn);
 
   const deleteBtn = document.createElement('button');
-  deleteBtn.className = 'history-action-btn';
+  deleteBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+  deleteBtn.type = 'button';
   deleteBtn.dataset.action = 'delete';
   deleteBtn.textContent = 'delete';
   actions.appendChild(deleteBtn);
@@ -800,9 +931,671 @@ function openSnapshotLink(snapshot) {
 
 function _historyActionKeepsPanelOpen(action) {
   if (action === 'star') return true;
+  if (action === 'compare') return true;
   const mobileMode = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
   if (!mobileMode) return false;
   return action === 'permalink';
+}
+
+function _compareFormatDate(value) {
+  return _historyCore.compareFormatDate(value);
+}
+
+function _compareDateGroupLabel(value) {
+  return _historyCore.compareDateGroupLabel(value);
+}
+
+function _compareFormatDuration(seconds) {
+  return _historyCore.compareFormatDuration(seconds);
+}
+
+function _compareFormatDelta(value, suffix = '') {
+  return _historyCore.compareFormatDelta(value, suffix);
+}
+
+function _ensureHistoryCompareOverlay() {
+  let overlay = document.getElementById('history-compare-overlay');
+  if (overlay) return overlay;
+
+  overlay = document.createElement('div');
+  overlay.id = 'history-compare-overlay';
+  overlay.className = 'modal-overlay mobile-sheet-overlay u-hidden history-compare-overlay';
+  overlay.innerHTML = `
+    <section id="history-compare-modal" class="history-compare-modal mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="history-compare-title">
+      <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close run comparison"></div>
+      <div class="history-compare-header surface-header">
+        <div>
+          <div id="history-compare-title" class="history-compare-title">COMPARE RUNS</div>
+          <div id="history-compare-subtitle" class="history-compare-subtitle"></div>
+        </div>
+        <button type="button" class="close-btn history-compare-close" aria-label="Close run comparison">✕</button>
+      </div>
+      <div id="history-compare-body" class="history-compare-body surface-body nice-scroll"></div>
+    </section>
+  `;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) closeHistoryCompareOverlay();
+  });
+  overlay.querySelectorAll('.history-compare-close, .sheet-grab').forEach(el => {
+    el.addEventListener('click', () => closeHistoryCompareOverlay());
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        closeHistoryCompareOverlay();
+      }
+    });
+  });
+  if (typeof bindDismissible === 'function') {
+    bindDismissible(overlay, {
+      level: 'modal',
+      isOpen: () => overlay.classList.contains('open'),
+      onClose: closeHistoryCompareOverlay,
+      closeButtons: overlay.querySelectorAll('.history-compare-close, .sheet-grab'),
+    });
+  }
+  return overlay;
+}
+
+function closeHistoryCompareOverlay() {
+  const overlay = document.getElementById('history-compare-overlay');
+  if (!overlay) return;
+  overlay.classList.remove('open');
+  overlay.classList.add('u-hidden');
+  overlay.setAttribute('aria-hidden', 'true');
+  if (typeof refocusComposerAfterAction === 'function') {
+    refocusComposerAfterAction({ preventScroll: true });
+  }
+}
+
+function _openHistoryCompareOverlay() {
+  const overlay = _ensureHistoryCompareOverlay();
+  overlay.classList.remove('u-hidden');
+  overlay.classList.add('open');
+  overlay.setAttribute('aria-hidden', 'false');
+}
+
+function isHistoryCompareOverlayOpen() {
+  const overlay = document.getElementById('history-compare-overlay');
+  return !!(overlay && overlay.classList.contains('open'));
+}
+
+function _historyCompareRunCard(run, label, extra = '') {
+  const card = document.createElement('div');
+  card.className = 'history-compare-run-card';
+  const eyebrow = document.createElement('div');
+  eyebrow.className = 'history-compare-run-eyebrow';
+  eyebrow.textContent = label;
+  card.appendChild(eyebrow);
+  const command = document.createElement('div');
+  command.className = 'history-compare-run-command';
+  command.textContent = run && run.command ? run.command : 'unknown command';
+  card.appendChild(command);
+  const meta = document.createElement('div');
+  meta.className = 'history-compare-run-meta';
+  const parts = [];
+  if (run && run.started) parts.push(_compareFormatDate(run.started));
+  if (run && run.exit_code !== undefined && run.exit_code !== null) parts.push(`exit ${run.exit_code}`);
+  if (run && Number.isFinite(Number(run.output_line_count))) parts.push(`${Number(run.output_line_count).toLocaleString()} lines`);
+  if (extra) parts.push(extra);
+  meta.textContent = parts.join(' · ');
+  card.appendChild(meta);
+  return card;
+}
+
+function _renderHistoryCompareLauncher() {
+  const overlay = _ensureHistoryCompareOverlay();
+  const body = overlay.querySelector('#history-compare-body');
+  const subtitle = overlay.querySelector('#history-compare-subtitle');
+  if (!body) return;
+  body.replaceChildren();
+  const source = _historyCompareState.source;
+  subtitle.textContent = source && source.command ? source.command : 'Choose two completed runs to compare';
+
+  if (!source) {
+    const empty = document.createElement('div');
+    empty.className = 'history-compare-empty';
+    empty.textContent = 'Choose a source run from history first.';
+    body.appendChild(empty);
+    return;
+  }
+
+  const sourceCard = _historyCompareRunCard(source, 'Run A');
+  body.appendChild(sourceCard);
+
+  const suggested = _historyCompareState.selected || _historyCompareState.candidates[0] || null;
+  const suggestedWrap = document.createElement('div');
+  suggestedWrap.className = 'history-compare-section';
+  const suggestedTitle = document.createElement('div');
+  suggestedTitle.className = 'history-compare-section-title';
+  suggestedTitle.textContent = 'Suggested match';
+  suggestedWrap.appendChild(suggestedTitle);
+  if (suggested) {
+    suggestedWrap.appendChild(_historyCompareRunCard(
+      suggested,
+      'Run B',
+      suggested.confidence_label || '',
+    ));
+    const primary = document.createElement('button');
+    primary.type = 'button';
+    primary.className = 'btn btn-primary btn-compact history-compare-primary';
+    primary.textContent = 'Compare with suggested run';
+    primary.addEventListener('click', () => fetchAndRenderHistoryComparison(source.id, suggested.id));
+    suggestedWrap.appendChild(primary);
+  } else {
+    const empty = document.createElement('div');
+    empty.className = 'history-compare-empty';
+    empty.textContent = 'No earlier similar run found. Choose a run manually.';
+    suggestedWrap.appendChild(empty);
+  }
+  body.appendChild(suggestedWrap);
+
+  const manual = document.createElement('div');
+  manual.className = 'history-compare-section';
+  const manualTitle = document.createElement('div');
+  manualTitle.className = 'history-compare-section-title';
+  manualTitle.textContent = 'Choose another run';
+  manual.appendChild(manualTitle);
+  const search = document.createElement('input');
+  search.className = 'form-control history-compare-search';
+  search.type = 'text';
+  search.placeholder = 'search history';
+  search.value = _historyCompareState.manualQuery || '';
+  search.autocomplete = 'off';
+  search.spellcheck = false;
+  search.addEventListener('input', e => {
+    _historyCompareState.manualQuery = e.target.value;
+    _loadHistoryCompareManualCandidates(source, e.target.value);
+  });
+  manual.appendChild(search);
+  const list = document.createElement('div');
+  list.className = 'history-compare-candidate-list';
+  list.dataset.compareCandidateList = '1';
+  manual.appendChild(list);
+  body.appendChild(manual);
+  _renderHistoryCompareCandidateList();
+}
+
+let _historyCompareManualTimer = null;
+
+function _loadHistoryCompareManualCandidates(source, query = '') {
+  if (_historyCompareManualTimer) clearTimeout(_historyCompareManualTimer);
+  _historyCompareState.manualPage = 1;
+  _historyCompareState.manualHasNext = false;
+  _historyCompareState.manualLoading = false;
+  _historyCompareState.manualCollapsedGroups = new Set();
+  const requestId = (_historyCompareState.manualRequestId || 0) + 1;
+  _historyCompareState.manualRequestId = requestId;
+  _historyCompareManualTimer = setTimeout(() => {
+    _historyCompareManualTimer = null;
+    _fetchHistoryCompareManualCandidates(source, query, { requestId, page: 1, append: false });
+  }, 120);
+}
+
+function _fetchHistoryCompareManualCandidates(source, query = '', { requestId = null, page = 1, append = false } = {}) {
+  if (!source || !source.id || _historyCompareState.manualLoading) return;
+  const activeRequestId = requestId || _historyCompareState.manualRequestId || 0;
+  _historyCompareState.manualLoading = true;
+  _renderHistoryCompareCandidateList();
+  const params = new URLSearchParams();
+  params.set('type', 'runs');
+  params.set('page_size', '20');
+  params.set('include_total', '1');
+  params.set('page', String(page));
+  const trimmed = String(query || '').trim();
+  if (trimmed) {
+    params.set('scope', 'command');
+    params.set('q', trimmed);
+  }
+  else if (source && source.command_root) params.set('command_root', source.command_root);
+  apiFetch(`/history?${params.toString()}`)
+    .then(resp => resp.json())
+    .then(data => {
+      if (_historyCompareState.manualRequestId !== activeRequestId) return;
+      const items = Array.isArray(data.items) ? data.items : (Array.isArray(data.runs) ? data.runs : []);
+      const ranked = _historyCompareState.candidates || [];
+      const seenRanked = new Set(ranked.map(item => item.id));
+      const existing = append ? new Set((_historyCompareState.manualCandidates || []).map(item => item.id)) : new Set();
+      const manualItems = items
+        .filter(item => item && item.type !== 'snapshot' && item.id && item.id !== source.id && !existing.has(item.id))
+        .map(item => ({
+          ...item,
+          confidence_label: seenRanked.has(item.id) ? ((ranked.find(candidate => candidate.id === item.id) || {}).confidence_label || '') : '',
+        }));
+      _historyCompareState.manualCandidates = append
+        ? [...(_historyCompareState.manualCandidates || []), ...manualItems]
+        : manualItems;
+      _historyCompareState.manualLoaded = true;
+      _historyCompareState.manualPage = Number(data.page) || page;
+      _historyCompareState.manualHasNext = !!data.has_next;
+      _historyCompareState.manualLoading = false;
+      _renderHistoryCompareCandidateList();
+    })
+    .catch(() => {
+      if (_historyCompareState.manualRequestId === activeRequestId) {
+        _historyCompareState.manualLoading = false;
+        _renderHistoryCompareCandidateList();
+      }
+      showToast('Failed to load comparison choices', 'error');
+    });
+}
+
+function _renderHistoryCompareCandidateList() {
+  const list = document.querySelector('[data-compare-candidate-list="1"]');
+  const source = _historyCompareState.source;
+  if (!list || !source) return;
+  const search = document.querySelector('.history-compare-search');
+  const searchWasFocused = search && document.activeElement === search;
+  list.replaceChildren();
+  const sourceCandidates = _historyCompareState.manualLoaded
+    ? (_historyCompareState.manualCandidates || [])
+    : (_historyCompareState.candidates || []);
+  const candidates = sourceCandidates
+    .filter(item => item && item.id && item.id !== source.id);
+  if (!candidates.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-compare-empty';
+    empty.textContent = _historyCompareState.manualLoading ? 'Loading runs...' : 'No runs found for the current search.';
+    list.appendChild(empty);
+    if (searchWasFocused && typeof search.focus === 'function') {
+      search.focus({ preventScroll: true });
+    }
+    return;
+  }
+  const groups = [];
+  const groupByLabel = new Map();
+  candidates.forEach(candidate => {
+    const groupLabel = _compareDateGroupLabel(candidate.started || candidate.created);
+    let group = groupByLabel.get(groupLabel);
+    if (!group) {
+      group = { label: groupLabel, items: [] };
+      groupByLabel.set(groupLabel, group);
+      groups.push(group);
+    }
+    group.items.push(candidate);
+  });
+  groups.forEach(group => {
+    const collapsed = _historyCompareState.manualCollapsedGroups.has(group.label);
+    const groupEl = document.createElement('div');
+    groupEl.className = 'history-compare-candidate-group';
+
+    const headerBtn = document.createElement('button');
+    headerBtn.type = 'button';
+    headerBtn.className = 'history-compare-candidate-day';
+    headerBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    const icon = document.createElement('span');
+    icon.className = 'history-compare-candidate-day-icon disclosure-chev';
+    icon.textContent = '▸';
+    headerBtn.appendChild(icon);
+    const label = document.createElement('span');
+    label.className = 'history-compare-candidate-day-label';
+    label.textContent = group.label;
+    headerBtn.appendChild(label);
+    const count = document.createElement('span');
+    count.className = 'history-compare-candidate-day-count';
+    count.textContent = String(group.items.length);
+    headerBtn.appendChild(count);
+    groupEl.appendChild(headerBtn);
+
+    const rows = document.createElement('div');
+    rows.className = 'history-compare-candidate-group-rows';
+    rows.hidden = collapsed;
+    group.items.forEach(candidate => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'history-compare-candidate history-entry chrome-row chrome-row-clickable';
+      row.dataset.runId = candidate.id;
+      const rowHeader = document.createElement('span');
+      rowHeader.className = 'history-entry-header';
+      const cmd = document.createElement('span');
+      cmd.className = 'history-entry-cmd history-compare-candidate-command';
+      cmd.textContent = candidate.command || '';
+      rowHeader.appendChild(cmd);
+      row.appendChild(rowHeader);
+      const meta = document.createElement('span');
+      meta.className = 'history-entry-meta history-compare-candidate-meta';
+      meta.textContent = [
+        candidate.confidence_label || '',
+        candidate.started ? _compareFormatDate(candidate.started) : '',
+        candidate.exit_code !== undefined && candidate.exit_code !== null ? `exit ${candidate.exit_code}` : '',
+      ].filter(Boolean).join(' · ');
+      row.appendChild(meta);
+      row.addEventListener('click', () => fetchAndRenderHistoryComparison(source.id, candidate.id));
+      rows.appendChild(row);
+    });
+    headerBtn.addEventListener('click', () => {
+      const nextCollapsed = !rows.hidden;
+      rows.hidden = nextCollapsed;
+      headerBtn.setAttribute('aria-expanded', nextCollapsed ? 'false' : 'true');
+      if (nextCollapsed) _historyCompareState.manualCollapsedGroups.add(group.label);
+      else _historyCompareState.manualCollapsedGroups.delete(group.label);
+    });
+    groupEl.appendChild(rows);
+    list.appendChild(groupEl);
+  });
+  if (_historyCompareState.manualLoaded && (_historyCompareState.manualHasNext || _historyCompareState.manualLoading)) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'btn btn-secondary btn-compact history-compare-load-more';
+    more.disabled = !!_historyCompareState.manualLoading;
+    more.textContent = _historyCompareState.manualLoading ? 'Loading...' : 'Load More';
+    more.addEventListener('click', () => {
+      _fetchHistoryCompareManualCandidates(source, _historyCompareState.manualQuery, {
+        requestId: _historyCompareState.manualRequestId,
+        page: (_historyCompareState.manualPage || 1) + 1,
+        append: true,
+      });
+    });
+    list.appendChild(more);
+  }
+  if (searchWasFocused && typeof search.focus === 'function') {
+    search.focus({ preventScroll: true });
+  }
+}
+
+function openHistoryCompareLauncher(run) {
+  if (!run || !run.id) return;
+  _historyCompareState = {
+    source: {
+      ...run,
+      command_root: (run.command || '').trim().split(/\s+/, 1)[0] || '',
+    },
+    candidates: [],
+    manualCandidates: [],
+    manualLoaded: false,
+    manualRequestId: 0,
+    manualPage: 1,
+    manualHasNext: false,
+    manualLoading: false,
+    manualCollapsedGroups: new Set(),
+    selected: null,
+    manualQuery: '',
+  };
+  _openHistoryCompareOverlay();
+  const body = document.querySelector('#history-compare-body');
+  if (body) {
+    body.replaceChildren();
+    const loading = document.createElement('div');
+    loading.className = 'history-compare-empty';
+    loading.textContent = 'Finding comparable runs...';
+    body.appendChild(loading);
+  }
+  apiFetch(`/history/${encodeURIComponent(run.id)}/compare-candidates`)
+    .then(resp => resp.json())
+    .then(data => {
+      if (data.error) throw new Error(data.error);
+      _historyCompareState.source = data.source || _historyCompareState.source;
+      _historyCompareState.candidates = Array.isArray(data.candidates) ? data.candidates : [];
+      _historyCompareState.selected = data.suggested || _historyCompareState.candidates[0] || null;
+      _renderHistoryCompareLauncher();
+      _loadHistoryCompareManualCandidates(_historyCompareState.source, '');
+    })
+    .catch(() => {
+      _historyCompareState.candidates = [];
+      _historyCompareState.selected = null;
+      _renderHistoryCompareLauncher();
+      showToast('Failed to load comparison choices', 'error');
+    });
+}
+
+function _compareMetricCell(label, value, tone = '') {
+  const cell = document.createElement('div');
+  cell.className = `history-compare-metric${tone ? ` ${tone}` : ''}`;
+  const labelEl = document.createElement('div');
+  labelEl.className = 'history-compare-metric-label';
+  labelEl.textContent = label;
+  const valueEl = document.createElement('div');
+  valueEl.className = 'history-compare-metric-value';
+  valueEl.textContent = value;
+  cell.appendChild(labelEl);
+  cell.appendChild(valueEl);
+  return cell;
+}
+
+function _renderHistoryCompareLines(title, lines, omitted, sign) {
+  const section = document.createElement('details');
+  section.className = 'history-compare-lines';
+  section.open = true;
+  const summary = document.createElement('summary');
+  summary.textContent = `${title} (${lines.length}${omitted ? `+${omitted}` : ''})`;
+  section.appendChild(summary);
+  if (!lines.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-compare-empty';
+    empty.textContent = `No ${title.toLowerCase()}.`;
+    section.appendChild(empty);
+    return section;
+  }
+  const list = document.createElement('div');
+  list.className = 'history-compare-line-list';
+  lines.forEach(line => {
+    const row = document.createElement('div');
+    row.className = 'history-compare-line';
+    const mark = document.createElement('span');
+    mark.className = sign === '+' ? 'history-compare-line-added' : 'history-compare-line-removed';
+    mark.textContent = sign;
+    row.appendChild(mark);
+    const text = document.createElement('code');
+    text.textContent = line.text || '';
+    row.appendChild(text);
+    list.appendChild(row);
+  });
+  section.appendChild(list);
+  if (omitted) {
+    const note = document.createElement('div');
+    note.className = 'history-compare-truncation';
+    note.textContent = `${omitted.toLocaleString()} additional changed line(s) omitted.`;
+    section.appendChild(note);
+  }
+  return section;
+}
+
+function _appendHistoryCompareSegments(parent, segments, fallbackText) {
+  const safeSegments = Array.isArray(segments) ? segments : [];
+  if (!safeSegments.length) {
+    parent.textContent = fallbackText || '';
+    return;
+  }
+  safeSegments.forEach(segment => {
+    const span = document.createElement('span');
+    span.textContent = segment && typeof segment.text === 'string' ? segment.text : '';
+    if (segment && segment.changed) span.className = 'history-compare-line-delta';
+    parent.appendChild(span);
+  });
+}
+
+function _renderHistoryCompareChangedLines(lines) {
+  const section = document.createElement('details');
+  section.className = 'history-compare-lines history-compare-changed-lines';
+  section.open = true;
+  const summary = document.createElement('summary');
+  summary.textContent = `Changed lines (${lines.length})`;
+  section.appendChild(summary);
+  if (!lines.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-compare-empty';
+    empty.textContent = 'No changed lines.';
+    section.appendChild(empty);
+    return section;
+  }
+  const list = document.createElement('div');
+  list.className = 'history-compare-line-list history-compare-changed-list';
+  lines.forEach(line => {
+    const pair = document.createElement('div');
+    pair.className = 'history-compare-changed-pair';
+
+    const removed = line && line.removed ? line.removed : {};
+    const added = line && line.added ? line.added : {};
+    [
+      { label: 'A', cls: 'history-compare-line-removed', line: removed },
+      { label: 'B', cls: 'history-compare-line-added', line: added },
+    ].forEach(item => {
+      const row = document.createElement('div');
+      row.className = 'history-compare-line';
+      const mark = document.createElement('span');
+      mark.className = item.cls;
+      mark.textContent = item.label;
+      row.appendChild(mark);
+      const text = document.createElement('code');
+      _appendHistoryCompareSegments(text, item.line.segments, item.line.text || '');
+      row.appendChild(text);
+      pair.appendChild(row);
+    });
+
+    list.appendChild(pair);
+  });
+  section.appendChild(list);
+  return section;
+}
+
+function _historyCompareHasTabCapacity(count) {
+  const maxTabs = Number((typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.max_tabs) || 0);
+  if (!maxTabs || maxTabs <= 0 || typeof tabs === 'undefined' || !Array.isArray(tabs)) return true;
+  return tabs.length + Number(count || 0) <= maxTabs;
+}
+
+function _restoreBothHistoryCompareRuns(left, right) {
+  if (!left || !right) return Promise.reject(new Error('missing comparison runs'));
+  if (!_historyCompareHasTabCapacity(2)) {
+    showToast('Not enough tab capacity to restore both runs', 'error');
+    return Promise.reject(new Error('not enough tab capacity'));
+  }
+  const leftTabId = createTab(`A: ${left.command || 'run'}`);
+  if (!leftTabId) return Promise.reject(new Error('failed to create Run A tab'));
+  const rightTabId = createTab(`B: ${right.command || 'run'}`);
+  if (!rightTabId) return Promise.reject(new Error('failed to create Run B tab'));
+  return Promise.all([
+    restoreHistoryRunIntoTab(left, { targetTabId: leftTabId, hidePanelOnSuccess: false }),
+    restoreHistoryRunIntoTab(right, { targetTabId: rightTabId, hidePanelOnSuccess: false }),
+  ]).then(() => {
+    if (typeof activateTab === 'function') activateTab(rightTabId, { focusComposer: false });
+    return [leftTabId, rightTabId];
+  });
+}
+
+function _renderHistoryComparison(data) {
+  const overlay = _ensureHistoryCompareOverlay();
+  const body = overlay.querySelector('#history-compare-body');
+  const subtitle = overlay.querySelector('#history-compare-subtitle');
+  if (!body) return;
+  body.replaceChildren();
+  subtitle.textContent = 'Changed output only';
+
+  const runs = document.createElement('div');
+  runs.className = 'history-compare-run-grid';
+  runs.appendChild(_historyCompareRunCard(data.left, 'Run A'));
+  runs.appendChild(_historyCompareRunCard(data.right, 'Run B'));
+  body.appendChild(runs);
+
+  const deltas = data.deltas || {};
+  const metrics = document.createElement('div');
+  metrics.className = 'history-compare-metrics';
+  metrics.appendChild(_compareMetricCell('Exit', deltas.exit_code_changed ? `${deltas.exit_code.left} -> ${deltas.exit_code.right}` : `unchanged · ${deltas.exit_code?.right ?? 'n/a'}`, deltas.exit_code_changed ? 'is-changed' : ''));
+  metrics.appendChild(_compareMetricCell('Duration', _compareFormatDelta((deltas.duration_seconds && deltas.duration_seconds.delta) || 0, 's')));
+  metrics.appendChild(_compareMetricCell('Lines', _compareFormatDelta((deltas.output_lines && deltas.output_lines.delta) || 0)));
+  metrics.appendChild(_compareMetricCell('Findings', _compareFormatDelta((deltas.findings && deltas.findings.delta) || 0)));
+  body.appendChild(metrics);
+
+  if (data.truncated && (data.truncated.left || data.truncated.right || data.truncated.changed_lines)) {
+    const note = document.createElement('div');
+    note.className = 'history-compare-truncation';
+    note.textContent = 'Comparison is partial because one or both outputs were truncated or the changed-line list hit its display limit.';
+    body.appendChild(note);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'history-compare-actions';
+  const restoreA = document.createElement('button');
+  restoreA.type = 'button';
+  restoreA.className = 'btn btn-secondary btn-compact';
+  restoreA.textContent = 'Restore A';
+  restoreA.addEventListener('click', () => restoreHistoryRunIntoTab(data.left, { hidePanelOnSuccess: false }).then(() => closeHistoryCompareOverlay()).catch(() => showToast('Failed to restore run', 'error')));
+  actions.appendChild(restoreA);
+  const restoreB = document.createElement('button');
+  restoreB.type = 'button';
+  restoreB.className = 'btn btn-secondary btn-compact';
+  restoreB.textContent = 'Restore B';
+  restoreB.addEventListener('click', () => restoreHistoryRunIntoTab(data.right, { hidePanelOnSuccess: false }).then(() => closeHistoryCompareOverlay()).catch(() => showToast('Failed to restore run', 'error')));
+  actions.appendChild(restoreB);
+  const restoreBoth = document.createElement('button');
+  restoreBoth.type = 'button';
+  restoreBoth.className = 'btn btn-secondary btn-compact';
+  restoreBoth.textContent = 'Restore Both';
+  restoreBoth.addEventListener('click', () => {
+    restoreBoth.disabled = true;
+    _restoreBothHistoryCompareRuns(data.left, data.right)
+      .then(() => closeHistoryCompareOverlay())
+      .catch(err => {
+        restoreBoth.disabled = false;
+        if (err && err.message === 'not enough tab capacity') return;
+        showToast('Failed to restore both runs', 'error');
+      });
+  });
+  actions.appendChild(restoreBoth);
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'btn btn-secondary btn-compact';
+  copy.textContent = 'Copy summary';
+  copy.addEventListener('click', () => {
+    const summary = [
+      `Compare: ${data.left.command} -> ${data.right.command}`,
+      `Exit: ${deltas.exit_code?.left ?? 'n/a'} -> ${deltas.exit_code?.right ?? 'n/a'}`,
+      `Lines: ${_compareFormatDelta(deltas.output_lines?.delta || 0)}`,
+      `Findings: ${_compareFormatDelta(deltas.findings?.delta || 0)}`,
+      `Changed: ${(data.sections?.changed || []).length}`,
+      `Added: ${(data.sections?.added || []).length}`,
+      `Removed: ${(data.sections?.removed || []).length}`,
+    ].join('\n');
+    copyTextToClipboard(summary)
+      .then(() => showToast('Comparison summary copied'))
+      .catch(() => showToast('Failed to copy summary', 'error'));
+  });
+  actions.appendChild(copy);
+  body.appendChild(actions);
+
+  const sections = data.sections || {};
+  const changedLines = sections.changed || [];
+  const addedLines = sections.added || [];
+  const removedLines = sections.removed || [];
+  const addedOmitted = sections.added_omitted || 0;
+  const removedOmitted = sections.removed_omitted || 0;
+  if (changedLines.length) {
+    body.appendChild(_renderHistoryCompareChangedLines(changedLines));
+  }
+  if (addedLines.length || addedOmitted) {
+    body.appendChild(_renderHistoryCompareLines('Added lines', addedLines, addedOmitted, '+'));
+  }
+  if (removedLines.length || removedOmitted) {
+    body.appendChild(_renderHistoryCompareLines('Removed lines', removedLines, removedOmitted, '-'));
+  }
+  if (!changedLines.length && !addedLines.length && !removedLines.length && !addedOmitted && !removedOmitted) {
+    const empty = document.createElement('div');
+    empty.className = 'history-compare-empty';
+    empty.textContent = 'No changed output.';
+    body.appendChild(empty);
+  }
+}
+
+function fetchAndRenderHistoryComparison(leftId, rightId) {
+  if (!leftId || !rightId) return;
+  const body = document.querySelector('#history-compare-body');
+  if (body) {
+    body.replaceChildren();
+    const loading = document.createElement('div');
+    loading.className = 'history-compare-empty';
+    loading.textContent = 'Comparing runs...';
+    body.appendChild(loading);
+  }
+  apiFetch(`/history/compare?left=${encodeURIComponent(leftId)}&right=${encodeURIComponent(rightId)}`)
+    .then(resp => resp.json())
+    .then(data => {
+      if (data.error) throw new Error(data.error);
+      _renderHistoryComparison(data);
+    })
+    .catch(() => {
+      _renderHistoryCompareLauncher();
+      showToast('Failed to compare runs', 'error');
+    });
 }
 
 
@@ -821,11 +1614,11 @@ function confirmHistAction(type, id, command, itemType = 'run') {
     ? [
         { id: 'cancel', label: 'Cancel', role: 'cancel' },
         { id: 'nonfav', label: 'Delete Non-Favorites', role: 'secondary', tone: 'warning' },
-        { id: 'all',    label: 'Delete all', role: 'primary', tone: 'warning' },
+        { id: 'all',    label: 'Delete all', role: 'destructive', tone: 'warning' },
       ]
     : [
         { id: 'cancel', label: 'Cancel', role: 'cancel' },
-        { id: 'one',    label: 'Delete', role: 'primary', tone: 'warning' },
+        { id: 'one',    label: 'Delete', role: 'destructive', tone: 'warning' },
       ];
   showConfirm({ body, tone: 'warning', actions }).then((choice) => {
     if (!choice || choice === 'cancel') {
@@ -928,11 +1721,12 @@ function restoreHistoryRunIntoTab(run, { targetTabId = null, hidePanelOnSuccess 
         t.reconnectedRun = false;
       }
       _appendHistoryCommandEcho(tabId, fullRun.command);
-      (fullRun.output || []).forEach(line => appendLine(line, '', tabId));
+      const outputLines = Array.isArray(fullRun.output_entries) ? fullRun.output_entries : (fullRun.output || []);
+      outputLines.forEach(line => _appendHistoryOutputLine(line, tabId));
       if (previewNotice) appendLine(previewNotice, 'notice', tabId);
       appendLine(
-        `[history — exit ${fullRun.exit_code}]`,
-        fullRun.exit_code === 0 ? 'exit-ok' : 'exit-fail',
+        `[history — ${_historyExitLabel(fullRun.exit_code)}]`,
+        _historyExitClass(fullRun.exit_code),
         tabId
       );
       if (typeof setTabStatus === 'function') {
@@ -943,6 +1737,19 @@ function restoreHistoryRunIntoTab(run, { targetTabId = null, hidePanelOnSuccess 
       return tabId;
     });
 }
+
+function restoreHistoryRun(runOrId, options = {}) {
+  const run = typeof runOrId === 'object' && runOrId !== null
+    ? runOrId
+    : { id: String(runOrId || ''), full_output_available: true };
+  return restoreHistoryRunIntoTab(run, {
+    hidePanelOnSuccess: false,
+    ...options,
+  });
+}
+
+window.openHistoryWithFilters = openHistoryWithFilters;
+window.restoreHistoryRun = restoreHistoryRun;
 
 function refreshHistoryPanel() {
   // The panel is populated on demand so we always fetch the latest persisted
@@ -1069,6 +1876,13 @@ function refreshHistoryPanel() {
           if (!_historyActionKeepsPanelOpen('permalink')) hideHistoryPanel();
         },
       });
+      bindPressable(entry.querySelector('[data-action="compare"]'), {
+        refocusComposer: false,
+        onActivate: () => {
+          openHistoryCompareLauncher(run);
+          if (!_historyActionKeepsPanelOpen('compare')) hideHistoryPanel();
+        },
+      });
       bindPressable(entry.querySelector('[data-action="delete"]'), {
         onActivate: () => {
           confirmHistAction('delete', run.id, run.command);
@@ -1115,11 +1929,15 @@ if (typeof historyRootInput !== 'undefined' && historyRootInput) {
     _setHistoryFilter('commandRoot', e.target.value, { debounce: true });
   });
   historyRootInput.addEventListener('focus', () => {
+    _historyRootInputFocused = true;
     _historyRootIndex = -1;
     _historyRefreshRootDropdown();
   });
   historyRootInput.addEventListener('blur', () => {
-    setTimeout(() => _hideHistoryRootDropdown(), 0);
+    setTimeout(() => {
+      _historyRootInputFocused = false;
+      _hideHistoryRootDropdown();
+    }, 0);
   });
   historyRootInput.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
@@ -1268,7 +2086,8 @@ function _renderHistSearch() {
   } else {
     matches.forEach((cmd, i) => {
       const item = document.createElement('div');
-      item.className = 'hist-search-item' + (i === _histSearchIndex ? ' active' : '');
+      item.className = 'hist-search-item dropdown-item dropdown-item-compact'
+        + (i === _histSearchIndex ? ' active dropdown-item-active' : '');
       if (_histSearchQuery) {
         const lower = cmd.toLowerCase();
         const qi = lower.indexOf(_histSearchQuery.toLowerCase());

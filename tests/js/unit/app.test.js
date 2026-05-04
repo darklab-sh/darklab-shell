@@ -1,654 +1,207 @@
-import { readFileSync } from 'fs'
+import { readFileSync, readdirSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
-import { MemoryStorage, fromDomScripts } from './helpers/extract.js'
+import yaml from 'js-yaml'
+import { loadAppFns } from './helpers/app_harness.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
+const THEME_META_KEYS = new Set(['label', 'group', 'sort'])
+const THEME_BASE_KEYS = new Set([
+  'bg',
+  'surface',
+  'border',
+  'border_bright',
+  'border_soft',
+  'text',
+  'muted',
+  'green',
+  'green_dim',
+  'green_glow',
+  'amber',
+  'red',
+  'blue',
+  'terminal_font_size',
+  'terminal_line_height',
+])
 
-// This harness recreates the browser-global environment expected by the classic
-// script bundle so app.js can be tested without loading the full page.
-async function loadAppFns({
-  theme = null,
-  themeRegistry = null,
-  cookies = {},
-  apiFetch: apiFetchOverride = null,
-  showConfirm: showConfirmOverride = null,
-  doKill: doKillOverride = vi.fn(),
-  pendingKillTabId = null,
-  requestWelcomeSettle: requestWelcomeSettleOverride = vi.fn(),
-  tabs: tabsOverride = [],
-  confirmKill: confirmKillOverride = vi.fn(),
-  interruptPromptLine: interruptPromptLineOverride = vi.fn(),
-  welcomeActive = false,
-  welcomeOwnsTab: welcomeOwnsTabOverride = () => false,
-  runCommand: runCommandOverride = vi.fn(),
-  submitComposerCommand: submitComposerCommandOverride = vi.fn(),
-  submitVisibleComposerCommand: submitVisibleComposerCommandOverride = vi.fn(),
-  createTab: createTabOverride = vi.fn(() => 'tab-1'),
-  closeTab: closeTabOverride = vi.fn(),
-  activateTab: activateTabOverride = vi.fn(),
-  permalinkTab: permalinkTabOverride = vi.fn(),
-  copyTab: copyTabOverride = vi.fn(),
-  clearTab: clearTabOverride = vi.fn(),
-  cancelWelcome: cancelWelcomeOverride = vi.fn(),
-  navigateCmdHistory: navigateCmdHistoryOverride = vi.fn(() => false),
-  enterHistSearch: enterHistSearchOverride = vi.fn(),
-  activeTabId = 'tab-1',
-  acFiltered: acFilteredOverride = [],
-  acSuggestions: acSuggestionsOverride = [],
-  acContextRegistry: acContextRegistryOverride = {},
-  getAutocompleteMatches: getAutocompleteMatchesOverride = null,
-  acIndex: acIndexOverride = -1,
-  acShow: acShowOverride = () => {},
-  acHide: acHideOverride = () => {},
-  acExpandSharedPrefix: acExpandSharedPrefixOverride = () => false,
-  getOutput: getOutputOverride = null,
-  mobileViewport = null,
-  mobileTouch = true,
-  Notification: NotificationOverride = undefined,
-  showToast: showToastOverride = vi.fn(),
-  updateSessionId: updateSessionIdOverride = vi.fn(),
-  copyTextToClipboard: copyTextToClipboardOverride = vi.fn(() => Promise.resolve()),
-  reloadSessionHistory: reloadSessionHistoryOverride = vi.fn(() => Promise.resolve()),
-  seedLocalStorageStarsToServer: seedLocalStorageStarsToServerOverride = vi.fn(() => Promise.resolve()),
-  hydrateCmdHistory: hydrateCmdHistoryOverride = vi.fn(),
-  hasPendingTerminalConfirm: hasPendingTerminalConfirmOverride = vi.fn(() => false),
-  cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride = vi.fn(() => false),
-  sessionId = 'session-old',
-} = {}) {
-  document.body.className = ''
-  document.body.innerHTML = `
-    <header><h1></h1></header>
-    <button id="ts-btn"></button>
-    <button id="theme-btn"></button>
-    <button id="options-btn"></button>
-    <button id="faq-btn"></button>
-    <button id="hamburger-btn"></button>
-    <button id="new-tab-btn"></button>
-    <button id="search-toggle-btn"></button>
-    <button id="hist-btn"></button>
-    <button id="ln-btn"></button>
-    <button id="history-close"></button>
-    <button id="hist-clear-all-btn"></button>
-    <nav class="rail-nav" id="rail-nav">
-      <button class="rail-nav-item" data-action="options" type="button"></button>
-      <button class="rail-nav-item" data-action="history" type="button"></button>
-      <button class="rail-nav-item" data-action="theme" type="button"></button>
-      <button class="rail-nav-item" data-action="faq" type="button"></button>
-      <a class="rail-nav-item u-hidden" data-action="diag" id="rail-diag-btn" href="/diag"></a>
-    </nav>
-    <div id="mobile-shell" aria-hidden="true">
-      <div id="mobile-shell-chrome"></div>
-      <div id="mobile-shell-transcript"></div>
-      <div id="mobile-shell-composer">
-        <div id="mobile-composer-host">
-          <div id="mobile-edit-bar">
-            <button data-edit-action="home"></button>
-            <button data-edit-action="word-left"></button>
-            <button data-edit-action="left"></button>
-            <button data-edit-action="delete-word"></button>
-            <button data-edit-action="end"></button>
-            <button data-edit-action="word-right"></button>
-            <button data-edit-action="right"></button>
-            <button data-edit-action="delete-line"></button>
-          </div>
-          <div id="mobile-composer-row">
-            <span class="mobile-prompt-label">$</span>
-            <input id="mobile-cmd" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" />
-            <button id="mobile-run-btn"></button>
-          </div>
-        </div>
-      </div>
-      <div id="mobile-shell-overlays">
-        <div id="mobile-menu-sheet" class="menu-sheet u-hidden">
-          <button data-menu-action="ln"></button>
-          <button data-menu-action="ts-toggle" aria-expanded="false" aria-controls="mobile-menu-ts-submenu"></button>
-          <div id="mobile-menu-ts-submenu" class="menu-submenu u-hidden">
-            <button data-menu-action="ts-set" data-ts-mode="off"></button>
-            <button data-menu-action="ts-set" data-ts-mode="elapsed"></button>
-            <button data-menu-action="ts-set" data-ts-mode="clock"></button>
-          </div>
-          <button data-menu-action="search"></button>
-          <button data-menu-action="clear"></button>
-          <button data-menu-action="history"></button>
-          <button data-menu-action="options"></button>
-          <button data-menu-action="theme"></button>
-          <button data-menu-action="faq"></button>
-        </div>
-      </div>
-    </div>
-    <div class="terminal-wrap">
-      <div id="history-row" class="history-row" style="display:none">
-        <span class="history-label">Recent:</span>
-      </div>
-      <div class="terminal-bar">
-        <span class="dot dot-r"></span>
-        <span class="dot dot-y"></span>
-        <span class="dot dot-g"></span>
-        <button id="tabs-scroll-left"></button>
-        <div class="tabs-bar" id="tabs-bar"></div>
-        <button id="tabs-scroll-right"></button>
-        <div class="terminal-bar-btns"></div>
-        <span id="status"></span>
-        <span id="run-timer"></span>
-      </div>
-      <div id="shell-prompt-wrap" class="prompt-wrap shell-prompt-wrap">
-        <span class="prompt-prefix" data-mobile-label="$">anon@darklab:~$</span>
-        <div id="shell-prompt-line">
-          <span id="shell-prompt-text" class="shell-prompt-text"></span>
-          <span id="shell-prompt-caret"></span>
-          <span id="shell-prompt-ghost" class="shell-prompt-ghost"></span>
-        </div>
-        <div id="ac-dropdown" style="display:none"></div>
-        <button id="run-btn" aria-label="Run command">Run</button>
-      </div>
-      <div class="search-bar" id="search-bar" style="display:none">
-        <input id="search-input" type="text" placeholder="Search output…" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search output">
-        <div class="search-toggles">
-          <button id="search-case-btn"></button>
-          <button id="search-regex-btn"></button>
-        </div>
-        <span class="search-count" id="search-count"></span>
-        <div class="search-nav">
-          <button id="search-prev"></button>
-          <button id="search-next"></button>
-        </div>
-        <button id="search-close-btn"></button>
-      </div>
-      <div id="tab-panels"></div>
-    <div id="faq-limits-text"></div>
-    <div id="faq-allowed-text"></div>
-    <div id="faq-overlay"></div>
-    <button class="faq-close"></button>
-    <div class="faq-body"></div>
-    <div id="theme-overlay"></div>
-    <button class="theme-close"></button>
-    <div id="theme-modal"></div>
-    <div id="theme-select" tabindex="-1"></div>
-    <div id="options-overlay"></div>
-    <button class="options-close"></button>
-    <div id="options-modal"></div>
-    <span id="options-session-token-status"></span>
-    <button id="options-session-token-generate-btn"></button>
-    <button id="options-session-token-set-btn"></button>
-    <button id="options-session-token-rotate-btn"></button>
-    <button id="options-session-token-clear-btn"></button>
-    <button id="options-session-token-copy-btn"></button>
-    <div id="options-session-token-msg"></div>
-    <div id="workflows-overlay"></div>
-    <button id="workflows-btn"></button>
-    <button class="workflows-close"></button>
-    <select id="options-ts-select">
-      <option value="off">off</option>
-      <option value="elapsed">elapsed</option>
-      <option value="clock">clock</option>
-      </select>
-      <input id="options-ln-toggle" type="checkbox" />
-      <select id="options-welcome-select">
-        <option value="animated">animated</option>
-        <option value="disable_animation">disable_animation</option>
-        <option value="remove">remove</option>
-      </select>
-      <select id="options-share-redaction-select">
-        <option value="unset">unset</option>
-        <option value="redacted">redacted</option>
-        <option value="raw">raw</option>
-      </select>
-      <input id="options-notify-toggle" type="checkbox" />
-      <select id="options-hud-clock-select">
-        <option value="utc">utc</option>
-        <option value="local">local</option>
-      </select>
-      <div id="shell-input-row" data-mobile-label="$">
-        <input id="cmd" />
-      </div>
-      <div id="history-panel"></div>
-      <div id="history-list"></div>
-      <div id="permalink-toast"></div>
-      <div class="prompt-wrap"></div>
-    </div>
-  `
-
-  const storage = new MemoryStorage()
-  const sessionStore = new MemoryStorage()
-  const tabsState = tabsOverride
-  let activeTabState = activeTabId
-  if (theme !== null) storage.setItem('theme', theme)
-  for (const [name, value] of Object.entries(cookies)) {
-    document.cookie = `${name}=${encodeURIComponent(value)}; path=/`
+function builtInAutocompleteBase() {
+  const hint = (value, description = '', insertValue = undefined) => {
+    const item = { value, description }
+    if (insertValue !== undefined) item.insertValue = insertValue
+    return item
   }
-
-  const apiFetch =
-    apiFetchOverride ||
-    vi.fn((url) => {
-      if (url === '/config') {
-        return Promise.resolve({
-          json: () =>
-            Promise.resolve({
-              app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
-              version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
-              default_theme: 'darklab_obsidian.yaml',
-              share_redaction_enabled: true,
-              share_redaction_rules: [],
-              motd: '',
-              command_timeout_seconds: 0,
-              max_output_lines: 0,
-              permalink_retention_days: 0,
-            }),
-        })
-      }
-      if (url === '/allowed-commands') {
-        return Promise.resolve({
-          json: () => Promise.resolve({ restricted: false, commands: [], groups: [] }),
-        })
-      }
-      if (url === '/faq') {
-        return Promise.resolve({ json: () => Promise.resolve({ items: [] }) })
-      }
-      return Promise.resolve({ json: () => Promise.resolve({}) })
-    })
-
-  const runSearch = vi.fn()
-  const clearSearch = vi.fn()
-  const navigateSearch = vi.fn()
-  const logClientError = vi.fn()
-  const appendLine = vi.fn()
-  const appendCommandEcho = vi.fn()
-  const setStatus = vi.fn()
-  const recordSuccessfulLocalCommand = vi.fn()
-  const getTab = vi.fn((id) => tabsState.find((tab) => tab && tab.id === id) || null)
-  const getActiveTab = vi.fn(
-    () => tabsState.find((tab) => tab && tab.id === activeTabState) || null,
-  )
-  const setTabs = vi.fn((nextTabs) => {
-    tabsState.splice(0, tabsState.length, ...nextTabs)
+  const emptyBuiltIn = description => ({
+    description,
+    flags: [],
+    expects_value: [],
+    arg_hints: { __positional__: [] },
+    sequence_arg_hints: {},
+    close_after: {},
+    examples: [],
+    subcommands: {},
+    argument_limit: null,
   })
-  const setActiveTabId = vi.fn((id) => {
-    activeTabState = id
-  })
-  const cmdInput = document.getElementById('cmd')
-  const acDropdown = document.getElementById('ac-dropdown')
-  const domBindings = {
-    hamburgerBtn: document.getElementById('hamburger-btn'),
-    faqBtn: document.getElementById('faq-btn'),
-    faqCloseBtn: document.querySelector('.faq-close'),
-    optionsBtn: document.getElementById('options-btn'),
-    optionsCloseBtn: document.querySelector('.options-close'),
-    themeCloseBtn: document.querySelector('.theme-close'),
-    newTabBtn: document.getElementById('new-tab-btn'),
-    searchToggleBtn: document.getElementById('search-toggle-btn'),
-    histBtn: document.getElementById('hist-btn'),
-    historyCloseBtn: document.getElementById('history-close'),
-    histClearAllBtn: document.getElementById('hist-clear-all-btn'),
-    searchPrevBtn: document.getElementById('search-prev'),
-    searchNextBtn: document.getElementById('search-next'),
-    searchCloseBtn: document.getElementById('search-close-btn'),
-    optionsTsSelect: document.getElementById('options-ts-select'),
-    optionsLnToggle: document.getElementById('options-ln-toggle'),
-    optionsWelcomeSelect: document.getElementById('options-welcome-select'),
-    optionsShareRedactionSelect: document.getElementById('options-share-redaction-select'),
-    optionsNotifyToggle: document.getElementById('options-notify-toggle'),
-    optionsHudClockSelect: document.getElementById('options-hud-clock-select'),
-    themeSelect: document.getElementById('theme-select'),
-    tsBtn: document.getElementById('ts-btn'),
-    lnBtn: document.getElementById('ln-btn'),
-    themeBtn: document.getElementById('theme-btn'),
-    headerTitle: document.querySelector('header h1'),
-    faqBody: document.querySelector('.faq-body'),
-    faqLimitsText: document.getElementById('faq-limits-text'),
-    faqAllowedText: document.getElementById('faq-allowed-text'),
-    status: document.getElementById('status'),
-    histRow: document.getElementById('history-row'),
-    tabsBar: document.getElementById('tabs-bar'),
-    tabPanels: document.getElementById('tab-panels'),
-    themeOverlay: document.getElementById('theme-overlay'),
-    mobileShell: document.getElementById('mobile-shell'),
-    mobileShellChrome: document.getElementById('mobile-shell-chrome'),
-    mobileShellTranscript: document.getElementById('mobile-shell-transcript'),
-    mobileShellComposer: document.getElementById('mobile-shell-composer'),
-    mobileShellOverlays: document.getElementById('mobile-shell-overlays'),
-    mobileComposerHost: document.getElementById('mobile-composer-host'),
-    mobileComposerRow: document.getElementById('mobile-composer-row'),
-    mobileEditBar: document.getElementById('mobile-edit-bar'),
-    mobileCmdInput: document.getElementById('mobile-cmd'),
-    mobileRunBtn: document.getElementById('mobile-run-btn'),
-    mobileMenu: document.getElementById('mobile-menu-sheet'),
-    searchBar: document.getElementById('search-bar'),
-    searchInput: document.getElementById('search-input'),
-    searchCount: document.getElementById('search-count'),
-    historyPanel: document.getElementById('history-panel'),
-    historyList: document.getElementById('history-list'),
-    historyLoadOverlay: document.getElementById('history-load-overlay'),
-    acDropdown,
-    themeCloseBtn: document.querySelector('.theme-close'),
-    faqOverlay: document.getElementById('faq-overlay'),
-    optionsOverlay: document.getElementById('options-overlay'),
-    workflowsOverlay: document.getElementById('workflows-overlay'),
-    workflowsBtn: document.getElementById('workflows-btn'),
-    workflowsCloseBtn: document.querySelector('.workflows-close'),
-    permalinkToast: document.getElementById('permalink-toast'),
-    runTimer: document.getElementById('run-timer'),
-    searchCaseBtn: document.getElementById('search-case-btn'),
-    searchRegexBtn: document.getElementById('search-regex-btn'),
-    shellPromptWrap: document.getElementById('shell-prompt-wrap'),
-    shellPromptLine: document.getElementById('shell-prompt-line'),
-    shellPromptText: document.getElementById('shell-prompt-text'),
-    shellPromptCaret: document.getElementById('shell-prompt-caret'),
-    shellInputRow: document.getElementById('shell-input-row'),
-    runBtn: document.getElementById('run-btn'),
-  }
-  cmdInput.focus = vi.fn()
-  cmdInput.blur = vi.fn()
-  const shellPromptWrapEl = document.getElementById('shell-prompt-wrap')
-  shellPromptWrapEl.scrollIntoView = vi.fn()
-  const mobileComposerHostEl = document.getElementById('mobile-composer-host')
-  mobileComposerHostEl.scrollIntoView = vi.fn()
-  const mobileCmdInput = document.getElementById('mobile-cmd')
-  cmdInput.focus = vi.fn()
-  mobileCmdInput.focus = vi.fn()
-  mobileCmdInput.blur = vi.fn()
-
-  const originalMatchMedia = window.matchMedia
-  const originalVisualViewport = window.visualViewport
-  const originalScrollTo = window.scrollTo
-  const originalMaxTouchPoints = navigator.maxTouchPoints
-  window.scrollTo = vi.fn()
-  if (mobileViewport) {
-    const matchMediaMock = vi.fn((query) => {
-      const q = String(query || '')
-      const maxWidth = /max-width:\s*900px/.test(q)
-      const coarse = /pointer:\s*coarse/.test(q)
-      return {
-        matches: mobileTouch ? maxWidth || coarse : maxWidth,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      }
-    })
-    Object.defineProperty(window, 'matchMedia', {
-      configurable: true,
-      value: matchMediaMock,
-    })
-    if (mobileTouch) {
-      Object.defineProperty(window.navigator, 'maxTouchPoints', {
-        configurable: true,
-        value: 5,
-      })
-    } else {
-      Object.defineProperty(window.navigator, 'maxTouchPoints', {
-        configurable: true,
-        value: 0,
-      })
-    }
-    Object.defineProperty(window, 'visualViewport', {
-      configurable: true,
-      value: {
-        height: mobileViewport.height,
-        offsetTop: mobileViewport.offsetTop ?? 0,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      },
-    })
-  }
-
-  if (themeRegistry !== null) window.ThemeRegistry = themeRegistry
-  else delete window.ThemeRegistry
-
-  class FakeAnsiUp {
-    constructor() {
-      this.use_classes = false
-    }
-
-    ansi_to_html(text) {
-      return text
-    }
-  }
-
-  const fns = fromDomScripts(
-    ['app/static/js/output.js', 'app/static/js/app.js', 'app/static/js/controller.js'],
-    {
-      document,
-      localStorage: storage,
-      sessionStorage: sessionStore,
-      apiFetch,
-      APP_CONFIG: {},
-      AnsiUp: FakeAnsiUp,
-      showConfirm: showConfirmOverride || vi.fn(() => Promise.resolve(null)),
-      isConfirmOpen: vi.fn(() => false),
-      cancelConfirm: vi.fn(),
-      ThemeRegistry: themeRegistry,
-      SESSION_ID: sessionId,
-      updateSessionId: updateSessionIdOverride,
-      copyTextToClipboard: copyTextToClipboardOverride,
-      reloadSessionHistory: reloadSessionHistoryOverride,
-      _seedLocalStorageStarsToServer: seedLocalStorageStarsToServerOverride,
-      hasPendingTerminalConfirm: hasPendingTerminalConfirmOverride,
-      cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride,
-      ...domBindings,
-      getOutput: getOutputOverride || (() => document.getElementById('history-list')),
-      renderMotd: (text) => text,
-      updateNewTabBtn: () => {},
-      createTab: createTabOverride,
-      runWelcome: () => {},
-      cmdInput,
-      runBtn: document.getElementById('run-btn'),
-      shellInputRow: document.getElementById('shell-input-row'),
-      searchBar: document.getElementById('search-bar'),
-      searchInput: document.getElementById('search-input'),
-      searchCaseBtn: document.getElementById('search-case-btn'),
-      searchRegexBtn: document.getElementById('search-regex-btn'),
-      historyPanel: document.getElementById('history-panel'),
-      runSearch,
-      clearSearch,
-      refreshHistoryPanel: () => {},
-      navigateSearch,
-      searchCaseSensitive: false,
-      searchRegexMode: false,
-      confirmHistAction: vi.fn(),
-      executeHistAction: vi.fn(),
-      pendingHistAction: null,
-      pendingKillTabId,
-      acHide: acHideOverride,
-      acSuggestions: acSuggestionsOverride,
-      acContextRegistry: acContextRegistryOverride,
-      getAutocompleteMatches: getAutocompleteMatchesOverride,
-      acFiltered: acFilteredOverride,
-      acIndex: acIndexOverride,
-      acShow: acShowOverride,
-      acAccept: () => {},
-      acExpandSharedPrefix: acExpandSharedPrefixOverride,
-      resetCmdHistoryNav: () => {},
-      navigateCmdHistory: navigateCmdHistoryOverride,
-      setupTabScrollControls: () => {},
-      hydrateCmdHistory: hydrateCmdHistoryOverride,
-      mountShellPrompt: () => {},
-      unmountShellPrompt: () => {},
-      logClientError,
-      appendLine,
-      appendCommandEcho,
-      setStatus,
-      _recordSuccessfulLocalCommand: recordSuccessfulLocalCommand,
-      tabs: tabsState,
-      activeTabId: activeTabState,
-      getTab,
-      getActiveTab,
-      setTabs,
-      setActiveTabId,
-      confirmKill: confirmKillOverride,
-      closeTab: closeTabOverride,
-      activateTab: activateTabOverride,
-      permalinkTab: permalinkTabOverride,
-      copyTab: copyTabOverride,
-      clearTab: clearTabOverride,
-      cancelWelcome: cancelWelcomeOverride,
-      enterHistSearch: enterHistSearchOverride,
-      interruptPromptLine: interruptPromptLineOverride,
-      _welcomeActive: welcomeActive,
-      welcomeOwnsTab: welcomeOwnsTabOverride,
-      shellPromptWrap: shellPromptWrapEl,
-      shellPromptText: document.getElementById('shell-prompt-text'),
-      shellPromptCaret: document.getElementById('shell-prompt-caret'),
-      terminalWrap: document.querySelector('.terminal-wrap'),
-      terminalBar: document.querySelector('.terminal-bar'),
-      histRow: document.getElementById('history-row'),
-      tabPanels: document.getElementById('tab-panels'),
-      mobileShell: document.getElementById('mobile-shell'),
-      mobileShellChrome: document.getElementById('mobile-shell-chrome'),
-      mobileShellTranscript: document.getElementById('mobile-shell-transcript'),
-      mobileShellComposer: document.getElementById('mobile-shell-composer'),
-      mobileShellOverlays: document.getElementById('mobile-shell-overlays'),
-      mobileComposerHost: document.getElementById('mobile-composer-host'),
-      mobileComposerRow: document.getElementById('mobile-composer-row'),
-      mobileEditBar: document.getElementById('mobile-edit-bar'),
-      mobileMenu: document.getElementById('mobile-menu-sheet'),
-      faqOverlay: document.getElementById('faq-overlay'),
-      optionsOverlay: document.getElementById('options-overlay'),
-      workflowsOverlay: document.getElementById('workflows-overlay'),
-      workflowsBtn: document.getElementById('workflows-btn'),
-      workflowsCloseBtn: document.querySelector('.workflows-close'),
-      permalinkToast: document.getElementById('permalink-toast'),
-      mobileComposerHostEl,
-      acDropdown,
-      loadStarredFromServer: () => Promise.resolve(),
-      maskSessionToken: (t) => (t ? t.slice(0, 8) + '••••••••' : '(none)'),
-      requestWelcomeSettle: requestWelcomeSettleOverride,
-      runCommand: runCommandOverride,
-      submitComposerCommand: submitComposerCommandOverride,
-      submitVisibleComposerCommand: submitVisibleComposerCommandOverride,
-      doKill: doKillOverride,
-      Event,
-      showToast: showToastOverride,
-      ...(NotificationOverride !== undefined ? { Notification: NotificationOverride } : {}),
-      setTimeout: (fn) => {
-        fn()
-        return 0
-      },
-    },
-    `{
-    _setTsMode,
-    _setLnMode,
-    handleComposerInputChange,
-    setComposerValue,
-    moveCmdCaret,
-    setCmdCaret,
-    deleteCmdWordLeft,
-    performMobileEditAction,
-    syncMobileComposerKeyboardState,
-    focusVisibleComposerInput,
-    blurVisibleComposerInput,
-    blurVisibleComposerInputIfMobile,
-    _replayPromptShortcutAfterSelection,
-    refocusComposerAfterAction,
-    getVisibleComposerInput,
-    getComposerValue,
-    setRunButtonDisabled,
-    persistTabSessionStateNow,
-    schedulePersistTabSessionState,
-    restoreTabSessionState,
-    _getTabSessionStateKey: () => TAB_SESSION_STATE_KEY,
-    confirmHistAction,
-    executeHistAction,
-    doKill,
-    confirmPermalinkRedactionChoice,
-    getWelcomeIntroPreference,
-    getShareRedactionDefaultPreference,
-    getRunNotifyPreference,
-    getHudClockPreference,
-    applyRunNotifyPreference,
-    applyHudClockPreference,
-    syncOptionsControls,
-    handleThemeCommand,
-    handleConfigCommand,
-    getRuntimeAutocompleteContext,
-    getRuntimeAutocompleteItems,
-    openOptions,
-    openThemeSelector,
-    openFaq,
-    getComposerState,
-    setComposerState,
-    setComposerPromptMode,
-    resetComposerState,
-    syncShellPrompt,
-    _getAcIndex: () => acIndex,
-    _getWelcomeBootPending: () => _welcomeBootPending,
-  }`,
-    'setTabs(tabs); setActiveTabId(activeTabId);',
-  )
-
-  await Promise.resolve()
-  await Promise.resolve()
-
   return {
-    ...fns,
-    storage,
-    tabs: tabsState,
-    apiFetch,
-    runSearch,
-    clearSearch,
-    navigateSearch,
-    cmdInput,
-    requestWelcomeSettle: requestWelcomeSettleOverride,
-    showConfirm: showConfirmOverride,
-    updateSessionId: updateSessionIdOverride,
-    copyTextToClipboard: copyTextToClipboardOverride,
-    reloadSessionHistory: reloadSessionHistoryOverride,
-    seedLocalStorageStarsToServer: seedLocalStorageStarsToServerOverride,
-    hydrateCmdHistory: hydrateCmdHistoryOverride,
-    hasPendingTerminalConfirm: hasPendingTerminalConfirmOverride,
-    cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride,
-    confirmKill: confirmKillOverride,
-    createTab: createTabOverride,
-    closeTab: closeTabOverride,
-    activateTab: activateTabOverride,
-    permalinkTab: permalinkTabOverride,
-    copyTab: copyTabOverride,
-    clearTab: clearTabOverride,
-    cancelWelcome: cancelWelcomeOverride,
-    navigateCmdHistory: navigateCmdHistoryOverride,
-    enterHistSearch: enterHistSearchOverride,
-    interruptPromptLine: interruptPromptLineOverride,
-    runCommand: runCommandOverride,
-    submitComposerCommand: submitComposerCommandOverride,
-    submitVisibleComposerCommand: submitVisibleComposerCommandOverride,
-    logClientError,
-    appendLine,
-    appendCommandEcho,
-    setStatus,
-    recordSuccessfulLocalCommand,
-    acDropdown,
-    acHide: acHideOverride,
-    shellPromptWrap: shellPromptWrapEl,
-    syncShellPrompt: fns.syncShellPrompt,
-    sessionStorage: sessionStore,
-    getTab,
-    getActiveTab,
-    setTabs,
-    setActiveTabId,
-    restoreViewport: () => {
-      if (originalMatchMedia === undefined) delete window.matchMedia
-      else
-        Object.defineProperty(window, 'matchMedia', {
-          configurable: true,
-          value: originalMatchMedia,
-        })
-      if (originalVisualViewport === undefined) delete window.visualViewport
-      else
-        Object.defineProperty(window, 'visualViewport', {
-          configurable: true,
-          value: originalVisualViewport,
-        })
-      if (originalScrollTo === undefined) delete window.scrollTo
-      else window.scrollTo = originalScrollTo
-      if (originalMaxTouchPoints === undefined) delete window.navigator.maxTouchPoints
-      else
-        Object.defineProperty(window.navigator, 'maxTouchPoints', {
-          configurable: true,
-          value: originalMaxTouchPoints,
-        })
+    commands: {
+      ...emptyBuiltIn('built-in: list built-in and allowed external commands'),
+      flags: [hint('--built-in', 'Show only built-in shell commands'), hint('--external', 'Show only allowed external commands')],
     },
+    config: {
+      ...emptyBuiltIn('built-in: show or update user options'),
+      expects_value: ['get', 'set'],
+      arg_hints: {
+        list: [],
+        get: [],
+        set: [],
+        __positional__: [hint('list', 'Show all current user config'), hint('get', 'Show one user config value', 'get '), hint('set', 'Set one user config value', 'set ')],
+      },
+    },
+    theme: {
+      ...emptyBuiltIn('built-in: show or apply the active shell theme'),
+      expects_value: ['set'],
+      arg_hints: {
+        list: [],
+        current: [],
+        set: [],
+        __positional__: [hint('list', 'Show available themes'), hint('current', 'Show the active theme'), hint('set', 'Apply a theme', 'set ')],
+      },
+    },
+    var: {
+      ...emptyBuiltIn('built-in: set, list, or unset session command variables'),
+      expects_value: ['set', 'unset'],
+      close_after: { list: 0, set: 2, unset: 1 },
+      arg_hints: {
+        list: [],
+        set: [],
+        unset: [],
+        __positional__: [hint('list', 'Show session variables'), hint('set', 'Set a session variable', 'set '), hint('unset', 'Remove a session variable', 'unset ')],
+      },
+    },
+    runs: {
+      ...emptyBuiltIn('built-in: show active runs; use -v for details or --json for automation'),
+      flags: [hint('-v'), hint('--verbose'), hint('--json')],
+    },
+    jobs: {
+      ...emptyBuiltIn('built-in: alias for runs'),
+      flags: [hint('-v'), hint('--verbose'), hint('--json')],
+    },
+    'session-token': {
+      ...emptyBuiltIn('built-in: show or manage persistent session tokens'),
+      expects_value: ['set', 'revoke'],
+      arg_hints: {
+        generate: [],
+        copy: [],
+        clear: [],
+        rotate: [],
+        list: [],
+        set: [hint('<token>', 'Paste a tok_... token or UUID from another device')],
+        revoke: [hint('<token>', 'tok_ token to permanently invalidate on the server')],
+        __positional__: [
+          hint('generate', 'Generate a new session token and save it to this browser'),
+          hint('set <token>', 'Activate an existing session token from another device', 'set '),
+          hint('copy', 'Copy the active session token to the clipboard'),
+          hint('clear', 'Confirm before removing the active session token'),
+          hint('rotate', 'Generate a new token and migrate all history to it'),
+          hint('list', 'Show the active session token and its creation date'),
+          hint('revoke <token>', 'Permanently invalidate a tok_ token on this server', 'revoke '),
+        ],
+      },
+    },
+    workflow: {
+      ...emptyBuiltIn('built-in: list, inspect, and run guided workflows'),
+      expects_value: ['show', 'run'],
+      arg_hints: {
+        list: [],
+        show: [],
+        run: [],
+        __positional__: [
+          hint('list', 'List workflows'),
+          hint('show', 'Show workflow steps', 'show '),
+          hint('run', 'Run a workflow', 'run '),
+        ],
+      },
+    },
+    file: {
+      ...emptyBuiltIn('built-in: list, view, create, edit, download, or remove session files'),
+      feature_required: 'workspace',
+      expects_value: ['show', 'add', 'add-dir', 'edit', 'download', 'rm', 'delete', 'ls'],
+      arg_hints: {
+        list: [],
+        ls: [],
+        help: [],
+        show: [],
+        add: [hint('<file>', 'New session file name')],
+        'add-dir': [hint('<folder>', 'New session folder')],
+        edit: [],
+        download: [],
+        rm: [],
+        delete: [],
+        __positional__: [
+          hint('list', 'List current session files'),
+          hint('ls', 'List current session files'),
+          hint('show <file>', 'Print a session file in the terminal', 'show '),
+          hint('add <file>', 'Open the Files editor for a new session file', 'add '),
+          hint('add-dir <folder>', 'Create a session folder', 'add-dir '),
+          hint('edit <file>', 'Open the Files editor for an existing session file', 'edit '),
+          hint('download <file>', 'Download a session file through the browser', 'download '),
+          hint('delete <file>', 'Remove a session file from this session', 'delete '),
+          hint('help', 'Show file command usage'),
+        ],
+      },
+    },
+    cat: { ...emptyBuiltIn('built-in: show a session file'), feature_required: 'workspace', argument_limit: 1 },
+    cd: { ...emptyBuiltIn('built-in: change the current workspace folder'), feature_required: 'workspace', argument_limit: 1 },
+    grep: { ...emptyBuiltIn('built-in: filter a session file'), feature_required: 'workspace', argument_limit: 2 },
+    head: { ...emptyBuiltIn('built-in: print the first lines of a session file'), feature_required: 'workspace', argument_limit: 1 },
+    ll: { ...emptyBuiltIn('built-in: long-list session files'), feature_required: 'workspace', argument_limit: 1 },
+    ls: { ...emptyBuiltIn('built-in: list session files'), feature_required: 'workspace', argument_limit: 1 },
+    mkdir: { ...emptyBuiltIn('built-in: create a session folder'), feature_required: 'workspace', argument_limit: 1 },
+    rm: {
+      ...emptyBuiltIn('built-in: remove a session file after confirmation'),
+      feature_required: 'workspace',
+      argument_limit: 1,
+    },
+    sort: { ...emptyBuiltIn('built-in: sort a session file'), feature_required: 'workspace', argument_limit: 1 },
+    tail: { ...emptyBuiltIn('built-in: print the last lines of a session file'), feature_required: 'workspace', argument_limit: 1 },
+    uniq: { ...emptyBuiltIn('built-in: collapse adjacent duplicate lines in a session file'), feature_required: 'workspace', argument_limit: 1 },
+    wc: { ...emptyBuiltIn('built-in: count lines in a session file'), feature_required: 'workspace', argument_limit: 1 },
+    man: { ...emptyBuiltIn('built-in: show a real or built-in manual page'), argument_limit: 1 },
+    which: { ...emptyBuiltIn('built-in: locate a built-in command or allowed runtime command'), argument_limit: 1 },
+    type: { ...emptyBuiltIn('built-in: describe whether a command is built-in, installed, or missing'), argument_limit: 1 },
+    status: emptyBuiltIn('built-in: show the current session summary, limits, and backend health'),
+    whoami: emptyBuiltIn('built-in: describe this shell and link to the project README'),
   }
+}
+
+function shippedThemeRegistry() {
+  const themeDir = resolve(REPO_ROOT, 'app/conf/themes')
+  const themes = readdirSync(themeDir)
+    .filter(name => name.endsWith('.yaml') && !name.endsWith('.local.yaml'))
+    .sort()
+    .map(filename => {
+      const raw = yaml.load(readFileSync(resolve(themeDir, filename), 'utf8')) || {}
+      const name = filename.replace(/\.yaml$/, '')
+      const vars = {}
+      Object.entries(raw).forEach(([key, value]) => {
+        if (THEME_META_KEYS.has(key) || key === 'color_scheme') return
+        const cssKey = String(key).replaceAll('_', '-')
+        const cssValue = String(value)
+        if (THEME_BASE_KEYS.has(key)) vars[`--${cssKey}`] = cssValue
+        vars[`--theme-${cssKey}`] = cssValue
+      })
+      return {
+        name,
+        filename,
+        label: raw.label || name,
+        group: raw.group || 'Other',
+        sort: Number.isInteger(raw.sort) ? raw.sort : null,
+        color_scheme: raw.color_scheme === 'light' ? 'only light' : 'only dark',
+        source: 'variant',
+        vars,
+      }
+    })
+  return { current: themes[0], themes }
 }
 
 describe('app helpers', () => {
@@ -660,6 +213,7 @@ describe('app helpers', () => {
       'pref_line_numbers',
       'pref_welcome_intro',
       'pref_share_redaction_default',
+      'pref_prompt_username',
     ].forEach((name) => {
       document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
     })
@@ -671,14 +225,14 @@ describe('app helpers', () => {
       themeRegistry: {
         current: {
           name: 'theme_light_blue',
-          label: 'Blue Paper',
+          label: 'Apricot Sand',
           source: 'variant',
           vars: { '--bg': '#9ab7d0' },
         },
         themes: [
           {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
@@ -723,7 +277,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
@@ -764,7 +319,7 @@ describe('app helpers', () => {
           },
           {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
@@ -788,18 +343,83 @@ describe('app helpers', () => {
     const promptPrefix = shellPromptWrap.querySelector('.prompt-prefix')
     const mobilePromptLabel = document.querySelector('#mobile-composer-row .mobile-prompt-label')
 
-    expect(promptPrefix.textContent).toBe('anon@darklab:~$')
-    expect(mobilePromptLabel.textContent).toBe('$')
+    expect(promptPrefix.textContent).toBe('anon@darklab.sh:/ $')
+    expect(mobilePromptLabel.textContent).toBe('')
+    expect(mobilePromptLabel.hidden).toBe(true)
+    expect(document.getElementById('mobile-cmd').placeholder).toBe('/ · type command')
 
     setComposerPromptMode('confirm')
     expect(promptPrefix.textContent).toBe('[yes/no]:')
     expect(mobilePromptLabel.textContent).toBe('[yes/no]:')
+    expect(mobilePromptLabel.hidden).toBe(false)
+    expect(document.getElementById('mobile-cmd').placeholder).toBe('')
     expect(shellPromptWrap.classList.contains('shell-prompt-confirm')).toBe(true)
 
     setComposerPromptMode(null)
-    expect(promptPrefix.textContent).toBe('anon@darklab:~$')
-    expect(mobilePromptLabel.textContent).toBe('$')
+    expect(promptPrefix.textContent).toBe('anon@darklab.sh:/ $')
+    expect(mobilePromptLabel.textContent).toBe('')
+    expect(mobilePromptLabel.hidden).toBe(true)
+    expect(document.getElementById('mobile-cmd').placeholder).toBe('/ · type command')
     expect(shellPromptWrap.classList.contains('shell-prompt-confirm')).toBe(false)
+  })
+
+  it('applies the saved prompt username preference to the live prompt', async () => {
+    const { applyPromptUsernamePreference } = await loadAppFns({
+      cookies: { pref_prompt_username: 'nona' },
+    })
+    const promptPrefix = document.querySelector('#shell-prompt-wrap .prompt-prefix')
+    expect(promptPrefix.textContent).toBe('nona@darklab.sh:/ $')
+    expect(document.getElementById('options-prompt-username-input').value).toBe('nona')
+
+    applyPromptUsernamePreference('ops-user')
+
+    expect(promptPrefix.textContent).toBe('ops-user@darklab.sh:/ $')
+    expect(document.cookie).toContain('pref_prompt_username=ops-user')
+  })
+
+  it('shows live validation for invalid prompt username input without saving it', async () => {
+    await loadAppFns({
+      cookies: { pref_prompt_username: 'nona' },
+    })
+    const input = document.getElementById('options-prompt-username-input')
+    const error = document.getElementById('options-prompt-username-error')
+
+    input.value = 'bad/path'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+    expect(error.classList.contains('u-hidden')).toBe(false)
+
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+
+    expect(document.querySelector('#shell-prompt-wrap .prompt-prefix').textContent).toBe('nona@darklab.sh:/ $')
+    expect(document.cookie).toContain('pref_prompt_username=nona')
+
+    input.value = 'good_user'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+
+    expect(input.getAttribute('aria-invalid')).toBe('false')
+    expect(error.classList.contains('u-hidden')).toBe(true)
+    expect(document.querySelector('#shell-prompt-wrap .prompt-prefix').textContent).toBe('good_user@darklab.sh:/ $')
+    expect(document.cookie).toContain('pref_prompt_username=good_user')
+  })
+
+  it('uses a compact cwd placeholder instead of the mobile prompt label', async () => {
+    const { setComposerPromptMode } = await loadAppFns({
+      workspaceCwd: 'very/deep/reports/nuclei-output',
+    })
+    const mobilePromptLabel = document.querySelector('#mobile-composer-row .mobile-prompt-label')
+    const mobileCmd = document.getElementById('mobile-cmd')
+
+    expect(mobilePromptLabel.textContent).toBe('')
+    expect(mobilePromptLabel.hidden).toBe(true)
+    expect(mobileCmd.placeholder).toBe('.../nuclei-output · type command')
+
+    setComposerPromptMode('confirm')
+    setComposerPromptMode(null)
+
+    expect(mobileCmd.placeholder).toBe('.../nuclei-output · type command')
   })
 
   it('_setTsMode updates body classes and button labels', async () => {
@@ -864,12 +484,12 @@ describe('app helpers', () => {
     const toggle = sheet.querySelector('[data-menu-action="ts-toggle"]')
 
     sheet.classList.remove('u-hidden')
-    // Controller dispatcher is a no-op for ts-toggle and skips hideMobileMenu
-    // in the button click path; the inline submenu's aria-expanded / u-hidden
-    // lifecycle moved to bindDisclosure in mobile_chrome.js (covered in
-    // ui_disclosure.test.js). What this test still guarantees is that the
+    // Controller dispatch is a no-op for ts-toggle and skips hideMobileMenu
+    // in the real button click path; the inline submenu's aria-expanded /
+    // u-hidden lifecycle moved to bindDisclosure in mobile_chrome.js (covered
+    // in ui_disclosure.test.js). What this test still guarantees is that the
     // ts-toggle click does not cascade into closing the parent sheet.
-    window.dispatchMobileMenuAction('ts-toggle', toggle)
+    toggle.click()
     expect(sheet.classList.contains('u-hidden')).toBe(false)
   })
 
@@ -905,19 +525,31 @@ describe('app helpers', () => {
     expect(sheet.classList.contains('u-hidden')).toBe(true)
   })
 
+  it('opens Status Monitor from the mobile menu and closes the sheet', async () => {
+    const openStatusMonitor = vi.fn(() => Promise.resolve(true))
+    await loadAppFns({ openStatusMonitor })
+    const sheet = document.getElementById('mobile-menu-sheet')
+    sheet.classList.remove('u-hidden')
+
+    document.querySelector('#mobile-menu-sheet [data-menu-action="status-monitor"]').click()
+
+    expect(openStatusMonitor).toHaveBeenCalledWith({ source: 'mobile-menu' })
+    expect(sheet.classList.contains('u-hidden')).toBe(true)
+  })
+
   it('opens the theme selector from the theme button', async () => {
     const { openThemeSelector } = await loadAppFns({
       themeRegistry: {
         current: {
           name: 'theme_light_blue',
-          label: 'Blue Paper',
+          label: 'Apricot Sand',
           source: 'variant',
           vars: { '--bg': '#9ab7d0' },
         },
         themes: [
           {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
@@ -941,14 +573,14 @@ describe('app helpers', () => {
     const themeRegistry = {
       current: {
         name: 'theme_light_blue',
-        label: 'Blue Paper',
+        label: 'Apricot Sand',
         source: 'variant',
         vars: { '--bg': '#9ab7d0' },
       },
       themes: [
         {
           name: 'theme_light_blue',
-          label: 'Blue Paper',
+          label: 'Apricot Sand',
           source: 'variant',
           vars: { '--bg': '#9ab7d0' },
         },
@@ -971,7 +603,7 @@ describe('app helpers', () => {
       'theme_light_olive',
     ])
     expect(themeCards.map((card) => card.querySelector('.theme-card-label')?.textContent)).toEqual([
-      'Blue Paper',
+      'Apricot Sand',
       'Olive Parchment',
     ])
 
@@ -986,20 +618,95 @@ describe('app helpers', () => {
     expect(document.cookie).toContain('pref_theme_name=theme_light_olive')
   })
 
+  it('renders theme preview cards with the current desktop shell structure', async () => {
+    await loadAppFns({
+      themeRegistry: {
+        current: {
+          name: 'darklab_obsidian',
+          label: 'Darklab Obsidian',
+          source: 'variant',
+          vars: {
+            '--theme-chrome-bg': '#050505',
+            '--theme-panel-bg': '#111111',
+            '--theme-tab-active-bg': '#1a1a1a',
+          },
+        },
+        themes: [
+          {
+            name: 'darklab_obsidian',
+            label: 'Darklab Obsidian',
+            source: 'variant',
+            vars: {
+              '--theme-chrome-bg': '#050505',
+              '--theme-panel-bg': '#111111',
+              '--theme-tab-active-bg': '#1a1a1a',
+            },
+          },
+        ],
+      },
+    })
+
+    const card = document.querySelector('#theme-select .theme-card')
+    expect(card?.style.getPropertyValue('--theme-chrome-bg')).toBe('#050505')
+    expect(card?.querySelector('.theme-card-preview-rail')).not.toBeNull()
+    expect(card?.querySelector('.theme-card-preview-tab-active')).not.toBeNull()
+    expect(card?.querySelector('.theme-card-preview-content')).not.toBeNull()
+    expect(card?.querySelector('.theme-card-preview-hud')).not.toBeNull()
+    expect(card?.querySelectorAll('.theme-card-preview-rail-section')).toHaveLength(3)
+    expect(card?.querySelector('.theme-card-preview-modal')).not.toBeNull()
+    expect(card?.querySelectorAll('.theme-card-preview-modal-button')).toHaveLength(2)
+    expect(card?.querySelectorAll('.theme-card-preview-line')).toHaveLength(4)
+    expect(card?.querySelector('.theme-card-preview-bar')).toBeNull()
+    expect(card?.querySelector('.theme-card-preview-pill')).toBeNull()
+    expect(card?.querySelector('.theme-card-preview-chip')).toBeNull()
+    expect(card?.querySelector('.theme-card-preview-drawer')).toBeNull()
+  })
+
+  it('renders shipped theme preview cards with populated core surface tokens', async () => {
+    const registry = shippedThemeRegistry()
+    await loadAppFns({ themeRegistry: registry })
+
+    const cards = Array.from(document.querySelectorAll('#theme-select .theme-card'))
+    expect(cards).toHaveLength(registry.themes.length)
+
+    cards.forEach(card => {
+      const theme = registry.themes.find(item => item.name === card.dataset.themeName)
+      expect(theme, `missing registry theme for ${card.dataset.themeName}`).toBeTruthy()
+      ;[
+        '--bg',
+        '--surface',
+        '--theme-panel-bg',
+        '--theme-chrome-bg',
+        '--theme-modal-bg',
+        '--theme-tab-active-bg',
+        '--theme-button-secondary-bg',
+        '--theme-button-secondary-border',
+        '--theme-dropdown-bg',
+        '--theme-dropdown-border',
+      ].forEach(token => {
+        expect(card.style.getPropertyValue(token), `${theme.name} missing ${token}`).not.toBe('')
+      })
+      expect(card.querySelector('.theme-card-preview-rail')).not.toBeNull()
+      expect(card.querySelector('.theme-card-preview-hud')).not.toBeNull()
+      expect(card.querySelector('.theme-card-preview-content')).not.toBeNull()
+      expect(card.querySelector('.theme-card-preview-modal')).not.toBeNull()
+    })
+  })
+
   it('applies a theme from the terminal theme command', async () => {
     const { handleThemeCommand, appendCommandEcho, setStatus, recordSuccessfulLocalCommand } =
       await loadAppFns({
         themeRegistry: {
           current: {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
           themes: [
             {
               name: 'theme_light_blue',
-              label: 'Blue Paper',
+              label: 'Apricot Sand',
               source: 'variant',
               vars: { '--bg': '#9ab7d0' },
             },
@@ -1043,7 +750,7 @@ describe('app helpers', () => {
             },
             {
               name: 'theme_light_blue',
-              label: 'Blue Paper',
+              label: 'Apricot Sand',
               color_scheme: 'only light',
               source: 'variant',
               vars: { '--bg': '#9ab7d0' },
@@ -1069,7 +776,7 @@ describe('app helpers', () => {
       'Dark themes:',
       '  * darklab_obsidian          Darklab Obsidian',
       'Light themes:',
-      '    theme_light_blue          Blue Paper',
+      '    theme_light_blue          Apricot Sand',
       'Other themes:',
       '    theme_unknown             Unknown Scheme',
     ])
@@ -1083,14 +790,14 @@ describe('app helpers', () => {
         themeRegistry: {
           current: {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
           themes: [
             {
               name: 'theme_light_blue',
-              label: 'Blue Paper',
+              label: 'Apricot Sand',
               source: 'variant',
               vars: { '--bg': '#9ab7d0' },
             },
@@ -1119,18 +826,27 @@ describe('app helpers', () => {
           pref_line_numbers: 'off',
           pref_timestamps: 'off',
           pref_welcome_intro: 'animated',
+          pref_prompt_username: '',
         },
       })
 
     await handleConfigCommand('config set line-numbers on', 'tab-1')
     await handleConfigCommand('config set welcome static', 'tab-1')
+    await handleConfigCommand('config set prompt-username nona', 'tab-1')
+    await handleConfigCommand('config get prompt-username', 'tab-1')
+    await handleConfigCommand('config list', 'tab-1')
 
     expect(appendCommandEcho).toHaveBeenCalledWith('config set line-numbers on', 'tab-1')
     expect(document.body.classList.contains('ln-on')).toBe(true)
     expect(document.cookie).toContain('pref_line_numbers=on')
     expect(document.cookie).toContain('pref_welcome_intro=disable_animation')
+    expect(document.cookie).toContain('pref_prompt_username=nona')
+    expect(document.querySelector('#shell-prompt-wrap .prompt-prefix').textContent).toBe('nona@darklab.sh:~ $')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set line-numbers on')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set welcome static')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set prompt-username nona')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config get prompt-username')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config list')
     expect(setStatus).toHaveBeenCalledWith('ok')
   })
 
@@ -1143,9 +859,11 @@ describe('app helpers', () => {
       })
 
     await handleConfigCommand('config line-numbers on', 'tab-1')
+    await handleConfigCommand('config set prompt-username bad/path', 'tab-1')
 
     expect(document.body.classList.contains('ln-on')).toBe(false)
     expect(document.cookie).not.toContain('pref_line_numbers=on')
+    expect(document.cookie).not.toContain('pref_prompt_username=bad')
     expect(appendCommandEcho).toHaveBeenCalledWith('config line-numbers on', 'tab-1')
     expect(recordSuccessfulLocalCommand).not.toHaveBeenCalled()
     expect(setStatus).toHaveBeenCalledWith('fail')
@@ -1185,14 +903,14 @@ describe('app helpers', () => {
       themeRegistry: {
         current: {
           name: 'theme_light_blue',
-          label: 'Blue Paper',
+          label: 'Apricot Sand',
           source: 'variant',
           vars: { '--bg': '#9ab7d0' },
         },
         themes: [
           {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
@@ -1204,47 +922,265 @@ describe('app helpers', () => {
           },
         ],
       },
+      sessionVariables: [
+        { name: 'HOST', value: 'ip.darklab.sh' },
+      ],
     })
-    const context = getRuntimeAutocompleteContext({})
+    const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
 
     expect(context.theme.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'current', 'set'])
     expect(context.theme.arg_hints.set.map(item => item.value)).toContain('theme_light_olive')
     expect(context.theme.arg_hints.set.find(item => item.value === 'theme_light_blue')?.description)
       .toContain('(current)')
     expect(context.config.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'get', 'set'])
+    expect(context.config.arg_hints.set.map(item => item.value)).toContain('prompt-username')
     expect(context.config.sequence_arg_hints['set line-numbers'].map(item => item.value)).toEqual(['on', 'off'])
+    expect(context.config.sequence_arg_hints['set prompt-username'].map(item => item.value)).toEqual(['<username> | default'])
+    expect(context.var.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'set', 'unset'])
+    expect(context.var.arg_hints.set.filter(item => item.value === 'HOST')).toEqual([
+      { value: 'HOST', description: 'Current value: ip.darklab.sh' },
+    ])
+    expect(context.var.arg_hints.set.map(item => item.value)).toEqual(['HOST', 'PORT', 'IP_ADDR'])
+    expect(context.var.sequence_arg_hints['set host'].map(item => item.value)).toEqual(['<value>'])
+    expect(context.var.sequence_arg_hints['unset host']).toEqual([])
+    expect(context.var.close_after).toEqual({ list: 0, set: 2, unset: 1 })
+  })
+
+  it('serves workflow names and variable flags in runtime autocomplete context', async () => {
+    const { getRuntimeAutocompleteContext, renderWorkflowItems } = await loadAppFns()
+    renderWorkflowItems([
+      {
+        id: 'usr_abcd',
+        source: 'user',
+        title: 'DNS Check',
+        description: 'Custom DNS workflow',
+        inputs: [{ id: 'domain', label: 'Domain', type: 'domain', required: true, placeholder: 'example.com', default: '', help: '' }],
+        steps: [{ cmd: 'dig {{domain}} A', note: '' }],
+      },
+    ], { emitCatalogEvent: false })
+
+    const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
+
+    expect(context.workflow.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'show', 'run'])
+    expect(context.workflow.arg_hints.run.map(item => item.value)).toEqual(['dns-check'])
+    expect(context.workflow.sequence_arg_hints['run dns-check'].map(item => item.value)).toEqual(['--domain'])
+    expect(context.workflow.arg_hints['--domain'][0].value_type).toBe('domain')
+  })
+
+  it('deduplicates workflow subcommands that share runtime insert text', async () => {
+    const { getRuntimeAutocompleteContext, renderWorkflowItems } = await loadAppFns()
+    renderWorkflowItems([
+      {
+        id: 'usr_abcd',
+        source: 'user',
+        title: 'DNS Check',
+        description: 'Custom DNS workflow',
+        inputs: [],
+        steps: [{ cmd: 'dig darklab.sh A', note: '' }],
+      },
+    ], { emitCatalogEvent: false })
+    const registry = builtInAutocompleteBase()
+    registry.workflow.arg_hints.__positional__ = [
+      { value: 'list', description: 'List workflows' },
+      { value: 'show <workflow>', description: 'Show workflow steps', insertValue: 'show ' },
+      { value: 'run <workflow>', description: 'Run a workflow', insertValue: 'run ' },
+    ]
+
+    const context = getRuntimeAutocompleteContext(registry)
+
+    expect(context.workflow.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'show', 'run'])
+    expect(context.workflow.arg_hints.run.map(item => item.value)).toEqual(['dns-check'])
+  })
+
+  it('renders user workflows above built-ins with edit actions', async () => {
+    const { renderWorkflowItems } = await loadAppFns()
+    document.getElementById('workflows-overlay').innerHTML = '<div class="workflows-body"></div>'
+
+    renderWorkflowItems([
+      {
+        id: 'usr_saved',
+        source: 'user',
+        title: 'Saved Recon',
+        description: '',
+        inputs: [],
+        steps: [{ cmd: 'whois darklab.sh', note: '' }],
+      },
+      {
+        id: 'builtin:dns',
+        source: 'builtin',
+        title: 'DNS Troubleshooting',
+        description: '',
+        inputs: [],
+        steps: [{ cmd: 'dig darklab.sh A', note: '' }],
+      },
+    ], { emitCatalogEvent: false })
+
+    const labels = [...document.querySelectorAll('.workflow-section-label')].map(el => el.textContent)
+    const titles = [...document.querySelectorAll('.workflow-title')].map(el => el.textContent)
+    expect(labels).toEqual(['My workflows', 'Built-ins'])
+    expect(titles).toEqual(['Saved Recon', 'DNS Troubleshooting'])
+    expect(document.querySelector('.is-user-workflow .workflow-edit-btn')).toBeTruthy()
+  })
+
+  it('runs a workflow from the terminal command with flag-provided inputs', async () => {
+    const submitComposerCommand = vi.fn()
+    const workflow = {
+      id: 'builtin:dns',
+      source: 'builtin',
+      title: 'DNS Troubleshooting',
+      description: '',
+      inputs: [{ id: 'domain', label: 'Domain', type: 'domain', required: true, placeholder: 'example.com', default: '', help: '' }],
+      steps: [{ cmd: 'dig {{domain}} A', note: '' }],
+    }
+    const { renderWorkflowItems, handleWorkflowTerminalCommand, appendCommandEcho } = await loadAppFns({
+      submitComposerCommand,
+      apiFetch: (url) => {
+        if (url === '/workflows') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ items: [workflow] }) })
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+      },
+    })
+    renderWorkflowItems([workflow], { emitCatalogEvent: false })
+
+    await handleWorkflowTerminalCommand('workflow run dns-troubleshooting --domain darklab.sh', 'tab-1')
+
+    expect(appendCommandEcho).toHaveBeenCalledWith(
+      'workflow run dns-troubleshooting --domain darklab.sh',
+      'tab-1',
+    )
+    expect(document.body.textContent).toContain('[workflow] DNS Troubleshooting: 1 step(s) queued.')
   })
 
   it('serves runtime autocomplete context for built-in command lookup helpers', async () => {
     const { getRuntimeAutocompleteContext } = await loadAppFns()
 
-    const context = getRuntimeAutocompleteContext({ curl: {}, nmap: {} })
+    const context = getRuntimeAutocompleteContext({
+      ...builtInAutocompleteBase(),
+      curl: {},
+      nmap: {},
+    })
 
+    expect(context.commands.flags.map(item => item.value)).toEqual(['--built-in', '--external'])
+    expect(context.runs.flags.map(item => item.value)).toEqual(['-v', '--verbose', '--json'])
+    expect(context.jobs.flags.map(item => item.value)).toEqual(['-v', '--verbose', '--json'])
     expect(context['session-token'].arg_hints.__positional__.map(item => item.value)).toContain('set <token>')
     expect(context['session-token'].arg_hints.set[0].value).toBe('<token>')
+    expect(context.file.arg_hints.__positional__.map(item => item.value)).toEqual([
+      'list',
+      'ls',
+      'show <file>',
+      'add <file>',
+      'add-dir <folder>',
+      'edit <file>',
+      'download <file>',
+      'delete <file>',
+      'help',
+    ])
     expect(context.status).toBeTruthy()
     expect(context.whoami).toBeTruthy()
     expect(context.man.arg_hints.__positional__.map(item => item.value)).toEqual(
-      expect.arrayContaining(['curl', 'nmap', 'status', 'whoami']),
+      expect.arrayContaining(['commands', 'curl', 'nmap', 'status', 'whoami']),
     )
     expect(context.which.arg_hints.__positional__.map(item => item.value)).toEqual(
-      expect.arrayContaining(['curl', 'status']),
+      expect.arrayContaining(['commands', 'curl', 'status']),
     )
     expect(context.type.arg_hints.__positional__.map(item => item.value)).toEqual(
-      expect.arrayContaining(['nmap', 'whoami']),
+      expect.arrayContaining(['commands', 'nmap', 'whoami']),
     )
   })
 
-  it('keeps code-owned built-ins out of autocomplete.yaml', () => {
-    const autocompleteYaml = readFileSync(resolve(REPO_ROOT, 'app/conf/autocomplete.yaml'), 'utf8')
+  it('serves loaded workspace files as file command autocomplete values', async () => {
+    const { getRuntimeAutocompleteContext } = await loadAppFns({
+      getWorkspaceAutocompleteFileHints: () => [
+        { value: 'targets.txt', description: 'session file · 11 B' },
+        { value: 'ffuf.json', description: 'session file · 2 KB' },
+      ],
+      getWorkspaceAutocompleteDirectoryHints: () => [
+        { value: 'reports', description: 'session folder' },
+      ],
+    })
+
+    const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
+
+    expect(context.file.arg_hints.show.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
+    expect(context.file.arg_hints.edit.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
+    expect(context.file.arg_hints.download.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
+    expect(context.file.arg_hints.rm.map(item => item.description)).toEqual([
+      'Remove folders recursively',
+      'Remove folders recursively',
+      'session file · 11 B',
+      'session file · 2 KB',
+      'session folder',
+    ])
+    expect(context.cat.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
+    expect(context.cd.arg_hints.__positional__.map(item => item.value)).toEqual(['reports', '/'])
+    expect(context.ll.arg_hints.__positional__.map(item => item.value)).toEqual(['-R', 'reports', '/'])
+    expect(context.ls.arg_hints.__positional__.map(item => item.value)).toEqual(['-l', '-R', 'reports', '/'])
+    expect(context.mkdir.arg_hints.__positional__.map(item => item.value)).toEqual(['reports', '<folder>'])
+    expect(context.grep.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
+    expect(context.head.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
+    expect(context.rm.arg_hints.__positional__.map(item => item.value)).toEqual(['-r', '-rf', 'targets.txt', 'ffuf.json', 'reports'])
+  })
+
+  it('serves workspace autocomplete values relative to the active workspace folder', async () => {
+    const { getRuntimeAutocompleteContext } = await loadAppFns({
+      workspaceCwd: 'reports',
+      getWorkspaceAutocompleteFileHints: () => [
+        { value: 'reports/summary.txt', description: 'session file · 11 B' },
+        { value: 'reports/nested/deep.txt', description: 'session file · 2 KB' },
+        { value: 'root.txt', description: 'session file · 1 B' },
+      ],
+      getWorkspaceAutocompleteDirectoryHints: () => [
+        { value: 'reports', description: 'session folder' },
+        { value: 'reports/nested', description: 'session folder' },
+      ],
+      getWorkspaceDirectoryEntries: () => ({
+        folders: [{ name: 'nested', path: 'reports/nested' }],
+        files: [{ name: 'summary.txt', path: 'reports/summary.txt' }],
+      }),
+    })
+
+    const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
+
+    expect(context.cd.arg_hints.__positional__.map(item => item.value)).toEqual(['../', 'nested', '/'])
+    expect(context.ll.arg_hints.__positional__.map(item => item.value)).toEqual(['-R', '../', 'nested', '/'])
+    expect(context.ls.arg_hints.__positional__.map(item => item.value)).toEqual(['-l', '-R', '../', 'nested', '/'])
+    expect(context.cat.arg_hints.__positional__.map(item => item.value)).toEqual(['summary.txt'])
+    expect(context.grep.arg_hints.__positional__.map(item => item.value)).toEqual(['summary.txt'])
+    expect(context.file.arg_hints.show.map(item => item.value)).toEqual(['summary.txt'])
+    expect(context.file.arg_hints.list.map(item => item.value)).toEqual(['-l', '-R', 'nested', '/'])
+    expect(context.file.arg_hints.ls.map(item => item.value)).toEqual(['-l', '-R', 'nested', '/'])
+  })
+
+  it('hides workspace built-ins from runtime autocomplete when Files are disabled', async () => {
+    const { getRuntimeAutocompleteContext } = await loadAppFns({
+      appConfig: { workspace_enabled: false },
+    })
+
+    const context = getRuntimeAutocompleteContext({ ...builtInAutocompleteBase(), curl: {} })
+
+    expect(context.file).toBeUndefined()
+    expect(context.cat).toBeUndefined()
+    expect(context.cd).toBeUndefined()
+    expect(context.grep).toBeUndefined()
+    expect(context.ll).toBeUndefined()
+    expect(context.ls).toBeUndefined()
+    expect(context.mkdir).toBeUndefined()
+    expect(context.rm).toBeUndefined()
+    expect(context.man.arg_hints.__positional__.map(item => item.value)).not.toContain('file')
+  })
+
+  it('keeps code-owned built-ins out of commands.yaml', () => {
+    const commandsYaml = readFileSync(resolve(REPO_ROOT, 'app/conf/commands.yaml'), 'utf8')
     const yamlRoots = new Set(
-      [...autocompleteYaml.matchAll(/^  ([a-z0-9_-]+):/gm)].map(match => match[1]),
+      [...commandsYaml.matchAll(/^- root: ([a-z0-9_-]+)/gm)].map(match => match[1]),
     )
     const runtimeRoots = [
-      'autocomplete', 'banner', 'clear', 'config', 'date', 'df', 'env', 'faq', 'fortune', 'free',
-      'groups', 'help', 'history', 'hostname', 'id', 'ip', 'jobs', 'last', 'limits', 'ls', 'man',
-      'ps', 'pwd', 'retention', 'route', 'session-token', 'shortcuts', 'status', 'theme', 'tty',
-      'type', 'uname', 'uptime', 'version', 'which', 'who', 'whoami',
+      'banner', 'cat', 'cd', 'clear', 'commands', 'config', 'date', 'df', 'env', 'exit', 'faq', 'fortune', 'free',
+      'file', 'grep', 'groups', 'head', 'help', 'history', 'hostname', 'id', 'ip', 'jobs', 'last', 'limits', 'll', 'ls', 'man',
+      'mkdir', 'ps', 'pwd', 'quit', 'retention', 'rm', 'route', 'runs', 'session-token', 'shortcuts', 'sort', 'stats', 'status',
+      'tail', 'theme', 'tty', 'type', 'uname', 'uniq', 'uptime', 'version', 'wc', 'which', 'who', 'whoami',
     ]
 
     expect(runtimeRoots.filter(root => yamlRoots.has(root))).toEqual([])
@@ -1254,18 +1190,18 @@ describe('app helpers', () => {
     await loadAppFns({
       themeRegistry: {
         current: {
-          name: 'blue_paper',
-          label: 'Blue Paper',
-          group: 'Cool Light',
+          name: 'apricot_sand',
+          label: 'Apricot Sand',
+          group: 'Warm Light',
           sort: 50,
           source: 'variant',
           vars: { '--bg': '#9ab7d0' },
         },
         themes: [
           {
-            name: 'blue_paper',
-            label: 'Blue Paper',
-            group: 'Cool Light',
+            name: 'apricot_sand',
+            label: 'Apricot Sand',
+            group: 'Warm Light',
             sort: 50,
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
@@ -1301,11 +1237,11 @@ describe('app helpers', () => {
     const groupTitles = Array.from(
       document.querySelectorAll('#theme-select .theme-picker-group-title'),
     ).map((node) => node.textContent)
-    expect(groupTitles).toEqual(['Warm Light', 'Cool Light', 'Neutral Light'])
+    expect(groupTitles).toEqual(['Warm Light', 'Neutral Light'])
     const sectionGroups = Array.from(
       document.querySelectorAll('#theme-select .theme-picker-group'),
     ).map((node) => node.dataset.themeGroup)
-    expect(sectionGroups).toEqual(['Warm Light', 'Cool Light', 'Neutral Light'])
+    expect(sectionGroups).toEqual(['Warm Light', 'Neutral Light'])
     expect(
       document.getElementById('theme-select')?.style.getPropertyValue('--theme-picker-columns'),
     ).toBe('2')
@@ -1318,14 +1254,14 @@ describe('app helpers', () => {
       themeRegistry: {
         current: {
           name: 'theme_light_blue',
-          label: 'Blue Paper',
+          label: 'Apricot Sand',
           source: 'variant',
           vars: { '--bg': '#9ab7d0' },
         },
         themes: [
           {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
@@ -1352,7 +1288,7 @@ describe('app helpers', () => {
         themes: [
           {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
@@ -1370,7 +1306,8 @@ describe('app helpers', () => {
             json: () =>
               Promise.resolve({
                 app_name: 'darklab_shell',
-                prompt_prefix: 'anon@darklab:~$',
+                prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
                 version: '9.9',
                 default_theme: 'theme_missing.yaml',
                 motd: '',
@@ -1512,6 +1449,7 @@ describe('app helpers', () => {
         </div>
         <button data-menu-action="search"></button>
         <button data-menu-action="history"></button>
+        <button data-menu-action="status-monitor"></button>
         <button data-menu-action="theme"></button>
         <button data-menu-action="faq"></button>
       </div>
@@ -1657,6 +1595,52 @@ describe('app helpers', () => {
     expect(saved.tabs[0].draftInput).toBe('')
   })
 
+  it('persists output signal metadata for session restore', async () => {
+    const tabs = [
+      {
+        id: 'tab-1',
+        label: 'tab 1',
+        command: 'host darklab.sh',
+        renamed: false,
+        draftInput: '',
+        st: 'idle',
+        exitCode: 0,
+        historyRunId: 'run-1',
+        previewTruncated: false,
+        fullOutputAvailable: true,
+        fullOutputLoaded: true,
+        rawLines: [
+          {
+            text: 'darklab.sh has address 104.21.4.35',
+            cls: '',
+            tsC: '12:00:00',
+            tsE: '+0.1s',
+            signals: ['findings'],
+            line_index: 0,
+            command_root: 'host',
+            target: 'darklab.sh',
+          },
+        ],
+        closing: false,
+      },
+    ]
+    const { persistTabSessionStateNow, sessionStorage, _getTabSessionStateKey } = await loadAppFns({
+      tabs,
+      activeTabId: 'tab-1',
+    })
+
+    persistTabSessionStateNow()
+
+    const saved = JSON.parse(sessionStorage.getItem(_getTabSessionStateKey()))
+    expect(saved.tabs[0].rawLines[0]).toMatchObject({
+      text: 'darklab.sh has address 104.21.4.35',
+      signals: ['findings'],
+      line_index: 0,
+      command_root: 'host',
+      target: 'darklab.sh',
+    })
+  })
+
   it('restores saved non-running tabs and active draft state from session storage', async () => {
     const tabs = []
     let seq = 0
@@ -1795,6 +1779,7 @@ describe('app helpers', () => {
             label: 'tab 1',
             command: '',
             renamed: false,
+            workspaceCwd: 'shell',
             draftInput: 'dig darklab.sh',
             st: 'idle',
             exitCode: null,
@@ -1808,6 +1793,7 @@ describe('app helpers', () => {
             label: 'tab 2',
             command: '',
             renamed: false,
+            workspaceCwd: 'shell/reports',
             draftInput: 'hostname',
             st: 'idle',
             exitCode: null,
@@ -1824,6 +1810,8 @@ describe('app helpers', () => {
     expect(restoreTabSessionState()).toBe(true)
     expect(getTab('tab-1')?.draftInput).toBe('dig darklab.sh')
     expect(getTab('tab-2')?.draftInput).toBe('hostname')
+    expect(getTab('tab-1')?.workspaceCwd).toBe('shell')
+    expect(getTab('tab-2')?.workspaceCwd).toBe('shell/reports')
   })
 
   it('preserves the last created non-active tab draft when the final restored active tab is different', async () => {
@@ -1913,6 +1901,70 @@ describe('app helpers', () => {
     expect(cmdInput.value).toBe('abc')
     expect(cmdInput.selectionStart).toBe(3)
     expect(cmdInput.selectionEnd).toBe(3)
+  })
+
+  it('ignores command history and autocomplete while a terminal confirmation is pending', async () => {
+    const navigateCmdHistory = vi.fn(() => true)
+    const acHide = vi.fn()
+    const acShow = vi.fn()
+    const hasPendingTerminalConfirm = vi.fn(() => true)
+    const { cmdInput, _getAcIndex, _replayPromptShortcutAfterSelection } = await loadAppFns({
+      navigateCmdHistory,
+      acHide,
+      acShow,
+      acSuggestions: ['curl http://localhost:5001/health'],
+      acFiltered: ['curl http://localhost:5001/health'],
+      hasPendingTerminalConfirm,
+    })
+
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => cmdInput,
+    })
+
+    cmdInput.value = 'cur'
+    cmdInput.setSelectionRange(3, 3)
+    cmdInput.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(acShow).not.toHaveBeenCalled()
+    expect(_getAcIndex()).toBe(-1)
+
+    const tabEv = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+    cmdInput.dispatchEvent(tabEv)
+    expect(tabEv.defaultPrevented).toBe(true)
+    expect(cmdInput.value).toBe('cur')
+    expect(_getAcIndex()).toBe(-1)
+
+    for (const key of ['ArrowUp', 'ArrowDown']) {
+      const ev = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })
+      cmdInput.dispatchEvent(ev)
+      expect(ev.defaultPrevented).toBe(true)
+    }
+
+    const originalGetSelection = window.getSelection
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => document.body,
+    })
+    Object.defineProperty(window, 'getSelection', {
+      configurable: true,
+      value: () => ({ toString: () => 'selected output' }),
+    })
+
+    try {
+      const replayEv = new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })
+      expect(_replayPromptShortcutAfterSelection(replayEv)).toBe(true)
+      expect(replayEv.defaultPrevented).toBe(true)
+    } finally {
+      Object.defineProperty(window, 'getSelection', {
+        configurable: true,
+        value: originalGetSelection,
+      })
+    }
+
+    expect(hasPendingTerminalConfirm).toHaveBeenCalled()
+    expect(acHide).toHaveBeenCalled()
+    expect(acShow).not.toHaveBeenCalled()
+    expect(navigateCmdHistory).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -2094,7 +2146,8 @@ describe('app helpers', () => {
     expect(runBtn.hidden).toBe(true)
     expect(shellInputRow.hidden).toBe(true)
     expect(shellInputRow.getAttribute('aria-hidden')).toBe('true')
-    expect(mobileComposerRow.querySelector('.mobile-prompt-label')?.textContent).toBe('$')
+    expect(mobileComposerRow.querySelector('.mobile-prompt-label')?.textContent).toBe('')
+    expect(mobileCmdInput.placeholder).toBe('/ · type command')
     expect(shellPromptWrap.scrollIntoView).not.toHaveBeenCalled()
 
     restoreViewport()
@@ -2194,6 +2247,56 @@ describe('app helpers', () => {
     }
   })
 
+  it('keeps the active output pinned to the bottom when the mobile keyboard closes', async () => {
+    const output = document.createElement('div')
+    let scrollTop = 0
+    Object.defineProperty(output, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value) => {
+        scrollTop = value
+      },
+    })
+    Object.defineProperty(output, 'scrollHeight', {
+      configurable: true,
+      get: () => 300,
+    })
+    const { restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 768, offsetTop: 0 },
+      tabs: [
+        {
+          id: 'tab-1',
+          followOutput: true,
+          suppressOutputScrollTracking: false,
+          _outputFollowToken: 0,
+        },
+      ],
+      getOutput: () => output,
+    })
+    try {
+      const mobileCmdInput = document.getElementById('mobile-cmd')
+      let activeElement = mobileCmdInput
+      document.body.classList.add('mobile-terminal-mode')
+      Object.defineProperty(document, 'activeElement', {
+        configurable: true,
+        get: () => activeElement,
+      })
+
+      window.visualViewport.height = 500
+      mobileCmdInput.dispatchEvent(new Event('focus'))
+      expect(scrollTop).toBe(300)
+
+      scrollTop = 12
+      activeElement = document.body
+      window.visualViewport.height = 768
+      mobileCmdInput.dispatchEvent(new Event('blur'))
+
+      expect(scrollTop).toBe(300)
+    } finally {
+      restoreViewport()
+    }
+  })
+
   it('keeps the mobile keyboard helper row visible when the viewport resize lands before focus', async () => {
     const { syncMobileComposerKeyboardState, restoreViewport } = await loadAppFns({
       mobileViewport: { height: 768, offsetTop: 0 },
@@ -2214,8 +2317,6 @@ describe('app helpers', () => {
     )
     mobileCmdInput.dispatchEvent(new Event('focus'))
     expect(document.body.classList.contains('mobile-keyboard-open')).toBe(true)
-    expect(document.getElementById('mobile-edit-bar').hidden).toBe(false)
-
     restoreViewport()
   })
 
@@ -2451,23 +2552,6 @@ describe('app helpers', () => {
     expect(document.title).toBe('darklab_shell')
   })
 
-  it('updates existing terminal-wordmark elements with app name and version after config loads', async () => {
-    // loadAppFns resets document.body.innerHTML internally, so the wordmark must be
-    // injected after setup but before the async config handler drains.
-    await loadAppFns()
-    const wordmark = document.createElement('a')
-    wordmark.className = 'terminal-wordmark'
-    wordmark.href = '#'
-    document.body.appendChild(wordmark)
-
-    await new Promise((resolve) => setImmediate(resolve))
-
-    expect(wordmark.textContent).toBe('darklab_shell v9.9')
-    expect(wordmark.getAttribute('href')).toBe(
-      'https://gitlab.com/darklab.sh/darklab_shell',
-    )
-  })
-
   it('keeps the mobile run button visible after the keyboard closes', async () => {
     const { restoreViewport } = await loadAppFns({
       mobileViewport: { height: 768, offsetTop: 0 },
@@ -2562,7 +2646,7 @@ describe('app helpers', () => {
     )
 
     expect(shellMatch).not.toBeNull()
-    expect(shellMatch[1]).toMatch(/background:\s*var\(--theme-mobile-composer-host-bg\)/)
+    expect(shellMatch[1]).toMatch(/background:\s*transparent/)
     expect(shellMatch[1]).not.toMatch(/rgba\(13,13,13/)
 
     expect(composerMatch).not.toBeNull()
@@ -2661,7 +2745,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               default_theme: 'darklab_obsidian.yaml',
               motd: '',
@@ -2773,10 +2858,34 @@ describe('app helpers', () => {
     expect(shellPromptWrap.classList.contains('shell-prompt-has-selection')).toBe(true)
   })
 
+  it('refreshes prompt rendering from the focused input before drawing the caret', async () => {
+    const { cmdInput, setComposerState, syncShellPrompt } = await loadAppFns()
+    const shellPromptText = document.getElementById('shell-prompt-text')
+    const shellPromptWrap = document.getElementById('shell-prompt-wrap')
+
+    setComposerState({
+      value: 'stale text',
+      selectionStart: 10,
+      selectionEnd: 10,
+      activeInput: 'desktop',
+    })
+    cmdInput.value = ''
+    cmdInput.setSelectionRange(0, 0)
+    const activeElementSpy = vi.spyOn(document, 'activeElement', 'get').mockReturnValue(cmdInput)
+
+    syncShellPrompt()
+
+    expect(shellPromptText.textContent).toBe('')
+    expect(shellPromptWrap.classList.contains('shell-prompt-empty')).toBe(true)
+    expect(shellPromptWrap.classList.contains('shell-prompt-has-value')).toBe(false)
+    activeElementSpy.mockRestore()
+  })
+
   it('supports ctrl+w to delete one word to the left', async () => {
     const { cmdInput, setComposerState } = await loadAppFns()
 
     cmdInput.value = 'dig darklab.sh A'
+    cmdInput.focus()
     cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
     setComposerState({
       value: 'dig darklab.sh A',
@@ -2909,15 +3018,10 @@ describe('app helpers', () => {
     expect(cmdInput.selectionStart).toBe(16)
   })
 
-  it('supports the mobile edit bar actions', async () => {
-    const { getVisibleComposerInput, setComposerState } = await loadAppFns({
+  it('supports the mobile keyboard helper edit actions', async () => {
+    const { getVisibleComposerInput, performMobileEditAction, setComposerState } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
     })
-    const press = (selector) => {
-      document
-        .querySelector(selector)
-        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
-    }
 
     document.body.classList.add('mobile-terminal-mode')
     const cmdInput = document.getElementById('cmd')
@@ -2934,41 +3038,36 @@ describe('app helpers', () => {
     })
     const visibleInput = getVisibleComposerInput()
 
-    press('[data-edit-action="left"]')
+    performMobileEditAction('left')
     expect(visibleInput.selectionStart).toBe(visibleInput.value.length - 1)
 
-    press('[data-edit-action="home"]')
+    performMobileEditAction('home')
     expect(visibleInput.selectionStart).toBe(0)
 
-    press('[data-edit-action="word-right"]')
+    performMobileEditAction('word-right')
     expect(visibleInput.selectionStart).toBe(4)
 
-    press('[data-edit-action="right"]')
+    performMobileEditAction('right')
     expect(visibleInput.selectionStart).toBe(5)
 
-    press('[data-edit-action="word-left"]')
+    performMobileEditAction('word-left')
     expect(visibleInput.selectionStart).toBe(0)
 
-    press('[data-edit-action="end"]')
+    performMobileEditAction('end')
     expect(visibleInput.selectionStart).toBe(visibleInput.value.length)
 
-    press('[data-edit-action="delete-word"]')
+    performMobileEditAction('delete-word')
     expect(visibleInput.value).toBe('ping -c 4 ')
 
-    press('[data-edit-action="delete-line"]')
+    performMobileEditAction('delete-line')
     expect(visibleInput.value).toBe('')
     expect(visibleInput.selectionStart).toBe(0)
   })
 
-  it('keeps the mobile composer scrolled to the caret when edit-bar navigation moves through long input', async () => {
-    const { getVisibleComposerInput, setComposerState } = await loadAppFns({
+  it('keeps the mobile composer scrolled to the caret when helper navigation moves through long input', async () => {
+    const { getVisibleComposerInput, performMobileEditAction, setComposerState } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
     })
-    const press = (selector) => {
-      document
-        .querySelector(selector)
-        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
-    }
 
     document.body.classList.add('mobile-terminal-mode')
     const mobileCmdInput = document.getElementById('mobile-cmd')
@@ -2986,11 +3085,11 @@ describe('app helpers', () => {
     })
     const visibleInput = getVisibleComposerInput()
 
-    press('[data-edit-action="end"]')
+    performMobileEditAction('end')
     expect(visibleInput.selectionStart).toBe(longValue.length)
     expect(visibleInput.scrollLeft).toBeGreaterThan(0)
 
-    press('[data-edit-action="home"]')
+    performMobileEditAction('home')
     expect(visibleInput.selectionStart).toBe(0)
     expect(visibleInput.scrollLeft).toBe(0)
   })
@@ -3073,7 +3172,7 @@ describe('app helpers', () => {
     expect(createTab).toHaveBeenCalledWith('shell 2')
   })
 
-  it('supports Alt+W to close the active tab', async () => {
+  it('supports Alt+W and Ctrl+D to close the active tab', async () => {
     const closeTab = vi.fn()
     const { cmdInput } = await loadAppFns({
       closeTab,
@@ -3081,8 +3180,11 @@ describe('app helpers', () => {
     })
 
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', altKey: true, bubbles: true }))
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, bubbles: true }))
 
-    expect(closeTab).toHaveBeenCalledWith('tab-1')
+    expect(closeTab).toHaveBeenCalledTimes(2)
+    expect(closeTab).toHaveBeenNthCalledWith(1, 'tab-1')
+    expect(closeTab).toHaveBeenNthCalledWith(2, 'tab-1')
   })
 
   it('supports macOS Option+W to close the active tab via physical key code', async () => {
@@ -3104,7 +3206,63 @@ describe('app helpers', () => {
     expect(closeTab).toHaveBeenCalledWith('tab-1')
   })
 
-  it('supports Alt+ArrowLeft and Alt+ArrowRight to cycle between tabs', async () => {
+  it('supports Alt+ArrowLeft and Alt+ArrowRight to move by word', async () => {
+    const activateTab = vi.fn()
+    const { cmdInput, getComposerState, handleComposerWordArrowShortcut, setComposerValue } = await loadAppFns({
+      activateTab,
+      activeTabId: 'tab-2',
+      tabs: [
+        { id: 'tab-1', st: 'idle' },
+        { id: 'tab-2', st: 'idle' },
+        { id: 'tab-3', st: 'idle' },
+      ],
+    })
+
+    setComposerValue('dig darklab.sh A', 16, 16, { dispatch: false })
+    cmdInput.focus()
+
+    expect(handleComposerWordArrowShortcut({
+      key: 'ArrowLeft',
+      code: 'ArrowLeft',
+      altKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    })).toBe(true)
+    expect(getComposerState().selectionStart).toBe(15)
+    expect(getComposerState().selectionEnd).toBe(15)
+
+    handleComposerWordArrowShortcut({
+      key: 'ArrowLeft',
+      code: 'ArrowLeft',
+      altKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    })
+    expect(getComposerState().selectionStart).toBe(4)
+    expect(getComposerState().selectionEnd).toBe(4)
+
+    handleComposerWordArrowShortcut({
+      key: 'ArrowRight',
+      code: 'ArrowRight',
+      altKey: true,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+    })
+    expect(getComposerState().selectionStart).toBe(14)
+    expect(getComposerState().selectionEnd).toBe(14)
+    expect(activateTab).not.toHaveBeenCalled()
+  })
+
+  it('supports Shift+Alt+ArrowLeft and Shift+Alt+ArrowRight to cycle between tabs', async () => {
     const activateTab = vi.fn()
     const { cmdInput } = await loadAppFns({
       activateTab,
@@ -3117,13 +3275,13 @@ describe('app helpers', () => {
     })
 
     cmdInput.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }),
+      new KeyboardEvent('keydown', { key: 'ArrowRight', code: 'ArrowRight', altKey: true, shiftKey: true, bubbles: true }),
     )
     expect(activateTab).toHaveBeenCalledWith('tab-3')
 
     activateTab.mockClear()
     cmdInput.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'ArrowLeft', altKey: true, bubbles: true }),
+      new KeyboardEvent('keydown', { key: 'ArrowLeft', code: 'ArrowLeft', altKey: true, shiftKey: true, bubbles: true }),
     )
     expect(activateTab).toHaveBeenCalledWith('tab-1')
   })
@@ -3235,6 +3393,46 @@ describe('app helpers', () => {
     )
 
     expect(copyTab).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('supports Alt+M to toggle the status monitor from the terminal prompt', async () => {
+    const openStatusMonitor = vi.fn(() => Promise.resolve(true))
+    const closeStatusMonitor = vi.fn()
+    let statusMonitorOpen = false
+    const { cmdInput } = await loadAppFns({
+      openStatusMonitor,
+      closeStatusMonitor,
+      isStatusMonitorOpen: () => statusMonitorOpen,
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', altKey: true, bubbles: true }))
+    statusMonitorOpen = true
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'm', altKey: true, bubbles: true }))
+
+    expect(openStatusMonitor).toHaveBeenCalledWith({ source: 'shortcut' })
+    expect(openStatusMonitor).toHaveBeenCalledTimes(1)
+    expect(closeStatusMonitor).toHaveBeenCalledTimes(1)
+  })
+
+  it('supports Alt+Shift+F to open the Files modal from the terminal prompt', async () => {
+    const openWorkspace = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      openWorkspace,
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'F',
+        code: 'KeyF',
+        altKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    )
+
+    expect(openWorkspace).toHaveBeenCalled()
   })
 
   it('supports Ctrl+L to clear the active tab without dropping a running command', async () => {
@@ -3517,14 +3715,14 @@ describe('app helpers', () => {
       themeRegistry: {
         current: {
           name: 'theme_light_blue',
-          label: 'Blue Paper',
+          label: 'Apricot Sand',
           source: 'variant',
           vars: { '--bg': '#9ab7d0' },
         },
         themes: [
           {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
@@ -3631,7 +3829,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
@@ -3707,7 +3906,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
@@ -3800,7 +4000,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
@@ -3862,8 +4063,7 @@ describe('app helpers', () => {
     expect(confirmOpts.actions.map((action) => action.id)).toEqual(['copy', 'cancel', 'clear'])
     expect(confirmOpts.actions.find((action) => action.id === 'cancel')).toMatchObject({ role: 'cancel' })
     expect(confirmOpts.actions.find((action) => action.id === 'clear')).toMatchObject({
-      role: 'primary',
-      tone: 'danger',
+      role: 'destructive',
       label: 'Clear token',
     })
   })
@@ -3930,7 +4130,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
@@ -3962,14 +4163,14 @@ describe('app helpers', () => {
       themeRegistry: {
         current: {
           name: 'theme_light_blue',
-          label: 'Blue Paper',
+          label: 'Apricot Sand',
           source: 'variant',
           vars: { '--bg': '#9ab7d0' },
         },
         themes: [
           {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
@@ -4046,7 +4247,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               default_theme: 'darklab_obsidian.yaml',
               motd: '',
@@ -4103,7 +4305,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               default_theme: 'darklab_obsidian.yaml',
               motd: '',
@@ -4149,6 +4352,65 @@ describe('app helpers', () => {
     expect(mobileCmdInput.focus).not.toHaveBeenCalled()
   })
 
+  it('opens autocomplete after loading an FAQ command chip', async () => {
+    const acShow = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/config') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              app_name: 'darklab_shell',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
+              version: '9.9',
+              default_theme: 'darklab_obsidian.yaml',
+              motd: '',
+              command_timeout_seconds: 120,
+              max_output_lines: 5000,
+              permalink_retention_days: 365,
+            }),
+        })
+      }
+      if (url === '/allowed-commands') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              restricted: true,
+              commands: ['nc'],
+              groups: [{ name: 'Network', commands: ['nc'] }],
+            }),
+        })
+      }
+      if (url === '/faq') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              items: [{ question: 'Allowed?', answer: 'allowlist', ui_kind: 'allowed_commands' }],
+            }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+
+    await loadAppFns({
+      apiFetch,
+      getAutocompleteMatches: (value, cursor) => (
+        value === 'nc ' && cursor === 3
+          ? [{ value: '-z', description: 'Zero-I/O mode', replaceStart: 3, replaceEnd: 3 }]
+          : []
+      ),
+      acShow,
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+
+    document.querySelector('.allowed-chip').click()
+
+    expect(document.getElementById('mobile-cmd').value).toBe('nc ')
+    expect(acShow).toHaveBeenCalledWith([
+      { value: '-z', description: 'Zero-I/O mode', replaceStart: 3, replaceEnd: 3 },
+    ])
+  })
+
   it('loads custom FAQ chips into the prompt with the same command-chip behavior', async () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/config') {
@@ -4156,7 +4418,8 @@ describe('app helpers', () => {
           json: () =>
             Promise.resolve({
               app_name: 'darklab_shell',
-              prompt_prefix: 'anon@darklab:~$',
+              prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
               version: '9.9',
               default_theme: 'darklab_obsidian.yaml',
               motd: '',

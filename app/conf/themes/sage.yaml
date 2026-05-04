@@ -1,0 +1,123 @@
+# darklab shell — Light Theme: Sage
+# -------------------------------------------------
+# Dusty herb-green mid-light. Sagebrush, lichen on granite, tarnished copper at noon. The cool-green counterpoint to Overcast's neutral grey — grounded, not minty.
+
+label: "Sage"
+color_scheme: light
+group: "Neutral Mid-tone"
+sort: 76
+
+bg: "#b4c0a6"
+surface: "#c4cfb6"
+border: "rgba(20,30,16,0.22)"
+border_bright: "rgba(20,30,16,0.38)"
+border_soft: "rgba(20,30,16,0.12)"
+text: "#1a2115"
+muted: "#3f4a38"
+green: "#2d5a2e"
+green_dim: "#3a6a3b"
+green_glow: "rgba(45,90,46,0.10)"
+amber: "#5a3c08"
+red: "#8a2420"
+blue: "#2a4268"
+terminal_font_size: "14px"
+terminal_line_height: "1.65"
+prompt_line_text: "#1a2115"
+
+panel_bg: "#acb89e"
+panel_border: "rgba(20,30,16,0.22)"
+panel_shadow: "rgba(14,22,10,0.10)"
+terminal_bar_bg: "#9ca894"
+
+chrome_bg: "#9ca894"
+chrome_header_bg: "#9ca894"
+chrome_row_bg: "#9ca894"
+chrome_row_hover_bg: "rgba(45,90,46,0.10)"
+chrome_control_bg: "color-mix(in srgb, var(--surface) 92%, transparent)"
+chrome_control_border: "var(--border-bright)"
+chrome_divider_color: "var(--border)"
+
+toolbar_button_bg: "#aab69c"
+toolbar_button_border: "#808c78"
+toolbar_button_text: "#2a3424"
+toolbar_button_hover_bg: "#98a488"
+toolbar_button_hover_border: "#66725a"
+toolbar_button_hover_text: "#0c130a"
+toolbar_button_active_bg: "#849072"
+toolbar_button_active_border: "#66725a"
+toolbar_button_active_text: "#06100a"
+
+# Button primitives
+button_secondary_bg: "color-mix(in srgb, var(--surface) 66%, transparent)"
+button_secondary_border: "color-mix(in srgb, var(--border-bright) 88%, transparent)"
+button_secondary_text: "color-mix(in srgb, var(--muted) 86%, var(--text))"
+button_secondary_hover_bg: "color-mix(in srgb, var(--_tone) 7%, transparent)"
+button_secondary_hover_border: "color-mix(in srgb, var(--_tone-dim) 72%, var(--border-bright))"
+button_ghost_border: "color-mix(in srgb, var(--border-bright) 58%, transparent)"
+button_ghost_text: "color-mix(in srgb, var(--muted) 86%, var(--text))"
+button_ghost_hover_bg: "color-mix(in srgb, var(--_tone) 10%, transparent)"
+button_ghost_hover_border: "color-mix(in srgb, var(--_tone-dim) 62%, var(--border-bright))"
+button_destructive_bg: "color-mix(in srgb, var(--_tone) 8%, transparent)"
+button_destructive_text: "color-mix(in srgb, var(--muted) 86%, var(--text))"
+button_destructive_hover_bg: "color-mix(in srgb, var(--_tone) 16%, transparent)"
+
+
+tab_text: "#3f4a38"
+tab_hover_text: "#1a2115"
+tab_active_bg: "#bdc8b0"
+tab_close_bg: "rgba(255,255,255,0.25)"
+tab_close_border: "rgba(14,22,10,0.10)"
+tab_close_hover_bg: "color-mix(in srgb, var(--green) 14%, transparent)"
+tab_close_hover_border: "color-mix(in srgb, var(--green) 28%, transparent)"
+tab_close_hover_text: "inherit"
+tab_touch_drag_text_shadow: "0 0 10px color-mix(in srgb, var(--green) 14%, transparent)"
+tab_drop_shadow: "0 0 10px color-mix(in srgb, var(--green) 28%, transparent)"
+
+chrome_shadow: "rgba(14,22,10,0.22)"
+scrollbar_track: "color-mix(in srgb, var(--surface) 72%, transparent)"
+scrollbar_thumb: "color-mix(in srgb, var(--muted) 44%, var(--border-bright))"
+scrollbar_thumb_hover: "color-mix(in srgb, var(--text) 38%, var(--border-bright))"
+history_load_overlay_bg: "rgba(8,14,8,0.64)"
+
+modal_bg: "#bdc8b0"
+
+dropdown_bg: "#bdc8b0"
+dropdown_border: "color-mix(in srgb, var(--blue) 22%, transparent)"
+dropdown_border_soft: "rgba(26,90,170,0.18)"
+dropdown_shadow: "rgba(14,22,10,0.16)"
+dropdown_shadow_ring: "color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent)"
+dropdown_shadow_ring_strong: "color-mix(in srgb, var(--theme-dropdown-shadow) 36%, transparent)"
+dropdown_item_text: "#3f4a38"
+overlay_backdrop_bg: "rgba(8,14,8,0.64)"
+
+# Search highlights
+search_highlight_bg: "rgba(154,66,0,0.18)"
+search_highlight_current_bg: "rgba(154,66,0,0.34)"
+search_signal_bg: "rgba(154,66,0,0.08)"
+search_signal_accent: "rgba(154,66,0,0.28)"
+search_signal_current_bg: "rgba(154,66,0,0.14)"
+search_signal_current_accent: "rgba(154,66,0,0.42)"
+
+inline_surface_bg: "#acb89e"
+
+toast_bg: "#c4cfb6"
+toast_text: "#2d5a2e"
+toast_border: "color-mix(in srgb, #2d5a2e 45%, transparent)"
+toast_error_bg: "#c4cfb6"
+toast_error_text: "#8a2420"
+toast_error_border: "color-mix(in srgb, var(--red) 38%, transparent)"
+toast_shadow: "0 12px 28px color-mix(in srgb, var(--theme-panel-shadow) 74%, transparent)"
+
+
+welcome_ascii_color: "var(--green)"
+welcome_command_hover_bg: "rgba(45,90,46,0.10)"
+welcome_command_hover_shadow: "0 0 0 1px var(--green-glow)"
+welcome_ascii_text_shadow: "0 1px 0 rgba(196,207,182,0.60)"
+welcome_ascii_filter: "saturate(0.85) contrast(1.02) brightness(0.98)"
+
+# Action / selection text colors
+on_accent_text: "#000"
+selection_text: "#f7fff2"
+selection_line_text: "#eef7ee"
+modal_danger_btn_text: "#fff"
+modal_warning_btn_text: "#000"

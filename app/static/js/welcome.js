@@ -7,7 +7,9 @@
 // animation immediately; runner.js also calls clearTab to wipe partial output.
 
 const _welcomeWaiters = new Set();
-const _welcomePrompt = (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.prompt_prefix) || 'anon@darklab:~$';
+const _welcomePrompt = typeof buildPromptLabel === 'function'
+  ? buildPromptLabel()
+  : 'anon@darklab.sh:~ $';
 const _welcomeGroupOrder = ['basics', 'dns', 'web', 'recon', 'advanced'];
 const _welcomeStatusFrames = ['initializing /', 'initializing -', 'initializing \\', 'initializing |'];
 const _welcomeStatusPendingText = 'initializing...';
@@ -694,6 +696,46 @@ async function _runWelcomeHintFeed(tabId, hints, intervalMs) {
   if (tabId === activeTabId) mountShellPrompt(tabId);
 }
 
+function _currentWelcomeHintText() {
+  if (!_welcomeHintNode) return '';
+  return String(_welcomeHintNode.textContent || '').replace(/^#\s*/, '').trim();
+}
+
+async function _resumeWelcomeHintFeed(tabId, hints, intervalMs) {
+  if (!_welcomeActive || !_welcomeDone || !Array.isArray(hints) || !hints.length) return;
+  if (!(Number(intervalMs) > 0)) {
+    _welcomeActive = false;
+    return;
+  }
+  let rotationsRemaining = _welcomeHintRotationBudget(APP_CONFIG.welcome_hint_rotations);
+  if (rotationsRemaining === 0) {
+    _welcomeActive = false;
+    return;
+  }
+
+  const used = new Set();
+  const current = _currentWelcomeHintText();
+  if (current) used.add(current);
+
+  while (_shouldRotateWelcomeHints(tabId)) {
+    await _sleep(intervalMs);
+    if (!_shouldRotateWelcomeHints(tabId)) break;
+
+    if (rotationsRemaining !== Infinity) {
+      if (rotationsRemaining <= 0) break;
+      rotationsRemaining--;
+    }
+
+    const next = _pickRandomHint(hints, used);
+    if (!next) break;
+    used.add(next);
+    await _showWelcomeHint(tabId, next, false);
+  }
+
+  _welcomeActive = false;
+  if (tabId === activeTabId) mountShellPrompt(tabId);
+}
+
 function _ensureFeaturedWelcomeBadge(line, cmd) {
   if (!line || line.querySelector('.welcome-command-badge')) return;
   const comment = line.querySelector('.welcome-command-comment');
@@ -719,9 +761,10 @@ function _ensureWelcomeFinalHint(tabId, hints) {
   // entry starts from a stable transcript instead of a still-rotating footer.
   if (_welcomeHintNode) return;
   if (Array.isArray(hints) && hints.length) {
+    const finalHint = _pickRandomHint(hints, new Set()) || hints[0];
     const line = document.createElement('span');
     line.className = 'line welcome-hint welcome-hint-feed welcome-hint-visible';
-    line.textContent = `# ${String(hints[0]).trim()}`;
+    line.textContent = `# ${String(finalHint).trim()}`;
     getOutput(tabId)?.appendChild(line);
     _welcomeHintNode = line;
     if (tabId === activeTabId) mountShellPrompt(tabId, true);
@@ -788,6 +831,7 @@ function _renderSettledWelcome(tabId, {
   blocks = [],
   hints = [],
   includeBlocks = true,
+  rotateHints = false,
 } = {}) {
   const out = getOutput(tabId);
   if (!out || !_welcomeActive) return false;
@@ -798,7 +842,14 @@ function _renderSettledWelcome(tabId, {
     blocks: introBlocks,
     hints,
   };
-  return settleWelcome(tabId);
+  const settled = settleWelcome(tabId);
+  if (settled && rotateHints && Array.isArray(hints) && hints.length) {
+    _welcomeActive = true;
+    _welcomeBootPending = false;
+    const intervalMs = Math.max(0, Number(APP_CONFIG.welcome_hint_interval_ms ?? 4200) || 0);
+    void _resumeWelcomeHintFeed(tabId, hints, intervalMs);
+  }
+  return settled;
 }
 
 async function runWelcome() {
@@ -837,6 +888,7 @@ async function runWelcome() {
         blocks: [],
         hints,
         includeBlocks: false,
+        rotateHints: true,
       });
       return;
     }
@@ -884,6 +936,7 @@ async function runWelcome() {
       blocks: sampledBlocks,
       hints,
       includeBlocks: true,
+      rotateHints: true,
     });
     return;
   }

@@ -54,7 +54,7 @@
   color: var(--text);
 }
 .welcome-ascii-art {
-  color: var(--green);
+  color: var(--theme-welcome-ascii-color, var(--green));
   font-family: var(--font-mono);
   font-size: clamp(8px, 0.72vw + 3px, 12px);
   line-height: 1.04;
@@ -205,11 +205,6 @@ body .welcome-status-loaded {
 .line.wlc-live {
   opacity: 1;
 }
-.line.welcome-system {
-  color: var(--green);
-  font-weight: 700;
-  margin-top: 4px;
-}
 .line.welcome-section-header {
   color: color-mix(in srgb, var(--green) 74%, var(--muted));
   font-size: 11px;
@@ -264,12 +259,6 @@ body .welcome-status-loaded {
   0%, 100% { opacity: 0.68; }
   50% { opacity: 0.82; }
 }
-@keyframes prompt-load-flash {
-  0% { border-color: var(--border-bright); box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 0%, transparent); }
-  25% { border-color: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 16%, transparent); }
-  100% { border-color: var(--border-bright); box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 0%, transparent); }
-}
-
 @media (max-width: 900px) {
   .welcome-banner {
     gap: 1px;

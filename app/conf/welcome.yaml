@@ -88,10 +88,6 @@
   group: "web"
   out: "probe HTTP services and inspect responses"
 
-- cmd: "amass enum -d darklab.sh"
-  group: "recon"
-  out: "broaden subdomain and asset discovery"
-
 - cmd: "assetfinder darklab.sh"
   group: "recon"
   out: "enumerate assets related to a domain"
@@ -108,7 +104,7 @@
   group: "advanced"
   out: "scan common web ports quickly with a bounded rate"
 
-- cmd: "gobuster dir -u https://darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
+- cmd: "gobuster dir -u https://tor-stats.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
   group: "web"
   out: "brute force directories with an installed wordlist"
 
@@ -128,10 +124,6 @@
 - cmd: "nikto -h https://darklab.sh"
   group: "web"
   out: "run a quick web server vulnerability check"
-
-- cmd: "wapiti -u https://darklab.sh"
-  group: "web"
-  out: "scan a web app for common attack surfaces"
 
 - cmd: "wpscan --url https://darklab.sh"
   group: "advanced"

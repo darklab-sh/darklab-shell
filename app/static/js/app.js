@@ -11,10 +11,34 @@ const _defaultMobilePromptLabel = (() => {
 })();
 let _composerPromptMode = null;
 
+function _compactMobileComposerPath(path = '/') {
+  const displayPath = String(path || '/').trim() || '/';
+  if (displayPath === '/') return '/';
+  if (displayPath.length <= 18) return displayPath;
+  const parts = displayPath.split('/').filter(Boolean);
+  const folder = parts[parts.length - 1] || displayPath.replace(/^\/+/, '') || '/';
+  return `.../${folder}`;
+}
+
+function _mobileComposerPlaceholder() {
+  if (
+    typeof APP_CONFIG !== 'undefined'
+    && APP_CONFIG
+    && APP_CONFIG.workspace_enabled === true
+    && typeof currentPromptWorkspacePath === 'function'
+  ) {
+    return `${_compactMobileComposerPath(currentPromptWorkspacePath())} · type command`;
+  }
+  return 'Type a command';
+}
+
 function _applyComposerPromptMode() {
   const isConfirm = _composerPromptMode === 'confirm';
-  const desktopLabel = isConfirm ? '[yes/no]:' : _defaultDesktopPromptLabel;
-  const mobileLabel = isConfirm ? '[yes/no]:' : _defaultMobilePromptLabel;
+  const defaultPromptLabel = typeof buildPromptLabel === 'function'
+    ? buildPromptLabel()
+    : (_defaultDesktopPromptLabel || 'anon@darklab.sh:~ $');
+  const desktopLabel = isConfirm ? '[yes/no]:' : defaultPromptLabel;
+  const mobileLabel = isConfirm ? '[yes/no]:' : '';
   const promptPrefix = typeof shellPromptWrap !== 'undefined' && shellPromptWrap
     ? shellPromptWrap.querySelector('.prompt-prefix')
     : null;
@@ -25,7 +49,13 @@ function _applyComposerPromptMode() {
   const mobilePromptLabel = typeof mobileComposerRow !== 'undefined' && mobileComposerRow
     ? mobileComposerRow.querySelector('.mobile-prompt-label')
     : null;
-  if (mobilePromptLabel) mobilePromptLabel.textContent = mobileLabel;
+  if (mobilePromptLabel) {
+    mobilePromptLabel.textContent = mobileLabel;
+    mobilePromptLabel.hidden = !isConfirm;
+  }
+  if (typeof mobileCmdInput !== 'undefined' && mobileCmdInput) {
+    mobileCmdInput.placeholder = isConfirm ? '' : _mobileComposerPlaceholder();
+  }
 }
 
 function setComposerPromptMode(mode = null) {
@@ -38,6 +68,15 @@ function syncShellPrompt() {
   // the hidden input directly, so selection/caret state stays correct across
   // desktop/mobile and while welcome owns the tab.
   if (typeof shellPromptText === 'undefined' || !shellPromptText) return;
+  if (
+    typeof document !== 'undefined'
+    && typeof syncFocusedComposerState === 'function'
+    && typeof getComposerInputs === 'function'
+  ) {
+    const { desktop, mobile } = getComposerInputs();
+    const active = document.activeElement;
+    if (active && (active === desktop || active === mobile)) syncFocusedComposerState(active);
+  }
   const composer = typeof getComposerState === 'function' ? getComposerState() : null;
   const fallbackInput = typeof cmdInput !== 'undefined' && cmdInput ? cmdInput : null;
   const value = composer && typeof composer.value === 'string'
@@ -125,6 +164,7 @@ const _permalinkToastHomeParent = typeof permalinkToast !== 'undefined' && perma
 const _confirmHostEl = document.getElementById('confirm-host');
 const _confirmHostHomeParent = _confirmHostEl ? _confirmHostEl.parentElement : null;
 const _workflowsOverlayHomeParent = typeof workflowsOverlay !== 'undefined' && workflowsOverlay ? workflowsOverlay.parentElement : null;
+const _workspaceOverlayHomeParent = typeof workspaceOverlay !== 'undefined' && workspaceOverlay ? workspaceOverlay.parentElement : null;
 const _faqOverlayHomeParent = typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay.parentElement : null;
 const _themeOverlayHomeParent = typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay.parentElement : null;
 const _optionsOverlayHomeParent = typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay.parentElement : null;
@@ -135,9 +175,10 @@ const _mobileHeaderActionsHomeParent = typeof mobileHeaderActions !== 'undefined
 const TAB_SESSION_STATE_KEY = `tab_session_state:${typeof SESSION_ID !== 'undefined' ? SESSION_ID : 'session'}`;
 let _tabSessionPersistTimer = null;
 let _tabSessionRestoreInProgress = false;
-const _welcomeIntroModes = ['animated', 'disable_animation', 'remove'];
-const _shareRedactionDefaultModes = ['unset', 'redacted', 'raw'];
-const _hudClockModes = ['utc', 'local'];
+const PreferenceCore = window.DarklabPreferenceCore;
+const _welcomeIntroModes = PreferenceCore.WELCOME_INTRO_MODES;
+const _shareRedactionDefaultModes = PreferenceCore.SHARE_REDACTION_DEFAULT_MODES;
+const _hudClockModes = PreferenceCore.HUD_CLOCK_MODES;
 
 function _moveComposerNode(node, target, anchor = null) {
   if (!node || !target || node.parentElement === target) return;
@@ -176,8 +217,7 @@ function _getMobileUiLayoutRefs() {
   const shellRoot = typeof mobileShell !== 'undefined' && mobileShell ? mobileShell : null;
   const composerHost = typeof mobileComposerHost !== 'undefined' && mobileComposerHost ? mobileComposerHost : null;
   const composerRow = typeof mobileComposerRow !== 'undefined' && mobileComposerRow ? mobileComposerRow : null;
-  const editBar = typeof mobileEditBar !== 'undefined' && mobileEditBar ? mobileEditBar : null;
-  if (!shellRoot && !composerHost && !composerRow && !editBar) return null;
+  if (!shellRoot && !composerHost && !composerRow) return null;
   return {
     shell: shellRoot ? {
       root: shellRoot,
@@ -188,7 +228,6 @@ function _getMobileUiLayoutRefs() {
     composer: {
       host: composerHost,
       row: composerRow,
-      editBar,
     },
   };
 }
@@ -196,10 +235,14 @@ function _getMobileUiLayoutRefs() {
 // These refs let the same DOM nodes move between the desktop document flow and
 // the simplified mobile shell without duplicating markup or event handlers.
 const _mobileUiLayoutRefs = _getMobileUiLayoutRefs();
+const _workspaceOverlayEl = typeof workspaceOverlay !== 'undefined' && workspaceOverlay ? workspaceOverlay : null;
 const _uiOverlayRefs = {
   mobileMenu: mobileMenu || null,
   hamburgerBtn: hamburgerBtn || null,
   workflowsOverlay: typeof workflowsOverlay !== 'undefined' && workflowsOverlay ? workflowsOverlay : null,
+  workspaceOverlay: _workspaceOverlayEl,
+  workspaceViewerOverlay: typeof workspaceViewerOverlay !== 'undefined' && workspaceViewerOverlay ? workspaceViewerOverlay : null,
+  workspaceEditorOverlay: typeof workspaceEditorOverlay !== 'undefined' && workspaceEditorOverlay ? workspaceEditorOverlay : null,
   faqOverlay: typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay : null,
   themeOverlay: typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay : null,
   optionsOverlay: typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay : null,
@@ -209,74 +252,6 @@ const _uiOverlayRefs = {
 function _bindMobileComposerInteractions(uiRefs) {
   const composerRefs = uiRefs && uiRefs.composer;
   if (!composerRefs || !composerRefs.host || !cmdInput) return;
-}
-
-function _bindMobileEditBarInteractions(editBar) {
-  if (!editBar || !cmdInput) return;
-  editBar.querySelectorAll('button[data-mobile-edit], button[data-edit-action]').forEach(btn => {
-    if (btn.dataset.mobileEditBound === '1') return;
-    btn.dataset.mobileEditBound = '1';
-    const action = btn.dataset.mobileEdit || btn.dataset.editAction;
-    const repeating = action === 'left' || action === 'right';
-    let handledPointerDown = false;
-    let _repeatDelay = null;
-    let _repeatInterval = null;
-    const _clearRepeat = () => {
-      if (_repeatDelay)    { clearTimeout(_repeatDelay);   _repeatDelay = null; }
-      if (_repeatInterval) { clearInterval(_repeatInterval); _repeatInterval = null; }
-      if (typeof document !== 'undefined') {
-        document.removeEventListener('pointerup',     stopRepeat);
-        document.removeEventListener('pointercancel', stopRepeat);
-        document.removeEventListener('touchend',      stopRepeat);
-        document.removeEventListener('touchcancel',   stopRepeat);
-      }
-    };
-    const stopRepeat = () => _clearRepeat();
-    const handler = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      performMobileEditAction(action);
-      if (repeating) {
-        _clearRepeat();
-        _repeatDelay = setTimeout(() => {
-          _repeatInterval = setInterval(() => performMobileEditAction(action), 60);
-        }, 400);
-        if (typeof document !== 'undefined') {
-          document.addEventListener('pointerup',     stopRepeat);
-          document.addEventListener('pointercancel', stopRepeat);
-          document.addEventListener('touchend',      stopRepeat);
-          document.addEventListener('touchcancel',   stopRepeat);
-        }
-      }
-    };
-    if (typeof window !== 'undefined' && typeof window.PointerEvent === 'function') {
-      btn.addEventListener('pointerdown', e => {
-        handledPointerDown = true;
-        handler(e);
-      });
-      btn.addEventListener('mousedown', e => {
-        if (handledPointerDown) {
-          handledPointerDown = false;
-          e.preventDefault();
-          return;
-        }
-        handler(e);
-      });
-      if (repeating) {
-        btn.addEventListener('pointerup',     stopRepeat);
-        btn.addEventListener('pointercancel', stopRepeat);
-        btn.addEventListener('pointerleave',  stopRepeat);
-      }
-    } else {
-      btn.addEventListener('mousedown',  handler);
-      btn.addEventListener('touchstart', handler, { passive: false });
-      if (repeating) {
-        btn.addEventListener('mouseup',     stopRepeat);
-        btn.addEventListener('touchend',    stopRepeat);
-        btn.addEventListener('touchcancel', stopRepeat);
-      }
-    }
-  });
 }
 
 const _mobileShellChromeNodes = [
@@ -293,7 +268,8 @@ const _mobileShellOverlayNodes = [
   { node: _confirmHostEl, homeParent: _confirmHostHomeParent, desktopAnchor: faqOverlay || null },
   { node: faqOverlay, homeParent: _faqOverlayHomeParent, desktopAnchor: themeOverlay || null },
   { node: themeOverlay, homeParent: _themeOverlayHomeParent, desktopAnchor: optionsOverlay || null },
-  { node: optionsOverlay, homeParent: _optionsOverlayHomeParent, desktopAnchor: workflowsOverlay || null },
+  { node: optionsOverlay, homeParent: _optionsOverlayHomeParent, desktopAnchor: _workspaceOverlayEl || workflowsOverlay || null },
+  { node: _workspaceOverlayEl, homeParent: _workspaceOverlayHomeParent, desktopAnchor: workflowsOverlay || null },
   { node: workflowsOverlay, homeParent: _workflowsOverlayHomeParent, desktopAnchor: null },
 ];
 
@@ -353,7 +329,7 @@ function syncMobileComposerLayout(mobileMode) {
     { node: shellInputRow, visibleOnMobile: false, visibleOnDesktop: true, ariaHiddenOnMobile: 'true', ariaHiddenOnDesktop: 'true' },
   ]);
   if (useMobile) {
-    _moveComposerNode(acDropdown, mobileComposerRefs.row);
+    _moveComposerNode(acDropdown, mobileComposerRefs.host, mobileComposerRefs.host.firstElementChild || null);
   } else {
     if (typeof shellInputRow !== 'undefined' && shellInputRow && _shellInputRowHomeParent) {
       _moveComposerNode(shellInputRow, _shellInputRowHomeParent);
@@ -424,12 +400,10 @@ function syncMobileViewportState() {
   syncMobileShellLayout(activeMobileMode);
   syncMobileComposerLayout(activeMobileMode);
   if (activeMobileMode) syncMobileViewportHeight({ keyboardOpen });
-  if (activeMobileMode && keyboardOpen && typeof _refreshFollowingOutputsAfterLayout === 'function') {
-    setTimeout(() => {
-      if (!useMobileTerminalViewportMode()) return;
-      if (!document.body || !document.body.classList.contains('mobile-keyboard-open')) return;
-      _refreshFollowingOutputsAfterLayout();
-    }, 0);
+  if (activeMobileMode && keyboardOpen) {
+    queueMobileOutputTailRefresh({ keyboardOpen: true, delays: [0] });
+  } else if (activeMobileMode && wasMobileKeyboardOpen) {
+    queueMobileOutputTailRefresh({ keyboardOpen: false });
   }
   if (activeMobileMode && keyboardOpen) {
     hideMobileMenu();
@@ -448,16 +422,11 @@ function dismissMobileKeyboardAfterSubmit() {
 }
 
 const PREF_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
-const _sessionPreferenceKeys = [
-  'pref_theme_name',
-  'pref_timestamps',
-  'pref_line_numbers',
-  'pref_welcome_intro',
-  'pref_share_redaction_default',
-  'pref_run_notify',
-  'pref_hud_clock',
-];
+const _sessionPreferenceKeys = PreferenceCore.SESSION_PREFERENCE_KEYS;
 let _sessionPreferenceOverrides = null;
+if (typeof window !== 'undefined') {
+  window.__sessionPreferencesLoadState = 'idle';
+}
 
 function getPreferenceCookie(name) {
   const prefix = `${name}=`;
@@ -486,45 +455,17 @@ function getPreference(name) {
 
 function _defaultSessionPreferences() {
   const defaultTheme = _defaultThemeEntry?.()?.name || APP_CONFIG.default_theme || 'darklab_obsidian.yaml';
-  return {
-    pref_theme_name: defaultTheme,
-    pref_timestamps: 'off',
-    pref_line_numbers: 'off',
-    pref_welcome_intro: 'animated',
-    pref_share_redaction_default: 'unset',
-    pref_run_notify: 'off',
-    pref_hud_clock: 'utc',
-  };
+  return PreferenceCore.defaultSessionPreferences(defaultTheme);
 }
 
 function _normalizeSessionPreferences(raw) {
-  const defaults = _defaultSessionPreferences();
-  const prefs = { ...defaults };
-  const source = (raw && typeof raw === 'object') ? raw : {};
-  if (typeof source.pref_theme_name === 'string' && source.pref_theme_name.trim()) {
-    prefs.pref_theme_name = source.pref_theme_name.trim();
-  }
-  if (_tsModes.includes(source.pref_timestamps)) prefs.pref_timestamps = source.pref_timestamps;
-  if (source.pref_line_numbers === 'on' || source.pref_line_numbers === 'off') {
-    prefs.pref_line_numbers = source.pref_line_numbers;
-  }
-  if (_welcomeIntroModes.includes(source.pref_welcome_intro)) {
-    prefs.pref_welcome_intro = source.pref_welcome_intro;
-  }
-  if (_shareRedactionDefaultModes.includes(source.pref_share_redaction_default)) {
-    prefs.pref_share_redaction_default = source.pref_share_redaction_default;
-  }
-  if (source.pref_run_notify === 'on' || source.pref_run_notify === 'off') {
-    prefs.pref_run_notify = source.pref_run_notify;
-  }
-  if (_hudClockModes.includes(source.pref_hud_clock)) {
-    prefs.pref_hud_clock = source.pref_hud_clock;
-  }
-  return prefs;
+  return PreferenceCore.normalizeSessionPreferences(raw, _defaultSessionPreferences(), {
+    timestampModes: _tsModes,
+  });
 }
 
 function _sessionPreferenceCacheKey(sessionId = SESSION_ID) {
-  return `session_pref_cache:${sessionId || ''}`;
+  return PreferenceCore.sessionPreferenceCacheKey(sessionId);
 }
 
 function _readCachedSessionPreferences(sessionId = SESSION_ID) {
@@ -567,6 +508,7 @@ function _buildCurrentSessionPreferenceSnapshot() {
     pref_share_redaction_default: getShareRedactionDefaultPreference(),
     pref_run_notify: getRunNotifyPreference(),
     pref_hud_clock: getHudClockPreference(),
+    pref_prompt_username: getPromptUsernamePreference(),
   });
 }
 
@@ -592,59 +534,85 @@ async function _persistCurrentSessionPreferences() {
 }
 
 async function loadSessionPreferences() {
-  const sessionId = (typeof SESSION_ID === 'string' && SESSION_ID.trim()) ? SESSION_ID.trim() : '';
-  const defaults = _defaultSessionPreferences();
-  const localFallback = sessionId && !sessionId.startsWith('tok_')
-    ? _normalizeSessionPreferences(_buildCurrentSessionPreferenceSnapshot())
-    : null;
-  let prefs = null;
+  if (typeof window !== 'undefined') {
+    window.__sessionPreferencesLoadState = 'pending';
+  }
   try {
-    const resp = await apiFetch('/session/preferences');
-    if (resp && resp.ok === false) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    const remote = _normalizeSessionPreferences(data && data.preferences);
-    if (data && data.preferences && Object.keys(data.preferences).length) {
-      prefs = remote;
+    const sessionId = (typeof SESSION_ID === 'string' && SESSION_ID.trim()) ? SESSION_ID.trim() : '';
+    const defaults = _defaultSessionPreferences();
+    const localFallback = sessionId && !sessionId.startsWith('tok_')
+      ? _normalizeSessionPreferences(_buildCurrentSessionPreferenceSnapshot())
+      : null;
+    let prefs = null;
+    try {
+      const resp = await apiFetch('/session/preferences');
+      if (resp && resp.ok === false) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const remote = _normalizeSessionPreferences(data && data.preferences);
+      if (data && data.preferences && Object.keys(data.preferences).length) {
+        prefs = remote;
+      }
+    } catch (err) {
+      logClientError('failed to load /session/preferences', err);
     }
-  } catch (err) {
-    logClientError('failed to load /session/preferences', err);
+    if (!prefs) prefs = _readCachedSessionPreferences(sessionId);
+    if (!prefs) prefs = localFallback;
+    if (!prefs) prefs = defaults;
+    _sessionPreferenceOverrides = prefs;
+    _writePreferenceSnapshotToStorage(prefs);
+    _cacheSessionPreferences(prefs, sessionId);
+    applyThemePreference(prefs.pref_theme_name, false);
+    applyTimestampPreference(prefs.pref_timestamps, false);
+    applyLineNumberPreference(prefs.pref_line_numbers, false);
+    applyWelcomeIntroPreference(prefs.pref_welcome_intro, false);
+    applyShareRedactionDefaultPreference(prefs.pref_share_redaction_default, false);
+    applyHudClockPreference(prefs.pref_hud_clock, false);
+    applyPromptUsernamePreference(prefs.pref_prompt_username, false);
+    if (typeof applyRunNotifyPreference === 'function') {
+      await applyRunNotifyPreference(prefs.pref_run_notify, false);
+    }
+    syncOptionsControls();
+    return prefs;
+  } finally {
+    if (typeof window !== 'undefined') {
+      window.__sessionPreferencesLoadState = 'settled';
+    }
   }
-  if (!prefs) prefs = _readCachedSessionPreferences(sessionId);
-  if (!prefs) prefs = localFallback;
-  if (!prefs) prefs = defaults;
-  _sessionPreferenceOverrides = prefs;
-  _writePreferenceSnapshotToStorage(prefs);
-  _cacheSessionPreferences(prefs, sessionId);
-  applyThemePreference(prefs.pref_theme_name, false);
-  applyTimestampPreference(prefs.pref_timestamps, false);
-  applyLineNumberPreference(prefs.pref_line_numbers, false);
-  applyWelcomeIntroPreference(prefs.pref_welcome_intro, false);
-  applyShareRedactionDefaultPreference(prefs.pref_share_redaction_default, false);
-  applyHudClockPreference(prefs.pref_hud_clock, false);
-  if (typeof applyRunNotifyPreference === 'function') {
-    await applyRunNotifyPreference(prefs.pref_run_notify, false);
-  }
-  syncOptionsControls();
-  return prefs;
 }
 
 function getWelcomeIntroPreference() {
-  const value = getPreference('pref_welcome_intro');
-  return _welcomeIntroModes.includes(value) ? value : 'animated';
+  return PreferenceCore.coerceWelcomeIntroMode(getPreference('pref_welcome_intro'));
 }
 
 function getShareRedactionDefaultPreference() {
-  const value = getPreference('pref_share_redaction_default');
-  return _shareRedactionDefaultModes.includes(value) ? value : 'unset';
+  return PreferenceCore.coerceShareRedactionDefaultMode(getPreference('pref_share_redaction_default'));
 }
 
 function getRunNotifyPreference() {
-  return getPreference('pref_run_notify') === 'on' ? 'on' : 'off';
+  return PreferenceCore.coerceRunNotifyMode(getPreference('pref_run_notify'));
 }
 
 function getHudClockPreference() {
-  const value = getPreference('pref_hud_clock');
-  return _hudClockModes.includes(value) ? value : 'utc';
+  return PreferenceCore.coerceHudClockMode(getPreference('pref_hud_clock'));
+}
+
+function getPromptUsernamePreference() {
+  return PreferenceCore.normalizePromptUsername(getPreference('pref_prompt_username'));
+}
+
+function _promptUsernameInputValid(value) {
+  const username = String(value || '').trim();
+  return !username || PreferenceCore.normalizePromptUsername(username) === username;
+}
+
+function syncPromptUsernameValidation() {
+  if (!optionsPromptUsernameInput) return true;
+  const valid = _promptUsernameInputValid(optionsPromptUsernameInput.value);
+  optionsPromptUsernameInput.setAttribute('aria-invalid', valid ? 'false' : 'true');
+  if (optionsPromptUsernameError) {
+    optionsPromptUsernameError.classList.toggle('u-hidden', valid);
+  }
+  return valid;
 }
 
 async function applyRunNotifyPreference(mode, persist = true) {
@@ -670,7 +638,7 @@ async function applyRunNotifyPreference(mode, persist = true) {
 }
 
 function applyHudClockPreference(mode, persist = true) {
-  const nextMode = _hudClockModes.includes(mode) ? mode : 'utc';
+  const nextMode = PreferenceCore.coerceHudClockMode(mode);
   if (persist) {
     _primePreferenceValue('pref_hud_clock', nextMode);
     try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist HUD clock preference', err); }
@@ -688,6 +656,18 @@ function syncOptionsControls() {
   if (optionsShareRedactionSelect) optionsShareRedactionSelect.value = getShareRedactionDefaultPreference();
   if (optionsNotifyToggle) optionsNotifyToggle.checked = getRunNotifyPreference() === 'on';
   if (optionsHudClockSelect) optionsHudClockSelect.value = getHudClockPreference();
+  if (optionsPromptUsernameInput) {
+    optionsPromptUsernameInput.value = getPromptUsernamePreference();
+    const defaultUsername = String(APP_CONFIG?.prompt_username || 'anon').trim() || 'anon';
+    optionsPromptUsernameInput.placeholder = `Use server default (${defaultUsername})`;
+    syncPromptUsernameValidation();
+  }
+  if (typeof syncAppSelect === 'function') {
+    syncAppSelect(optionsTsSelect);
+    syncAppSelect(optionsWelcomeSelect);
+    syncAppSelect(optionsShareRedactionSelect);
+    syncAppSelect(optionsHudClockSelect);
+  }
 }
 
 function applyThemePreference(theme, persist = true) {
@@ -695,7 +675,7 @@ function applyThemePreference(theme, persist = true) {
 }
 
 function applyTimestampPreference(mode, persist = true) {
-  const nextMode = _tsModes.includes(mode) ? mode : 'off';
+  const nextMode = PreferenceCore.coerceTimestampMode(mode, _tsModes);
   _setTsMode(nextMode);
   if (persist) {
     _primePreferenceValue('pref_timestamps', nextMode);
@@ -705,7 +685,7 @@ function applyTimestampPreference(mode, persist = true) {
 }
 
 function applyLineNumberPreference(mode, persist = true) {
-  const nextMode = mode === 'on' ? 'on' : 'off';
+  const nextMode = PreferenceCore.coerceLineNumberMode(mode);
   _setLnMode(nextMode);
   if (persist) {
     _primePreferenceValue('pref_line_numbers', nextMode);
@@ -715,7 +695,7 @@ function applyLineNumberPreference(mode, persist = true) {
 }
 
 function applyWelcomeIntroPreference(mode, persist = true) {
-  const nextMode = _welcomeIntroModes.includes(mode) ? mode : 'animated';
+  const nextMode = PreferenceCore.coerceWelcomeIntroMode(mode);
   if (persist) {
     _primePreferenceValue('pref_welcome_intro', nextMode);
     try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist welcome-intro preference', err); }
@@ -724,7 +704,7 @@ function applyWelcomeIntroPreference(mode, persist = true) {
 }
 
 function applyShareRedactionDefaultPreference(mode, persist = true) {
-  const nextMode = _shareRedactionDefaultModes.includes(mode) ? mode : 'unset';
+  const nextMode = PreferenceCore.coerceShareRedactionDefaultMode(mode);
   if (persist) {
     _primePreferenceValue('pref_share_redaction_default', nextMode);
     try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist share-redaction preference', err); }
@@ -732,9 +712,35 @@ function applyShareRedactionDefaultPreference(mode, persist = true) {
   syncOptionsControls();
 }
 
+function applyPromptUsernamePreference(username, persist = true) {
+  const rawUsername = String(username || '').trim();
+  const nextUsername = PreferenceCore.normalizePromptUsername(rawUsername);
+  if (rawUsername && !nextUsername) {
+    syncPromptUsernameValidation();
+    return false;
+  }
+  if (persist) {
+    _primePreferenceValue('pref_prompt_username', nextUsername);
+    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist prompt username preference', err); }
+  } else {
+    _primePreferenceValue('pref_prompt_username', nextUsername);
+  }
+  syncOptionsControls();
+  if (typeof setComposerPromptMode === 'function') setComposerPromptMode(_composerPromptMode);
+  else if (typeof syncShellPrompt === 'function') syncShellPrompt();
+  return true;
+}
+
 function _closeMajorOverlays() {
   if (isHistoryPanelOpen()) hideHistoryPanel();
-  if (isWorkflowsOverlayOpen()) hideWorkflowsOverlay();
+  if (isWorkflowsOverlayOpen()) {
+    if (typeof closeWorkflows === 'function') closeWorkflows();
+    else hideWorkflowsOverlay();
+  }
+  if (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen()) {
+    if (typeof closeWorkspace === 'function') closeWorkspace();
+    else hideWorkspaceOverlay();
+  }
   if (isFaqOverlayOpen()) hideFaqOverlay();
   if (isThemeOverlayOpen()) hideThemeOverlay();
   if (isOptionsOverlayOpen()) hideOptionsOverlay();
@@ -751,6 +757,9 @@ function openOptions() {
   syncOptionsControls();
   if (typeof _updateOptionsSessionTokenStatus === 'function') _updateOptionsSessionTokenStatus();
   showOptionsOverlay();
+  if (typeof markInteractionSurfaceReady === 'function') {
+    markInteractionSurfaceReady('options', optionsOverlay, document.getElementById('options-modal'));
+  }
 }
 
 function closeOptions() {
@@ -767,8 +776,12 @@ function openThemeSelector() {
   setTimeout(() => {
     const selectedCard = themeSelect && themeSelect.querySelector('.theme-card-active');
     const target = selectedCard || themeSelect?.querySelector('[data-theme-name]');
-    if (focusElement(target, { preventScroll: true })) return;
-    focusElement(themeSelect, { preventScroll: true });
+    if (!focusElement(target, { preventScroll: true })) {
+      focusElement(themeSelect, { preventScroll: true });
+    }
+    if (typeof markInteractionSurfaceReady === 'function') {
+      markInteractionSurfaceReady('theme', themeOverlay, document.getElementById('theme-modal'));
+    }
   }, 0);
 }
 
@@ -822,6 +835,12 @@ function clearActiveShortcutTab() {
   cancelWelcome(activeTabId);
   const activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
   clearTab(activeTabId, { preserveRunState: !!(activeTab && activeTab.st === 'running') });
+}
+
+function isStatusMonitorShortcutOpen() {
+  if (typeof isStatusMonitorOpen === 'function') return isStatusMonitorOpen();
+  const monitor = document.getElementById('status-monitor');
+  return !!(monitor && !monitor.classList.contains('u-hidden'));
 }
 
 function _buildShareRedactionRememberField() {
@@ -881,6 +900,13 @@ function _snapshotTabRawLines(rawLines) {
     cls: String(line && line.cls || ''),
     tsC: String(line && line.tsC || ''),
     tsE: String(line && line.tsE || ''),
+    signals: Array.isArray(line && line.signals)
+      ? line.signals.map(signal => String(signal || '')).filter(Boolean)
+      : [],
+    line_index: Number.isInteger(line && line.line_index) ? line.line_index : undefined,
+    line_number: Number.isInteger(line && line.line_number) ? line.line_number : undefined,
+    command_root: String(line && line.command_root || ''),
+    target: String(line && line.target || ''),
   }));
 }
 
@@ -901,7 +927,11 @@ function _tabSessionSnapshot() {
       label: String(tab.label || ''),
       command: String(tab.command || ''),
       renamed: !!tab.renamed,
+      workspaceCwd: String(tab.workspaceCwd || ''),
       draftInput: String(tab.draftInput || ''),
+      commandHistory: Array.isArray(tab.commandHistory)
+        ? tab.commandHistory.map(cmd => String(cmd || '')).filter(Boolean)
+        : [],
       st: String(tab.st || 'idle'),
       exitCode: tab.exitCode == null ? null : Number(tab.exitCode),
       historyRunId: String(tab.historyRunId || ''),
@@ -920,6 +950,11 @@ function _tabSessionSnapshot() {
     activeIndex: activeIndex >= 0 ? activeIndex : 0,
     tabs: persisted,
   };
+}
+
+function _normalizeRestoredWorkspaceCwd(path = '') {
+  const parts = String(path || '').split('/').map(part => String(part || '').trim()).filter(Boolean);
+  return parts.join('/');
 }
 
 function persistTabSessionStateNow() {
@@ -992,7 +1027,13 @@ function restoreTabSessionState() {
       if (!tab) return;
       tab.command = String(item && item.command || '');
       tab.renamed = !!(item && item.renamed);
+      tab.workspaceCwd = _normalizeRestoredWorkspaceCwd(item && item.workspaceCwd || '');
       tab.draftInput = String(item && item.draftInput || '');
+      tab.commandHistory = Array.isArray(item && item.commandHistory)
+        ? item.commandHistory.map(cmd => String(cmd || '')).filter(Boolean)
+        : [];
+      tab.historyNavIndex = -1;
+      tab.historyNavDraft = '';
       tab.exitCode = item && item.exitCode == null ? null : Number(item.exitCode);
       tab.historyRunId = String(item && item.historyRunId || '');
       tab.previewTruncated = !!(item && item.previewTruncated);
@@ -1015,7 +1056,13 @@ function restoreTabSessionState() {
       if (!tab) return;
       tab.command = String(item && item.command || '');
       tab.renamed = !!(item && item.renamed);
+      tab.workspaceCwd = _normalizeRestoredWorkspaceCwd(item && item.workspaceCwd || '');
       tab.draftInput = String(item && item.draftInput || '');
+      tab.commandHistory = Array.isArray(item && item.commandHistory)
+        ? item.commandHistory.map(cmd => String(cmd || '')).filter(Boolean)
+        : [];
+      tab.historyNavIndex = -1;
+      tab.historyNavDraft = '';
       tab.exitCode = item && item.exitCode == null ? null : Number(item.exitCode);
       tab.historyRunId = String(item && item.historyRunId || '');
       tab.previewTruncated = !!(item && item.previewTruncated);
@@ -1027,6 +1074,13 @@ function restoreTabSessionState() {
     const activeIndex = Math.max(0, Math.min(Number(parsed.activeIndex) || 0, restoredIds.length - 1));
     if (typeof activateTab === 'function') activateTab(restoredIds[activeIndex], { focusComposer: false });
     if (typeof mountShellPrompt === 'function') mountShellPrompt(restoredIds[activeIndex], true);
+    if (typeof _restoreOutputTailAfterLayout === 'function'
+      && typeof getOutput === 'function'
+      && typeof getTab === 'function') {
+      const activeTab = getTab(restoredIds[activeIndex]);
+      const activeOutput = getOutput(restoredIds[activeIndex]);
+      _restoreOutputTailAfterLayout(activeOutput, activeTab);
+    }
     return true;
   } finally {
     _tabSessionRestoreInProgress = false;
@@ -1063,12 +1117,12 @@ function handleTabShortcut(e) {
     e.preventDefault();
     return true;
   }
-  if (e.key === 'ArrowRight') {
+  if (e.shiftKey && e.key === 'ArrowRight') {
     activateRelativeTab(1);
     e.preventDefault();
     return true;
   }
-  if (e.key === 'ArrowLeft') {
+  if (e.shiftKey && e.key === 'ArrowLeft') {
     activateRelativeTab(-1);
     e.preventDefault();
     return true;
@@ -1105,25 +1159,29 @@ function handleActionShortcut(e) {
     e.preventDefault();
     return true;
   }
+  if (e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'd' || e.key === 'D')) {
+    closeActiveShortcutTab();
+    e.preventDefault();
+    return true;
+  }
   return false;
 }
 
-// Desktop chrome shortcuts (rail, search, history, options, theme, workflows).
+// Desktop chrome shortcuts (rail, search, history, options, theme, workflows,
+      // Files, and Status Monitor).
 // The composer is allowed to pass through so prompt-focused users can still
 // trigger chrome toggles — each branch calls preventDefault so Option-glyphs
-// (`«`, `˙`, `©`, `≤`, `ˇ`, `ß`) never leak into the prompt on macOS. Other
-// editable targets (modal inputs, search field, options textarea) remain
-// gated so typing isn't hijacked.
+// (`«`, `˙`, `µ`, `©`, `≤`, `ˇ`, `ß`) never leak into the prompt on macOS.
+// Other editable targets (modal inputs, search field, options textarea)
+// remain gated so typing isn't hijacked.
 //
 // Search is bound to Alt+S (not Alt+F) because the composer owns Alt+F as
 // readline word-forward; binding search to Alt+F would either hijack that
 // or require a context-dependent chord that's a net UX loss. Alt+S has no
 // readline conflict and works identically from everywhere.
 //
-// Each chord toggles its surface directly rather than delegating to the
-// corresponding header button's click handler. The header buttons share a
-// pre-existing quirk where they call _closeMajorOverlays() before toggling,
-// which cancels out the close half of the toggle.
+// Each chord toggles its surface directly so the shortcut behavior stays in
+// sync with the current rail/menu surfaces.
 function handleChromeShortcut(e) {
   if (!e.altKey || e.ctrlKey || e.metaKey) return false;
   if (shouldIgnoreGlobalShortcutTarget(e.target)) return false;
@@ -1134,8 +1192,19 @@ function handleChromeShortcut(e) {
     e.preventDefault();
     return true;
   }
+  if (e.shiftKey && eventMatchesLetter(e, 'f')) {
+    if (typeof openWorkspace === 'function') openWorkspace();
+    e.preventDefault();
+    return true;
+  }
   // All remaining chrome chords are shift-free.
   if (e.shiftKey) return false;
+  if (eventMatchesLetter(e, 'm')) {
+    if (isStatusMonitorShortcutOpen() && typeof closeStatusMonitor === 'function') closeStatusMonitor();
+    else if (typeof openStatusMonitor === 'function') void openStatusMonitor({ source: 'shortcut' });
+    e.preventDefault();
+    return true;
+  }
   if (eventMatchesLetter(e, 'h')) {
     if (typeof isHistoryPanelOpen === 'function' && isHistoryPanelOpen()) {
       hideHistoryPanel();
@@ -1222,24 +1291,30 @@ function moveCmdCaret(delta) {
   syncShellPrompt();
 }
 
-function setCmdCaret(position) {
+function moveCmdCaretByWord(direction) {
+  const input = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : cmdInput;
+  if (typeof syncFocusedComposerState === 'function') syncFocusedComposerState(input);
   const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || '');
-  const next = Math.max(0, Math.min(value.length, position));
-  if (typeof syncComposerSelection === 'function') syncComposerSelection(next, next, { input: getVisibleComposerInput() });
-  else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(next, next);
+  const { start, end } = getCmdSelection(value);
+  const next = direction < 0
+    ? findWordBoundaryLeft(value, start)
+    : findWordBoundaryRight(value, end);
+  if (typeof syncComposerSelection === 'function') syncComposerSelection(next, next, { input });
+  if (input && typeof input.setSelectionRange === 'function' && input.selectionStart !== next) {
+    input.setSelectionRange(next, next);
+  } else if (!input && cmdInput && typeof cmdInput.setSelectionRange === 'function') {
+    cmdInput.setSelectionRange(next, next);
+  }
   syncShellPrompt();
 }
 
-function deleteCmdWordLeft() {
-  const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || '');
-  const { start, end } = getCmdSelection(value);
-  if (start !== end) {
-    replaceCmdRange(value, start, end);
-    return;
-  }
-  if (start === 0) return;
-  const cut = findWordBoundaryLeft(value, start);
-  replaceCmdRange(value, cut, start);
+function handleComposerWordArrowShortcut(e) {
+  if (!e || !e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return false;
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return false;
+  e.preventDefault();
+  e.stopPropagation();
+  moveCmdCaretByWord(e.key === 'ArrowLeft' ? -1 : 1);
+  return true;
 }
 
 function performMobileEditAction(action) {
@@ -1254,12 +1329,15 @@ function performMobileEditAction(action) {
   if (typeof acHide === 'function') acHide();
 
   const composer = getComposerStateSnapshot();
-  const value = composer && typeof composer.value === 'string'
-    ? composer.value
-    : (input.value || '');
-  const { start, end } = composer
-    ? getCmdSelection(value)
-    : getInputSelection(input, value);
+  const inputValue = input.value || '';
+  const composerValue = composer && typeof composer.value === 'string' ? composer.value : null;
+  const preferLiveInput = document.activeElement === input && composerValue !== inputValue;
+  const value = preferLiveInput
+    ? inputValue
+    : (composerValue !== null ? composerValue : inputValue);
+  const { start, end } = preferLiveInput || !composer
+    ? getInputSelection(input, value)
+    : getCmdSelection(value);
   let nextValue = value;
   let nextStart = start;
   let nextEnd = end;
@@ -1313,6 +1391,22 @@ function performMobileEditAction(action) {
   ) {
     if (typeof syncComposerSelection === 'function') syncComposerSelection(nextStart, nextEnd, { input });
     else if (input && typeof input.setSelectionRange === 'function') input.setSelectionRange(nextStart, nextEnd);
+    setTimeout(() => {
+      if (!input || typeof input.setSelectionRange !== 'function') return;
+      if (typeof document !== 'undefined' && document.activeElement !== input) return;
+      if ((input.value || '') !== value) return;
+      if (input.selectionStart === nextStart && input.selectionEnd === nextEnd) return;
+      input.setSelectionRange(nextStart, nextEnd);
+      if (typeof setComposerState === 'function') {
+        setComposerState({
+          value,
+          selectionStart: nextStart,
+          selectionEnd: nextEnd,
+          activeInput: 'mobile',
+        });
+      }
+      syncShellPrompt();
+    }, 0);
   } else {
     setComposerValue(nextValue, nextStart, nextEnd);
   }
@@ -1340,6 +1434,21 @@ function syncMobileViewportHeight({ keyboardOpen = null } = {}) {
   document.documentElement.style.setProperty('--mobile-viewport-height', `${h}px`);
 }
 
+function queueMobileOutputTailRefresh({ keyboardOpen = null, delays = [0, 80, 180, 320] } = {}) {
+  if (typeof _refreshFollowingOutputsAfterLayout !== 'function') return;
+  delays.forEach(delay => {
+    setTimeout(() => {
+      if (!useMobileTerminalViewportMode()) return;
+      if (!document.body) return;
+      if (
+        typeof keyboardOpen === 'boolean'
+        && document.body.classList.contains('mobile-keyboard-open') !== keyboardOpen
+      ) return;
+      _refreshFollowingOutputsAfterLayout();
+    }, delay);
+  });
+}
+
 function syncMobileComposerKeyboard({ open = null } = {}) {
   if (typeof window === 'undefined') return;
   const offset = getMobileKeyboardOffset();
@@ -1347,12 +1456,7 @@ function syncMobileComposerKeyboard({ open = null } = {}) {
     ? syncMobileComposerKeyboardState(offset, { open })
     : !!open;
   syncMobileViewportHeight({ keyboardOpen });
-  if (keyboardOpen && typeof _refreshFollowingOutputsAfterLayout === 'function') {
-    setTimeout(() => {
-      if (!document.body || !document.body.classList.contains('mobile-keyboard-open')) return;
-      _refreshFollowingOutputsAfterLayout();
-    }, 0);
-  }
+  queueMobileOutputTailRefresh({ keyboardOpen, delays: keyboardOpen ? [0] : [0, 80, 180, 320] });
 }
 
 let _mobileComposerKeyboardSyncTimer = null;
@@ -1454,6 +1558,7 @@ function bindMobileComposerSubmitAndInputListeners(mobileInput) {
   });
 
   mobileInput.addEventListener('keydown', e => {
+    if (typeof handleComposerWordArrowShortcut === 'function' && handleComposerWordArrowShortcut(e)) return;
     if (e.key === 'Enter') {
       e.preventDefault();
       _mobileSubmit();
@@ -1630,44 +1735,80 @@ function _buildThemePreviewCard(theme) {
   preview.className = 'theme-card-preview';
   preview.setAttribute('aria-hidden', 'true');
 
-  const bar = document.createElement('span');
-  bar.className = 'theme-card-preview-bar';
-  ['dot-r', 'dot-y', 'dot-g'].forEach(dotClass => {
-    const dot = document.createElement('span');
-    dot.className = `dot ${dotClass}`;
-    bar.appendChild(dot);
-  });
-  const pill = document.createElement('span');
-  pill.className = 'theme-card-preview-pill';
-  bar.appendChild(pill);
-
-  const panel = document.createElement('span');
-  panel.className = 'theme-card-preview-panel';
-  const prompt = document.createElement('span');
-  prompt.className = 'theme-card-preview-prompt';
-  const prefix = document.createElement('span');
-  prefix.className = 'theme-card-preview-prefix';
-  prefix.textContent = (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.prompt_prefix) || 'anon@darklab:~$';
-  prompt.appendChild(prefix);
-
-  const line1 = document.createElement('span');
-  line1.className = 'theme-card-preview-line';
-  const line2 = document.createElement('span');
-  line2.className = 'theme-card-preview-line theme-card-preview-line-short';
-  const chipRow = document.createElement('span');
-  chipRow.className = 'theme-card-preview-chip-row';
-  for (let i = 0; i < 2; i += 1) {
-    const chip = document.createElement('span');
-    chip.className = 'theme-card-preview-chip';
-    chipRow.appendChild(chip);
+  const rail = document.createElement('span');
+  rail.className = 'theme-card-preview-rail';
+  for (let i = 0; i < 3; i += 1) {
+    const railSection = document.createElement('span');
+    railSection.className = 'theme-card-preview-rail-section';
+    const railHeader = document.createElement('span');
+    railHeader.className = 'theme-card-preview-rail-header';
+    railSection.appendChild(railHeader);
+    for (let j = 0; j < 2; j += 1) {
+      const railLine = document.createElement('span');
+      railLine.className = 'theme-card-preview-rail-line';
+      railSection.appendChild(railLine);
+    }
+    rail.appendChild(railSection);
   }
 
-  panel.appendChild(prompt);
-  panel.appendChild(line1);
-  panel.appendChild(line2);
-  panel.appendChild(chipRow);
-  preview.appendChild(bar);
-  preview.appendChild(panel);
+  const shell = document.createElement('span');
+  shell.className = 'theme-card-preview-shell';
+
+  const tabbar = document.createElement('span');
+  tabbar.className = 'theme-card-preview-tabbar';
+  const activeTab = document.createElement('span');
+  activeTab.className = 'theme-card-preview-tab theme-card-preview-tab-active';
+  const idleTab = document.createElement('span');
+  idleTab.className = 'theme-card-preview-tab';
+  tabbar.appendChild(activeTab);
+  tabbar.appendChild(idleTab);
+
+  const content = document.createElement('span');
+  content.className = 'theme-card-preview-content';
+  const prompt = document.createElement('span');
+  prompt.className = 'theme-card-preview-prompt';
+  prompt.textContent = typeof buildPromptLabel === 'function'
+    ? buildPromptLabel()
+    : 'anon@darklab.sh:~ $';
+  content.appendChild(prompt);
+  for (let index = 0; index < 4; index += 1) {
+    const line = document.createElement('span');
+    line.className = 'theme-card-preview-line';
+    line.style.setProperty('--theme-preview-line-width', `${86 - (index * 13)}%`);
+    content.appendChild(line);
+  }
+
+  const modal = document.createElement('span');
+  modal.className = 'theme-card-preview-modal';
+  const modalHeader = document.createElement('span');
+  modalHeader.className = 'theme-card-preview-modal-header';
+  const modalBody = document.createElement('span');
+  modalBody.className = 'theme-card-preview-modal-body';
+  const modalActions = document.createElement('span');
+  modalActions.className = 'theme-card-preview-modal-actions';
+  for (let i = 0; i < 2; i += 1) {
+    const modalButton = document.createElement('span');
+    modalButton.className = 'theme-card-preview-modal-button';
+    modalActions.appendChild(modalButton);
+  }
+  modal.appendChild(modalHeader);
+  modal.appendChild(modalBody);
+  modal.appendChild(modalActions);
+
+  const hud = document.createElement('span');
+  hud.className = 'theme-card-preview-hud';
+  for (let i = 0; i < 5; i += 1) {
+    const cell = document.createElement('span');
+    cell.className = 'theme-card-preview-hud-cell';
+    hud.appendChild(cell);
+  }
+
+  shell.appendChild(tabbar);
+  shell.appendChild(content);
+  shell.appendChild(modal);
+  shell.appendChild(hud);
+  preview.appendChild(rail);
+  preview.appendChild(shell);
 
   const label = document.createElement('span');
   label.className = 'theme-card-label';
@@ -1863,18 +2004,18 @@ async function handleThemeCommand(cmd, tabId = null) {
 
   if (parts.length === 1 || sub === 'list') {
     const current = _cliCurrentThemeEntry();
-    _cliAppendLine(_formatCliRecord('current theme', _cliThemeDescription(current)), 'fake-kv', tabId);
-    _cliAppendLine('', 'fake-spacer', tabId);
-    _cliAppendLine('Available themes:', 'fake-section', tabId);
+    _cliAppendLine(_formatCliRecord('current theme', _cliThemeDescription(current)), 'builtin-kv', tabId);
+    _cliAppendLine('', 'builtin-spacer', tabId);
+    _cliAppendLine('Available themes:', 'builtin-section', tabId);
     const grouped = _cliThemeEntriesByColorScheme();
     ['dark', 'light', 'other'].forEach((scheme) => {
       const entries = grouped[scheme] || [];
       if (!entries.length) return;
-      _cliAppendLine(_cliThemeColorSchemeLabel(scheme), 'fake-section', tabId);
+      _cliAppendLine(_cliThemeColorSchemeLabel(scheme), 'builtin-section', tabId);
       entries.forEach((entry) => {
         const slug = _cliThemeSlug(entry);
         const marker = slug === _cliCurrentThemeSlug() ? '*' : ' ';
-        _cliAppendLine(`  ${marker} ${slug.padEnd(24)}  ${String(entry.label || slug)}`, 'fake-help-row', tabId);
+        _cliAppendLine(`  ${marker} ${slug.padEnd(24)}  ${String(entry.label || slug)}`, 'builtin-help-row', tabId);
       });
     });
     _cliRecordSuccess(cmd);
@@ -1883,7 +2024,7 @@ async function handleThemeCommand(cmd, tabId = null) {
   }
 
   if (sub === 'current') {
-    _cliAppendLine(_formatCliRecord('current theme', _cliThemeDescription(_cliCurrentThemeEntry())), 'fake-kv', tabId);
+    _cliAppendLine(_formatCliRecord('current theme', _cliThemeDescription(_cliCurrentThemeEntry())), 'builtin-kv', tabId);
     _cliRecordSuccess(cmd);
     _cliSetStatus('ok');
     return true;
@@ -1920,6 +2061,13 @@ const _cliConfigValueLabels = {
 
 function _cliNormalizeValue(value) {
   return String(value || '').trim().toLowerCase().replace(/_/g, '-');
+}
+
+function _cliNormalizePromptUsernameValue(value) {
+  const raw = String(value || '').trim();
+  const normalized = _cliNormalizeValue(raw);
+  if (['default', 'clear', 'unset', 'server-default'].includes(normalized)) return '';
+  return PreferenceCore.normalizePromptUsername(raw) || null;
 }
 
 function _cliConfigEntries() {
@@ -1980,6 +2128,15 @@ function _cliConfigEntries() {
       get: () => getHudClockPreference(),
       set: (value) => applyHudClockPreference(value),
     },
+    {
+      key: 'prompt-username',
+      description: 'Username shown before the prompt domain',
+      values: null,
+      valueHelp: '<username> | default',
+      get: () => getPromptUsernamePreference() || 'default',
+      normalize: _cliNormalizePromptUsernameValue,
+      set: (value) => applyPromptUsernamePreference(value),
+    },
   ];
 }
 
@@ -1989,6 +2146,10 @@ function _findCliConfigEntry(key) {
 }
 
 function _normalizeCliConfigEntryValue(entry, value) {
+  if (typeof entry.normalize === 'function') {
+    const normalized = entry.normalize(value);
+    return normalized === '' || normalized ? normalized : null;
+  }
   const normalized = _cliNormalizeValue(value);
   const aliased = entry.aliases && Object.prototype.hasOwnProperty.call(entry.aliases, normalized)
     ? entry.aliases[normalized]
@@ -2003,13 +2164,13 @@ function _cliConfigDisplayValue(value) {
 function _printCliConfigEntry(entry, tabId) {
   _cliAppendLine(
     _formatCliRecord(entry.key, _cliConfigDisplayValue(entry.get()), 19),
-    'fake-kv',
+    'builtin-kv',
     tabId,
   );
 }
 
 function _printCliConfigList(tabId) {
-  _cliAppendLine('Current user config:', 'fake-section', tabId);
+  _cliAppendLine('Current user config:', 'builtin-section', tabId);
   _cliConfigEntries().forEach(entry => _printCliConfigEntry(entry, tabId));
 }
 
@@ -2053,9 +2214,9 @@ async function handleConfigCommand(cmd, tabId = null) {
   }
 
   const normalizedValue = _normalizeCliConfigEntryValue(entry, value);
-  if (!normalizedValue) {
+  if (normalizedValue === null) {
     _cliAppendLine(`config: invalid value '${value}' for ${entry.key}`, 'exit-fail', tabId);
-    _cliAppendLine(`allowed values: ${entry.values.join(', ')}`, '', tabId);
+    _cliAppendLine(`allowed values: ${entry.values ? entry.values.join(', ') : entry.valueHelp}`, '', tabId);
     _cliSetStatus('fail');
     return true;
   }
@@ -2086,6 +2247,7 @@ function _runtimeContextSpec({
   pipeLabel = '',
   pipeDescription = '',
   examples = [],
+  closeAfter = {},
 } = {}) {
   return {
     flags,
@@ -2098,51 +2260,106 @@ function _runtimeContextSpec({
     pipe_label: pipeLabel,
     pipe_description: pipeDescription,
     examples,
+    close_after: closeAfter,
   };
 }
 
-const _runtimeBuiltinCommandInfo = [
-  ['autocomplete', 'built-in: explain context-aware autocomplete for known commands'],
-  ['banner', 'built-in: print the configured banner art'],
-  ['clear', 'built-in: clear the current terminal tab output'],
-  ['config', 'built-in: show or update user options'],
-  ['date', 'built-in: show the current server time'],
-  ['df', 'built-in: show a compact filesystem summary'],
-  ['env', 'built-in: show core environment values for this shell'],
-  ['faq', 'built-in: show configured FAQ entries'],
-  ['fortune', 'built-in: print a short operator-themed one-liner'],
-  ['free', 'built-in: show a compact memory summary'],
-  ['groups', 'built-in: show the shell group membership'],
-  ['help', 'built-in: list all built-in commands'],
-  ['history', 'built-in: list recent commands from this session'],
-  ['hostname', 'built-in: show the configured shell instance name'],
-  ['id', 'built-in: show the shell identity'],
-  ['ip', 'built-in: show a minimal shell network interface view'],
-  ['jobs', 'built-in: list active jobs for this session'],
-  ['last', 'built-in: show recent completed runs with timestamps and exit codes'],
-  ['limits', 'built-in: show configured runtime, history, and retention limits'],
-  ['ls', 'built-in: show the allowed command catalog'],
-  ['man', 'built-in: show a real or built-in manual page'],
-  ['ps', 'built-in: show the current shell process view'],
-  ['pwd', 'built-in: show the web shell workspace path'],
-  ['retention', 'built-in: show retention and persisted-output settings'],
-  ['route', 'built-in: show the shell routing table summary'],
-  ['session-token', 'built-in: show or manage persistent session tokens'],
-  ['shortcuts', 'built-in: show current keyboard shortcuts'],
-  ['status', 'built-in: show the current session and shell configuration summary'],
-  ['theme', 'built-in: show or apply the active shell theme'],
-  ['tty', 'built-in: show the web terminal device path'],
-  ['type', 'built-in: describe whether a command is built-in, installed, or missing'],
-  ['uname', 'built-in: show the shell platform string'],
-  ['uptime', 'built-in: show app uptime since process start'],
-  ['version', 'built-in: show shell, app, Flask, and Python version details'],
-  ['which', 'built-in: locate a built-in command or allowed runtime command'],
-  ['who', 'built-in: show the current shell user and session'],
-  ['whoami', 'built-in: describe this shell and link to the project README'],
-];
+function isWorkspaceFeatureEnabled() {
+  return !!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true);
+}
 
-function _runtimeBuiltinDescription(root) {
-  return _runtimeBuiltinCommandInfo.find(([name]) => name === root)?.[1] || 'built-in command';
+function _runtimeSpecEnabledForFeatures(root, spec) {
+  const featureRequired = spec && spec.feature_required;
+  const features = Array.isArray(featureRequired) ? featureRequired : [featureRequired];
+  if (features.some(feature => String(feature || '').toLowerCase() === 'workspace')) {
+    return isWorkspaceFeatureEnabled();
+  }
+  return !['file', 'cat', 'ls', 'rm'].includes(String(root || '').toLowerCase()) || isWorkspaceFeatureEnabled();
+}
+
+function _cloneRuntimeSpec(spec) {
+  if (!spec || typeof spec !== 'object') return _runtimeContextSpec();
+  try {
+    return JSON.parse(JSON.stringify(spec));
+  } catch (err) {
+    return _runtimeContextSpec();
+  }
+}
+
+function _runtimeMergeHints(baseHints = {}, overlayHints = {}) {
+  const merged = Object.assign({}, baseHints || {});
+  Object.entries(overlayHints || {}).forEach(([trigger, hints]) => {
+    const bucket = Array.isArray(merged[trigger]) ? merged[trigger].slice() : [];
+    const seen = new Set(bucket.map(item => String(item && item.value || '').toLowerCase()));
+    const seenInserts = new Map();
+    bucket.forEach((item, index) => {
+      const insertValue = String(item && item.insertValue || '').toLowerCase();
+      if (insertValue && !seenInserts.has(insertValue)) seenInserts.set(insertValue, index);
+    });
+    (hints || []).forEach((hint) => {
+      const value = String(hint && hint.value || '');
+      const key = value.toLowerCase();
+      const insertValue = String(hint && hint.insertValue || '').toLowerCase();
+      if (!value || seen.has(key)) return;
+      if (insertValue && seenInserts.has(insertValue)) {
+        const existingIndex = seenInserts.get(insertValue);
+        const existing = bucket[existingIndex];
+        const existingKey = String(existing && existing.value || '').toLowerCase();
+        seen.delete(existingKey);
+        seen.add(key);
+        bucket[existingIndex] = hint;
+        return;
+      }
+      seen.add(key);
+      if (insertValue) seenInserts.set(insertValue, bucket.length);
+      bucket.push(hint);
+    });
+    merged[trigger] = bucket;
+  });
+  return merged;
+}
+
+function _runtimeMergeContextSpec(baseSpec = {}, overlaySpec = {}) {
+  const merged = _cloneRuntimeSpec(baseSpec);
+  const appendItems = (key) => {
+    const bucket = Array.isArray(merged[key]) ? merged[key] : [];
+    const seen = new Set(bucket.map(item => String(item && item.value != null ? item.value : item).toLowerCase()));
+    (overlaySpec[key] || []).forEach((item) => {
+      const raw = item && item.value != null ? item.value : item;
+      const value = String(raw || '');
+      const lookup = value.toLowerCase();
+      if (!value || seen.has(lookup)) return;
+      seen.add(lookup);
+      bucket.push(item);
+    });
+    merged[key] = bucket;
+  };
+  appendItems('flags');
+  appendItems('expects_value');
+  appendItems('examples');
+  merged.arg_hints = _runtimeMergeHints(merged.arg_hints, overlaySpec.arg_hints);
+  merged.sequence_arg_hints = _runtimeMergeHints(merged.sequence_arg_hints, overlaySpec.sequence_arg_hints);
+  merged.close_after = Object.assign({}, merged.close_after || {}, overlaySpec.close_after || {});
+  if (Number.isInteger(overlaySpec.argument_limit) && overlaySpec.argument_limit > 0) {
+    merged.argument_limit = overlaySpec.argument_limit;
+  }
+  return merged;
+}
+
+function _runtimeActiveBuiltinRoots(baseRegistry = {}) {
+  const roots = new Set(
+    Array.isArray(acBuiltinCommandRoots) ? acBuiltinCommandRoots.map(root => String(root || '')) : [],
+  );
+  Object.entries(baseRegistry || {}).forEach(([root, spec]) => {
+    if (spec && typeof spec === 'object' && String(spec.description || '').startsWith('built-in:')) {
+      roots.add(root);
+    }
+  });
+  return [...roots].filter(Boolean).sort();
+}
+
+function _runtimeBuiltinDescription(root, baseRegistry = {}) {
+  return String(baseRegistry[root]?.description || 'built-in command');
 }
 
 function _runtimeAllowedCommandRoots() {
@@ -2158,8 +2375,14 @@ function _runtimeAllowedCommandRoots() {
 }
 
 function _runtimeCommandLookupHints(baseRegistry = {}, descriptionForExternal = 'manual page') {
-  const builtinNames = new Set(_runtimeBuiltinCommandInfo.map(([name]) => name));
-  const externalRoots = new Set(Object.keys(baseRegistry || {}));
+  const builtinNames = new Set(
+    _runtimeActiveBuiltinRoots(baseRegistry)
+      .filter(root => _runtimeSpecEnabledForFeatures(root, baseRegistry[root])),
+  );
+  const externalRoots = new Set(
+    Object.keys(baseRegistry || {})
+      .filter(root => _runtimeSpecEnabledForFeatures(root, baseRegistry[root])),
+  );
   _runtimeAllowedCommandRoots().forEach(root => externalRoots.add(root));
   builtinNames.forEach(root => externalRoots.delete(root));
 
@@ -2168,59 +2391,109 @@ function _runtimeCommandLookupHints(baseRegistry = {}, descriptionForExternal = 
     items.push(_runtimeHint(root, `${root} ${descriptionForExternal}`));
   });
   [...builtinNames].sort().forEach(root => {
-    items.push(_runtimeHint(root, _runtimeBuiltinDescription(root)));
+    items.push(_runtimeHint(root, _runtimeBuiltinDescription(root, baseRegistry)));
   });
   items.push(_runtimeHint('<command>', 'Any built-in or allowed command'));
   return items;
 }
 
-function _runtimeStaticBuiltinContext() {
-  const emptySpec = _runtimeContextSpec();
-  const context = Object.fromEntries(
-    _runtimeBuiltinCommandInfo.map(([root]) => [root, emptySpec]),
-  );
+function _runtimeWorkspaceFileHints() {
+  return _runtimeWorkspaceEntryHints('file');
+}
 
-  context.ps = _runtimeContextSpec({
-    flags: [
-      _runtimeHint('aux', 'All processes with user and memory info'),
-      _runtimeHint('-ef', 'All processes, full format'),
-    ],
-  });
-  context.df = _runtimeContextSpec({ flags: [_runtimeHint('-h', 'Human-readable disk usage')] });
-  context.free = _runtimeContextSpec({ flags: [_runtimeHint('-h', 'Human-readable memory usage')] });
-  context.uname = _runtimeContextSpec({ flags: [_runtimeHint('-a', 'All system information')] });
-  context.ip = _runtimeContextSpec({
-    argHints: { __positional__: [_runtimeHint('a', 'Show all network interfaces and addresses')] },
-  });
-  context.ls = _runtimeContextSpec({
-    flags: [
-      _runtimeHint('-la', 'Long listing including hidden files'),
-      _runtimeHint('-lh', 'Long listing with human-readable sizes'),
-      _runtimeHint('-l', 'Long listing format'),
-    ],
-  });
-  context['session-token'] = _runtimeContextSpec({
-    expectsValue: ['set', 'revoke'],
+function _runtimeWorkspaceDirectoryHints() {
+  return _runtimeWorkspaceEntryHints('directory');
+}
+
+function _runtimeWorkspaceCwd() {
+  if (typeof _workspaceCwd === 'function') return _workspaceCwd(activeTabId);
+  if (typeof getTab === 'function') {
+    const tab = getTab(activeTabId);
+    const parts = String(tab && tab.workspaceCwd || '').split('/').filter(Boolean);
+    return parts.join('/');
+  }
+  return '';
+}
+
+function _runtimeWorkspaceRelativeValue(path = '', cwd = '') {
+  const normalizedPath = String(path || '').split('/').filter(Boolean).join('/');
+  const normalizedCwd = String(cwd || '').split('/').filter(Boolean).join('/');
+  if (!normalizedCwd) return normalizedPath;
+  if (!normalizedPath.startsWith(`${normalizedCwd}/`)) return '';
+  return normalizedPath.slice(normalizedCwd.length + 1);
+}
+
+function _runtimeWorkspaceDirectHintFromPath(item, cwd = '') {
+  const relative = _runtimeWorkspaceRelativeValue(item && item.value, cwd);
+  if (!relative || relative.includes('/')) return null;
+  return _runtimeHint(relative, item && item.description || '');
+}
+
+function _runtimeWorkspaceEntryHints(kind = 'file') {
+  const cwd = _runtimeWorkspaceCwd();
+  if (typeof getWorkspaceDirectoryEntries === 'function') {
+    const entries = getWorkspaceDirectoryEntries(cwd) || {};
+    const source = kind === 'directory' ? entries.folders : entries.files;
+    const allHints = kind === 'directory'
+      ? (typeof getWorkspaceAutocompleteDirectoryHints === 'function' ? getWorkspaceAutocompleteDirectoryHints() : [])
+      : (typeof getWorkspaceAutocompleteFileHints === 'function' ? getWorkspaceAutocompleteFileHints() : []);
+    return (Array.isArray(source) ? source : []).map((entry) => {
+      const path = String(entry && entry.path || '').split('/').filter(Boolean).join('/');
+      const value = String(entry && entry.name || _runtimeWorkspaceRelativeValue(path, cwd)).trim();
+      const existing = allHints.find(item => String(item && item.value || '') === path);
+      return value ? _runtimeHint(value, existing && existing.description || (kind === 'directory' ? 'session folder' : 'session file')) : null;
+    }).filter(Boolean);
+  }
+  if (kind === 'directory') {
+    if (typeof getWorkspaceAutocompleteDirectoryHints !== 'function') return [];
+    return getWorkspaceAutocompleteDirectoryHints()
+      .map(item => _runtimeWorkspaceDirectHintFromPath(item, cwd))
+      .filter(Boolean);
+  }
+  if (typeof getWorkspaceAutocompleteFileHints !== 'function') return [];
+  return getWorkspaceAutocompleteFileHints()
+    .map(item => _runtimeWorkspaceDirectHintFromPath(item, cwd))
+    .filter(Boolean);
+}
+
+function _runtimeWorkspaceContext() {
+  const fileHints = _runtimeWorkspaceFileHints();
+  const directoryHints = _runtimeWorkspaceDirectoryHints();
+  const deleteHints = fileHints.concat(directoryHints);
+  return _runtimeContextSpec({
+    expectsValue: ['show', 'add', 'add-dir', 'edit', 'download', 'rm', 'delete', 'ls'],
     argHints: {
-      generate: [],
-      copy: [],
-      clear: [],
-      rotate: [],
-      list: [],
-      set: [_runtimeHint('<token>', 'Paste a tok_... token or UUID from another device')],
-      revoke: [_runtimeHint('<token>', 'tok_ token to permanently invalidate on the server')],
+      list: [_runtimeHint('-l', 'Long listing'), _runtimeHint('-R', 'Recursive listing')].concat(directoryHints, [_runtimeHint('/', 'Session workspace root')]),
+      ls: [_runtimeHint('-l', 'Long listing'), _runtimeHint('-R', 'Recursive listing')].concat(directoryHints, [_runtimeHint('/', 'Session workspace root')]),
+      help: [],
+      show: fileHints,
+      add: [_runtimeHint('<file>', 'New session file name')],
+      'add-dir': directoryHints.concat([_runtimeHint('<folder>', 'New session folder')]),
+      edit: fileHints,
+      download: fileHints,
+      rm: [_runtimeHint('-r', 'Remove folders recursively'), _runtimeHint('-rf', 'Remove folders recursively')].concat(deleteHints),
+      delete: [_runtimeHint('-r', 'Remove folders recursively'), _runtimeHint('-rf', 'Remove folders recursively')].concat(deleteHints),
       __positional__: [
-        _runtimeHint('generate', 'Generate a new session token and save it to this browser'),
-        _runtimeHint('set <token>', 'Activate an existing session token from another device', 'set '),
-        _runtimeHint('copy', 'Copy the active session token to the clipboard'),
-        _runtimeHint('clear', 'Confirm before removing the active session token'),
-        _runtimeHint('rotate', 'Generate a new token and migrate all history to it'),
-        _runtimeHint('list', 'Show the active session token and its creation date'),
-        _runtimeHint('revoke <token>', 'Permanently invalidate a tok_ token on this server', 'revoke '),
+        _runtimeHint('list', 'List current session files'),
+        _runtimeHint('ls', 'List current session files'),
+        _runtimeHint('show <file>', 'Print a session file in the terminal', 'show '),
+        _runtimeHint('add <file>', 'Open the Files editor for a new session file', 'add '),
+        _runtimeHint('add-dir <folder>', 'Create a session folder', 'add-dir '),
+        _runtimeHint('edit <file>', 'Open the Files editor for an existing session file', 'edit '),
+        _runtimeHint('download <file>', 'Download a session file through the browser', 'download '),
+        _runtimeHint('delete <file>', 'Remove a session file from this session', 'delete '),
+        _runtimeHint('help', 'Show file command usage'),
       ],
     },
   });
-  return context;
+}
+
+function _runtimeWorkspaceNavigableDirectoryHints() {
+  const hints = _runtimeWorkspaceDirectoryHints();
+  const cwd = _runtimeWorkspaceCwd();
+  if (cwd) hints.unshift(_runtimeHint('../', 'Parent workspace folder'));
+  hints.push(_runtimeHint('/', 'Session workspace root'));
+  return hints;
 }
 
 function _runtimeThemeContext() {
@@ -2254,35 +2527,197 @@ function _runtimeConfigContext() {
   };
   const sequenceArgHints = {};
   entries.forEach((entry) => {
-    sequenceArgHints[`set ${entry.key}`] = entry.values.map(value => _runtimeHint(value, entry.description));
+    sequenceArgHints[`set ${entry.key}`] = Array.isArray(entry.values)
+      ? entry.values.map(value => _runtimeHint(value, entry.description))
+      : [_runtimeHint(entry.valueHelp || '<value>', entry.description)];
     sequenceArgHints[`get ${entry.key}`] = [];
-    entry.values.forEach(value => { argHints[value] = []; });
+    if (Array.isArray(entry.values)) entry.values.forEach(value => { argHints[value] = []; });
   });
   return _runtimeContextSpec({ expectsValue: ['get', 'set'], argHints, sequenceArgHints });
 }
 
+function _runtimeVariableHints(description = 'Session variable') {
+  const variables = Array.isArray(sessionVariables) ? sessionVariables : [];
+  return variables.map(variable => {
+    const name = String(variable && variable.name || '').trim();
+    const value = String(variable && variable.value || '').trim();
+    return _runtimeHint(name, value ? `${description}: ${value}` : description);
+  }).filter(item => item.value);
+}
+
+function _runtimeVarContext() {
+  const variableHints = _runtimeVariableHints('Current value');
+  const starterNames = ['HOST', 'PORT', 'IP_ADDR'];
+  const currentNames = new Set(variableHints.map(item => String(item.value || '').toUpperCase()));
+  const starterHints = starterNames
+    .filter(name => !currentNames.has(name))
+    .map(name => _runtimeHint(name, `Common ${name.toLowerCase()} value`));
+  const sequenceArgHints = {};
+  variableHints.concat(starterNames.map(name => _runtimeHint(name))).forEach(item => {
+    const name = String(item && item.value || '').trim();
+    if (name) {
+      sequenceArgHints[`set ${name.toLowerCase()}`] = [_runtimeHint('<value>', `Value for ${name}`)];
+      sequenceArgHints[`unset ${name.toLowerCase()}`] = [];
+    }
+  });
+  const argHints = {
+    list: [],
+    set: variableHints.concat(starterHints),
+    unset: variableHints,
+    __positional__: [
+      _runtimeHint('list', 'Show session variables'),
+      _runtimeHint('set', 'Set a session variable', 'set '),
+      _runtimeHint('unset', 'Remove a session variable', 'unset '),
+    ],
+  };
+  return _runtimeContextSpec({
+    expectsValue: ['set', 'unset'],
+    argHints,
+    sequenceArgHints,
+    closeAfter: {
+      list: 0,
+      set: 2,
+      unset: 1,
+    },
+  });
+}
+
+function _runtimeWordlistContext() {
+  const wordlists = (typeof acWordlists !== 'undefined' && Array.isArray(acWordlists)) ? acWordlists : [];
+  const categoryHints = [];
+  const seenCategories = new Set();
+  wordlists.forEach((item) => {
+    const category = String(item && (item.wordlist_category || item.category) || '').trim();
+    if (!category || seenCategories.has(category.toLowerCase())) return;
+    seenCategories.add(category.toLowerCase());
+    categoryHints.push(_runtimeHint(category, 'Wordlist category'));
+  });
+  const pathHints = wordlists.map(item => _runtimeHint(
+    String(item && item.name || item && item.label || item && item.value || ''),
+    String(item && item.description || 'Installed wordlist'),
+  )).filter(item => item.value);
+  return _runtimeContextSpec({
+    argHints: {
+      list: categoryHints,
+      path: pathHints,
+    },
+  });
+}
+
 function getRuntimeAutocompleteContext(baseRegistry = {}) {
-  const context = _runtimeStaticBuiltinContext();
+  const context = {};
+  _runtimeActiveBuiltinRoots(baseRegistry).forEach((root) => {
+    if (baseRegistry[root] && _runtimeSpecEnabledForFeatures(root, baseRegistry[root])) {
+      context[root] = _cloneRuntimeSpec(baseRegistry[root]);
+    }
+  });
   const lookupHints = _runtimeCommandLookupHints(baseRegistry);
-  context.theme = _runtimeThemeContext();
-  context.config = _runtimeConfigContext();
-  context.man = _runtimeContextSpec({
-    argumentLimit: 1,
+  context.theme = _runtimeMergeContextSpec(baseRegistry.theme, _runtimeThemeContext());
+  context.config = _runtimeMergeContextSpec(baseRegistry.config, _runtimeConfigContext());
+  context.var = _runtimeMergeContextSpec(baseRegistry.var, _runtimeVarContext());
+  if (baseRegistry.wordlist) {
+    context.wordlist = _runtimeMergeContextSpec(baseRegistry.wordlist, _runtimeWordlistContext());
+  }
+  if (baseRegistry.workflow) {
+    context.workflow = _runtimeMergeContextSpec(baseRegistry.workflow, _runtimeWorkflowContext());
+  }
+  if (isWorkspaceFeatureEnabled() && baseRegistry.file) {
+    context.file = _runtimeMergeContextSpec(baseRegistry.file, _runtimeWorkspaceContext());
+  }
+  if (isWorkspaceFeatureEnabled() && baseRegistry.cat) {
+    context.cat = _runtimeMergeContextSpec(baseRegistry.cat, _runtimeContextSpec({
+      argHints: { __positional__: _runtimeWorkspaceFileHints() },
+    }));
+  }
+  if (isWorkspaceFeatureEnabled() && baseRegistry.cd) {
+    context.cd = _runtimeMergeContextSpec(baseRegistry.cd, _runtimeContextSpec({
+      argHints: { __positional__: _runtimeWorkspaceNavigableDirectoryHints() },
+    }));
+  }
+  if (isWorkspaceFeatureEnabled() && baseRegistry.ls) {
+    context.ls = _runtimeMergeContextSpec(baseRegistry.ls, _runtimeContextSpec({
+      argHints: { __positional__: [_runtimeHint('-l', 'Long listing'), _runtimeHint('-R', 'Recursive listing')].concat(_runtimeWorkspaceNavigableDirectoryHints()) },
+    }));
+  }
+  if (isWorkspaceFeatureEnabled() && baseRegistry.ll) {
+    context.ll = _runtimeMergeContextSpec(baseRegistry.ll, _runtimeContextSpec({
+      argHints: { __positional__: [_runtimeHint('-R', 'Recursive listing')].concat(_runtimeWorkspaceNavigableDirectoryHints()) },
+    }));
+  }
+  if (isWorkspaceFeatureEnabled() && baseRegistry.mkdir) {
+    context.mkdir = _runtimeMergeContextSpec(baseRegistry.mkdir, _runtimeContextSpec({
+      argHints: { __positional__: _runtimeWorkspaceDirectoryHints().concat([_runtimeHint('<folder>', 'New session folder')]) },
+    }));
+  }
+  if (isWorkspaceFeatureEnabled() && baseRegistry.rm) {
+    const deleteHints = _runtimeWorkspaceFileHints().concat(_runtimeWorkspaceDirectoryHints());
+    context.rm = _runtimeMergeContextSpec(baseRegistry.rm, _runtimeContextSpec({
+      argHints: {
+        __positional__: [_runtimeHint('-r', 'Remove folders recursively'), _runtimeHint('-rf', 'Remove folders recursively')].concat(deleteHints),
+      },
+    }));
+  }
+  ['grep', 'head', 'tail', 'sort', 'uniq'].forEach((root) => {
+    if (isWorkspaceFeatureEnabled() && baseRegistry[root]) {
+      context[root] = _runtimeMergeContextSpec(baseRegistry[root], _runtimeContextSpec({
+        argHints: { __positional__: _runtimeWorkspaceFileHints() },
+      }));
+    }
+  });
+  if (isWorkspaceFeatureEnabled() && baseRegistry.wc) {
+    context.wc = _runtimeMergeContextSpec(baseRegistry.wc, _runtimeContextSpec({
+      argHints: { '-l': _runtimeWorkspaceFileHints() },
+      sequenceArgHints: { '-l': _runtimeWorkspaceFileHints() },
+    }));
+  }
+  context.man = _runtimeMergeContextSpec(baseRegistry.man, _runtimeContextSpec({
     argHints: { __positional__: lookupHints },
-  });
-  context.which = _runtimeContextSpec({
-    argumentLimit: 1,
+  }));
+  context.which = _runtimeMergeContextSpec(baseRegistry.which, _runtimeContextSpec({
     argHints: { __positional__: _runtimeCommandLookupHints(baseRegistry, 'command path') },
-  });
-  context.type = _runtimeContextSpec({
-    argumentLimit: 1,
+  }));
+  context.type = _runtimeMergeContextSpec(baseRegistry.type, _runtimeContextSpec({
     argHints: { __positional__: _runtimeCommandLookupHints(baseRegistry, 'command type') },
-  });
+  }));
   return context;
 }
 
-function getRuntimeAutocompleteItems() {
-  return [];
+function getRuntimeAutocompleteItems(ctx, buildItem, filterItems) {
+  const token = String(ctx && ctx.currentToken || '');
+  const dollarIndex = token.lastIndexOf('$');
+  if (dollarIndex < 0 || !buildItem || !filterItems) return [];
+  const afterDollar = token.slice(dollarIndex + 1);
+  const braced = afterDollar.startsWith('{');
+  const query = braced ? afterDollar.slice(1) : afterDollar;
+  if (!/^\{?[A-Za-z_][A-Za-z0-9_]*$/.test(afterDollar) && afterDollar !== '{') return [];
+  const variables = Array.isArray(sessionVariables) ? sessionVariables : [];
+  const items = variables.map(variable => {
+    const name = String(variable && variable.name || '').trim();
+    if (!name) return null;
+    const label = braced ? '${' + name + '}' : '$' + name;
+    return buildItem({
+      value: label,
+      label,
+      description: String(variable && variable.value || ''),
+      replaceStart: ctx.tokenStart + dollarIndex,
+      replaceEnd: ctx.tokenEnd,
+      insertValue: label,
+    });
+  }).filter(Boolean);
+  return filterItems(items, braced ? '${' + query : '$' + query);
+}
+
+async function loadSessionVariables() {
+  try {
+    const resp = await apiFetch('/session/variables');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    sessionVariables = Array.isArray(data.variables) ? data.variables : [];
+  } catch (err) {
+    logClientError('failed to load /session/variables', err);
+    sessionVariables = [];
+  }
+  return sessionVariables;
 }
 
 let allowedCommandsFaqData = null;
@@ -2348,11 +2783,34 @@ function renderFaqLimits(cfg) {
   limitsEl.replaceChildren(_buildFaqLimitsContent(cfg));
 }
 
+function openAutocompleteForVisibleComposer() {
+  const input = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
+  if (!input || typeof input.value !== 'string') return false;
+  const value = input.value;
+  const cursor = typeof input.selectionStart === 'number' ? input.selectionStart : value.length;
+  if (!value.trim() || typeof getAutocompleteMatches !== 'function') return false;
+  const matches = getAutocompleteMatches(value, cursor);
+  acFiltered = typeof limitAutocompleteMatchesForDisplay === 'function'
+    ? limitAutocompleteMatchesForDisplay(matches, 12)
+    : matches.slice(0, 12);
+  acIndex = -1;
+  if (!acFiltered.length) {
+    if (typeof acHide === 'function') acHide();
+    return false;
+  }
+  if (typeof acShow === 'function') acShow(acFiltered);
+  return true;
+}
+
 function activateFaqCommandChip(cmd) {
   if (!cmd) return;
-  setComposerValue(cmd + ' ');
+  const next = `${cmd} `;
+  setComposerValue(next, next.length, next.length, { dispatch: false });
   _closeMajorOverlays();
   refocusComposerAfterAction({ defer: true });
+  setTimeout(() => {
+    openAutocompleteForVisibleComposer();
+  }, 0);
 }
 
 function wireFaqCommandChips(root = faqBody) {
@@ -2373,7 +2831,7 @@ function wireFaqCommandChips(root = faqBody) {
 
 function makeAllowedCommandChip(cmd) {
   const chip = document.createElement('span');
-  chip.className = 'allowed-chip faq-chip';
+  chip.className = 'allowed-chip faq-chip chip chip-action';
   chip.textContent = cmd;
   chip.title = 'Click to load into prompt';
   chip.dataset.faqCommand = cmd;
@@ -2472,26 +2930,682 @@ function renderFaqItems(items) {
   wireFaqCommandChips(faqBody);
 }
 
+const WORKFLOW_TOKEN_RE = /{{\s*([a-z][a-z0-9_]*)\s*}}/g;
+const WORKFLOW_INPUT_STATE_KEY = 'workflow_input_state_v1';
+const _workflowRunQueueByTab = new Map();
+let workflowCatalogItems = [];
+let _workflowEditorWorkflow = null;
+
+function getWorkflowStorageKey(workflow) {
+  const id = String(workflow?.id || '').trim();
+  if (id) return id;
+  const title = String(workflow?.title || '').trim();
+  const description = String(workflow?.description || '').trim();
+  return `${title}::${description}`;
+}
+
+function workflowSlug(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'workflow';
+}
+
+function workflowLookupKeys(workflow) {
+  const keys = [];
+  const id = String(workflow?.id || '').trim();
+  const title = String(workflow?.title || '').trim();
+  [id, title, workflowSlug(title)].forEach((key) => {
+    const value = String(key || '').trim().toLowerCase();
+    if (value && !keys.includes(value)) keys.push(value);
+  });
+  return keys;
+}
+
+function workflowCliName(workflow) {
+  const id = String(workflow?.id || '').trim();
+  return workflowSlug(workflow?.title || id || 'workflow');
+}
+
+function readWorkflowInputState() {
+  if (typeof localStorage === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(WORKFLOW_INPUT_STATE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_err) {
+    return {};
+  }
+}
+
+function writeWorkflowInputState(nextState) {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(WORKFLOW_INPUT_STATE_KEY, JSON.stringify(nextState || {}));
+  } catch (_err) {
+    // Non-critical persistence failure; the workflow form still works in-memory.
+  }
+}
+
+function loadWorkflowInputValues(workflow) {
+  const base = getWorkflowInputValues(workflow);
+  const state = readWorkflowInputState();
+  const saved = state[getWorkflowStorageKey(workflow)];
+  if (!saved || typeof saved !== 'object') return base;
+  const next = { ...base };
+  Object.entries(saved).forEach(([key, value]) => {
+    const input = (workflow?.inputs || []).find((item) => item.id === key);
+    if (!input) return;
+    next[key] = sanitizeWorkflowInputValue(input, value);
+  });
+  return next;
+}
+
+function persistWorkflowInputValues(workflow, values) {
+  const state = readWorkflowInputState();
+  const nextState = { ...state };
+  nextState[getWorkflowStorageKey(workflow)] = { ...(values || {}) };
+  writeWorkflowInputState(nextState);
+}
+
+function sanitizeWorkflowInputValue(input, value) {
+  const raw = String(value == null ? '' : value).trim();
+  if (!input || !raw) return raw;
+  if (input.type === 'port') return raw.replace(/[^\d]/g, '');
+  return raw;
+}
+
+function getWorkflowInputValues(workflow) {
+  const values = {};
+  const inputs = Array.isArray(workflow?.inputs) ? workflow.inputs : [];
+  inputs.forEach((input) => {
+    values[input.id] = sanitizeWorkflowInputValue(input, input.default || '');
+  });
+  return values;
+}
+
+function renderWorkflowCommandTemplate(template, values) {
+  return String(template || '').replace(WORKFLOW_TOKEN_RE, (_match, token) => values[token] || '');
+}
+
+function workflowInputsReady(workflow, values) {
+  const inputs = Array.isArray(workflow?.inputs) ? workflow.inputs : [];
+  return inputs.every((input) => !input.required || String(values[input.id] || '').trim().length > 0);
+}
+
+function buildRenderedWorkflow(workflow, values) {
+  const renderedValues = { ...(values || {}) };
+  const ready = workflowInputsReady(workflow, renderedValues);
+  const steps = Array.isArray(workflow?.steps) ? workflow.steps : [];
+  return {
+    ready,
+    steps: steps.map((step) => ({
+      ...step,
+      renderedCmd: renderWorkflowCommandTemplate(step.cmd || '', renderedValues).trim(),
+    })),
+  };
+}
+
+function workflowInputTypeFromName(name) {
+  const value = String(name || '').toLowerCase();
+  if (value.includes('url')) return 'url';
+  if (value.includes('port')) return 'port';
+  if (value.includes('path') || value.includes('file') || value.includes('wordlist')) return 'path';
+  if (value.includes('domain')) return 'domain';
+  return 'host';
+}
+
+function workflowInputLabel(inputId) {
+  return String(inputId || '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function collectWorkflowTokensFromSteps(steps) {
+  const seen = [];
+  (Array.isArray(steps) ? steps : []).forEach((step) => {
+    [step?.cmd, step?.note].forEach((value) => {
+      const text = String(value || '');
+      let match = WORKFLOW_TOKEN_RE.exec(text);
+      while (match) {
+        const token = String(match[1] || '').trim();
+        if (token && !seen.includes(token)) seen.push(token);
+        match = WORKFLOW_TOKEN_RE.exec(text);
+      }
+      WORKFLOW_TOKEN_RE.lastIndex = 0;
+    });
+  });
+  return seen;
+}
+
+function inferWorkflowInputsFromSteps(steps) {
+  return collectWorkflowTokensFromSteps(steps).map((id) => ({
+    id,
+    label: workflowInputLabel(id),
+    type: workflowInputTypeFromName(id),
+    required: true,
+    placeholder: id,
+    default: '',
+    help: '',
+  }));
+}
+
+function runWorkflowCommands(commands) {
+  const runnable = (commands || []).map((cmd) => String(cmd || '').trim()).filter(Boolean);
+  if (!runnable.length) return;
+  const targetTabId = typeof getActiveTabId === 'function' ? getActiveTabId() : activeTabId;
+  if (!targetTabId) return;
+  if (typeof welcomeOwnsTab === 'function' && welcomeOwnsTab(targetTabId)) {
+    if (typeof cancelWelcome === 'function') cancelWelcome(targetTabId);
+    if (typeof clearTab === 'function') clearTab(targetTabId);
+    if (typeof setTabStatus === 'function') setTabStatus(targetTabId, 'idle');
+  }
+  _closeMajorOverlays();
+  _workflowRunQueueByTab.set(targetTabId, {
+    commands: runnable.slice(),
+    nextIndex: 1,
+    total: runnable.length,
+  });
+  if (typeof activateTab === 'function') activateTab(targetTabId);
+  if (typeof appendLine === 'function' && runnable.length > 1) {
+    appendLine(`[workflow] Running ${runnable.length} steps sequentially in this tab.`, 'notice', targetTabId);
+  }
+  if (typeof submitComposerCommand === 'function') {
+    submitComposerCommand(runnable[0], {
+      dismissKeyboard: true,
+      focusAfterSubmit: true,
+    });
+  }
+}
+
+function _runNextWorkflowQueueStep(tabId) {
+  const queue = _workflowRunQueueByTab.get(tabId);
+  if (!queue) return;
+  const nextCommand = queue.commands[queue.nextIndex];
+  if (!nextCommand) {
+    _workflowRunQueueByTab.delete(tabId);
+    if (typeof appendLine === 'function') {
+      appendLine('[workflow] Completed all queued steps.', 'exit-ok', tabId);
+    }
+    return;
+  }
+  queue.nextIndex += 1;
+  if (typeof appendLine === 'function') {
+    appendLine(`[workflow] Continuing with step ${queue.nextIndex}/${queue.total}.`, 'notice', tabId);
+  }
+  if (typeof activateTab === 'function') activateTab(tabId, { focusComposer: false });
+  if (typeof submitComposerCommand === 'function') {
+    submitComposerCommand(nextCommand, {
+      dismissKeyboard: false,
+      focusAfterSubmit: false,
+    });
+  }
+}
+
+function _scheduleNextWorkflowQueueStep(tabId) {
+  const waitForFlush = () => {
+    if (!_workflowRunQueueByTab.has(tabId)) return;
+    if (typeof hasPendingOutputBatch === 'function' && hasPendingOutputBatch(tabId)) {
+      setTimeout(waitForFlush, 20);
+      return;
+    }
+    _runNextWorkflowQueueStep(tabId);
+  };
+  setTimeout(waitForFlush, 0);
+}
+
+if (typeof onUiEvent === 'function') {
+  onUiEvent('app:tab-status-changed', (e) => {
+    const tabId = e?.detail?.id;
+    const status = e?.detail?.status;
+    if (!tabId || !_workflowRunQueueByTab.has(tabId) || status === 'running') return;
+    if (status === 'killed') {
+      _workflowRunQueueByTab.delete(tabId);
+      if (typeof appendLine === 'function') {
+        appendLine('[workflow] Queue stopped because the current step was killed.', 'denied', tabId);
+      }
+      return;
+    }
+    _scheduleNextWorkflowQueueStep(tabId);
+  });
+}
+
+function renderWorkflowInputCard(card, workflow) {
+  const inputs = Array.isArray(workflow?.inputs) ? workflow.inputs : [];
+  if (!inputs.length) return null;
+
+  const panel = document.createElement('div');
+  panel.className = 'workflow-input-panel';
+
+  const intro = document.createElement('div');
+  intro.className = 'workflow-input-intro';
+  intro.textContent = 'Fill in your target to preview the exact commands before loading or running a step.';
+  panel.appendChild(intro);
+
+  const grid = document.createElement('div');
+  grid.className = 'workflow-input-grid';
+  panel.appendChild(grid);
+
+  const values = loadWorkflowInputValues(workflow);
+  const hint = document.createElement('div');
+  hint.className = 'workflow-input-hint';
+  const actions = document.createElement('div');
+  actions.className = 'workflow-input-actions';
+
+  const runAllBtn = document.createElement('button');
+  runAllBtn.type = 'button';
+  runAllBtn.className = 'btn btn-secondary btn-compact workflow-run-all';
+  runAllBtn.textContent = 'Run all';
+  runAllBtn.title = 'Run each rendered workflow step sequentially in this tab';
+  actions.appendChild(runAllBtn);
+
+  panel.appendChild(actions);
+
+  inputs.forEach((input) => {
+    const field = document.createElement('label');
+    field.className = 'workflow-input-field';
+
+    const label = document.createElement('span');
+    label.className = 'workflow-input-label';
+    label.textContent = input.label || input.id || '';
+    field.appendChild(label);
+
+    const control = document.createElement('input');
+    control.className = 'options-token-input workflow-input-control';
+    control.type = input.type === 'port' ? 'text' : 'text';
+    control.autocomplete = 'off';
+    control.autocapitalize = 'none';
+    control.autocorrect = 'off';
+    control.spellcheck = false;
+    control.inputMode = input.type === 'port' ? 'numeric' : 'text';
+    control.placeholder = input.placeholder || '';
+    control.value = values[input.id] || '';
+    control.dataset.workflowInputId = input.id;
+    if (input.required) {
+      control.required = true;
+      control.setAttribute('aria-required', 'true');
+    }
+    field.appendChild(control);
+
+    if (input.help) {
+      const help = document.createElement('span');
+      help.className = 'workflow-input-help';
+      help.textContent = input.help;
+      field.appendChild(help);
+    }
+
+    grid.appendChild(field);
+  });
+
+  panel.appendChild(hint);
+
+  const applyRenderedState = () => {
+    const rendered = buildRenderedWorkflow(workflow, values);
+    const stepsEl = card.querySelector('.workflow-steps');
+    if (!stepsEl) return;
+    stepsEl.querySelectorAll('.workflow-step').forEach((stepEl, idx) => {
+      const chip = stepEl.querySelector('.workflow-step-cmd');
+      const runBtn = stepEl.querySelector('.workflow-step-run');
+      const renderedStep = rendered.steps[idx];
+      const renderedCmd = renderedStep?.renderedCmd || '';
+      if (chip) {
+        chip.textContent = rendered.ready ? (renderedCmd || renderedStep?.cmd || '') : (renderedStep?.cmd || '');
+        if (rendered.ready && renderedCmd) {
+          chip.title = 'Click to load into prompt';
+          chip.dataset.faqCommand = renderedCmd;
+          chip.classList.remove('is-disabled');
+        } else {
+          chip.title = 'Fill required workflow inputs to load this step';
+          delete chip.dataset.faqCommand;
+          chip.classList.add('is-disabled');
+        }
+      }
+      if (runBtn) {
+        runBtn.dataset.workflowStepCmd = rendered.ready ? renderedCmd : '';
+        runBtn.disabled = !(rendered.ready && renderedCmd);
+        runBtn.setAttribute('aria-disabled', runBtn.disabled ? 'true' : 'false');
+        runBtn.title = runBtn.disabled ? 'Fill required workflow inputs to run this step' : 'Run this step';
+        runBtn.setAttribute('aria-label', rendered.ready && renderedCmd ? `Run: ${renderedCmd}` : 'Run this step');
+      }
+    });
+    runAllBtn.disabled = !(rendered.ready && rendered.steps.some((step) => step.renderedCmd));
+    runAllBtn.setAttribute('aria-disabled', runAllBtn.disabled ? 'true' : 'false');
+    hint.textContent = rendered.ready
+      ? 'Rendered commands are live. Click a chip to load it, use ▶ to run one step, or Run all to execute the full workflow here in sequence.'
+      : 'Fill the required fields to render runnable commands.';
+    wireFaqCommandChips(card);
+    wireWorkflowStepRunButtons(card);
+  };
+
+  bindPressable(runAllBtn, {
+    onActivate: () => {
+      const rendered = buildRenderedWorkflow(workflow, values);
+      if (!rendered.ready) return;
+      runWorkflowCommands(rendered.steps.map((step) => step.renderedCmd));
+    },
+  });
+
+  grid.querySelectorAll('.workflow-input-control').forEach((control) => {
+    control.addEventListener('input', () => {
+      const input = inputs.find((item) => item.id === control.dataset.workflowInputId);
+      values[control.dataset.workflowInputId || ''] = sanitizeWorkflowInputValue(input, control.value);
+      if (input?.type === 'port' && control.value !== values[control.dataset.workflowInputId || '']) {
+        control.value = values[control.dataset.workflowInputId || ''];
+      }
+      persistWorkflowInputValues(workflow, values);
+      applyRenderedState();
+    });
+  });
+
+  panel._workflowApplyRenderedState = applyRenderedState;
+  return panel;
+}
+
+function workflowEditorRefs() {
+  return {
+    overlay: document.getElementById('workflow-editor-overlay'),
+    form: document.getElementById('workflow-editor-form'),
+    title: document.getElementById('workflow-editor-title'),
+    titleInput: document.getElementById('workflow-editor-title-input'),
+    descriptionInput: document.getElementById('workflow-editor-description-input'),
+    steps: document.getElementById('workflow-editor-steps'),
+    msg: document.getElementById('workflow-editor-msg'),
+    saveBtn: document.getElementById('workflow-editor-save-btn'),
+  };
+}
+
+function setWorkflowEditorMessage(message = '', isError = false) {
+  const { msg } = workflowEditorRefs();
+  if (!msg) return;
+  msg.textContent = message;
+  msg.classList.toggle('is-error', !!isError);
+}
+
+function createWorkflowEditorStep(step = {}, index = 0) {
+  const row = document.createElement('div');
+  row.className = 'workflow-editor-step';
+  row.dataset.workflowEditorStep = '1';
+
+  const header = document.createElement('div');
+  header.className = 'workflow-editor-step-header';
+  const title = document.createElement('span');
+  title.className = 'workflow-editor-step-title';
+  title.textContent = `Step ${index + 1}`;
+  header.appendChild(title);
+  const removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'btn btn-ghost btn-icon-only btn-compact workflow-editor-remove-step';
+  removeBtn.textContent = '×';
+  removeBtn.title = 'Remove step';
+  removeBtn.setAttribute('aria-label', 'Remove workflow step');
+  header.appendChild(removeBtn);
+  row.appendChild(header);
+
+  const cmdLabel = document.createElement('label');
+  cmdLabel.className = 'workflow-editor-field';
+  const cmdText = document.createElement('span');
+  cmdText.className = 'workflow-input-label';
+  cmdText.textContent = 'Command';
+  const cmdInput = document.createElement('input');
+  cmdInput.className = 'options-token-input workflow-editor-step-command';
+  cmdInput.type = 'text';
+  cmdInput.autocomplete = 'off';
+  cmdInput.autocapitalize = 'none';
+  cmdInput.autocorrect = 'off';
+  cmdInput.spellcheck = false;
+  cmdInput.inputMode = 'text';
+  cmdInput.value = step.cmd || '';
+  cmdInput.placeholder = 'nmap -F {{host}}';
+  cmdLabel.append(cmdText, cmdInput);
+  row.appendChild(cmdLabel);
+
+  const noteLabel = document.createElement('label');
+  noteLabel.className = 'workflow-editor-field';
+  const noteText = document.createElement('span');
+  noteText.className = 'workflow-input-label';
+  noteText.textContent = 'Note';
+  const noteInput = document.createElement('input');
+  noteInput.className = 'options-token-input workflow-editor-step-note';
+  noteInput.type = 'text';
+  noteInput.autocomplete = 'off';
+  noteInput.autocapitalize = 'none';
+  noteInput.autocorrect = 'off';
+  noteInput.spellcheck = false;
+  noteInput.inputMode = 'text';
+  noteInput.value = step.note || '';
+  noteInput.placeholder = 'Optional context for this step';
+  noteLabel.append(noteText, noteInput);
+  row.appendChild(noteLabel);
+
+  removeBtn.addEventListener('click', () => {
+    row.remove();
+    refreshWorkflowEditorStepNumbers();
+  });
+  return row;
+}
+
+function refreshWorkflowEditorStepNumbers() {
+  const { steps } = workflowEditorRefs();
+  if (!steps) return;
+  const rows = [...steps.querySelectorAll('[data-workflow-editor-step]')];
+  rows.forEach((row, index) => {
+    const title = row.querySelector('.workflow-editor-step-title');
+    if (title) title.textContent = `Step ${index + 1}`;
+    const removeBtn = row.querySelector('.workflow-editor-remove-step');
+    if (removeBtn) removeBtn.disabled = rows.length <= 1;
+  });
+}
+
+function addWorkflowEditorStep(step = {}) {
+  const { steps } = workflowEditorRefs();
+  if (!steps) return;
+  const row = createWorkflowEditorStep(step, steps.querySelectorAll('[data-workflow-editor-step]').length);
+  steps.appendChild(row);
+  refreshWorkflowEditorStepNumbers();
+}
+
+function workflowPayloadFromEditor() {
+  const { titleInput, descriptionInput, steps } = workflowEditorRefs();
+  const rawSteps = [...(steps?.querySelectorAll('[data-workflow-editor-step]') || [])].map(row => ({
+    cmd: String(row.querySelector('.workflow-editor-step-command')?.value || '').trim(),
+    note: String(row.querySelector('.workflow-editor-step-note')?.value || '').trim(),
+  })).filter(step => step.cmd);
+  return {
+    title: String(titleInput?.value || '').trim(),
+    description: String(descriptionInput?.value || '').trim(),
+    inputs: inferWorkflowInputsFromSteps(rawSteps),
+    steps: rawSteps,
+  };
+}
+
+function openWorkflowEditor(workflow = null) {
+  const refs = workflowEditorRefs();
+  if (!refs.overlay || !refs.form || !refs.steps) return;
+  _workflowEditorWorkflow = workflow && workflow.source === 'user' ? workflow : null;
+  refs.title.textContent = _workflowEditorWorkflow ? 'EDIT WORKFLOW' : 'NEW WORKFLOW';
+  refs.saveBtn.textContent = _workflowEditorWorkflow ? 'Save changes' : 'Save workflow';
+  refs.titleInput.value = _workflowEditorWorkflow?.title || '';
+  refs.descriptionInput.value = _workflowEditorWorkflow?.description || '';
+  refs.steps.innerHTML = '';
+  const sourceSteps = Array.isArray(_workflowEditorWorkflow?.steps) && _workflowEditorWorkflow.steps.length
+    ? _workflowEditorWorkflow.steps
+    : [{ cmd: '', note: '' }];
+  sourceSteps.forEach(step => addWorkflowEditorStep(step));
+  setWorkflowEditorMessage('');
+  refs.overlay.classList.remove('u-hidden');
+  refs.overlay.classList.add('open');
+  refs.overlay.setAttribute('aria-hidden', 'false');
+  setTimeout(() => refs.titleInput?.focus(), 0);
+}
+
+function closeWorkflowEditor() {
+  const { overlay, form } = workflowEditorRefs();
+  if (!overlay) return;
+  overlay.classList.remove('open');
+  overlay.classList.add('u-hidden');
+  overlay.setAttribute('aria-hidden', 'true');
+  if (form) form.reset();
+  _workflowEditorWorkflow = null;
+}
+
+async function saveWorkflowEditor() {
+  const refs = workflowEditorRefs();
+  if (!refs.saveBtn) return;
+  const payload = workflowPayloadFromEditor();
+  if (!payload.title) {
+    setWorkflowEditorMessage('Workflow name is required.', true);
+    return;
+  }
+  if (!payload.steps.length) {
+    setWorkflowEditorMessage('Add at least one command step.', true);
+    return;
+  }
+  refs.saveBtn.disabled = true;
+  setWorkflowEditorMessage('Saving workflow...');
+  try {
+    const editing = _workflowEditorWorkflow && _workflowEditorWorkflow.id;
+    const url = editing
+      ? `/session/workflows/${encodeURIComponent(_workflowEditorWorkflow.id)}`
+      : '/session/workflows';
+    const resp = await apiFetch(url, {
+      method: editing ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+    closeWorkflowEditor();
+    await reloadWorkflowCatalog();
+    if (typeof showToast === 'function') showToast(editing ? 'Workflow updated' : 'Workflow saved');
+  } catch (err) {
+    setWorkflowEditorMessage(err.message || 'Failed to save workflow.', true);
+  } finally {
+    refs.saveBtn.disabled = false;
+  }
+}
+
+async function deleteUserWorkflow(workflow) {
+  if (!workflow || workflow.source !== 'user' || !workflow.id) return;
+  let confirmed = true;
+  if (typeof showConfirm === 'function') {
+    const choice = await showConfirm({
+      body: `Delete workflow "${workflow.title}"?`,
+      tone: 'danger',
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: 'delete', label: 'Delete', role: 'destructive' },
+      ],
+    });
+    confirmed = choice === 'delete';
+  }
+  if (!confirmed) return;
+  try {
+    const resp = await apiFetch(`/session/workflows/${encodeURIComponent(workflow.id)}`, { method: 'DELETE' });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${resp.status}`);
+    }
+    await reloadWorkflowCatalog();
+    if (typeof showToast === 'function') showToast('Workflow deleted');
+  } catch (err) {
+    if (typeof showToast === 'function') showToast(err.message || 'Failed to delete workflow', 'error');
+  }
+}
+
+function isMobileWorkflowSheetMode() {
+  return !!(
+    typeof useMobileTerminalViewportMode === 'function'
+    && useMobileTerminalViewportMode()
+  );
+}
+
 function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
+  const list = Array.isArray(items) ? items : [];
+  workflowCatalogItems = list.slice();
   const body = document.querySelector('.workflows-body');
   if (!body) return;
   body.innerHTML = '';
-  const list = Array.isArray(items) ? items : [];
-  list.forEach(item => {
+  const collapseCards = isMobileWorkflowSheetMode();
+  let lastSection = null;
+  list.forEach((item, idx) => {
+    const section = item.source === 'user' ? 'My workflows' : 'Built-ins';
+    if (section !== lastSection) {
+      const label = document.createElement('div');
+      label.className = 'workflow-section-label';
+      label.textContent = section;
+      body.appendChild(label);
+      lastSection = section;
+    }
     const card = document.createElement('div');
-    card.className = 'workflow-card';
+    card.className = 'workflow-card workflow-card-accordion';
+    if (item.source === 'user') card.classList.add('is-user-workflow');
+    if (collapseCards) card.classList.add('is-collapsed');
 
-    const titleEl = document.createElement('div');
+    const cardBodyId = `workflow-card-body-${idx}`;
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.className = 'workflow-card-toggle';
+    toggleBtn.setAttribute('aria-expanded', collapseCards ? 'false' : 'true');
+    toggleBtn.setAttribute('aria-controls', cardBodyId);
+
+    const heading = document.createElement('span');
+    heading.className = 'workflow-card-heading';
+    const titleEl = document.createElement('span');
     titleEl.className = 'workflow-title';
     titleEl.textContent = item.title || '';
-    card.appendChild(titleEl);
+    heading.appendChild(titleEl);
+    if (item.source === 'user') {
+      const badge = document.createElement('span');
+      badge.className = 'workflow-source-badge';
+      badge.textContent = 'user';
+      heading.appendChild(badge);
+    }
+    toggleBtn.appendChild(heading);
+
+    const toggleIcon = document.createElement('span');
+    toggleIcon.className = 'workflow-card-toggle-icon';
+    toggleIcon.setAttribute('aria-hidden', 'true');
+    toggleIcon.textContent = '⌄';
+    toggleBtn.appendChild(toggleIcon);
+    toggleBtn.addEventListener('click', () => {
+      const nextExpanded = card.classList.toggle('is-collapsed') === false;
+      toggleBtn.setAttribute('aria-expanded', nextExpanded ? 'true' : 'false');
+    });
+    card.appendChild(toggleBtn);
+
+    const cardBody = document.createElement('div');
+    cardBody.className = 'workflow-card-body';
+    cardBody.id = cardBodyId;
+
+    if (item.source === 'user') {
+      const actions = document.createElement('div');
+      actions.className = 'workflow-card-actions';
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'btn btn-secondary btn-compact workflow-edit-btn';
+      editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', () => openWorkflowEditor(item));
+      actions.appendChild(editBtn);
+      const deleteBtn = document.createElement('button');
+      deleteBtn.type = 'button';
+      deleteBtn.className = 'btn btn-ghost btn-compact workflow-delete-btn';
+      deleteBtn.textContent = 'Delete';
+      deleteBtn.addEventListener('click', () => deleteUserWorkflow(item));
+      actions.appendChild(deleteBtn);
+      cardBody.appendChild(actions);
+    }
 
     if (item.description) {
       const desc = document.createElement('div');
       desc.className = 'workflow-desc';
       desc.textContent = item.description;
-      card.appendChild(desc);
+      cardBody.appendChild(desc);
     }
+
+    const inputPanel = renderWorkflowInputCard(card, item);
+    if (inputPanel) cardBody.appendChild(inputPanel);
 
     const steps = item.steps || [];
     if (steps.length) {
@@ -2505,19 +3619,32 @@ function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
         main.className = 'workflow-step-main';
 
         const chip = document.createElement('span');
-        chip.className = 'allowed-chip faq-chip workflow-step-cmd';
+        chip.className = 'allowed-chip faq-chip workflow-step-cmd chip chip-action';
         chip.textContent = step.cmd || '';
-        chip.title = 'Click to load into prompt';
-        chip.dataset.faqCommand = step.cmd || '';
+        if (inputPanel) {
+          chip.title = 'Fill required workflow inputs to load this step';
+          chip.classList.add('is-disabled');
+        } else {
+          chip.title = 'Click to load into prompt';
+          chip.dataset.faqCommand = step.cmd || '';
+        }
         main.appendChild(chip);
 
         const runBtn = document.createElement('button');
         runBtn.type = 'button';
         runBtn.className = 'btn btn-ghost btn-compact btn-icon-only workflow-step-run';
         runBtn.textContent = '▶';
-        runBtn.title = 'Run this step';
-        runBtn.setAttribute('aria-label', `Run: ${step.cmd || ''}`);
-        runBtn.dataset.workflowStepCmd = step.cmd || '';
+        if (inputPanel) {
+          runBtn.title = 'Fill required workflow inputs to run this step';
+          runBtn.setAttribute('aria-label', 'Run this step');
+          runBtn.dataset.workflowStepCmd = '';
+          runBtn.disabled = true;
+          runBtn.setAttribute('aria-disabled', 'true');
+        } else {
+          runBtn.title = 'Run this step';
+          runBtn.setAttribute('aria-label', `Run: ${step.cmd || ''}`);
+          runBtn.dataset.workflowStepCmd = step.cmd || '';
+        }
         main.appendChild(runBtn);
 
         li.appendChild(main);
@@ -2531,7 +3658,13 @@ function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
 
         stepsEl.appendChild(li);
       });
-      card.appendChild(stepsEl);
+      cardBody.appendChild(stepsEl);
+    }
+
+    card.appendChild(cardBody);
+
+    if (inputPanel && typeof inputPanel._workflowApplyRenderedState === 'function') {
+      inputPanel._workflowApplyRenderedState();
     }
 
     body.appendChild(card);
@@ -2545,6 +3678,14 @@ function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
       items: list.slice(),
     });
   }
+}
+
+async function reloadWorkflowCatalog() {
+  const resp = await apiFetch('/workflows');
+  if (resp && resp.ok === false) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  renderWorkflowItems(data.items || []);
+  return data.items || [];
 }
 
 function activateWorkflowStepRun(cmd) {
@@ -2563,3 +3704,319 @@ function wireWorkflowStepRunButtons(root) {
     });
   });
 }
+
+function _workflowCommandTokens(cmd) {
+  if (typeof _workspaceCommandTokens === 'function') return _workspaceCommandTokens(cmd);
+  const tokens = [];
+  const re = /"[^"]*"|'[^']*'|\S+/g;
+  let match = re.exec(String(cmd || '').trim());
+  while (match) {
+    let token = match[0];
+    if (token.length >= 2 && ((token[0] === '"' && token[token.length - 1] === '"') || (token[0] === "'" && token[token.length - 1] === "'"))) {
+      token = token.slice(1, -1);
+    }
+    tokens.push(token);
+    match = re.exec(String(cmd || '').trim());
+  }
+  return tokens;
+}
+
+function _workflowCliAppend(text, cls = '', tabId = activeTabId) {
+  if (typeof appendLine === 'function') appendLine(text, cls, tabId);
+}
+
+function _workflowCliSetStatus(status) {
+  if (typeof setStatus === 'function') setStatus(status);
+}
+
+function _workflowCliRecord(cmd) {
+  if (typeof _recordSuccessfulLocalCommand === 'function') _recordSuccessfulLocalCommand(cmd);
+}
+
+function _workflowCliPersist(cmd, lines, status = 'ok') {
+  if (typeof _persistClientSideRun === 'function') _persistClientSideRun(cmd, lines, status);
+}
+
+function _workflowCliFinish(cmd, lines, status = 'ok', tabId = activeTabId, { record = false } = {}) {
+  if (record && status !== 'fail') _workflowCliRecord(cmd);
+  _workflowCliPersist(cmd, lines, status);
+  if (typeof _finalizeClientSideCommandStatus === 'function') {
+    _finalizeClientSideCommandStatus(tabId, status);
+  } else {
+    _workflowCliSetStatus(status);
+  }
+}
+
+function _workflowFind(selector) {
+  const query = String(selector || '').trim().toLowerCase();
+  if (!query) return { workflow: null, error: 'workflow name is required' };
+  const items = workflowCatalogItems || [];
+  const exactMatches = items.filter(item => workflowLookupKeys(item).some(key => key === query));
+  if (exactMatches.length === 1) return { workflow: exactMatches[0], error: '' };
+  if (exactMatches.length > 1) {
+    return {
+      workflow: null,
+      error: `ambiguous workflow '${selector}': ${exactMatches.slice(0, 5).map(workflowCliName).join(', ')}`,
+    };
+  }
+  const matches = items.filter(item => workflowLookupKeys(item).some(key => key.includes(query)));
+  if (matches.length === 1) return { workflow: matches[0], error: '' };
+  if (matches.length > 1) {
+    return {
+      workflow: null,
+      error: `ambiguous workflow '${selector}': ${matches.slice(0, 5).map(workflowCliName).join(', ')}`,
+    };
+  }
+  return { workflow: null, error: `workflow not found: ${selector}` };
+}
+
+function _workflowCliUsageLines() {
+  return [
+    'Usage: workflow [list | show <name> | run <name> [--input value ...]]',
+    'Examples:',
+    '  workflow list',
+    '  workflow show dns-troubleshooting',
+    '  workflow run dns-troubleshooting --domain darklab.sh',
+  ];
+}
+
+function _workflowParseRunArgs(args) {
+  const selectors = [];
+  const values = {};
+  const errors = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const token = String(args[index] || '');
+    if (token.startsWith('--')) {
+      const eq = token.indexOf('=');
+      const rawName = eq >= 0 ? token.slice(2, eq) : token.slice(2);
+      const name = rawName.replace(/-/g, '_').toLowerCase();
+      if (!name) {
+        errors.push(`invalid flag '${token}'`);
+        continue;
+      }
+      let value = eq >= 0 ? token.slice(eq + 1) : '';
+      if (eq < 0) {
+        index += 1;
+        value = args[index] || '';
+      }
+      if (!String(value || '').trim()) errors.push(`missing value for --${rawName}`);
+      values[name] = value;
+    } else {
+      selectors.push(token);
+    }
+  }
+  return { selector: selectors.join(' '), values, errors };
+}
+
+function _workflowResolvedValues(workflow, provided = {}) {
+  const values = getWorkflowInputValues(workflow);
+  Object.entries(provided || {}).forEach(([key, value]) => {
+    const input = (workflow.inputs || []).find(item => item.id === key);
+    if (!input) return;
+    values[key] = sanitizeWorkflowInputValue(input, value);
+  });
+  return values;
+}
+
+function _workflowMissingInputs(workflow, values) {
+  return (workflow.inputs || []).filter(input => input.required && !String(values[input.id] || '').trim());
+}
+
+function _workflowRunResolved(workflow, values, tabId) {
+  const rendered = buildRenderedWorkflow(workflow, values);
+  if (!rendered.ready) {
+    _workflowCliAppend('[workflow] Required inputs are missing.', 'exit-fail', tabId);
+    _workflowCliSetStatus('fail');
+    return;
+  }
+  const commands = rendered.steps.map(step => step.renderedCmd).filter(Boolean);
+  if (!commands.length) {
+    _workflowCliAppend('[workflow] No runnable steps.', 'exit-fail', tabId);
+    _workflowCliSetStatus('fail');
+    return;
+  }
+  persistWorkflowInputValues(workflow, values);
+  _workflowCliAppend(`[workflow] ${workflow.title}: ${commands.length} step(s) queued.`, 'notice', tabId);
+  runWorkflowCommands(commands);
+}
+
+function _workflowPromptForInputs(workflow, values, missing, tabId) {
+  const queue = missing.slice();
+  const askNext = () => {
+    const input = queue.shift();
+    if (!input) {
+      _workflowRunResolved(workflow, values, tabId);
+      return;
+    }
+    const label = input.label || input.id;
+    const hint = input.placeholder ? ` (${input.placeholder})` : '';
+    _workflowCliAppend(`[workflow] ${label}${hint}:`, 'notice', tabId);
+    if (typeof _setPendingTerminalConfirm !== 'function') {
+      _workflowCliAppend(`[workflow] missing --${input.id.replace(/_/g, '-')}`, 'exit-fail', tabId);
+      _workflowCliSetStatus('fail');
+      return;
+    }
+    _setPendingTerminalConfirm({
+      kind: 'text',
+      tabId,
+      onAnswer: async (answer) => {
+        const value = sanitizeWorkflowInputValue(input, answer);
+        if (!value) {
+          queue.unshift(input);
+        } else {
+          values[input.id] = value;
+        }
+        askNext();
+      },
+      onCancel: async () => {
+        _workflowCliAppend('[workflow] canceled.', 'notice', tabId);
+        _workflowCliSetStatus('idle');
+      },
+    });
+    _workflowCliSetStatus('idle');
+  };
+  askNext();
+}
+
+async function handleWorkflowTerminalCommand(cmd, tabId = activeTabId) {
+  const lines = [];
+  const append = (text, cls = '') => {
+    lines.push({ text, cls });
+    _workflowCliAppend(text, cls, tabId);
+  };
+  if (typeof appendCommandEcho === 'function') appendCommandEcho(cmd, tabId);
+  if (!workflowCatalogItems.length) {
+    try { await reloadWorkflowCatalog(); }
+    catch (err) {
+      append(`[workflow] failed to load workflows: ${err.message || 'network error'}`, 'exit-fail');
+      _workflowCliFinish(cmd, lines, 'fail', tabId);
+      return true;
+    }
+  }
+  const parts = _workflowCommandTokens(cmd);
+  const sub = String(parts[1] || 'list').toLowerCase();
+  if (sub === 'help' || sub === '--help' || sub === '-h') {
+    _workflowCliUsageLines().forEach(line => append(line, ''));
+    _workflowCliFinish(cmd, lines, 'ok', tabId, { record: true });
+    return true;
+  }
+  if (sub === 'list' || parts.length === 1) {
+    append('Workflows:', 'builtin-section');
+    workflowCatalogItems.forEach((workflow) => {
+      const kind = workflow.source === 'user' ? 'user' : 'built-in';
+      const idHint = workflow.source === 'user' && workflow.id ? `, id: ${workflow.id}` : '';
+      append(`  ${workflowCliName(workflow)}  ${workflow.title} (${workflow.steps?.length || 0} steps, ${kind}${idHint})`, 'builtin-help-row');
+    });
+    _workflowCliFinish(cmd, lines, 'ok', tabId, { record: true });
+    return true;
+  }
+  if (sub === 'show') {
+    const selector = parts.slice(2).join(' ');
+    const { workflow, error } = _workflowFind(selector);
+    if (!workflow) {
+      append(`[workflow] ${error}`, 'exit-fail');
+      _workflowCliFinish(cmd, lines, 'fail', tabId);
+      return true;
+    }
+    append(`${workflow.title} (${workflowCliName(workflow)})`, 'builtin-section');
+    if (workflow.description) append(workflow.description, 'builtin-note');
+    (workflow.inputs || []).forEach(input => append(`  --${input.id.replace(/_/g, '-')}  ${input.label || input.id}`, 'builtin-help-row'));
+    (workflow.steps || []).forEach((step, index) => {
+      append(`  ${index + 1}. ${step.cmd}`, 'builtin-help-row');
+      if (step.note) append(`     ${step.note}`, 'builtin-note');
+    });
+    _workflowCliFinish(cmd, lines, 'ok', tabId, { record: true });
+    return true;
+  }
+  if (sub === 'run') {
+    const parsed = _workflowParseRunArgs(parts.slice(2));
+    if (parsed.errors.length) {
+      parsed.errors.forEach(error => append(`[workflow] ${error}`, 'exit-fail'));
+      _workflowCliFinish(cmd, lines, 'fail', tabId);
+      return true;
+    }
+    const { workflow, error } = _workflowFind(parsed.selector);
+    if (!workflow) {
+      append(`[workflow] ${error}`, 'exit-fail');
+      _workflowCliFinish(cmd, lines, 'fail', tabId);
+      return true;
+    }
+    const values = _workflowResolvedValues(workflow, parsed.values);
+    const missing = _workflowMissingInputs(workflow, values);
+    if (missing.length) {
+      _workflowPromptForInputs(workflow, values, missing, tabId);
+      return true;
+    }
+    _workflowRunResolved(workflow, values, tabId);
+    return true;
+  }
+  append(`[workflow] unknown subcommand '${sub}'`, 'exit-fail');
+  _workflowCliUsageLines().forEach(line => append(line, ''));
+  _workflowCliFinish(cmd, lines, 'fail', tabId);
+  return true;
+}
+
+function _workflowRuntimeHintFor(workflow) {
+  const value = workflowCliName(workflow);
+  return _runtimeHint(value, workflow.title || value, value);
+}
+
+function _workflowInputHint(input) {
+  const item = _runtimeHint(
+    `<${input.id}>`,
+    input.label || input.id,
+    null,
+  );
+  if (input.type === 'domain') item.value_type = 'domain';
+  return item;
+}
+
+function _runtimeWorkflowContext() {
+  const workflows = Array.isArray(workflowCatalogItems) ? workflowCatalogItems : [];
+  const workflowHints = workflows.map(_workflowRuntimeHintFor);
+  const flags = [];
+  const expectsValue = [];
+  const argHints = {
+    list: [],
+    show: workflowHints,
+    run: workflowHints,
+    __positional__: [
+      _runtimeHint('list', 'List workflows'),
+      _runtimeHint('show', 'Show workflow steps', 'show '),
+      _runtimeHint('run', 'Run a workflow', 'run '),
+    ],
+  };
+  const sequenceArgHints = {};
+  const seenFlags = new Set();
+  workflows.forEach((workflow) => {
+    const workflowName = workflowCliName(workflow).toLowerCase();
+    const workflowFlags = [];
+    (workflow.inputs || []).forEach((input) => {
+      const flag = `--${String(input.id || '').replace(/_/g, '-')}`;
+      if (!seenFlags.has(flag)) {
+        seenFlags.add(flag);
+        flags.push({ value: flag, description: input.label || input.id });
+        expectsValue.push(flag);
+        argHints[flag] = [_workflowInputHint(input)];
+      }
+      workflowFlags.push(_runtimeHint(flag, input.label || input.id, `${flag} `));
+    });
+    sequenceArgHints[`run ${workflowName}`] = workflowFlags;
+  });
+  return _runtimeContextSpec({ flags, expectsValue, argHints, sequenceArgHints });
+}
+
+document.querySelectorAll('#workflow-new-btn, #rail-workflow-new-btn').forEach(btn => {
+  btn.addEventListener('click', () => openWorkflowEditor());
+});
+document.getElementById('workflow-editor-add-step')?.addEventListener('click', () => addWorkflowEditorStep());
+document.getElementById('workflow-editor-form')?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  saveWorkflowEditor();
+});
+document.querySelectorAll('.workflow-editor-close').forEach(btn => {
+  btn.addEventListener('click', () => closeWorkflowEditor());
+});
+document.getElementById('workflow-editor-overlay')?.addEventListener('click', (event) => {
+  if (event.target === event.currentTarget) closeWorkflowEditor();
+});

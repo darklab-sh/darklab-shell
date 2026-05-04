@@ -5,8 +5,8 @@
 # Run this after upgrading the base image, apt packages, or any pinned
 # tool version in the Dockerfile (Go binaries, pip packages, gems).
 # It builds a fresh image with docker compose, starts the container, and
-# runs every command from app/conf/autocomplete.yaml examples through /run, checking
-# each one against the expected output recorded in
+# runs every user-facing command in the shared smoke corpus through /runs
+# (commands.yaml examples plus workflow steps), checking each one against the expected output recorded in
 # tests/py/fixtures/container_smoke_test-expectations.json.
 #
 # A failure means a command is missing, broken, or producing unexpected
@@ -21,6 +21,10 @@
 #   scripts/container_smoke_test.sh --cmd "nuclei -u https://ip.darklab.sh -t network/"
 #   scripts/container_smoke_test.sh --cmd "host ip.darklab.sh" --cmd "dig +short MX ip.darklab.sh"
 #   scripts/container_smoke_test.sh -k nuclei
+#
+# Retry tuning:
+#   RUN_CONTAINER_SMOKE_TEST_RETRIES=3
+#   RUN_CONTAINER_SMOKE_TEST_RETRY_DELAY_SECONDS=3
 #
 # Output: test-results/container_smoke_test.xml (JUnit XML)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pre-commit checks: flake8, bandit, pytest, pip-audit, eslint, npm audit,
-#                   shellcheck, hadolint, yamllint, jsonlint, markdownlint, vendor:check
+# shell script linting, hadolint, yamllint, jsonlint, markdownlint, vendor:check
 # Install once with: git config core.hooksPath scripts/hooks
 
 set -uo pipefail
@@ -56,7 +56,7 @@ fi
 # npm audit — JS dependency CVEs (fail on high/critical only)
 run_check "npm audit" npm --prefix "$REPO_ROOT" run audit:js
 
-# shellcheck — shell script static analysis (skips non-shell .sh files)
+# Shell script static analysis (skips non-shell .sh files)
 shell_scripts=$(find "$REPO_ROOT" -name '*.sh' -not -path "$REPO_ROOT/.git/*" -not -path "$REPO_ROOT/node_modules/*" -type f | while read -r f; do
     head -1 "$f" | grep -qE '#!/.*(bash|sh)' && printf '%s ' "$f"
 done)
@@ -74,7 +74,7 @@ fi
 yaml_files=$(find "$REPO_ROOT" \( -name '*.yml' -o -name '*.yaml' \) -not -path "$REPO_ROOT/.git/*" -not -path "$REPO_ROOT/node_modules/*" -type f -print)
 if [ -n "$yaml_files" ]; then
     # shellcheck disable=SC2086  # word-splitting intentional to pass list of files
-    run_check "yamllint" yamllint -c "$REPO_ROOT/config/yamllint.yml" $yaml_files
+    run_check "yamllint" "$PYTHON" -m yamllint -c "$REPO_ROOT/config/yamllint.yml" $yaml_files
 fi
 
 # jsonlint — JSON syntax and style

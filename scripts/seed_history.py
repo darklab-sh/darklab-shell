@@ -40,6 +40,7 @@ Pick a custom count and star some of the seeded commands:
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import random
@@ -58,7 +59,7 @@ VISUAL_HISTORY_FIXTURES = {
     "visual-flows": {
         "count": 240,
         "days": 30,
-        "star": 24,
+        "star": 2,
         "seed": 4242,
     },
 }
@@ -71,9 +72,16 @@ def _resolve_db_path() -> str:
     the DB and writes (DROP/CREATE TRIGGER, possibly FTS rebuild). We want
     this script to be a pure data-only writer.
     """
-    data_dir = os.environ.get("APP_DATA_DIR") or (
-        "/data" if os.path.isdir("/data") else "/tmp"  # nosec B108
-    )
+    app_dir = ROOT / "app"
+    if app_dir.exists() and str(app_dir) not in sys.path:
+        sys.path.insert(0, str(app_dir))
+    try:
+        from config import resolve_data_dir  # noqa: PLC0415
+        data_dir = resolve_data_dir()
+    except Exception:  # noqa: BLE001
+        data_dir = os.environ.get("APP_DATA_DIR") or (
+            "/data" if os.path.isdir("/data") else "/tmp"  # nosec B108
+        )
     return os.path.join(data_dir, "history.db")
 
 
@@ -89,298 +97,98 @@ def db_connect():
         conn.close()
 
 
-# Each template is (command, [output lines], exit_code). Output lines are
-# plain strings; we wrap them into the preview-entry dict shape at insert time.
-# Keep the variety broad so filtering/search UI has something to chew on.
-COMMAND_TEMPLATES: list[tuple[str, list[str], int]] = [
-    # ── DNS ───────────────────────────────────────────────────────────────
-    ("dig example.com", [
-        "; <<>> DiG 9.18.24 <<>> example.com",
-        ";; global options: +cmd",
-        ";; Got answer:",
-        ";; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 42315",
-        ";; ANSWER SECTION:",
-        "example.com.\t\t3600\tIN\tA\t93.184.216.34",
-        ";; Query time: 12 msec",
-    ], 0),
-    ("dig +short example.org AAAA", [
-        "2606:2800:21f:cb07:6820:80da:af6b:8b2c",
-    ], 0),
-    ("dig @8.8.8.8 darklab.sh MX", [
-        "; <<>> DiG 9.18.24 <<>> @8.8.8.8 darklab.sh MX",
-        ";; ANSWER SECTION:",
-        "darklab.sh.\t\t300\tIN\tMX\t10 mail.darklab.sh.",
-    ], 0),
-    ("nslookup scanme.nmap.org", [
-        "Server:\t\t1.1.1.1",
-        "Address:\t1.1.1.1#53",
-        "Non-authoritative answer:",
-        "Name:\tscanme.nmap.org",
-        "Address: 45.33.32.156",
-    ], 0),
-    ("host -t TXT example.com", [
-        'example.com descriptive text "v=spf1 -all"',
-        'example.com descriptive text "wgyf8z8cgvm2qmxpnbnldrcltvk4xqfn"',
-    ], 0),
-    ("host -t NS example.org", [
-        "example.org name server a.iana-servers.net.",
-        "example.org name server b.iana-servers.net.",
-    ], 0),
-    ("dig missing-subdomain-xyz.example.com", [
-        ";; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 11231",
-        ";; QUESTION SECTION:",
-        ";missing-subdomain-xyz.example.com. IN A",
-    ], 0),
-    ("subfinder -d example.com -silent", [
-        "www.example.com",
-        "api.example.com",
-        "dev.example.com",
-        "staging.example.com",
-        "mail.example.com",
-    ], 0),
-    ("dnsx -l domains.txt -a -resp", [
-        "example.com [93.184.216.34]",
-        "example.org [93.184.216.34]",
-        "iana.org [192.0.43.8]",
-    ], 0),
+def _load_autocomplete_example_commands() -> list[str]:
+    """Return surfaced example commands from the command registry context."""
+    sys.path.insert(0, str(ROOT / "app"))
+    commands_mod = importlib.import_module("commands")
+    seen = set()
+    commands = []
+    for spec in commands_mod.load_autocomplete_context_from_commands_registry().values():
+        if not isinstance(spec, dict):
+            continue
+        for example in spec.get("examples") or []:
+            if not isinstance(example, dict):
+                continue
+            value = str(example.get("value") or "").strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            commands.append(value)
+    return commands
 
-    # ── HTTP ──────────────────────────────────────────────────────────────
-    ("curl -I https://example.com", [
-        "HTTP/2 200",
-        "content-type: text/html; charset=UTF-8",
-        "date: Sat, 18 Apr 2026 14:02:00 GMT",
-        "server: ECS (nyb/1D2B)",
-        "x-cache: HIT",
-        "content-length: 1256",
-    ], 0),
-    ("curl -sSL https://example.org -o /tmp/index.html", [], 0),
-    ("curl https://httpbin.org/status/500", [
-        "  % Total    % Received % Xferd  Average Speed   Time",
-        "                                 Dload  Upload   Total",
-        "100    0  100     0      0     12      0 --:--:--  0:00:01",
-    ], 22),
-    ("curl -v --max-time 2 https://10.255.255.1", [
-        "*   Trying 10.255.255.1:443...",
-        "* connect to 10.255.255.1 port 443 failed: Operation timed out",
-        "* Failed to connect to 10.255.255.1 port 443 after 2003 ms",
-        "curl: (28) Failed to connect after 2003 ms",
-    ], 28),
-    ("curl --head https://darklab.sh", [
-        "HTTP/2 200",
-        "content-type: text/html; charset=utf-8",
-        "x-frame-options: DENY",
-        "content-security-policy: default-src 'self'",
-    ], 0),
-    ("httpx -l hosts.txt -title -status-code -tech-detect", [
-        "https://example.com [200] [Example Domain]",
-        "https://example.org [200] [Example Domain]",
-        "https://www.iana.org [200] [Internet Assigned Numbers Authority]",
-    ], 0),
-    ("wget -q https://example.com -O /tmp/example.html", [], 0),
 
-    # ── Nmap / port scan ──────────────────────────────────────────────────
-    ("nmap -sV scanme.nmap.org", [
-        "Starting Nmap 7.94 ( https://nmap.org ) at 2026-04-18 14:03 UTC",
-        "Nmap scan report for scanme.nmap.org (45.33.32.156)",
-        "Host is up (0.025s latency).",
-        "Not shown: 996 closed tcp ports (reset)",
-        "PORT     STATE    SERVICE    VERSION",
-        "22/tcp   open     ssh        OpenSSH 6.6.1p1 Ubuntu 2ubuntu2.13",
-        "80/tcp   open     http       Apache httpd 2.4.7",
-        "9929/tcp open     nping-echo Nping echo",
-        "31337/tcp open    tcpwrapped",
-        "Nmap done: 1 IP address (1 host up) scanned in 18.42 seconds",
-    ], 0),
-    ("nmap -sS -p 1-1000 192.168.1.1", [
-        "Starting Nmap 7.94 ( https://nmap.org )",
-        "Nmap scan report for 192.168.1.1",
-        "Host is up (0.0012s latency).",
-        "Not shown: 997 filtered tcp ports",
-        "PORT    STATE SERVICE",
-        "22/tcp  open  ssh",
-        "53/tcp  open  domain",
-        "443/tcp open  https",
-    ], 0),
-    ("nmap --script http-enum -p 80,443 example.com", [
-        "Starting Nmap 7.94 ( https://nmap.org )",
-        "Nmap scan report for example.com (93.184.216.34)",
-        "PORT    STATE SERVICE",
-        "80/tcp  open  http",
-        "443/tcp open  https",
-        "| http-enum:",
-        "|   /robots.txt: Robots file",
-        "|_  /sitemap.xml: Sitemap",
-    ], 0),
-    ("nmap 127.0.0.1", [
-        "Starting Nmap 7.94 ( https://nmap.org )",
-        "Nmap scan report for localhost (127.0.0.1)",
-        "Host is up (0.000012s latency).",
-        "All 1000 scanned ports on localhost are in state: closed",
-    ], 0),
-    ("rustscan -a 10.0.0.5 --ulimit 5000", [
-        ".----. .-. .-. .----..---.  .----. .---.   .--.  .-. .-.",
-        "| {}  }| { } |{ {__ {_   _}{ {__  /  ___} / {} \\ |  `| |",
-        "| .-. \\| {_} |.-._} } | |  .-._} }\\     }/  /\\  \\| |\\  |",
-        "`-' `-'`-----'`----'  `-'  `----'  `---' `-'  `-'`-' `-'",
-        "The Modern Day Port Scanner.",
-        "[~] Starting Script(s)",
-        "[>] Script to be run Nmap 7.94",
-        "Open 10.0.0.5:22",
-        "Open 10.0.0.5:80",
-        "Open 10.0.0.5:443",
-    ], 0),
+def _fake_output_for_command(command: str) -> tuple[list[str], int]:
+    root = command.split()[0].lower() if command else ""
 
-    # ── WHOIS / Registration ──────────────────────────────────────────────
-    ("whois example.com", [
-        "   Domain Name: EXAMPLE.COM",
-        "   Registry Domain ID: 2336799_DOMAIN_COM-VRSN",
-        "   Registrar WHOIS Server: whois.iana.org",
-        "   Creation Date: 1995-08-14T04:00:00Z",
-        "   Registry Expiry Date: 2026-08-13T04:00:00Z",
-        "   Name Server: A.IANA-SERVERS.NET",
-        "   Name Server: B.IANA-SERVERS.NET",
-        "   DNSSEC: signedDelegation",
-    ], 0),
-    ("whois 45.33.32.156", [
-        "NetRange:       45.33.32.0 - 45.33.35.255",
-        "CIDR:           45.33.32.0/22",
-        "NetName:        LINODE-US",
-        "NetHandle:      NET-45-33-32-0-1",
-        "OrgName:        Linode",
-    ], 0),
-    ("whois darklab.sh", [
-        "   Domain Name: DARKLAB.SH",
-        "   Registrar: NameSilo, LLC",
-        "   Creation Date: 2024-11-03T00:00:00Z",
-        "   DNSSEC: unsigned",
-    ], 0),
+    if root == "dig":
+        return ([
+            "; <<>> DiG 9.18.24 <<>> darklab.sh",
+            ";; global options: +cmd",
+            ";; ANSWER SECTION:",
+            "darklab.sh.\t\t300\tIN\tA\t104.21.4.35",
+            "darklab.sh.\t\t300\tIN\tA\t172.67.72.36",
+        ], 0)
+    if root in {"nslookup", "host"}:
+        return ([
+            "Server:\t\t1.1.1.1",
+            "Non-authoritative answer:",
+            "Name:\tdarklab.sh",
+            "Address: 104.21.4.35",
+        ], 0)
+    if root in {"subfinder", "dnsx", "dnsrecon", "dnsenum", "fierce"}:
+        return ([
+            "api.darklab.sh",
+            "ip.darklab.sh",
+            "tor-stats.darklab.sh",
+        ], 0)
+    if root in {"curl", "wget", "pd-httpx", "whatweb", "katana"}:
+        return ([
+            "HTTP/2 200",
+            "content-type: text/html; charset=utf-8",
+            "server: cloudflare",
+            "x-cache: HIT",
+        ], 0)
+    if root in {"openssl", "sslscan", "sslyze", "testssl"}:
+        return ([
+            "CONNECTED(00000003)",
+            "TLSv1.3 supported",
+            "Certificate chain verified",
+        ], 0)
+    if root in {"nmap", "rustscan", "masscan", "naabu"}:
+        return ([
+            "Host is up (0.024s latency).",
+            "PORT     STATE SERVICE",
+            "80/tcp   open  http",
+            "443/tcp  open  https",
+        ], 0)
+    if root in {"ping", "fping"}:
+        return ([
+            "PING darklab.sh (104.21.4.35) 56(84) bytes of data.",
+            "64 bytes from 104.21.4.35: icmp_seq=1 ttl=59 time=22.4 ms",
+            "64 bytes from 104.21.4.35: icmp_seq=2 ttl=59 time=21.9 ms",
+        ], 0)
+    if root in {"mtr", "traceroute", "tcptraceroute"}:
+        return ([
+            " 1. 192.168.1.1      0.5 ms  0.6 ms  0.6 ms",
+            " 2. 100.64.0.1       7.0 ms  6.8 ms  7.1 ms",
+            " 3. 104.21.4.35     19.8 ms 19.7 ms 19.9 ms",
+        ], 0)
+    if root == "nc":
+        return (["Connection to 104.21.4.35 443 port [tcp/https] succeeded!"], 0)
+    if root == "whois":
+        return ([
+            "Domain Name: DARKLAB.SH",
+            "Registrar: NameSilo, LLC",
+            "Creation Date: 2024-11-03T00:00:00Z",
+        ], 0)
+    if root in {"ffuf", "gobuster", "nikto", "wpscan", "wafw00f", "nuclei"}:
+        return ([
+            "[200] /",
+            "[301] /images",
+            "[403] /admin",
+        ], 0)
 
-    # ── Connectivity ──────────────────────────────────────────────────────
-    ("ping -c 3 1.1.1.1", [
-        "PING 1.1.1.1 (1.1.1.1): 56 data bytes",
-        "64 bytes from 1.1.1.1: icmp_seq=0 ttl=59 time=12.341 ms",
-        "64 bytes from 1.1.1.1: icmp_seq=1 ttl=59 time=11.983 ms",
-        "64 bytes from 1.1.1.1: icmp_seq=2 ttl=59 time=12.221 ms",
-        "--- 1.1.1.1 ping statistics ---",
-        "3 packets transmitted, 3 packets received, 0.0% packet loss",
-        "round-trip min/avg/max/stddev = 11.983/12.182/12.341/0.149 ms",
-    ], 0),
-    ("ping -c 2 203.0.113.99", [
-        "PING 203.0.113.99 (203.0.113.99): 56 data bytes",
-        "Request timeout for icmp_seq 0",
-        "Request timeout for icmp_seq 1",
-        "--- 203.0.113.99 ping statistics ---",
-        "2 packets transmitted, 0 packets received, 100.0% packet loss",
-    ], 1),
-    ("traceroute -n 8.8.8.8", [
-        "traceroute to 8.8.8.8 (8.8.8.8), 30 hops max, 60 byte packets",
-        " 1  192.168.1.1  0.412 ms  0.402 ms  0.389 ms",
-        " 2  100.64.0.1   6.712 ms  6.801 ms  6.892 ms",
-        " 3  * * *",
-        " 4  72.14.218.62  8.913 ms  9.001 ms  8.812 ms",
-        " 5  108.170.241.1 9.112 ms  9.223 ms  9.344 ms",
-        " 6  8.8.8.8       9.554 ms  9.612 ms  9.702 ms",
-    ], 0),
-    ("mtr --report --report-cycles 3 darklab.sh", [
-        "HOST: seed-host                  Loss%   Snt   Last   Avg  Best  Wrst",
-        "  1. 192.168.1.1                  0.0%     3    0.5   0.6   0.5   0.7",
-        "  2. 100.64.0.1                   0.0%     3    6.8   6.9   6.7   7.1",
-        "  3. 104.21.12.54                 0.0%     3   18.1  18.3  18.0  18.6",
-    ], 0),
-
-    # ── Web fuzzing / enumeration ─────────────────────────────────────────
-    ("gobuster dir -u https://example.com -w /usr/share/wordlists/common.txt", [
-        "===============================================================",
-        "Gobuster v3.6",
-        "===============================================================",
-        "[+] Url:                     https://example.com",
-        "[+] Method:                  GET",
-        "[+] Threads:                 10",
-        "[+] Wordlist:                /usr/share/wordlists/common.txt",
-        "===============================================================",
-        "/images               (Status: 301) [--> /images/]",
-        "/index.html           (Status: 200)",
-        "/robots.txt           (Status: 200)",
-        "===============================================================",
-        "Finished",
-        "===============================================================",
-    ], 0),
-    ("ffuf -u https://example.com/FUZZ -w common.txt -mc 200,301", [
-        "        /'___\\  /'___\\           /'___\\",
-        "       /\\ \\__/ /\\ \\__/  __  __  /\\ \\__/",
-        "       \\ \\ ,__\\\\ \\ ,__\\/\\ \\/\\ \\ \\ \\ ,__\\",
-        "        \\ \\ \\_/ \\ \\ \\_/\\ \\ \\_\\ \\ \\ \\ \\_/",
-        "         \\ \\_\\   \\ \\_\\  \\ \\____/  \\ \\_\\",
-        "          \\/_/    \\/_/   \\/___/    \\/_/",
-        "v2.1.0",
-        "images                  [Status: 301, Size: 178, Words: 6, Lines: 9]",
-        "index.html              [Status: 200, Size: 1256, Words: 101, Lines: 30]",
-    ], 0),
-    ("whatweb https://example.com", [
-        "https://example.com [200 OK] Country[UNITED STATES][US], HTML5, HTTPServer[ECS (nyb/1D2B)], IP[93.184.216.34]",
-    ], 0),
-    ("nikto -h http://scanme.nmap.org", [
-        "- Nikto v2.5.0",
-        "---------------------------------------------------------------",
-        "+ Target IP:          45.33.32.156",
-        "+ Target Hostname:    scanme.nmap.org",
-        "+ Target Port:        80",
-        "+ Start Time:         2026-04-12 09:14:03",
-        "+ Server: Apache/2.4.7 (Ubuntu)",
-        "+ /: Apache/2.4.7 appears outdated.",
-        "+ 8085 requests: 0 error(s) and 5 item(s) reported on remote host",
-    ], 0),
-    ("wpscan --url https://example-wordpress.test --no-update", [
-        "_______________________________________________________________",
-        "         __          _______   _____",
-        "         \\ \\        / /  __ \\ / ____|",
-        "          \\ \\  /\\  / /| |__) | (___   ___  __ _ _ __ ®",
-        "           \\ \\/  \\/ / |  ___/ \\___ \\ / __|/ _` | '_ \\",
-        "            \\  /\\  /  | |     ____) | (__| (_| | | | |",
-        "             \\/  \\/   |_|    |_____/ \\___|\\__,_|_| |_|",
-        "       WordPress Security Scanner by the WPScan Team",
-        "                       Version 3.8.25",
-        "_______________________________________________________________",
-        "[+] URL: https://example-wordpress.test/",
-        "[+] Interesting Finding(s):",
-        "[+] WordPress version 6.4.3 identified",
-    ], 3),
-
-    # ── Built-ins / shell ────────────────────────────────────────────────
-    ("help", [
-        "Darklab Shell — quick reference",
-        "  help            show this text",
-        "  history         list previous commands",
-        "  clear           clear the active output pane",
-        "  theme           print or switch the active theme",
-        "  star            toggle a command in the starred list",
-    ], 0),
-    ("history", [
-        "  1  dig example.com",
-        "  2  nmap -sV scanme.nmap.org",
-        "  3  curl -I https://example.com",
-        "  4  whois example.com",
-    ], 0),
-    ("theme", ["active theme: dark"], 0),
-    ("theme monokai", ["theme set to monokai"], 0),
-    ("star dig example.com", ["starred: dig example.com"], 0),
-    ("clear", [], 0),
-    ("bogus-command", [
-        "bogus-command: command not found",
-    ], 127),
-    ("cat /etc/shadow", [
-        "cat: /etc/shadow: Permission denied",
-    ], 1),
-    ("ls /does/not/exist", [
-        "ls: cannot access '/does/not/exist': No such file or directory",
-    ], 2),
-    ("echo $SHELL", [
-        "/bin/zsh",
-    ], 0),
-    ("uname -a", [
-        "Darwin seed-host 25.5.0 Darwin Kernel Version 25.5.0 arm64",
-    ], 0),
-]
+    return ([f"{root}: completed successfully", f"command: {command}"], 0)
 
 
 # ── Session resolution ──────────────────────────────────────────────────────
@@ -441,9 +249,10 @@ def _fake_run_row(
     output_lines: list[str],
     exit_code: int,
     started_dt: datetime,
+    rng: random.Random,
 ) -> tuple:
     # Fabricate plausible elapsed time so the history UI has varied durations.
-    elapsed_s = random.uniform(0.2, 18.0)
+    elapsed_s = rng.uniform(0.2, 18.0)
     finished_dt = started_dt + timedelta(seconds=elapsed_s)
 
     preview_lines = []
@@ -479,19 +288,26 @@ def seed_runs(session_id: str, count: int, days_span: int, rng: random.Random) -
     """Insert ``count`` fabricated runs and return the commands we inserted."""
     now = datetime.now(timezone.utc)
     earliest = now - timedelta(days=days_span)
+    command_pool = _load_autocomplete_example_commands()
+    if not command_pool:
+        sys.exit("command registry example command pool is empty")
 
     rows: list[tuple] = []
     commands_inserted: list[str] = []
+    previous_command = None
 
     for _ in range(count):
-        command, output, exit_code = rng.choice(COMMAND_TEMPLATES)
+        choices = [cmd for cmd in command_pool if cmd != previous_command] or command_pool
+        command = rng.choice(choices)
+        output, exit_code = _fake_output_for_command(command)
         # Spread runs across the window so the date-range filter has something
         # to bite.  Bias toward more recent runs (sqrt distribution) so the
         # default "recent" view is not empty.
         offset = rng.random() ** 0.5
         started_dt = earliest + (now - earliest) * offset
-        rows.append(_fake_run_row(session_id, command, output, exit_code, started_dt))
+        rows.append(_fake_run_row(session_id, command, output, exit_code, started_dt, rng))
         commands_inserted.append(command)
+        previous_command = command
 
     # Sort chronologically so the history list reads naturally.
     rows.sort(key=lambda r: r[3])

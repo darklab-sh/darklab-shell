@@ -1,6 +1,6 @@
 # Theme System
 
-This document is the full reference for the shell theme system. It explains how theme files are loaded, how values flow into the browser, and what every configurable key does.
+This is the full reference for the shell theme system. It explains how theme files load, how values reach the browser, and what each configurable key does.
 
 ---
 
@@ -23,13 +23,13 @@ This document is the full reference for the shell theme system. It explains how 
 
 ## Overview
 
-The theme system externalizes all visual palette values into named YAML files that the runtime loads, resolves against built-in fallback defaults, and injects into every presentation surface. The live shell, permalink pages, the runtime theme selector, exported HTML, and PDF export all read from the same resolved semantic tokens rather than each maintaining a separate palette. Themes are selectable at runtime through the preview modal or the `theme` terminal command without requiring code changes or a container rebuild.
+The theme system keeps visual palette values in named YAML files. The app loads those files, fills in any missing values from built-in defaults, and injects the resolved tokens into every UI surface. The live shell, permalink pages, theme selector, exported HTML, and PDF export all read from the same theme values instead of each carrying its own palette. Users can switch themes from the preview modal or the `theme` terminal command without code changes or a container rebuild.
 
 ---
 
 ## Semantic Color Contract
 
-Every theme provides four semantic colors with fixed meanings. Themes may choose any visual tone for each color, but the four must stay visually distinct within a single theme so each meaning remains recognizable.
+Every theme provides four colors with fixed meanings. A theme can choose any visual tone for each one, but all four must stay easy to tell apart inside that theme.
 
 | Semantic | Token | Meaning |
 |----------|-------|---------|
@@ -40,8 +40,8 @@ Every theme provides four semantic colors with fixed meanings. Themes may choose
 
 ### Rules
 
-- **Binary, not graded.** One color, one meaning. If a surface needs a softer treatment (e.g. dimmed expiry text) it uses the `dim` token plus the semantic color on the label only, not a second intensity tier of the same color.
-- **All four must stay distinct per theme.** A theme that collapses caution into danger (yellow ≈ red) defeats the purpose of the contract. Theme authors must verify red, yellow, green, and dim are visually separable inside each theme, not just in aggregate across the palette family.
+- **Binary, not graded.** One color, one meaning. If a surface needs a softer treatment, such as dimmed expiry text, it uses the `dim` token plus the semantic color on the label only. It should not create a second intensity tier of the same color.
+- **All four must stay distinct per theme.** A theme that makes caution look like danger (yellow ≈ red) defeats the point. Theme authors must verify red, yellow, green, and dim are visually separable inside each theme.
 - **In-progress belongs to yellow, not green.** A "running" task is yellow; a "completed success" task is green. This keeps the two states visually distinct even when both are "active" in the loose sense. Use yellow for running, live, pending, and the HUD `RUNNING` pill; use green only for completed success, enabled switches, and current-focus indicators.
 - **Use existing theme tokens.** Do not introduce surface-local amber / red / green variants. If a surface needs tuning, add a new `--theme-*` chrome token derived from the base semantic token via `color-mix()` in the theme file — never hardcode a one-off color.
 
@@ -51,7 +51,6 @@ These uses of yellow do not match the strict semantic meaning above, but are ret
 
 - **Starred items.** A yellow star icon on favorited / starred entries (history rows, chips, sheet items) — matches the universal star-is-yellow convention (GitHub, Gmail, etc.).
 - **Search-hit highlights.** `mark.search-hl` tints matches yellow — matches browser and IDE find-in-page convention.
-- **macOS-style minimize button.** `window_btn_minimize` in every theme renders the amber traffic-light dot — decorative chrome that mirrors the macOS window-control convention, not a semantic signal.
 
 ---
 
@@ -63,13 +62,13 @@ The runtime theme choice is resolved in this order:
 2. `default_theme` from `app/conf/config.yaml`
 3. the baked-in dark fallback palette in `app/config.py`
 
-That means the browser always prefers the user's last selected theme, then the instance default filename, and only falls back to the built-in dark values if the saved or configured theme cannot be loaded. The selector does not promote the first registry theme as a hidden third fallback, and an empty registry simply leaves the preview modal empty while the app uses the baked-in fallback colors. Legacy `pref_theme_name` / `pref_theme` cookies are still read for backwards compatibility, but `localStorage.theme` is the canonical value.
+That means the browser first uses the user's last selected theme, then the instance default filename, and only falls back to the built-in dark values if the saved or configured theme cannot be loaded. The selector does not promote the first registry theme as a hidden third fallback. If the registry is empty, the preview modal is empty and the app uses the baked-in fallback colors. Legacy `pref_theme_name` / `pref_theme` cookies are still read for backwards compatibility, but `localStorage.theme` is the main saved value.
 
 ---
 
 ## Baked-In Fallback Palette
 
-The theme framework has two built-in, hard-coded palettes: a dark palette and a light palette. Both live in `app/config.py` under `_THEME_DEFAULTS["dark"]` and `_THEME_DEFAULTS["light"]`. These are not selectable theme files — they are the compile-time baseline that the loader falls back to for any key a custom theme file does not specify.
+The theme framework has two built-in palettes: dark and light. Both live in `app/config.py` under `_THEME_DEFAULTS["dark"]` and `_THEME_DEFAULTS["light"]`. These are not selectable theme files. They are the baseline the loader falls back to for any key a custom theme file does not specify.
 
 Every key listed in the [Theme Key Reference](#theme-key-reference) section below has a baked-in value in both palettes. If you need the exact source of truth, inspect `_THEME_DEFAULTS` in [app/config.py](app/config.py).
 
@@ -87,7 +86,7 @@ When `load_theme(name)` merges a custom theme file, it uses `color_scheme` to pi
 - `color_scheme: light` → missing keys are filled from `_THEME_DEFAULTS["light"]`
 - absent → falls back to `_THEME_DEFAULTS["dark"]`
 
-This means a light-family custom theme only needs to specify the values it actually changes. All unspecified keys automatically inherit the built-in light defaults rather than the dark ones. The two built-in palettes were designed as complementary starting points: all keys have sensible values in both, and any theme file is free to override as many or as few as it needs.
+This means a light-family custom theme only needs to list the values it changes. All other keys inherit the built-in light defaults rather than the dark ones. The two built-in palettes are starting points: every key has a sensible value in both, and a theme can override as many or as few as it needs.
 
 ### Generated example files
 
@@ -111,7 +110,7 @@ The checked-in files `app/conf/theme_dark.yaml.example` and `app/conf/theme_ligh
 
 ### 4. Expose the values to JS
 
-`theme_vars_script.html` serializes the current resolved values into `window.ThemeCssVars` and the full registry into `window.ThemeRegistry`. Browser-side helpers, especially the HTML export builder, runtime theme selector, and `theme` terminal command, can then read the exact runtime theme without duplicating a hardcoded palette.
+`theme_vars_script.html` serializes the current resolved values into `window.ThemeCssVars` and the full registry into `window.ThemeRegistry`. Browser-side helpers, especially the HTML export builder, theme selector, and `theme` terminal command, can then read the exact current theme without duplicating a hardcoded palette.
 
 ### 5. Consume from CSS and export helpers
 
@@ -140,9 +139,20 @@ The checked-in files `app/conf/theme_dark.yaml.example` and `app/conf/theme_ligh
 
 ## Runtime Theme Selector
 
-The theme preview grid is driven by the runtime theme registry. Clicking a preview card immediately applies that theme and persists the selection to `localStorage`. On desktop, the selector opens as a right-side drawer so the shell remains visible behind it while comparing themes. On mobile, it remains a full-screen chooser with a two-column preview layout on wider phones.
+The theme preview grid is driven by the theme registry. Clicking a preview card immediately applies that theme and saves the choice to `localStorage`. Each preview card renders a compact sketch of the current desktop shell — rail sections, tabbar with an active tab, terminal panel, HUD bar, and a small modal surface — so contrast is judged against the same relationships used by the live app. On desktop, the selector opens as a right-side drawer so the shell remains visible while comparing themes. On mobile, it remains a full-screen chooser with a two-column preview layout on wider phones.
 
 The built-in `theme` button is a shortcut to the selector. The preview grid is the source of truth for named variants — registry entries without an explicit `label:` fall back to a humanized filename stem, and entries without a `group:` appear under "Other".
+
+The current built-in selector ships 18 named themes:
+
+- Dark Neon: `darklab_obsidian`, `emerald_obsidian`, `ember_obsidian`, `cobalt_obsidian`
+- Dark Neutral: `charcoal_amber`, `charcoal_steel`, `charcoal_lavender`
+- Dark Mid-tone: `slate_dusk`, `moss_stone`
+- Warm Light: `apricot_sand`, `olive_grove`, `rose_quartz`
+- Cool Light: `lavender_fog`, `mint_glass`
+- Neutral Light: `newsprint`, `chalk`
+- Neutral Mid-tone: `overcast`
+- Neutral Green Mid-tone: `sage`
 
 ---
 
@@ -150,7 +160,7 @@ The built-in `theme` button is a shortcut to the selector. The preview grid is t
 
 ### Authoring a theme
 
-- Copy `theme_dark.yaml.example` or `theme_light.yaml.example` into `app/conf/themes/<filename>.yaml` to expose it in the runtime selector. The loader reads the canonical files plus every YAML file in `app/conf/themes/`.
+- Copy `theme_dark.yaml.example` or `theme_light.yaml.example` into `app/conf/themes/<filename>.yaml` to expose it in the runtime selector. The loader reads the built-in reference files plus every YAML file in `app/conf/themes/`.
 - For a private overlay on an existing base theme, create `app/conf/themes/<filename>.local.yaml` next to it; the loader merges the overlay after the checked-in base file.
 - Unknown keys are ignored — only keys present in `_THEME_DEFAULTS` (`app/config.py`) are accepted.
 - Values may be any valid CSS color, length, gradient, or shadow string, depending on the key.
@@ -185,9 +195,9 @@ There is no filename-based or palette-based group inference — `group` must be 
 
 ## Practical Notes
 
-- Theme YAML files are explicit and self-contained so operators can tune the shell appearance without touching code.
+- Theme YAML files are explicit and self-contained so operators can tune the shell without touching code.
 - Most values are safe to tweak live as long as they remain valid CSS values.
-- The theme layer is shared by the live app, permalink pages, and export HTML, so a change in these files can affect all three surfaces.
+- The theme layer is shared by the live app, permalink pages, and export HTML, so a change in these files can affect all three.
 - If you are trying to restyle something and cannot find a key in this appendix, it is probably still hardcoded elsewhere in CSS and should be moved to the theme system next.
 
 ---
@@ -225,12 +235,13 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
-| `bg` | `#0d0d0d` | `#b8c4d0` | Page background behind the terminal shell |
+| `bg` | `#000000` | `#b8c4d0` | Page background behind the terminal shell |
 | `surface` | `#141414` | `#eef2f6` | Core panel, modal, and dropdown surface color |
-| `border` | `#1f1f1f` | `rgba(0,0,0,0.15)` | Subtle separators and low-emphasis borders |
-| `border_bright` | `#2e2e2e` | `rgba(0,0,0,0.28)` | Stronger borders, focus outlines, and modal chrome |
+| `border` | `#2a2a2a` | `rgba(0,0,0,0.15)` | Subtle separators and low-emphasis borders |
+| `border_bright` | `#3c3c3c` | `rgba(0,0,0,0.28)` | Stronger borders, focus outlines, and modal chrome |
+| `border_soft` | `rgba(255, 255, 255, 0.08)` | `rgba(0,0,0,0.12)` | Soft dividers where a full border would read too heavy |
 | `text` | `#e0e0e0` | `#101820` | Primary body text |
-| `muted` | `#7a7a7a` | `#5a6878` | Secondary labels, hints, and timestamps |
+| `muted` | `#9a9a9a` | `#5a6878` | Secondary labels, hints, and timestamps |
 | `green` | `#39ff14` | `#2a5d18` | Prompt, success states, and primary active accent |
 | `green_dim` | `#1a7a08` | `#355f24` | Dimmed green accent for borders and low-key highlights |
 | `green_glow` | `rgba(57,255,20,0.12)` | `rgba(42,93,24,0.08)` | Glow, focus rings, and accent tints |
@@ -246,69 +257,63 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 | `terminal_line_height` | `1.65` | `1.65` | Line spacing for terminal output |
 | `prompt_line_text` | `#e8e8e8` | `#1c201a` | Text color for the live prompt line above the hidden input |
 
-### Terminal Panes and Panels
+### Terminal Panes, Panels, and Shell Chrome
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
 | `panel_bg` | `#141414` | `#d4e0ec` | Main panel background |
-| `panel_alt_bg` | `#101010` | `#e8eef6` | Alternate panel background |
-| `panel_border` | `#2e2e2e` | `rgba(0,0,0,0.28)` | Panel borders |
-| `panel_shadow` | `rgba(0,0,0,0.7)` | `rgba(0,0,0,0.22)` | Panel drop shadow |
-| `terminal_bar_bg` | `#0d0d0d` | `#b8c4d0` | Top terminal bar background |
-| `terminal_bar_border` | `#1f1f1f` | `#8898b0` | Top terminal bar border |
-| `terminal_actions_bg` | `transparent` | `rgba(0,0,0,0.025)` | Actions strip behind top controls |
-| `terminal_wrap_border` | `#2e2e2e` | `rgba(0,0,0,0.42)` | Outer terminal wrapper border |
-| `terminal_wrap_shadow` | `rgba(0,0,0,0.7)` | `rgba(0,0,0,0.22)` | Outer terminal wrapper shadow |
-| `window_btn_close` | `#ff6b5f` | `#c25b4d` | Close button color in the terminal bar |
-| `window_btn_minimize` | `#ffbe3b` | `#b77f22` | Minimize button color in the terminal bar |
-| `window_btn_maximize` | `#32d74b` | `#2f7a43` | Maximize button color in the terminal bar |
+| `panel_border` | `#3c3c3c` | `rgba(0,0,0,0.28)` | Panel borders |
+| `panel_shadow` | `rgba(170,170,170,0.12)` | `rgba(0,0,0,0.22)` | Panel drop shadow |
+| `terminal_bar_bg` | `#000000` | `#b8c4d0` | Top terminal bar background |
+| `chrome_bg` | `#0c0c0c` | `#b8c4d0` | Shared shell chrome background for the rail, HUD, History drawer, Status Monitor, mobile recents, and mobile menu |
+| `chrome_header_bg` | `#0c0c0c` | `#b8c4d0` | Header bands inside shell chrome surfaces |
+| `chrome_row_bg` | `#0c0c0c` | `#b8c4d0` | Rows inside shell chrome surfaces |
+| `chrome_row_hover_bg` | `rgba(57,255,20,0.12)` | `rgba(26,90,170,0.06)` | Hover/focus rows inside shell chrome surfaces |
+| `chrome_control_bg` | `color-mix(in srgb, var(--surface) 92%, transparent)` | `color-mix(in srgb, var(--surface) 92%, transparent)` | Inputs and compact controls inside shell chrome surfaces |
+| `chrome_control_border` | `var(--border-bright)` | `var(--border-bright)` | Inputs and compact control borders inside shell chrome surfaces |
+| `chrome_divider_color` | `#2a2a2a` | `rgba(0,0,0,0.15)` | Divider lines inside shell chrome surfaces |
+| `chrome_shadow` | `rgba(0,0,0,0.6)` | `rgba(0,0,0,0.6)` | Shared shadow for chrome drawers and sheets |
+| `scrollbar_track` | `color-mix(in srgb, var(--surface) 72%, transparent)` | `color-mix(in srgb, var(--surface) 72%, transparent)` | Shared terminal/permalink scrollbar track |
+| `scrollbar_thumb` | `color-mix(in srgb, var(--muted) 44%, var(--border-bright))` | `color-mix(in srgb, var(--muted) 44%, var(--border-bright))` | Shared terminal/permalink scrollbar thumb |
+| `scrollbar_thumb_hover` | `color-mix(in srgb, var(--text) 38%, var(--border-bright))` | `color-mix(in srgb, var(--text) 38%, var(--border-bright))` | Shared terminal/permalink scrollbar thumb hover |
 
 ### Toolbar Buttons and Chips
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
 | `toolbar_button_bg` | `transparent` | `#c8d4e0` | Chrome button (rail, HUD, toolbar) backgrounds |
-| `toolbar_button_border` | `#2e2e2e` | `#8898b0` | Chrome button (rail, HUD, toolbar) borders |
-| `toolbar_button_text` | `#7a7a7a` | `#202838` | Chrome button (rail, HUD, toolbar) text |
+| `toolbar_button_border` | `#3c3c3c` | `#8898b0` | Chrome button (rail, HUD, toolbar) borders |
+| `toolbar_button_text` | `#9a9a9a` | `#202838` | Chrome button (rail, HUD, toolbar) text |
 | `toolbar_button_hover_bg` | `transparent` | `#b8c8d8` | Hover background for chrome buttons |
 | `toolbar_button_hover_border` | `#1a7a08` | `#6880a0` | Hover border for chrome buttons |
 | `toolbar_button_hover_text` | `#39ff14` | `#101820` | Hover text for chrome buttons |
 | `toolbar_button_active_bg` | `rgba(57,255,20,0.06)` | `#a0b4c8` | Active chrome button background |
 | `toolbar_button_active_border` | `#1a7a08` | `#6880a0` | Active chrome button border |
 | `toolbar_button_active_text` | `#39ff14` | `#101820` | Active chrome button text |
-| `chip_bg` | `transparent` | `#c8d4e0` | History chips and starred chips |
-| `chip_border` | `#2e2e2e` | `#8898b0` | Chip borders |
-| `chip_text` | `#7a7a7a` | `#202838` | Default chip text |
-| `chip_hover_bg` | `rgba(57,255,20,0.12)` | `#b8c8d8` | Chip hover background |
-| `chip_hover_border` | `#1a7a08` | `#6880a0` | Chip hover border |
-| `chip_hover_text` | `#e0e0e0` | `#101820` | Chip hover text |
-| `chip_overflow_text` | `#39ff14` | `#274f17` | "More" / overflow chip text |
+| `button_secondary_bg` | `color-mix(in srgb, var(--surface) 66%, transparent)` | `color-mix(in srgb, var(--surface) 66%, transparent)` | Shared secondary button background |
+| `button_secondary_border` | `color-mix(in srgb, var(--border-bright) 88%, transparent)` | `color-mix(in srgb, var(--border-bright) 88%, transparent)` | Shared secondary button border |
+| `button_secondary_text` | `color-mix(in srgb, var(--muted) 86%, var(--text))` | `color-mix(in srgb, var(--muted) 86%, var(--text))` | Shared secondary button text |
+| `button_secondary_hover_bg` | `color-mix(in srgb, var(--_tone) 7%, transparent)` | `color-mix(in srgb, var(--_tone) 7%, transparent)` | Shared secondary button hover wash; resolves against the active button tone |
+| `button_secondary_hover_border` | `color-mix(in srgb, var(--_tone-dim) 72%, var(--border-bright))` | `color-mix(in srgb, var(--_tone-dim) 72%, var(--border-bright))` | Shared secondary button hover border; resolves against the active button tone |
+| `button_ghost_border` | `color-mix(in srgb, var(--border-bright) 58%, transparent)` | `color-mix(in srgb, var(--border-bright) 58%, transparent)` | Shared ghost button border |
+| `button_ghost_text` | `color-mix(in srgb, var(--muted) 86%, var(--text))` | `color-mix(in srgb, var(--muted) 86%, var(--text))` | Shared ghost button text |
+| `button_ghost_hover_bg` | `color-mix(in srgb, var(--_tone) 10%, transparent)` | `color-mix(in srgb, var(--_tone) 10%, transparent)` | Shared ghost button hover wash; resolves against the active button tone |
+| `button_ghost_hover_border` | `color-mix(in srgb, var(--_tone-dim) 62%, var(--border-bright))` | `color-mix(in srgb, var(--_tone-dim) 62%, var(--border-bright))` | Shared ghost button hover border; resolves against the active button tone |
+| `button_destructive_bg` | `color-mix(in srgb, var(--_tone) 8%, transparent)` | `color-mix(in srgb, var(--_tone) 8%, transparent)` | Shared destructive button background; resolves against the active destructive tone |
+| `button_destructive_text` | `color-mix(in srgb, var(--muted) 86%, var(--text))` | `color-mix(in srgb, var(--muted) 86%, var(--text))` | Shared destructive button text |
+| `button_destructive_hover_bg` | `color-mix(in srgb, var(--_tone) 16%, transparent)` | `color-mix(in srgb, var(--_tone) 16%, transparent)` | Shared destructive button hover background; resolves against the active destructive tone |
 
 ### Tabs and Tab Controls
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
-| `tabs_bar_scrollbar_track` | `rgba(255,255,255,0.06)` | `rgba(0,0,0,0.08)` | Tabs bar scrollbar track |
-| `tabs_bar_scrollbar_thumb` | `#555555` | `#7890a8` | Tabs bar scrollbar thumb |
-| `tabs_bar_scrollbar_thumb_hover` | `#777777` | `#5a6878` | Hover thumb color |
-| `tabs_scroll_btn_bg` | `transparent` | `#c4d0dc` | Tab-scroll button background |
-| `tabs_scroll_btn_border` | `#1f1f1f` | `#8898b0` | Tab-scroll button border |
-| `tabs_scroll_btn_text` | `#7a7a7a` | `#202838` | Tab-scroll button text |
-| `tabs_scroll_btn_hover_bg` | `transparent` | `#b4c4d4` | Tab-scroll button hover background |
-| `tabs_scroll_btn_hover_border` | `#2e2e2e` | `#6880a0` | Tab-scroll button hover border |
-| `tabs_scroll_btn_hover_text` | `#e0e0e0` | `#101010` | Tab-scroll button hover text |
-| `tab_bg` | `linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))` | `linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))` | Inactive tab background |
-| `tab_border` | `#2e2e2e` | `rgba(0,0,0,0.15)` | Inactive tab border |
-| `tab_text` | `#7a7a7a` | `#5a6878` | Inactive tab text |
+| `tab_text` | `#9a9a9a` | `#5a6878` | Inactive tab text |
 | `tab_hover_text` | `#e0e0e0` | `#101820` | Hovered tab text |
 | `tab_active_bg` | `rgba(57,255,20,0.04)` | `#c0cedd` | Active tab background |
-| `tab_active_border` | `color-mix(in srgb, var(--green) 42%, transparent)` | `#8898b0` | Active tab border |
-| `tab_active_text` | `#39ff14` | `#101820` | Active tab text |
-| `tab_active_shadow` | `none` | `inset 0 0 0 1px rgba(255,255,255,0.22)` | Active tab depth styling |
 | `tab_close_bg` | `rgba(255,255,255,0.02)` | `rgba(255,255,255,0.02)` | Close-button background inside a tab |
 | `tab_close_border` | `rgba(255,255,255,0.06)` | `rgba(255,255,255,0.06)` | Close-button border inside a tab |
-| `tab_close_hover_bg` | `color-mix(in srgb, var(--red) 18%, transparent)` | `color-mix(in srgb, var(--red) 18%, transparent)` | Close-button hover background |
-| `tab_close_hover_border` | `color-mix(in srgb, var(--red) 30%, transparent)` | `color-mix(in srgb, var(--red) 30%, transparent)` | Close-button hover border |
+| `tab_close_hover_bg` | `color-mix(in srgb, var(--green-dim) 18%, transparent)` | `color-mix(in srgb, var(--red) 18%, transparent)` | Close-button hover background |
+| `tab_close_hover_border` | `color-mix(in srgb, var(--green-dim) 30%, transparent)` | `color-mix(in srgb, var(--red) 30%, transparent)` | Close-button hover border |
 | `tab_close_hover_text` | `inherit` | `inherit` | Close-button hover text color |
 | `tab_touch_drag_text_shadow` | `0 0 10px color-mix(in srgb, var(--green) 14%, transparent)` | `0 0 10px rgba(42,93,24,0.08)` | Drag feedback on touch devices |
 | `tab_drop_shadow` | `0 0 10px color-mix(in srgb, var(--green) 45%, transparent)` | `0 0 10px rgba(42,93,24,0.18)` | Drag/drop emphasis for reordered tabs |
@@ -317,68 +322,70 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
-| `history_panel_bg` | `#0d0d0d` | `#c8d8e8` | History drawer background |
-| `history_panel_shadow` | `rgba(0,0,0,0.50)` | `rgba(34,58,88,0.20)` | Side shadow for the history drawer |
-| `history_entry_hover_bg` | `rgba(57,255,20,0.12)` | `rgba(26,90,170,0.06)` | Hover background for history entries |
 | `history_load_overlay_bg` | `rgba(0,0,0,0.76)` | `rgba(0,0,0,0.76)` | Overlay shown while restoring a history entry |
-| `history_load_modal_bg` | `color-mix(in srgb, var(--surface) 88%, #000)` | `#e8eef6` | Restore modal background |
-| `history_load_modal_border` | `#3c3c3c` | `rgba(0,0,0,0.28)` | Restore modal border |
-| `history_load_modal_shadow` | `rgba(0,0,0,0.35)` | `rgba(0,0,0,0.35)` | Restore modal shadow |
 
-### Modals and Dropdowns
+### Modals, Dropdowns, and Inline Surfaces
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
-| `faq_modal_bg` | `#141414` | `#e8eef6` | FAQ modal background |
-| `options_modal_bg` | `#141414` | `#e8eef6` | Options modal background |
-| `confirm_modal_bg` | `#141414` | `#d4e0ec` | Confirmation modal background (shared for all `showConfirm` dialogs) |
-| `dropdown_bg` | `color-mix(in srgb, var(--surface) 96%, transparent)` | `#d4e0ec` | Main autocomplete dropdown background |
-| `dropdown_border` | `color-mix(in srgb, var(--green) 18%, transparent)` | `rgba(26,90,170,0.25)` | Main autocomplete border |
-| `dropdown_shadow` | `rgba(0,0,0,0.35)` | `rgba(0,0,0,0.14)` | Main autocomplete shadow |
-| `dropdown_up_bg` | `color-mix(in srgb, var(--surface) 98%, transparent)` | `#d4e0ec` | Upward-opening autocomplete background |
-| `dropdown_up_border` | `color-mix(in srgb, var(--green) 28%, transparent)` | `rgba(26,90,170,0.35)` | Upward-opening autocomplete border |
-| `dropdown_up_shadow` | `rgba(0,0,0,0.45)` | `rgba(0,0,0,0.14)` | Upward-opening autocomplete shadow |
-| `dropdown_item_text` | `#7a7a7a` | `#4a5868` | Text for autocomplete items |
-| `overlay_backdrop_bg` | `rgba(0,0,0,0.75)` | `rgba(34,58,88,0.22)` | Shared backdrop behind modals and overlays |
-| `faq_code_bg` | `#141414` | `#dce6f0` | Code-styled FAQ tokens and examples |
-| `allowed_chip_bg` | `#141414` | `#dce6f0` | Allowed-command chips in the FAQ |
-| `form_control_bg` | `#141414` | `#e0e8f4` | Background for themed `<select>` form controls (`.form-select`) |
+| `modal_bg` | `#141414` | `#e8eef6` | Shared background for standard modal surfaces and the Theme selector |
+| `dropdown_bg` | `color-mix(in srgb, var(--surface) 96%, transparent)` | `#d4e0ec` | Shared dropdown background for autocomplete, save menus, and app-native select menus |
+| `dropdown_border` | `color-mix(in srgb, var(--green) 18%, transparent)` | `rgba(26,90,170,0.25)` | Shared dropdown border for autocomplete, save menus, and app-native select menus |
+| `dropdown_border_soft` | `color-mix(in srgb, var(--green) 14%, transparent)` | `rgba(26,90,170,0.18)` | Softer dropdown border used when dropdowns dock against mobile keyboard chrome |
+| `dropdown_shadow` | `rgba(0,0,0,0.35)` | `rgba(0,0,0,0.14)` | Shared dropdown shadow for autocomplete, save menus, and app-native select menus |
+| `dropdown_shadow_ring` | `color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent)` | `color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent)` | Subtle one-pixel shadow ring for dropdown surfaces |
+| `dropdown_shadow_ring_strong` | `color-mix(in srgb, var(--theme-dropdown-shadow) 36%, transparent)` | `color-mix(in srgb, var(--theme-dropdown-shadow) 36%, transparent)` | Stronger dropdown shadow ring for keyboard-docked mobile dropdowns |
+| `dropdown_item_text` | `#9a9a9a` | `#4a5868` | Text for autocomplete and menu items |
+| `overlay_backdrop_bg` | `rgba(0,0,0,0.76)` | `rgba(34,58,88,0.22)` | Shared backdrop behind modals and overlays |
 
-### Status and Toasts
+### Search and Output Highlights
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
-| `tab_status_ok_bg` | `#39ff14` | `#22a040` | Success dot / OK status on tabs |
+| `search_highlight_bg` | `color-mix(in srgb, var(--amber) 35%, transparent)` | `rgba(154,66,0,0.18)` | Inline search match highlight fill |
+| `search_highlight_current_bg` | `color-mix(in srgb, var(--amber) 70%, transparent)` | `rgba(154,66,0,0.34)` | Inline current search match highlight fill |
+| `search_signal_bg` | `color-mix(in srgb, var(--amber) 8%, transparent)` | `rgba(154,66,0,0.08)` | Output-line background for signal-scoped search matches |
+| `search_signal_accent` | `color-mix(in srgb, var(--amber) 55%, transparent)` | `rgba(154,66,0,0.28)` | Output-line left accent for signal-scoped search matches |
+| `search_signal_current_bg` | `color-mix(in srgb, var(--amber) 16%, transparent)` | `rgba(154,66,0,0.14)` | Output-line background for the current signal-scoped search match |
+| `search_signal_current_accent` | `color-mix(in srgb, var(--amber) 88%, transparent)` | `rgba(154,66,0,0.42)` | Output-line left accent for the current signal-scoped search match |
+
+### Inline Surfaces
+
+| Key | Dark default | Light default | Used for |
+|-----|--------------|---------------|----------|
+| `inline_surface_bg` | `#141414` | `#dce6f0` | Inline code, allowed-command chips, and compact embedded surfaces |
+
+### Toasts
+
+| Key | Dark default | Light default | Used for |
+|-----|--------------|---------------|----------|
 | `toast_bg` | `#141414` | `#e4eef8` | Normal toast background |
 | `toast_text` | `#39ff14` | `#2a5d18` | Normal toast text |
 | `toast_border` | `#1a7a08` | `rgba(0,0,0,0.28)` | Normal toast border |
 | `toast_error_bg` | `color-mix(in srgb, var(--red) 8%, var(--bg))` | `#e4eef8` | Error toast background |
 | `toast_error_text` | `#ff3c3c` | `#cc2200` | Error toast text |
 | `toast_error_border` | `color-mix(in srgb, var(--red) 45%, transparent)` | `rgba(204,34,0,0.38)` | Error toast border |
-
-### Mobile Shell and Menu
-
-| Key | Dark default | Light default | Used for |
-|-----|--------------|---------------|----------|
-| `mobile_composer_host_bg` | `linear-gradient(180deg, rgba(20,20,20,0.92), rgba(20,20,20,0.98))` | `linear-gradient(180deg, rgba(20,20,20,0.92), rgba(20,20,20,0.98))` | Mobile composer host background for the default shell variant |
-| `mobile_composer_host_light_bg` | `linear-gradient(180deg, rgba(238,242,246,0.94), rgba(238,242,246,0.99))` | `linear-gradient(180deg, rgba(238,242,246,0.94), rgba(238,242,246,0.99))` | Mobile composer host background for the lighter shell variants |
-| `mobile_menu_bg` | `#141414` | `#eef2f6` | Mobile overflow/menu panel background |
-| `mobile_menu_border` | `#2e2e2e` | `rgba(0,0,0,0.28)` | Mobile menu border |
-| `mobile_menu_shadow` | `rgba(0,0,0,0.6)` | `rgba(0,0,0,0.6)` | Mobile menu shadow |
-| `mobile_menu_button_border` | `#1f1f1f` | `#dce6f0` | Mobile menu button border |
-| `mobile_menu_button_hover_bg` | `var(--green-glow)` | `var(--bg)` | Mobile menu button hover background |
-| `mobile_menu_button_hover_text` | `#39ff14` | `#101820` | Mobile menu button hover text |
-
-Theme authors should also know that not every mobile overlay uses the same geometry. Options / FAQ / workflows / shortcuts now share the generic mobile sheet contract, but the theme selector intentionally keeps its dedicated full-screen mobile treatment so the grouped preview cards have enough space. Theme tokens still flow into both categories through the same surface variables; only the layout contract differs.
+| `toast_shadow` | `0 12px 28px color-mix(in srgb, var(--theme-panel-shadow) 74%, transparent)` | `0 12px 28px color-mix(in srgb, var(--theme-panel-shadow) 74%, transparent)` | Shared toast elevation shadow |
 
 ### Welcome and Onboarding
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
+| `welcome_ascii_color` | `var(--green)` | `var(--green)` | Direct ASCII-art text color before filter and shadow treatment |
 | `welcome_command_hover_bg` | `color-mix(in srgb, var(--green) 6%, transparent)` | `rgba(42,93,24,0.06)` | Hover state for clickable welcome commands |
 | `welcome_command_hover_shadow` | `0 0 0 1px var(--green-glow)` | `0 0 0 1px rgba(42,93,24,0.1)` | Hover outline for clickable welcome commands |
 | `welcome_ascii_text_shadow` | `0 0 10px color-mix(in srgb, var(--green) 14%, transparent), 0 0 4px color-mix(in srgb, var(--green) 18%, transparent), 0 1px 0 rgba(8,16,12,0.4)` | `0 0 0 transparent, 0 0 0 transparent, 0 1px 0 rgba(255,255,255,0.5)` | Welcome ASCII art text shadow |
 | `welcome_ascii_filter` | `saturate(1.12) contrast(1.08) brightness(1.08)` | `saturate(0.9) contrast(0.95) brightness(0.9)` | Welcome ASCII art filter |
+
+### Action and Selection Text
+
+| Key | Dark default | Light default | Used for |
+|-----|--------------|---------------|----------|
+| `on_accent_text` | `#000` | `#000` | Text on bright accent fills such as the caret block and run button |
+| `selection_text` | `#f7fff2` | `#f7fff2` | Prompt selection text color |
+| `selection_line_text` | `#eef7ee` | `#eef7ee` | Prompt line text while a selection is active |
+| `modal_danger_btn_text` | `#fff` | `#fff` | Text for danger-tone modal buttons |
+| `modal_warning_btn_text` | `#000` | `#000` | Text for warning-tone modal buttons |
 
 ---
 

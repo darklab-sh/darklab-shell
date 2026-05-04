@@ -17,8 +17,6 @@
   const mobileShellChrome     = document.getElementById('mobile-shell-chrome');
   const mobileComposer        = document.getElementById('mobile-composer');
   const mobileKillBtn         = document.getElementById('mobile-kill-btn');
-  const mobileEditBar         = document.getElementById('mobile-edit-bar');
-  const hamburgerBtnEl        = document.getElementById('hamburger-btn');
   const statusPillEl          = document.getElementById('status');
   const recentPeek            = document.getElementById('mobile-recent-peek');
   const recentPeekCount       = document.getElementById('mobile-recent-peek-count');
@@ -60,6 +58,9 @@
   const show = (el) => el && el.classList && el.classList.remove('u-hidden');
   const hide = (el) => el && el.classList && el.classList.add('u-hidden');
   const isRunning = () => !!(statusPillEl && statusPillEl.classList && statusPillEl.classList.contains('running'));
+  const STATUS_MONITOR_PEEK_PULSE_KEY = 'status_monitor_mobile_peek_seen';
+  let _statusMonitorPeekHoldUntil = 0;
+  let _statusMonitorPeekTimer = 0;
 
   // ── 2A+2B: Status-driven progress bar and composer ring ─────────
   function syncRunState() {
@@ -406,8 +407,75 @@
     const h = global.recentPreviewHistory;
     return Array.isArray(h) ? h : [];
   }
+  function _prefersReducedMotion() {
+    try {
+      return !!(global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch (_) {
+      return false;
+    }
+  }
+  function _formatPeekElapsed(runStart) {
+    const start = Number(runStart);
+    if (!Number.isFinite(start) || start <= 0) return '';
+    const seconds = Math.max(0, Math.floor((Date.now() - start) / 1000));
+    const minutes = Math.floor(seconds / 60);
+    const remainder = String(seconds % 60).padStart(2, '0');
+    return `${minutes}:${remainder}`;
+  }
+  function _syncStatusMonitorPeekTimer(activeRunning) {
+    if (activeRunning) {
+      if (!_statusMonitorPeekTimer) {
+        _statusMonitorPeekTimer = window.setInterval(() => {
+          try { renderRecentPeek(); } catch (_) { /* non-critical */ }
+        }, 1000);
+      }
+      return;
+    }
+    if (_statusMonitorPeekTimer) {
+      window.clearInterval(_statusMonitorPeekTimer);
+      _statusMonitorPeekTimer = 0;
+    }
+  }
   function renderRecentPeek() {
     if (!recentPeek) return;
+    const activeTab = typeof global.getActiveTab === 'function' ? global.getActiveTab() : null;
+    const activeRunning = !!(activeTab && activeTab.st === 'running');
+    _syncStatusMonitorPeekTimer(activeRunning);
+    const holdStatusMonitor = !activeRunning && _statusMonitorPeekHoldUntil && Date.now() < _statusMonitorPeekHoldUntil;
+    if (activeRunning || holdStatusMonitor) {
+      recentPeek.dataset.peekMode = 'status-monitor';
+      recentPeek.setAttribute('aria-label', 'Open Status Monitor');
+      const elapsed = activeRunning ? _formatPeekElapsed(activeTab.runStart) : '';
+      if (recentPeekCount) recentPeekCount.textContent = activeRunning ? (elapsed || 'live') : 'done';
+      if (recentPeekPreview) {
+        recentPeekPreview.textContent = activeRunning
+          ? String(activeTab.command || 'active command')
+          : 'final state available';
+      }
+      const label = recentPeek.querySelector('.recent-peek-label');
+      if (label) label.textContent = 'Status Monitor';
+      show(recentPeek);
+      if (activeRunning && !_prefersReducedMotion()) {
+        try {
+          if (sessionStorage.getItem(STATUS_MONITOR_PEEK_PULSE_KEY) !== '1') {
+            sessionStorage.setItem(STATUS_MONITOR_PEEK_PULSE_KEY, '1');
+            recentPeek.classList.add('recent-peek-status-monitor-wiggle');
+            window.setTimeout(() => recentPeek.classList.remove('recent-peek-status-monitor-wiggle'), 1900);
+          }
+        } catch (_) {
+          if (recentPeek.dataset.statusMonitorWiggled !== '1') {
+            recentPeek.dataset.statusMonitorWiggled = '1';
+            recentPeek.classList.add('recent-peek-status-monitor-wiggle');
+            window.setTimeout(() => recentPeek.classList.remove('recent-peek-status-monitor-wiggle'), 1900);
+          }
+        }
+      }
+      return;
+    }
+    recentPeek.dataset.peekMode = 'recents';
+    recentPeek.setAttribute('aria-label', 'Show recent commands');
+    const label = recentPeek.querySelector('.recent-peek-label');
+    if (label) label.textContent = 'Recent';
     const items = readCmdHistory();
     if (!items.length) { hide(recentPeek); return; }
     if (recentPeekCount) recentPeekCount.textContent = String(items.length);
@@ -421,6 +489,9 @@
   // the composer; per-row actions reuse the existing history.js helpers.
   let _recentsItems = [];
   let _recentsSearchQuery = '';
+  let _recentsLoaded = false;
+  let _recentsFetchInFlight = null;
+  let _recentsRequestSeq = 0;
   const _recentsFilterState = { type: 'all', root: '', exit: 'all', date: 'all', starred: false };
   const _recentsPaging = {
     page: 1,
@@ -532,12 +603,13 @@
 
     recentsPagination.classList.remove('u-hidden');
   }
-  function _recentsMakeAction(label, handler) {
+  function _recentsMakeAction(label, handler, role = 'secondary') {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'sheet-item-action';
+    btn.className = `sheet-item-action btn btn-${role} btn-compact`;
     btn.textContent = label;
     bindPressable(btn, {
+      clearPressStyle: true,
       onActivate: (e) => {
         e.stopPropagation();
         try { handler(); } catch (_) { /* non-critical */ }
@@ -547,9 +619,29 @@
   }
   function _recentsMakeKindBadge(kind, label = kind.toUpperCase()) {
     const badge = document.createElement('span');
-    badge.className = `sheet-item-kind sheet-item-kind-${kind}`;
+    const tone = kind === 'run' ? 'badge-tone-green' : 'badge-tone-muted';
+    badge.className = `sheet-item-kind sheet-item-kind-${kind} badge ${tone}`;
     badge.textContent = label;
     return badge;
+  }
+  const RECENTS_GRACEFUL_TERMINATION_EXIT_CODES = new Set([-15]);
+  function _recentsExitCodeNumber(exitCode) {
+    if (exitCode === null || exitCode === undefined || exitCode === '') return null;
+    const number = Number(exitCode);
+    return Number.isFinite(number) ? number : null;
+  }
+  function _recentsIsGracefulTerminationExitCode(exitCode) {
+    const code = _recentsExitCodeNumber(exitCode);
+    return code !== null && RECENTS_GRACEFUL_TERMINATION_EXIT_CODES.has(code);
+  }
+  function _recentsIsFailedExitCode(exitCode) {
+    const code = _recentsExitCodeNumber(exitCode);
+    return code !== null && code !== 0 && !RECENTS_GRACEFUL_TERMINATION_EXIT_CODES.has(code);
+  }
+  function _recentsExitLabel(exitCode) {
+    const code = _recentsExitCodeNumber(exitCode);
+    if (code === null) return '—';
+    return _recentsIsGracefulTerminationExitCode(code) ? 'terminated' : `exit ${code}`;
   }
   function _recentsSnapshotUrl(item) {
     return `${location.origin}/share/${item.id}`;
@@ -564,7 +656,7 @@
     const starred = _recentsStarred();
     if (!_recentsItems.length) {
       const empty = document.createElement('div');
-      empty.className = 'sheet-item';
+      empty.className = 'sheet-item chrome-row';
       empty.style.color = 'var(--muted)';
       empty.style.opacity = '0.7';
       empty.style.justifyContent = 'center';
@@ -587,7 +679,7 @@
       const cmd = run?.command || '';
       const isStarred = isRun && starred.has(cmd);
       const item = document.createElement('div');
-      item.className = 'sheet-item';
+      item.className = 'sheet-item chrome-row';
       if (cmd) item.dataset.cmd = cmd;
 
       const head = document.createElement('div');
@@ -638,8 +730,8 @@
       if (isRun) {
         const exitEl = document.createElement('span');
         const exitCode = (run.exit_code ?? null);
-        exitEl.className = 'sheet-item-exit' + (exitCode !== null && exitCode !== 0 ? ' nonzero' : '');
-        exitEl.textContent = exitCode === null ? '—' : `exit ${exitCode}`;
+        exitEl.className = 'sheet-item-exit' + (_recentsIsFailedExitCode(exitCode) ? ' nonzero' : '');
+        exitEl.textContent = _recentsExitLabel(exitCode);
         meta.appendChild(exitEl);
       }
 
@@ -704,11 +796,27 @@
     });
     _recentsRenderPagination(_recentsItems.length);
   }
-  function _recentsRefresh() {
+  function _recentsRenderLoading() {
+    if (!recentsSheetList) return;
+    recentsSheetList.replaceChildren();
+    const loading = document.createElement('div');
+    loading.className = 'sheet-item chrome-row';
+    loading.style.color = 'var(--muted)';
+    loading.style.opacity = '0.7';
+    loading.style.justifyContent = 'center';
+    loading.style.alignItems = 'center';
+    loading.textContent = 'loading history...';
+    recentsSheetList.appendChild(loading);
+    _recentsRenderPagination(0);
+  }
+  function _recentsRefresh({ render = true } = {}) {
     if (typeof global.apiFetch !== 'function') return Promise.resolve([]);
-    return global.apiFetch(_recentsBuildHistoryRequestUrl())
+    const requestUrl = _recentsBuildHistoryRequestUrl();
+    const requestSeq = ++_recentsRequestSeq;
+    const request = global.apiFetch(requestUrl)
       .then(r => r.json())
       .then(data => {
+        if (requestSeq !== _recentsRequestSeq) return _recentsItems;
         _recentsPaging.page = Math.max(1, Number(data.page) || _recentsPaging.page || 1);
         _recentsPaging.pageSize = Math.max(1, Number(data.page_size) || _recentsPaging.pageSize || 1);
         _recentsPaging.totalCount = Math.max(0, Number(data.total_count ?? data.items?.length ?? data.runs?.length ?? 0) || 0);
@@ -716,18 +824,29 @@
         _recentsPaging.hasPrev = !!data.has_prev;
         _recentsPaging.hasNext = !!data.has_next;
         _recentsItems = Array.isArray(data.items) ? data.items : (Array.isArray(data.runs) ? data.runs : []);
-        _recentsRenderList();
+        _recentsLoaded = true;
+        if (render || isRecentsSheetOpen()) _recentsRenderList();
         return _recentsItems;
       })
       .catch(() => {
+        if (requestSeq !== _recentsRequestSeq) return _recentsItems;
         _recentsItems = [];
+        _recentsLoaded = false;
         _recentsPaging.totalCount = 0;
         _recentsPaging.pageCount = 0;
         _recentsPaging.hasPrev = false;
         _recentsPaging.hasNext = false;
-        _recentsRenderList();
+        if (render || isRecentsSheetOpen()) _recentsRenderList();
         return [];
       });
+    _recentsFetchInFlight = request.finally(() => {
+      if (_recentsFetchInFlight === request && requestSeq === _recentsRequestSeq) _recentsFetchInFlight = null;
+    });
+    return _recentsFetchInFlight;
+  }
+  function _recentsPrefetch() {
+    if (_recentsLoaded || _recentsFetchInFlight) return _recentsFetchInFlight || Promise.resolve(_recentsItems);
+    return _recentsRefresh({ render: false });
   }
   function showRecentsSheet() {
     if (!recentsSheet) return;
@@ -746,6 +865,7 @@
     if (recentsFiltersToggle) recentsFiltersToggle.setAttribute('aria-expanded', 'false');
     if (recentsFiltersExpanded) recentsFiltersExpanded.classList.add('u-hidden');
     _recentsSyncFilterUI();
+    _recentsRenderLoading();
     show(recentsSheetScrim);
     show(recentsSheet);
     _recentsRefresh();
@@ -770,17 +890,24 @@
       backdropEl: recentsSheetScrim,
     });
   }
-  recentsSheetClearBtn?.addEventListener('click', () => {
-    if (typeof global.confirmHistAction === 'function') {
-      global.confirmHistAction('clear');
-    }
-  });
+  if (recentsSheetClearBtn) {
+    bindPressable(recentsSheetClearBtn, {
+      refocusComposer: false,
+      clearPressStyle: true,
+      onActivate: () => {
+        if (typeof global.confirmHistAction === 'function') {
+          global.confirmHistAction('clear');
+        }
+      },
+    });
+  }
 
   if (typeof onUiEvent === 'function') {
     onUiEvent('app:history-panel-refreshed', () => {
       if (isRecentsSheetOpen()) _recentsRefresh();
     });
   }
+  _recentsPrefetch();
 
   let _recentsSearchTimer = null;
   recentsSheetSearch?.addEventListener('input', (e) => {
@@ -814,14 +941,14 @@
   const recentsChipsEl         = document.getElementById('mobile-recents-chips');
   const _dropdownLabels = {
     type: { all: 'all', runs: 'runs', snapshots: 'snapshots' },
-    exit: { all: 'all', success: 'success (0)', failed: 'failed (non-zero)' },
+    exit: { all: 'all', success: 'success (0)', failed: 'failed' },
     date: { all: 'all', today: 'today', week: 'this week' },
   };
   // Short labels used inside the active-filter chips (desktop uses the same
   // pattern: shorter inside chips than inside the filter rows).
   const _chipLabels = {
     type: { runs: 'runs', snapshots: 'snapshots' },
-    exit: { success: 'exit 0', failed: 'exit ≠ 0' },
+    exit: { success: 'exit 0', failed: 'failed' },
     date: { today: 'today', week: 'past week' },
   };
 
@@ -848,7 +975,7 @@
     const push = (key, text) => {
       const chip = document.createElement('button');
       chip.type = 'button';
-      chip.className = 'filter-chip';
+      chip.className = 'filter-chip chip chip-removable';
       chip.dataset.chipKey = key;
       chip.setAttribute('aria-label', `Clear filter ${text}`);
       const label = document.createElement('span');
@@ -857,7 +984,11 @@
       x.className = 'filter-chip-x';
       x.textContent = '×';
       chip.append(label, x);
-      chip.addEventListener('click', () => _clearOneFilter(key));
+      bindPressable(chip, {
+        refocusComposer: false,
+        clearPressStyle: true,
+        onActivate: () => _clearOneFilter(key),
+      });
       recentsChipsEl.appendChild(chip);
     };
     const s = _recentsFilterState;
@@ -894,7 +1025,9 @@
       wrap.classList.toggle('active', val !== 'all');
       if (trigger) trigger.disabled = !runOnlyEnabled && key === 'exit';
       wrap.querySelectorAll('[data-dropdown-value]').forEach(opt => {
-        opt.setAttribute('aria-selected', opt.dataset.dropdownValue === val ? 'true' : 'false');
+        const active = opt.dataset.dropdownValue === val;
+        opt.setAttribute('aria-selected', active ? 'true' : 'false');
+        opt.classList.toggle('dropdown-item-active', active);
       });
     });
     if (recentsFilterStarred) {
@@ -917,6 +1050,7 @@
       panel: recentsFiltersExpanded,
       openClass: null,
       hiddenClass: 'u-hidden',
+      clearPressStyle: true,
       onToggle: (open) => {
         if (!open) _closeRecentsDropdowns();
         // _recentsSyncFilterUI() rewrites the toggle label ("filters" vs
@@ -942,21 +1076,31 @@
   recentsDropdowns.forEach(wrap => {
     const key = wrap.dataset.recentsDropdown;
     const trigger = wrap.querySelector('.sheet-filter-dropdown');
-    trigger?.addEventListener('click', () => {
-      const open = wrap.classList.contains('open');
-      _closeRecentsDropdowns(open ? null : wrap);
-      wrap.classList.toggle('open', !open);
-      trigger.setAttribute('aria-expanded', !open ? 'true' : 'false');
-    });
+    if (trigger) {
+      bindPressable(trigger, {
+        refocusComposer: false,
+        clearPressStyle: true,
+        onActivate: () => {
+          const open = wrap.classList.contains('open');
+          _closeRecentsDropdowns(open ? null : wrap);
+          wrap.classList.toggle('open', !open);
+          trigger.setAttribute('aria-expanded', !open ? 'true' : 'false');
+        },
+      });
+    }
     wrap.querySelectorAll('[data-dropdown-value]').forEach(opt => {
-      opt.addEventListener('click', () => {
-        _recentsFilterState[key] = opt.dataset.dropdownValue;
-        if (key === 'type' && _recentsFilterState.type === 'snapshots') _recentsResetRunOnlyFilters();
-        wrap.classList.remove('open');
-        trigger?.setAttribute('aria-expanded', 'false');
-        _recentsSyncFilterUI();
-        _recentsPaging.page = 1;
-        _recentsRefresh();
+      bindPressable(opt, {
+        refocusComposer: false,
+        clearPressStyle: true,
+        onActivate: () => {
+          _recentsFilterState[key] = opt.dataset.dropdownValue;
+          if (key === 'type' && _recentsFilterState.type === 'snapshots') _recentsResetRunOnlyFilters();
+          wrap.classList.remove('open');
+          trigger?.setAttribute('aria-expanded', 'false');
+          _recentsSyncFilterUI();
+          _recentsPaging.page = 1;
+          _recentsRefresh();
+        },
       });
     });
   });
@@ -977,6 +1121,7 @@
   if (recentsFilterStarred) {
     bindPressable(recentsFilterStarred, {
       refocusComposer: false,
+      clearPressStyle: true,
       onActivate: () => {
         _recentsFilterState.starred = !_recentsFilterState.starred;
         _recentsSyncFilterUI();
@@ -989,6 +1134,7 @@
   if (recentsFiltersClear) {
     bindPressable(recentsFiltersClear, {
       refocusComposer: false,
+      clearPressStyle: true,
       onActivate: () => {
         _recentsFilterState.type = 'all';
         _recentsFilterState.root = '';
@@ -1009,7 +1155,13 @@
   // other surface.
 
   // Peek: tap opens the sheet; vertical swipe-up also opens it.
-  function openRecentsFromPeek() { showRecentsSheet(); }
+  function openPeekSurface() {
+    if (recentPeek && recentPeek.dataset.peekMode === 'status-monitor') {
+      if (typeof global.openStatusMonitor === 'function') void global.openStatusMonitor({ source: 'mobile-peek' });
+      return;
+    }
+    showRecentsSheet();
+  }
   if (recentPeek) {
     // role="button" div — Enter/Space handled by bindPressable; opt into
     // clearPressStyle so the :hover/:active residue on touch doesn't stick
@@ -1017,7 +1169,7 @@
     bindPressable(recentPeek, {
       refocusComposer: false,
       clearPressStyle: true,
-      onActivate: openRecentsFromPeek,
+      onActivate: openPeekSurface,
     });
   }
 
@@ -1029,7 +1181,7 @@
       const dy = peekStartY - e.clientY;
       if (dy > 8) {
         peekStartY = null;
-        openRecentsFromPeek();
+        openPeekSurface();
       }
     });
     const endPeekDrag = () => { peekStartY = null; };
@@ -1039,6 +1191,21 @@
 
   if (typeof onUiEvent === 'function') {
     onUiEvent('app:history-rendered', () => {
+      try { renderRecentPeek(); } catch (_) { /* non-critical */ }
+    });
+    onUiEvent('app:tab-status-changed', (e) => {
+      const activeId = typeof global.getActiveTabId === 'function' ? global.getActiveTabId() : null;
+      const detail = e && e.detail ? e.detail : {};
+      if (detail.id === activeId && detail.status && detail.status !== 'running') {
+        _statusMonitorPeekHoldUntil = Date.now() + 2500;
+        window.setTimeout(() => {
+          try { renderRecentPeek(); } catch (_) { /* non-critical */ }
+        }, 2550);
+      }
+      try { renderRecentPeek(); } catch (_) { /* non-critical */ }
+    });
+    onUiEvent('app:tab-activated', () => {
+      _statusMonitorPeekHoldUntil = 0;
       try { renderRecentPeek(); } catch (_) { /* non-critical */ }
     });
   }
@@ -1058,14 +1225,8 @@
                     && document.body.classList.contains('mobile-keyboard-open'));
     if (open) {
       show(kbHelper);
-      // body.mobile-keyboard-open #mobile-edit-bar outranks .u-hidden, so
-      // suppress the shared edit bar with an inline style while the helper row is
-      // active. Reset the style on close so the default CSS display:none
-      // applies again.
-      if (mobileEditBar && mobileEditBar.style) mobileEditBar.style.display = 'none';
     } else {
       hide(kbHelper);
-      if (mobileEditBar && mobileEditBar.style) mobileEditBar.style.display = '';
     }
   }
   if (typeof onUiEvent === 'function') {
@@ -1073,11 +1234,8 @@
   }
   syncKbHelper();
 
-  // The #mobile-edit-bar handlers in app.js are bound to pointerdown,
-  // not click, so proxy.click() on them does nothing. Invoke the same
-  // performMobileEditAction entry point directly. preventDefault on
-  // pointerdown keeps the composer input from losing focus when a helper
-  // key is tapped.
+  // Invoke the shared edit action directly. preventDefault on pointerdown keeps
+  // the composer input from losing focus when a helper key is tapped.
   kbHelper?.querySelectorAll('button[data-kb-action]').forEach(btn => {
     const action = btn.dataset.kbAction;
     const fire = () => {
@@ -1148,15 +1306,4 @@
     if (e.cancelable) e.preventDefault();
   }, { passive: false });
 
-  global._mobileChrome = {
-    nodes: {
-      mobileShellChrome, recentPeek, recentPeekCount, recentPeekPreview,
-      menuSheet, menuSheetScrim, menuLnState, menuTsState,
-      menuWorkflowsCount, menuThemeHint, kbHelper, progressBar,
-    },
-    openMenuSheet, closeMenuSheet, isMenuSheetOpen,
-    renderRecentPeek, syncRunState, syncKbHelper,
-    refreshMenuStateHints, refreshWorkflowsCount, refreshThemeHint,
-    syncRunningIndicator,
-  };
 })(typeof window !== 'undefined' ? window : this);

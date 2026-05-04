@@ -3,6 +3,10 @@ import { fromDomScripts } from './helpers/extract.js'
 
 // The tabs module owns a large amount of DOM state, so these tests build a
 // minimal but realistic shell scaffold rather than mocking every interaction.
+async function flushPromises(times = 4) {
+  for (let i = 0; i < times; i += 1) await Promise.resolve()
+}
+
 function touchPointerEvent(type, init) {
   const event = new Event(type, { bubbles: true, cancelable: true })
   Object.assign(event, init)
@@ -29,6 +33,8 @@ function loadTabsFns({
   welcomeBootPending = undefined,
   clipboardWrite = () => Promise.resolve(),
   doKill = vi.fn(),
+  showConfirm = undefined,
+  detachRunStreamForTab = undefined,
   acFiltered: acFilteredOverride = [],
   acHide: acHideOverride = () => {},
   urlImpl = {
@@ -50,6 +56,7 @@ function loadTabsFns({
   const historyPanel = document.getElementById('history-panel')
   const clipboardWrites = []
   const shellPromptWrap = document.createElement('div')
+  shellPromptWrap.id = 'shell-prompt-wrap'
   shellPromptWrap.className = 'shell-prompt-wrap'
 
   const navigator = {
@@ -92,6 +99,8 @@ function loadTabsFns({
       clearSearch: () => {},
       confirmKill: () => {},
       doKill,
+      ...(showConfirm ? { showConfirm } : {}),
+      ...(detachRunStreamForTab ? { detachRunStreamForTab } : {}),
       cancelWelcome: () => {},
       confirmPermalinkRedactionChoice,
       apiFetch,
@@ -159,6 +168,7 @@ function loadTabsAndOutputFns({
   const newTabBtn = document.getElementById('new-tab-btn')
   const historyPanel = document.getElementById('history-panel')
   const shellPromptWrap = document.createElement('div')
+  shellPromptWrap.id = 'shell-prompt-wrap'
   shellPromptWrap.className = 'shell-prompt-wrap'
 
   const navigator = {
@@ -168,7 +178,7 @@ function loadTabsAndOutputFns({
   }
 
   const fns = fromDomScripts(
-    ['app/static/js/utils.js', 'app/static/js/output.js', 'app/static/js/tabs.js'],
+    ['app/static/js/utils.js', 'app/static/js/output_core.js', 'app/static/js/output.js', 'app/static/js/tabs.js'],
     {
       document,
       AnsiUp: class {
@@ -196,7 +206,8 @@ function loadTabsAndOutputFns({
         max_tabs: maxTabs,
         max_output_lines: maxOutputLines,
         app_name: 'darklab_shell',
-        prompt_prefix: 'anon@darklab:~$',
+        prompt_username: 'anon',
+              prompt_domain: 'darklab.sh',
         share_redaction_enabled: shareRedactionEnabled,
         share_redaction_rules: shareRedactionRules,
       },
@@ -214,11 +225,15 @@ function loadTabsAndOutputFns({
       Blob,
       shellPromptWrap,
       getOutput: (id) => document.getElementById(`output-${id}`),
+      _welcomeBootPending: false,
     },
     `{
     createTab,
     mountShellPrompt,
+    closeTab,
     renderRestoredTabOutput,
+    appendLine,
+    _setLnMode,
     _getTabs: () => getTabs(),
     _stickOutputToBottom,
     _maybeMountDeferredPrompt,
@@ -385,6 +400,36 @@ describe('tabs helpers', () => {
     activeElementSpy.mockRestore()
   })
 
+  it('closeTab resets the preserved last tab line counter before the next command output', () => {
+    const { createTab, closeTab, appendLine, _setLnMode, _getTabs, shellPromptWrap } = loadTabsAndOutputFns()
+    const id = createTab('first label')
+    const tab = _getTabs()[0]
+
+    _setLnMode('on')
+    appendLine('old one', '', id)
+    appendLine('old two', '', id)
+    tab.workspaceCwd = 'reports'
+    tab.draftInput = 'stale draft'
+    tab.commandHistory = ['cat old.txt']
+
+    closeTab(id)
+
+    const out = document.getElementById(`output-${id}`)
+    expect(out.dataset.outputLineCounter).toBe('0')
+    expect(tab._outputLineCounter).toBe(0)
+    expect(tab.workspaceCwd).toBe('')
+    expect(tab.draftInput).toBe('')
+    expect(tab.commandHistory).toEqual([])
+    expect(shellPromptWrap.dataset.lineNumber).toBe('1')
+
+    appendLine('fresh one', '', id)
+
+    const lines = out.getElementsByClassName('line')
+    expect(lines).toHaveLength(1)
+    expect(lines[0].dataset.lineNumber).toBe('1')
+    expect(shellPromptWrap.dataset.lineNumber).toBe('2')
+  })
+
   it('clearTab preserves a running tab state when asked to keep the run active', () => {
     const { createTab, clearTab, _getTabs, shellPromptWrap } = loadTabsFns()
     const id = createTab('tab 1')
@@ -436,8 +481,9 @@ describe('tabs helpers', () => {
     expect(mobileCmdInput.value).toBe('pending mobile command')
   })
 
-  it('closing a running tab kills it and activates a neighboring tab', () => {
-    const { createTab, activateTab, closeTab, _getTabs, doKill } = loadTabsFns()
+  it('closing a running tab prompts before killing it and activates a neighboring tab', async () => {
+    const showConfirm = vi.fn(() => Promise.resolve('kill'))
+    const { createTab, activateTab, closeTab, _getTabs, doKill } = loadTabsFns({ showConfirm })
     const firstId = createTab('tab 1')
     const secondId = createTab('tab 2')
 
@@ -448,6 +494,13 @@ describe('tabs helpers', () => {
     runningTab.runId = 'run-2'
 
     closeTab(secondId)
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({
+        text: 'Close this running tab?',
+        note: expect.stringContaining('Keep running detaches this tab only'),
+      }),
+    }))
+    await flushPromises()
 
     expect(doKill).toHaveBeenCalledWith(secondId)
     expect(_getTabs().map((tab) => tab.id)).toEqual([firstId, secondId])
@@ -456,19 +509,55 @@ describe('tabs helpers', () => {
     expect(document.getElementById('cmd').focus).not.toHaveBeenCalled()
   })
 
-  it('closing the only running tab kills it and keeps the tab shell ready', () => {
-    const { createTab, closeTab, _getTabs, doKill } = loadTabsFns()
+  it('closing an attached running tab can detach it without killing the run', async () => {
+    const showConfirm = vi.fn(() => Promise.resolve('detach'))
+    const detachRunStreamForTab = vi.fn()
+    const { createTab, activateTab, closeTab, _getTabs, doKill } = loadTabsFns({
+      showConfirm,
+      detachRunStreamForTab,
+    })
+    const firstId = createTab('tab 1')
+    const secondId = createTab('attached run')
+
+    activateTab(secondId)
+    const attachedTab = _getTabs().find((tab) => tab.id === secondId)
+    attachedTab.st = 'running'
+    attachedTab.runId = 'run-other'
+    attachedTab.historyRunId = 'run-other'
+    attachedTab.attachMode = 'attached'
+
+    closeTab(secondId)
+    await flushPromises()
+
+    expect(detachRunStreamForTab).toHaveBeenCalledWith(secondId)
+    expect(doKill).not.toHaveBeenCalled()
+    expect(_getTabs().map((tab) => tab.id)).toEqual([firstId])
+    expect(document.querySelector(`[data-id="${secondId}"]`)).toBeNull()
+    expect(document.querySelector('.tab.active').dataset.id).toBe(firstId)
+  })
+
+  it('closing the only running tab can detach it and keep the tab shell ready', async () => {
+    const showConfirm = vi.fn(() => Promise.resolve('detach'))
+    const detachRunStreamForTab = vi.fn()
+    const { createTab, closeTab, _getTabs, doKill } = loadTabsFns({
+      showConfirm,
+      detachRunStreamForTab,
+    })
     const id = createTab('tab 1')
     const runningTab = _getTabs()[0]
     runningTab.st = 'running'
     runningTab.runId = 'run-1'
+    runningTab.historyRunId = 'run-1'
 
     closeTab(id)
+    await flushPromises()
 
-    expect(doKill).toHaveBeenCalledWith(id)
+    expect(detachRunStreamForTab).toHaveBeenCalledWith(id)
+    expect(doKill).not.toHaveBeenCalled()
     expect(_getTabs()).toHaveLength(1)
-    expect(_getTabs()[0].closing).toBe(true)
-    expect(_getTabs()[0].st).toBe('running')
+    expect(_getTabs()[0].closing).toBe(false)
+    expect(_getTabs()[0].st).toBe('idle')
+    expect(_getTabs()[0].runId).toBeNull()
   })
 
   it('mountShellPrompt does not render prompt when tab is running even when forced', () => {
@@ -521,6 +610,21 @@ describe('tabs helpers', () => {
     scrollTop = 200
     output.dispatchEvent(new Event('scroll'))
     expect(tab.followOutput).toBe(true)
+  })
+
+  it('does not treat a simple output tap as user scroll intent', () => {
+    const { createTab, _getTabs } = loadTabsFns()
+    const id = createTab('tab 1')
+    const tab = _getTabs()[0]
+    const output = document.getElementById(`output-${id}`)
+
+    output.dispatchEvent(touchPointerEvent('pointerdown', { pointerType: 'touch' }))
+    output.dispatchEvent(touchEvent('touchstart', [{ identifier: 1, clientX: 20, clientY: 20 }]))
+
+    expect(tab.outputUserScrollUntil).toBe(0)
+
+    output.dispatchEvent(touchPointerEvent('pointermove', { pointerType: 'touch' }))
+    expect(tab.outputUserScrollUntil).toBeGreaterThan(Date.now() - 10)
   })
 
   it('shows a live jump button while output is streaming off the live tail', () => {
@@ -649,8 +753,8 @@ describe('tabs helpers', () => {
     ])
 
     const promptLine = document.querySelector(`#output-${id} .line.prompt-echo`)
-    expect(promptLine?.querySelector('.prompt-prefix')?.textContent).toBe('anon@darklab:~$')
-    expect(promptLine?.textContent).toBe('anon@darklab:~$dig darklab.sh')
+    expect(promptLine?.querySelector('.prompt-prefix')?.textContent).toBe('anon@darklab.sh:~ $')
+    expect(promptLine?.textContent).toBe('anon@darklab.sh:~ $dig darklab.sh')
   })
 
   it('keeps currentRunStartIndex aligned when old raw lines are pruned from the front', () => {
@@ -695,6 +799,33 @@ describe('tabs helpers', () => {
     ])
     expect(_getTabs()[0].label).toBe('shell 1')
     expect(_getTabs()[1].label).toBe('shell 2')
+  })
+
+  it('numbers new default tabs from the highest currently open shell label', () => {
+    const { createTab, closeTab, _getTabs } = loadTabsFns({ maxTabs: 5 })
+
+    const firstId = createTab()
+    createTab()
+    const thirdId = createTab()
+
+    closeTab(firstId)
+    closeTab(thirdId)
+    createTab()
+
+    expect(_getTabs().map(tab => tab.label)).toEqual(['shell 2', 'shell 3'])
+    expect([...document.querySelectorAll('.tab-label')].map(el => el.textContent)).toEqual([
+      'shell 2',
+      'shell 3',
+    ])
+  })
+
+  it('avoids duplicate default labels after restoring a non-first shell tab', () => {
+    const { createTab, _getTabs } = loadTabsFns({ maxTabs: 5 })
+
+    createTab('shell 2')
+    createTab()
+
+    expect(_getTabs().map(tab => tab.label)).toEqual(['shell 2', 'shell 3'])
   })
 
   it('shows commands temporarily while preserving the stable default label', () => {

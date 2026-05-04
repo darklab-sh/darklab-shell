@@ -20,6 +20,14 @@
     {
       "no_output": false,
       "exit_code": 0,
+      "command": "ping -c 4 ip.darklab.sh",
+      "expected_text": [
+        "PING ip.darklab.sh"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
       "command": "ping -i 0.5 -c 20 darklab.sh",
       "expected_text": [
         "PING darklab.sh"
@@ -271,6 +279,14 @@
       "command": "subfinder -h",
       "expected_text": [
         "Subfinder is a subdomain discovery"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "amass -h",
+      "expected_text": [
+        "Usage:"
       ]
     },
     {
@@ -532,7 +548,7 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "nmap -sV -p 80,443 ip.darklab.sh",
+      "command": "nmap -sT -sV -p 80,443 ip.darklab.sh",
       "any_of": [
         { "expected_text": ["Starting Nmap"] },
         { "expected_text": ["Nmap scan report"] }
@@ -541,7 +557,7 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "nmap -A -T4 ip.darklab.sh",
+      "command": "nmap -sT -A -T4 ip.darklab.sh",
       "expected_text": [
         "Starting Nmap"
       ]
@@ -549,7 +565,7 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "nmap -Pn --top-ports 100 ip.darklab.sh",
+      "command": "nmap -sT -Pn --top-ports 100 ip.darklab.sh",
       "expected_text": [
         "Starting Nmap"
       ]
@@ -811,7 +827,7 @@
       "exit_code": 0,
       "command": "wafw00f https://darklab.sh",
       "expected_text": [
-        "Cloudflare"
+        "Checking"
       ]
     },
     {
@@ -820,6 +836,407 @@
       "any_of": [
         {"no_output": true},
         {"expected_text": ["ip.darklab.sh"]}
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "whois --help",
+      "expected_text": [
+        "Usage: whois"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "whois darklab.sh",
+      "expected_text": [
+        "Domain Name"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "whois 104.21.4.35",
+      "expected_text": [
+        "NetRange"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "whois -h whois.iana.org darklab.sh",
+      "expected_text": [
+        "domain"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "dig darklab.sh A",
+      "expected_text": [
+        "DiG"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "dig darklab.sh NS",
+      "expected_text": [
+        "DiG"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "dig @8.8.8.8 darklab.sh A",
+      "expected_text": [
+        "DiG"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "dig darklab.sh +trace",
+      "expected_text": [
+        "DiG"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "dig darklab.sh MX",
+      "expected_text": [
+        "DiG"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "curl -Iv https://ip.darklab.sh",
+      "expected_text": [
+        "IPv4"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "openssl s_client -connect ip.darklab.sh:443",
+      "expected_text": [
+        "Certificate chain"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "testssl ip.darklab.sh",
+      "expected_text": [
+        "rDNS"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "curl -sIL https://ip.darklab.sh",
+      "expected_text": [
+        "content-type"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "curl -sv -o /dev/null https://ip.darklab.sh| head -60",
+      "expected_text": [
+        "Server certificate"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "wget -S --spider https://ip.darklab.sh",
+      "expected_text": [
+        "HTTP request sent"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "nc -zv ip.darklab.sh 443",
+      "expected_text": [
+        "open"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "nmap -F ip.darklab.sh",
+      "expected_text": [
+        "Starting Nmap"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "dig darklab.sh TXT",
+      "expected_text": [
+        "DiG"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "dig _dmarc.darklab.sh TXT",
+      "expected_text": [
+        "DiG"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "dig @8.8.8.8 darklab.sh MX",
+      "expected_text": [
+        "DiG"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "dnsrecon -d darklab.sh",
+      "expected_text": [
+        "Performing General Enumeration"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
+      "expected_text": [
+        "Current httpx"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "ffuf -u https://tor-stats.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
+      "expected_text": [
+        "Method"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "gobuster dir -u https://tor-stats.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
+      "expected_text": [
+        "Starting gobuster"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "curl -sIL https://tor-stats.darklab.sh/admin",
+      "expected_text": [
+        "content-type"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "sslscan ip.darklab.sh",
+      "expected_text": [
+        "Testing SSL server"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "sslyze --certinfo ip.darklab.sh",
+      "expected_text": [
+        "CHECKING CONNECTIVITY"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "openssl s_client -connect ip.darklab.sh:443 -servername ip.darklab.sh",
+      "expected_text": [
+        "Connecting to"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "curl -sI https://ip.darklab.sh/api",
+      "expected_text": [
+        "content-type"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "curl -sX OPTIONS -I https://ip.darklab.sh/api",
+      "expected_text": [
+        "content-length"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "curl -sH Accept:application/json https://ip.darklab.sh/api",
+      "expected_text": [
+        "108.79.194.246"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "ping -c 10 ip.darklab.sh",
+      "expected_text": [
+        "PING ip.darklab.sh"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "mtr ip.darklab.sh",
+      "expected_text": [
+        "Note: mtr has been run"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "traceroute ip.darklab.sh",
+      "expected_text": [
+        "traceroute to ip.darklab.sh"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "assetfinder -subs-only darklab.sh",
+      "expected_text": [
+        "darklab.sh"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "tcptraceroute ip.darklab.sh 443",
+      "expected_text": [
+        "Tracing the path"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "rustscan -a ip.darklab.sh --range 1-1000",
+      "expected_text": [
+        "rustscan"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "naabu -host ip.darklab.sh -silent",
+      "any_of": [
+        {"no_output": true},
+        {"expected_text": ["ip.darklab.sh"]}
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "nmap -sV ip.darklab.sh",
+      "expected_text": [
+        "Starting Nmap"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "nc -zv ip.darklab.sh 80",
+      "expected_text": [
+        "open"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "tcptraceroute ip.darklab.sh 80",
+      "expected_text": [
+        "Tracing"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "openssl s_client -help",
+      "expected_text": [
+        "Usage: s_client"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "openssl ciphers -help",
+      "expected_text": [
+        "Usage: ciphers"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "openssl ciphers -v",
+      "expected_text": [
+        "TLS_"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "openssl ciphers -s -v 'ALL:@SECLEVEL=2'",
+      "expected_text": [
+        "TLS_"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -x php,html,txt",
+      "expected_text": [
+        "Starting gobuster"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "gobuster dns --domain darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
+      "expected_text": [
+        "Starting gobuster"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "gobuster dns --domain darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt --resolver 8.8.8.8",
+      "expected_text": [
+        "Starting gobuster"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "gobuster vhost -u https://ip.darklab.sh --append-domain -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
+      "expected_text": [
+        "Starting gobuster"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "gobuster fuzz -u https://ip.darklab.sh?FUZZ=test -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
+      "expected_text": [
+        "Starting gobuster"
       ]
     }
   ]

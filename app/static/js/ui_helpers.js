@@ -43,25 +43,41 @@
     const input = global.getVisibleComposerInput();
     return input ? input.value : '';
   };
-  global.getComposerSelection = () => {
-    if (typeof getComposerState === 'function') {
-      const composer = getComposerState();
-      if (composer) {
-        const value = typeof composer.value === 'string' ? composer.value : '';
-        const len = value.length;
-        const start = typeof composer.selectionStart === 'number' ? Math.max(0, Math.min(composer.selectionStart, len)) : len;
-        const end = typeof composer.selectionEnd === 'number' ? Math.max(0, Math.min(composer.selectionEnd, len)) : len;
-        return start <= end ? { start, end } : { start: end, end: start };
+  let _setComposerValueInProgress = false;
+  const _baseSetComposerState = typeof global.setComposerState === 'function'
+    ? global.setComposerState
+    : null;
+  function _syncComposerInputsFromState() {
+    if (_setComposerValueInProgress || typeof getComposerState !== 'function') return;
+    const composer = getComposerState();
+    if (!composer) return;
+    const value = typeof composer.value === 'string' ? composer.value : '';
+    const start = typeof composer.selectionStart === 'number' ? Math.max(0, Math.min(composer.selectionStart, value.length)) : value.length;
+    const end = typeof composer.selectionEnd === 'number' ? Math.max(0, Math.min(composer.selectionEnd, value.length)) : start;
+    const inputs = global.getComposerInputs();
+    const target = composer.activeInput === 'mobile' ? inputs.mobile : inputs.desktop;
+    if (target) {
+      if (target.value !== value) target.value = value;
+      if (
+        typeof target.setSelectionRange === 'function'
+        && (document.activeElement === target || target === global.getVisibleComposerInput())
+      ) {
+        target.setSelectionRange(start, end);
+        _syncComposerCaretVisibility(target, start, end);
       }
     }
-    const input = global.getVisibleComposerInput();
-    if (!input) return { start: 0, end: 0 };
-    const value = input.value || '';
-    let start = typeof input.selectionStart === 'number' ? input.selectionStart : value.length;
-    let end = typeof input.selectionEnd === 'number' ? input.selectionEnd : value.length;
-    if (start > end) [start, end] = [end, start];
-    return { start, end };
-  };
+    if (typeof global.syncRunButtonDisabled === 'function') global.syncRunButtonDisabled();
+  }
+  if (_baseSetComposerState) {
+    global.setComposerState = (next = {}) => {
+      const stateSnapshot = _baseSetComposerState(next);
+      _syncComposerInputsFromState();
+      return stateSnapshot;
+    };
+    if (global.APP_STATE_API) {
+      global.APP_STATE_API.setComposerState = (next) => global.setComposerState(next);
+    }
+  }
   global.applyMobileTextInputDefaults = (input) => {
     if (!input || typeof input.setAttribute !== 'function') return;
     input.setAttribute('autocomplete', 'off');
@@ -137,19 +153,10 @@
     return global.focusComposerInput(target, { preventScroll });
   };
   global.getMobileKeyboardOffsetBaseline = () => state._mobileKeyboardOffsetBaseline;
-  global.setMobileKeyboardOffsetBaseline = (value) => {
-    state._mobileKeyboardOffsetBaseline = typeof value === 'number' ? value : null;
-    return state._mobileKeyboardOffsetBaseline;
-  };
   global.getMobileViewportClosedHeight = () => state._mobileViewportClosedHeight;
   global.setMobileViewportClosedHeight = (value) => {
     state._mobileViewportClosedHeight = typeof value === 'number' ? value : null;
     return state._mobileViewportClosedHeight;
-  };
-  global.getMobileKeyboardLastOpenOffset = () => state._mobileKeyboardLastOpenOffset || 0;
-  global.setMobileKeyboardLastOpenOffset = (value) => {
-    state._mobileKeyboardLastOpenOffset = Math.max(0, Number(value) || 0);
-    return state._mobileKeyboardLastOpenOffset;
   };
   global.blurVisibleComposerInput = () => {
     const target = (typeof getVisibleComposerInput === 'function')
@@ -172,7 +179,7 @@
     const requestedOpen = typeof open === 'boolean'
       ? open
       : document.body.classList.contains('mobile-keyboard-open');
-    const lastOpenOffset = global.getMobileKeyboardLastOpenOffset();
+    const lastOpenOffset = state._mobileKeyboardLastOpenOffset || 0;
     const nextOffset = requestedOpen && requestedOffset <= 0 && lastOpenOffset > 0
       ? lastOpenOffset
       : requestedOffset;
@@ -261,17 +268,22 @@
       ? getActiveComposerInput()
       : global.getVisibleComposerInput();
     if (typeof setComposerState === 'function') {
-      setComposerState({
-        value: nextValue,
-        selectionStart: nextStart,
-        selectionEnd: nextEnd,
-        activeInput: (typeof document !== 'undefined'
-          && document.body
-          && document.body.classList
-          && document.body.classList.contains('mobile-terminal-mode'))
-          ? 'mobile'
-          : 'desktop',
-      });
+      _setComposerValueInProgress = true;
+      try {
+        setComposerState({
+          value: nextValue,
+          selectionStart: nextStart,
+          selectionEnd: nextEnd,
+          activeInput: (typeof document !== 'undefined'
+            && document.body
+            && document.body.classList
+            && document.body.classList.contains('mobile-terminal-mode'))
+            ? 'mobile'
+            : 'desktop',
+        });
+      } finally {
+        _setComposerValueInProgress = false;
+      }
     }
     if (target && target !== exclude) {
       // Skip programmatic value assignment on the excluded input (typically the
@@ -318,6 +330,22 @@
     _syncComposerCaretVisibility(target, orderedStart, orderedEnd);
     return { start: orderedStart, end: orderedEnd };
   };
+  global.syncFocusedComposerState = (input = null) => {
+    const target = input || global.getActiveComposerInput();
+    if (!target || typeof target.value !== 'string') return null;
+    const value = target.value;
+    const start = typeof target.selectionStart === 'number' ? target.selectionStart : value.length;
+    const end = typeof target.selectionEnd === 'number' ? target.selectionEnd : start;
+    if (typeof setComposerState === 'function') {
+      setComposerState({
+        value,
+        selectionStart: start,
+        selectionEnd: end,
+        activeInput: target === global.getComposerInputs().mobile ? 'mobile' : 'desktop',
+      });
+    }
+    return { value, start, end, input: target };
+  };
   global.handleComposerInputChange = (sourceInput) => {
     if (!sourceInput) return;
     // Typing always snaps the output back to bottom so the prompt stays visible.
@@ -343,14 +371,23 @@
       if (typeof acHide === 'function') acHide();
       return;
     }
+    if (typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm()) {
+      acIndex = -1;
+      acFiltered = [];
+      if (typeof acHide === 'function') acHide();
+      return;
+    }
     acIndex = -1;
     if (!value.trim()) {
       if (typeof acHide === 'function') acHide();
       return;
     }
     const usedContextMatcher = typeof getAutocompleteMatches === 'function';
+    const contextMatches = usedContextMatcher ? getAutocompleteMatches(value, start) : [];
     acFiltered = usedContextMatcher
-      ? getAutocompleteMatches(value, start).slice(0, 12)
+      ? (typeof limitAutocompleteMatchesForDisplay === 'function'
+        ? limitAutocompleteMatchesForDisplay(contextMatches, 12)
+        : contextMatches.slice(0, 12))
       : ((typeof acSuggestions !== 'undefined' && acSuggestions ? acSuggestions : [])
         .filter(s => s.toLowerCase().startsWith(value.toLowerCase()))
         .slice(0, 12));
@@ -369,9 +406,24 @@
   };
   global.showPanelOverlay = (el) => {
     if (el && el.classList) el.classList.add('open');
+    if (el && el.dataset) el.dataset.interactionReady = '0';
   };
   global.hidePanelOverlay = (el) => {
     if (el && el.classList) el.classList.remove('open');
+    if (el && el.dataset) delete el.dataset.interactionReady;
+  };
+  global.markInteractionSurfaceReady = (surface, overlay, card = null) => {
+    if (overlay && overlay.dataset) overlay.dataset.interactionReady = '1';
+    if (card && card.dataset) card.dataset.interactionReady = '1';
+    if (typeof emitUiEvent === 'function') {
+      emitUiEvent('app:interaction-surface-ready', {
+        surface: surface || '',
+        overlayId: overlay && overlay.id ? overlay.id : '',
+        cardId: card && card.id ? card.id : '',
+        activeElementId: document.activeElement && document.activeElement.id ? document.activeElement.id : '',
+        focusTrapBound: !!(card && card.dataset && card.dataset.focusTrapBound === '1'),
+      });
+    }
   };
   // Canonical post-action refocus path for chrome interactions. Every
   // "return focus to the terminal after a button/overlay/sheet action" call
@@ -419,13 +471,6 @@
   global.hideModalOverlay = (el) => {
     if (el && el.style) el.style.display = 'none';
   };
-  global.toggleModalOverlay = (el, force = null, display = 'flex') => {
-    if (!el || !el.style) return false;
-    const next = force === null ? el.style.display !== display : !!force;
-    el.style.display = next ? display : 'none';
-    return next;
-  };
-  global.isModalOverlayOpen = (el, display = 'flex') => !!(el && el.style && el.style.display === display);
   global.showHistoryPanel = () => showPanelOverlay(historyPanel);
   global.hideHistoryPanel = () => {
     hidePanelOverlay(historyPanel);
@@ -458,6 +503,12 @@
   global.showOptionsOverlay = () => showPanelOverlay(optionsOverlay || null);
   global.hideOptionsOverlay = () => hidePanelOverlay(optionsOverlay || null);
   global.isOptionsOverlayOpen = () => isPanelOverlayOpen(optionsOverlay || null);
+  const getWorkspaceOverlay = () => (
+    typeof workspaceOverlay !== 'undefined' && workspaceOverlay ? workspaceOverlay : null
+  );
+  global.showWorkspaceOverlay = () => showPanelOverlay(getWorkspaceOverlay());
+  global.hideWorkspaceOverlay = () => hidePanelOverlay(getWorkspaceOverlay());
+  global.isWorkspaceOverlayOpen = () => isPanelOverlayOpen(getWorkspaceOverlay());
   global.showHistoryLoadOverlay = () => {
     if (historyLoadOverlay && historyLoadOverlay.classList) historyLoadOverlay.classList.add('open');
     if (historyLoadOverlay) historyLoadOverlay.setAttribute('aria-hidden', 'false');
@@ -466,7 +517,6 @@
     if (historyLoadOverlay && historyLoadOverlay.classList) historyLoadOverlay.classList.remove('open');
     if (historyLoadOverlay) historyLoadOverlay.setAttribute('aria-hidden', 'true');
   };
-  global.isHistoryLoadOverlayOpen = () => !!(historyLoadOverlay && historyLoadOverlay.classList && historyLoadOverlay.classList.contains('open'));
   // Initialise inline display so the inline style takes precedence over the
   // conflicting .search-bar { display: flex } class rule (same specificity,
   // later in the sheet) when .u-hidden is also present on the element.
@@ -485,7 +535,6 @@
   global.hideHistoryRow = () => {
     if (histRow && histRow.style) histRow.style.display = 'none';
   };
-  global.isHistoryRowVisible = () => !!(histRow && histRow.style && histRow.style.display !== 'none');
   global.showRunTimer = () => {
     if (runTimer && runTimer.style) runTimer.style.display = 'inline';
   };
@@ -493,7 +542,6 @@
     if (runTimer && runTimer.style) runTimer.style.display = 'none';
     if (runTimer) runTimer.textContent = '';
   };
-  global.isRunTimerVisible = () => !!(runTimer && runTimer.style && runTimer.style.display !== 'none');
   global.setRunButtonDisabled = (disabled) => {
     const next = !!disabled;
     if (typeof runBtn !== 'undefined' && runBtn) runBtn.disabled = next;
@@ -573,8 +621,119 @@
       }
     }
   };
-  global.setDisplayState = (el, visible, display = 'block') => {
-    if (!el || !el.style) return;
-    el.style.display = visible ? display : 'none';
-  };
+  const _appSelects = new Map();
+  function _closeAppSelects(exceptWrap = null) {
+    _appSelects.forEach(({ wrap, trigger }) => {
+      if (wrap === exceptWrap) return;
+      wrap.classList.remove('open');
+      trigger.setAttribute('aria-expanded', 'false');
+    });
+  }
+  function _syncAppSelect(select) {
+    const state = _appSelects.get(select);
+    if (!state) return;
+    const selected = select.options[select.selectedIndex] || select.options[0] || null;
+    state.valueEl.textContent = selected ? selected.textContent : '';
+    state.trigger.disabled = !!select.disabled;
+    state.wrap.classList.toggle('disabled', !!select.disabled);
+    state.options.forEach((btn) => {
+      const active = btn.dataset.value === select.value;
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+      btn.classList.toggle('active', active);
+      btn.classList.toggle('dropdown-item-active', active);
+    });
+  }
+  function _enhanceAppSelect(select) {
+    if (!select || _appSelects.has(select) || select.dataset.appSelectEnhanced === 'true') return;
+    const wrap = document.createElement('div');
+    wrap.className = 'app-select';
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'app-select-trigger control-row form-control-compact';
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-expanded', 'false');
+    const label = select.getAttribute('aria-label');
+    if (label) trigger.setAttribute('aria-label', label);
+    const valueEl = document.createElement('span');
+    valueEl.className = 'app-select-value';
+    const caret = document.createElement('span');
+    caret.className = 'app-select-caret';
+    caret.setAttribute('aria-hidden', 'true');
+    caret.textContent = '▾';
+    trigger.append(valueEl, caret);
+    const menu = document.createElement('div');
+    menu.className = 'app-select-menu dropdown-surface';
+    menu.setAttribute('role', 'listbox');
+    if (label) menu.setAttribute('aria-label', label);
+    const options = Array.from(select.options).map((option) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'dropdown-item dropdown-item-touch';
+      btn.setAttribute('role', 'option');
+      btn.dataset.value = option.value;
+      btn.textContent = option.textContent;
+      btn.disabled = option.disabled;
+      btn.addEventListener('click', () => {
+        if (select.value !== option.value) {
+          select.value = option.value;
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        _closeAppSelects();
+        _syncAppSelect(select);
+      });
+      menu.appendChild(btn);
+      return btn;
+    });
+    wrap.append(trigger, menu);
+    select.insertAdjacentElement('afterend', wrap);
+    select.classList.add('app-select-native');
+    select.dataset.appSelectEnhanced = 'true';
+    _appSelects.set(select, { wrap, trigger, valueEl, menu, options });
+    trigger.addEventListener('click', () => {
+      if (select.disabled) return;
+      const open = wrap.classList.contains('open');
+      _closeAppSelects(open ? null : wrap);
+      wrap.classList.toggle('open', !open);
+      trigger.setAttribute('aria-expanded', !open ? 'true' : 'false');
+    });
+    trigger.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        _closeAppSelects();
+        return;
+      }
+      if (!['ArrowDown', 'ArrowUp', 'Enter', ' '].includes(event.key)) return;
+      event.preventDefault();
+      const enabledOptions = options.filter((btn) => !btn.disabled);
+      if (!enabledOptions.length) return;
+      const currentIndex = Math.max(0, enabledOptions.findIndex((btn) => btn.dataset.value === select.value));
+      const delta = event.key === 'ArrowUp' ? -1 : 1;
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        const next = enabledOptions[(currentIndex + delta + enabledOptions.length) % enabledOptions.length];
+        select.value = next.dataset.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        _syncAppSelect(select);
+        return;
+      }
+      wrap.classList.add('open');
+      trigger.setAttribute('aria-expanded', 'true');
+    });
+    select.addEventListener('change', () => _syncAppSelect(select));
+    _syncAppSelect(select);
+  }
+  function enhanceAppSelects(root = document) {
+    if (!root || typeof root.querySelectorAll !== 'function') return;
+    root.querySelectorAll('select.form-select, .history-panel-filters select').forEach(_enhanceAppSelect);
+  }
+  global.syncAppSelect = (select) => _syncAppSelect(select);
+  enhanceAppSelects();
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('click', (event) => {
+      const target = event.target;
+      if (target && typeof target.closest === 'function' && target.closest('.app-select')) return;
+      _closeAppSelects();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') _closeAppSelects();
+    });
+  }
 })(globalThis);

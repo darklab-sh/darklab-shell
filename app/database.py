@@ -1,8 +1,10 @@
 """
 SQLite persistence — connection helper, schema initialisation, and retention pruning.
-Database lives in /data (writable volume mount). Falls back to /tmp for local dev.
+Database lives in the configured data directory. If unset, /data is used when
+writable and /tmp is the local-dev fallback.
 
-Tables: runs, run_output_artifacts, snapshots, session_tokens, session_preferences.
+Tables: runs, run_output_artifacts, snapshots, session_tokens, session_preferences,
+starred_commands, session_variables, user_workflows, recent_domains.
 FTS: runs_fts (FTS5 virtual table over runs.command + runs.output_search_text).
 """
 
@@ -14,14 +16,13 @@ from contextlib import contextmanager
 
 import fcntl
 
-from config import CFG
+from config import CFG, resolve_data_dir
 from run_output_store import delete_artifact_file, ensure_run_output_dir, load_full_output_entries
 
 log = logging.getLogger("shell")
 
-# /tmp (tmpfs) is the intended fallback for local dev without the volume mount.
 # APP_DATA_DIR lets test workers and local tooling isolate their own databases.
-DATA_DIR = os.environ.get("APP_DATA_DIR") or ("/data" if os.path.isdir("/data") else "/tmp")  # nosec B108
+DATA_DIR = resolve_data_dir()
 DB_PATH  = os.path.join(DATA_DIR, "history.db")
 DB_INIT_LOCK_PATH = os.path.join(DATA_DIR, "history.db.init.lock")
 
@@ -106,6 +107,36 @@ def _create_schema(conn):
             PRIMARY KEY (session_id, command)
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS session_variables (
+            session_id TEXT NOT NULL,
+            name       TEXT NOT NULL,
+            value      TEXT NOT NULL,
+            updated    TEXT NOT NULL,
+            PRIMARY KEY (session_id, name)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_workflows (
+            id          TEXT PRIMARY KEY,
+            session_id  TEXT NOT NULL,
+            title       TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            inputs      TEXT NOT NULL DEFAULT '[]',
+            steps       TEXT NOT NULL DEFAULT '[]',
+            created     TEXT NOT NULL,
+            updated     TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS recent_domains (
+            session_id TEXT NOT NULL,
+            domain     TEXT NOT NULL,
+            last_used  TEXT NOT NULL,
+            use_count  INTEGER NOT NULL DEFAULT 1,
+            PRIMARY KEY (session_id, domain)
+        )
+    """)
 
 
 def _create_indexes(conn):
@@ -114,6 +145,12 @@ def _create_indexes(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_run_output_artifacts_created ON run_output_artifacts (created)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots (session_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_starred_commands_session ON starred_commands (session_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_session_variables_session ON session_variables (session_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_user_workflows_session ON user_workflows (session_id)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_recent_domains_session_last_used "
+        "ON recent_domains (session_id, last_used DESC)"
+    )
 
 
 def _extract_search_text_from_preview_json(raw_preview):
@@ -154,7 +191,7 @@ def _populate_output_search_text(conn):
                 try:
                     entries = load_full_output_entries(row["rel_path"])
                     search_text = "\n".join(
-                        e.get("text", "") for e in entries if isinstance(e, dict)
+                        str(e.get("text", "")) for e in entries if isinstance(e, dict)
                     )
                 except Exception:  # noqa: BLE001
                     search_text = _extract_search_text_from_preview_json(row["output_preview"])
@@ -260,6 +297,48 @@ def _migrate_schema(conn):
                 session_id TEXT NOT NULL,
                 command    TEXT NOT NULL,
                 PRIMARY KEY (session_id, command)
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS session_variables (
+                session_id TEXT NOT NULL,
+                name       TEXT NOT NULL,
+                value      TEXT NOT NULL,
+                updated    TEXT NOT NULL,
+                PRIMARY KEY (session_id, name)
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_workflows (
+                id          TEXT PRIMARY KEY,
+                session_id  TEXT NOT NULL,
+                title       TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                inputs      TEXT NOT NULL DEFAULT '[]',
+                steps       TEXT NOT NULL DEFAULT '[]',
+                created     TEXT NOT NULL,
+                updated     TEXT NOT NULL
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS recent_domains (
+                session_id TEXT NOT NULL,
+                domain     TEXT NOT NULL,
+                last_used  TEXT NOT NULL,
+                use_count  INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (session_id, domain)
             )
         """)
     except sqlite3.OperationalError:

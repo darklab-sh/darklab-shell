@@ -1,7 +1,7 @@
 """
-Execution routes: /run (SSE command streaming) and /kill.
+Execution routes: /runs (brokered command streaming), /run/client, and /kill.
 
-The /run route is rate-limited per-IP via the shared limiter singleton.
+The /runs start route is rate-limited per-IP via the shared limiter singleton.
 """
 
 import json
@@ -9,44 +9,137 @@ import logging
 import os
 import re
 import selectors
+import codecs
 import shutil
 import signal
 import subprocess  # nosec B404
 import threading
 import uuid
 from collections import deque
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import cast
 
 from flask import Blueprint, Response, jsonify, request
 
 from commands import (
+    CommandValidationResult,
+    command_root,
     is_command_allowed,
     parse_synthetic_postfilter,
     rewrite_command,
     runtime_missing_command_message,
     runtime_missing_command_name,
+    validate_command,
 )
 from config import CFG, SCANNER_PREFIX
 from database import db_connect
 from extensions import limiter
-from fake_commands import (
-    execute_fake_command,
-    resolve_fake_command,
-    resolves_exact_special_fake_command,
+from builtin_commands import (
+    execute_builtin_command,
+    resolve_builtin_command,
+    resolves_exact_special_builtin_command,
 )
 from helpers import get_client_ip, get_log_session_id, get_session_id
-from process import active_run_register, active_run_remove, pid_pop, pid_register
+from process import (
+    active_run_register,
+    active_run_remove,
+    active_run_touch_owner,
+    active_runs_for_session,
+    pid_pop,
+    pid_pop_for_session,
+    pid_register,
+)
+from run_broker import (
+    broker_available,
+    broker_unavailable_reason,
+    get_run_events,
+    publish_run_event,
+    stream_run_events,
+)
 from run_output_store import RunOutputCapture, load_full_output_entries
+from output_signals import OutputSignalClassifier
+from session_variables import SessionVariableError, expand_session_variables
+from workspace import session_workspace_dir, WorkspaceDisabled
 
 log = logging.getLogger("shell")
 
 run_bp = Blueprint("run", __name__)
 
+
+def _active_run_owner_value(value: object) -> str:
+    return str(value or "").strip()[:128]
+
+
+def _validate_command_for_run(command: str, session_id: str) -> CommandValidationResult:
+    # Several route tests monkeypatch this module's legacy is_command_allowed
+    # symbol to keep subprocess behavior focused. Honor that seam while the
+    # runtime path uses the richer validator for workspace rewrites.
+    if getattr(is_command_allowed, "__module__", "") != "commands":
+        allowed, reason = is_command_allowed(command)
+        return CommandValidationResult(
+            allowed,
+            reason,
+            display_command=command,
+            exec_command=command,
+        )
+    return validate_command(command, session_id=session_id, cfg=CFG)
+
+
+def _workspace_notice_lines(validation: CommandValidationResult) -> list[str]:
+    notices: list[str] = []
+    for path in validation.workspace_reads:
+        notices.append(f"[workspace] reading {path}")
+    for path in validation.workspace_writes:
+        notices.append(f"[workspace] writing {path}")
+    return notices
+
+
 SHELL_BIN = shutil.which("sh") or "/bin/sh"
 SUDO_BIN  = shutil.which("sudo") or "/usr/bin/sudo"
 KILL_BIN  = shutil.which("kill") or "/bin/kill"
 
-CLIENT_SIDE_RUN_ROOTS = {"theme", "config", "session-token"}
+CLIENT_SIDE_RUN_ROOTS = {
+    "cat",
+    "cd",
+    "config",
+    "file",
+    "grep",
+    "head",
+    "ll",
+    "ls",
+    "mkdir",
+    "pwd",
+    "rm",
+    "session-token",
+    "sort",
+    "tail",
+    "theme",
+    "uniq",
+    "wc",
+}
+
+
+def _variable_notice_line(expanded_command: str, used_names: tuple[str, ...]) -> str:
+    variables = ", ".join(f"${name}" for name in used_names)
+    return f"[vars] expanded {variables}: {expanded_command}"
+RUN_SUBPROCESS_UMASK = 0o027
+
+
+def _prepare_run_child() -> None:
+    os.setsid()
+    os.umask(RUN_SUBPROCESS_UMASK)
+
+
+def _terminate_process_group(proc) -> None:
+    pgid = os.getpgid(proc.pid)
+    if SCANNER_PREFIX:
+        subprocess.run(
+            [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", f"-{pgid}"],
+            timeout=5
+        )  # nosec B603
+    else:
+        os.killpg(pgid, signal.SIGTERM)
 
 
 # ── Run output helpers ────────────────────────────────────────────────────────
@@ -60,6 +153,37 @@ def _run_output_capture(run_id):
         persist_full_output=CFG.get("persist_full_run_output", False),
         full_output_max_bytes=CFG.get("full_output_max_bytes", 0),
     )
+
+
+def _capture_add_line_with_signals(capture, classifier, text, *, cls="", ts_clock="", ts_elapsed=""):
+    metadata = classifier.classify_line(text, cls=cls) if classifier else {}
+    capture.add_line(
+        text,
+        cls=cls,
+        ts_clock=ts_clock,
+        ts_elapsed=ts_elapsed,
+        signals=metadata.get("signals") if isinstance(metadata.get("signals"), list) else None,
+        line_index=metadata.get("line_index") if isinstance(metadata.get("line_index"), int) else None,
+        command_root=str(metadata.get("command_root", "")),
+        target=str(metadata.get("target", "")),
+    )
+    return metadata
+
+
+def _broker_output_payload(event_type, text, *, cls="", metadata=None):
+    payload = {"text": text}
+    if cls:
+        payload["cls"] = cls
+    if isinstance(metadata, dict):
+        if isinstance(metadata.get("signals"), list):
+            payload["signals"] = metadata["signals"]
+        if isinstance(metadata.get("line_index"), int):
+            payload["line_index"] = metadata["line_index"]
+        if isinstance(metadata.get("command_root"), str):
+            payload["command_root"] = metadata["command_root"]
+        if isinstance(metadata.get("target"), str):
+            payload["target"] = metadata["target"]
+    return payload
 
 
 def _extract_output_search_text(preview_lines):
@@ -160,6 +284,65 @@ def _stdout_ready(stream, timeout):
         sel.close()
 
 
+def _make_nonblocking_stream_reader(stream):
+    fileno = getattr(stream, "fileno", None)
+    if not callable(fileno):
+        return {"stream": stream, "fd": None, "decoder": None, "pending": ""}
+    fd = fileno()
+    if not isinstance(fd, int):
+        return {"stream": stream, "fd": None, "decoder": None, "pending": ""}
+    fd = cast(int, fd)
+    try:
+        os.set_blocking(fd, False)
+    except OSError as exc:
+        log.warning("RUN_STREAM_NONBLOCKING_UNAVAILABLE", extra={"fd": fd, "error": str(exc)})
+        return {"stream": stream, "fd": None, "decoder": None, "pending": ""}
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    errors = getattr(stream, "errors", None) or "replace"
+    return {
+        "fd": fd,
+        "decoder": codecs.getincrementaldecoder(encoding)(errors=errors),
+        "pending": "",
+    }
+
+
+def _read_available_stream_lines(reader_state, *, finalize=False):
+    if reader_state.get("fd") is None:
+        line = reader_state["stream"].readline()
+        if line:
+            return [line], False
+        return [], True
+
+    lines = []
+    pending = str(reader_state.get("pending", ""))
+    eof = False
+
+    while True:
+        try:
+            chunk = os.read(reader_state["fd"], 4096)
+        except BlockingIOError:
+            break
+        if not chunk:
+            eof = True
+            break
+        pending += reader_state["decoder"].decode(chunk)
+        split = pending.splitlines(keepends=True)
+        if split and not split[-1].endswith(("\n", "\r")):
+            pending = split.pop()
+        else:
+            pending = ""
+        lines.extend(split)
+
+    if finalize:
+        pending += reader_state["decoder"].decode(b"", final=True)
+        if pending:
+            lines.append(pending)
+            pending = ""
+
+    reader_state["pending"] = pending
+    return lines, eof
+
+
 def _cleanup_proc_stream(proc):
     stdout = getattr(proc, "stdout", None)
     if stdout is not None and not getattr(stdout, "closed", False):
@@ -180,71 +363,6 @@ def _wait_for_proc_exit_code(proc):
         return proc.wait()
     except Exception:
         return getattr(proc, "returncode", None)
-
-
-def _synthetic_run_response(original_command, session_id, client_ip, events, exit_code=0, *, cmd_type="builtin"):
-    # Synthetic commands deliberately reuse the same persistence/logging path as
-    # real commands so the shell treats them as first-class runs.
-    run_id      = str(uuid.uuid4())
-    run_started = datetime.now(timezone.utc).isoformat()
-    capture = _run_output_capture(run_id)
-
-    log.info("RUN_START", extra={
-        "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
-        "pid": 0, "cmd": original_command, "cmd_type": cmd_type,
-    })
-
-    def generate():
-        try:
-            yield f"data: {json.dumps({'type': 'started', 'run_id': run_id})}\n\n"
-            run_started_dt = datetime.fromisoformat(run_started)
-            for event in events:
-                if event.get("type") == "output":
-                    line = event.get("text", "")
-                    line_dt = datetime.now(timezone.utc)
-                    capture.add_line(
-                        line,
-                        cls=str(event.get("cls", "")),
-                        ts_clock=line_dt.strftime("%H:%M:%S"),
-                        ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
-                    )
-                    yield f"data: {json.dumps({'type': 'output', 'text': line + chr(10), 'cls': str(event.get('cls', ''))})}\n\n"
-                elif event.get("type") == "clear":
-                    yield f"data: {json.dumps({'type': 'clear'})}\n\n"
-
-            finished = datetime.now(timezone.utc)
-            elapsed = round((finished - datetime.fromisoformat(run_started)).total_seconds(), 1)
-            log.info("RUN_END", extra={
-                "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
-                "exit_code": exit_code, "elapsed": elapsed, "cmd": original_command,
-                "cmd_type": cmd_type,
-            })
-            yield f"data: {json.dumps({
-                'type': 'exit',
-                'code': exit_code,
-                'elapsed': elapsed,
-                'preview_truncated': capture.preview_truncated,
-                'output_line_count': capture.output_line_count,
-                'full_output_available': capture.full_output_available,
-            })}\n\n"
-            _save_completed_run(
-                run_id, session_id, original_command, run_started,
-                finished.isoformat(), exit_code, capture,
-            )
-        except Exception as e:
-            log.error("RUN_STREAM_ERROR", exc_info=True, extra={
-                "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
-                "cmd": original_command,
-            })
-            yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
-
-    return Response(generate(), mimetype="text/event-stream",
-                    headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
-
-
-def _fake_run_response(original_command, session_id, client_ip):
-    events, exit_code = execute_fake_command(original_command, session_id)
-    return _synthetic_run_response(original_command, session_id, client_ip, events, exit_code)
 
 
 def _client_side_run_command_allowed(command: str) -> bool:
@@ -492,37 +610,101 @@ class _SyntheticPostFilterProcessor:
         return lines
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+class _WorkspacePathOutputFilter:
+    """Display absolute session-workspace paths as user-facing workspace paths."""
 
-@run_bp.route("/run", methods=["POST"])
-@limiter.limit(lambda: (
-    f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second"
-))
-def run_command():
-    # Stream newline-delimited SSE events so the browser can render output in
-    # real time without waiting for the subprocess to finish.
-    data             = request.get_json() or {}
-    if not isinstance(data, dict):
-        return jsonify({"error": "Request body must be a JSON object"}), 400
-    original_command = data.get("command", "")
-    session_id       = get_session_id()
-    client_ip        = get_client_ip()
-    if not isinstance(original_command, str):
-        return jsonify({"error": "Command must be a string"}), 400
-    original_command = original_command.strip()
-    if not original_command:
-        return jsonify({"error": "No command provided"}), 400
-    if resolves_exact_special_fake_command(original_command):
-        return _fake_run_response(original_command, session_id, client_ip)
-    postfilter_spec, postfilter_error = parse_synthetic_postfilter(original_command)
+    def __init__(self, session_id: str, cfg: dict):
+        self.prefix = ""
+        if not session_id or not cfg.get("workspace_enabled"):
+            return
+        try:
+            self.prefix = str(session_workspace_dir(session_id, cfg).resolve(strict=False)).rstrip(os.sep)
+        except (WorkspaceDisabled, OSError):
+            self.prefix = ""
+
+    def process_output_line(self, line: str) -> str:
+        if not self.prefix:
+            return line
+
+        def _replace(match):
+            suffix = match.group(1).lstrip("/")
+            return f"/{suffix}" if suffix else "/"
+
+        pattern = re.escape(self.prefix) + r"(/[\w@%+=:,./-]*)?"
+        return re.sub(pattern, _replace, line)
+
+
+@dataclass(frozen=True)
+class _PreparedCommandInput:
+    execution_command: str
+    variable_notice: str
+    postfilter: _SyntheticPostFilterProcessor
+
+
+@dataclass(frozen=True)
+class _PreparedRealCommand:
+    execution_command: str
+    command: str
+    rewrite_notice: str | None
+    validation: CommandValidationResult
+    missing_runtime: str | None
+
+
+@dataclass(frozen=True)
+class _StartedRealCommand:
+    run_id: str
+    run_started: str
+    proc: subprocess.Popen
+    capture: RunOutputCapture
+    signal_classifier: OutputSignalClassifier
+    workspace_path_filter: _WorkspacePathOutputFilter
+
+
+class _RunPreparationError(Exception):
+    def __init__(self, message: str, *, status_code: int = 403):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class _RunSpawnError(Exception):
+    pass
+
+
+def _preparation_error_response(exc: _RunPreparationError):
+    return jsonify({"error": str(exc)}), exc.status_code
+
+
+def _prepare_command_input(
+    original_command: str,
+    session_id: str,
+    client_ip: str,
+    *,
+    log_pipe: bool = False,
+) -> _PreparedCommandInput:
+    expanded_command = original_command
+    variable_notice = ""
+    if command_root(original_command) != "var":
+        try:
+            expansion = expand_session_variables(original_command, session_id)
+            expanded_command = expansion.command
+            if expanded_command != original_command:
+                variable_notice = _variable_notice_line(expanded_command, expansion.used_names)
+        except SessionVariableError as exc:
+            log.warning("CMD_DENIED", extra={
+                "ip": client_ip, "session": get_log_session_id(session_id),
+                "cmd": original_command, "reason": str(exc),
+            })
+            raise _RunPreparationError(str(exc)) from exc
+
+    postfilter_spec, postfilter_error = parse_synthetic_postfilter(expanded_command)
     if postfilter_error:
         log.warning("CMD_DENIED", extra={
             "ip": client_ip, "session": get_log_session_id(session_id),
             "cmd": original_command, "reason": postfilter_error,
         })
-        return jsonify({"error": postfilter_error}), 403
-    execution_command = postfilter_spec["base_command"] if postfilter_spec else original_command
-    if postfilter_spec:
+        raise _RunPreparationError(postfilter_error)
+    execution_command = postfilter_spec["base_command"] if postfilter_spec else expanded_command
+    if log_pipe and postfilter_spec:
         stage_kinds = [stage.get("kind") for stage in postfilter_spec.get("stages", []) if stage.get("kind")]
         log.debug("CMD_PIPE", extra={
             "ip": client_ip, "session": get_log_session_id(session_id),
@@ -532,33 +714,47 @@ def run_command():
     try:
         postfilter = _SyntheticPostFilterProcessor(postfilter_spec)
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 403
+        raise _RunPreparationError(str(exc)) from exc
+    return _PreparedCommandInput(
+        execution_command=execution_command,
+        variable_notice=variable_notice,
+        postfilter=postfilter,
+    )
 
-    if resolve_fake_command(execution_command):
-        events, exit_code = execute_fake_command(execution_command, session_id)
-        filtered_events = []
-        for event in events:
-            if event.get("type") != "output":
-                filtered_events.append(event)
-                continue
-            for filtered_line in postfilter.process_output_line(str(event.get("text", ""))):
-                filtered_event = dict(event)
-                filtered_event["text"] = filtered_line.rstrip("\n")
-                filtered_events.append(filtered_event)
-        for filtered_line in postfilter.finalize_output_lines():
-            filtered_events.append({"type": "output", "text": filtered_line.rstrip("\n")})
-        events = filtered_events
-        return _synthetic_run_response(original_command, session_id, client_ip, events, exit_code)
 
-    allowed, reason = is_command_allowed(original_command)
-    if not allowed:
+def _filter_builtin_command_events(events, variable_notice: str, postfilter: _SyntheticPostFilterProcessor):
+    if variable_notice:
+        events = [{"type": "output", "text": variable_notice, "cls": "notice"}] + events
+    filtered_events = []
+    for event in events:
+        if event.get("type") != "output":
+            filtered_events.append(event)
+            continue
+        for filtered_line in postfilter.process_output_line(str(event.get("text", ""))):
+            filtered_event = dict(event)
+            filtered_event["text"] = filtered_line.rstrip("\n")
+            filtered_events.append(filtered_event)
+    for filtered_line in postfilter.finalize_output_lines():
+        filtered_events.append({"type": "output", "text": filtered_line.rstrip("\n")})
+    return filtered_events
+
+
+def _prepare_real_command(
+    original_command: str,
+    execution_command: str,
+    session_id: str,
+    client_ip: str,
+) -> _PreparedRealCommand:
+    validation = _validate_command_for_run(execution_command, session_id)
+    if not validation.allowed:
         log.warning("CMD_DENIED", extra={
             "ip": client_ip, "session": get_log_session_id(session_id),
-            "cmd": original_command, "reason": reason,
+            "cmd": original_command, "reason": validation.reason,
         })
-        return jsonify({"error": reason}), 403
+        raise _RunPreparationError(validation.reason)
+    execution_command = validation.exec_command or execution_command
 
-    command, notice = rewrite_command(execution_command)
+    command, notice = rewrite_command(execution_command, session_id=session_id, cfg=CFG)
     if command != execution_command:
         log.info("CMD_REWRITE", extra={
             "ip": client_ip, "original": original_command, "rewritten": command,
@@ -570,228 +766,426 @@ def run_command():
             "ip": client_ip, "session": get_log_session_id(session_id),
             "cmd": original_command, "missing": missing_runtime,
         })
-        return _synthetic_run_response(
-            original_command,
-            session_id,
-            client_ip,
-            [{"type": "output", "text": runtime_missing_command_message(missing_runtime)}],
-            127,
-            cmd_type="missing",
-        )
+    return _PreparedRealCommand(
+        execution_command=execution_command,
+        command=command,
+        rewrite_notice=notice,
+        validation=validation,
+        missing_runtime=missing_runtime,
+    )
 
-    run_id      = str(uuid.uuid4())
+
+def _start_real_command_process(
+    original_command: str,
+    session_id: str,
+    client_ip: str,
+    prepared_real: _PreparedRealCommand,
+    *,
+    owner_client_id: str = "",
+    owner_tab_id: str = "",
+) -> _StartedRealCommand:
+    run_id = str(uuid.uuid4())
     run_started = datetime.now(timezone.utc).isoformat()
     capture = _run_output_capture(run_id)
+    signal_classifier = OutputSignalClassifier(prepared_real.execution_command, cmd_type="real")
+    workspace_path_filter = _WorkspacePathOutputFilter(session_id, CFG)
 
-    # Start the process immediately — before the generator runs — so the PID
-    # is registered before any kill request could arrive
     try:
         proc = subprocess.Popen(
-            SCANNER_PREFIX + [SHELL_BIN, "-c", command] if SCANNER_PREFIX
-            else [SHELL_BIN, "-c", command],
+            SCANNER_PREFIX + [SHELL_BIN, "-c", prepared_real.command] if SCANNER_PREFIX
+            else [SHELL_BIN, "-c", prepared_real.command],
             shell=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
             universal_newlines=True,
-            preexec_fn=os.setsid,
+            preexec_fn=_prepare_run_child,
         )  # nosec B603
-    except Exception as e:
+    except Exception as exc:
         log.error("RUN_SPAWN_ERROR", exc_info=True, extra={
             "ip": client_ip, "session": get_log_session_id(session_id), "cmd": original_command,
         })
-        return jsonify({"error": str(e)}), 500
+        raise _RunSpawnError(str(exc)) from exc
 
     pid_register(run_id, proc.pid)
-    active_run_register(run_id, proc.pid, session_id, original_command, run_started)
+    active_run_register(
+        run_id,
+        proc.pid,
+        session_id,
+        original_command,
+        run_started,
+        owner_client_id=owner_client_id,
+        owner_tab_id=owner_tab_id,
+    )
     log.info("RUN_START", extra={
         "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
         "pid": proc.pid, "cmd": original_command, "cmd_type": "real",
     })
+    return _StartedRealCommand(
+        run_id=run_id,
+        run_started=run_started,
+        proc=proc,
+        capture=capture,
+        signal_classifier=signal_classifier,
+        workspace_path_filter=workspace_path_filter,
+    )
 
-    # Heartbeat interval in seconds — keeps the SSE connection alive through
-    # nginx and browser idle timeouts when a command produces no output
-    HEARTBEAT_INTERVAL = CFG["heartbeat_interval_seconds"]
-    COMMAND_TIMEOUT    = CFG["command_timeout_seconds"] or None  # None = no timeout
 
-    def _continue_run_detached():
-        try:
-            run_started_dt = datetime.fromisoformat(run_started)
-            if proc.stdout is None:
-                raise RuntimeError("Process stdout pipe was not created")
-            while True:
-                if COMMAND_TIMEOUT:
-                    elapsed = (datetime.now(timezone.utc) - run_started_dt).total_seconds()
-                    if elapsed >= COMMAND_TIMEOUT:
-                        try:
-                            pgid = os.getpgid(proc.pid)
-                            if SCANNER_PREFIX:
-                                subprocess.run(
-                                    [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", f"-{pgid}"],
-                                    timeout=5
-                                )  # nosec B603
-                            else:
-                                os.killpg(pgid, signal.SIGTERM)
-                        except (ProcessLookupError, OSError):
-                            pass
-                        timeout_msg = _timeout_notice(COMMAND_TIMEOUT)
-                        line_dt = datetime.now(timezone.utc)
-                        capture.add_line(
-                            timeout_msg,
-                            cls="notice",
-                            ts_clock=line_dt.strftime("%H:%M:%S"),
-                            ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
-                        )
-                        log.warning("CMD_TIMEOUT", extra={
-                            "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
-                            "timeout": COMMAND_TIMEOUT, "cmd": original_command,
-                        })
-                        break
-                if _stdout_ready(proc.stdout, HEARTBEAT_INTERVAL):
-                    line = proc.stdout.readline()
-                    if line:
-                        filtered_lines = postfilter.process_output_line(line)
-                        for filtered_line in filtered_lines:
-                            line_dt = datetime.now(timezone.utc)
-                            capture.add_line(
-                                filtered_line,
-                                ts_clock=line_dt.strftime("%H:%M:%S"),
-                                ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
-                            )
-                    else:
-                        break
-                else:
+def _publish_broker_captured_line(
+    run_id: str,
+    capture,
+    signal_classifier,
+    event_type: str,
+    text: str,
+    *,
+    cls: str = "",
+    run_started_dt,
+):
+    line_dt = datetime.now(timezone.utc)
+    metadata = _capture_add_line_with_signals(
+        capture,
+        signal_classifier,
+        text,
+        cls=cls,
+        ts_clock=line_dt.strftime("%H:%M:%S"),
+        ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
+    )
+    publish_run_event(
+        run_id,
+        event_type,
+        _broker_output_payload(event_type, text, cls=cls, metadata=metadata),
+    )
+
+
+def _brokered_synthetic_run(original_command, session_id, client_ip, events, exit_code=0, *, cmd_type="builtin"):
+    run_id = str(uuid.uuid4())
+    run_started = datetime.now(timezone.utc).isoformat()
+    capture = _run_output_capture(run_id)
+    signal_classifier = OutputSignalClassifier(original_command, cmd_type=cmd_type)
+    run_started_dt = datetime.fromisoformat(run_started)
+
+    log.info("RUN_START", extra={
+        "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
+        "pid": 0, "cmd": original_command, "cmd_type": cmd_type,
+    })
+    publish_run_event(run_id, "started", {"run_id": run_id, "started": run_started})
+    try:
+        for event in events:
+            if event.get("type") == "output":
+                _publish_broker_captured_line(
+                    run_id,
+                    capture,
+                    signal_classifier,
+                    "output",
+                    str(event.get("text", "")),
+                    cls=str(event.get("cls", "")),
+                    run_started_dt=run_started_dt,
+                )
+            elif event.get("type") == "clear":
+                publish_run_event(run_id, "clear", {})
+        finished = datetime.now(timezone.utc)
+        elapsed = round((finished - datetime.fromisoformat(run_started)).total_seconds(), 1)
+        log.info("RUN_END", extra={
+            "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
+            "exit_code": exit_code, "elapsed": elapsed, "cmd": original_command,
+            "cmd_type": cmd_type,
+        })
+        publish_run_event(run_id, "exit", {
+            "code": exit_code,
+            "elapsed": elapsed,
+            "preview_truncated": capture.preview_truncated,
+            "output_line_count": capture.output_line_count,
+            "full_output_available": capture.full_output_available,
+        })
+        _save_completed_run(
+            run_id, session_id, original_command, run_started,
+            finished.isoformat(), exit_code, capture,
+        )
+    except Exception as exc:
+        log.error("RUN_BROKER_SYNTHETIC_ERROR", exc_info=True, extra={
+            "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
+            "cmd": original_command,
+        })
+        publish_run_event(run_id, "error", {"text": str(exc)})
+    return run_id
+
+
+def _brokered_real_run_worker(
+    *,
+    run_id,
+    proc,
+    session_id,
+    client_ip,
+    original_command,
+    run_started,
+    capture,
+    signal_classifier,
+    postfilter,
+    workspace_path_filter,
+    variable_notice,
+    rewrite_notice,
+    workspace_notices,
+):
+    command_timeout = CFG["command_timeout_seconds"] or None
+    heartbeat_interval = CFG.get("run_broker_heartbeat_seconds") or CFG["heartbeat_interval_seconds"]
+    run_started_dt = datetime.fromisoformat(run_started)
+
+    def _process_real_output_line(line: str) -> list[str]:
+        return postfilter.process_output_line(workspace_path_filter.process_output_line(line))
+
+    try:
+        if variable_notice:
+            _publish_broker_captured_line(
+                run_id, capture, signal_classifier, "notice", variable_notice,
+                cls="notice", run_started_dt=run_started_dt,
+            )
+        if rewrite_notice:
+            _publish_broker_captured_line(
+                run_id, capture, signal_classifier, "notice", f"[notice] {rewrite_notice}",
+                cls="notice", run_started_dt=run_started_dt,
+            )
+        for workspace_notice in workspace_notices:
+            _publish_broker_captured_line(
+                run_id, capture, signal_classifier, "notice", workspace_notice,
+                cls="notice", run_started_dt=run_started_dt,
+            )
+
+        if proc.stdout is None:
+            raise RuntimeError("Process stdout pipe was not created")
+        stream_reader = _make_nonblocking_stream_reader(proc.stdout)
+        while True:
+            if command_timeout:
+                now_dt = datetime.now(timezone.utc)
+                elapsed = (now_dt - run_started_dt).total_seconds()
+                if elapsed >= command_timeout:
+                    try:
+                        _terminate_process_group(proc)
+                    except (ProcessLookupError, subprocess.TimeoutExpired, OSError):
+                        pass
+                    timeout_msg = _timeout_notice(command_timeout)
+                    log.warning("CMD_TIMEOUT", extra={
+                        "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
+                        "timeout": command_timeout, "cmd": original_command,
+                    })
+                    _publish_broker_captured_line(
+                        run_id, capture, signal_classifier, "notice", timeout_msg,
+                        cls="notice", run_started_dt=run_started_dt,
+                    )
+                    break
+
+            if _stdout_ready(proc.stdout, heartbeat_interval):
+                lines, eof = _read_available_stream_lines(stream_reader)
+                if not lines and eof:
+                    break
+                if not lines:
                     if proc.poll() is not None:
                         break
+                    publish_run_event(run_id, "heartbeat", {})
+                    continue
+                for line in lines:
+                    for filtered_line in _process_real_output_line(line):
+                        _publish_broker_captured_line(
+                            run_id,
+                            capture,
+                            signal_classifier,
+                            "output",
+                            filtered_line,
+                            run_started_dt=run_started_dt,
+                        )
+            else:
+                if proc.poll() is not None:
+                    break
+                publish_run_event(run_id, "heartbeat", {})
 
-            for filtered_line in postfilter.finalize_output_lines():
-                line_dt = datetime.now(timezone.utc)
-                capture.add_line(
+        trailing_lines, _ = _read_available_stream_lines(stream_reader, finalize=True)
+        for line in trailing_lines:
+            for filtered_line in _process_real_output_line(line):
+                _publish_broker_captured_line(
+                    run_id,
+                    capture,
+                    signal_classifier,
+                    "output",
                     filtered_line,
-                    ts_clock=line_dt.strftime("%H:%M:%S"),
-                    ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
+                    run_started_dt=run_started_dt,
                 )
-            exit_code = _wait_for_proc_exit_code(proc)
-            _finalize_completed_run(
-                run_id, session_id, client_ip, original_command, run_started, exit_code, capture,
+        for filtered_line in postfilter.finalize_output_lines():
+            _publish_broker_captured_line(
+                run_id,
+                capture,
+                signal_classifier,
+                "output",
+                filtered_line,
+                run_started_dt=run_started_dt,
             )
-        except Exception:
-            log.error("RUN_STREAM_ERROR", exc_info=True, extra={
-                "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
-                "cmd": original_command,
-            })
-        finally:
-            _cleanup_proc_stream(proc)
-            pid_pop(run_id)
-            active_run_remove(run_id)
+        exit_code = _wait_for_proc_exit_code(proc)
+        elapsed = _finalize_completed_run(
+            run_id, session_id, client_ip, original_command, run_started, exit_code, capture,
+        )
+        publish_run_event(run_id, "exit", {
+            "code": exit_code,
+            "elapsed": elapsed,
+            "preview_truncated": capture.preview_truncated,
+            "output_line_count": capture.output_line_count,
+            "full_output_available": capture.full_output_available,
+        })
+    except Exception as exc:
+        log.error("RUN_BROKER_STREAM_ERROR", exc_info=True, extra={
+            "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
+            "cmd": original_command,
+        })
+        publish_run_event(run_id, "error", {"text": str(exc)})
+    finally:
+        _cleanup_proc_stream(proc)
+        pid_pop(run_id)
+        active_run_remove(run_id)
+
+
+def _run_belongs_to_session(run_id: str, session_id: str) -> bool:
+    if not run_id or not session_id:
+        return False
+    active_ids = {str(item.get("run_id", "")) for item in active_runs_for_session(session_id)}
+    if run_id in active_ids:
+        return True
+    try:
+        with db_connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM runs WHERE id = ? AND session_id = ?",
+                (run_id, session_id),
+            ).fetchone()
+            return row is not None
+    except Exception:
+        log.error("RUN_BROKER_SESSION_CHECK_ERROR", exc_info=True, extra={
+            "run_id": run_id, "session": get_log_session_id(session_id),
+        })
+        return False
+
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+
+@run_bp.route("/runs", methods=["POST"])
+@limiter.limit(lambda: (
+    f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second"
+))
+def start_brokered_run():
+    if not broker_available():
+        return jsonify({"error": broker_unavailable_reason()}), 503
+
+    data = request.get_json() or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    original_command = data.get("command", "")
+    session_id = get_session_id()
+    client_ip = get_client_ip()
+    owner_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
+    owner_tab_id = _active_run_owner_value(data.get("tab_id", ""))
+    if not isinstance(original_command, str):
+        return jsonify({"error": "Command must be a string"}), 400
+    original_command = original_command.strip()
+    if not original_command:
+        return jsonify({"error": "No command provided"}), 400
+
+    if resolves_exact_special_builtin_command(original_command):
+        events, exit_code = execute_builtin_command(original_command, session_id)
+        run_id = _brokered_synthetic_run(original_command, session_id, client_ip, events, exit_code)
+        return jsonify({"run_id": run_id, "stream": f"/runs/{run_id}/stream"}), 202
+
+    try:
+        prepared_input = _prepare_command_input(original_command, session_id, client_ip)
+    except _RunPreparationError as exc:
+        return _preparation_error_response(exc)
+
+    if resolve_builtin_command(prepared_input.execution_command):
+        events, exit_code = execute_builtin_command(prepared_input.execution_command, session_id)
+        filtered_events = _filter_builtin_command_events(
+            events,
+            prepared_input.variable_notice,
+            prepared_input.postfilter,
+        )
+        run_id = _brokered_synthetic_run(original_command, session_id, client_ip, filtered_events, exit_code)
+        return jsonify({"run_id": run_id, "stream": f"/runs/{run_id}/stream"}), 202
+
+    try:
+        prepared_real = _prepare_real_command(
+            original_command,
+            prepared_input.execution_command,
+            session_id,
+            client_ip,
+        )
+    except _RunPreparationError as exc:
+        return _preparation_error_response(exc)
+    if prepared_real.missing_runtime:
+        events = [{"type": "output", "text": runtime_missing_command_message(prepared_real.missing_runtime)}]
+        run_id = _brokered_synthetic_run(original_command, session_id, client_ip, events, 127, cmd_type="missing")
+        return jsonify({"run_id": run_id, "stream": f"/runs/{run_id}/stream"}), 202
+
+    try:
+        started = _start_real_command_process(
+            original_command,
+            session_id,
+            client_ip,
+            prepared_real,
+            owner_client_id=owner_client_id,
+            owner_tab_id=owner_tab_id,
+        )
+    except _RunSpawnError as exc:
+        return jsonify({"error": str(exc)}), 500
+
+    publish_run_event(started.run_id, "started", {"run_id": started.run_id, "started": started.run_started})
+    threading.Thread(
+        target=_brokered_real_run_worker,
+        kwargs={
+            "run_id": started.run_id,
+            "proc": started.proc,
+            "session_id": session_id,
+            "client_ip": client_ip,
+            "original_command": original_command,
+            "run_started": started.run_started,
+            "capture": started.capture,
+            "signal_classifier": started.signal_classifier,
+            "postfilter": prepared_input.postfilter,
+            "workspace_path_filter": started.workspace_path_filter,
+            "variable_notice": prepared_input.variable_notice,
+            "rewrite_notice": prepared_real.rewrite_notice,
+            "workspace_notices": _workspace_notice_lines(prepared_real.validation),
+        },
+        name=f"run-broker-{started.run_id[:8]}",
+        daemon=True,
+    ).start()
+    return jsonify({"run_id": started.run_id, "stream": f"/runs/{started.run_id}/stream"}), 202
+
+
+@run_bp.route("/runs/<run_id>/events")
+def get_brokered_run_events(run_id):
+    session_id = get_session_id()
+    if not _run_belongs_to_session(run_id, session_id):
+        return jsonify({"error": "Run not found"}), 404
+    after_id = str(request.args.get("after", "0-0") or "0-0")
+    try:
+        limit = max(1, min(int(request.args.get("limit", 100) or 100), 500))
+    except (TypeError, ValueError):
+        limit = 100
+    events = get_run_events(run_id, after_id=after_id, limit=limit)
+    return jsonify({
+        "run_id": run_id,
+        "events": [event.as_payload() for event in events],
+    })
+
+
+@run_bp.route("/runs/<run_id>/stream")
+def stream_brokered_run(run_id):
+    session_id = get_session_id()
+    if not _run_belongs_to_session(run_id, session_id):
+        return jsonify({"error": "Run not found"}), 404
+    after_id = str(request.args.get("after", "0-0") or "0-0")
+    owner_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
+    owner_tab_id = _active_run_owner_value(request.args.get("tab_id", ""))
 
     def generate():
-        detached = False
-        try:
-            # Send the run_id first so the client can call /kill
-            yield f"data: {json.dumps({'type': 'started', 'run_id': run_id})}\n\n"
-            run_started_dt = datetime.fromisoformat(run_started)
-
-            # If the command was rewritten, surface a notice to the user
-            if notice:
-                notice_dt = datetime.now(timezone.utc)
-                capture.add_line(
-                    f"[notice] {notice}",
-                    cls="notice",
-                    ts_clock=notice_dt.strftime("%H:%M:%S"),
-                    ts_elapsed=f"+{(notice_dt - run_started_dt).total_seconds():.1f}s",
-                )
-                yield f"data: {json.dumps({'type': 'notice', 'text': notice})}\n\n"
-
-            if proc.stdout is None:
-                raise RuntimeError("Process stdout pipe was not created")
-            while True:
-                # Check timeout at the top of every iteration so it fires even
-                # during continuous output, not only during idle heartbeat periods.
-                if COMMAND_TIMEOUT:
-                    elapsed = (datetime.now(timezone.utc) - run_started_dt).total_seconds()
-                    if elapsed >= COMMAND_TIMEOUT:
-                        try:
-                            pgid = os.getpgid(proc.pid)
-                            if SCANNER_PREFIX:
-                                subprocess.run(
-                                    [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", f"-{pgid}"],
-                                    timeout=5
-                                )  # nosec B603
-                            else:
-                                os.killpg(pgid, signal.SIGTERM)
-                        except (ProcessLookupError, OSError):
-                            pass
-                        timeout_msg = _timeout_notice(COMMAND_TIMEOUT)
-                        log.warning("CMD_TIMEOUT", extra={
-                            "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
-                            "timeout": COMMAND_TIMEOUT, "cmd": original_command,
-                        })
-                        yield f"data: {json.dumps({'type': 'notice', 'text': timeout_msg})}\n\n"
-                        break
-                # Wait up to HEARTBEAT_INTERVAL seconds for output
-                if _stdout_ready(proc.stdout, HEARTBEAT_INTERVAL):
-                    line = proc.stdout.readline()
-                    if line:
-                        filtered_lines = postfilter.process_output_line(line)
-                        for filtered_line in filtered_lines:
-                            line_dt = datetime.now(timezone.utc)
-                            capture.add_line(
-                                filtered_line,
-                                ts_clock=line_dt.strftime("%H:%M:%S"),
-                                ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
-                            )
-                            yield f"data: {json.dumps({'type': 'output', 'text': filtered_line})}\n\n"
-                    else:
-                        # EOF — process has finished
-                        break
-                else:
-                    # No output within the interval — send a heartbeat comment
-                    # to keep nginx and the browser from treating the connection as idle
-                    if proc.poll() is not None:
-                        break
-                    yield ": heartbeat\n\n"
-
-            for filtered_line in postfilter.finalize_output_lines():
-                line_dt = datetime.now(timezone.utc)
-                capture.add_line(
-                    filtered_line,
-                    ts_clock=line_dt.strftime("%H:%M:%S"),
-                    ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
-                )
-                yield f"data: {json.dumps({'type': 'output', 'text': filtered_line})}\n\n"
-            exit_code = _wait_for_proc_exit_code(proc)
-            elapsed = _finalize_completed_run(
-                run_id, session_id, client_ip, original_command, run_started, exit_code, capture,
-            )
-            yield f"data: {json.dumps({
-                'type': 'exit',
-                'code': exit_code,
-                'elapsed': elapsed,
-                'preview_truncated': capture.preview_truncated,
-                'output_line_count': capture.output_line_count,
-                'full_output_available': capture.full_output_available,
-            })}\n\n"
-        except GeneratorExit:
-            detached = True
-            threading.Thread(
-                target=_continue_run_detached,
-                name=f"run-drain-{run_id[:8]}",
-                daemon=True,
-            ).start()
-            raise
-        except Exception as e:
-            log.error("RUN_STREAM_ERROR", exc_info=True, extra={
-                "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
-                "cmd": original_command,
-            })
-            yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
-        finally:
-            if not detached:
-                _cleanup_proc_stream(proc)
-                pid_pop(run_id)
-                active_run_remove(run_id)
+        for item in stream_run_events(run_id, after_id=after_id):
+            if owner_client_id:
+                active_run_touch_owner(run_id, owner_client_id, owner_tab_id)
+            yield item
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
@@ -803,17 +1197,27 @@ def kill_command():
     if not isinstance(data, dict):
         return jsonify({"error": "Request body must be a JSON object"}), 400
     run_id    = data.get("run_id", "")
+    killer_tab_id = _active_run_owner_value(data.get("tab_id", ""))
     client_ip = get_client_ip()
     if not isinstance(run_id, str):
         return jsonify({"error": "run_id must be a string"}), 400
-    pid       = pid_pop(run_id)
+    session_id = get_session_id()
+    killer_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
+    pid       = pid_pop_for_session(run_id, session_id)
     if not pid:
-        log.debug("KILL_MISS", extra={"ip": client_ip, "run_id": run_id})
+        log.debug("KILL_MISS", extra={
+            "ip": client_ip,
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+        })
         return jsonify({"error": "No such process"}), 404
-    active_run_remove(run_id)
+    publish_run_event(run_id, "killed", {
+        "killer_client_id": killer_client_id,
+        "killer_tab_id": killer_tab_id,
+    })
     try:
-        # Subprocesses are spawned with preexec_fn=os.setsid, which makes
-        # PGID == PID at creation time. Use the stored PID directly as the
+        # Subprocesses call os.setsid() during child setup, which makes PGID
+        # == PID at creation time. Use the stored PID directly as the
         # PGID rather than calling os.getpgid() — if the subprocess has
         # already exited and its PID was reused (e.g. by a new Gunicorn
         # worker), os.getpgid() would return the wrong PGID and we would
@@ -832,7 +1236,13 @@ def kill_command():
         else:
             # Local dev — same user, can kill directly
             os.killpg(pgid, signal.SIGTERM)
-        log.info("RUN_KILL", extra={"run_id": run_id, "ip": client_ip, "pid": pid, "pgid": pgid})
+        log.info("RUN_KILL", extra={
+            "run_id": run_id,
+            "ip": client_ip,
+            "session": get_log_session_id(session_id),
+            "pid": pid,
+            "pgid": pgid,
+        })
     except (ProcessLookupError, subprocess.TimeoutExpired, OSError) as e:
         log.warning("KILL_FAILED", extra={
             "run_id": run_id, "ip": client_ip, "pid": pid, "error": str(e),

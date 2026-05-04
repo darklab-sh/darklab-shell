@@ -119,39 +119,78 @@ test.describe('tab command recall', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
+  test('up/down recall prefers the active tab before global history', async ({ page }) => {
+    await runCommand(page, CMD)
+
+    await page.locator('#new-tab-btn').click()
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await page.keyboard.press('ArrowUp')
+    await expect(page.locator('#cmd')).toHaveValue(CMD)
+    await page.keyboard.press('ArrowDown')
+    await expect(page.locator('#cmd')).toHaveValue('')
+
+    await runCommand(page, CMD_B)
+    await page.keyboard.press('ArrowUp')
+    await expect(page.locator('#cmd')).toHaveValue(CMD_B)
+    await page.keyboard.press('ArrowUp')
+    await expect(page.locator('#cmd')).toHaveValue(CMD)
+
+    await page.locator('.tab').first().click()
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await page.keyboard.press('ArrowUp')
+    await expect(page.locator('#cmd')).toHaveValue(CMD)
+
+    await page.keyboard.press('ArrowDown')
+    await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
   test('running a command in one tab does not block another tab from running', async ({ page }) => {
     const secondCmd = 'status'
 
-    await page.route('**/run', async (route) => {
+    await page.route('**/runs', async (route) => {
       const payload = JSON.parse(route.request().postData() || '{}')
       const command = payload.command || ''
 
       if (command === LONG_CMD) {
         await route.fulfill({
-          status: 200,
-          contentType: 'text/event-stream',
-          body: [
-            'data: {"type":"started","run_id":"tabs-long-run"}\n\n',
-            'data: {"type":"output","text":"long run started\\n"}\n\n',
-          ].join(''),
+          status: 202,
+          contentType: 'application/json',
+          body: JSON.stringify({ run_id: 'tabs-long-run', stream: '/runs/tabs-long-run/stream' }),
         })
         return
       }
 
       if (command === secondCmd) {
         await route.fulfill({
-          status: 200,
-          contentType: 'text/event-stream',
-          body: [
-            'data: {"type":"started","run_id":"tabs-second-run"}\n\n',
-            'data: {"type":"output","text":"second tab output\\n"}\n\n',
-            'data: {"type":"exit","code":0,"elapsed":0.1}\n\n',
-          ].join(''),
+          status: 202,
+          contentType: 'application/json',
+          body: JSON.stringify({ run_id: 'tabs-second-run', stream: '/runs/tabs-second-run/stream' }),
         })
         return
       }
 
       await route.continue()
+    })
+    await page.route('**/runs/tabs-long-run/stream**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: [
+          'data: {"type":"started","run_id":"tabs-long-run"}\n\n',
+          'data: {"type":"output","text":"long run started\\n"}\n\n',
+        ].join(''),
+      })
+    })
+    await page.route('**/runs/tabs-second-run/stream**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: [
+          'data: {"type":"started","run_id":"tabs-second-run"}\n\n',
+          'data: {"type":"output","text":"second tab output\\n"}\n\n',
+          'data: {"type":"exit","code":0,"elapsed":0.1}\n\n',
+        ].join(''),
+      })
     })
 
     await page.locator('#cmd').fill(LONG_CMD)
@@ -226,6 +265,86 @@ test.describe('tab command recall', () => {
     await expect(page.locator('#cmd')).toHaveValue('hostname')
   })
 
+  test('reload restores a large completed tab at the prompt tail', async ({ page }) => {
+    const key = await page.evaluate(() => `tab_session_state:${window.SESSION_ID || 'session'}`)
+    const rawLines = [
+      { text: '$ nmap -iL targets.txt', cls: 'prompt-echo', tsC: '', tsE: '' },
+      ...Array.from({ length: 320 }, (_, index) => ({
+        text: `restored output line ${index + 1}`,
+        cls: '',
+        tsC: '',
+        tsE: '',
+      })),
+      { text: '[process exited with code 0]', cls: 'exit-ok', tsC: '', tsE: '' },
+    ]
+    await page.evaluate(
+      ({ storageKey, lines }) => {
+        window.sessionStorage.setItem(storageKey, JSON.stringify({
+          version: 1,
+          activeIndex: 0,
+          tabs: [{
+            label: 'large restore',
+            command: 'nmap -iL targets.txt',
+            renamed: false,
+            draftInput: '',
+            st: 'ok',
+            exitCode: 0,
+            historyRunId: 'restore-tail-test',
+            previewTruncated: false,
+            fullOutputAvailable: false,
+            fullOutputLoaded: false,
+            rawLines: lines,
+          }],
+        }))
+      },
+      { storageKey: key, lines: rawLines },
+    )
+
+    await page.reload()
+    await page.locator('#cmd').waitFor()
+    await expect(page.locator('.tab-panel.active .output #shell-prompt-wrap')).toBeVisible()
+
+    await expect
+      .poll(async () => page.locator('.tab-panel.active .output').evaluate((out) => (
+        Math.round(out.scrollHeight - (out.scrollTop + out.clientHeight))
+      )))
+      .toBeLessThanOrEqual(24)
+  })
+
+  test('switching to a restored inactive large tab pins it to the prompt tail', async ({ page }) => {
+    await runCommand(page, 'status')
+    await page.locator('#new-tab-btn').click()
+    await page.evaluate(() => {
+      const id = window.activeTabId
+      window.setTabLabel(id, 'inactive large restore')
+      window.appendLine('$ nmap -iL targets.txt', 'prompt-echo', id)
+      for (let index = 1; index <= 320; index += 1) {
+        window.appendLine(`inactive restored output line ${index}`, '', id)
+      }
+      window.appendLine('[process exited with code 0]', 'exit-ok', id)
+      window.setTabStatus(id, 'ok')
+      window.persistTabSessionStateNow()
+    })
+    await expect(page.locator('.tab')).toHaveCount(2)
+    await page.locator('.tab').first().click()
+    await expect(page.locator('.tab').first()).toHaveClass(/active/)
+
+    await page.reload()
+    await page.locator('#cmd').waitFor()
+    await expect(page.locator('.tab')).toHaveCount(2)
+    await expect(page.locator('.tab').first()).toHaveClass(/active/)
+
+    await page.locator('.tab').nth(1).click()
+    await expect(page.locator('.tab-panel.active .output #shell-prompt-wrap')).toBeVisible()
+    await expect(page.locator('.tab-panel.active .output')).toContainText('inactive restored output line 320')
+
+    await expect
+      .poll(async () => page.locator('.tab-panel.active .output').evaluate((out) => (
+        Math.round(out.scrollHeight - (out.scrollTop + out.clientHeight))
+      )))
+      .toBeLessThanOrEqual(24)
+  })
+
   test('reload restores idle tabs and drafts alongside an active-run reconnect tab', async ({
     page,
   }) => {
@@ -233,7 +352,7 @@ test.describe('tab command recall', () => {
     const activeCmd = 'ping darklab.sh'
     let activeRunStarted = false
 
-    await page.route('**/run', async (route) => {
+    await page.route('**/runs', async (route) => {
       const body = route.request().postData() || '{}'
       const payload = JSON.parse(body)
       if ((payload.command || '') !== activeCmd) {
@@ -241,6 +360,14 @@ test.describe('tab command recall', () => {
         return
       }
       activeRunStarted = true
+      await route.fulfill({
+        status: 202,
+        contentType: 'application/json',
+        body: JSON.stringify({ run_id: 'tabs-reconnect-run', stream: '/runs/tabs-reconnect-run/stream' }),
+      })
+    })
+
+    await page.route('**/runs/tabs-reconnect-run/stream**', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'text/event-stream',
@@ -358,10 +485,12 @@ test.describe('tab strip interactions', () => {
     await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
   })
 
   test('drag reordering the active tab returns focus to the terminal input', async ({ page }) => {
     await page.locator('#new-tab-btn').click()
+    await expect(page.locator('.tab')).toHaveCount(2)
 
     const secondTab = page.locator('.tab').nth(1)
     const firstTab = page.locator('.tab').first()
@@ -383,8 +512,11 @@ test.describe('tab strip interactions', () => {
   })
 
   test('touch dragging reorders tabs and clears mobile drag state on release', async ({ page }) => {
+    await expect(page.locator('.tab')).toHaveCount(1)
     await page.locator('#new-tab-btn').click()
+    await expect(page.locator('.tab')).toHaveCount(2)
     await page.locator('#new-tab-btn').click()
+    await expect(page.locator('.tab')).toHaveCount(3)
 
     const firstTab = page.locator('.tab').nth(0)
     const thirdTab = page.locator('.tab').nth(2)
@@ -412,7 +544,7 @@ test.describe('tab strip interactions', () => {
       },
     )
 
-    await page.waitForTimeout(220)
+    await expect(thirdTab).toHaveClass(/tab-touch-dragging/)
 
     await page.evaluate(
       ({ moveX, moveY }) => {

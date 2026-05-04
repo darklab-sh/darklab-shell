@@ -4,6 +4,7 @@ set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 THEME="${CAPTURE_THEME:-}"
+THEME_VARIANT="${CAPTURE_THEME_VARIANT:-all}"
 UI="${CAPTURE_UI:-all}"
 OUT_DIR="${CAPTURE_OUT_DIR:-/tmp/darklab_shell-ui-capture}"
 
@@ -13,7 +14,8 @@ Usage:
   scripts/capture_ui_screenshots.sh [options]
 
 Options:
-  --theme <name|all|default>  Theme to capture. Unset/default uses the app default.
+  --theme <name|all|default>  Theme to capture. Unset/default uses the configured app default theme name.
+  --theme-variant <light|dark|all>  Restrict --theme all to one color-scheme family. Default: ${THEME_VARIANT}
   --ui <desktop|mobile|all>   Which UI pack(s) to capture. Default: all.
   --out-dir <dir>             Output directory. Relative paths resolve from repo root. Default: ${OUT_DIR}
 EOF
@@ -23,6 +25,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --theme)
       THEME="$2"
+      shift 2
+      ;;
+    --theme-variant)
+      THEME_VARIANT="$2"
       shift 2
       ;;
     --ui)
@@ -54,6 +60,15 @@ case "$UI" in
     ;;
 esac
 
+case "$THEME_VARIANT" in
+  light|dark|all) ;;
+  *)
+    echo "Invalid --theme-variant value: ${THEME_VARIANT}" >&2
+    usage >&2
+    exit 1
+    ;;
+esac
+
 if [[ -n "$THEME" && "$THEME" != "all" && "$THEME" != "default" ]]; then
   if [[ ! -f "$ROOT_DIR/app/conf/themes/${THEME}.yaml" ]]; then
     echo "Unknown theme: ${THEME}" >&2
@@ -68,7 +83,7 @@ mkdir -p "$OUT_DIR"
 run_capture() {
   local config="$1"
   echo "Running ${config} ..."
-  RUN_CAPTURE=1 CAPTURE_THEME="$THEME" CAPTURE_OUT_DIR="$OUT_DIR" \
+  RUN_CAPTURE=1 CAPTURE_THEME="$THEME" CAPTURE_THEME_VARIANT="$THEME_VARIANT" CAPTURE_OUT_DIR="$OUT_DIR" \
     npx playwright test --config "$config"
 }
 

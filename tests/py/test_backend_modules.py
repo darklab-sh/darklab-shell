@@ -1,7 +1,7 @@
 """
 Tests for pure utility functions across the app modules:
   - split_chained_commands      (commands.py)
-  - load_allowed_commands       (commands.py)
+  - command registry loading    (commands.py)
   - load_faq                    (commands.py)
   - _is_denied edge cases       (commands.py)
   - is_command_allowed path-blocking edge cases (commands.py)
@@ -15,31 +15,61 @@ Run with: pytest tests/ (from the repo root)
 import gzip
 import importlib.util
 import os
+import random
 import re
+import shlex
 import sqlite3
 import tempfile
 import textwrap
 import unittest.mock as mock
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+import yaml
 import process
+import run_broker
 import database
 import app as shell_app
 import config as app_config
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
-import fake_commands
+import builtin_commands
+import session_variables
+import workspace as workspace_module
+import wordlists
 from commands import (
-    split_chained_commands, load_allowed_commands, load_all_faq, load_faq,
+    split_chained_commands, load_all_faq, load_all_workflows, load_faq,
     load_welcome, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
-    load_mobile_welcome_hints, load_autocomplete_context,
-    load_allowed_commands_grouped,
+    load_mobile_welcome_hints, autocomplete_context_from_commands_registry,
+    load_autocomplete_context_from_commands_registry, load_command_policy, load_container_smoke_test_commands,
+    load_allow_grouping_flags, load_commands_registry, load_workflows,
     is_command_allowed, rewrite_command,
 )
 from permalinks import _format_retention, _expiry_note, _permalink_error_page, _normalize_permalink_lines, _prompt_echo_text
+from output_signals import OutputSignalClassifier, classify_line, command_root, extract_target
 from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
+from workspace import (
+    InvalidWorkspacePath, WorkspaceDisabled, WorkspaceQuotaExceeded,
+    cleanup_inactive_workspaces, create_workspace_directory, delete_workspace_file, delete_workspace_path,
+    ensure_session_workspace, list_workspace_directories, list_workspace_files,
+    prepare_workspace_directory_for_command, prepare_workspace_file_for_command, read_workspace_text_file, resolve_workspace_path,
+    session_workspace_name, workspace_usage,
+    touch_session_workspace, workspace_path_info, write_workspace_text_file, WORKSPACE_COMMAND_WRITE_FILE_MODE,
+    WORKSPACE_DIR_MODE, WORKSPACE_FILE_MODE,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+SEED_HISTORY_PATH = REPO_ROOT / "scripts" / "seed_history.py"
+
+
+def _load_seed_history_module():
+    spec = importlib.util.spec_from_file_location("seed_history", SEED_HISTORY_PATH)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 # ── split_chained_commands ────────────────────────────────────────────────────
@@ -94,8 +124,6 @@ class TestSplitChainedCommands:
         assert split_chained_commands("") == []
 
 
-# ── load_allowed_commands ─────────────────────────────────────────────────────
-
 class TestLoadConfig:
     def test_local_config_overrides_base_config_without_replacing_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -105,7 +133,8 @@ class TestLoadConfig:
                 f.write(textwrap.dedent(
                     """
                     app_name: base-shell
-                    prompt_prefix: base@local:~$
+                    prompt_username: base
+                    prompt_domain: local
                     default_theme: base-theme.yaml
                     full_output_max_mb: 7MB
                     rate_limit_per_minute: 30
@@ -115,19 +144,27 @@ class TestLoadConfig:
                 f.write(textwrap.dedent(
                     """
                     app_name: local-shell
-                    prompt_prefix: local@local:~$
+                    prompt_username: local
                     rate_limit_per_minute: 99
                     """
                 ))
             cfg = app_config.load_config(tmp)
 
         assert cfg["app_name"] == "local-shell"
-        assert cfg["prompt_prefix"] == "local@local:~$"
+        assert cfg["prompt_username"] == "local"
+        assert cfg["prompt_domain"] == "local"
         assert cfg["default_theme"] == "base-theme.yaml"
         assert cfg["full_output_max_mb"] == 7
         assert cfg["full_output_max_bytes"] == 7 * 1024 * 1024
         assert cfg["rate_limit_per_minute"] == 99
         assert cfg["trusted_proxy_cidrs"] == ["127.0.0.1/32", "::1/128"]
+        assert cfg["data_dir"] == ""
+        assert cfg["workspace_enabled"] is False
+        assert cfg["workspace_backend"] == "tmpfs"
+        assert cfg["workspace_quota_mb"] == 50
+        assert cfg["workspace_max_file_mb"] == 5
+        assert cfg["workspace_max_files"] == 100
+        assert cfg["workspace_inactivity_ttl_hours"] == 1
 
     def test_share_redaction_enabled_defaults_true(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -157,104 +194,1182 @@ class TestLoadConfig:
         })
         assert rules == []
 
-class TestLoadAllowedCommands:
-    def _write(self, content, tmp_dir):
-        path = os.path.join(tmp_dir, "allowed_commands.txt")
-        with open(path, "w") as f:
-            f.write(textwrap.dedent(content))
-        return path
+    def test_resolve_data_dir_prefers_app_data_dir_environment_override(self):
+        with tempfile.TemporaryDirectory() as env_dir, tempfile.TemporaryDirectory() as cfg_dir:
+            with mock.patch.dict(os.environ, {"APP_DATA_DIR": env_dir}):
+                assert app_config.resolve_data_dir({"data_dir": cfg_dir}) == env_dir
 
-    def _write_local(self, content, tmp_dir):
-        path = os.path.join(tmp_dir, "allowed_commands.local.txt")
-        with open(path, "w") as f:
-            f.write(textwrap.dedent(content))
-        return path
-
-    def test_missing_file_returns_none_and_empty_deny(self):
-        with mock.patch("commands.ALLOWED_COMMANDS_FILE", "/nonexistent/path.txt"):
-            allow, deny = load_allowed_commands()
-        assert allow is None
-        assert deny == []
-
-    def test_allow_entries_parsed(self):
+    def test_resolve_data_dir_uses_configured_data_dir_when_environment_is_unset(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("ping\nnmap\ndig\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                allow, deny = load_allowed_commands()
-        assert allow == ["ping", "nmap", "dig"]
-        assert deny == []
+            with mock.patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("APP_DATA_DIR", None)
+                assert app_config.resolve_data_dir({"data_dir": tmp}) == tmp
 
-    def test_deny_entries_stripped_of_bang_and_preserve_case(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("ping\n!NMAP -SU\n!curl -o\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                allow, deny = load_allowed_commands()
-        assert allow is not None
-        assert "ping" in allow
-        assert "NMAP -SU" in deny
-        assert "curl -o" in deny
+    def test_resolve_data_dir_falls_back_to_tmp_when_data_is_not_writable(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("APP_DATA_DIR", None)
+            with mock.patch.object(app_config, "_is_writable_directory", side_effect=lambda path: path == "/tmp"):
+                assert app_config.resolve_data_dir({"data_dir": ""}) == "/tmp"
 
-    def test_comments_and_blank_lines_ignored(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("# comment\n\nping\n  \n# another\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                allow, deny = load_allowed_commands()
-        assert allow == ["ping"]
+    def test_resolve_data_dir_rejects_unwritable_configured_data_dir(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("APP_DATA_DIR", None)
+            with mock.patch.object(app_config, "_is_writable_directory", return_value=False):
+                try:
+                    app_config.resolve_data_dir({"data_dir": "/not-writable"})
+                    assert False, "expected unwritable configured data_dir to fail"
+                except RuntimeError as exc:
+                    assert "data_dir is not writable: /not-writable" in str(exc)
 
-    def test_only_deny_entries_returns_none_allow(self):
-        # File with only ! lines → no allow prefixes → unrestricted
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("!nmap -su\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                allow, deny = load_allowed_commands()
-        assert allow is None
-        assert deny == ["nmap -su"]
+    def test_workspace_root_env_warning_only_logs_on_mismatch(self):
+        with mock.patch.object(shell_app.log, "warning") as warning:
+            shell_app._warn_workspace_root_config_drift(
+                {"workspace_root": "/tmp/workspaces"},
+                {"WORKSPACE_ROOT": "/tmp/workspaces"},
+            )
+            warning.assert_not_called()
 
-    def test_allow_entries_are_lowercased(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("PING\nNMAP\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                allow, _ = load_allowed_commands()
-        assert allow is not None
-        assert "ping" in allow
-        assert "nmap" in allow
+        with mock.patch.object(shell_app.log, "warning") as warning:
+            shell_app._warn_workspace_root_config_drift(
+                {"workspace_root": "/tmp/app-workspaces"},
+                {"WORKSPACE_ROOT": "/tmp/env-workspaces"},
+            )
 
-    def test_empty_file_returns_none_allow(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                allow, deny = load_allowed_commands()
-        assert allow is None
-        assert deny == []
+        warning.assert_called_once()
+        args, kwargs = warning.call_args
+        assert args == ("WORKSPACE_ROOT_MISMATCH",)
+        assert kwargs["extra"]["workspace_root_env"].endswith("/tmp/env-workspaces")
+        assert kwargs["extra"]["workspace_root_config"].endswith("/tmp/app-workspaces")
 
-    def test_local_overlay_appends_and_dedupes_entries(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base_path = self._write("ping\nnmap\n!curl -o\n", tmp)
-            self._write_local("nmap\ncurl\n!curl -o\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", base_path):
-                allow, deny = load_allowed_commands()
-        assert allow == ["ping", "nmap", "curl"]
-        assert deny == ["curl -o"]
 
-    def test_local_overlay_preserves_case_in_denies(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base_path = self._write("ping\n!curl -K\n", tmp)
-            self._write_local("!curl -k\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", base_path):
-                allow, deny = load_allowed_commands()
-        assert allow == ["ping"]
-        assert deny == ["curl -K", "curl -k"]
+class TestSessionWorkspace:
+    def _cfg(self, root, **overrides):
+        cfg = {
+            "workspace_enabled": True,
+            "workspace_backend": "tmpfs",
+            "workspace_root": str(root),
+            "workspace_quota_mb": 1,
+            "workspace_max_file_mb": 1,
+            "workspace_max_files": 10,
+            "workspace_inactivity_ttl_hours": 1,
+        }
+        cfg.update(overrides)
+        return cfg
 
-    def test_local_overlay_merges_group_headers(self):
+    def test_disabled_workspace_rejects_operations(self):
         with tempfile.TemporaryDirectory() as tmp:
-            base_path = self._write("## Network\nping\n", tmp)
-            self._write_local("## Network\ncurl\n## Scanning\nnmap\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", base_path):
-                groups = load_allowed_commands_grouped()
-        assert groups is not None
-        assert [group["name"] for group in groups] == ["Network", "Scanning"]
-        assert groups[0]["commands"] == ["ping", "curl"]
-        assert groups[1]["commands"] == ["nmap"]
+            cfg = self._cfg(tmp, workspace_enabled=False)
+            try:
+                ensure_session_workspace("session-1", cfg)
+                assert False, "expected disabled workspace to reject operations"
+            except WorkspaceDisabled:
+                pass
+
+    def test_session_workspace_uses_hashed_session_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            path = ensure_session_workspace("tok_secret_value", cfg)
+
+            assert path.name == session_workspace_name("tok_secret_value")
+            assert "tok_secret_value" not in str(path)
+            assert path.exists()
+            mode = path.stat().st_mode & 0o7777
+            assert WORKSPACE_DIR_MODE == 0o3730
+            assert mode & 0o1730 == 0o1730
+            assert not mode & 0o004
+
+    def test_session_workspace_logs_chmod_failures_without_blocking_creation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            with mock.patch("workspace.os.chmod", side_effect=OSError("chmod blocked")):
+                with mock.patch.object(workspace_module.log, "warning") as warning:
+                    path = ensure_session_workspace("session-1", cfg)
+
+            assert path.exists()
+            warning.assert_called_once()
+            args = warning.call_args.args
+            assert args[0] == "WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s"
+            assert args[1] == path
+            assert args[2] == WORKSPACE_DIR_MODE
+
+    def test_write_read_list_delete_text_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+
+            written = write_workspace_text_file("session-1", "targets.txt", "darklab.sh\n", cfg)
+            assert written == {"path": "targets.txt", "size": 11}
+            written_path = resolve_workspace_path("session-1", "targets.txt", cfg)
+            assert (written_path.stat().st_mode & 0o777) == WORKSPACE_FILE_MODE
+            assert not written_path.stat().st_mode & 0o007
+            assert read_workspace_text_file("session-1", "targets.txt", cfg) == "darklab.sh\n"
+            assert list_workspace_files("session-1", cfg)[0]["path"] == "targets.txt"
+            assert workspace_usage("session-1", cfg).bytes_used == 11
+
+            delete_workspace_file("session-1", "targets.txt", cfg)
+            assert list_workspace_files("session-1", cfg) == []
+
+    def test_prepare_workspace_file_for_command_uses_limited_write_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            write_workspace_text_file("session-1", "output.txt", "old\n", cfg)
+            path = resolve_workspace_path("session-1", "output.txt", cfg)
+
+            prepare_workspace_file_for_command(path, mode="write")
+
+            assert (path.stat().st_mode & 0o777) == WORKSPACE_COMMAND_WRITE_FILE_MODE
+            assert not path.stat().st_mode & 0o007
+
+    def test_prepare_workspace_directory_for_command_does_not_temporarily_widen_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "amass"
+            path.mkdir()
+
+            with mock.patch("workspace.shutil.which", return_value="/usr/bin/sudo"), \
+                    mock.patch("workspace.pwd.getpwnam", return_value=object()), \
+                    mock.patch("workspace.subprocess.run") as run:
+                prepare_workspace_directory_for_command(path, mode="read_write")
+
+            commands = [call.args[0] for call in run.call_args_list]
+            assert commands == [
+                ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "chmod", "3770", str(path)],
+            ]
+
+    def test_delete_workspace_file_falls_back_to_scanner_owner_for_nested_command_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            write_workspace_text_file("session-1", "nmap-dot/amass.dot", "digraph {}\n", cfg)
+            path = resolve_workspace_path("session-1", "nmap-dot/amass.dot", cfg)
+
+            with mock.patch("workspace.Path.unlink", side_effect=PermissionError), \
+                    mock.patch("workspace.shutil.which", return_value="/usr/bin/sudo"), \
+                    mock.patch("workspace.pwd.getpwnam", return_value=object()), \
+                    mock.patch("workspace.subprocess.run") as run:
+                delete_workspace_file("session-1", "nmap-dot/amass.dot", cfg)
+
+            run.assert_called_once_with(
+                ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "rm", "--", str(path)],
+                check=True,
+                stdout=mock.ANY,
+                stderr=mock.ANY,
+                timeout=5,
+            )
+
+    def test_workspace_path_info_and_delete_remove_folders_recursively(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            create_workspace_directory("session-1", "reports/empty", cfg)
+            write_workspace_text_file("session-1", "reports/one.txt", "1", cfg)
+            write_workspace_text_file("session-1", "reports/nested/two.txt", "2", cfg)
+
+            assert workspace_path_info("session-1", "reports", cfg) == {
+                "path": "reports",
+                "kind": "directory",
+                "file_count": 2,
+            }
+
+            result = delete_workspace_path("session-1", "reports", cfg)
+
+            assert result.kind == "directory"
+            assert result.file_count == 2
+            assert result.path == "reports"
+            assert list_workspace_files("session-1", cfg) == []
+            assert list_workspace_directories("session-1", cfg) == []
+
+    def test_create_and_list_empty_directories_without_file_usage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+
+            created = create_workspace_directory("session-1", "reports/empty", cfg)
+
+            assert created == {"path": "reports/empty"}
+            assert {item["path"] for item in list_workspace_directories("session-1", cfg)} == {
+                "reports",
+                "reports/empty",
+            }
+            assert list_workspace_files("session-1", cfg) == []
+            assert workspace_usage("session-1", cfg).file_count == 0
+
+    def test_rejects_absolute_traversal_and_backslash_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            for bad_path in ["/etc/passwd", "../escape", "safe/../../escape", "safe\\.txt"]:
+                try:
+                    resolve_workspace_path("session-1", bad_path, cfg, ensure_parent=True)
+                    assert False, f"expected invalid path rejection for {bad_path}"
+                except InvalidWorkspacePath:
+                    pass
+
+    def test_allows_hidden_files_that_are_listed_by_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            hidden = resolve_workspace_path("session-1", ".config/amass.txt", cfg, ensure_parent=True)
+
+            assert hidden.name == "amass.txt"
+            assert hidden.parent.name == ".config"
+
+    def test_rejects_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            root = ensure_session_workspace("session-1", cfg)
+            outside = Path(tmp) / "outside"
+            outside.mkdir()
+            (root / "link").symlink_to(outside, target_is_directory=True)
+
+            try:
+                resolve_workspace_path("session-1", "link/file.txt", cfg)
+                assert False, "expected symlink path rejection"
+            except InvalidWorkspacePath:
+                pass
+
+    def test_rejects_final_component_symlink_swaps(self):
+        if not hasattr(os, "O_NOFOLLOW"):
+            pytest.skip("final-component no-follow open is not supported on this platform")
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            outside = Path(tmp) / "outside.txt"
+            outside.write_text("outside\n", encoding="utf-8")
+            real_resolve = workspace_module.resolve_workspace_path
+
+            def swap_final_component(session_id, relative_path, active_cfg=None, *, ensure_parent=False):
+                path = real_resolve(session_id, relative_path, active_cfg, ensure_parent=ensure_parent)
+                if path.exists() or path.is_symlink():
+                    path.unlink()
+                path.symlink_to(outside)
+                return path
+
+            operations = [
+                lambda: read_workspace_text_file("session-1", "target.txt", cfg),
+                lambda: workspace_module.open_workspace_file_for_download("session-1", "target.txt", cfg),
+                lambda: write_workspace_text_file("session-1", "target.txt", "replacement\n", cfg),
+                lambda: delete_workspace_file("session-1", "target.txt", cfg),
+                lambda: workspace_path_info("session-1", "target.txt", cfg),
+            ]
+            workspace_root = ensure_session_workspace("session-1", cfg)
+            for operation in operations:
+                target = workspace_root / "target.txt"
+                if target.exists() or target.is_symlink():
+                    target.unlink()
+                target.write_text("inside\n", encoding="utf-8")
+                with mock.patch("workspace.resolve_workspace_path", side_effect=swap_final_component):
+                    with pytest.raises(InvalidWorkspacePath):
+                        operation()
+                assert outside.read_text(encoding="utf-8") == "outside\n"
+
+    def test_enforces_file_size_quota_and_file_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(
+                tmp,
+                workspace_quota_mb=0,
+                workspace_max_file_mb=0,
+                workspace_max_files=1,
+            )
+            try:
+                write_workspace_text_file("session-1", "too-big.txt", "x", cfg)
+                assert False, "expected max file size rejection"
+            except WorkspaceQuotaExceeded:
+                pass
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp, workspace_max_files=1)
+            write_workspace_text_file("session-1", "one.txt", "1", cfg)
+            try:
+                write_workspace_text_file("session-1", "two.txt", "2", cfg)
+                assert False, "expected max file count rejection"
+            except WorkspaceQuotaExceeded:
+                pass
+
+    def test_cleanup_removes_only_expired_session_directories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
+            old_root = ensure_session_workspace("old-session", cfg)
+            fresh_root = ensure_session_workspace("fresh-session", cfg)
+            unrelated = Path(tmp) / "manual"
+            unrelated.mkdir()
+            old_ts = 1000
+            fresh_ts = 2000
+            os.utime(old_root, (old_ts, old_ts))
+            os.utime(fresh_root, (fresh_ts, fresh_ts))
+
+            removed = cleanup_inactive_workspaces(cfg, now=4601)
+
+            assert removed == 1
+            assert not old_root.exists()
+            assert fresh_root.exists()
+            assert unrelated.exists()
+
+    def test_cleanup_uses_session_directory_activity_not_file_mtime(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
+            root = ensure_session_workspace("session-1", cfg)
+            file_path = root / "fresh-output.txt"
+            file_path.write_text("fresh\n", encoding="utf-8")
+            old_ts = 1000
+            fresh_ts = 4500
+            os.utime(root, (old_ts, old_ts))
+            os.utime(file_path, (fresh_ts, fresh_ts))
+
+            removed = cleanup_inactive_workspaces(cfg, now=4601)
+
+            assert removed == 1
+            assert not root.exists()
+
+    def test_touch_session_workspace_extends_cleanup_activity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
+            root = ensure_session_workspace("session-1", cfg)
+            os.utime(root, (1000, 1000))
+
+            touch_session_workspace("session-1", cfg)
+
+            removed = cleanup_inactive_workspaces(cfg, now=4601)
+
+            assert removed == 0
+            assert root.exists()
+
+    def test_cleanup_can_skip_current_session_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp, workspace_inactivity_ttl_hours=1)
+            current_root = ensure_session_workspace("current-session", cfg)
+            old_root = ensure_session_workspace("old-session", cfg)
+            os.utime(current_root, (1000, 1000))
+            os.utime(old_root, (1000, 1000))
+
+            removed = cleanup_inactive_workspaces(cfg, now=4601, skip_session_id="current-session")
+
+            assert removed == 1
+            assert current_root.exists()
+            assert not old_root.exists()
+
+
+class TestEntrypointWorkspaceRepair:
+    def test_workspace_repair_targets_children_inside_session_directories(self):
+        entrypoint = (REPO_ROOT / "entrypoint.sh").read_text()
+
+        assert "chown -R appuser:appuser \"$WORKSPACE_ROOT\"" not in entrypoint
+        assert "chown appuser:appuser \"$WORKSPACE_ROOT\"" in entrypoint
+        assert "-exec chown appuser:appuser {} \\;" in entrypoint
+        assert "find \"$WORKSPACE_ROOT\" -mindepth 2 -exec chown scanner:appuser" not in entrypoint
+        assert "find \"$session_dir\" -mindepth 1 -exec chown scanner:appuser" in entrypoint
+        assert "find \"$session_dir\" -mindepth 1 -type d -exec chmod 3770" in entrypoint
+        assert "find \"$session_dir\" -mindepth 1 -type f -exec chmod 640" in entrypoint
+
+
+class TestDerivedCommandRegistry:
+    def test_commands_registry_loader_normalizes_policy_and_autocomplete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: PING
+                category: Network
+                policy:
+                  allow:
+                    - PING
+                    - ping
+                  deny:
+                    - ping -f
+                workspace_flags:
+                  - flag: -iL
+                    mode: read
+                    value: separate
+                    format: text
+                  - flag: -oN
+                    mode: write
+                    value: separate_or_attached
+                    format: text
+                  - flag: ""
+                    mode: write
+                runtime_adaptations:
+                  inject_flags:
+                    - flags:
+                        - -sT
+                      position: prepend
+                      unless_any:
+                        - -h
+                      unless_any_regex:
+                        - "^-s[A-Z]"
+                    - flags:
+                        - env
+                        - XDG_CONFIG_HOME={session_workspace}
+                      position: command_prefix
+                      requires_workspace: true
+                  managed_workspace_directory:
+                    flag: -dir
+                    directory: ping-db
+                    subcommands:
+                      - stats
+                    reject_message: ping stats uses the managed ping-db session directory.
+                  environment:
+                    - name: XDG_CONFIG_HOME
+                      value: "{managed_workspace_parent}"
+                      managed_directory_flag: -dir
+                autocomplete:
+                  flags:
+                    - value: -c
+                      description: Count
+                      takes_value: true
+                      suggest:
+                        - value: "4"
+                          description: Four probes
+                    - value: -v
+                      description: Verbose
+                      allow_grouping: true
+                    - value: -d
+                      description: Target domain
+                      takes_value: true
+                      value_type: domain
+                    - value: -w
+                      description: DNS wordlist
+                      takes_value: true
+                      value_type: wordlist
+                      wordlist_category: dns
+                  subcommands:
+                    stats:
+                      description: Show ping stats
+                      flags:
+                        - value: --json
+                          description: JSON output
+                      examples:
+                        - value: ping stats --json
+                          description: Export stats
+                  examples:
+                    - value: ping -c 4 darklab.sh
+                      description: Send four probes
+            pipe_helpers:
+              - root: grep
+                autocomplete:
+                  pipe:
+                    enabled: true
+                    description: Filter lines
+                  flags:
+                    - value: -i
+                      description: Ignore case
+            """))
+            with mock.patch("commands.COMMANDS_REGISTRY_FILE", str(path)):
+                registry = load_commands_registry()
+
+        ping = registry["commands"][0]
+        assert ping["root"] == "ping"
+        assert ping["category"] == "Network"
+        assert ping["policy"]["allow"] == ["ping"]
+        assert ping["policy"]["deny"] == ["ping -f"]
+        assert ping["allow_grouping_flags"] == ["-v"]
+        assert ping["workspace_flags"] == [
+            {"flag": "-iL", "mode": "read", "value": "separate", "format": "text"},
+            {"flag": "-oN", "mode": "write", "value": "separate_or_attached", "format": "text"},
+        ]
+        assert ping["runtime_adaptations"]["inject_flags"] == [
+            {
+                "flags": ["-sT"],
+                "position": "prepend",
+                "unless_any": ["-h"],
+                "unless_any_regex": ["^-s[A-Z]"],
+            },
+            {
+                "flags": ["env", "XDG_CONFIG_HOME={session_workspace}"],
+                "position": "command_prefix",
+                "unless_any": [],
+                "unless_any_regex": [],
+                "requires_workspace": True,
+            },
+        ]
+        assert ping["runtime_adaptations"]["managed_workspace_directory"]["flag"] == "-dir"
+        assert ping["runtime_adaptations"]["managed_workspace_directory"]["directory"] == "ping-db"
+        assert ping["runtime_adaptations"]["environment"] == [{
+            "name": "XDG_CONFIG_HOME",
+            "value": "{managed_workspace_parent}",
+            "managed_directory_flag": "-dir",
+        }]
+        assert ping["autocomplete"]["flags"][0] == {"value": "-c", "description": "Count"}
+        assert ping["autocomplete"]["flags"][1] == {"value": "-v", "description": "Verbose"}
+        assert ping["autocomplete"]["flags"][2] == {"value": "-d", "description": "Target domain", "value_type": "domain"}
+        assert ping["autocomplete"]["flags"][3] == {
+            "value": "-w",
+            "description": "DNS wordlist",
+            "value_type": "wordlist",
+            "wordlist_category": "dns",
+        }
+        assert ping["autocomplete"]["expects_value"] == ["-c", "-d", "-w"]
+        assert ping["autocomplete"]["arg_hints"]["-c"][0]["value"] == "4"
+        assert ping["autocomplete"]["arg_hints"]["-d"][0]["value"] == "<domain>"
+        assert ping["autocomplete"]["arg_hints"]["-d"][0]["value_type"] == "domain"
+        assert ping["autocomplete"]["arg_hints"]["-w"][0]["value"] == "<wordlist>"
+        assert ping["autocomplete"]["arg_hints"]["-w"][0]["value_type"] == "wordlist"
+        assert ping["autocomplete"]["arg_hints"]["-w"][0]["wordlist_category"] == "dns"
+        assert ping["autocomplete"]["arg_hints"]["__positional__"][0]["value"] == "stats"
+        assert ping["autocomplete"]["subcommands"]["stats"]["description"] == "Show ping stats"
+        assert ping["autocomplete"]["subcommands"]["stats"]["flags"][0]["value"] == "--json"
+        assert ping["autocomplete"]["subcommands"]["stats"]["examples"][0]["value"] == "ping stats --json"
+        assert ping["autocomplete"]["examples"][0]["value"] == "ping -c 4 darklab.sh"
+        grep = registry["pipe_helpers"][0]
+        assert grep["root"] == "grep"
+        assert grep["autocomplete"]["pipe_command"] is True
+        assert grep["autocomplete"]["pipe_description"] == "Filter lines"
+
+    def test_commands_registry_local_overlay_appends_policy_and_context(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = Path(tmp) / "commands.yaml"
+            local_path = Path(tmp) / "commands.local.yaml"
+            base_path.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: ping
+                category: Network
+                policy:
+                  allow:
+                    - ping
+                  deny: []
+                workspace_flags:
+                  - flag: -iL
+                    mode: read
+                    value: separate
+                autocomplete:
+                  flags:
+                    - value: -c
+                      description: Count
+            pipe_helpers:
+              - root: grep
+                autocomplete:
+                  pipe:
+                    enabled: true
+                    description: Filter lines
+            """))
+            local_path.write_text(textwrap.dedent("""
+            commands:
+              - root: ping
+                category: Network Diagnostics
+                policy:
+                  allow:
+                    - ping -c
+                  deny:
+                    - ping -f
+                workspace_flags:
+                  - flag: -oN
+                    mode: write
+                    value: separate_or_attached
+                autocomplete:
+                  examples:
+                    - value: ping -c 4 darklab.sh
+                      description: Send four probes
+                  subcommands:
+                    stats:
+                      description: Show ping stats
+                      flags:
+                        - value: --json
+                          description: JSON output
+              - root: curl
+                category: Network Diagnostics
+                policy:
+                  allow:
+                    - curl
+                  deny:
+                    - curl -O
+                autocomplete:
+                  flags:
+                    - value: -I
+                      description: HEAD request
+            pipe_helpers:
+              - root: grep
+                autocomplete:
+                  flags:
+                    - value: -i
+                      description: Ignore case
+            """))
+            with mock.patch("commands.COMMANDS_REGISTRY_FILE", str(base_path)):
+                registry = load_commands_registry()
+
+        by_root = {entry["root"]: entry for entry in registry["commands"]}
+        assert [entry["root"] for entry in registry["commands"]] == ["ping", "curl"]
+        assert by_root["ping"]["category"] == "Network Diagnostics"
+        assert by_root["ping"]["policy"]["allow"] == ["ping", "ping -c"]
+        assert by_root["ping"]["policy"]["deny"] == ["ping -f"]
+        assert by_root["ping"]["workspace_flags"] == [
+            {"flag": "-iL", "mode": "read", "value": "separate"},
+            {"flag": "-oN", "mode": "write", "value": "separate_or_attached"},
+        ]
+        assert by_root["ping"]["autocomplete"]["flags"][0]["value"] == "-c"
+        assert by_root["ping"]["autocomplete"]["examples"][0]["value"] == "ping -c 4 darklab.sh"
+        assert by_root["ping"]["autocomplete"]["subcommands"]["stats"]["flags"][0]["value"] == "--json"
+        assert by_root["ping"]["autocomplete"]["arg_hints"]["__positional__"][0]["value"] == "stats"
+        assert by_root["curl"]["policy"]["deny"] == ["curl -O"]
+        grep = registry["pipe_helpers"][0]
+        assert grep["autocomplete"]["pipe_command"] is True
+        assert grep["autocomplete"]["flags"][0]["value"] == "-i"
+
+    def test_real_registry_amass_uses_subcommand_scoped_autocomplete(self):
+        context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
+        amass = context["amass"]
+
+        assert [item["value"] for item in amass["flags"]] == ["-h"]
+        assert [item["value"] for item in amass["arg_hints"]["__positional__"]] == [
+            "enum",
+            "subs",
+            "track",
+            "viz",
+        ]
+        assert "-names" in {item["value"] for item in amass["subcommands"]["subs"]["flags"]}
+        assert "-d3" not in {item["value"] for item in amass["subcommands"]["subs"]["flags"]}
+        assert "-d3" in {item["value"] for item in amass["subcommands"]["viz"]["flags"]}
+        assert "-names" not in {item["value"] for item in amass["subcommands"]["viz"]["flags"]}
+        assert amass["subcommands"]["enum"]["arg_hints"]["-d"][0]["value_type"] == "domain"
+        assert amass["subcommands"]["subs"]["arg_hints"]["-d"][0]["value_type"] == "domain"
+        assert "amass subs -d darklab.sh -show" in {
+            item["value"] for item in amass["subcommands"]["subs"]["examples"]
+        }
+        assert "-df" in amass["subcommands"]["enum"]["workspace_file_flags"]
+        assert "-config" in amass["subcommands"]["subs"]["workspace_file_flags"]
+        assert "-o" not in amass["subcommands"]["subs"].get("workspace_file_flags", [])
+
+    def test_real_registry_openssl_uses_subcommand_scoped_autocomplete(self):
+        context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
+        openssl = context["openssl"]
+
+        assert [item["value"] for item in openssl["arg_hints"]["__positional__"]] == [
+            "s_client",
+            "ciphers",
+        ]
+        s_client_flags = {item["value"] for item in openssl["subcommands"]["s_client"]["flags"]}
+        ciphers_flags = {item["value"] for item in openssl["subcommands"]["ciphers"]["flags"]}
+        assert "-connect" in s_client_flags
+        assert "-CAfile" in s_client_flags
+        assert "-stdname" not in s_client_flags
+        assert "-stdname" in ciphers_flags
+        assert "-connect" not in ciphers_flags
+        assert openssl["subcommands"]["s_client"]["workspace_file_flags"] == ["-CAfile"]
+
+    def test_real_registry_gobuster_uses_subcommand_scoped_autocomplete(self):
+        context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
+        gobuster = context["gobuster"]
+
+        assert [item["value"] for item in gobuster["arg_hints"]["__positional__"]] == [
+            "dir",
+            "dns",
+            "vhost",
+            "fuzz",
+            "s3",
+            "gcs",
+            "tftp",
+        ]
+        dir_flags = {item["value"] for item in gobuster["subcommands"]["dir"]["flags"]}
+        dns_flags = {item["value"] for item in gobuster["subcommands"]["dns"]["flags"]}
+        vhost_flags = {item["value"] for item in gobuster["subcommands"]["vhost"]["flags"]}
+        assert "-x" in dir_flags
+        assert "--append-domain" not in dir_flags
+        assert "-r" in dns_flags
+        assert "-x" not in dns_flags
+        assert "--append-domain" in vhost_flags
+        assert "-d" not in vhost_flags
+        assert gobuster["subcommands"]["dir"]["workspace_file_flags"] == ["-w"]
+        assert gobuster["subcommands"]["dir"]["arg_hints"]["-w"][0]["value_type"] == "wordlist"
+        assert gobuster["subcommands"]["dir"]["arg_hints"]["-w"][0]["wordlist_category"] == "web-content"
+
+    def test_real_registry_wordlist_metadata_covers_known_wordlist_flags(self):
+        context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
+
+        assert context["dnsrecon"]["arg_hints"]["-D"][0]["wordlist_category"] == "dns"
+        assert context["dnsx"]["arg_hints"]["-w"][0]["wordlist_category"] == "dns"
+        assert context["fierce"]["arg_hints"]["--subdomain-file"][0]["wordlist_category"] == "dns"
+        assert context["dnsenum"]["arg_hints"]["-f"][0]["wordlist_category"] == "dns"
+        assert context["ffuf"]["arg_hints"]["-w"][0]["value_type"] == "wordlist"
+        assert context["ffuf"]["arg_hints"]["-w"][0]["wordlist_category"] == [
+            "web-content",
+            "api",
+            "fuzzing",
+            "dns",
+        ]
+
+    def test_real_registry_restricted_input_metadata_covers_known_target_slots(self):
+        context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
+
+        expectations = [
+            ("curl", "__positional__", "url"),
+            ("wget", "-i", "url"),
+            ("subfinder", "-dL", "domain"),
+            ("amass", "enum:-df", "domain"),
+            ("amass", "enum:-nf", "host"),
+            ("dnsx", "-l", "host"),
+            ("pd-httpx", "-l", "url"),
+            ("gobuster", "dir:-u", "url"),
+            ("gobuster", "tftp:-s", "host"),
+            ("ffuf", "-u", "url"),
+            ("naabu", "-l", "host"),
+            ("katana", "-list", "url"),
+            ("wafw00f", "-i", "url"),
+            ("masscan", "-iL", "target"),
+            ("rustscan", "__positional__", "domain"),
+            ("nmap", "-iL", "target"),
+            ("testssl", "__positional__", "url"),
+            ("wpscan", "--url", "url"),
+            ("nuclei", "-l", "target"),
+        ]
+        for root, trigger, value_type in expectations:
+            spec = context[root]
+            if ":" in trigger:
+                subcommand, trigger = trigger.split(":", 1)
+                spec = spec["subcommands"][subcommand]
+            assert spec["arg_hints"][trigger][0]["value_type"] == value_type
+
+    def test_autocomplete_context_can_be_derived_from_commands_registry(self):
+        context = autocomplete_context_from_commands_registry({
+            "commands": [
+                {"root": "ping", "autocomplete": {"examples": [{"value": "ping -c 4 darklab.sh"}]}},
+                {"root": "empty", "autocomplete": {}},
+            ],
+            "pipe_helpers": [
+                {"root": "grep", "autocomplete": {"pipe_command": True}},
+            ],
+        })
+        assert list(context) == ["ping", "grep"]
+        assert context["ping"]["examples"][0]["value"] == "ping -c 4 darklab.sh"
+        assert context["grep"]["pipe_command"] is True
+
+    def test_builtin_autocomplete_registry_uses_app_owned_yaml(self):
+        context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
+
+        assert context["commands"]["flags"][0]["value"] == "--built-in"
+        assert context["runs"]["flags"][-1]["value"] == "--json"
+        assert context["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
+        assert [item["value"] for item in context["var"]["arg_hints"]["__positional__"]] == [
+            "list",
+            "set",
+            "unset",
+        ]
+        assert context["var"]["close_after"] == {"list": 0, "set": 2, "unset": 1}
+
+    def test_builtin_autocomplete_workspace_roots_follow_feature_flag(self):
+        disabled = load_autocomplete_context_from_commands_registry({"workspace_enabled": False})
+        enabled = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
+
+        assert {"file", "cat", "ls", "rm"}.isdisjoint(disabled)
+        assert {"file", "cat", "ls", "rm"}.issubset(enabled)
+        assert [item["value"] for item in enabled["file"]["arg_hints"]["__positional__"]] == [
+            "list <folder>",
+            "ls <folder>",
+            "show <file>",
+            "add <file>",
+            "add-dir <folder>",
+            "edit <file>",
+            "download <file>",
+            "delete <file>",
+            "help",
+        ]
+        assert "rm" in enabled["file"]["expects_value"]
+        assert "rm" in enabled["file"]["arg_hints"]
+
+    def test_real_registry_workspace_file_flags_cover_supported_file_io_tools(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 40,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            session_id = "registry-workspace-flags"
+            for path, text in {
+                "urls.txt": "https://ip.darklab.sh\n",
+                "tls-targets.txt": "ip.darklab.sh\n",
+                "subdomains.txt": "www.darklab.sh\n",
+                "domains.txt": "darklab.sh\n",
+                "targets.txt": "ip.darklab.sh\n",
+                "excluded-hosts.txt": "skip.darklab.sh\n",
+                "httpx-config.yaml": "threads: 5\n",
+                "katana-config.yaml": "depth: 1\n",
+                "katana-field-config.yaml": "rules: []\n",
+                "nuclei-config.yaml": "rate-limit: 10\n",
+                "nuclei-report-config.yaml": "markdown: {}\n",
+                "nuclei-resume.cfg": "resume\n",
+                "ports.txt": "80\n443\n",
+                "resolvers.txt": "1.1.1.1\n",
+                "request.txt": "GET / HTTP/1.1\nHost: ip.darklab.sh\n\n",
+                "subfinder-config.yaml": "recursive: false\n",
+                "subfinder-provider-config.yaml": "github: []\n",
+                "ca.pem": "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n",
+                "nmap-script-args.txt": "http.useragent=darklab\n",
+            }.items():
+                write_workspace_text_file(session_id, path, text, cfg)
+
+            cases = {
+                "wget -i urls.txt -O response.html": (["urls.txt"], ["response.html"]),
+                "openssl s_client -connect ip.darklab.sh:443 -CAfile ca.pem": (["ca.pem"], []),
+                "sslscan --xml sslscan.xml ip.darklab.sh": ([], ["sslscan.xml"]),
+                "sslyze --targets_in tls-targets.txt --json_out sslyze.json": (
+                    ["tls-targets.txt"], ["sslyze.json"],
+                ),
+                "dnsrecon -d darklab.sh -D subdomains.txt -c dnsrecon.csv": (
+                    ["subdomains.txt"], ["dnsrecon.csv"],
+                ),
+                "subfinder -dL domains.txt -o subfinder.txt": (["domains.txt"], ["subfinder.txt"]),
+                "subfinder -dL domains.txt -oD subfinder-by-domain": (
+                    ["domains.txt"], ["subfinder-by-domain"],
+                ),
+                "subfinder -d darklab.sh -config subfinder-config.yaml -pc subfinder-provider-config.yaml -rL resolvers.txt": (
+                    ["subfinder-config.yaml", "subfinder-provider-config.yaml", "resolvers.txt"], [],
+                ),
+                "amass enum -df domains.txt -timeout 10": (["domains.txt"], ["amass"]),
+                "amass subs -d darklab.sh -names": ([], ["amass"]),
+                "amass subs -d darklab.sh -names -dir amass": ([], ["amass"]),
+                "amass subs -d darklab.sh -names -o amass-subdomains.txt": (
+                    [], ["amass-subdomains.txt", "amass"],
+                ),
+                "amass track -d darklab.sh": ([], ["amass"]),
+                "amass viz -d darklab.sh -d3 -o amass-viz": ([], ["amass-viz", "amass"]),
+                "dnsx -l subdomains.txt -o dnsx.txt": (["subdomains.txt"], ["dnsx.txt"]),
+                "pd-httpx -rr request.txt -status-code -o httpx-raw.txt": (
+                    ["request.txt"], ["httpx-raw.txt"],
+                ),
+                "pd-httpx -l urls.txt -status-code -sr -srd httpx-responses": (
+                    ["urls.txt"], ["httpx-responses"],
+                ),
+                "pd-httpx -l urls.txt -screenshot -srd httpx-screenshots -config httpx-config.yaml": (
+                    ["urls.txt", "httpx-config.yaml"], ["httpx-screenshots"],
+                ),
+                "wafw00f -i urls.txt -o wafw00f.txt": (["urls.txt"], ["wafw00f.txt"]),
+                "masscan -iL targets.txt -oL masscan.txt -p 80": (["targets.txt"], ["masscan.txt"]),
+                "testssl --fast --jsonfile testssl.json https://ip.darklab.sh": ([], ["testssl.json"]),
+                "nikto -h ip.darklab.sh -o nikto.txt": ([], ["nikto.txt"]),
+                "wpscan --url https://ip.darklab.sh -o wpscan.txt": ([], ["wpscan.txt"]),
+                "naabu -host ip.darklab.sh -pf ports.txt -ef excluded-hosts.txt -o naabu-results.txt": (
+                    ["ports.txt", "excluded-hosts.txt"], ["naabu-results.txt"],
+                ),
+                (
+                    "katana -u https://ip.darklab.sh -config katana-config.yaml "
+                    "-flc katana-field-config.yaml -elog katana-errors.log"
+                ): (
+                    ["katana-config.yaml", "katana-field-config.yaml"], ["katana-errors.log"],
+                ),
+                "katana -u https://ip.darklab.sh -sr -srd katana-responses": (
+                    [], ["katana-responses"],
+                ),
+                "katana -u https://ip.darklab.sh -sf fqdn -sfd katana-fields": (
+                    [], ["katana-fields"],
+                ),
+                "nuclei -u https://ip.darklab.sh -sresp -srd nuclei-responses": (
+                    [], ["nuclei-responses"],
+                ),
+                "nuclei -u https://ip.darklab.sh -me nuclei-markdown": (
+                    [], ["nuclei-markdown"],
+                ),
+                (
+                    "nuclei -u https://ip.darklab.sh -je nuclei-results.json "
+                    "-jle nuclei-results.jsonl -se nuclei-results.sarif"
+                ): (
+                    [], ["nuclei-results.json", "nuclei-results.jsonl", "nuclei-results.sarif"],
+                ),
+                (
+                    "nuclei -u https://ip.darklab.sh -tlog nuclei-trace.log "
+                    "-elog nuclei-errors.log -config nuclei-config.yaml "
+                    "-rc nuclei-report-config.yaml -resume nuclei-resume.cfg"
+                ): (
+                    ["nuclei-config.yaml", "nuclei-report-config.yaml", "nuclei-resume.cfg"],
+                    ["nuclei-trace.log", "nuclei-errors.log"],
+                ),
+                "nmap --script http-headers --script-args-file nmap-script-args.txt ip.darklab.sh": (
+                    ["nmap-script-args.txt"], [],
+                ),
+            }
+
+            registry = commands.load_commands_registry()
+            with mock.patch("commands.load_commands_registry", return_value=registry):
+                command_policy = commands.load_command_policy()
+                allow_grouping = commands.load_allow_grouping_flags()
+                workspace_flags = commands._workspace_flag_specs_by_root()
+                runtime_adaptations = commands._runtime_adaptations_by_root()
+
+            with mock.patch("commands.load_command_policy", return_value=command_policy), \
+                 mock.patch("commands.load_allow_grouping_flags", return_value=allow_grouping), \
+                 mock.patch("commands._workspace_flag_specs_by_root", return_value=workspace_flags), \
+                 mock.patch("commands._runtime_adaptations_by_root", return_value=runtime_adaptations):
+                for command, (reads, writes) in cases.items():
+                    result = commands.validate_command(command, session_id=session_id, cfg=cfg)
+                    assert result.allowed, f"{command!r} should be workspace-allowed: {result.reason}"
+                    assert result.workspace_reads == reads
+                    assert result.workspace_writes == writes
+                    exec_tokens = commands.split_command_argv(result.exec_command)
+                    if command.startswith("amass "):
+                        assert exec_tokens[0] == "env"
+                        assert exec_tokens[1].startswith("XDG_CONFIG_HOME=")
+                        assert exec_tokens[2] == "amass"
+                        assert "-dir" in exec_tokens
+                    for original in reads + writes:
+                        if command.startswith("amass ") and original == commands.AMASS_DEFAULT_WORKSPACE_DIR:
+                            continue
+                        assert original not in exec_tokens
+
+                result = commands.validate_command(
+                    "amass subs -d darklab.sh -names -dir custom-amass-db",
+                    session_id=session_id,
+                    cfg=cfg,
+                )
+                assert not result.allowed
+                assert "managed amass session directory" in result.reason
+
+                result = commands.validate_command(
+                    "amass enum -d darklab.sh -o unmanaged.txt",
+                    session_id=session_id,
+                    cfg=cfg,
+                )
+                assert not result.allowed
+                assert "Command not allowed" in result.reason
+
+    def test_workspace_rewrites_quote_shell_sensitive_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace_root = Path(tmp) / "work space;$(subshell)&`tick`"
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": str(workspace_root),
+                "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            session_id = "quote-sensitive-paths"
+            write_workspace_text_file(session_id, "targets & dollars $.txt", "ip.darklab.sh\n", cfg)
+
+            with _patched_command_validation_helpers():
+                result = commands.validate_command(
+                    "masscan -iL 'targets & dollars $.txt' -oL 'masscan output $.txt' -p 80",
+                    session_id=session_id,
+                    cfg=cfg,
+                )
+
+            assert result.allowed, result.reason
+            assert result.workspace_reads == ["targets & dollars $.txt"]
+            assert result.workspace_writes == ["masscan output $.txt"]
+            assert ";$(subshell)&`tick`" in result.exec_command
+            expected_output_path = resolve_workspace_path(session_id, "masscan output $.txt", cfg)
+            assert shlex.quote(str(expected_output_path)) in result.exec_command
+            assert commands.split_command_argv(result.exec_command) == [
+                "masscan",
+                "-iL",
+                str(resolve_workspace_path(session_id, "targets & dollars $.txt", cfg)),
+                "-oL",
+                str(expected_output_path),
+                "-p",
+                "80",
+            ]
+
+    def test_amass_runtime_environment_quotes_rewritten_workspace_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace_root = Path(tmp) / "amass root;$(subshell)&`tick`"
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": str(workspace_root),
+                "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+
+            with _patched_command_validation_helpers():
+                result = commands.validate_command(
+                    "amass subs -d darklab.sh -names",
+                    session_id="amass-quote-sensitive-paths",
+                    cfg=cfg,
+                )
+
+            assert result.allowed, result.reason
+            assert result.exec_command.startswith("env ")
+            assert ";$(subshell)&`tick`" in result.exec_command
+            tokens = commands.split_command_argv(result.exec_command)
+            amass_dir = resolve_workspace_path("amass-quote-sensitive-paths", "amass", cfg, ensure_parent=True)
+            assert tokens[:3] == [
+                "env",
+                f"XDG_CONFIG_HOME={amass_dir.parent}",
+                "amass",
+            ]
+            assert tokens[-2:] == ["-dir", str(amass_dir)]
+
+    def test_autocomplete_context_filters_workspace_feature_hints(self):
+        registry = {
+            "commands": [
+                {
+                    "root": "nmap",
+                    "autocomplete": {
+                        "examples": [
+                            {"value": "nmap ip.darklab.sh", "description": "Scan host"},
+                            {
+                                "value": "nmap -iL targets.txt -oN nmap.txt",
+                                "description": "Scan file targets",
+                                "feature_required": "workspace",
+                            },
+                        ],
+                        "flags": [
+                            {"value": "-sV", "description": "Service detection"},
+                            {
+                                "value": "-iL",
+                                "description": "Read session file",
+                                "feature_required": "workspace",
+                            },
+                        ],
+                        "expects_value": ["-iL"],
+                        "arg_hints": {
+                            "-iL": [{"value": "targets.txt", "description": "Targets file"}],
+                        },
+                        "subcommands": {
+                            "subs": {
+                                "flags": [
+                                    {"value": "-names", "description": "Print names"},
+                                    {
+                                        "value": "-o",
+                                        "description": "Write session file",
+                                        "feature_required": "workspace",
+                                    },
+                                ],
+                                "expects_value": ["-o"],
+                                "arg_hints": {
+                                    "-o": [{"value": "subs.txt", "description": "Output file"}],
+                                },
+                                "examples": [
+                                    {"value": "nmap subs -names"},
+                                    {
+                                        "value": "nmap subs -o subs.txt",
+                                        "feature_required": "workspace",
+                                    },
+                                ],
+                            },
+                        },
+                    },
+                },
+            ],
+        }
+
+        disabled = autocomplete_context_from_commands_registry(registry, cfg={"workspace_enabled": False})
+        enabled = autocomplete_context_from_commands_registry(registry, cfg={"workspace_enabled": True})
+
+        assert [item["value"] for item in disabled["nmap"]["examples"]] == ["nmap ip.darklab.sh"]
+        assert [item["value"] for item in disabled["nmap"]["flags"]] == ["-sV"]
+        assert "-iL" not in disabled["nmap"]["expects_value"]
+        assert "-iL" not in disabled["nmap"]["arg_hints"]
+        assert [item["value"] for item in disabled["nmap"]["subcommands"]["subs"]["flags"]] == ["-names"]
+        assert "-o" not in disabled["nmap"]["subcommands"]["subs"]["expects_value"]
+        assert "-o" not in disabled["nmap"]["subcommands"]["subs"]["arg_hints"]
+        assert [item["value"] for item in disabled["nmap"]["subcommands"]["subs"]["examples"]] == ["nmap subs -names"]
+        assert [item["value"] for item in enabled["nmap"]["examples"]] == [
+            "nmap ip.darklab.sh",
+            "nmap -iL targets.txt -oN nmap.txt",
+        ]
+        assert [item["value"] for item in enabled["nmap"]["flags"]] == ["-sV", "-iL"]
+        assert enabled["nmap"]["arg_hints"]["-iL"][0]["value"] == "targets.txt"
+        assert [item["value"] for item in enabled["nmap"]["subcommands"]["subs"]["flags"]] == ["-names", "-o"]
+        assert enabled["nmap"]["subcommands"]["subs"]["arg_hints"]["-o"][0]["value"] == "subs.txt"
+
+    def test_command_policy_can_be_derived_from_commands_registry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(
+                textwrap.dedent(
+                    """
+                    version: 1
+                    commands:
+                    - root: curl
+                      policy:
+                        allow:
+                        - curl
+                        deny:
+                        - curl -K
+                    - root: nmap
+                      policy:
+                        allow:
+                        - nmap
+                        deny:
+                        - nmap -sU
+                    """
+                )
+            )
+
+            with mock.patch("commands.COMMANDS_REGISTRY_FILE", str(path)):
+                allow, deny = load_command_policy()
+
+        assert allow == ["curl", "nmap"]
+        assert deny == ["curl -K", "nmap -sU"]
+
+    def test_allow_grouping_flags_can_be_derived_from_commands_registry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(
+                textwrap.dedent(
+                    """
+                    version: 1
+                    commands:
+                    - root: nc
+                      policy:
+                        allow:
+                        - nc -z
+                        deny: []
+                      autocomplete:
+                        flags:
+                        - value: -z
+                          allow_grouping: true
+                        - value: -v
+                          allow_grouping: true
+                        - value: -n
+                          allow_grouping: true
+                        - value: -w
+                          allow_grouping: true
+                          takes_value: true
+                        - value: --help
+                          allow_grouping: true
+                    """
+                )
+            )
+
+            with mock.patch("commands.COMMANDS_REGISTRY_FILE", str(path)):
+                grouped = load_allow_grouping_flags()
+
+        assert grouped == {"nc": {"-z", "-v", "-n"}}
+
+    def test_allow_grouping_flags_match_short_flag_bundles(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(
+                textwrap.dedent(
+                    """
+                    version: 1
+                    commands:
+                    - root: nc
+                      policy:
+                        allow:
+                        - nc -z
+                        deny:
+                        - nc -e
+                      autocomplete:
+                        flags:
+                        - value: -z
+                          allow_grouping: true
+                        - value: -v
+                          allow_grouping: true
+                        - value: -n
+                          allow_grouping: true
+                    - root: nmap
+                      policy:
+                        allow:
+                        - nmap -sV
+                        deny: []
+                      autocomplete:
+                        flags:
+                        - value: -sV
+                          description: Service detection
+                    """
+                )
+            )
+
+            with mock.patch("commands.COMMANDS_REGISTRY_FILE", str(path)):
+                assert is_command_allowed("nc -zv darklab.sh 80")[0]
+                assert is_command_allowed("nc -vz darklab.sh 80")[0]
+                assert is_command_allowed("nc -n -v -z darklab.sh 80")[0]
+                assert is_command_allowed("nc -w 3 -z darklab.sh 80")[0]
+                assert is_command_allowed("nc -w 3 -vz darklab.sh 80")[0]
+                assert not is_command_allowed("nc -nv darklab.sh 80")[0]
+                assert not is_command_allowed("nc -zve darklab.sh 80")[0]
+                assert not is_command_allowed("nc -w 3 -e /bin/sh -z darklab.sh 80")[0]
+                assert is_command_allowed("nmap -sV darklab.sh")[0]
+                assert not is_command_allowed("nmap -Vs darklab.sh")[0]
 
 
 # ── load_faq ──────────────────────────────────────────────────────────────────
@@ -332,16 +1447,105 @@ class TestLoadFaq:
                 result = load_faq()
         assert [item["question"] for item in result] == ["Base?", "Local?"]
 
+    def test_workspace_feature_entry_hidden_when_workspace_disabled(self):
+        yaml_content = textwrap.dedent(
+            """
+            - question: Always?
+              answer: Always answer.
+            - question: Files?
+              feature: workspace
+              answer: Files answer.
+            """
+        )
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_faq({"workspace_enabled": False})
+        finally:
+            os.unlink(path)
+
+        assert [item["question"] for item in result] == ["Always?"]
+
+    def test_workspace_feature_entry_visible_when_workspace_enabled(self):
+        yaml_content = textwrap.dedent(
+            """
+            - question: Always?
+              answer: Always answer.
+            - question: Files?
+              feature: workspace
+              answer: Files answer.
+            """
+        )
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_faq({"workspace_enabled": True})
+        finally:
+            os.unlink(path)
+
+        assert [item["question"] for item in result] == ["Always?", "Files?"]
+
 
 # ── load_theme_registry / load_theme ─────────────────────────────────────────
 
 class TestThemeRegistry:
+    _THEME_METADATA_KEYS = {"label", "group", "sort"}
+    _RETIRED_THEME_KEYS = {
+        "chip_bg",
+        "chip_border",
+        "chip_text",
+        "confirm_modal_bg",
+        "dropdown_up_bg",
+        "dropdown_up_border",
+        "dropdown_up_shadow",
+        "form_control_bg",
+        "history_load_modal_bg",
+        "history_load_modal_border",
+        "history_load_modal_shadow",
+        "history_panel_shadow",
+        "mobile_composer_host_bg",
+        "mobile_composer_host_light_bg",
+        "mobile_menu_shadow",
+        "modal_header_bg",
+        "modal_section_bg",
+        "panel_alt_bg",
+        "tab_active_border",
+        "tab_active_shadow",
+        "tab_active_text",
+        "tab_bg",
+        "tab_border",
+        "tab_status_ok_bg",
+        "tabs_bar_scrollbar_thumb",
+        "tabs_bar_scrollbar_thumb_hover",
+        "tabs_bar_scrollbar_track",
+        "tabs_scroll_btn_bg",
+        "tabs_scroll_btn_border",
+        "tabs_scroll_btn_text",
+        "terminal_actions_bg",
+        "terminal_bar_border",
+        "window_btn_bg",
+        "window_btn_border",
+        "window_btn_text",
+    }
+
     def _write_theme(self, root, name, content):
         theme_dir = root / "themes"
         theme_dir.mkdir(parents=True, exist_ok=True)
         path = theme_dir / f"{name}.yaml"
         path.write_text(textwrap.dedent(content))
         return theme_dir, path
+
+    def _shipped_theme_files(self):
+        return sorted((REPO_ROOT / "app" / "conf" / "themes").glob("*.yaml"))
+
+    def _load_shipped_theme_yaml(self, path):
+        data = yaml.safe_load(path.read_text()) or {}
+        assert isinstance(data, dict), f"{path.name} must be a YAML mapping"
+        return data
 
     def test_missing_label_falls_back_to_humanized_filename(self, tmp_path, monkeypatch):
         theme_dir, _ = self._write_theme(
@@ -484,6 +1688,108 @@ class TestThemeRegistry:
         assert dark_actual == dark_expected, "theme_dark.yaml.example is out of sync; run ./scripts/generate_theme_examples.py"
         assert light_actual == light_expected, "theme_light.yaml.example is out of sync; run ./scripts/generate_theme_examples.py"
 
+    def test_shipped_theme_files_have_complete_matching_key_sets(self):
+        required_keys = set(app_config._THEME_DEFAULTS["dark"]) | {"color_scheme"}
+        issues = []
+        for theme_path in self._shipped_theme_files():
+            data = self._load_shipped_theme_yaml(theme_path)
+            keys = set(data) - self._THEME_METADATA_KEYS
+            missing = sorted(required_keys - keys)
+            extra = sorted(keys - required_keys)
+            if missing:
+                issues.append(f"{theme_path.name} missing keys: {', '.join(missing)}")
+            if extra:
+                issues.append(f"{theme_path.name} has unknown keys: {', '.join(extra)}")
+
+        assert not issues, "Shipped theme YAML key drift:\n" + "\n".join(issues)
+
+    def test_shipped_themes_do_not_reintroduce_retired_keys(self):
+        issues = []
+        for theme_path in self._shipped_theme_files():
+            data = self._load_shipped_theme_yaml(theme_path)
+            retired = sorted(set(data) & self._RETIRED_THEME_KEYS)
+            if retired:
+                issues.append(f"{theme_path.name}: {', '.join(retired)}")
+
+        assert not issues, "Retired theme keys were reintroduced:\n" + "\n".join(issues)
+
+    def test_theme_key_reference_matches_runtime_order_and_defaults(self):
+        theme_doc = (REPO_ROOT / "THEME.md").read_text()
+        row_re = re.compile(r"^\| `([^`]+)` \| `([^`]*)` \| `([^`]*)` \| ", re.MULTILINE)
+        rows = row_re.findall(theme_doc.split("## Theme Key Reference", 1)[1])
+        documented_keys = [key for key, _, _ in rows]
+        expected_keys = list(app_config._THEME_CSS_ORDER)
+
+        assert documented_keys == expected_keys, (
+            "THEME.md Theme Key Reference drifted from _THEME_CSS_ORDER"
+        )
+
+        default_issues = []
+        for key, dark_value, light_value in rows:
+            expected_dark = str(app_config._THEME_DEFAULTS["dark"][key])
+            expected_light = str(app_config._THEME_DEFAULTS["light"][key])
+            if dark_value != expected_dark:
+                default_issues.append(f"{key}: dark doc={dark_value!r}, expected={expected_dark!r}")
+            if light_value != expected_light:
+                default_issues.append(f"{key}: light doc={light_value!r}, expected={expected_light!r}")
+
+        assert not default_issues, (
+            "THEME.md Theme Key Reference default values drifted:\n"
+            + "\n".join(default_issues)
+        )
+
+    def test_css_theme_var_references_are_defined_or_explicitly_fallbacked(self):
+        known_theme_vars = {
+            f"--theme-{key.replace('_', '-')}" for key in app_config._THEME_CSS_ORDER
+        }
+        var_call_re = re.compile(r"var\((--theme-[\w-]+)([^)]*)\)")
+        issues = []
+
+        for css_path in sorted((REPO_ROOT / "app" / "static" / "css").glob("*.css")):
+            for line_no, line in enumerate(css_path.read_text().splitlines(), start=1):
+                for match in var_call_re.finditer(line):
+                    var_name = match.group(1)
+                    if var_name in known_theme_vars:
+                        continue
+                    if "," in match.group(2):
+                        continue
+                    issues.append(f"{css_path.relative_to(REPO_ROOT)}:{line_no} uses undefined {var_name}")
+
+        assert not issues, "CSS references undefined theme vars without fallbacks:\n" + "\n".join(issues)
+
+    def test_css_color_literals_are_theme_vars_or_var_derived(self):
+        color_re = re.compile(r"(#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(|\bcolor-mix\()")
+        issues = []
+
+        for css_path in sorted((REPO_ROOT / "app" / "static" / "css").glob("*.css")):
+            for line_no, line in enumerate(css_path.read_text().splitlines(), start=1):
+                stripped = line.strip()
+                if not color_re.search(stripped):
+                    continue
+                if stripped.startswith("--"):
+                    continue
+                if "var(--" in stripped:
+                    continue
+                issues.append(f"{css_path.relative_to(REPO_ROOT)}:{line_no}: {stripped}")
+
+        assert not issues, (
+            "CSS color literals outside token definitions must be var-derived or moved into theme vars:\n"
+            + "\n".join(issues)
+        )
+
+    def test_darklab_obsidian_matches_dark_defaults_and_example(self):
+        dark_example = yaml.safe_load((REPO_ROOT / "app" / "conf" / "theme_dark.yaml.example").read_text()) or {}
+        darklab_obsidian = yaml.safe_load(
+            (REPO_ROOT / "app" / "conf" / "themes" / "darklab_obsidian.yaml").read_text()
+        ) or {}
+
+        metadata_keys = {"label", "group", "sort"}
+        darklab_values = {key: value for key, value in darklab_obsidian.items() if key not in metadata_keys}
+        dark_defaults = {"color_scheme": "dark", **app_config._THEME_DEFAULTS["dark"]}
+
+        assert darklab_values == dark_defaults, "darklab_obsidian.yaml drifted from the app's default dark theme"
+        assert darklab_values == dark_example, "darklab_obsidian.yaml drifted from theme_dark.yaml.example"
+
     def test_entries_missing_question_filtered_out(self):
         yaml_content = "- answer: No question here.\n- question: Has one.\n  answer: Yes.\n"
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
@@ -570,6 +1876,39 @@ class TestThemeRegistry:
         assert "https://example.invalid/config-readme" in result[0]["answer"]
         assert "https://example.invalid/config-readme" in result[0]["answer_html"]
 
+    def test_load_all_faq_promotes_workspace_builtin_entry_when_enabled(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write("")
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_all_faq(
+                    "darklab_shell",
+                    "https://example.invalid/README.md",
+                    {"workspace_enabled": True},
+                )
+        finally:
+            os.unlink(path)
+        questions = [item["question"] for item in result]
+        assert questions.index("What are session Files?") == 2
+        assert questions.index("What are session Files?") < questions.index("How do I save or share my results?")
+
+    def test_load_all_faq_hides_workspace_builtin_entry_when_disabled(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write("")
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_all_faq(
+                    "darklab_shell",
+                    "https://example.invalid/README.md",
+                    {"workspace_enabled": False},
+                )
+        finally:
+            os.unlink(path)
+        questions = [item["question"] for item in result]
+        assert "What are session Files?" not in questions
+
     def test_load_all_faq_clarifies_snapshot_vs_run_permalink(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
             f.write("")
@@ -606,7 +1945,7 @@ class TestThemeRegistry:
         by_question = {item["question"]: item for item in result}
         built_in_html = by_question["What built-in shell features are supported?"]["answer_html"]
         assert "Built-in commands" in built_in_html
-        assert "help</code>" in built_in_html
+        assert "commands --built-in</code>" in built_in_html
         assert "history</code>" in built_in_html
         assert "command | grep pattern" in built_in_html
         assert "command | head -n 20" in built_in_html
@@ -622,10 +1961,36 @@ class TestThemeRegistry:
 
 # ── Path blocking edge cases ──────────────────────────────────────────────────
 
+_COMMAND_VALIDATION_HELPERS = None
+
+
+def _command_validation_helpers():
+    global _COMMAND_VALIDATION_HELPERS
+    if _COMMAND_VALIDATION_HELPERS is None:
+        registry = commands.load_commands_registry()
+        with mock.patch("commands.load_commands_registry", return_value=registry):
+            _COMMAND_VALIDATION_HELPERS = {
+                "allow_grouping": commands.load_allow_grouping_flags(),
+                "workspace_flags": commands._workspace_flag_specs_by_root(),
+                "runtime_adaptations": commands._runtime_adaptations_by_root(),
+            }
+    return _COMMAND_VALIDATION_HELPERS
+
+
+@contextmanager
+def _patched_command_validation_helpers():
+    helpers = _command_validation_helpers()
+    with mock.patch("commands.load_allow_grouping_flags", return_value=helpers["allow_grouping"]), \
+         mock.patch("commands._workspace_flag_specs_by_root", return_value=helpers["workspace_flags"]), \
+         mock.patch("commands._runtime_adaptations_by_root", return_value=helpers["runtime_adaptations"]):
+        yield
+
+
 def _check(cmd, allow=None, deny=None):
     a = allow if allow is not None else ["curl", "nmap", "ls"]
     d = deny if deny is not None else []
-    with mock.patch("commands.load_allowed_commands", return_value=(a, d)):
+    with mock.patch("commands.load_command_policy", return_value=(a, d)), \
+         _patched_command_validation_helpers():
         return is_command_allowed(cmd)
 
 
@@ -692,16 +2057,230 @@ class TestRewriteCaseInsensitive:
 
     def test_nmap_uppercase(self):
         cmd, _ = rewrite_command("NMAP -sV 10.0.0.1")
-        assert "--privileged" in cmd
+        assert "-sT" in cmd
+        assert "--privileged" not in cmd
 
     def test_nuclei_uppercase(self):
         cmd, _ = rewrite_command("NUCLEI -u https://darklab.sh")
         assert "-ud /tmp/nuclei-templates" in cmd
 
-    def test_wapiti_uppercase(self):
-        cmd, notice = rewrite_command("WAPITI http://darklab.sh")
-        assert "/dev/stdout" in cmd
-        assert notice is not None
+
+# ── run broker event storage ─────────────────────────────────────────────────
+
+class TestRunBrokerMemoryStore:
+    def test_memory_store_replays_events_after_saved_event_id(self):
+        store = run_broker._MemoryRunBrokerStore()
+
+        first = store.publish("run-1", "started", {"run_id": "run-1"})
+        second = store.publish("run-1", "output", {"text": "hello"})
+        third = store.publish("run-1", "exit", {"code": 0})
+
+        all_events = store.events_after("run-1", after_id="0-0", limit=10)
+        replayed = store.events_after("run-1", after_id=first.event_id, limit=10)
+
+        assert [event.event_id for event in all_events] == [
+            first.event_id,
+            second.event_id,
+            third.event_id,
+        ]
+        assert [event.event_id for event in replayed] == [second.event_id, third.event_id]
+        assert replayed[0].payload["type"] == "output"
+        assert replayed[0].payload["text"] == "hello"
+
+    def test_memory_store_marks_trimmed_replay_with_notice(self):
+        store = run_broker._MemoryRunBrokerStore()
+        with mock.patch.dict(run_broker.CFG, {"run_broker_max_replay_bytes": 160}):
+            store.publish("run-1", "output", {"text": "first-" + ("x" * 120)})
+            store.publish("run-1", "output", {"text": "second-" + ("y" * 120)})
+            events = store.events_after("run-1", after_id="0-0", limit=10)
+
+        assert events[0].payload["type"] == "notice"
+        assert events[0].payload["text"] == run_broker.REPLAY_TRIM_NOTICE
+        assert all("first-" not in str(event.payload.get("text", "")) for event in events)
+        assert any("second-" in str(event.payload.get("text", "")) for event in events)
+
+    def test_memory_store_uses_max_output_lines_as_replay_event_bound(self):
+        store = run_broker._MemoryRunBrokerStore()
+        with mock.patch.dict(run_broker.CFG, {"max_output_lines": 2, "run_broker_max_replay_bytes": 0}):
+            store.publish("run-1", "started", {"run_id": "run-1"})
+            store.publish("run-1", "output", {"text": "line 1"})
+            store.publish("run-1", "output", {"text": "line 2"})
+            store.publish("run-1", "output", {"text": "line 3"})
+            events = store.events_after("run-1", after_id="0-0", limit=10)
+
+        visible_text = [str(event.payload.get("text", "")) for event in events]
+        assert events[0].payload["type"] == "notice"
+        assert events[0].payload["text"] == run_broker.REPLAY_TRIM_NOTICE
+        assert "line 1" not in visible_text
+        assert "line 2" in visible_text
+        assert "line 3" in visible_text
+
+    def test_trim_notice_sse_does_not_advance_resume_cursor(self):
+        notice = run_broker._make_trim_notice_event()
+        sse = notice.as_sse()
+
+        assert "id:" not in sse
+        assert "event_id" not in sse
+        assert run_broker.REPLAY_TRIM_NOTICE in sse
+        assert "event_id" not in notice.as_payload()
+
+    def test_memory_store_does_not_replay_trim_notice_after_real_cursor(self):
+        store = run_broker._MemoryRunBrokerStore()
+        with mock.patch.dict(run_broker.CFG, {"run_broker_max_replay_bytes": 160}):
+            store.publish("run-1", "output", {"text": "first-" + ("x" * 120)})
+            tail = store.publish("run-1", "output", {"text": "second-" + ("y" * 120)})
+
+        assert store.events_after("run-1", after_id=tail.event_id, limit=10) == []
+
+    def test_bounded_replay_keeps_latest_output_and_terminal_event(self):
+        events = [
+            run_broker.BrokerEvent("1-0", {"type": "started"}),
+            run_broker.BrokerEvent("2-0", {"type": "output", "text": "line 1"}),
+            run_broker.BrokerEvent("3-0", {"type": "heartbeat"}),
+            run_broker.BrokerEvent("4-0", {"type": "output", "text": "line 2"}),
+            run_broker.BrokerEvent("5-0", {"type": "output", "text": "line 3"}),
+            run_broker.BrokerEvent("6-0", {"type": "exit", "code": 0}),
+        ]
+
+        with mock.patch.dict(run_broker.CFG, {"max_output_lines": 2}):
+            bounded = run_broker._bounded_replay_events(events)
+
+        visible_text = [str(event.payload.get("text", "")) for event in bounded]
+        assert bounded[0].payload["type"] == "notice"
+        assert bounded[0].payload["text"] == run_broker.REPLAY_TRIM_NOTICE
+        assert "line 1" not in visible_text
+        assert "line 2" in visible_text
+        assert "line 3" in visible_text
+        assert bounded[-1].payload == {"type": "exit", "code": 0}
+
+    def test_stream_run_events_replays_snapshot_before_waiting_for_live_events(self):
+        class FakeStore:
+            def __init__(self):
+                self.wait_after_id = ""
+
+            def replay(self, run_id):
+                assert run_id == "run-1"
+                return [run_broker.BrokerEvent("1-0", {"type": "output", "text": "replayed"})]
+
+            def wait_after(self, run_id, after_id, timeout):
+                self.wait_after_id = after_id
+                return [run_broker.BrokerEvent("2-0", {"type": "exit", "code": 0})]
+
+        store = FakeStore()
+        with mock.patch.object(run_broker, "_store", return_value=store):
+            events = list(run_broker.stream_run_events("run-1"))
+
+        assert '"text": "replayed"' in events[0]
+        assert '"type": "exit"' in events[1]
+        assert store.wait_after_id == "1-0"
+
+    def test_stream_run_events_skips_trim_notice_when_resuming_live_tail(self):
+        class FakeStore:
+            def __init__(self):
+                self.wait_after_id = ""
+
+            def replay(self, run_id):
+                assert run_id == "run-1"
+                return [
+                    run_broker._make_trim_notice_event(),
+                    run_broker.BrokerEvent("5-0", {"type": "output", "text": "tail"}),
+                ]
+
+            def wait_after(self, run_id, after_id, timeout):
+                self.wait_after_id = after_id
+                return [run_broker.BrokerEvent("6-0", {"type": "exit", "code": 0})]
+
+        store = FakeStore()
+        with mock.patch.object(run_broker, "_store", return_value=store):
+            events = list(run_broker.stream_run_events("run-1"))
+
+        assert events[0].startswith("data: ")
+        assert "id:" not in events[0]
+        assert '"text": "tail"' in events[1]
+        assert store.wait_after_id == "5-0"
+
+    def test_decode_payload_accepts_redis_bytes_fields(self):
+        payload = run_broker._decode_payload({b"payload": b'{"type":"output","text":"hello"}'})
+
+        assert payload == {"type": "output", "text": "hello"}
+
+    def test_redis_store_decodes_bytes_event_ids_and_payloads(self):
+        fake_redis = mock.Mock()
+        fake_redis.xrange.return_value = [
+            (b"1-0", {b"payload": b'{"type":"started"}'}),
+            (b"2-0", {b"payload": b'{"type":"output","text":"hello"}'}),
+        ]
+
+        with mock.patch.object(run_broker, "redis_client", fake_redis):
+            events = run_broker._RedisRunBrokerStore().events_after("run-1", after_id="1-0", limit=10)
+
+        assert [(event.event_id, event.payload) for event in events] == [
+            ("2-0", {"type": "output", "text": "hello"}),
+        ]
+
+    def test_redis_store_normalizes_invalid_resume_ids(self):
+        fake_redis = mock.Mock()
+        fake_redis.xrange.return_value = []
+
+        with mock.patch.object(run_broker, "redis_client", fake_redis):
+            run_broker._RedisRunBrokerStore().events_after("run-1", after_id="123-trim", limit=10)
+
+        fake_redis.xrange.assert_called_once_with("runstream:run-1", min="0-0", count=10)
+
+    def test_redis_replay_marks_tail_fetch_as_trimmed_when_stream_is_longer(self):
+        fake_redis = mock.Mock()
+        fake_redis.xrevrange.return_value = [
+            (b"3-0", {b"payload": b'{"type":"output","text":"line 3"}'}),
+            (b"2-0", {b"payload": b'{"type":"output","text":"line 2"}'}),
+        ]
+        fake_redis.xlen.return_value = 3
+
+        with mock.patch.object(run_broker, "redis_client", fake_redis), \
+             mock.patch.object(run_broker, "_replay_fetch_count", return_value=2):
+            events = run_broker._RedisRunBrokerStore().replay("run-1")
+
+        assert events[0].payload["type"] == "notice"
+        assert events[0].payload["text"] == run_broker.REPLAY_TRIM_NOTICE
+        assert [(event.event_id, event.payload.get("text")) for event in events[1:]] == [
+            ("2-0", "line 2"),
+            ("3-0", "line 3"),
+        ]
+
+    def test_redis_publish_trims_stream_with_replay_derived_maxlen(self):
+        fake_redis = mock.Mock()
+        fake_redis.xadd.return_value = b"1-0"
+
+        with mock.patch.object(run_broker, "redis_client", fake_redis), \
+             mock.patch.object(run_broker, "_redis_stream_maxlen", return_value=1234):
+            event = run_broker._RedisRunBrokerStore().publish("run-1", "output", {"text": "hello"})
+
+        assert event.event_id == "1-0"
+        fake_redis.xtrim.assert_called_once_with(
+            "runstream:run-1",
+            maxlen=1234,
+            approximate=True,
+        )
+
+    def test_broker_requires_redis_when_configured(self):
+        with mock.patch.object(run_broker, "redis_client", None), \
+             mock.patch.dict(run_broker.CFG, {
+                 "run_broker_enabled": True,
+                 "run_broker_require_redis": True,
+             }):
+            assert run_broker.broker_available() is False
+            assert run_broker.broker_unavailable_reason() == (
+                "Run broker requires Redis, but Redis is not available."
+            )
+
+    def test_broker_allows_memory_store_when_redis_is_optional(self):
+        with mock.patch.object(run_broker, "redis_client", None), \
+             mock.patch.dict(run_broker.CFG, {
+                 "run_broker_enabled": True,
+                 "run_broker_require_redis": False,
+             }):
+            assert run_broker.broker_available() is True
+            assert run_broker.broker_unavailable_reason() == ""
+            assert isinstance(run_broker._store(), run_broker._MemoryRunBrokerStore)
 
 
 # ── pid_register / pid_pop (in-process mode) ─────────────────────────────────
@@ -740,6 +2319,309 @@ class TestPidMap:
         process.pid_register("run-b", 222)
         assert process.pid_pop("run-a") == 111
         assert process.pid_pop("run-b") == 222
+
+
+class TestActiveRunMetadata:
+    def setup_method(self):
+        self._patcher = mock.patch.object(process, "redis_client", None)
+        self._patcher.start()
+        with process._pid_lock:
+            process._pid_map.clear()
+            process._active_run_meta.clear()
+            process._session_run_ids.clear()
+
+    def teardown_method(self):
+        self._patcher.stop()
+        with process._pid_lock:
+            process._pid_map.clear()
+            process._active_run_meta.clear()
+            process._session_run_ids.clear()
+
+    def test_active_runs_for_session_preserves_pid(self):
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process, "_pid_start_time", return_value=None),
+        ):
+            process.active_run_register(
+                "run-1",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+            )
+
+            assert process.active_runs_for_session("session-1") == [
+                {
+                    "run_id": "run-1",
+                    "pid": 12345,
+                    "command": "ping darklab.sh",
+                    "started": "2026-01-01T00:00:00Z",
+                    "source": "memory",
+                    "owner_client_id": "",
+                    "owner_tab_id": "",
+                    "owner_last_seen": None,
+                    "owner_age_seconds": None,
+                    "owner_stale": True,
+                    "has_live_owner": False,
+                    "owned_by_this_client": False,
+                }
+            ]
+
+    def test_active_runs_for_session_reports_owner_liveness_for_client(self):
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process, "_pid_start_time", return_value=None),
+            mock.patch.object(process.time, "time", return_value=1000.0),
+        ):
+            process.active_run_register(
+                "run-owned",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+                owner_client_id="client-1",
+                owner_tab_id="tab-1",
+            )
+
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process.time, "time", return_value=1030.0),
+        ):
+            owned = process.active_runs_for_session("session-1", client_id="client-1")[0]
+            other = process.active_runs_for_session("session-1", client_id="client-2")[0]
+
+        assert owned["owned_by_this_client"] is True
+        assert owned["has_live_owner"] is True
+        assert owned["owner_stale"] is False
+        assert owned["owner_tab_id"] == "tab-1"
+        assert other["owned_by_this_client"] is False
+        assert other["has_live_owner"] is True
+
+    def test_active_runs_for_session_refreshes_matching_owner_liveness(self):
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process, "_pid_start_time", return_value=None),
+            mock.patch.object(process.time, "time", return_value=1000.0),
+        ):
+            process.active_run_register(
+                "run-owned",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+                owner_client_id="client-1",
+                owner_tab_id="tab-1",
+            )
+
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process.time, "time", return_value=1080.0),
+        ):
+            owned = process.active_runs_for_session("session-1", client_id="client-1")[0]
+
+        assert owned["owner_last_seen"] == 1080.0
+        assert owned["owner_age_seconds"] == 0
+        assert owned["owner_stale"] is False
+        assert owned["owned_by_this_client"] is True
+
+    def test_active_run_touch_owner_refreshes_liveness(self):
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process, "_pid_start_time", return_value=None),
+            mock.patch.object(process.time, "time", return_value=1000.0),
+        ):
+            process.active_run_register(
+                "run-owned",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+                owner_client_id="client-1",
+                owner_tab_id="tab-1",
+            )
+
+        with mock.patch.object(process.time, "time", return_value=1100.0):
+            assert process.active_run_touch_owner("run-owned", "client-2", "tab-1") is False
+            assert process.active_run_touch_owner("run-owned", "client-1", "tab-1") is True
+
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process.time, "time", return_value=1101.0),
+        ):
+            run = process.active_runs_for_session("session-1", client_id="client-1")[0]
+
+        assert run["owner_last_seen"] == 1101.0
+        assert run["owner_stale"] is False
+
+    def test_active_run_owner_metadata_remains_provenance_only(self):
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process, "_pid_start_time", return_value=None),
+            mock.patch.object(process.time, "time", return_value=1000.0),
+        ):
+            process.active_run_register(
+                "run-owned",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+                owner_client_id="client-1",
+                owner_tab_id="tab-1",
+            )
+
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process.time, "time", return_value=1101.0),
+        ):
+            origin = process.active_runs_for_session("session-1", client_id="client-1")[0]
+            attached = process.active_runs_for_session("session-1", client_id="client-2")[0]
+
+        assert origin["owned_by_this_client"] is True
+        assert attached["owned_by_this_client"] is False
+        assert attached["has_live_owner"] is True
+        assert attached["owner_client_id"] == "client-1"
+        assert attached["owner_tab_id"] == "tab-1"
+        assert not hasattr(process, "active_run_set_owner")
+
+    def test_pid_pop_for_session_is_the_active_run_permission_boundary(self):
+        with (
+            mock.patch.object(process, "_pid_is_alive", return_value=True),
+            mock.patch.object(process, "_pid_start_time", return_value=None),
+            mock.patch.object(process.time, "time", return_value=1000.0),
+        ):
+            process.active_run_register(
+                "run-owned",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+                owner_client_id="client-1",
+                owner_tab_id="tab-1",
+            )
+            process.pid_register("run-owned", 12345)
+
+        assert process.pid_pop_for_session("run-owned", "session-2") is None
+        assert process.pid_pop_for_session("run-owned", "session-1") == 12345
+
+        with process._pid_lock:
+            assert "run-owned" not in process._pid_map
+            assert "run-owned" not in process._active_run_meta
+
+    def test_active_runs_for_session_prunes_dead_pid(self):
+        with mock.patch.object(process, "_pid_start_time", return_value=None):
+            process.active_run_register(
+                "run-dead",
+                23456,
+                "session-1",
+                "amass enum -active -d darklab.sh",
+                "2026-01-01T00:00:00Z",
+            )
+
+        with mock.patch.object(process, "_pid_is_alive", return_value=False):
+            assert process.active_runs_for_session("session-1") == []
+
+        assert process._active_run_meta == {}
+        assert process._session_run_ids == {}
+
+    def test_active_runs_for_session_prunes_redis_pid_reuse(self):
+        fake_redis = process._FakeRedisClient()
+        with mock.patch.object(process, "redis_client", fake_redis):
+            with mock.patch.object(process, "_pid_start_time", return_value="101"):
+                process.active_run_register(
+                    "run-reused",
+                    34567,
+                    "session-1",
+                    "amass enum -active -d darklab.sh",
+                    "2026-01-01T00:00:00Z",
+                )
+            process.pid_register("run-reused", 34567)
+
+            with (
+                mock.patch.object(process, "_pid_is_alive", return_value=True),
+                mock.patch.object(process, "_pid_start_time", return_value="202"),
+            ):
+                assert process.active_runs_for_session("session-1") == []
+
+            assert fake_redis.get("procmeta:run-reused") is None
+            assert fake_redis.get("proc:run-reused") is None
+            assert fake_redis.smembers("sessionprocs:session-1") == set()
+
+    def test_pid_pop_for_session_requires_matching_session(self):
+        with mock.patch.object(process, "_pid_start_time", return_value=None):
+            process.pid_register("run-owned", 12345)
+            process.active_run_register(
+                "run-owned",
+                12345,
+                "session-1",
+                "ping darklab.sh",
+                "2026-01-01T00:00:00Z",
+            )
+
+        assert process.pid_pop_for_session("run-owned", "session-2") is None
+        assert process.pid_pop_for_session("run-owned", "session-1") == 12345
+        assert process.pid_pop("run-owned") is None
+        assert process.active_runs_for_session("session-1") == []
+
+    def test_active_runs_for_session_prunes_redis_legacy_metadata_on_linux(self):
+        fake_redis = process._FakeRedisClient()
+        payload = {
+            "run_id": "run-legacy",
+            "pid": 45678,
+            "session_id": "session-1",
+            "command": "amass enum -active -d darklab.sh",
+            "started": "2026-01-01T00:00:00Z",
+        }
+        with mock.patch.object(process, "redis_client", fake_redis):
+            fake_redis.set("procmeta:run-legacy", process.json.dumps(payload))
+            fake_redis.sadd("sessionprocs:session-1", "run-legacy")
+
+            with (
+                mock.patch.object(process, "_pid_is_alive", return_value=True),
+                mock.patch.object(process, "_pid_start_time", return_value="303"),
+            ):
+                assert process.active_runs_for_session("session-1") == []
+
+            assert fake_redis.get("procmeta:run-legacy") is None
+
+    def test_active_run_resource_usage_reports_cumulative_cpu_and_memory(self):
+        class FakeTimes:
+            def __init__(self, user, system):
+                self.user = user
+                self.system = system
+
+        class FakeMemory:
+            def __init__(self, rss):
+                self.rss = rss
+
+        class FakeProcess:
+            def __init__(self, user, system, rss, children=None):
+                self._times = FakeTimes(user, system)
+                self._memory = FakeMemory(rss)
+                self._children = children or []
+
+            def children(self, recursive=True):
+                assert recursive is True
+                return self._children
+
+            def cpu_times(self):
+                return self._times
+
+            def memory_info(self):
+                return self._memory
+
+        root = FakeProcess(1.0, 0.5, 200, [FakeProcess(0.4, 0.1, 100)])
+        fake_psutil = mock.Mock()
+        fake_psutil.Process.return_value = root
+
+        with mock.patch.object(process, "psutil", fake_psutil):
+            usage = process._active_run_resource_usage("run-stats", 12345)
+
+        assert usage == {
+            "status": "ok",
+            "cpu_seconds": 2.0,
+            "memory_bytes": 300,
+            "process_count": 2,
+        }
 
 
 # ── _format_retention ─────────────────────────────────────────────────────────
@@ -949,6 +2831,79 @@ class TestWelcomeAssetLoading:
 
 # ── run_output_store ──────────────────────────────────────────────────────────
 
+class TestOutputSignals:
+    def test_command_root_and_target_extraction(self):
+        assert command_root("nmap -sV ip.darklab.sh") == "nmap"
+        assert extract_target("nuclei -u https://ip.darklab.sh -t http/") == "ip.darklab.sh"
+        assert extract_target("nc -zv ip.darklab.sh 443 80") == "ip.darklab.sh"
+        assert extract_target("dig @8.8.8.8 darklab.sh A") == "darklab.sh"
+        assert extract_target("assetfinder -subs-only darklab.sh") == "darklab.sh"
+
+    def test_classifies_common_findings(self):
+        assert classify_line("443/tcp open https", command="nmap ip.darklab.sh") == ["findings"]
+        assert classify_line("ip.darklab.sh [107.178.109.44] 80 (http) open", command="nc -zv ip.darklab.sh 80") == ["findings"]
+        assert classify_line("darklab.sh has address 104.21.4.35", command="host darklab.sh") == ["findings"]
+        assert classify_line("104.21.4.35", command="dig darklab.sh +short") == ["findings"]
+        assert classify_line("1 aspmx.l.google.com.", command="dig MX darklab.sh +short") == ["findings"]
+        assert classify_line("fw-vx1.darklab.sh", command="assetfinder -subs-only darklab.sh") == ["findings"]
+        assert classify_line("darklab.sh", command="assetfinder -subs-only darklab.sh") == ["findings"]
+        assert classify_line("104.21.4.35", command="cat ips.txt") == []
+        assert classify_line("fw-vx1.darklab.sh", command="cat hosts.txt") == []
+
+    def test_classifies_warning_error_and_summary_lines(self):
+        assert classify_line("warning: retrying request", cls="notice", command="curl https://darklab.sh") == ["warnings"]
+        assert classify_line("connection timed out", cls="exit-fail", command="nc -zv ip.darklab.sh 80") == ["errors"]
+        assert classify_line(
+            "Nmap done: 1 IP address (1 host up) scanned in 1.23 seconds",
+            command="nmap ip.darklab.sh",
+        ) == ["summaries"]
+
+    def test_workspace_notices_are_not_output_signals(self):
+        assert classify_line(
+            "[workspace] reading nmap/nmap_input.txt",
+            cls="notice",
+            command="nmap -iL nmap/nmap_input.txt",
+        ) == []
+        assert classify_line(
+            "[workspace] writing nmap/nmap_results.xml",
+            cls="notice",
+            command="nmap -oX nmap/nmap_results.xml",
+        ) == []
+
+        classifier = OutputSignalClassifier("nmap -iL nmap/nmap_input.txt -oX nmap/nmap_results.xml")
+        metadata = classifier.classify_line("[workspace] writing nmap/nmap_results.xml", cls="notice")
+
+        assert metadata["line_index"] == 0
+        assert metadata["command_root"] == "nmap"
+        assert "signals" not in metadata
+
+    def test_nmap_input_file_sections_update_signal_target(self):
+        classifier = OutputSignalClassifier("nmap -iL darklab_inputs.txt -sT")
+
+        first_header = classifier.classify_line("Nmap scan report for ip.darklab.sh (192.168.20.5)")
+        first_port = classifier.classify_line("80/tcp   open  http")
+        second_header = classifier.classify_line("Nmap scan report for h.darklab.sh (108.79.194.246)")
+        second_port = classifier.classify_line("443/tcp  open   https")
+
+        assert first_header["target"] == "ip.darklab.sh"
+        assert first_port["target"] == "ip.darklab.sh"
+        assert first_port["signals"] == ["findings"]
+        assert second_header["target"] == "h.darklab.sh"
+        assert second_port["target"] == "h.darklab.sh"
+        assert second_port["signals"] == ["findings"]
+
+    def test_user_killed_process_is_not_an_error(self):
+        assert classify_line("[killed by user after 2.0s]", cls="exit-fail", command="ping darklab.sh") == []
+
+    def test_builtin_classifier_keeps_metadata_but_omits_signals(self):
+        classifier = OutputSignalClassifier("status", cmd_type="builtin")
+        metadata = classifier.classify_line("warning: fake status line", cls="notice")
+
+        assert metadata["line_index"] == 0
+        assert metadata["command_root"] == "status"
+        assert "signals" not in metadata
+
+
 class TestRunOutputCapture:
     def teardown_method(self):
         if os.path.isdir(RUN_OUTPUT_DIR):
@@ -984,6 +2939,31 @@ class TestRunOutputCapture:
             {"text": "alpha", "cls": "", "tsC": "", "tsE": ""},
             {"text": "beta", "cls": "", "tsC": "", "tsE": ""},
         ]
+
+    def test_full_output_artifact_round_trips_signal_metadata(self):
+        capture = RunOutputCapture("test-run-output-signals", preview_limit=5, persist_full_output=True, full_output_max_bytes=0)
+        capture.add_line(
+            "443/tcp open https",
+            signals=["findings"],
+            line_index=0,
+            command_root="nmap",
+            target="ip.darklab.sh",
+        )
+        capture.finalize()
+
+        expected = [{
+            "text": "443/tcp open https",
+            "cls": "",
+            "tsC": "",
+            "tsE": "",
+            "signals": ["findings"],
+            "line_index": 0,
+            "command_root": "nmap",
+            "target": "ip.darklab.sh",
+        }]
+        assert list(capture.preview_lines) == expected
+        assert capture.artifact_rel_path is not None
+        assert load_full_output_entries(capture.artifact_rel_path) == expected
 
     def test_full_output_artifact_respects_byte_cap(self):
         capture = RunOutputCapture("test-run-output-cap", preview_limit=10, persist_full_output=True, full_output_max_bytes=60)
@@ -1023,6 +3003,31 @@ class TestRunOutputCapture:
         finally:
             os.unlink(path)
 
+    def test_hints_loader_skips_workspace_section_when_disabled(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write(
+                "[general]\n"
+                "Use the history panel.\n"
+                "[workspace]\n"
+                "Use Files to create targets.txt.\n"
+                "[general]\n"
+                "Press Enter to run.\n"
+            )
+            path = f.name
+        try:
+            with mock.patch("commands.APP_HINTS_FILE", path):
+                assert load_welcome_hints({"workspace_enabled": False}) == [
+                    "Use the history panel.",
+                    "Press Enter to run.",
+                ]
+                assert load_welcome_hints({"workspace_enabled": True}) == [
+                    "Use the history panel.",
+                    "Use Files to create targets.txt.",
+                    "Press Enter to run.",
+                ]
+        finally:
+            os.unlink(path)
+
 
 class TestMobileWelcomeHintLoading:
     def test_missing_mobile_hints_file_returns_empty_list(self):
@@ -1039,383 +3044,426 @@ class TestMobileWelcomeHintLoading:
         finally:
             os.unlink(path)
 
+    def test_mobile_hints_loader_skips_workspace_section_when_disabled(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write(
+                "Tap the prompt.\n"
+                "[workspace]\n"
+                "Use Files from the mobile menu.\n"
+                "[general]\n"
+                "Use the mobile menu.\n"
+            )
+            path = f.name
+        try:
+            with mock.patch("commands.APP_HINTS_MOBILE_FILE", path):
+                assert load_mobile_welcome_hints({"workspace_enabled": False}) == [
+                    "Tap the prompt.",
+                    "Use the mobile menu.",
+                ]
+                assert load_mobile_welcome_hints({"workspace_enabled": True}) == [
+                    "Tap the prompt.",
+                    "Use Files from the mobile menu.",
+                    "Use the mobile menu.",
+                ]
+        finally:
+            os.unlink(path)
+
 
 class TestAutocompleteContextLoading:
-    def test_missing_context_file_returns_empty_mapping(self):
-        with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", "/nonexistent/autocomplete_context.yaml"):
-            result = load_autocomplete_context()
-        assert result == {}
+    def test_container_smoke_test_commands_include_registry_examples_and_workflows(self):
+        registry_context = {
+            "dig": {
+                "examples": [
+                    {"value": "dig darklab.sh A", "description": "A lookup"},
+                    {"value": "dig darklab.sh MX", "description": "MX lookup"},
+                ]
+            },
+            "curl": {
+                "examples": [
+                    {"value": "curl -I https://darklab.sh", "description": "Headers"},
+                ]
+            },
+        }
+        workflows = [
+            {
+                "title": "DNS",
+                "steps": [
+                    {"cmd": "dig darklab.sh MX", "note": "Duplicate on purpose"},
+                    {"cmd": "host darklab.sh", "note": "Workflow-only command"},
+                ],
+            },
+            {
+                "title": "HTTP",
+                "steps": [
+                    {"cmd": "curl -I https://darklab.sh", "note": "Duplicate on purpose"},
+                    {"cmd": "wget -S --spider https://darklab.sh", "note": "Workflow-only command"},
+                ],
+            },
+        ]
 
-    def test_valid_context_entries_are_normalized(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(textwrap.dedent("""
-            context:
-              nmap:
-                flags:
-                  - value: -sV
-                    description: Service detection
-                  - -Pn
-                  - value: -p
-                    description: Port list
-                    takes_value: true
-                    value_hint:
-                      placeholder: "<ports>"
-                      description: Port list
-              wc:
-                pipe:
-                  enabled: true
-                  insert: wc -l
-                  label: wc -l
-                  description: Count lines
-            """))
-            path = f.name
-        try:
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
-                result = load_autocomplete_context()
-        finally:
-            os.unlink(path)
-        assert result["nmap"]["flags"][0] == {"value": "-sV", "description": "Service detection"}
-        assert result["nmap"]["flags"][1] == {"value": "-Pn", "description": ""}
-        assert result["nmap"]["expects_value"] == ["-p"]
-        assert result["nmap"]["arg_hints"]["-p"][0]["value"] == "<ports>"
-        assert result["wc"]["pipe_command"] is True
-        assert result["wc"]["pipe_insert_value"] == "wc -l"
-        assert result["wc"]["pipe_label"] == "wc -l"
-        assert result["wc"]["pipe_description"] == "Count lines"
+        with mock.patch("commands.load_autocomplete_context_from_commands_registry", return_value=registry_context):
+            with mock.patch("commands.load_all_workflows", return_value=workflows):
+                result = load_container_smoke_test_commands()
 
-    def test_value_hints_preserve_insert_with_trailing_whitespace(self):
-        # YAML authors use `insert: "set "` to leave the caret past a
-        # trailing space so the next argument can be typed. The normalizer
-        # must not strip the space or drop the key.
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(textwrap.dedent("""
-            context:
-              session-token:
-                subcommands:
-                  - value: set
-                    description: Activate an existing session token
-                    takes_value: true
-                    value_hint:
-                      placeholder: "<token>"
-                      description: Paste a tok_ token
-                  - value: clear
-                    description: Remove the session token
-                    closes: true
-            """))
-            path = f.name
-        try:
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
-                result = load_autocomplete_context()
-        finally:
-            os.unlink(path)
-        positional = result["session-token"]["arg_hints"]["__positional__"]
-        set_entry = next(p for p in positional if p["value"] == "set <token>")
-        assert set_entry["insertValue"] == "set "  # preserves trailing space
-        clear_entry = next(p for p in positional if p["value"] == "clear")
-        assert "insertValue" not in clear_entry  # not set → key absent
-        # arg_hints value without insertValue is an intentional placeholder;
-        # the frontend detects <placeholder> and flags it hintOnly.
-        set_hint = result["session-token"]["arg_hints"]["set"][0]
-        assert set_hint["value"] == "<token>"
-        assert "insertValue" not in set_hint
+        assert result == [
+            "dig darklab.sh A",
+            "curl -I https://darklab.sh",
+            "dig darklab.sh MX",
+            "host darklab.sh",
+            "wget -S --spider https://darklab.sh",
+        ]
 
-    def test_arguments_and_subcommands_normalize_into_runtime_hints(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(textwrap.dedent("""
-            context:
-              ping:
-                argument_limit: 1
-                flags:
-                  - value: -c
-                    description: Count
-                    takes_value: true
-                    suggest:
-                      - value: "4"
-                        description: Four probes
-                arguments:
-                  - placeholder: "<host>"
-                    description: Hostname or IP address
-              session-token:
-                subcommands:
-                  - value: generate
-                    description: Generate a new token
-                    closes: true
-                  - value: set
-                    description: Activate an existing token
-                    takes_value: true
-                    value_hint:
-                      placeholder: "<token>"
-                      description: Paste a token
-              grep:
-                pipe:
-                  enabled: true
-                  description: Filter lines by pattern
-            """))
-            path = f.name
-        try:
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
-                result = load_autocomplete_context()
-        finally:
-            os.unlink(path)
+    def test_container_smoke_test_commands_spread_sensitive_roots(self):
+        registry_context = {
+            "dig": {
+                "examples": [
+                    {"value": "dig darklab.sh A", "description": "A lookup"},
+                    {"value": "dig darklab.sh MX", "description": "MX lookup"},
+                    {"value": "dig darklab.sh NS", "description": "NS lookup"},
+                ]
+            },
+            "whois": {
+                "examples": [
+                    {"value": "whois darklab.sh", "description": "Domain ownership"},
+                    {"value": "whois 104.21.4.35", "description": "IP ownership"},
+                ]
+            },
+            "curl": {
+                "examples": [
+                    {"value": "curl -I https://darklab.sh", "description": "Headers"},
+                ]
+            },
+            "host": {
+                "examples": [
+                    {"value": "host darklab.sh", "description": "Host lookup"},
+                ]
+            },
+        }
 
-        assert result["ping"]["expects_value"] == ["-c"]
-        assert result["ping"]["arg_hints"]["-c"][0]["value"] == "4"
-        assert result["ping"]["arg_hints"]["__positional__"][0]["value"] == "<host>"
-        assert result["ping"]["argument_limit"] == 1
+        with mock.patch("commands.load_autocomplete_context_from_commands_registry", return_value=registry_context):
+            with mock.patch("commands.load_all_workflows", return_value=[]):
+                result = load_container_smoke_test_commands()
 
-        session_positionals = result["session-token"]["arg_hints"]["__positional__"]
-        assert session_positionals[0]["value"] == "generate"
-        set_entry = next(item for item in session_positionals if item["value"] == "set <token>")
-        assert set_entry["insertValue"] == "set "
-        assert result["session-token"]["expects_value"] == ["set"]
-        assert result["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
-        assert result["session-token"]["arg_hints"]["generate"] == []
+        assert result == [
+            "dig darklab.sh A",
+            "curl -I https://darklab.sh",
+            "whois darklab.sh",
+            "host darklab.sh",
+            "dig darklab.sh MX",
+            "whois 104.21.4.35",
+            "dig darklab.sh NS",
+        ]
+        for previous, current in zip(result, result[1:]):
+            prev_root = previous.split()[0]
+            curr_root = current.split()[0]
+            assert prev_root != curr_root
+        dig_positions = [idx for idx, command in enumerate(result) if command.startswith("dig ")]
+        whois_positions = [idx for idx, command in enumerate(result) if command.startswith("whois ")]
+        assert dig_positions == [0, 4, 6]
+        assert whois_positions == [2, 5]
 
-        assert result["grep"]["pipe_command"] is True
-        assert result["grep"]["pipe_description"] == "Filter lines by pattern"
+    def test_container_smoke_test_commands_render_workflow_defaults(self):
+        with mock.patch("commands.load_autocomplete_context_from_commands_registry", return_value={}):
+            with mock.patch(
+                "commands.load_all_workflows",
+                return_value=[
+                    {
+                        "title": "DNS",
+                        "inputs": [
+                            {
+                                "id": "domain",
+                                "type": "domain",
+                                "default": "darklab.sh",
+                            }
+                        ],
+                        "steps": [
+                            {"cmd": "dig {{domain}} A", "note": "Rendered from default"},
+                        ],
+                    }
+                ],
+            ):
+                result = load_container_smoke_test_commands()
 
-    def test_value_taking_flags_preserve_case_distinct_tokens(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(textwrap.dedent("""
-            context:
-              ping:
-                flags:
-                  - value: -W
-                    description: Per-packet timeout
-                    takes_value: true
-                  - value: -w
-                    description: Deadline before ping exits
-                    takes_value: true
-            """))
-            path = f.name
-        try:
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
-                result = load_autocomplete_context()
-        finally:
-            os.unlink(path)
+        assert result == ["dig darklab.sh A"]
 
-        assert result["ping"]["expects_value"] == ["-W", "-w"]
+    def test_container_smoke_test_commands_skip_workspace_required_examples(self):
+        registry_context = {
+            "curl": {
+                "examples": [
+                    {"value": "curl -I https://ip.darklab.sh", "description": "Headers"},
+                    {
+                        "value": "curl -L -o response.html https://noc.darklab.sh",
+                        "description": "Save response",
+                        "feature_required": "workspace",
+                    },
+                ],
+            },
+            "nmap": {
+                "examples": [
+                    {
+                        "value": "nmap -sT -iL targets.txt -p 80,443 --open -oN nmap-web.txt",
+                        "description": "Workspace targets",
+                        "feature_required": "workspace",
+                    },
+                ],
+            },
+        }
 
-    def test_local_overlay_merges_unique_context_entries(self):
+        with mock.patch(
+            "commands.load_autocomplete_context_from_commands_registry",
+            return_value=registry_context,
+        ) as load_context:
+            with mock.patch("commands.load_all_workflows", return_value=[]):
+                result = load_container_smoke_test_commands()
+
+        load_context.assert_called_once_with({"workspace_enabled": False})
+        assert result == ["curl -I https://ip.darklab.sh"]
+
+
+class TestWordlistCatalog:
+    def test_load_wordlist_catalog_filters_and_sorts_curated_matches(self, tmp_path):
+        root = tmp_path / "seclists"
+        (root / "Discovery" / "DNS").mkdir(parents=True)
+        (root / "Discovery" / "DNS" / "b.txt").write_text("beta\n")
+        (root / "Discovery" / "DNS" / "a.txt").write_text("alpha\n")
+        (root / "Discovery" / "DNS" / "README.md").write_text("docs\n")
+        config_path = tmp_path / "wordlists.yaml"
+        config_path.write_text(textwrap.dedent(f"""
+        root: {root}
+        categories:
+          - key: dns
+            label: DNS
+            description: DNS lists
+            include:
+              - Discovery/DNS/*.txt
+              - Discovery/DNS/README.md
+        """))
+
+        catalog = wordlists.load_wordlist_catalog(config_path=config_path)
+
+        assert [item["relpath"] for item in catalog["items"]] == [
+            "Discovery/DNS/a.txt",
+            "Discovery/DNS/b.txt",
+        ]
+        assert catalog["items"][0]["category"] == "dns"
+        assert catalog["items"][0]["path"].endswith("/Discovery/DNS/a.txt")
+
+    def test_wordlist_catalog_search_path_and_all_scan(self, tmp_path):
+        root = tmp_path / "seclists"
+        (root / "Discovery" / "Web-Content").mkdir(parents=True)
+        (root / "Passwords").mkdir(parents=True)
+        (root / "Discovery" / "Web-Content" / "common.txt").write_text("admin\n")
+        (root / "Passwords" / "top.txt").write_text("password\n")
+        (root / "Passwords" / "archive.7z").write_text("compressed\n")
+        config_path = tmp_path / "wordlists.yaml"
+        config_path.write_text(textwrap.dedent(f"""
+        root: {root}
+        categories:
+          - key: web-content
+            label: Web Content
+            include:
+              - Discovery/Web-Content/common.txt
+        """))
+
+        catalog = wordlists.load_wordlist_catalog(config_path=config_path, include_all=True)
+        matches = wordlists.filter_wordlists(catalog["items"], search="common")
+        found = wordlists.find_wordlist("common.txt", catalog["items"])
+
+        assert [item["name"] for item in matches] == ["common.txt"]
+        assert found is not None
+        assert found["relpath"] == "Discovery/Web-Content/common.txt"
+        assert [item["relpath"] for item in catalog["all_items"]] == [
+            "Discovery/Web-Content/common.txt",
+            "Passwords/top.txt",
+        ]
+
+    def test_wordlist_catalog_missing_root_returns_empty_items(self, tmp_path):
+        config_path = tmp_path / "wordlists.yaml"
+        config_path.write_text(textwrap.dedent(f"""
+        root: {tmp_path / "missing"}
+        categories:
+          - key: dns
+            include:
+              - Discovery/DNS/*.txt
+        """))
+
+        catalog = wordlists.load_wordlist_catalog(config_path=config_path)
+
+        assert catalog["items"] == []
+        assert catalog["categories"][0]["key"] == "dns"
+
+
+class TestWorkflowInputLoading:
+    def test_load_workflows_keeps_declared_inputs(self):
+        payload = textwrap.dedent(
+            """
+            - title: "DNS Workflow"
+              description: "Custom workflow"
+              inputs:
+                - id: domain
+                  label: Domain
+                  type: domain
+                  required: true
+                  placeholder: example.com
+                  help: Use the fully qualified domain.
+              steps:
+                - cmd: "dig {{domain}} A"
+                  note: "Check the answer section."
+            """
+        )
         with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "autocomplete_context.yaml")
-            local_path = os.path.join(tmp, "autocomplete_context.local.yaml")
-            with open(base_path, "w") as f:
-                f.write(textwrap.dedent("""
-                context:
-                  nmap:
-                    flags:
-                      - -sV
-                      - value: -p
-                        description: Port list
-                        takes_value: true
-                  wc:
-                    pipe:
-                      enabled: true
-                      insert: wc -l
-                """))
-            with open(local_path, "w") as f:
-                f.write(textwrap.dedent("""
-                context:
-                  nmap:
-                    flags:
-                      - -Pn
-                      - value: --top-ports
-                        description: Top ports
-                        takes_value: true
-                  ffuf:
-                    flags:
-                      - -u
-                  wc:
-                    pipe:
-                      label: wc -l
-                      description: Count lines
-                """))
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
-                result = load_autocomplete_context()
-        assert [item["value"] for item in result["nmap"]["flags"]] == ["-sV", "-p", "-Pn", "--top-ports"]
-        assert result["nmap"]["expects_value"] == ["-p", "--top-ports"]
-        assert [item["value"] for item in result["ffuf"]["flags"]] == ["-u"]
-        assert result["wc"]["pipe_command"] is True
-        assert result["wc"]["pipe_insert_value"] == "wc -l"
-        assert result["wc"]["pipe_label"] == "wc -l"
-        assert result["wc"]["pipe_description"] == "Count lines"
+            path = Path(tmp) / "workflows.yaml"
+            path.write_text(payload)
+            with mock.patch("commands.WORKFLOWS_FILE", str(path)):
+                result = load_workflows()
 
-    def test_local_overlay_preserves_case_distinct_value_taking_flags(self):
+        assert result == [
+            {
+                "title": "DNS Workflow",
+                "description": "Custom workflow",
+                "inputs": [
+                    {
+                        "id": "domain",
+                        "label": "Domain",
+                        "type": "domain",
+                        "required": True,
+                        "placeholder": "example.com",
+                        "default": "",
+                        "help": "Use the fully qualified domain.",
+                    }
+                ],
+                "steps": [
+                    {"cmd": "dig {{domain}} A", "note": "Check the answer section."},
+                ],
+            }
+        ]
+
+    def test_load_workflows_drops_steps_with_undeclared_tokens(self):
+        payload = textwrap.dedent(
+            """
+            - title: "Broken workflow"
+              description: "Unknown token"
+              inputs:
+                - id: host
+                  type: host
+                  required: true
+              steps:
+                - cmd: "ping {{host}}"
+                - cmd: "dig {{domain}} A"
+            """
+        )
         with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "autocomplete_context.yaml")
-            local_path = os.path.join(tmp, "autocomplete_context.local.yaml")
-            with open(base_path, "w") as f:
-                f.write(textwrap.dedent("""
-                context:
-                  ping:
-                    flags:
-                      - value: -W
-                        description: Per-packet timeout
-                        takes_value: true
-                """))
-            with open(local_path, "w") as f:
-                f.write(textwrap.dedent("""
-                context:
-                  ping:
-                    flags:
-                      - value: -w
-                        description: Deadline before exit
-                        takes_value: true
-                """))
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
-                result = load_autocomplete_context()
+            path = Path(tmp) / "workflows.yaml"
+            path.write_text(payload)
+            with mock.patch("commands.WORKFLOWS_FILE", str(path)):
+                result = load_workflows()
 
-        assert result["ping"]["expects_value"] == ["-W", "-w"]
+        assert result == [
+            {
+                "title": "Broken workflow",
+                "description": "Unknown token",
+                "inputs": [
+                    {
+                        "id": "host",
+                        "label": "Host",
+                        "type": "host",
+                        "required": True,
+                        "placeholder": "",
+                        "default": "",
+                        "help": "",
+                    }
+                ],
+                "steps": [
+                    {"cmd": "ping {{host}}", "note": ""},
+                ],
+            }
+        ]
 
-    def test_local_overlay_merges_arguments_and_subcommands_without_duplication(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "autocomplete_context.yaml")
-            local_path = os.path.join(tmp, "autocomplete_context.local.yaml")
-            with open(base_path, "w") as f:
-                f.write(textwrap.dedent("""
-                context:
-                  session-token:
-                    subcommands:
-                      - value: generate
-                        description: Generate a new token
-                        closes: true
-                      - value: set
-                        description: Activate an existing token
-                        takes_value: true
-                        value_hint:
-                          placeholder: "<token>"
-                          description: Paste a token
-                  curl:
-                    arguments:
-                      - placeholder: "<url>"
-                        description: Target URL
-                """))
-            with open(local_path, "w") as f:
-                f.write(textwrap.dedent("""
-                context:
-                  session-token:
-                    subcommands:
-                      - value: revoke
-                        description: Revoke a token
-                        takes_value: true
-                        value_hint:
-                          placeholder: "<token>"
-                          description: Token to revoke
-                  curl:
-                    arguments:
-                      - value: "https://"
-                        description: Start an HTTP or HTTPS URL
-                """))
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
-                result = load_autocomplete_context()
+    def test_load_all_workflows_filters_workspace_required_workflows(self):
+        disabled = load_all_workflows({"workspace_enabled": False})
+        enabled = load_all_workflows({"workspace_enabled": True})
 
-        session_positionals = result["session-token"]["arg_hints"]["__positional__"]
-        assert [item["value"] for item in session_positionals] == ["generate", "set <token>", "revoke <token>"]
-        assert result["session-token"]["expects_value"] == ["set", "revoke"]
-        assert result["session-token"]["arg_hints"]["generate"] == []
-        assert result["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
-        assert result["session-token"]["arg_hints"]["revoke"][0]["value"] == "<token>"
+        disabled_titles = {item["title"] for item in disabled}
+        enabled_titles = {item["title"] for item in enabled}
 
-        curl_positionals = result["curl"]["arg_hints"]["__positional__"]
-        assert [item["value"] for item in curl_positionals] == ["<url>", "https://"]
+        assert "Subdomain HTTP Triage" not in disabled_titles
+        assert "Crawl And Scan" not in disabled_titles
+        assert "Subdomain HTTP Triage" in enabled_titles
+        assert "Crawl And Scan" in enabled_titles
 
-    def test_local_overlay_can_override_argument_limit(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "autocomplete_context.yaml")
-            local_path = os.path.join(tmp, "autocomplete_context.local.yaml")
-            with open(base_path, "w") as f:
-                f.write(textwrap.dedent("""
-                context:
-                  man:
-                    argument_limit: 1
-                    arguments:
-                      - value: curl
-                        description: curl manual page
-                """))
-            with open(local_path, "w") as f:
-                f.write(textwrap.dedent("""
-                context:
-                  man:
-                    argument_limit: 2
-                    arguments:
-                      - value: ping
-                        description: ping manual page
-                """))
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
-                result = load_autocomplete_context()
-
-        assert result["man"]["argument_limit"] == 2
-        man_positionals = result["man"]["arg_hints"]["__positional__"]
-        assert [item["value"] for item in man_positionals] == ["curl", "ping"]
+        subdomain = next(item for item in enabled if item["title"] == "Subdomain HTTP Triage")
+        assert subdomain["feature_required"] == "workspace"
+        assert [step["cmd"] for step in subdomain["steps"]] == [
+            "subfinder -d {{domain}} -silent -o subdomains.txt",
+            "pd-httpx -l subdomains.txt -silent -o live-urls.txt",
+            "pd-httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt",
+        ]
 
 
-# ── load_allowed_commands_grouped ─────────────────────────────────────────────
+class TestSeedHistoryFixtures:
+    def test_visual_flows_fixture_only_stars_two_commands(self):
+        seed_history = _load_seed_history_module()
 
-class TestAllowedCommandsGroupingBasics:
-    def _write(self, content, tmp_dir):
-        path = os.path.join(tmp_dir, "allowed_commands.txt")
-        with open(path, "w") as f:
-            f.write(textwrap.dedent(content))
-        return path
+        assert seed_history.VISUAL_HISTORY_FIXTURES["visual-flows"]["star"] == 2
 
-    def test_missing_file_returns_none(self):
-        with mock.patch("commands.ALLOWED_COMMANDS_FILE", "/nonexistent/path.txt"):
-            result = load_allowed_commands_grouped()
-        assert result is None
+    def test_seed_history_uses_runtime_command_registry_examples(self):
+        seed_history = _load_seed_history_module()
+        commands_from_seed = seed_history._load_autocomplete_example_commands()
 
-    def test_commands_grouped_by_header(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write(
-                "## Network\nping\ncurl\n## Scanning\nnmap\n", tmp
+        expected_examples = []
+        seen = set()
+        for spec in load_autocomplete_context_from_commands_registry().values():
+            if not isinstance(spec, dict):
+                continue
+            for example in spec.get("examples") or []:
+                if not isinstance(example, dict):
+                    continue
+                value = str(example.get("value") or "").strip()
+                if not value or value in seen:
+                    continue
+                seen.add(value)
+                expected_examples.append(value)
+
+        assert commands_from_seed == expected_examples
+        assert "bogus-command" not in commands_from_seed
+
+    def test_seed_runs_avoids_adjacent_duplicate_commands(self):
+        seed_history = _load_seed_history_module()
+
+        class _FakeConn:
+            def executemany(self, *_args, **_kwargs):
+                return None
+
+            def commit(self):
+                return None
+
+        @contextmanager
+        def _fake_db_connect():
+            yield _FakeConn()
+
+        command_pool = [
+            "dig darklab.sh +short",
+            "curl -I https://ip.darklab.sh",
+            "ping -c 4 darklab.sh",
+        ]
+
+        with mock.patch.object(
+            seed_history,
+            "_load_autocomplete_example_commands",
+            return_value=command_pool,
+        ), mock.patch.object(seed_history, "db_connect", _fake_db_connect):
+            seeded_commands = seed_history.seed_runs(
+                "tok_deadbeefdeadbeefdeadbeefdeadbeef",
+                40,
+                7,
+                random.Random(4242),
             )
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                result = load_allowed_commands_grouped()
-        assert result is not None
-        assert len(result) == 2
-        assert result[0]["name"] == "Network"
-        assert result[0]["commands"] == ["ping", "curl"]
-        assert result[1]["name"] == "Scanning"
-        assert result[1]["commands"] == ["nmap"]
 
-    def test_commands_without_header_get_empty_name(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("ping\nnmap\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                result = load_allowed_commands_grouped()
-        assert result is not None
-        assert len(result) == 1
-        assert result[0]["name"] == ""
-        assert "ping" in result[0]["commands"]
-
-    def test_deny_entries_excluded_from_groups(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("## Scanning\nnmap\n!nmap -sU\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                result = load_allowed_commands_grouped()
-        assert result is not None
-        commands_list = result[0]["commands"]
-        assert "nmap" in commands_list
-        assert "!nmap -su" not in commands_list
-        assert all(not c.startswith("!") for c in commands_list)
-
-    def test_empty_groups_filtered_out(self):
-        # A header with only deny entries under it produces no commands → excluded
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("## Empty\n!nmap -sU\n## Real\nping\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                result = load_allowed_commands_grouped()
-        assert result is not None
-        names = [g["name"] for g in result]
-        assert "Empty" not in names
-        assert "Real" in names
-
-    def test_empty_file_returns_none(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                result = load_allowed_commands_grouped()
-        assert result is None
+        assert len(seeded_commands) == 40
+        assert all(
+            current != previous
+            for previous, current in zip(seeded_commands, seeded_commands[1:])
+        )
 
 
 # ── rewrite_command idempotency ───────────────────────────────────────────────
@@ -1431,19 +3479,13 @@ class TestRewriteIdempotent:
         assert "--report-wide" not in cmd
         assert notice is None
 
-    def test_nmap_already_privileged_unchanged(self):
-        cmd, _ = rewrite_command("nmap --privileged -sV 10.0.0.1")
-        assert cmd.count("--privileged") == 1
+    def test_nmap_already_connect_scan_unchanged(self):
+        cmd, _ = rewrite_command("nmap -sT -sV 10.0.0.1")
+        assert cmd.count("-sT") == 1
 
     def test_nuclei_already_ud_unchanged(self):
         cmd, _ = rewrite_command("nuclei -ud /my/templates -u https://darklab.sh")
         assert cmd.count("-ud") == 1
-
-    def test_wapiti_already_output_unchanged(self):
-        cmd, notice = rewrite_command("wapiti -u http://darklab.sh -o /tmp/report")
-        assert "/dev/stdout" not in cmd
-        assert notice is None
-
 
 # ── _expiry_note ──────────────────────────────────────────────────────────────
 
@@ -1492,47 +3534,47 @@ class TestExpiryNote:
 # ── _prompt_echo_text + synthesized prompt-echo lines ────────────────────────
 
 class TestPromptEchoText:
-    def test_uses_configured_prompt_prefix(self):
-        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
-            assert _prompt_echo_text("ls -la") == "ops@darklab:~$ ls -la"
+    def test_uses_configured_prompt_identity(self):
+        with mock.patch.dict("permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
+            assert _prompt_echo_text("ls -la") == "ops@darklab:~ $ ls -la"
 
-    def test_falls_back_to_dollar_when_prefix_missing(self):
-        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": ""}):
-            assert _prompt_echo_text("ls -la") == "$ ls -la"
+    def test_falls_back_to_default_identity_when_parts_are_missing(self):
+        with mock.patch.dict("permalinks.CFG", {"prompt_username": "", "prompt_domain": ""}):
+            assert _prompt_echo_text("ls -la") == "anon@darklab.sh:~ $ ls -la"
 
     def test_strips_trailing_space_when_label_empty(self):
-        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "anon@darklab:~$"}):
-            assert _prompt_echo_text("") == "anon@darklab:~$"
+        with mock.patch.dict("permalinks.CFG", {"prompt_username": "anon", "prompt_domain": "darklab.sh"}):
+            assert _prompt_echo_text("") == "anon@darklab.sh:~ $"
 
 
 class TestNormalizePermalinkLinesPromptEcho:
     """Regression guard: when a history snapshot does not already carry a
     prompt-echo line, the normalizer synthesizes one using the configured
-    prompt_prefix — not a reduced bare `$` — so permalink pages render the
+    prompt identity — not a reduced bare `$` — so permalink pages render the
     same prompt identity as the live shell."""
 
     def test_unstructured_content_uses_configured_prefix(self):
-        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
+        with mock.patch.dict("permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             lines = _normalize_permalink_lines(["hello", "world"], label="echo hello")
         assert lines[0]["cls"] == "prompt-echo"
-        assert lines[0]["text"] == "ops@darklab:~$ echo hello"
+        assert lines[0]["text"] == "ops@darklab:~ $ echo hello"
 
     def test_structured_snapshot_without_echo_gets_configured_prefix(self):
         content = [
             {"text": "hello", "cls": "", "tsC": "", "tsE": ""},
             {"text": "[process exited with code 0 in 0.1s]", "cls": "exit-ok"},
         ]
-        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
+        with mock.patch.dict("permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             lines = _normalize_permalink_lines(content, label="echo hello")
         assert lines[0]["cls"] == "prompt-echo"
-        assert lines[0]["text"] == "ops@darklab:~$ echo hello"
+        assert lines[0]["text"] == "ops@darklab:~ $ echo hello"
 
     def test_structured_snapshot_with_existing_echo_is_preserved(self):
         content = [
             {"text": "anon@darklab:~$ echo hello", "cls": "prompt-echo"},
             {"text": "hello", "cls": ""},
         ]
-        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
+        with mock.patch.dict("permalinks.CFG", {"prompt_username": "ops", "prompt_domain": "darklab"}):
             lines = _normalize_permalink_lines(content, label="echo hello")
         # Existing echo survives; normalizer does not prepend a second one.
         echo_lines = [entry for entry in lines if entry["cls"] == "prompt-echo"]
@@ -1598,6 +3640,7 @@ class TestDatabaseInit:
             conn.close()
         assert "runs" in tables
         assert "snapshots" in tables
+        assert "session_variables" in tables
 
     def test_creates_session_indexes(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1754,7 +3797,48 @@ class TestDatabaseInit:
         assert conn.execute.call_args_list[0].args[0] == "ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT ''"
 
 
-class TestFakeStatus:
+class TestSessionVariables:
+    def test_set_list_unset_and_expand_variables(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "vars.db")
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+                session_variables.set_session_variable("sess-vars", "HOST", "ip.darklab.sh")
+                session_variables.set_session_variable("sess-vars", "PORT", "443")
+                expansion = session_variables.expand_session_variables(
+                    "openssl s_client -connect ${HOST}:$PORT",
+                    "sess-vars",
+                )
+                assert expansion.command == "openssl s_client -connect ip.darklab.sh:443"
+                assert expansion.used_names == ("HOST", "PORT")
+                quoted = session_variables.expand_session_variables(
+                    "curl 'https://$HOST'",
+                    "sess-vars",
+                )
+                assert quoted.command == "curl 'https://ip.darklab.sh'"
+                assert session_variables.list_session_variables("sess-vars") == {
+                    "HOST": "ip.darklab.sh",
+                    "PORT": "443",
+                }
+                assert session_variables.unset_session_variable("sess-vars", "PORT") is True
+                assert session_variables.unset_session_variable("sess-vars", "PORT") is False
+
+    def test_rejects_invalid_names_and_undefined_references(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "vars.db")
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+                with pytest.raises(session_variables.InvalidSessionVariableName):
+                    session_variables.set_session_variable("sess-vars", "host", "ip.darklab.sh")
+                with pytest.raises(session_variables.UndefinedSessionVariable):
+                    session_variables.expand_session_variables("curl https://$HOST", "sess-vars")
+                with pytest.raises(session_variables.InvalidSessionVariableReference):
+                    session_variables.expand_session_variables("curl https://${HOST:-darklab.sh}", "sess-vars")
+
+
+class TestBuiltinStatus:
     def test_includes_session_summary_counts(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "status.db")
@@ -1787,14 +3871,163 @@ class TestFakeStatus:
             conn.close()
 
             with mock.patch("database.DB_PATH", db_path):
-                with mock.patch("fake_commands.active_runs_for_session", return_value=[{"id": "job-1"}]):
-                    lines = fake_commands._run_fake_status("tok_statusdemo")
+                with mock.patch("builtin_commands.active_runs_for_session", return_value=[{"id": "job-1"}]):
+                    with mock.patch("builtin_commands.redis_client", None):
+                        lines = builtin_commands._run_builtin_status("tok_statusdemo")
 
         text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", line["text"]) for line in lines)
-        assert re.search(r"session\s+tok_statusdemo", text)
-        assert re.search(r"session type\s+named token", text)
+        assert re.search(r"session\s+tok_stat••••", text)
+        assert "tok_statusdemo" not in text
+        assert re.search(r"session type\s+session token", text)
+        assert re.search(r"database\s+online", text)
+        assert re.search(r"redis\s+n/a", text)
         assert re.search(r"runs in session\s+2", text)
         assert re.search(r"snapshots\s+1", text)
         assert re.search(r"starred commands\s+1", text)
         assert re.search(r"saved options\s+yes", text)
-        assert re.search(r"active jobs\s+1", text)
+        assert re.search(r"active runs\s+1", text)
+
+
+class TestBuiltinStats:
+    def test_reports_session_activity_and_command_breakdown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "stats.db")
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            runs = [
+                (
+                    "run-1",
+                    "tok_statsdemo",
+                    "nmap -sV ip.darklab.sh",
+                    "2026-01-01 00:00:00",
+                    "2026-01-01 00:00:10",
+                    0,
+                ),
+                (
+                    "run-2",
+                    "tok_statsdemo",
+                    "nmap -p 443 ip.darklab.sh",
+                    "2026-01-01 00:01:00",
+                    "2026-01-01 00:01:20",
+                    1,
+                ),
+                (
+                    "run-3",
+                    "tok_statsdemo",
+                    "dig darklab.sh",
+                    "2026-01-01 00:02:00",
+                    "2026-01-01 00:02:02",
+                    0,
+                ),
+                (
+                    "run-4",
+                    "tok_statsdemo",
+                    "curl https://darklab.sh",
+                    "2026-01-01 00:03:00",
+                    None,
+                    None,
+                ),
+                (
+                    "run-5",
+                    "tok_statsdemo",
+                    "status",
+                    "2026-01-01 00:03:30",
+                    "2026-01-01 00:03:31",
+                    0,
+                ),
+                (
+                    "run-6",
+                    "tok_statsdemo",
+                    "sslscan ip.darklab.sh",
+                    "2026-01-01 00:04:00",
+                    "2026-01-01 00:05:23",
+                    0,
+                ),
+                (
+                    "run-7",
+                    "tok_statsdemo",
+                    "ping ip.darklab.sh",
+                    "2026-01-01 00:05:30",
+                    "2026-01-01 00:05:45",
+                    -15,
+                ),
+                (
+                    "other-session-run",
+                    "tok_other",
+                    "whois darklab.sh",
+                    "2026-01-01 00:06:00",
+                    "2026-01-01 00:06:01",
+                    0,
+                ),
+            ]
+            conn.executemany(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code) VALUES (?, ?, ?, ?, ?, ?)",
+                runs,
+            )
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
+                ("snap-1", "tok_statsdemo", "demo snapshot", "[]"),
+            )
+            conn.execute(
+                "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                ("tok_statsdemo", "nmap -sV ip.darklab.sh"),
+            )
+            conn.commit()
+            conn.close()
+
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("builtin_commands.active_runs_for_session", return_value=[{"id": "job-1"}]):
+                    lines = builtin_commands._run_builtin_stats("tok_statsdemo")
+
+        text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", line["text"]) for line in lines)
+        assert re.search(r"session\s+tok_stat••••", text)
+        assert "tok_statsdemo" not in text
+        assert re.search(r"runs\s+7", text)
+        assert re.search(r"snapshots\s+1", text)
+        assert re.search(r"starred commands\s+1", text)
+        assert re.search(r"active runs\s+1", text)
+        assert re.search(r"success rate\s+80% \(4 ok / 1 failed\)", text)
+        assert re.search(r"average duration\s+21\.[78]s", text)
+        assert "  command      runs         ok       avg" in text
+        assert "  nmap       2 runs     50% ok     15.0s" in text
+        assert "  dig         1 run    100% ok      2.0s" in text
+        assert "  curl        1 run     n/a ok       n/a" in text
+        assert "  sslscan     1 run    100% ok    1m 23s" in text
+        assert "  ping        1 run     n/a ok     15.0s" in text
+        assert "incomplete" not in text
+        assert not re.search(r"status\s+1 run", text)
+        assert "whois" not in text
+
+    def test_top_commands_empty_state_ignores_builtin_only_sessions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "stats-builtin-only.db")
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    "run-1",
+                    "tok_builtinonly",
+                    "status",
+                    "2026-01-01 00:00:00",
+                    "2026-01-01 00:00:01",
+                    0,
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            with mock.patch("database.DB_PATH", db_path):
+                lines = builtin_commands._run_builtin_stats("tok_builtinonly")
+
+        text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", line["text"]) for line in lines)
+        assert re.search(r"runs\s+1", text)
+        assert re.search(r"success rate\s+100% \(1 ok / 0 failed\)", text)
+        assert "No external tool runs for this session yet." in text
+        assert not re.search(r"status\s+1 run", text)

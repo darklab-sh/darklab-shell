@@ -1,45 +1,71 @@
 #!/usr/bin/env bash
 #
-# Record a mobile demo video of the shell for the README.
+# Record the mobile demo with OBS while Playwright drives a real headed
+# Chromium window. OBS is the standard demo recording path because it captures
+# animated UI such as the Status Monitor more smoothly than the old screenshot
+# stitcher. The demo keeps the in-page iOS keyboard overlay for the mobile flow.
 #
-# Requires a running container (default: http://localhost:8888).
-# Start one first if needed:
-#   docker compose up
+# OBS setup:
+#   1. Open OBS.
+#   2. Tools -> WebSocket Server Settings -> Enable WebSocket server.
+#   3. Add a Window Capture source for the Playwright Chromium window.
+#   4. Use a 502x932 canvas for viewport-only output, then crop browser chrome
+#      from the top/bottom of the Window Capture source and Fit to Screen.
+#   5. Set OBS recording output to your preferred 60 fps / high-bitrate profile.
 #
 # Usage:
 #   scripts/record_demo_mobile.sh
 #   scripts/record_demo_mobile.sh --base-url http://localhost:9000
+#   scripts/record_demo_mobile.sh --no-arm
+#   OBS_WS_PASSWORD=... scripts/record_demo_mobile.sh
 #
-# The recorded video is saved to assets/demo-mobile.webm at 1290×2796 (3×
-# device pixel density) — genuinely crisp on Retina displays. Playwright's
-# built-in video recorder ignores deviceScaleFactor; instead the spec runs a
-# background page.screenshot() loop which does respect it, and this script
-# stitches the frames into a video with ffmpeg.
-#
-# On macOS the output is assets/darklab_shell_mobile_demo.mp4 (Apple VideoToolbox HEVC, ~seconds).
-# On Linux the output is assets/darklab_shell_mobile_demo.webm (VP9 software encode, slower).
-#
-# Convert to GIF manually (scale down to 430px wide for embedding):
-#   ffmpeg -i assets/darklab_shell_mobile_demo.mp4 \
-#     -vf "fps=15,scale=393:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" \
-#     assets/darklab_shell_mobile_demo.gif
-#
-# Trim the video before converting if needed:
-#   ffmpeg -i assets/darklab_shell_mobile_demo.mp4 -ss 00:00:02 -to 00:01:30 -c copy assets/darklab_shell_mobile_demo-trimmed.mp4
+# Optional:
+#   DEMO_MOBILE_OBS_VIEWPORT_WIDTH=510 scripts/record_demo_mobile.sh
+#   DEMO_MOBILE_TOP_SAFE_AREA_PX=0 DEMO_MOBILE_BOTTOM_SAFE_AREA_PX=14 scripts/record_demo_mobile.sh
+#   DEMO_MOBILE_KEYBOARD_WIDTH=388 scripts/record_demo_mobile.sh
+#   DEMO_MOBILE_KEYBOARD_GUTTER_COLOR=#161617 scripts/record_demo_mobile.sh
+#   DEMO_MOBILE_WINDOW_WIDTH=510 DEMO_MOBILE_WINDOW_HEIGHT=1052 scripts/record_demo_mobile.sh
 
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BASE_URL="${DEMO_BASE_URL:-http://localhost:8888}"
-FRAMES_DIR="${DEMO_FRAMES_DIR:-/tmp/darklab_shell-mobile-demo-frames}"
-PLAYWRIGHT_OUTPUT_DIR="${DEMO_PLAYWRIGHT_OUTPUT_DIR:-/tmp/darklab_shell-mobile-demo-output}"
+PLAYWRIGHT_OUTPUT_DIR="${DEMO_PLAYWRIGHT_OUTPUT_DIR:-/tmp/darklab_shell-mobile-demo-obs-output}"
+DEMO_HISTORY_FIXTURE="${DEMO_HISTORY_FIXTURE:-visual-flows}"
+OBS_WS_URL="${OBS_WS_URL:-ws://127.0.0.1:4455}"
+ARM_BEFORE_RECORDING=1
+MOBILE_OBS_VIEWPORT_WIDTH="${DEMO_MOBILE_OBS_VIEWPORT_WIDTH:-502}"
+MOBILE_OBS_VIEWPORT_HEIGHT=932
+MOBILE_WINDOW_WIDTH="${DEMO_MOBILE_WINDOW_WIDTH:-$MOBILE_OBS_VIEWPORT_WIDTH}"
+MOBILE_WINDOW_HEIGHT="${DEMO_MOBILE_WINDOW_HEIGHT:-1052}"
+MOBILE_TOP_SAFE_AREA="${DEMO_MOBILE_TOP_SAFE_AREA_PX:-0}"
+MOBILE_BOTTOM_SAFE_AREA="${DEMO_MOBILE_BOTTOM_SAFE_AREA_PX:-14}"
+MOBILE_KEYBOARD_WIDTH="${DEMO_MOBILE_KEYBOARD_WIDTH:-430}"
+MOBILE_KEYBOARD_GUTTER_COLOR="${DEMO_MOBILE_KEYBOARD_GUTTER_COLOR:-#161617}"
+OBS_CANVAS_TARGET="${MOBILE_OBS_VIEWPORT_WIDTH}x${MOBILE_OBS_VIEWPORT_HEIGHT}"
+CHROMIUM_WINDOW_TARGET="${MOBILE_WINDOW_WIDTH}x${MOBILE_WINDOW_HEIGHT}"
 
-# Parse --base-url flag
+generate_demo_session_token() {
+  local raw
+  raw="$(uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '-')"
+  printf 'tok_%s\n' "${raw}"
+}
+
+DEMO_SESSION_TOKEN="${DEMO_SESSION_TOKEN:-$(generate_demo_session_token)}"
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --base-url)
       BASE_URL="$2"
       shift 2
+      ;;
+    --arm|--arm-before-recording)
+      ARM_BEFORE_RECORDING=1
+      shift
+      ;;
+    --no-arm|--start-immediately)
+      ARM_BEFORE_RECORDING=0
+      shift
       ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -48,7 +74,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Health check
 echo "Checking container at ${BASE_URL} ..."
 if ! curl -sf "${BASE_URL}/health" > /dev/null 2>&1; then
   echo "Error: cannot reach ${BASE_URL} — is the container running?"
@@ -59,60 +84,175 @@ echo "Container is up."
 
 cd "$ROOT_DIR"
 
-# Clear previous frames and Playwright output
-rm -rf "$FRAMES_DIR" "$PLAYWRIGHT_OUTPUT_DIR"
+require_workspace_enabled() {
+  local status
+  status="$(
+    curl -sS -o /dev/null -w '%{http_code}' \
+      -H "X-Session-ID: ${DEMO_SESSION_TOKEN}" \
+      "${BASE_URL}/workspace/files" || true
+  )"
+  if [ "$status" = "200" ]; then
+    return
+  fi
 
+  echo "Error: mobile OBS demo recording requires Files/workspace API access so the Files panel can show response.html."
+  echo "Workspace probe returned HTTP ${status:-000} for GET /workspace/files."
+  echo "Add this to app/conf/config.local.yaml and restart the container:"
+  echo "  workspace_enabled: true"
+  echo "  docker compose down && docker compose up -d"
+  exit 1
+}
+
+seed_demo_history() {
+  case "$BASE_URL" in
+    http://localhost:*|http://127.0.0.1:*|https://localhost:*|https://127.0.0.1:*)
+      ;;
+    *)
+      echo "Skipping demo history seed for non-local base URL: ${BASE_URL}"
+      return
+      ;;
+  esac
+
+  echo "Seeding demo history fixture (${DEMO_HISTORY_FIXTURE}) ..."
+  docker compose exec -T shell python - \
+    --fixture "$DEMO_HISTORY_FIXTURE" \
+    --token "$DEMO_SESSION_TOKEN" \
+    < "$ROOT_DIR/scripts/seed_history.py" >/dev/null
+}
+
+seed_demo_history
+require_workspace_enabled
+
+obs_recording_started=0
+stop_obs_recording() {
+  if [ "$obs_recording_started" = "1" ]; then
+    echo ""
+    echo "Stopping OBS recording ..."
+    node "$ROOT_DIR/scripts/obs_recording.mjs" stop || true
+  fi
+}
+
+if [ "$ARM_BEFORE_RECORDING" = "1" ]; then
+  ARMING_FILE="${DEMO_OBS_ARMING_FILE:-${PLAYWRIGHT_OUTPUT_DIR}/obs-arm-go}"
+  ARM_READY_FILE="${ARMING_FILE}.ready"
+  playwright_pid=""
+
+  # Invoked by EXIT/INT/TERM traps.
+  # shellcheck disable=SC2317,SC2329
+  cleanup_armed_demo() {
+    if [ -n "$playwright_pid" ] && kill -0 "$playwright_pid" 2>/dev/null; then
+      kill "$playwright_pid" 2>/dev/null || true
+      wait "$playwright_pid" 2>/dev/null || true
+    fi
+    stop_obs_recording
+    rm -f "$ARMING_FILE" "$ARM_READY_FILE"
+  }
+  trap cleanup_armed_demo EXIT
+  trap 'cleanup_armed_demo; exit 130' INT
+  trap 'cleanup_armed_demo; exit 143' TERM
+
+  rm -rf "$PLAYWRIGHT_OUTPUT_DIR"
+  mkdir -p "$(dirname -- "$ARMING_FILE")"
+  rm -f "$ARMING_FILE" "$ARM_READY_FILE"
+
+  echo "Launching mobile Chromium setup window. The app will not load until you press Enter."
+  DEMO_BASE_URL="$BASE_URL" \
+  DEMO_PLAYWRIGHT_OUTPUT_DIR="$PLAYWRIGHT_OUTPUT_DIR" \
+  DEMO_SESSION_TOKEN="$DEMO_SESSION_TOKEN" \
+  DEMO_HEADED=1 \
+  DEMO_DISABLE_FRAME_CAPTURE=1 \
+  DEMO_OBS_ARMING_FILE="$ARMING_FILE" \
+  RUN_DEMO=1 npx playwright test \
+    --config config/playwright.demo.mobile.config.js &
+  playwright_pid=$!
+
+  echo "Waiting for Chromium setup window ..."
+  while [ ! -f "$ARM_READY_FILE" ]; do
+    if ! kill -0 "$playwright_pid" 2>/dev/null; then
+      set +e
+      wait "$playwright_pid"
+      playwright_status=$?
+      set -e
+      playwright_pid=""
+      trap - EXIT INT TERM
+      rm -f "$ARMING_FILE" "$ARM_READY_FILE"
+      exit "$playwright_status"
+    fi
+    sleep 0.25
+  done
+
+  echo ""
+  echo "Chromium setup window is ready."
+  echo "OBS canvas/output target: ${OBS_CANVAS_TARGET}"
+  echo "Chromium window launch size: ${CHROMIUM_WINDOW_TARGET}"
+  echo "In-page safe area: top ${MOBILE_TOP_SAFE_AREA}px, bottom ${MOBILE_BOTTOM_SAFE_AREA}px"
+  echo "Keyboard image width/gutter: ${MOBILE_KEYBOARD_WIDTH}px / ${MOBILE_KEYBOARD_GUTTER_COLOR}"
+  echo "Select that window in OBS, then press Enter here to start recording and run the demo."
+  IFS= read -r _ || true
+
+  echo "Checking OBS WebSocket at ${OBS_WS_URL} ..."
+  node "$ROOT_DIR/scripts/obs_recording.mjs" assert-idle
+
+  echo "Starting OBS recording ..."
+  node "$ROOT_DIR/scripts/obs_recording.mjs" start
+  obs_recording_started=1
+  printf 'go\n' > "$ARMING_FILE"
+
+  set +e
+  wait "$playwright_pid"
+  playwright_status=$?
+  set -e
+  playwright_pid=""
+
+  echo ""
+  echo "Stopping OBS recording ..."
+  node "$ROOT_DIR/scripts/obs_recording.mjs" stop
+  obs_recording_started=0
+  trap - EXIT INT TERM
+  rm -f "$ARMING_FILE" "$ARM_READY_FILE"
+
+  if [ "$playwright_status" -ne 0 ]; then
+    echo "Playwright mobile demo failed with exit code ${playwright_status}." >&2
+    exit "$playwright_status"
+  fi
+
+  echo ""
+  echo "Done. OBS saved the recording to the path shown above."
+  exit 0
+fi
+
+echo "Checking OBS WebSocket at ${OBS_WS_URL} ..."
+node "$ROOT_DIR/scripts/obs_recording.mjs" assert-idle
+
+rm -rf "$PLAYWRIGHT_OUTPUT_DIR"
+
+trap stop_obs_recording EXIT INT TERM
+
+echo "Starting OBS recording ..."
+node "$ROOT_DIR/scripts/obs_recording.mjs" start
+obs_recording_started=1
+
+set +e
 DEMO_BASE_URL="$BASE_URL" \
-DEMO_FRAMES_DIR="$FRAMES_DIR" \
 DEMO_PLAYWRIGHT_OUTPUT_DIR="$PLAYWRIGHT_OUTPUT_DIR" \
+DEMO_SESSION_TOKEN="$DEMO_SESSION_TOKEN" \
+DEMO_HEADED=1 \
+DEMO_DISABLE_FRAME_CAPTURE=1 \
 RUN_DEMO=1 npx playwright test \
   --config config/playwright.demo.mobile.config.js
+playwright_status=$?
+set -e
 
-# ── Stitch frames into video ──────────────────────────────────────────────────
-# The spec writes PNG frames to DEMO_FRAMES_DIR via page.screenshot(), which
-# returns images at deviceScaleFactor resolution
-# (1290×2796 for a 430×932 viewport at deviceScaleFactor: 3).
-FRAME_COUNT=$(find "$FRAMES_DIR" -name 'frame_*.png' 2>/dev/null | wc -l | tr -d ' ')
+echo ""
+echo "Stopping OBS recording ..."
+node "$ROOT_DIR/scripts/obs_recording.mjs" stop
+obs_recording_started=0
+trap - EXIT INT TERM
 
-if [ "$FRAME_COUNT" -eq 0 ]; then
-  echo ""
-  echo "Error: no frames found in ${FRAMES_DIR} — did the test pass?"
-  exit 1
+if [ "$playwright_status" -ne 0 ]; then
+  echo "Playwright mobile demo failed with exit code ${playwright_status}." >&2
+  exit "$playwright_status"
 fi
 
 echo ""
-echo "Stitching ${FRAME_COUNT} frames into video..."
-mkdir -p "$ROOT_DIR/docs"
-
-if [[ "$(uname -s)" == "Darwin" ]]; then
-  # Apple Silicon: use VideoToolbox hardware HEVC encoder — encodes in seconds
-  # instead of minutes. libvpx-vp9 software encoding does not effectively
-  # parallelize on Apple Silicon and would take 30+ minutes at this resolution.
-  OUT="$ROOT_DIR/assets/darklab_shell_mobile_demo.mp4"
-  ffmpeg -y -framerate 15 \
-    -i "$FRAMES_DIR/frame_%06d.png" \
-    -c:v hevc_videotoolbox -q:v 60 \
-    -tag:v hvc1 \
-    "$OUT"
-else
-  OUT="$ROOT_DIR/assets/darklab_shell_mobile_demo.webm"
-  ffmpeg -y -framerate 15 \
-    -i "$FRAMES_DIR/frame_%06d.png" \
-    -c:v libvpx-vp9 -b:v 0 -crf 28 \
-    -cpu-used 4 -row-mt 1 -threads 0 \
-    "$OUT"
-fi
-
-OUTNAME=$(basename "$OUT")
-echo "Done. Final video: assets/${OUTNAME}"
-
-echo ""
-echo "Video saved to assets/${OUTNAME}"
-echo ""
-echo "Convert to GIF (scale down to 430px wide for embedding):"
-echo "  ffmpeg -i assets/${OUTNAME} \\"
-echo "    -vf \"fps=15,scale=430:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" \\"
-echo "    assets/darklab_shell_mobile_demo.gif"
-echo ""
-echo "Trim before converting if needed:"
-echo "  ffmpeg -i assets/${OUTNAME} -ss 00:00:02 -to 00:01:30 -c copy assets/darklab_shell_mobile_demo-trimmed.${OUTNAME##*.}"
+echo "Done. OBS saved the recording to the path shown above."

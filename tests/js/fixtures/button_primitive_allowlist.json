@@ -3,9 +3,9 @@
     "Allowlist fixture for button_primitives_allowlist.test.js.",
     "Every <button>, [role=\"button\"], and <a role=\"button\"> in app/templates/ must",
     "either carry one of `allowed_primitive_classes` OR match one of `exceptions[].selector`.",
-    "Exceptions document surfaces whose button classes fall outside the",
-    ".btn / .nav-item / .close-btn / .toggle-btn / .kb-key primitive family.",
-    "Keep this list minimal — add a selector only when a surface has a deliberate reason to opt out."
+    "The primitive set includes structural controls such as app buttons, nav rows, dropdown items,",
+    "form/control rows, HUD action cells, keyboard keys, and mobile gesture handles.",
+    "Keep `exceptions` empty unless a surface has a documented structural reason to opt out."
   ],
 
   "allowed_primitive_classes": [
@@ -13,32 +13,13 @@
     "nav-item",
     "close-btn",
     "toggle-btn",
-    "kb-key"
+    "kb-key",
+    "dropdown-item",
+    "control-row",
+    "hud-action-cell",
+    "diag-cmd-cell",
+    "gesture-handle"
   ],
 
-  "exceptions": [
-    { "selector": ".rail-nav-item",       "note": "Desktop rail primary nav — surface-specific class family" },
-    { "selector": ".rail-section-header", "note": "Desktop rail collapsible section headers — surface-specific class family" },
-    { "selector": ".rail-collapse-btn",   "note": "Desktop rail collapse toggle — surface-specific class family" },
-    { "selector": ".tabs-scroll-btn",     "note": "Tab bar scroll arrows — surface-specific class family" },
-    { "selector": ".chrome-btn",          "note": "Terminal bar chrome toggles (search / ln / ts) — surface-specific class family" },
-    { "selector": ".history-action-btn",  "note": "History panel action buttons — surface-specific class family" },
-    { "selector": ".sheet-clear-btn",     "note": "Mobile recents sheet 'delete all' button — surface-specific class family" },
-    { "selector": ".sheet-filter-row",    "note": "Mobile recents filter rows (toggle / dropdown / check / clear) — surface-specific class family" },
-    { "selector": ".menu-item",           "note": "Mobile hamburger menu items — surface-specific class family" },
-    { "selector": ".menu-subitem",        "note": "Mobile hamburger menu sub-items (timestamp modes) — surface-specific class family" },
-    { "selector": ".recent-peek",         "note": "Mobile recent-peek strip (role=button div) — surface-specific class family" },
-    { "selector": ".sheet-grab",          "note": "Mobile sheet grab handle (role=button div) — surface-specific class family" },
-
-    { "selector": "#hist-btn, #options-btn, #theme-btn, #workflows-btn, #faq-btn", "note": "Desktop header toolbar buttons (classless, styled by id)" },
-    { "selector": "#hamburger-btn",       "note": "Mobile hamburger trigger (classless, styled by id)" },
-    { "selector": "#mobile-run-btn, #mobile-kill-btn", "note": "Mobile composer run/kill (classless, styled by id)" },
-    { "selector": "#new-tab-btn",         "note": "Tab bar new-tab trigger (classless, styled by id)" },
-    { "selector": "#search-prev, #search-next", "note": "Search nav arrows (classless, styled by id)" },
-    { "selector": "#run-btn",             "note": "Hidden fallback run button (tabindex=-1, aria-hidden)" },
-
-    { "selector": "[data-mobile-edit]",   "note": "Mobile composer edit bar (classless, data-attr selected)" },
-    { "selector": "[role=\"option\"]",    "note": "Sheet dropdown options inside .sheet-filter-dropdown" },
-    { "selector": "[data-action^=\"save-\"]", "note": "Permalink save-menu items (save-txt / save-html / save-pdf)" }
-  ]
+  "exceptions": []
 }

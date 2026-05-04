@@ -116,6 +116,28 @@ export async function runCommand(page, cmd) {
 }
 
 /**
+ * Wait for client-side output batching to finish for the active tab.
+ *
+ * The SSE exit event can update the HUD before large output batches have
+ * finished rendering. Tests that assert scroll position after high-volume
+ * commands should wait for this so scrollHeight stops moving underneath them.
+ */
+export async function waitForActiveOutputSettled(page, { timeout = 15_000 } = {}) {
+  await page.waitForFunction(
+    () => {
+      const tabId = typeof activeTabId !== 'undefined' ? activeTabId : null
+      if (!tabId) return false
+      const pending =
+        typeof _pendingOutputBatches !== 'undefined' ? _pendingOutputBatches.get(tabId) : null
+      return !pending || (!pending.scheduled && pending.items.length === 0)
+    },
+    { timeout },
+  )
+
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)))
+}
+
+/**
  * Set a composer value through the app's shared input-change path so
  * autocomplete and shared prompt state update deterministically.
  */

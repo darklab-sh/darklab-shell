@@ -1,8 +1,8 @@
 # Architectural Decisions
 
-This document records the key architectural decisions, tradeoffs, bugs, and implementation lessons that shaped the current design of darklab_shell.
+This document records the main design decisions, tradeoffs, bugs, and lessons that shaped darklab_shell.
 
-Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, runtime diagrams, persistence model, and deployment shape. Use this file for the reasoning behind those structures. If you are about to change something and want to know what has historically caused problems, skip to [Known Gotchas and Lessons Learned](#known-gotchas-and-lessons-learned).
+Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagrams, persistence model, and deployment shape. Use this file for the reasoning behind those choices. If you're about to change something and want to know what has caused trouble before, start with [Known Gotchas and Lessons Learned](#known-gotchas-and-lessons-learned).
 
 ---
 
@@ -10,6 +10,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, runtime
 
 - [Runtime and Coordination Decisions](#runtime-and-coordination-decisions)
   - [Real-time Output: SSE over WebSockets](#real-time-output-sse-over-websockets)
+  - [Redis-Backed Run Broker](#redis-backed-run-broker)
   - [Multi-worker Process Killing via Redis](#multi-worker-process-killing-via-redis)
   - [Rate Limiting via Redis](#rate-limiting-via-redis)
 - [Security and Isolation Decisions](#security-and-isolation-decisions)
@@ -57,6 +58,20 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, runtime
 
 Server-Sent Events are simpler to implement with Flask, work correctly behind nginx-proxy without additional configuration, and are unidirectional (server → client) which is all that's needed for streaming command output. The frontend reads the SSE stream via `fetch()` + `ReadableStream` rather than the `EventSource` API, because `EventSource` doesn't support custom headers (needed for the session ID).
 
+### Redis-Backed Run Broker
+
+**Command execution is owned by the run broker, not by the browser request that started it.**
+
+Earlier command streaming tied subprocess stdout draining directly to the browser's HTTP request. That made the first browser connection special: if the page reloaded, another browser opened the same session token, or the request stream failed, the backend had to choose between losing live output, continuing detached work with a separate drain path, or waiting for completed history. Those paths were hard to reason about and became especially awkward once Status Monitor needed cross-browser attach and kill behavior.
+
+The current model starts commands with `POST /runs`, records active-run ownership metadata, and has a backend worker drain stdout exactly once. The worker publishes normalized events (`started`, `notice`, `output`, `error`, `exit`) to a run stream. Browsers subscribe with `GET /runs/<run_id>/stream`, optionally replaying from an event id. This makes subscribers replaceable: the owning tab, a reloaded tab, a phone on the same session token, and an attached tab all consume the same processed output stream.
+
+Redis Streams were chosen for production because darklab_shell already relies on Redis for cross-worker rate limiting and process coordination. Gunicorn workers do not share memory, so in-process queues cannot provide reliable live-output replay or attach behavior across workers. SQLite is the durable history store, but it is a poor fit for high-frequency temporary stream events and blocking subscriber reads. Redis Streams provide ordered event ids, bounded replay, blocking reads, TTL-backed cleanup, and cross-worker visibility without turning the history database into a message bus.
+
+The app still includes a single-process in-memory broker fallback for local development, but production live reattachment expects Redis. That split is intentional: local development should stay easy to start, while Docker/Gunicorn deployments need one shared broker so active run state, stream replay, and process control behave consistently no matter which worker handles the next request.
+
+The old request-owned `POST /run` execution route was removed instead of kept as a compatibility layer. The app is pre-release, and maintaining two command execution paths would have duplicated lifecycle behavior, increased test burden, and made future active-run features more fragile. `POST /run/client` remains separate because browser-owned built-ins such as `theme`, `config`, and `session-token` need local DOM/storage behavior before their rendered transcript is saved to normal run history.
+
 ### Multi-worker Process Killing via Redis
 
 **Problem:** Gunicorn runs 4 workers, each with isolated memory. A kill request could hit a different worker than the one that started the process.
@@ -68,7 +83,7 @@ Server-Sent Events are simpler to implement with Flask, work correctly behind ng
 
 **Solution:** Redis keys — `SET proc:<run_id> <pid> EX 14400`. Every worker reads and writes the same Redis instance. `GETDEL` (Redis 6.2+) provides an atomic get-and-delete, preventing race conditions between workers. The 4-hour TTL (`EX 14400`) replaces the startup purge — orphaned entries self-expire rather than requiring cleanup on init.
 
-**Fallback for local development:** If `REDIS_URL` is not set, the app falls back to `memory://` for rate limiting and a `threading.Lock` + in-process dict for PID tracking. This is correct for single-process development (`python3 app.py`) but breaks under Gunicorn multi-worker mode — use Docker Compose for multi-worker testing.
+**Fallback for local development:** If `REDIS_URL` is not set, the app falls back to `memory://` for rate limiting and a `threading.Lock` + in-process dict for PID tracking. This works for single-process development (`python3 app.py`) but breaks under Gunicorn multi-worker mode — use Docker Compose for multi-worker testing.
 
 **Critical timing fix:** `Popen` and `pid_register` must happen *before* `return Response(generate(), ...)`. Flask generators are lazy — the generator body doesn't execute until Flask starts streaming. If `pid_register` is inside the generator, a kill request arriving before streaming starts finds nothing in Redis and silently fails.
 
@@ -101,7 +116,7 @@ This is what motivated the Redis addition in the first place. Once Redis was a d
 - **`appuser`** — runs Gunicorn, owns `/data` (chmod 700), can write SQLite
 - **`scanner`** — runs all user-submitted commands via `sudo -u scanner env HOME=/tmp`, no write access to `/data`
 
-`HOME=/tmp` is critical. Without it, `sudo` resets HOME to `/home/scanner` which doesn't exist on the read-only filesystem. Tools like nuclei, wapiti, and subfinder all write to `$HOME` at startup and will fail with "read-only filesystem" errors without this.
+`HOME=/tmp` is critical. Without it, `sudo` resets HOME to `/home/scanner` which doesn't exist on the read-only filesystem. Tools like nuclei and subfinder write to `$HOME` at startup and will fail with "read-only filesystem" errors without this.
 
 ### Path Blocking (/data and /tmp)
 
@@ -109,7 +124,7 @@ This is what motivated the Redis addition in the first place. Once Redis was a d
 
 The regex is `(?<![\w:/])/data\b` (and `/tmp`). The negative lookbehind `(?<![\w:/])` prevents false positives on URLs — `https://darklab.sh/data/` won't match because the `/data` segment is immediately preceded by `m` (the last character of `darklab.sh`), which satisfies `\w` in the lookbehind.
 
-Blocking happens at two layers: client-side (immediate feedback) and server-side (authoritative). Internal rewrites (e.g. `nuclei -ud /tmp/nuclei-templates`) are injected by `rewrite_command()` which runs *after* `is_command_allowed()`, so they bypass the check.
+Blocking happens at two layers: client-side (immediate feedback) and server-side (authoritative). Internal rewrites (for example `nuclei -ud /tmp/nuclei-templates` and ProjectDiscovery `XDG_CONFIG_HOME` wrappers) are injected by `rewrite_command()` after command validation, so app-owned runtime tokens can point at trusted internal paths without exposing arbitrary `/tmp` input to users.
 
 ### Loopback Address Blocking
 
@@ -122,7 +137,7 @@ Commands containing loopback addresses (`localhost`, `127.0.0.1`, `0.0.0.0`, `[:
 Three complementary layers enforce the restriction:
 
 1. **Server-side regex** (`commands.py` `_is_command_allowed`) — authoritative; catches any tool and any URL form (bare hostname, with port, with scheme, etc.)
-2. **Allowlist deny entries** (`conf/allowed_commands.txt`) — client-side feedback for the most obvious bare-hostname patterns (`!curl localhost`, `!curl 127.0.0.1`, etc.)
+2. **Command registry deny entries** (`app/conf/commands.yaml` `policy.deny`) — client-side feedback for the most obvious bare-hostname patterns (`curl localhost`, `curl 127.0.0.1`, etc.)
 3. **iptables rule** (`entrypoint.sh`) — OS-level TCP block for the `scanner` uid on the app port; fires before the Flask app sees the request and covers tools that bypass command validation (e.g. scripting languages)
 
 The iptables rule is added by `entrypoint.sh` as root before the `gosu` drop. It uses `REJECT --reject-with tcp-reset` so connections from the scanner user fail immediately rather than timing out. The `|| true` ensures the rule failure does not abort startup in environments where `xt_owner` is unavailable.
@@ -133,13 +148,13 @@ The iptables rule is added by `entrypoint.sh` as root before the `gosu` drop. It
 
 **1. `/session/migrate` requires `from_session_id == X-Session-ID`**
 
-The migrate endpoint accepts `from_session_id` and `to_session_id` in the POST body. Without the header check, any client that knew another user's session ID could call `/session/migrate` with `from_session_id=<victim>` and redirect the victim's entire run history to their own token. The `X-Session-ID` header is the requester's current identity — enforcing that it matches `from_session_id` means you can only migrate *your own* session.
+The migrate endpoint accepts `from_session_id` and `to_session_id` in the POST body. Without the header check, any client that knew another user's session ID could call `/session/migrate` with `from_session_id=<victim>` and redirect the victim's run history and workspace files to their own token. The `X-Session-ID` header is the requester's current identity — enforcing that it matches `from_session_id` means you can only migrate *your own* session.
 
 **2. `SESSION_ID` must not be updated until after `/session/migrate` completes during rotate, and the switch is gated on migration success**
 
 `session-token rotate` must call `/session/migrate` with `X-Session-ID: <old id>` before calling `updateSessionId(<new token>)`. If `SESSION_ID` were updated first, the migrate request would carry the new token as `X-Session-ID`, which would fail the `from_session_id == X-Session-ID` check (since `from_session_id` is the old ID). The `_doSessionMigration` helper therefore calls `fetch()` directly with an explicit `X-Session-ID` override rather than going through `apiFetch()`, which always uses the current `SESSION_ID`.
 
-Critically, the identity switch (`localStorage.setItem` + `updateSessionId`) only happens if migration succeeds. A failed migration aborts rotate and leaves the old token active — otherwise a transient network failure would strand the user on a fresh token with their history still on the old session.
+Critically, the identity switch (`localStorage.setItem` + `updateSessionId`) only happens if migration succeeds. A failed migration aborts rotate and leaves the old token active — otherwise a transient network failure would strand the user on a fresh token with their history or Files workspace still on the old session.
 
 **3. Other open tabs are kept in sync via the `storage` event**
 
@@ -149,7 +164,7 @@ Header sync alone is not sufficient, though. Passive tabs also need to refresh s
 
 **4. Session-token subcommands are intercepted client-side; bare `session-token` is not**
 
-`generate`, `set`, `copy`, `clear`, `rotate`, `list`, and `revoke` are intercepted in `submitCommand()` after `addToHistory()` and never reach the server. This keeps sensitive token values out of the server command log. Bare `session-token` (status only) passes to the server as a normal fake command so the server-side rendering path handles the output consistently with other status commands. The intercept check is `cmd.trim().toLowerCase().startsWith('session-token ')` — the trailing space ensures it only fires when a subcommand is present. Token-bearing local history entries are masked before storage so the local history/recents surfaces stay useful without echoing raw token values.
+`generate`, `set`, `copy`, `clear`, `rotate`, `list`, and `revoke` are intercepted in `submitCommand()` after `addToHistory()` and never reach the server. This keeps sensitive token values out of the server command log. Bare `session-token` (status only) passes to the server as a normal bulit-in command so the server-side rendering path handles the output consistently with other status commands. The intercept check is `cmd.trim().toLowerCase().startsWith('session-token ')` — the trailing space ensures it only fires when a subcommand is present. Token-bearing local history entries are masked before storage so the local history/recents surfaces stay useful without echoing raw token values.
 
 **5. Revocation is enforced at the API layer, not just client-side**
 
@@ -159,9 +174,9 @@ Header sync alone is not sufficient, though. Passive tabs also need to refresh s
 
 **Deny entries match denied flags anywhere in the command, not just as a command prefix.**
 
-Allow-listed tools can have specific flags blocked via `!`-prefixed deny entries in `conf/allowed_commands.txt`. Early implementations only matched the deny entry as a prefix of the command — `!curl -o` would catch `curl -o /tmp/out` but not `curl -s -o /tmp/out` where other flags precede the denied one.
+Allow-listed tools can have specific flags blocked through `policy.deny` entries in `app/conf/commands.yaml`. Early implementations only matched the deny entry as a prefix of the command — `curl -o` would catch `curl -o /tmp/out` but not `curl -s -o /tmp/out` where other flags precede the denied one.
 
-`_is_denied()` tokenizes both the incoming command and the deny entry using the shared `split_command_argv` helper. Tool names and subcommand prefixes are compared case-insensitively; flags are compared with exact case, so `!curl -K` (disable TLS verification, uppercase) does not fire on `curl -k` (lowercase). For short combined flags (`-sU`), `_flag_matches_token` checks whether the denied flag letter appears within the token, so `!nmap -sU` catches `-sU`, `-UsT`, and other combinations. The tool prefix must still match first, so `!gobuster dir -o` only fires for `gobuster dir` subcommand invocations, not `gobuster dns`.
+`_is_denied()` tokenizes both the incoming command and the deny entry using the shared `split_command_argv` helper. Tool names and subcommand prefixes are compared case-insensitively; flags are compared with exact case, so `curl -K` (disable TLS verification, uppercase) does not fire on `curl -k` (lowercase). For short combined flags (`-sU`), `_flag_matches_token` checks whether the denied flag letter appears within the token, so `nmap -sU` catches `-sU`, `-UsT`, and other combinations. The tool prefix must still match first, so `gobuster dir -o` only fires for `gobuster dir` subcommand invocations, not `gobuster dns`.
 
 **`/dev/null` exception:** a denied output flag is allowed when its argument is `/dev/null` (e.g. `curl -o /dev/null -s -w "%{http_code}" <url>`). This is a common pattern for checking HTTP response codes without writing to the filesystem. The exception checks for `flag /dev/null\b` immediately after the flag match.
 
@@ -191,7 +206,7 @@ setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
 
 This grants the capabilities to the binary itself — any user who executes nmap gets them for the duration of that process only. `docker-compose.yml` must also have `cap_add: [NET_RAW, NET_ADMIN]` or the host kernel won't make those capabilities available to the container.
 
-The `--privileged` flag (nmap's own flag, not Docker's) is auto-injected by `rewrite_command()` so users don't need to add it. Without it, nmap falls back to limited scan modes even with the capabilities set.
+The app now standardizes on TCP connect scans for nmap. `rewrite_command()` injects `-sT` when no scan mode is explicit, while command validation blocks `-sS` and nmap's own `--privileged` flag so users do not hit confusing raw-socket permission failures after launch.
 
 ### Go Binary Installation
 
@@ -199,7 +214,7 @@ The `--privileged` flag (nmap's own flag, not Docker's) is auto-injected by `rew
 
 All Go tools (`nuclei`, `subfinder`, `httpx`, `dnsx`, `gobuster`) are installed with `ENV GOBIN=/usr/local/bin` in the Dockerfile. This puts binaries directly in `/usr/local/bin` with world-executable permissions, accessible to the `scanner` user. Without this, Go installs to `/root/go/bin` which is root-owned and inaccessible to `scanner`. Previous symlinks from `/root/go/bin/` to `/usr/local/bin/` also fail because symlinks inherit the target's permissions issue.
 
-`httpx` is renamed to `pd-httpx` via `mv` after install to avoid shadowing the Python `httpx` library that `wapiti3` pulls in as a dependency.
+`httpx` is renamed to `pd-httpx` via `mv` after install to avoid shadowing the Python `httpx` library used by the app and other Python tooling.
 
 ### SQLite WAL Mode
 
@@ -381,11 +396,11 @@ Confirmations were originally per-surface: the kill flow, history clear, history
 
 ### Demo Recording Pipeline
 
-**Playwright's built-in video recorder ignores `deviceScaleFactor`.** The recorder always captures frames at CSS pixel dimensions (e.g. 1280×960) regardless of how `deviceScaleFactor` is configured in `playwright.config.js`. For a desktop demo at 1280×960 with `deviceScaleFactor: 2`, you want 2560×1920 frames that look sharp on Retina displays. `page.screenshot()` *does* respect the factor and returns images at full physical resolution. The demo specs run a concurrent background loop that calls `page.screenshot()` at ~15 fps, writes the frames to `test-results/demo-frames/`, and the wrapper script stitches them with ffmpeg at 15 fps (HEVC via VideoToolbox on macOS, VP9 via libvpx on Linux). The built-in `video: { mode: 'on' }` path was tried first and rejected for this reason.
+**OBS is the standard demo recorder.** Playwright's built-in video recorder ignores `deviceScaleFactor`, and the older screenshot-stitcher produced choppy motion for animated UI like the Status Monitor pulse strip. The desktop and mobile demo wrappers now open a headed Chromium window, pause on a holding screen so OBS can select the right window, then start/stop OBS through `scripts/obs_recording.mjs`. The specs still keep their screenshot-frame fallback for local experiments, but README-quality demo videos should use `scripts/record_demo.sh` or `scripts/record_demo_mobile.sh`.
 
 **Clicking a `<button>` to select a theme causes a one-frame scroll jump.** When the recording spec selects a theme card, even a synthetic `dispatchEvent('click')` focuses the underlying `<button>` element. Chromium's native focus-scroll management then repositions the scroll container to ensure the focused element is in view — even if it already is — producing a visible one-frame jump in the recording. The fix is to call `applyThemeSelection(name)` directly via `page.evaluate()` instead of dispatching any click event. This applies the theme and toggles `theme-card-active` with identical effect, but never touches focus or scroll state. Avoid any approach that causes a DOM click (`.click()`, `.dispatchEvent('click')`, `locator.click()`) on a `<button>` inside a scroll container when you need the scroll position to remain stable.
 
-**`freezeFrame()` is needed to guarantee correct pause length in the recording.** `page.screenshot()` takes ~300 ms per call at `slowMo: 60`. During a static pause, the background capture loop only achieves ~3 fps, so a 2-second pause captures only ~6 frames — far fewer than the 30 frames a 2-second pause at 15 fps requires. `freezeFrame(durationMs)` takes a single screenshot, stamps it N times (N = durationMs / frameInterval), and uses a `capture.paused` flag to prevent the concurrent loop from writing frames or advancing the index during the stamp. This guarantees exactly the right number of frames regardless of how slow `page.screenshot()` is.
+**`freezeFrame()` is only for the screenshot fallback.** When `DEMO_DISABLE_FRAME_CAPTURE` is unset, the specs can still capture PNG frames with `page.screenshot()`. `freezeFrame(durationMs)` keeps those fallback recordings from compressing pauses into fast-forward by stamping one screenshot across the expected frame count. The normal OBS wrappers disable frame capture, so real-time pauses are handled by the browser and OBS.
 
 **Chromium's mobile keyboard simulation overlay cannot be covered.** In Playwright's headless Chromium mobile emulation, focusing any input element (`input.focus()`, `locator.click()`, or `page.keyboard.type()`) triggers a gray keyboard-simulation overlay that is painted above all page content regardless of z-index. This overlay is not a DOM element and cannot be hidden with CSS, `pointer-events: none`, or JS. The overlay also shrinks the visual viewport, making the composer area shift up and the transcript area shrink — producing a demo that looks nothing like the real mobile app on a phone. The mobile demo spec avoids this entirely by typing through the native `HTMLInputElement.prototype.value` setter + `InputEvent` dispatch, never calling `.focus()` on the input. This keeps the visual viewport stable, the fake keyboard image visible at the bottom of the frame, and the transcript filling the full screen while commands run.
 
@@ -401,11 +416,17 @@ Confirmations were originally per-surface: the kill flow, history clear, history
 
 **Multi-tab stall detection requires per-tab state.** The SSE stall detector fires if no data arrives within 45 seconds. The original implementation used a single module-level `_stalledTimeout` variable. With multiple tabs running commands simultaneously, starting a command in Tab B would cancel Tab A's timeout, leaving Tab A's stalled connection undetected indefinitely. Fixed by replacing the single variable with a `Map` keyed by `tabId` (`_stalledTimeouts = new Map()`). All four call sites (`_resetStalledTimeout`, `_clearStalledTimeout`, and their consumers in the SSE loop and kill handler) must pass `tabId`.
 
+**Partial-line stream readers must not block heartbeat delivery.** The server originally used `select()` followed by `readline()` on `proc.stdout`. That looks safe, but it fails for tools that write partial lines: `select()` reports readability as soon as bytes arrive, then `readline()` can still block waiting for a newline. While blocked, the generator cannot emit heartbeat comments, so the browser can misclassify the stream as stalled even though the subprocess is still alive. The fix is a nonblocking fd reader plus an incremental decoder and a pending-fragment buffer, so complete lines stream immediately, partial fragments wait safely for completion, and heartbeats keep flowing during quiet periods.
+
+**Detached run drains need a ceiling.** When a browser disconnects from `/runs/<run_id>/stream`, the server keeps draining stdout in a background worker so the run can still be persisted. Without a hard ceiling, a process that never exits or never closes stdout can leak work and pin active-run metadata until the worker is recycled. Detached drains are now bounded to the command timeout plus grace, terminate the scanner process group when exceeded, and always run the same PID/active-run cleanup path.
+
+**Workspace file opens use no-follow hardening at the final component.** The normal workspace resolver rejects unsafe relative paths and symlink components before use, but a final symlink can theoretically be swapped in after validation and before open by the same filesystem principal. Reads and downloads now use final-component no-follow opens where supported, which keeps the session-root boundary deterministic without changing the user-facing file API.
+
 ### Linting and Static Analysis Toolchain
 
 **ESLint was chosen over Prettier for JS linting.** Prettier's `--check` mode only identifies which files differ from its expected output — it does not show which line or rule is violated. ESLint shows the exact file, line, column, and rule name on every violation, which is far more actionable in a pre-commit hook. ESLint is configured in `config/eslint.config.js` with three rules scoped to config and test files (`tests/js/`, `playwright*.js`): 2-space `indent`, `singleQuote`, and `semi: never`. The browser-side app JS (`app/static/js/`) is excluded because it follows a different convention (semicolons) and rewriting it would be a large unrelated diff.
 
-**Git hooks live in `scripts/hooks/` instead of `.githooks/` or `.git/hooks/`.** `.git/hooks/` is not version-controlled and requires every developer to manually copy or symlink files after cloning. `.githooks/` is trackable but is a non-standard directory name that requires explicit opt-in. `scripts/hooks/` is tracked like any other script, follows the project's existing `scripts/` convention, and is activated with one command: `git config core.hooksPath scripts/hooks`. The previous Python-only hook at `.githooks/pre-commit` has been superseded; the consolidated hook at `scripts/hooks/pre-commit` covers all twelve checks (flake8, bandit, pytest, pip-audit, vitest, eslint, npm audit, shellcheck, hadolint, yamllint, markdownlint, vendor:check).
+**Git hooks live in `scripts/hooks/` instead of `.githooks/` or `.git/hooks/`.** `.git/hooks/` is not version-controlled and requires every developer to manually copy or symlink files after cloning. `.githooks/` is trackable but is a non-standard directory name that requires explicit opt-in. `scripts/hooks/` is tracked like any other script, follows the project's existing `scripts/` convention, and is activated with one command: `git config core.hooksPath scripts/hooks`. The previous Python-only hook at `.githooks/pre-commit` has been superseded; the consolidated hook at `scripts/hooks/pre-commit` covers the tracked local checks (flake8, bandit, pytest, pip-audit, vitest, eslint, npm audit, shellcheck, hadolint, yamllint, jsonlint, markdownlint, and vendor:check).
 
 ### Long-Running and Local-Dev Edge Cases
 

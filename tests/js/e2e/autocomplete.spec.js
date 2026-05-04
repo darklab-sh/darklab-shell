@@ -124,6 +124,35 @@ test.describe('autocomplete', () => {
     await expect(dropdown).toContainText('Hostname, IP, or CIDR')
   })
 
+  test('workspace input flags suggest live session files instead of static examples', async ({ page }) => {
+    const input = page.locator('#cmd')
+    const dropdown = page.locator('#ac-dropdown')
+
+    await page.locator('.rail-nav [data-action="workspace"]').click()
+    await expect(page.locator('#workspace-overlay')).toHaveClass(/open/)
+    await page.locator('#workspace-new-btn').click()
+    await page.locator('#workspace-path-input').fill('inputs.txt')
+    await page.locator('#workspace-text-input').fill('darklab.sh\n')
+    await page.locator('#workspace-save-btn').click()
+    await expect(page.locator('.workspace-file-row').filter({ hasText: 'inputs.txt' })).toBeVisible()
+    await page.locator('.workspace-close').click()
+
+    await setComposerValueForTest(page, 'nmap -iL ')
+    await expect
+      .poll(async () => ({
+        hidden: await dropdown.evaluate((node) => node.classList.contains('u-hidden')),
+        text: (await dropdown.textContent()) || '',
+      }))
+      .toEqual(
+        expect.objectContaining({
+          hidden: false,
+          text: expect.stringContaining('inputs.txt'),
+        }),
+      )
+    await expect(dropdown).not.toContainText('targets.txt')
+    await expect(input).toHaveValue('nmap -iL ')
+  })
+
   test('built-in pipe support suggests the supported pipe commands after a pipe', async ({
     page,
   }) => {

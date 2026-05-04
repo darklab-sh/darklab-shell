@@ -117,15 +117,55 @@
   (function () {
     var wrap = document.getElementById('perm-save-wrap');
     var btn = document.getElementById('perm-save-btn');
+    var menu = wrap ? wrap.querySelector('.save-menu') : null;
     if (!wrap || !btn) return;
+    function resetSaveMenuPosition() {
+      if (!menu) return;
+      menu.style.position = '';
+      menu.style.top = '';
+      menu.style.left = '';
+      menu.style.right = '';
+      menu.style.width = '';
+      menu.style.maxWidth = '';
+    }
+    function positionSaveMenu() {
+      if (!menu) return;
+      if (!window.matchMedia || !window.matchMedia('(max-width: 640px)').matches) {
+        resetSaveMenuPosition();
+        return;
+      }
+      if (!wrap.classList.contains('open')) return;
+      var margin = 12;
+      var viewportWidth = Math.max(0, window.innerWidth || document.documentElement.clientWidth || 0);
+      var rect = btn.getBoundingClientRect();
+      var menuWidth = Math.min(220, Math.max(0, viewportWidth - margin * 2));
+      var maxLeft = Math.max(margin, viewportWidth - menuWidth - margin);
+      var left = Math.min(Math.max(rect.left, margin), maxLeft);
+      menu.style.position = 'fixed';
+      menu.style.top = Math.round(rect.bottom - 1) + 'px';
+      menu.style.left = Math.round(left) + 'px';
+      menu.style.right = 'auto';
+      menu.style.width = Math.round(menuWidth) + 'px';
+      menu.style.maxWidth = 'calc(100vw - 24px)';
+    }
+    function closeSaveMenu() {
+      wrap.classList.remove('open');
+      resetSaveMenuPosition();
+    }
     btn.addEventListener('click', function () {
       wrap.classList.toggle('open');
+      if (wrap.classList.contains('open')) positionSaveMenu();
+      else resetSaveMenuPosition();
     });
+    if (typeof window.addEventListener === 'function') {
+      window.addEventListener('resize', positionSaveMenu);
+      window.addEventListener('scroll', positionSaveMenu, true);
+    }
     if (typeof bindOutsideClickClose === 'function') {
       bindOutsideClickClose(wrap, {
         triggers: btn,
         isOpen: function () { return wrap.classList.contains('open'); },
-        onClose: function () { wrap.classList.remove('open'); },
+        onClose: closeSaveMenu,
       });
     }
   })();

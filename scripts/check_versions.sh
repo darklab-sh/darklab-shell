@@ -31,10 +31,16 @@ GITLAB_CI = ROOT / ".gitlab-ci.yml"
 PIN_PATTERN = re.compile(r"^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?==(.+)$")
 IMAGE_PATTERN = re.compile(r"^([A-Za-z0-9./_-]+?)(?::([^@\s]+))?(?:@.+)?$")
 NUMERIC_TAG_PATTERN = re.compile(r"^(\d+)(?:\.(\d+)(?:\.(\d+))?)?$")
+ARG_PATTERN = re.compile(r"^ARG\s+([A-Za-z_][A-Za-z0-9_]*)=(.+)$")
+DOCKER_VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+GO_TOOLCHAIN_PATTERN = re.compile(r"go(\d+\.\d+(?:\.\d+)?)\.linux-")
 GO_INSTALL_PATTERN = re.compile(r"go install(?:\s+-v)?\s+([^\s@]+)@([^\s\\]+)")
-PIP_INSTALL_PATTERN = re.compile(r"pip install(?:\s+--no-cache-dir)?\s+([A-Za-z0-9_.\-\[\]]+)==([^\s\\]+)")
+PIP_INSTALL_PATTERN = re.compile(r"pip install(?:\s+--[A-Za-z0-9_.=-]+)*\s+([A-Za-z0-9_.\-\[\]]+)==([^\s\\]+)")
 GEM_INSTALL_PATTERN = re.compile(r"gem install\s+([A-Za-z0-9_.-]+)\s+-v\s+([^\s\\]+)")
 GITHUB_RELEASE_PATTERN = re.compile(r"github\.com/([^/\s]+)/([^/\s]+)/releases/download/([^/\s]+)/")
+GITHUB_CLONE_BRANCH_PATTERN = re.compile(
+    r"git clone(?:\s+--depth\s+\d+)?\s+--branch\s+\"?([^\"\s]+)\"?\s+https://github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?(?:\s|$)"
+)
 GO_STABLE_TAG_PATTERN = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 CI_IMAGE_VAR_PATTERN = re.compile(r"^\s{2}(CI_[A-Z0-9_]+):\s*[\"']?([^\"'\n#]+)[\"']?\s*(?:#.*)?$")
 CI_IMAGE_REF_PATTERN = re.compile(r"^\s*image:\s*\$([A-Z0-9_]+)\s*(?:#.*)?$")
@@ -164,6 +170,23 @@ def _latest_golang_version(module: str, debug: bool = False) -> str:
     return best_version
 
 
+def _latest_go_toolchain_version() -> str:
+    try:
+        with urllib.request.urlopen("https://go.dev/dl/?mode=json", timeout=5) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError, UnicodeDecodeError):
+        return "unknown"
+    if not isinstance(payload, list):
+        return "unknown"
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        version = item.get("version")
+        if isinstance(version, str) and version.startswith("go"):
+            return version.removeprefix("go")
+    return "unknown"
+
+
 def _latest_github_release_version(owner: str, repo: str) -> str:
     url = f"https://api.github.com/repos/{urllib.parse.quote(owner, safe='')}/{urllib.parse.quote(repo, safe='')}/releases/latest"
     req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "check_versions.sh"})
@@ -178,7 +201,32 @@ def _latest_github_release_version(owner: str, repo: str) -> str:
 
 def _strip_v(version: str) -> str:
     """Strip leading 'v' for version comparison (e.g. v2.4.1 == 2.4.1)."""
-    return version[1:] if version.startswith("v") else version
+    for prefix in ("openssl-", "go", "v"):
+        if version.startswith(prefix):
+            return version[len(prefix):]
+    return version
+
+
+def _dockerfile_args() -> dict[str, str]:
+    args: dict[str, str] = {}
+    if not DOCKERFILE.exists():
+        return args
+    for raw in _read_lines(DOCKERFILE):
+        line = raw.strip()
+        match = ARG_PATTERN.match(line)
+        if not match:
+            continue
+        name, value = match.groups()
+        args[name] = value.strip().strip('"').strip("'")
+    return args
+
+
+def _expand_docker_vars(value: str, args: dict[str, str]) -> str:
+    def replace(match: re.Match[str]) -> str:
+        name = match.group(1) or match.group(2)
+        return args.get(name, match.group(0))
+
+    return DOCKER_VAR_PATTERN.sub(replace, value)
 
 
 def _load_json(path: pathlib.Path) -> dict:
@@ -391,22 +439,31 @@ def _print_dockerfile_pins(labels: set[str] | None = None, debug: bool = False) 
     if not DOCKERFILE.exists():
         return
     pins: list[tuple[int, str, str, str, str]] = []
+    docker_args = _dockerfile_args()
     for lineno, raw in enumerate(_read_lines(DOCKERFILE), start=1):
-        line = raw.strip()
+        line = _expand_docker_vars(raw.strip(), docker_args)
         if not line or line.startswith("#"):
             continue
+        if labels is None or "go-toolchain" in labels:
+            go_toolchain_match = GO_TOOLCHAIN_PATTERN.search(line)
+            if go_toolchain_match:
+                pins.append((lineno, "go-toolchain", "go", go_toolchain_match.group(1), line))
         for label, pattern in (
             ("go", GO_INSTALL_PATTERN),
             ("pip", PIP_INSTALL_PATTERN),
             ("gem", GEM_INSTALL_PATTERN),
             ("github", GITHUB_RELEASE_PATTERN),
+            ("github", GITHUB_CLONE_BRANCH_PATTERN),
         ):
             if labels is not None and label not in labels:
                 continue
             match = pattern.search(line)
             if match:
                 groups = match.groups()
-                if label == "github":
+                if pattern == GITHUB_CLONE_BRANCH_PATTERN:
+                    version, owner, repo = groups
+                    package = f"{owner}/{repo}"
+                elif label == "github":
                     owner, repo, version = groups
                     package = f"{owner}/{repo}"
                 else:
@@ -416,7 +473,9 @@ def _print_dockerfile_pins(labels: set[str] | None = None, debug: bool = False) 
         return
     print("\nDockerfile tool versions:")
     for lineno, label, package, version, line in pins:
-        if label == "go":
+        if label == "go-toolchain":
+            latest = _latest_go_toolchain_version()
+        elif label == "go":
             latest = _latest_golang_version(package, debug=debug)
         elif label == "pip":
             latest = _latest_pypi_version(package)
@@ -433,7 +492,7 @@ def _print_dockerfile_pins(labels: set[str] | None = None, debug: bool = False) 
             status = "up-to-date"
         else:
             status = "behind"
-        print(f"- line {lineno:3d} [{label:3s}] {package:48} pinned={version:12} latest={latest:12} {status}")
+        print(f"- line {lineno:3d} [{label:12s}] {package:48} pinned={version:12} latest={latest:12} {status}")
 
 
 def _print_python_requirements() -> None:
@@ -510,10 +569,14 @@ def main() -> int:
     parser.add_argument("--python-only", action="store_true", help="Only report Python requirements")
     parser.add_argument("--node-only", action="store_true", help="Only report Node dependencies and devDependencies")
     parser.add_argument("--docker-only", action="store_true", help="Only report the Docker base image")
-    parser.add_argument("--go-only", action="store_true", help="Only report Go tool pins from Dockerfile")
+    parser.add_argument("--go-only", action="store_true", help="Only report Go toolchain and Go module pins from Dockerfile")
     parser.add_argument("--pip-only", action="store_true", help="Only report pip tool pins from Dockerfile")
     parser.add_argument("--gem-only", action="store_true", help="Only report gem tool pins from Dockerfile")
-    parser.add_argument("--github-only", action="store_true", help="Only report GitHub release pins from Dockerfile")
+    parser.add_argument(
+        "--github-only",
+        action="store_true",
+        help="Only report GitHub release pins from Dockerfile",
+    )
     parser.add_argument("--debug", action="store_true", help="Print registry lookup details for Go pins")
     args = parser.parse_args()
 
@@ -526,9 +589,20 @@ def main() -> int:
         args.gem_only,
         args.github_only,
     )) > 1:
-        parser.error("--python-only, --node-only, --docker-only, --go-only, --pip-only, --gem-only, and --github-only are mutually exclusive")
+        parser.error(
+            "--python-only, --node-only, --docker-only, --go-only, --pip-only, "
+            "--gem-only, and --github-only are mutually exclusive"
+        )
 
-    if not any((args.python_only, args.node_only, args.docker_only, args.go_only, args.pip_only, args.gem_only, args.github_only)):
+    if not any((
+        args.python_only,
+        args.node_only,
+        args.docker_only,
+        args.go_only,
+        args.pip_only,
+        args.gem_only,
+        args.github_only,
+    )):
         _print_python_requirements()
         _print_node_dependencies()
         _print_docker_image()
@@ -543,7 +617,7 @@ def main() -> int:
         _print_ci_images()
         _print_dockerfile_pins(debug=args.debug)
     elif args.go_only:
-        _print_dockerfile_pins(labels={"go"}, debug=args.debug)
+        _print_dockerfile_pins(labels={"go-toolchain", "go"}, debug=args.debug)
     elif args.pip_only:
         _print_dockerfile_pins(labels={"pip"}, debug=args.debug)
     elif args.gem_only:
@@ -552,13 +626,31 @@ def main() -> int:
         _print_dockerfile_pins(labels={"github"}, debug=args.debug)
 
     print("\nNotes:")
-    print("- `pip index versions <package>` requires network access, so unavailable lookups are reported as unknown.")
-    print("- The Go check uses the public Go module proxy and only considers stable release tags.")
-    print("- The Node check reads package.json/package-lock.json dependencies and devDependencies and compares them against the npm registry.")
-    print("- The Docker/runtime check reads the production base image from Dockerfile and CI runner images from .gitlab-ci.yml, and ignores prerelease tags like alpha and rc builds.")
-    print("- Dockerfile pinned tool versions are checked against upstream: go→proxy.golang.org, pip→pypi.org, gem→rubygems.org, github→GitHub releases API.")
+    print(
+        "- `pip index versions <package>` requires network access, so unavailable lookups "
+        "are reported as unknown."
+    )
+    print(
+        "- The Go check uses go.dev for the toolchain and the public Go module proxy for "
+        "module pins; module checks only consider stable release tags."
+    )
+    print(
+        "- The Node check reads package.json/package-lock.json dependencies and "
+        "devDependencies and compares them against the npm registry."
+    )
+    print(
+        "- The Docker/runtime check reads the production base image from Dockerfile and CI "
+        "runner images from .gitlab-ci.yml, and ignores prerelease tags like alpha and rc builds."
+    )
+    print(
+        "- Dockerfile pinned tool versions are checked against upstream: go→go.dev/proxy, "
+        "pip→pypi.org, gem→rubygems.org, github→GitHub releases API."
+    )
     print("- Version comparisons normalise leading 'v' so v2.4.1 and 2.4.1 are treated as equal.")
-    print("- Use --python-only, --node-only, --docker-only, --go-only, --pip-only, --gem-only, or --github-only to narrow the output; add --debug for Go proxy lookup details.")
+    print(
+        "- Use --python-only, --node-only, --docker-only, --go-only, --pip-only, "
+        "--gem-only, or --github-only to narrow the output; add --debug for Go lookup details."
+    )
     return 0
 
 

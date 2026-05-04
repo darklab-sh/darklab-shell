@@ -4,8 +4,8 @@ default:
 
 variables:
   CI_DEFAULT_IMAGE: "python:3.14-slim"
-  CI_PYTHON_E2E_IMAGE: "python:3.14"
-  CI_NODE_IMAGE: "node:22-slim"
+  CI_PYTHON_E2E_IMAGE: "python:3.14.4"
+  CI_NODE_IMAGE: "node:25.9.0-slim"
   CI_DOCKER_IMAGE: "docker:27"
   PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
@@ -209,4 +209,4 @@ docker-build:
     - when: manual
       allow_failure: true
   script:
-    - docker build -t darklab-shell:$CI_COMMIT_SHA .
+    - docker build -t darklab_shell:$CI_COMMIT_SHA .

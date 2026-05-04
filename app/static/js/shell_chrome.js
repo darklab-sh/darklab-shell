@@ -24,7 +24,7 @@
   const railWorkflowsCount = document.getElementById('rail-workflows-count');
   const railNav           = document.getElementById('rail-nav');
 
-  const hudStatusCell     = document.getElementById('hud-status-cell');
+  const hud               = document.getElementById('hud');
   const hudLastExitEl     = document.getElementById('hud-last-exit');
   const hudTabsEl         = document.getElementById('hud-tabs');
   const hudLatencyEl      = document.getElementById('hud-latency');
@@ -183,22 +183,7 @@
   function onWorkflowsToggle(open) {
     ui.workflowsOpen = open;
     writePref(PREF_WORKFLOWS, open ? '1' : '0');
-    if (!open) ui.recentHeight = null; // reset auto-size next open
     applySectionsState();
-    if (open && ui.recentOpen && ui.recentHeight == null) {
-      // Auto-size Recent: measure Workflows natural height and leave Recent ≥120px.
-      requestAnimationFrame(() => {
-        if (!railSplitArea || !railWorkflowsBody) return;
-        const areaH = railSplitArea.getBoundingClientRect().height;
-        const wfH = railWorkflowsBody.scrollHeight || 180;
-        const HEADER_H = 28;
-        const SPLITTER_H = 6;
-        const desiredWorkflowsH = Math.min(wfH + HEADER_H, Math.max(MIN_SECTION_H, areaH - 120));
-        const nextRecentH = Math.max(120, areaH - desiredWorkflowsH - SPLITTER_H);
-        ui.recentHeight = clampRecentHeight(nextRecentH);
-        applySectionsState();
-      });
-    }
   }
 
   if (railRecentHeader) {
@@ -310,8 +295,7 @@
 
   // ── Nav menu ─────────────────────────────────────────────────────
   // The visible rail is the desktop source of truth. Route clicks directly
-  // into the shared action layer instead of proxying through hidden header
-  // buttons.
+  // into the shared action layer.
   railNav?.addEventListener('click', e => {
     const item = e.target.closest?.('[data-action]');
     if (!item) return;
@@ -322,6 +306,10 @@
       global.toggleHistoryPanelSurface();
       return;
     }
+    if (action === 'status-monitor' && typeof global.openStatusMonitor === 'function') {
+      void global.openStatusMonitor({ source: 'rail' });
+      return;
+    }
     if (action === 'options' && typeof global.openOptions === 'function') {
       global.openOptions();
       return;
@@ -330,18 +318,13 @@
       global.openThemeSelector();
       return;
     }
+    if (action === 'workspace' && typeof global.openWorkspace === 'function') {
+      global.openWorkspace();
+      return;
+    }
     if (action === 'faq' && typeof global.openFaq === 'function') {
       global.openFaq();
     }
-  });
-
-  // ── HUD: status cell toggle (debug affordance; safe no-op elsewhere) ──
-  // Clicking the status cell is a design affordance for toggling mock state.
-  // In the real app, status is driven by runner.js — leave this inert unless
-  // no run is active, so curious users can't desync the runtime.
-  hudStatusCell?.addEventListener('click', () => {
-    // Intentionally no-op: status reflects runner state and must not be
-    // forced from UI. Left in place to preserve cursor affordance.
   });
 
   // ── HUD action buttons ──────────────────────────────────────────
@@ -407,7 +390,7 @@
       saveWrap.classList.toggle('open');
     }, 'btn btn-secondary btn-compact', 'Save tab output (txt / html / pdf)');
     const saveMenu = document.createElement('div');
-    saveMenu.className = 'save-menu';
+    saveMenu.className = 'save-menu dropdown-surface dropdown-up';
     [
       ['Plain text (.txt)',   'save-txt',  () => { const id = _currentTabId(); if (id && typeof saveTab === 'function') saveTab(id); }],
       ['Styled HTML (.html)', 'save-html', () => { const id = _currentTabId(); if (id && typeof exportTabHtml === 'function') exportTabHtml(id); }],
@@ -415,6 +398,7 @@
     ].forEach(([label, action, fn]) => {
       const item = document.createElement('button');
       item.type = 'button';
+      item.className = 'dropdown-item dropdown-item-compact';
       item.textContent = label;
       item.dataset.action = action;
       bindPressable(item, {
@@ -454,6 +438,13 @@
     const id = tabId || _currentTabId();
     const tab = (typeof getTab === 'function') ? getTab(id) : null;
     _setHudKillVisible(!!(tab && tab.st === 'running'));
+  }
+
+  function refreshHudRunningState() {
+    if (!hud) return;
+    const id = _currentTabId();
+    const tab = (typeof getTab === 'function') ? getTab(id) : null;
+    hud.classList.toggle('hud-running', !!(tab && tab.st === 'running'));
   }
 
   buildHudActions();
@@ -587,12 +578,12 @@
 
   function _renderSession() {
     if (!hudSessionEl) return;
-    // Read directly from localStorage: SESSION_ID in session.js is declared
+    // Read directly from window storage: SESSION_ID in session.js is declared
     // with `let` so it is not attached to window; localStorage is the
     // underlying source of truth and updates synchronously across all paths
     // that change the active session token.
     let token = '';
-    try { token = localStorage.getItem('session_token') || ''; } catch (_) {}
+    try { token = global.localStorage?.getItem('session_token') || ''; } catch (_) {}
     if (token && token.startsWith('tok_')) {
       const masked = (typeof maskSessionToken === 'function') ? maskSessionToken(token) : token;
       hudSessionEl.textContent = masked;
@@ -689,6 +680,7 @@
     } catch (_) {
       hudState.latencyMs = null;
       hudState.db = 'down';
+      if (hudState.redis !== 'none') hudState.redis = 'down';
     }
     _renderLatency();
     _renderUptime();
@@ -733,18 +725,22 @@
       try { _renderTabs(); } catch (_) { /* non-critical */ }
       try { _renderLastExit(); } catch (_) { /* non-critical */ }
       try { refreshHudActions(); } catch (_) { /* non-critical */ }
+      try { refreshHudRunningState(); } catch (_) { /* non-critical */ }
     });
     onUiEvent('app:tab-activated', () => {
       try { _renderLastExit(); } catch (_) { /* non-critical */ }
       try { refreshHudActions(); } catch (_) { /* non-critical */ }
+      try { refreshHudRunningState(); } catch (_) { /* non-critical */ }
     });
     onUiEvent('app:tab-created', () => {
       try { _renderTabs(); } catch (_) { /* non-critical */ }
       try { refreshHudActions(); } catch (_) { /* non-critical */ }
+      try { refreshHudRunningState(); } catch (_) { /* non-critical */ }
     });
     onUiEvent('app:tab-closed', () => {
       try { _renderTabs(); } catch (_) { /* non-critical */ }
       try { refreshHudActions(); } catch (_) { /* non-critical */ }
+      try { refreshHudRunningState(); } catch (_) { /* non-critical */ }
     });
     onUiEvent('app:last-exit-changed', (e) => {
       hudState.lastExit = e.detail ? e.detail.value : null;
@@ -767,6 +763,7 @@
   _renderUptime();
   _renderDb();
   _renderRedis();
+  refreshHudRunningState();
 
   _startHudStatusPoll({ pollNow: true });
   setInterval(() => { _renderClock(); _renderUptime(); _renderSession(); }, CLOCK_TICK_MS);

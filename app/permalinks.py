@@ -74,12 +74,14 @@ def _format_retention(days: int) -> str:
 
 def _prompt_echo_text(label: str) -> str:
     # Single server-side source of truth for prompt-echo text on synthesized
-    # history/snapshot lines. Reads CFG["prompt_prefix"] so permalinks render
-    # the full configured prefix (e.g. "anon@darklab:~$ ls -la") rather than a
+    # history/snapshot lines. Reads CFG prompt identity settings so permalinks render
+    # the full configured prefix (e.g. "anon@darklab:~ $ ls -la") rather than a
     # reduced "$ ls -la" echo that drifts from the live shell. Paired with the
     # JS export helper (ExportHtmlUtils.renderExportPromptEcho) that consumes
     # this text by splitting on its first space to colorize the prefix.
-    prefix = str(CFG.get("prompt_prefix", "$")).strip() or "$"
+    username = str(CFG.get("prompt_username") or "anon").strip() or "anon"
+    domain = str(CFG.get("prompt_domain") or "darklab.sh").strip() or "darklab.sh"
+    prefix = f"{username}@{domain}:~ $"
     return f"{prefix} {label}".rstrip()
 
 
@@ -105,12 +107,21 @@ def _normalize_permalink_lines(content_lines, label: str):
             if isinstance(entry, str):
                 normalized_lines.append({"text": entry, "cls": "", "tsC": "", "tsE": ""})
             else:
-                normalized_lines.append({
+                normalized: dict[str, object] = {
                     "text": str(entry.get("text", "")),
                     "cls": str(entry.get("cls", "")),
                     "tsC": str(entry.get("tsC", "")),
                     "tsE": str(entry.get("tsE", "")),
-                })
+                }
+                if isinstance(entry.get("signals"), list):
+                    normalized["signals"] = [str(signal) for signal in entry["signals"] if str(signal)]
+                if isinstance(entry.get("line_index"), int):
+                    normalized["line_index"] = entry["line_index"]
+                if isinstance(entry.get("command_root"), str):
+                    normalized["command_root"] = entry["command_root"]
+                if isinstance(entry.get("target"), str):
+                    normalized["target"] = entry["target"]
+                normalized_lines.append(normalized)
     else:
         normalized_lines.append({"text": echo_text, "cls": "prompt-echo", "tsC": "", "tsE": ""})
         normalized_lines.append({"text": "", "cls": "", "tsC": "", "tsE": ""})

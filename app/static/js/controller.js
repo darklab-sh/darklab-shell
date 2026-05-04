@@ -22,6 +22,9 @@ function openWorkflows() {
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   showWorkflowsOverlay();
+  if (typeof markInteractionSurfaceReady === 'function') {
+    markInteractionSurfaceReady('workflows', workflowsOverlay, document.getElementById('workflows-modal'));
+  }
 }
 
 function closeWorkflows() {
@@ -34,6 +37,9 @@ function openFaq() {
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   showFaqOverlay();
+  if (typeof markInteractionSurfaceReady === 'function') {
+    markInteractionSurfaceReady('faq', faqOverlay, document.getElementById('faq-modal'));
+  }
 }
 
 function closeFaq() {
@@ -45,6 +51,9 @@ function openShortcuts() {
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   if (typeof showShortcutsOverlay === 'function') showShortcutsOverlay();
+  if (typeof markInteractionSurfaceReady === 'function') {
+    markInteractionSurfaceReady('shortcuts', shortcutsOverlay, document.getElementById('shortcuts-modal'));
+  }
 }
 
 function closeShortcuts() {
@@ -66,8 +75,6 @@ function toggleHistoryPanelSurface(force = null) {
 }
 
 window.toggleHistoryPanelSurface = toggleHistoryPanelSurface;
-window.openHistoryPanelSurface = () => toggleHistoryPanelSurface(true);
-window.closeHistoryPanelSurface = () => toggleHistoryPanelSurface(false);
 
 function renderShortcuts(data) {
   const listEl = document.getElementById('shortcuts-list');
@@ -106,11 +113,15 @@ function setupMobileSheetDragClose() {
   if (typeof bindMobileSheet !== 'function') return;
   const faqModal = document.getElementById('faq-modal');
   const optionsModal = document.getElementById('options-modal');
+  const workspaceModal = document.getElementById('workspace-modal');
   const workflowsModal = document.getElementById('workflows-modal');
+  const workflowEditor = document.getElementById('workflow-editor-form');
 
   bindMobileSheet(mobileMenu,         { onClose: () => hideMobileMenu() });
   bindMobileSheet(historyPanel,       { onClose: () => hideHistoryPanel() });
   bindMobileSheet(workflowsModal,     { onClose: () => closeWorkflows() });
+  bindMobileSheet(workspaceModal,     { onClose: () => { if (typeof closeWorkspace === 'function') closeWorkspace(); } });
+  bindMobileSheet(workflowEditor,     { onClose: () => { if (typeof closeWorkflowEditor === 'function') closeWorkflowEditor(); } });
   bindMobileSheet(faqModal,           { onClose: () => closeFaq() });
   bindMobileSheet(optionsModal,       { onClose: () => closeOptions() });
 }
@@ -125,12 +136,46 @@ function setupDismissibleOverlays() {
   if (typeof bindDismissible !== 'function') return;
   const shortcutsOverlayEl = document.getElementById('shortcuts-overlay');
   const shortcutsCloseBtn = shortcutsOverlayEl?.querySelector('.shortcuts-close');
+  const workflowEditorOverlay = document.getElementById('workflow-editor-overlay');
+  const workflowEditorCloseBtns = workflowEditorOverlay?.querySelectorAll('.workflow-editor-close');
 
   bindDismissible(_uiOverlayRefs.workflowsOverlay, {
     level: 'panel',
     isOpen: isWorkflowsOverlayOpen,
     onClose: closeWorkflows,
     closeButtons: workflowsCloseBtn,
+  });
+  bindDismissible(_uiOverlayRefs.workspaceOverlay, {
+    level: 'panel',
+    isOpen: () => typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen(),
+    onClose: () => { if (typeof closeWorkspace === 'function') closeWorkspace(); },
+    closeButtons: typeof workspaceCloseBtn !== 'undefined' ? workspaceCloseBtn : null,
+  });
+  bindDismissible(_uiOverlayRefs.workspaceViewerOverlay, {
+    level: 'modal',
+    isOpen: () => (
+      typeof workspaceViewerOverlay !== 'undefined'
+      && workspaceViewerOverlay
+      && !workspaceViewerOverlay.classList.contains('u-hidden')
+    ),
+    onClose: () => { if (typeof hideWorkspaceViewer === 'function') hideWorkspaceViewer(); },
+    closeButtons: typeof workspaceCloseViewerBtn !== 'undefined' ? workspaceCloseViewerBtn : null,
+  });
+  bindDismissible(_uiOverlayRefs.workspaceEditorOverlay, {
+    level: 'modal',
+    isOpen: () => (
+      typeof workspaceEditorOverlay !== 'undefined'
+      && workspaceEditorOverlay
+      && !workspaceEditorOverlay.classList.contains('u-hidden')
+    ),
+    onClose: () => { if (typeof hideWorkspaceEditor === 'function') hideWorkspaceEditor(); },
+    closeButtons: typeof workspaceCancelEditBtn !== 'undefined' ? workspaceCancelEditBtn : null,
+  });
+  bindDismissible(workflowEditorOverlay, {
+    level: 'modal',
+    isOpen: () => !!(workflowEditorOverlay && !workflowEditorOverlay.classList.contains('u-hidden')),
+    onClose: () => { if (typeof closeWorkflowEditor === 'function') closeWorkflowEditor(); },
+    closeButtons: workflowEditorCloseBtns,
   });
   bindDismissible(_uiOverlayRefs.faqOverlay, {
     level: 'panel',
@@ -181,7 +226,7 @@ function setupModalFocusTraps() {
   // hidden (display: none on the overlay wrapper), so the listener is only
   // reachable while the modal is open.
   if (typeof bindFocusTrap !== 'function') return;
-  const ids = ['options-modal', 'theme-modal', 'faq-modal', 'workflows-modal'];
+  const ids = ['options-modal', 'theme-modal', 'faq-modal', 'workspace-modal', 'workflows-modal', 'workflow-editor-form'];
   ids.forEach((id) => {
     const card = document.getElementById(id);
     if (card) bindFocusTrap(card);
@@ -217,20 +262,15 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
   document.title = cfg.app_name;
   if (headerTitle) headerTitle.textContent = cfg.app_name;
   const wmVersion = cfg.version ? ` v${cfg.version}` : '';
-  const wmText = `${cfg.app_name || 'darklab_shell'}${wmVersion}`;
-  document.querySelectorAll('.terminal-wordmark').forEach(el => {
-    el.textContent = wmText;
-    if (cfg.project_readme) el.href = cfg.project_readme;
-  });
-  document.querySelectorAll('.menu-footer').forEach(el => {
-    el.textContent = wmText;
+  const projectText = `${cfg.project_name || 'darklab_shell'}${wmVersion}`;
+  document.querySelectorAll('.menu-footer, .rail-nav-version').forEach(el => {
+    el.textContent = projectText;
     if (cfg.project_readme) el.href = cfg.project_readme;
   });
   syncThemeSelectionControls();
   updateNewTabBtn();
   renderFaqLimits(cfg);
   if (cfg.diag_enabled) {
-    if (diagBtn) diagBtn.classList.remove('u-hidden');
     const railDiagBtn = document.getElementById('rail-diag-btn');
     if (railDiagBtn) railDiagBtn.classList.remove('u-hidden');
     const mobileDiagBtn = _uiOverlayRefs.mobileMenu?.querySelector('button[data-menu-action="diag"]');
@@ -247,10 +287,8 @@ _uiOverlayRefs.hamburgerBtn.addEventListener('click', e => {
   else showMobileMenu();
 });
 
-// Mobile menu action dispatch. Exposed globally so the mobile-shell sheet
-// (mobile_chrome.js) can route its own data-menu-action button clicks here
-// without re-implementing the action body, and so a few flows (e.g. routing
-// 'history' to the recents pull-up sheet on mobile) can override one branch.
+// Mobile menu action dispatch. The click wiring below routes data-menu-action
+// buttons through this shared action body.
 function dispatchMobileMenuAction(action, btn = null) {
   if (action === 'search') {
     const visible = isSearchBarOpen();
@@ -258,9 +296,7 @@ function dispatchMobileMenuAction(action, btn = null) {
       hideSearchBar();
       clearSearch();
     } else {
-      showSearchBar();
-      focusElement(searchInput);
-      runSearch();
+      openSearchFromSignal();
     }
   }
   if (action === 'history') {
@@ -302,12 +338,15 @@ function dispatchMobileMenuAction(action, btn = null) {
     refocusComposerAfterAction({ defer: true });
   }
   if (action === 'options') openOptions();
+  if (action === 'status-monitor' && typeof openStatusMonitor === 'function') {
+    void openStatusMonitor({ source: 'mobile-menu' });
+  }
   if (action === 'theme') openThemeSelector();
   if (action === 'workflows') openWorkflows();
+  if (action === 'workspace' && typeof openWorkspace === 'function') openWorkspace();
   if (action === 'faq') openFaq();
   if (action === 'diag') window.location.href = '/diag';
 }
-window.dispatchMobileMenuAction = dispatchMobileMenuAction;
 
 _uiOverlayRefs.mobileMenu?.querySelectorAll('button[data-menu-action]').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -347,6 +386,12 @@ document.addEventListener('keydown', e => {
       isEditable;
     if (tag === 'select') return;
     if (isTextInput) {
+      if (
+        (ae === cmdInput || ae === mobileCmdInput)
+        && typeof syncFocusedComposerState === 'function'
+      ) {
+        syncFocusedComposerState(ae);
+      }
       const raw = isEditable ? (ae.textContent || '') : (ae.value || '');
       if (raw.length > 0) return;
     }
@@ -379,6 +424,12 @@ optionsNotifyToggle?.addEventListener('change', e => {
 });
 optionsHudClockSelect?.addEventListener('change', e => {
   applyHudClockPreference(e.target.value);
+});
+optionsPromptUsernameInput?.addEventListener('input', () => {
+  syncPromptUsernameValidation();
+});
+optionsPromptUsernameInput?.addEventListener('change', e => {
+  if (syncPromptUsernameValidation()) applyPromptUsernamePreference(e.target.value);
 });
 
 // Session token options panel — UI-native controls
@@ -430,12 +481,42 @@ async function _waitForMigrateChoice(msg) {
   });
 }
 
+function _optionsMigrationCountLabel(runCount = 0, workspaceFileCount = 0, workflowCount = 0, recentDomainCount = 0) {
+  const parts = [];
+  if (runCount > 0) parts.push(`${runCount} run(s)`);
+  if (workspaceFileCount > 0) parts.push(`${workspaceFileCount} workspace file(s)`);
+  if (workflowCount > 0) parts.push(`${workflowCount} workflow(s)`);
+  if (recentDomainCount > 0) parts.push(`${recentDomainCount} recent domain(s)`);
+  if (!parts.length) return 'no runs, workspace files, workflows, or recent domains';
+  if (parts.length === 1) return parts[0];
+  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
+
+function _optionsMigrationResultText(data = {}) {
+  const workspaceFiles = Number(data.migrated_workspace_files || 0);
+  const skippedWorkspaceFiles = Number(data.skipped_workspace_files || 0);
+  const workspaceDirs = Number(data.migrated_workspace_directories || 0);
+  const skippedWorkspaceDirs = Number(data.skipped_workspace_directories || 0);
+  const recentDomains = Number(data.migrated_recent_domains || 0);
+  const workspaceParts = [`${workspaceFiles} workspace file(s)`];
+  if (workspaceDirs > 0) workspaceParts.push(`${workspaceDirs} folder(s)`);
+  if (skippedWorkspaceFiles > 0) workspaceParts.push(`${skippedWorkspaceFiles} workspace file(s) skipped`);
+  if (skippedWorkspaceDirs > 0) workspaceParts.push(`${skippedWorkspaceDirs} folder(s) skipped`);
+  return `Migrated ${data.migrated_runs} run(s), ${data.migrated_snapshots} snapshot(s), `
+    + `${data.migrated_stars ?? 0} starred command(s), ${data.migrated_workflows ?? 0} workflow(s), `
+    + `${recentDomains} recent domain(s), `
+    + `${workspaceParts.join(', ')}, `
+    + 'and saved user options when the destination had none.';
+}
+
 async function _clearActiveSessionToken() {
   localStorage.removeItem('session_token');
   const uuid = localStorage.getItem('session_id') || SESSION_ID;
   updateSessionId(uuid);
+  if (typeof loadRecentDomains === 'function') await loadRecentDomains().catch(() => {});
   if (typeof hydrateCmdHistory === 'function') hydrateCmdHistory([]);
   if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+  if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
   _updateOptionsSessionTokenStatus();
   return uuid;
 }
@@ -470,7 +551,7 @@ async function confirmClearSessionToken() {
         },
       },
       { id: 'cancel', label: 'Cancel', role: 'cancel' },
-      { id: 'clear', label: 'Clear token', role: 'primary', tone: 'danger' },
+      { id: 'clear', label: 'Clear token', role: 'destructive' },
     ],
   });
 
@@ -479,7 +560,10 @@ async function confirmClearSessionToken() {
   return { cleared: true, anonymousSessionId: uuid };
 }
 
-document.getElementById('options-session-token-copy-btn')?.addEventListener('click', () => {
+document.getElementById('options-session-token-copy-btn')?.addEventListener('click', async () => {
+  if (typeof flushRecentDomains === 'function') {
+    await flushRecentDomains().catch(() => {});
+  }
   const token = localStorage.getItem('session_token');
   if (!token) return;
   copyTextToClipboard(token)
@@ -500,18 +584,31 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
     }
     const { session_token: newToken } = await resp.json();
 
-    // Count runs on OLD session before switching identity.
+    if (typeof flushRecentDomains === 'function') {
+      await flushRecentDomains().catch(() => {});
+    }
+
+    // Count runs/files on OLD session before switching identity.
     let runCount = 0;
+    let workspaceFileCount = 0;
+    let workflowCount = 0;
+    let recentDomainCount = 0;
     try {
       const countResp = await apiFetch('/session/run-count');
-      if (countResp.ok) runCount = (await countResp.json()).count || 0;
+      if (countResp.ok) {
+        const countData = await countResp.json();
+        runCount = countData.count || 0;
+        workspaceFileCount = countData.workspace_files || 0;
+        workflowCount = countData.workflow_count || 0;
+        recentDomainCount = countData.recent_domain_count || 0;
+      }
     } catch (_) {}
 
     // Migrate BEFORE switching identity so a failed /session/migrate does not
     // leave the user on the new token with their runs still on the old session.
-    if (runCount > 0) {
+    if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0 || recentDomainCount > 0) {
       const migrateChoice = await _waitForMigrateChoice(
-        `You have ${runCount} run(s) in your previous session. Migrate history to the new token?`
+        `You have ${_optionsMigrationCountLabel(runCount, workspaceFileCount, workflowCount, recentDomainCount)} in your previous session. Migrate history, files, workflows, and recent domains to the new token?`
       );
       if (migrateChoice !== 'skip' && migrateChoice !== 'yes') return;
       if (migrateChoice === 'yes') {
@@ -525,14 +622,19 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
           _optionsTokenShowMsg(`Migration failed — ${d.error || 'network error'}. Token not activated.`, true);
           return;
         }
+        const migrateData = await migrateResp.json().catch(() => ({}));
+        _optionsTokenShowMsg(_optionsMigrationResultText(migrateData));
       }
     }
 
     localStorage.setItem('session_token', newToken);
     updateSessionId(newToken);
+    if (typeof loadRecentDomains === 'function') await loadRecentDomains().catch(() => {});
     if (typeof _seedLocalStorageStarsToServer === 'function') await _seedLocalStorageStarsToServer();
     if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+    if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
     _updateOptionsSessionTokenStatus();
+    if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
     copyTextToClipboard(newToken)
       .then(() => showToast('New token copied to clipboard'))
       .catch(() => {});
@@ -642,17 +744,30 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
   _optionsTokenSetBusy(true);
   _optionsTokenShowMsg('');
   try {
+    if (typeof flushRecentDomains === 'function') {
+      await flushRecentDomains().catch(() => {});
+    }
+
     let runCount = 0;
+    let workspaceFileCount = 0;
+    let workflowCount = 0;
+    let recentDomainCount = 0;
     try {
       const countResp = await apiFetch('/session/run-count');
-      if (countResp.ok) runCount = (await countResp.json()).count || 0;
+      if (countResp.ok) {
+        const countData = await countResp.json();
+        runCount = countData.count || 0;
+        workspaceFileCount = countData.workspace_files || 0;
+        workflowCount = countData.workflow_count || 0;
+        recentDomainCount = countData.recent_domain_count || 0;
+      }
     } catch (_) {}
 
     // Migrate BEFORE switching identity so a failed /session/migrate does not
     // leave the user on the new token with their runs still on the old session.
-    if (runCount > 0) {
+    if (runCount > 0 || workspaceFileCount > 0 || workflowCount > 0 || recentDomainCount > 0) {
       const migrateChoice = await _waitForMigrateChoice(
-        `You have ${runCount} run(s) in your current session. Migrate history to this token?`
+        `You have ${_optionsMigrationCountLabel(runCount, workspaceFileCount, workflowCount, recentDomainCount)} in your current session. Migrate history, files, workflows, and recent domains to this token?`
       );
       if (migrateChoice !== 'skip' && migrateChoice !== 'yes') return;
       if (migrateChoice === 'yes') {
@@ -666,14 +781,19 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
           _optionsTokenShowMsg(`Migration failed — ${d.error || 'network error'}. Token not activated.`, true);
           return;
         }
+        const migrateData = await migrateResp.json().catch(() => ({}));
+        _optionsTokenShowMsg(_optionsMigrationResultText(migrateData));
       }
     }
 
     localStorage.setItem('session_token', value);
     updateSessionId(value);
+    if (typeof loadRecentDomains === 'function') await loadRecentDomains().catch(() => {});
     if (typeof _seedLocalStorageStarsToServer === 'function') await _seedLocalStorageStarsToServer();
     if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+    if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
     _updateOptionsSessionTokenStatus();
+    if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
     showToast('Session token applied');
   } catch (err) {
     _optionsTokenShowMsg(`Error: ${err.message || 'network error'}`, true);
@@ -706,12 +826,16 @@ document.getElementById('options-session-token-rotate-btn')?.addEventListener('c
       _optionsTokenShowMsg(`Migration failed — token not rotated: ${migrateData.error || migrateResp.status}`, true);
       return;
     }
+    _optionsTokenShowMsg(_optionsMigrationResultText(migrateData));
 
     localStorage.setItem('session_token', newToken);
     updateSessionId(newToken);
+    if (typeof loadRecentDomains === 'function') await loadRecentDomains().catch(() => {});
     if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+    if (typeof reloadWorkflowCatalog === 'function') reloadWorkflowCatalog().catch(() => {});
 
     _updateOptionsSessionTokenStatus();
+    if (typeof refreshWorkspaceFiles === 'function') refreshWorkspaceFiles().catch(() => {});
     copyTextToClipboard(newToken)
       .then(() => showToast('New token copied to clipboard'))
       .catch(() => showToast('Token rotated'));
@@ -746,10 +870,13 @@ apiFetch('/shortcuts').then(r => r.json()).then(data => {
   logClientError('failed to load /shortcuts', err);
 });
 
-apiFetch('/workflows').then(r => r.json()).then(data => {
-  const items = data.items || [];
-  renderWorkflowItems(items);
-}).catch(err => {
+const workflowsLoad = typeof reloadWorkflowCatalog === 'function'
+  ? reloadWorkflowCatalog()
+  : apiFetch('/workflows').then(r => r.json()).then(data => {
+      const items = data.items || [];
+      renderWorkflowItems(items);
+    });
+workflowsLoad.catch(err => {
   logClientError('failed to load /workflows', err);
 });
 
@@ -772,15 +899,17 @@ applyLineNumberPreference(getPreference('pref_line_numbers') || 'off', false);
 applyWelcomeIntroPreference(getWelcomeIntroPreference(), false);
 applyShareRedactionDefaultPreference(getShareRedactionDefaultPreference(), false);
 applyHudClockPreference(getHudClockPreference(), false);
+applyPromptUsernamePreference(getPromptUsernamePreference(), false);
 syncOptionsControls();
-if (typeof loadSessionPreferences === 'function') {
-  loadSessionPreferences().catch(err => {
+const sessionPreferencesLoad = typeof loadSessionPreferences === 'function'
+  ? loadSessionPreferences().catch(err => {
     logClientError('failed to apply session preferences', err);
-  });
-}
+  })
+  : Promise.resolve();
 
 const commandHistoryLimit = encodeURIComponent(String(APP_CONFIG.recent_commands_limit || 50));
 Promise.all([
+  sessionPreferencesLoad,
   apiFetch(`/history/commands?limit=${commandHistoryLimit}`).then(r => r.json()).catch(err => {
     logClientError('failed to load /history/commands', err);
     return { runs: [] };
@@ -789,13 +918,13 @@ Promise.all([
     logClientError('failed to load /history/active', err);
     return { runs: [] };
   }),
-]).then(([historyData, activeData]) => {
+]).then(([, historyData, activeData]) => {
   hydrateCmdHistory(historyData.runs || []);
   const restoredTabs = typeof restoreTabSessionState === 'function'
     && restoreTabSessionState();
   const restoredActiveRuns = typeof restoreActiveRunsAfterReload === 'function'
     && restoreActiveRunsAfterReload(activeData.runs || []);
-  if (!restoredTabs && !restoredActiveRuns) {
+  if (!restoredTabs && !restoredActiveRuns && (!Array.isArray(tabs) || tabs.length === 0)) {
     createTab(typeof createDefaultTabLabel === 'function' ? createDefaultTabLabel(1) : 'shell 1');
     runWelcome();
     return;
@@ -819,6 +948,29 @@ newTabBtn.addEventListener('click', () => {
   createShortcutTab();
 });
 
+function openSearchFromSignal(scope = null) {
+  const normalizedScope = scope || null;
+  if (
+    normalizedScope
+    && typeof isSearchBarOpen === 'function'
+    && isSearchBarOpen()
+    && searchScope === normalizedScope
+  ) {
+    navigateSearch(1);
+    refocusComposerAfterAction({ defer: true });
+    return;
+  }
+  if (typeof prepareSearchBarForScope === 'function' && normalizedScope) {
+    prepareSearchBarForScope(normalizedScope);
+  } else if (typeof prepareSearchBarForOpen === 'function') {
+    prepareSearchBarForOpen();
+  }
+  showSearchBar();
+  if (searchScope === 'text') focusElement(searchInput);
+  else refocusComposerAfterAction({ defer: true });
+  runSearch();
+}
+
 // ── Search ──
 searchToggleBtn.addEventListener('click', () => {
   const visible = isSearchBarOpen();
@@ -826,21 +978,41 @@ searchToggleBtn.addEventListener('click', () => {
     hideSearchBar();
     clearSearch();
   } else {
-    showSearchBar();
-    focusElement(searchInput);
-    runSearch();
+    openSearchFromSignal();
   }
 });
 
-searchInput.addEventListener('input', runSearch);
+if (typeof searchSummaryBtn !== 'undefined' && searchSummaryBtn) {
+  searchSummaryBtn.addEventListener('click', () => {
+    if (typeof summarizeCurrentOutputSignals === 'function') summarizeCurrentOutputSignals();
+    refocusComposerAfterAction({ defer: true });
+  });
+}
+
+searchInput.addEventListener('input', () => {
+  if (typeof scheduleRunSearch === 'function') scheduleRunSearch();
+  else runSearch();
+});
 searchPrevBtn.addEventListener('click', () => navigateSearch(-1));
 searchNextBtn.addEventListener('click', () => navigateSearch(1));
+if (typeof searchScopeButtons !== 'undefined' && Array.isArray(searchScopeButtons)) {
+  searchScopeButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      setSearchScope(btn.dataset.searchScope || 'text');
+      if (searchScope === 'text') focusElement(searchInput);
+      else refocusComposerAfterAction({ defer: true });
+    });
+  });
+}
 searchCloseBtn?.addEventListener('click', () => {
   hideSearchBar();
   clearSearch();
 });
 searchInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter') navigateSearch(e.shiftKey ? -1 : 1);
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    navigateSearch(e.shiftKey ? -1 : 1);
+  }
   if (e.key === 'Escape') {
     hideSearchBar();
     clearSearch();
@@ -882,13 +1054,26 @@ histClearAllBtn.addEventListener('click', () => {
 // App-safe key bindings stay narrow:
 // - Alt+T / Alt+W for new/close tab
 // - Alt+Tab / Alt+Shift+Tab for tab cycling (forward/backward)
-// - Alt+ArrowLeft / Alt+ArrowRight for tab cycling (same as Tab)
+// - Alt+Shift+ArrowLeft / Alt+Shift+ArrowRight for tab cycling
 // - Alt+P for permalink, Alt+Shift+C for copy
 // Confirmation dialogs (kill, history-delete, share-redaction, ...) use
 // default-focus-on-cancel so Enter resolves to the safe action via the
 // browser's native button activation. Escape is routed through the
 // dismissible dispatcher below.
 // Browser-native combos like Ctrl/Cmd+T or Ctrl/Cmd+W remain environment-dependent.
+function hasActiveTerminalConfirm() {
+  return typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm();
+}
+
+function isAnyPanelOverlayOpen() {
+  return (typeof isFaqOverlayOpen === 'function' && isFaqOverlayOpen())
+    || (typeof isWorkflowsOverlayOpen === 'function' && isWorkflowsOverlayOpen())
+    || (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen())
+    || (typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
+    || (typeof isOptionsOverlayOpen === 'function' && isOptionsOverlayOpen())
+    || (typeof isThemeOverlayOpen === 'function' && isThemeOverlayOpen());
+}
+
 document.addEventListener('keydown', e => {
   // Unified Escape dispatch: closes the topmost open dismissible
   // (modal > sheet > panel) via the registry populated by
@@ -902,7 +1087,14 @@ document.addEventListener('keydown', e => {
   // don't dispatch behind the overlay. Chrome shortcuts (Alt+H, Alt+G,
   // Alt+, etc.) still fire so the opening chord can also close the
   // surface.
-  if (isFaqOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen() || isWorkflowsOverlayOpen() || isHistoryPanelOpen()) {
+  if (
+    isFaqOverlayOpen()
+    || isOptionsOverlayOpen()
+    || isThemeOverlayOpen()
+    || isWorkflowsOverlayOpen()
+    || isHistoryPanelOpen()
+    || (typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
+  ) {
     if (handleChromeShortcut(e)) return;
     return;
   }
@@ -948,7 +1140,7 @@ document.addEventListener('keydown', e => {
     const activeTab = getActiveTab();
     if (activeTab && activeTab.st === 'running') {
       confirmKill(activeTabId);
-    } else if (typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm()) {
+    } else if (hasActiveTerminalConfirm()) {
       cancelPendingTerminalConfirm(activeTabId);
     } else {
       interruptPromptLine(activeTabId);
@@ -1001,6 +1193,7 @@ document.addEventListener('keydown', e => {
     && !(e.target && e.target.closest && e.target.closest('button, a, select'))
     && cmdInput
     && !isFaqOverlayOpen() && !isWorkflowsOverlayOpen() && !isOptionsOverlayOpen() && !isThemeOverlayOpen()
+    && !(typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
     && !(typeof isConfirmOpen === 'function' && isConfirmOpen())
   ) {
     e.preventDefault();
@@ -1032,6 +1225,10 @@ function _replayPromptShortcutAfterSelection(e) {
     return true;
   }
   if (e.key === 'ArrowDown') {
+    if (hasActiveTerminalConfirm()) {
+      if (typeof acHide === 'function') acHide();
+      return true;
+    }
     if (isAcDropdownOpen() && acFiltered.length) {
       acIndex = (acIndex + 1) % acFiltered.length;
       if (typeof acShow === 'function') acShow(acFiltered);
@@ -1041,6 +1238,10 @@ function _replayPromptShortcutAfterSelection(e) {
     return true;
   }
   if (e.key === 'ArrowUp') {
+    if (hasActiveTerminalConfirm()) {
+      if (typeof acHide === 'function') acHide();
+      return true;
+    }
     if (isAcDropdownOpen() && acFiltered.length) {
       acIndex = acIndex <= 0 ? acFiltered.length - 1 : acIndex - 1;
       if (typeof acShow === 'function') acShow(acFiltered);
@@ -1065,6 +1266,38 @@ function _replayPromptShortcutAfterSelection(e) {
   return true;
 }
 
+function _isMajorSurfaceOpenForPromptPaste() {
+  return (
+    isFaqOverlayOpen()
+    || isOptionsOverlayOpen()
+    || isThemeOverlayOpen()
+    || isWorkflowsOverlayOpen()
+    || (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen())
+    || (typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
+    || isHistoryPanelOpen()
+    || (typeof isConfirmOpen === 'function' && isConfirmOpen())
+  );
+}
+
+document.addEventListener('paste', e => {
+  if (!cmdInput || isEditableTarget(e.target) || _isMajorSurfaceOpenForPromptPaste()) return;
+  const clipboard = e.clipboardData || (typeof window !== 'undefined' ? window.clipboardData : null);
+  const text = clipboard && typeof clipboard.getData === 'function'
+    ? (clipboard.getData('text/plain') || clipboard.getData('text') || '')
+    : '';
+  if (!text) return;
+
+  e.preventDefault();
+  if (typeof window !== 'undefined' && typeof window.getSelection === 'function') {
+    const selection = window.getSelection();
+    if (selection && typeof selection.removeAllRanges === 'function') selection.removeAllRanges();
+  }
+  refocusComposerAfterAction({ preventScroll: true });
+  const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || '');
+  const { start, end } = getCmdSelection(value);
+  replaceCmdRange(value, start, end, text);
+});
+
 // ── Global click: dismiss history panel, autocomplete ──
 // bindOutsideClickClose owns ambient click dismissal for the two surfaces
 // that have no scrim of their own (the history side panel and the
@@ -1076,7 +1309,7 @@ if (historyPanel && typeof bindOutsideClickClose === 'function') {
     triggers: null,
     isOpen: isHistoryPanelOpen,
     onClose: hideHistoryPanel,
-    exemptSelectors: ['.hist-chip-overflow', '[data-action="history"]'],
+    exemptSelectors: ['.hist-chip-overflow', '[data-action="history"]', '#history-compare-overlay'],
   });
 }
 if (typeof bindOutsideClickClose === 'function' && typeof shellPromptWrap !== 'undefined' && shellPromptWrap) {
@@ -1091,12 +1324,58 @@ if (typeof bindOutsideClickClose === 'function' && typeof shellPromptWrap !== 'u
   });
 }
 
+function _selectionTouchesElement(el) {
+  if (!el || typeof window === 'undefined' || typeof window.getSelection !== 'function') return false;
+  const selection = window.getSelection();
+  if (!selection) return false;
+  const nodes = [selection.anchorNode, selection.focusNode];
+  if (selection.rangeCount > 0) nodes.push(selection.getRangeAt(0).commonAncestorContainer);
+  return nodes.some(node => (
+    !!node && el.contains(node.nodeType === Node.ELEMENT_NODE ? node : node.parentNode)
+  ));
+}
+
+let _promptPointerSelectionState = null;
+let _suppressPromptFocusUntil = 0;
+let _pendingPromptFocusTimer = null;
+
 if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && cmdInput) {
   shellPromptWrap.addEventListener('pointerdown', e => {
+    if (e.target === runBtn || (e.target && e.target.closest && e.target.closest('#run-btn'))) return;
     if (useMobileTerminalViewportMode()) {
       e.preventDefault();
       focusCommandInputFromGesture();
+      return;
     }
+    if (_pendingPromptFocusTimer) {
+      clearTimeout(_pendingPromptFocusTimer);
+      _pendingPromptFocusTimer = null;
+    }
+    _promptPointerSelectionState = {
+      id: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      moved: false,
+    };
+    if (document.activeElement === cmdInput && typeof cmdInput.blur === 'function') {
+      cmdInput.blur();
+    }
+  });
+  shellPromptWrap.addEventListener('pointermove', e => {
+    const state = _promptPointerSelectionState;
+    if (!state || state.id !== e.pointerId || state.moved) return;
+    if (Math.abs(e.clientX - state.x) > 4 || Math.abs(e.clientY - state.y) > 4) {
+      state.moved = true;
+    }
+  });
+  shellPromptWrap.addEventListener('pointerup', e => {
+    const state = _promptPointerSelectionState;
+    if (!state || state.id !== e.pointerId) return;
+    if (state.moved) _suppressPromptFocusUntil = Date.now() + 250;
+    _promptPointerSelectionState = null;
+  });
+  shellPromptWrap.addEventListener('pointercancel', () => {
+    _promptPointerSelectionState = null;
   });
   shellPromptWrap.addEventListener('touchstart', e => {
     if (useMobileTerminalViewportMode()) {
@@ -1106,12 +1385,30 @@ if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && cmdInput) {
   }, { passive: false });
   shellPromptWrap.addEventListener('click', e => {
     if (e.target === runBtn || (e.target && e.target.closest && e.target.closest('#run-btn'))) return;
-    focusCommandInputFromGesture();
+    if (useMobileTerminalViewportMode()) {
+      focusCommandInputFromGesture();
+      return;
+    }
+    if (e.detail > 1 || Date.now() < _suppressPromptFocusUntil) return;
+    if (_selectionTouchesElement(shellPromptWrap)) return;
+    if (_pendingPromptFocusTimer) clearTimeout(_pendingPromptFocusTimer);
+    _pendingPromptFocusTimer = setTimeout(() => {
+      _pendingPromptFocusTimer = null;
+      if (_selectionTouchesElement(shellPromptWrap)) return;
+      if (Date.now() < _suppressPromptFocusUntil) return;
+      focusCommandInputFromGesture();
+    }, 220);
+  });
+  shellPromptWrap.addEventListener('dblclick', () => {
+    if (_pendingPromptFocusTimer) {
+      clearTimeout(_pendingPromptFocusTimer);
+      _pendingPromptFocusTimer = null;
+    }
+    _suppressPromptFocusUntil = Date.now() + 400;
   });
 }
 
 _bindMobileComposerInteractions(_mobileUiLayoutRefs);
-_bindMobileEditBarInteractions(_mobileUiLayoutRefs && _mobileUiLayoutRefs.composer && _mobileUiLayoutRefs.composer.editBar);
 
 if (cmdInput) {
   cmdInput.addEventListener('focus', () => {
@@ -1139,6 +1436,13 @@ if (cmdInput) {
 if (typeof document !== 'undefined') {
   document.addEventListener('selectionchange', () => {
     if (!cmdInput) return;
+    if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && _selectionTouchesElement(shellPromptWrap)) {
+      if (_pendingPromptFocusTimer) {
+        clearTimeout(_pendingPromptFocusTimer);
+        _pendingPromptFocusTimer = null;
+      }
+      return;
+    }
     const composerInputs = typeof getComposerInputs === 'function' ? getComposerInputs() : {};
     const mobileInput = composerInputs.mobile || null;
     if (document.activeElement === cmdInput) {
@@ -1171,7 +1475,13 @@ if (typeof document !== 'undefined') {
 apiFetch('/autocomplete').then(r => r.json()).then(data => {
   acSuggestions = data.suggestions || [];
   acContextRegistry = data.context || {};
+  acWordlists = Array.isArray(data.wordlists) ? data.wordlists : [];
   acSpecialCommands = data.special_commands || [];
+  acBuiltinCommandRoots = data.builtin_command_roots || [];
+  if (typeof loadSessionVariables === 'function') loadSessionVariables().catch(() => {});
+  if (typeof loadRecentDomains === 'function') loadRecentDomains().catch(() => {});
+  if (typeof scheduleSearchDiscoverabilityRefresh === 'function') scheduleSearchDiscoverabilityRefresh();
+  else if (typeof refreshSearchDiscoverabilityUi === 'function') refreshSearchDiscoverabilityUi();
 }).catch(err => {
   logClientError('failed to load /autocomplete', err);
 });
@@ -1201,9 +1511,9 @@ cmdInput.addEventListener('input', () => {
 });
 
 cmdInput.addEventListener('keydown', e => {
-  if (isFaqOverlayOpen() || isWorkflowsOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen()) {
+  if (isAnyPanelOverlayOpen()) {
     if (e.key === 'Escape') {
-      closeFaq(); closeWorkflows(); closeOptions(); closeThemeSelector();
+      closeFaq(); closeWorkflows(); if (typeof closeWorkspace === 'function') closeWorkspace(); closeOptions(); closeThemeSelector();
       refocusComposerAfterAction({ defer: true });
       e.preventDefault();
     }
@@ -1211,6 +1521,28 @@ cmdInput.addEventListener('keydown', e => {
   }
   if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
     if (typeof handleHistSearchKey === 'function' && handleHistSearchKey(e)) return;
+  }
+
+  const isWordArrowLeft = e.key === 'ArrowLeft' || eventMatchesCode(e, 'ArrowLeft');
+  const isWordArrowRight = e.key === 'ArrowRight' || eventMatchesCode(e, 'ArrowRight');
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (isWordArrowLeft || isWordArrowRight)) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof syncFocusedComposerState === 'function') syncFocusedComposerState(cmdInput);
+    const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
+    const { start, end } = getCmdSelection(value);
+    const next = isWordArrowLeft
+      ? findWordBoundaryLeft(value, start)
+      : findWordBoundaryRight(value, end);
+    const input = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : cmdInput;
+    if (typeof syncComposerSelection === 'function') syncComposerSelection(next, next, { input });
+    if (input && typeof input.setSelectionRange === 'function' && input.selectionStart !== next) {
+      input.setSelectionRange(next, next);
+    } else if (!input && cmdInput && typeof cmdInput.setSelectionRange === 'function') {
+      cmdInput.setSelectionRange(next, next);
+    }
+    syncShellPrompt();
+    return;
   }
 
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'r' || e.key === 'R')) {
@@ -1232,7 +1564,7 @@ cmdInput.addEventListener('keydown', e => {
       confirmKill(activeTabId);
       return;
     }
-    if (typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm()) {
+    if (hasActiveTerminalConfirm()) {
       cancelPendingTerminalConfirm(activeTabId);
       return;
     }
@@ -1303,6 +1635,7 @@ cmdInput.addEventListener('keydown', e => {
 
   if (e.altKey && !e.ctrlKey && !e.metaKey && eventMatchesLetter(e, 'b')) {
     e.preventDefault();
+    if (typeof syncFocusedComposerState === 'function') syncFocusedComposerState(cmdInput);
     const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
     const { start } = getCmdSelection(value);
     const next = findWordBoundaryLeft(value, start);
@@ -1314,6 +1647,7 @@ cmdInput.addEventListener('keydown', e => {
 
   if (e.altKey && !e.ctrlKey && !e.metaKey && eventMatchesLetter(e, 'f')) {
     e.preventDefault();
+    if (typeof syncFocusedComposerState === 'function') syncFocusedComposerState(cmdInput);
     const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
     const { end } = getCmdSelection(value);
     const next = findWordBoundaryRight(value, end);
@@ -1330,7 +1664,7 @@ cmdInput.addEventListener('keydown', e => {
       refocusComposerAfterAction({ defer: true });
       return;
     }
-    if (acIndex >= 0 && acFiltered[acIndex]) {
+    if (!hasActiveTerminalConfirm() && acIndex >= 0 && acFiltered[acIndex]) {
       e.preventDefault();
       acAccept(acFiltered[acIndex]);
     } else {
@@ -1346,10 +1680,13 @@ cmdInput.addEventListener('keydown', e => {
   }
   if (e.key === 'Tab' && !e.altKey && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
+    if (hasActiveTerminalConfirm()) {
+      acHide();
+      return;
+    }
     if (acFiltered.length === 1) { acAccept(acFiltered[0]); }
     else if (acFiltered.length > 0) {
-      const _allExamples = acFiltered.every(item => item && item.isExample);
-      if (!_allExamples && typeof acExpandSharedPrefix === 'function' && acExpandSharedPrefix(acFiltered)) return;
+      if (typeof acExpandSharedPrefix === 'function' && acExpandSharedPrefix(acFiltered)) return;
       if (acIndex < 0 || !isAcDropdownOpen()) {
         acIndex = 0;
       } else if (e.shiftKey) {
@@ -1363,6 +1700,10 @@ cmdInput.addEventListener('keydown', e => {
   }
   if (e.key === 'ArrowDown') {
     e.preventDefault();
+    if (hasActiveTerminalConfirm()) {
+      acHide();
+      return;
+    }
     const acOpen = isAcDropdownOpen();
     if (acOpen && acFiltered.length) {
       acIndex = (acIndex + 1) % acFiltered.length;
@@ -1374,6 +1715,10 @@ cmdInput.addEventListener('keydown', e => {
   }
   if (e.key === 'ArrowUp') {
     e.preventDefault();
+    if (hasActiveTerminalConfirm()) {
+      acHide();
+      return;
+    }
     const acOpen = isAcDropdownOpen();
     if (acOpen && acFiltered.length) {
       acIndex = acIndex <= 0 ? acFiltered.length - 1 : acIndex - 1;
@@ -1414,6 +1759,7 @@ if (typeof window !== 'undefined') {
 // ── Run button ──
 runBtn.addEventListener('click', runCommand);
 
+if (typeof _applyComposerPromptMode === 'function') _applyComposerPromptMode();
 syncShellPrompt();
 if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
 

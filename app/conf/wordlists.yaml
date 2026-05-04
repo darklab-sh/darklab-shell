@@ -1,0 +1,87 @@
+version: 1
+root: /usr/share/wordlists/seclists
+categories:
+  - key: dns
+    label: DNS
+    description: Subdomain and DNS brute-force wordlists.
+    include:
+      - Discovery/DNS/subdomains-top1million-5000.txt
+      - Discovery/DNS/subdomains-top1million-20000.txt
+      - Discovery/DNS/subdomains-top1million-110000.txt
+      - Discovery/DNS/bitquark-subdomains-top100000.txt
+      - Discovery/DNS/dns-Jhaddix.txt
+      - Discovery/DNS/fierce-hostlist.txt
+      - Discovery/DNS/deepmagic.com-prefixes-top500.txt
+      - Discovery/DNS/deepmagic.com-prefixes-top50000.txt
+      - Discovery/DNS/namelist.txt
+  - key: web-content
+    label: Web Content
+    description: Directory, file, extension, and web path discovery lists.
+    include:
+      - Discovery/Web-Content/common.txt
+      - Discovery/Web-Content/quickhits.txt
+      - Discovery/Web-Content/big.txt
+      - Discovery/Web-Content/DirBuster-2007_directory-list-2.3-small.txt
+      - Discovery/Web-Content/DirBuster-2007_directory-list-2.3-medium.txt
+      - Discovery/Web-Content/DirBuster-2007_directory-list-2.3-big.txt
+      - Discovery/Web-Content/raft-small-directories.txt
+      - Discovery/Web-Content/raft-small-files.txt
+      - Discovery/Web-Content/raft-small-words.txt
+      - Discovery/Web-Content/raft-medium-directories.txt
+      - Discovery/Web-Content/raft-medium-files.txt
+      - Discovery/Web-Content/raft-medium-words.txt
+      - Discovery/Web-Content/web-extensions.txt
+      - Discovery/Web-Content/web-extensions-big.txt
+  - key: api
+    label: API
+    description: API endpoint, GraphQL, and parameter-name lists.
+    include:
+      - Discovery/Web-Content/common-api-endpoints-mazen160.txt
+      - Discovery/Web-Content/graphql.txt
+      - Discovery/Web-Content/burp-parameter-names.txt
+      - Discovery/Web-Content/api/api-endpoints.txt
+      - Discovery/Web-Content/api/api-seen-in-wild.txt
+  - key: cms
+    label: CMS
+    description: CMS-specific path and plugin discovery lists.
+    include:
+      - Discovery/Web-Content/CMS/wordpress.fuzz.txt
+      - Discovery/Web-Content/CMS/wp-plugins.fuzz.txt
+      - Discovery/Web-Content/CMS/wp-themes.fuzz.txt
+      - Discovery/Web-Content/CMS/Drupal.txt
+      - Discovery/Web-Content/CMS/Django.txt
+      - Discovery/Web-Content/CMS/Sharepoint.txt
+  - key: fuzzing
+    label: Fuzzing
+    description: Payload and token lists for request fuzzing.
+    include:
+      - Fuzzing/special-chars.txt
+      - Fuzzing/special-chars + urlencoded.txt
+      - Fuzzing/LFI/LFI-Jhaddix.txt
+      - Fuzzing/Databases/SQLi/quick-SQLi.txt
+      - Fuzzing/Databases/SQLi/Generic-SQLi.txt
+      - Fuzzing/XSS/XSS-EnDe-xssAttacks.txt
+      - Fuzzing/XSS/xss-without-parentheses-semi-colons-portswigger.txt
+  - key: passwords
+    label: Passwords
+    description: Common password lists for commands that explicitly request password wordlists.
+    include:
+      - Passwords/Common-Credentials/10k-most-common.txt
+      - Passwords/Common-Credentials/2020-200_most_used_passwords.txt
+      - Passwords/Common-Credentials/common-passwords-win.txt
+      - Passwords/Common-Credentials/xato-net-10-million-passwords-1000.txt
+      - Passwords/Common-Credentials/xato-net-10-million-passwords-10000.txt
+  - key: usernames
+    label: Usernames
+    description: Common username lists for commands that explicitly request username wordlists.
+    include:
+      - Usernames/top-usernames-shortlist.txt
+      - Usernames/CommonAdminBase64.txt
+  - key: user-agents
+    label: User Agents
+    description: User-agent lists for commands that explicitly request user-agent values.
+    include:
+      - Fuzzing/User-Agents/UserAgents.fuzz.txt
+      - Fuzzing/User-Agents/UserAgents-IE.txt
+      - Fuzzing/User-Agents/user-agents-whatismybrowserdotcom-small.txt
+      - Fuzzing/User-Agents/user-agents-whatismybrowserdotcom-mid.txt

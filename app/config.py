@@ -9,9 +9,26 @@ from pathlib import Path
 import yaml
 from redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
 
-APP_VERSION = "1.5"
+APP_VERSION = "1.6"
+PROJECT_NAME = "darklab_shell"
+
 PROJECT_README = "https://gitlab.com/darklab.sh/darklab_shell#darklab_shell"
 APP_CONF_DIR = os.environ.get("APP_CONF_DIR", "")
+DEFAULT_PROMPT_IDENTITY = "anon@darklab.sh"
+
+
+def split_prompt_identity(identity):
+    raw = str(identity or DEFAULT_PROMPT_IDENTITY).strip() or DEFAULT_PROMPT_IDENTITY
+    if raw.endswith("$"):
+        raw = raw[:-1].rstrip()
+    if ":" in raw:
+        head, tail = raw.rsplit(":", 1)
+        if head and tail and not any(ch.isspace() for ch in tail):
+            raw = head.strip()
+    username, sep, domain = raw.partition("@")
+    username = username.strip() or "anon"
+    domain = domain.strip() if sep else "darklab.sh"
+    return username, domain or "darklab.sh"
 
 
 def _load_yaml_config(path):
@@ -62,16 +79,19 @@ def load_config(conf_dir=None):
     """
     defaults = {
         "app_name":                   "darklab_shell",
-        "prompt_prefix":              "anon@darklab:~$",
+        "prompt_username":            split_prompt_identity(DEFAULT_PROMPT_IDENTITY)[0],
+        "prompt_domain":              split_prompt_identity(DEFAULT_PROMPT_IDENTITY)[1],
         "motd":                       "",
         "default_theme":              "darklab_obsidian.yaml",
         "history_panel_limit":        50,
         "recent_commands_limit":      50,
+        "data_dir":                   "",
         "permalink_retention_days":   365,
         "log_level":                  "INFO",
         "log_format":                 "text",
         "trusted_proxy_cidrs":        ["127.0.0.1/32", "::1/128"],
         "diagnostics_allowed_cidrs":  [],
+        "restricted_command_input_cidrs": [],
         "share_redaction_enabled":    True,
         "share_redaction_rules":      [],
         "rate_limit_enabled":         True,
@@ -80,9 +100,27 @@ def load_config(conf_dir=None):
         "max_output_lines":           5000,
         "persist_full_run_output":    True,
         "full_output_max_mb":         5,
+        "workspace_enabled":          False,
+        "workspace_backend":          "tmpfs",
+        # Intentional server-side workspace root default. Workspaces are
+        # disabled unless explicitly enabled and all file names are validated
+        # relative to hashed per-session directories before use.
+        "workspace_root":             "/tmp/darklab_shell-workspaces",  # nosec
+        "workspace_quota_mb":         50,
+        "workspace_max_file_mb":      5,
+        "workspace_max_files":        100,
+        "workspace_inactivity_ttl_hours": 1,
         "max_tabs":                   8,
         "command_timeout_seconds":    3600,
         "heartbeat_interval_seconds": 20,
+        "run_broker_enabled":         True,
+        "run_broker_require_redis":   True,
+        "run_broker_active_stream_ttl_seconds": 14400,
+        "run_broker_completed_stream_ttl_seconds": 3600,
+        "run_broker_max_replay_bytes": 10485760,
+        "run_broker_subscriber_block_seconds": 15,
+        "run_broker_heartbeat_seconds": 20,
+        "run_broker_owner_stale_seconds": 75,
         "welcome_char_ms":            18,
         "welcome_jitter_ms":          12,
         "welcome_post_cmd_ms":        650,
@@ -127,6 +165,47 @@ def load_config(conf_dir=None):
 CFG = load_config()
 
 
+def _is_writable_directory(path):
+    try:
+        os.makedirs(path, exist_ok=True)
+        probe_path = os.path.join(path, f".darklab_write_probe_{os.getpid()}")
+        with open(probe_path, "w", encoding="utf-8") as f:
+            f.write("")
+        os.unlink(probe_path)
+        return True
+    except OSError:
+        return False
+
+
+def _configured_data_dir(value):
+    if value is None or isinstance(value, bool):
+        return ""
+    return str(value).strip()
+
+
+def _require_writable_data_dir(path, source):
+    resolved = os.path.expanduser(path)
+    if not _is_writable_directory(resolved):
+        raise RuntimeError(f"{source} is not writable: {resolved}")
+    return resolved
+
+
+def resolve_data_dir(cfg=None):
+    """Return the writable directory used for SQLite and run-output artifacts."""
+    env_data_dir = _configured_data_dir(os.environ.get("APP_DATA_DIR"))
+    if env_data_dir:
+        return _require_writable_data_dir(env_data_dir, "APP_DATA_DIR")
+
+    active_cfg = CFG if cfg is None else cfg
+    configured = _configured_data_dir(active_cfg.get("data_dir"))
+    if configured:
+        return _require_writable_data_dir(configured, "data_dir")
+
+    if _is_writable_directory("/data"):
+        return "/data"
+    return _require_writable_data_dir("/tmp", "fallback data_dir")  # nosec B108
+
+
 def get_share_redaction_rules(cfg=None):
     """Return the effective share/export redaction rules for the current config."""
     active_cfg = cfg or CFG
@@ -145,6 +224,7 @@ _THEME_DEFAULTS = {
         "surface":             "#141414",
         "border":              "#2a2a2a",
         "border_bright":       "#3c3c3c",
+        "border_soft":         "rgba(255, 255, 255, 0.08)",
         "text":                "#e0e0e0",
         "muted":               "#9a9a9a",
         "green":               "#39ff14",
@@ -157,17 +237,20 @@ _THEME_DEFAULTS = {
         "terminal_line_height": "1.65",
         "prompt_line_text":    "#e8e8e8",
         "panel_bg":            "#141414",
-        "panel_alt_bg":        "#0c0c0c",
         "panel_border":        "#3c3c3c",
         "panel_shadow":        "rgba(170,170,170,0.12)",
         "terminal_bar_bg":     "#000000",
-        "terminal_bar_border": "#2a2a2a",
-        "terminal_actions_bg":  "transparent",
-        "terminal_wrap_border": "#3c3c3c",
-        "terminal_wrap_shadow": "rgba(210,210,210,0.24)",
-        "window_btn_close":    "color-mix(in srgb, var(--red) 78%, var(--surface))",
-        "window_btn_minimize": "color-mix(in srgb, var(--amber) 78%, var(--surface))",
-        "window_btn_maximize": "color-mix(in srgb, var(--green) 78%, var(--surface))",
+        "chrome_bg":           "#0c0c0c",
+        "chrome_header_bg":    "#0c0c0c",
+        "chrome_row_bg":       "#0c0c0c",
+        "chrome_row_hover_bg": "rgba(57,255,20,0.12)",
+        "chrome_control_bg":   "color-mix(in srgb, var(--surface) 92%, transparent)",
+        "chrome_control_border": "var(--border-bright)",
+        "chrome_divider_color": "#2a2a2a",
+        "chrome_shadow":       "rgba(0,0,0,0.6)",
+        "scrollbar_track":     "color-mix(in srgb, var(--surface) 72%, transparent)",
+        "scrollbar_thumb":     "color-mix(in srgb, var(--muted) 44%, var(--border-bright))",
+        "scrollbar_thumb_hover": "color-mix(in srgb, var(--text) 38%, var(--border-bright))",
         "toolbar_button_bg":   "transparent",
         "toolbar_button_border": "#3c3c3c",
         "toolbar_button_text": "#9a9a9a",
@@ -177,30 +260,21 @@ _THEME_DEFAULTS = {
         "toolbar_button_active_bg": "rgba(57,255,20,0.06)",
         "toolbar_button_active_border": "#1a7a08",
         "toolbar_button_active_text": "#39ff14",
-        "chip_bg":             "transparent",
-        "chip_border":         "#3c3c3c",
-        "chip_text":           "#9a9a9a",
-        "chip_hover_bg":       "rgba(57,255,20,0.12)",
-        "chip_hover_border":   "#1a7a08",
-        "chip_hover_text":     "#e0e0e0",
-        "chip_overflow_text":  "#39ff14",
-        "tabs_bar_scrollbar_track": "rgba(255,255,255,0.06)",
-        "tabs_bar_scrollbar_thumb": "#6d6d6d",
-        "tabs_bar_scrollbar_thumb_hover": "#8a8a8a",
-        "tabs_scroll_btn_bg":   "transparent",
-        "tabs_scroll_btn_border": "#2a2a2a",
-        "tabs_scroll_btn_text": "#9a9a9a",
-        "tabs_scroll_btn_hover_bg": "transparent",
-        "tabs_scroll_btn_hover_border": "#3c3c3c",
-        "tabs_scroll_btn_hover_text": "#e0e0e0",
-        "tab_bg":               "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))",
-        "tab_border":           "#3c3c3c",
+        "button_secondary_bg": "color-mix(in srgb, var(--surface) 66%, transparent)",
+        "button_secondary_border": "color-mix(in srgb, var(--border-bright) 88%, transparent)",
+        "button_secondary_text": "color-mix(in srgb, var(--muted) 86%, var(--text))",
+        "button_secondary_hover_bg": "color-mix(in srgb, var(--_tone) 7%, transparent)",
+        "button_secondary_hover_border": "color-mix(in srgb, var(--_tone-dim) 72%, var(--border-bright))",
+        "button_ghost_border": "color-mix(in srgb, var(--border-bright) 58%, transparent)",
+        "button_ghost_text": "color-mix(in srgb, var(--muted) 86%, var(--text))",
+        "button_ghost_hover_bg": "color-mix(in srgb, var(--_tone) 10%, transparent)",
+        "button_ghost_hover_border": "color-mix(in srgb, var(--_tone-dim) 62%, var(--border-bright))",
+        "button_destructive_bg": "color-mix(in srgb, var(--_tone) 8%, transparent)",
+        "button_destructive_text": "color-mix(in srgb, var(--muted) 86%, var(--text))",
+        "button_destructive_hover_bg": "color-mix(in srgb, var(--_tone) 16%, transparent)",
         "tab_text":             "#9a9a9a",
         "tab_hover_text":       "#e0e0e0",
         "tab_active_bg":        "rgba(57,255,20,0.04)",
-        "tab_active_border":    "color-mix(in srgb, var(--green) 42%, transparent)",
-        "tab_active_text":      "#39ff14",
-        "tab_active_shadow":    "none",
         "tab_close_bg":         "rgba(255,255,255,0.02)",
         "tab_close_border":     "rgba(255,255,255,0.06)",
         "tab_close_hover_bg":   "color-mix(in srgb, var(--green-dim) 18%, transparent)",
@@ -208,42 +282,30 @@ _THEME_DEFAULTS = {
         "tab_close_hover_text": "inherit",
         "tab_touch_drag_text_shadow": "0 0 10px color-mix(in srgb, var(--green) 14%, transparent)",
         "tab_drop_shadow":      "0 0 10px color-mix(in srgb, var(--green) 45%, transparent)",
-        "history_panel_bg":     "#000000",
-        "history_panel_shadow": "rgba(0,0,0,0.6)",
-        "history_entry_hover_bg": "rgba(57,255,20,0.12)",
         "history_load_overlay_bg": "rgba(0,0,0,0.76)",
-        "history_load_modal_bg": "color-mix(in srgb, var(--surface) 88%, #000)",
-        "history_load_modal_border": "#3c3c3c",
-        "history_load_modal_shadow": "rgba(0,0,0,0.35)",
-        "faq_modal_bg":         "#141414",
-        "options_modal_bg":     "#141414",
-        "confirm_modal_bg":     "#141414",
+        "modal_bg":             "#141414",
         "dropdown_bg":          "color-mix(in srgb, var(--surface) 96%, transparent)",
         "dropdown_border":      "color-mix(in srgb, var(--green) 18%, transparent)",
+        "dropdown_border_soft": "color-mix(in srgb, var(--green) 14%, transparent)",
         "dropdown_shadow":      "rgba(0,0,0,0.35)",
-        "dropdown_up_bg":       "color-mix(in srgb, var(--surface) 98%, transparent)",
-        "dropdown_up_border":   "color-mix(in srgb, var(--green) 28%, transparent)",
-        "dropdown_up_shadow":   "rgba(0,0,0,0.45)",
+        "dropdown_shadow_ring": "color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent)",
+        "dropdown_shadow_ring_strong": "color-mix(in srgb, var(--theme-dropdown-shadow) 36%, transparent)",
         "dropdown_item_text":   "#9a9a9a",
         "overlay_backdrop_bg":  "rgba(0,0,0,0.76)",
-        "faq_code_bg":          "#141414",
-        "allowed_chip_bg":      "#141414",
-        "form_control_bg":      "#141414",
-        "tab_status_ok_bg":     "#39ff14",
+        "search_highlight_bg": "color-mix(in srgb, var(--amber) 35%, transparent)",
+        "search_highlight_current_bg": "color-mix(in srgb, var(--amber) 70%, transparent)",
+        "search_signal_bg":    "color-mix(in srgb, var(--amber) 8%, transparent)",
+        "search_signal_accent": "color-mix(in srgb, var(--amber) 55%, transparent)",
+        "search_signal_current_bg": "color-mix(in srgb, var(--amber) 16%, transparent)",
+        "search_signal_current_accent": "color-mix(in srgb, var(--amber) 88%, transparent)",
+        "inline_surface_bg":    "#141414",
         "toast_bg":             "#141414",
         "toast_text":           "#39ff14",
         "toast_border":         "#1a7a08",
         "toast_error_bg":       "color-mix(in srgb, var(--red) 8%, var(--bg))",
         "toast_error_text":     "#ff3c3c",
         "toast_error_border":   "color-mix(in srgb, var(--red) 45%, transparent)",
-        "mobile_composer_host_bg": "linear-gradient(180deg, rgba(0,0,0,0.92), rgba(0,0,0,0.98))",
-        "mobile_composer_host_light_bg": "linear-gradient(180deg, rgba(238,242,246,0.94), rgba(238,242,246,0.99))",
-        "mobile_menu_bg":      "#141414",
-        "mobile_menu_border":  "#3c3c3c",
-        "mobile_menu_shadow":  "rgba(0,0,0,0.6)",
-        "mobile_menu_button_hover_bg": "var(--green-glow)",
-        "mobile_menu_button_hover_text": "#39ff14",
-        "mobile_menu_button_border": "#2a2a2a",
+        "toast_shadow":         "0 12px 28px color-mix(in srgb, var(--theme-panel-shadow) 74%, transparent)",
         "welcome_command_hover_bg": "color-mix(in srgb, var(--green) 6%, transparent)",
         "welcome_command_hover_shadow": "0 0 0 1px var(--green-glow)",
         "welcome_ascii_text_shadow": (
@@ -251,13 +313,20 @@ _THEME_DEFAULTS = {
             "0 0 4px color-mix(in srgb, var(--green) 18%, transparent), "
             "0 1px 0 rgba(8,16,12,0.4)"
         ),
+        "welcome_ascii_color": "var(--green)",
         "welcome_ascii_filter": "saturate(1.12) contrast(1.08) brightness(1.08)",
+        "on_accent_text":      "#000",
+        "selection_text":      "#f7fff2",
+        "selection_line_text": "#eef7ee",
+        "modal_danger_btn_text": "#fff",
+        "modal_warning_btn_text": "#000",
     },
     "light": {
         "bg":                  "#b8c4d0",
         "surface":             "#eef2f6",
         "border":              "rgba(0,0,0,0.15)",
         "border_bright":       "rgba(0,0,0,0.28)",
+        "border_soft":         "rgba(0,0,0,0.12)",
         "text":                "#101820",
         "muted":               "#5a6878",
         "green":               "#2a5d18",
@@ -270,17 +339,20 @@ _THEME_DEFAULTS = {
         "terminal_line_height": "1.65",
         "prompt_line_text":    "#1c201a",
         "panel_bg":            "#d4e0ec",
-        "panel_alt_bg":        "#e8eef6",
         "panel_border":        "rgba(0,0,0,0.28)",
         "panel_shadow":        "rgba(0,0,0,0.22)",
         "terminal_bar_bg":     "#b8c4d0",
-        "terminal_bar_border": "#8898b0",
-        "terminal_actions_bg":  "rgba(0,0,0,0.025)",
-        "terminal_wrap_border": "rgba(0,0,0,0.42)",
-        "terminal_wrap_shadow": "rgba(34,58,88,0.18)",
-        "window_btn_close":    "#c25b4d",
-        "window_btn_minimize": "#b77f22",
-        "window_btn_maximize": "#2f7a43",
+        "chrome_bg":           "#b8c4d0",
+        "chrome_header_bg":    "#b8c4d0",
+        "chrome_row_bg":       "#b8c4d0",
+        "chrome_row_hover_bg": "rgba(26,90,170,0.06)",
+        "chrome_control_bg":   "color-mix(in srgb, var(--surface) 92%, transparent)",
+        "chrome_control_border": "var(--border-bright)",
+        "chrome_divider_color": "rgba(0,0,0,0.15)",
+        "chrome_shadow":       "rgba(0,0,0,0.6)",
+        "scrollbar_track":     "color-mix(in srgb, var(--surface) 72%, transparent)",
+        "scrollbar_thumb":     "color-mix(in srgb, var(--muted) 44%, var(--border-bright))",
+        "scrollbar_thumb_hover": "color-mix(in srgb, var(--text) 38%, var(--border-bright))",
         "toolbar_button_bg":   "#c8d4e0",
         "toolbar_button_border": "#8898b0",
         "toolbar_button_text": "#202838",
@@ -290,30 +362,21 @@ _THEME_DEFAULTS = {
         "toolbar_button_active_bg": "#a0b4c8",
         "toolbar_button_active_border": "#6880a0",
         "toolbar_button_active_text": "#101820",
-        "chip_bg":             "#c8d4e0",
-        "chip_border":         "#8898b0",
-        "chip_text":           "#202838",
-        "chip_hover_bg":       "#b8c8d8",
-        "chip_hover_border":   "#6880a0",
-        "chip_hover_text":     "#101820",
-        "chip_overflow_text":  "#274f17",
-        "tabs_bar_scrollbar_track": "rgba(0,0,0,0.08)",
-        "tabs_bar_scrollbar_thumb": "#7890a8",
-        "tabs_bar_scrollbar_thumb_hover": "#5a6878",
-        "tabs_scroll_btn_bg":   "#c4d0dc",
-        "tabs_scroll_btn_border": "#8898b0",
-        "tabs_scroll_btn_text": "#202838",
-        "tabs_scroll_btn_hover_bg": "#b4c4d4",
-        "tabs_scroll_btn_hover_border": "#6880a0",
-        "tabs_scroll_btn_hover_text": "#101010",
-        "tab_bg":               "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))",
-        "tab_border":           "rgba(0,0,0,0.15)",
+        "button_secondary_bg": "color-mix(in srgb, var(--surface) 66%, transparent)",
+        "button_secondary_border": "color-mix(in srgb, var(--border-bright) 88%, transparent)",
+        "button_secondary_text": "color-mix(in srgb, var(--muted) 86%, var(--text))",
+        "button_secondary_hover_bg": "color-mix(in srgb, var(--_tone) 7%, transparent)",
+        "button_secondary_hover_border": "color-mix(in srgb, var(--_tone-dim) 72%, var(--border-bright))",
+        "button_ghost_border": "color-mix(in srgb, var(--border-bright) 58%, transparent)",
+        "button_ghost_text": "color-mix(in srgb, var(--muted) 86%, var(--text))",
+        "button_ghost_hover_bg": "color-mix(in srgb, var(--_tone) 10%, transparent)",
+        "button_ghost_hover_border": "color-mix(in srgb, var(--_tone-dim) 62%, var(--border-bright))",
+        "button_destructive_bg": "color-mix(in srgb, var(--_tone) 8%, transparent)",
+        "button_destructive_text": "color-mix(in srgb, var(--muted) 86%, var(--text))",
+        "button_destructive_hover_bg": "color-mix(in srgb, var(--_tone) 16%, transparent)",
         "tab_text":             "#5a6878",
         "tab_hover_text":       "#101820",
         "tab_active_bg":        "#c0cedd",
-        "tab_active_border":    "#8898b0",
-        "tab_active_text":      "#101820",
-        "tab_active_shadow":    "inset 0 0 0 1px rgba(255,255,255,0.22)",
         "tab_close_bg":         "rgba(255,255,255,0.02)",
         "tab_close_border":     "rgba(255,255,255,0.06)",
         "tab_close_hover_bg":   "color-mix(in srgb, var(--red) 18%, transparent)",
@@ -321,46 +384,40 @@ _THEME_DEFAULTS = {
         "tab_close_hover_text": "inherit",
         "tab_touch_drag_text_shadow": "0 0 10px rgba(42,93,24,0.08)",
         "tab_drop_shadow":      "0 0 10px rgba(42,93,24,0.18)",
-        "history_panel_bg":     "#c8d8e8",
-        "history_panel_shadow": "rgba(34,58,88,0.20)",
-        "history_entry_hover_bg": "rgba(26,90,170,0.06)",
         "history_load_overlay_bg": "rgba(0,0,0,0.76)",
-        "history_load_modal_bg": "#e8eef6",
-        "history_load_modal_border": "rgba(0,0,0,0.28)",
-        "history_load_modal_shadow": "rgba(0,0,0,0.35)",
-        "faq_modal_bg":         "#e8eef6",
-        "options_modal_bg":     "#e8eef6",
-        "confirm_modal_bg":     "#d4e0ec",
+        "modal_bg":             "#e8eef6",
         "dropdown_bg":          "#d4e0ec",
         "dropdown_border":      "rgba(26,90,170,0.25)",
+        "dropdown_border_soft": "rgba(26,90,170,0.18)",
         "dropdown_shadow":      "rgba(0,0,0,0.14)",
-        "dropdown_up_bg":       "#d4e0ec",
-        "dropdown_up_border":   "rgba(26,90,170,0.35)",
-        "dropdown_up_shadow":   "rgba(0,0,0,0.14)",
+        "dropdown_shadow_ring": "color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent)",
+        "dropdown_shadow_ring_strong": "color-mix(in srgb, var(--theme-dropdown-shadow) 36%, transparent)",
         "dropdown_item_text":   "#4a5868",
         "overlay_backdrop_bg":  "rgba(34,58,88,0.22)",
-        "faq_code_bg":          "#dce6f0",
-        "allowed_chip_bg":      "#dce6f0",
-        "form_control_bg":      "#e0e8f4",
-        "tab_status_ok_bg":     "#22a040",
+        "search_highlight_bg": "rgba(154,66,0,0.18)",
+        "search_highlight_current_bg": "rgba(154,66,0,0.34)",
+        "search_signal_bg":    "rgba(154,66,0,0.08)",
+        "search_signal_accent": "rgba(154,66,0,0.28)",
+        "search_signal_current_bg": "rgba(154,66,0,0.14)",
+        "search_signal_current_accent": "rgba(154,66,0,0.42)",
+        "inline_surface_bg":    "#dce6f0",
         "toast_bg":             "#e4eef8",
         "toast_text":           "#2a5d18",
         "toast_border":         "rgba(0,0,0,0.28)",
         "toast_error_bg":       "#e4eef8",
         "toast_error_text":     "#cc2200",
         "toast_error_border":   "rgba(204,34,0,0.38)",
-        "mobile_composer_host_bg": "linear-gradient(180deg, rgba(20,20,20,0.92), rgba(20,20,20,0.98))",
-        "mobile_composer_host_light_bg": "linear-gradient(180deg, rgba(238,242,246,0.94), rgba(238,242,246,0.99))",
-        "mobile_menu_bg":      "#eef2f6",
-        "mobile_menu_border":  "rgba(0,0,0,0.28)",
-        "mobile_menu_shadow":  "rgba(0,0,0,0.6)",
-        "mobile_menu_button_hover_bg": "var(--bg)",
-        "mobile_menu_button_hover_text": "#101820",
-        "mobile_menu_button_border": "#dce6f0",
+        "toast_shadow":         "0 12px 28px color-mix(in srgb, var(--theme-panel-shadow) 74%, transparent)",
         "welcome_command_hover_bg": "rgba(42,93,24,0.06)",
         "welcome_command_hover_shadow": "0 0 0 1px rgba(42,93,24,0.1)",
+        "welcome_ascii_color": "var(--green)",
         "welcome_ascii_text_shadow": "0 0 0 transparent, 0 0 0 transparent, 0 1px 0 rgba(255,255,255,0.5)",
         "welcome_ascii_filter": "saturate(0.9) contrast(0.95) brightness(0.9)",
+        "on_accent_text":      "#000",
+        "selection_text":      "#f7fff2",
+        "selection_line_text": "#eef7ee",
+        "modal_danger_btn_text": "#fff",
+        "modal_warning_btn_text": "#000",
     },
 }
 
@@ -371,6 +428,7 @@ _THEME_BASE_CSS_KEYS = (
     "surface",
     "border",
     "border_bright",
+    "border_soft",
     "text",
     "muted",
     "green",
@@ -389,6 +447,7 @@ _THEME_CSS_ORDER = (
     "surface",
     "border",
     "border_bright",
+    "border_soft",
     "text",
     "muted",
     "green",
@@ -401,17 +460,20 @@ _THEME_CSS_ORDER = (
     "terminal_line_height",
     "prompt_line_text",
     "panel_bg",
-    "panel_alt_bg",
     "panel_border",
     "panel_shadow",
     "terminal_bar_bg",
-    "terminal_bar_border",
-    "terminal_actions_bg",
-    "terminal_wrap_border",
-    "terminal_wrap_shadow",
-    "window_btn_close",
-    "window_btn_minimize",
-    "window_btn_maximize",
+    "chrome_bg",
+    "chrome_header_bg",
+    "chrome_row_bg",
+    "chrome_row_hover_bg",
+    "chrome_control_bg",
+    "chrome_control_border",
+    "chrome_divider_color",
+    "chrome_shadow",
+    "scrollbar_track",
+    "scrollbar_thumb",
+    "scrollbar_thumb_hover",
     "toolbar_button_bg",
     "toolbar_button_border",
     "toolbar_button_text",
@@ -421,30 +483,21 @@ _THEME_CSS_ORDER = (
     "toolbar_button_active_bg",
     "toolbar_button_active_border",
     "toolbar_button_active_text",
-    "chip_bg",
-    "chip_border",
-    "chip_text",
-    "chip_hover_bg",
-    "chip_hover_border",
-    "chip_hover_text",
-    "chip_overflow_text",
-    "tabs_bar_scrollbar_track",
-    "tabs_bar_scrollbar_thumb",
-    "tabs_bar_scrollbar_thumb_hover",
-    "tabs_scroll_btn_bg",
-    "tabs_scroll_btn_border",
-    "tabs_scroll_btn_text",
-    "tabs_scroll_btn_hover_bg",
-    "tabs_scroll_btn_hover_border",
-    "tabs_scroll_btn_hover_text",
-    "tab_bg",
-    "tab_border",
+    "button_secondary_bg",
+    "button_secondary_border",
+    "button_secondary_text",
+    "button_secondary_hover_bg",
+    "button_secondary_hover_border",
+    "button_ghost_border",
+    "button_ghost_text",
+    "button_ghost_hover_bg",
+    "button_ghost_hover_border",
+    "button_destructive_bg",
+    "button_destructive_text",
+    "button_destructive_hover_bg",
     "tab_text",
     "tab_hover_text",
     "tab_active_bg",
-    "tab_active_border",
-    "tab_active_text",
-    "tab_active_shadow",
     "tab_close_bg",
     "tab_close_border",
     "tab_close_hover_bg",
@@ -452,46 +505,40 @@ _THEME_CSS_ORDER = (
     "tab_close_hover_text",
     "tab_touch_drag_text_shadow",
     "tab_drop_shadow",
-    "history_panel_bg",
-    "history_panel_shadow",
-    "history_entry_hover_bg",
     "history_load_overlay_bg",
-    "history_load_modal_bg",
-    "history_load_modal_border",
-    "history_load_modal_shadow",
-    "faq_modal_bg",
-    "options_modal_bg",
-    "confirm_modal_bg",
+    "modal_bg",
     "dropdown_bg",
     "dropdown_border",
+    "dropdown_border_soft",
     "dropdown_shadow",
-    "dropdown_up_bg",
-    "dropdown_up_border",
-    "dropdown_up_shadow",
+    "dropdown_shadow_ring",
+    "dropdown_shadow_ring_strong",
     "dropdown_item_text",
     "overlay_backdrop_bg",
-    "faq_code_bg",
-    "allowed_chip_bg",
-    "form_control_bg",
-    "tab_status_ok_bg",
+    "search_highlight_bg",
+    "search_highlight_current_bg",
+    "search_signal_bg",
+    "search_signal_accent",
+    "search_signal_current_bg",
+    "search_signal_current_accent",
+    "inline_surface_bg",
     "toast_bg",
     "toast_text",
     "toast_border",
     "toast_error_bg",
     "toast_error_text",
     "toast_error_border",
-    "mobile_composer_host_bg",
-    "mobile_composer_host_light_bg",
-    "mobile_menu_bg",
-    "mobile_menu_border",
-    "mobile_menu_shadow",
-    "mobile_menu_button_hover_bg",
-    "mobile_menu_button_hover_text",
-    "mobile_menu_button_border",
+    "toast_shadow",
+    "welcome_ascii_color",
     "welcome_command_hover_bg",
     "welcome_command_hover_shadow",
     "welcome_ascii_text_shadow",
     "welcome_ascii_filter",
+    "on_accent_text",
+    "selection_text",
+    "selection_line_text",
+    "modal_danger_btn_text",
+    "modal_warning_btn_text",
 )
 
 
@@ -724,16 +771,18 @@ def get_theme_entry(name, fallback="dark"):
         return THEME_REGISTRY_MAP[_theme_name_stem(fallback)]
     return _builtin_theme_entry("dark")
 
-# Scanner user wrapping — prepend sudo -u scanner to run commands as the
-# unprivileged scanner user. appuser (Gunicorn) is granted NOPASSWD sudo
-# rights to scanner in /etc/sudoers. Falls back to running directly if
-# sudo/scanner aren't available (local dev).
+# Scanner user wrapping — prepend sudo to run commands as the unprivileged
+# scanner user with the shared appuser group. The explicit run group keeps
+# validated workspace files readable/writable without making them world-accessible.
+# appuser (Gunicorn) is granted NOPASSWD sudo rights to that runas pair in
+# /etc/sudoers. Falls back to running directly if sudo/scanner aren't available
+# (local dev).
 SCANNER_PREFIX = []
 try:
     pwd.getpwnam("scanner")
     # Pass HOME=/tmp explicitly so nuclei (and other tools) use the tmpfs mount
     # for config/cache instead of /home/scanner which doesn't exist on the
     # read-only filesystem.
-    SCANNER_PREFIX = ["sudo", "-u", "scanner", "env", "HOME=/tmp"]
+    SCANNER_PREFIX = ["sudo", "-u", "scanner", "-g", "appuser", "env", "HOME=/tmp"]
 except KeyError:
     pass  # scanner user doesn't exist — local dev, run directly

@@ -1,77 +1,38 @@
 // ── Shared autocomplete logic ──
+const _autocompleteCore = typeof DarklabAutocompleteCore !== 'undefined' ? DarklabAutocompleteCore : null;
 
 function _acItemText(item) {
-  if (item && typeof item === 'object') {
-    return String(item.label || item.value || '').trim();
-  }
-  return String(item || '').trim();
+  return _autocompleteCore.itemText(item);
+}
+
+function _isAutocompleteBlockedByTerminalConfirm() {
+  return typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm();
 }
 
 function _acItemInsertValue(item) {
-  if (item && typeof item === 'object') {
-    return String(item.insertValue || item.value || item.label || '').trim();
-  }
-  return String(item || '').trim();
+  return _autocompleteCore.itemInsertValue(item);
 }
 
 // Like _acItemInsertValue but preserves the exact whitespace authors chose in
 // the YAML, so an insertValue of "set " leaves the cursor after the space —
 // the signal "ready to type an argument next". Only used at the insertion site.
 function _acItemInsertText(item) {
-  if (item && typeof item === 'object') {
-    if (item.hintOnly) return '';
-    const raw = item.insertValue != null ? item.insertValue : (item.value != null ? item.value : item.label);
-    return String(raw || '');
-  }
-  return String(item || '');
+  return _autocompleteCore.itemInsertText(item);
 }
 
 // Arg-hints often use a placeholder like "<token>" to show what the next
 // positional argument should be. Without this check, Tab on a single-item
 // dropdown for that placeholder inserts the literal "<token>" string.
 function _isPlaceholderValue(value) {
-  return typeof value === 'string' && /^<[^<>\s][^<>]*>$/.test(value.trim());
+  return _autocompleteCore.isPlaceholderValue(value);
 }
 
 function _acItemDescription(item) {
-  if (!item || typeof item !== 'object') return '';
-  return String(item.description || '').trim();
+  return _autocompleteCore.itemDescription(item);
 }
 
 function _tokenContextFromText(value, cursorPos, offset = 0) {
-  const text = String(value || '');
-  const cursor = Math.max(0, Math.min(typeof cursorPos === 'number' ? cursorPos : text.length, text.length));
-  const tokens = [];
-  const tokenRe = /\S+/g;
-  let match;
-  while ((match = tokenRe.exec(text)) !== null) {
-    tokens.push({
-      value: match[0],
-      start: match.index,
-      end: match.index + match[0].length,
-    });
-  }
-
-  const containing = tokens.find(token => cursor > token.start && cursor <= token.end)
-    || tokens.find(token => cursor === token.start && cursor === token.end);
-  const atWhitespace = !containing;
-  const tokenStart = containing ? containing.start : cursor;
-  const tokenEnd = containing ? containing.end : cursor;
-  const currentToken = containing ? containing.value : '';
-  const beforeTokens = tokens.filter(token => token.end <= tokenStart);
-  const previousToken = beforeTokens.length ? beforeTokens[beforeTokens.length - 1].value : null;
-  const commandRoot = tokens.length ? String(tokens[0].value || '').toLowerCase() : '';
-  return {
-    text,
-    cursor,
-    tokens,
-    currentToken,
-    tokenStart: tokenStart + offset,
-    tokenEnd: tokenEnd + offset,
-    previousToken,
-    commandRoot,
-    atWhitespace,
-  };
+  return _autocompleteCore.tokenContextFromText(value, cursorPos, offset);
 }
 
 function _autocompleteTokenContext(value, cursorPos) {
@@ -119,35 +80,344 @@ function _autocompletePipeContext(value, cursorPos) {
 }
 
 function _buildAutocompleteItem({ value, description = '', replaceStart, replaceEnd, insertValue = null, label = null, hintOnly = null }) {
-  // If the caller didn't give us an insertValue and the value is a <placeholder>,
-  // flag it as display-only so Tab doesn't insert the literal placeholder text.
-  const resolvedHintOnly = hintOnly != null ? !!hintOnly : (insertValue == null && _isPlaceholderValue(value));
-  return {
-    value,
-    label: label || value,
-    description,
-    replaceStart,
-    replaceEnd,
-    insertValue: resolvedHintOnly ? '' : (insertValue != null ? insertValue : value),
-    hintOnly: resolvedHintOnly,
-  };
+  return _autocompleteCore.buildItem({ value, description, replaceStart, replaceEnd, insertValue, label, hintOnly });
 }
 
 function _filterAutocompleteItems(items, query) {
-  const q = String(query || '').toLowerCase();
-  if (!q) return items.slice();
-  const concrete = [];
-  const hintOnly = [];
-  items.forEach(item => {
-    if (item && typeof item === 'object' && item.hintOnly) hintOnly.push(item);
-    else concrete.push(item);
+  return _autocompleteCore.filterItems(items, query);
+}
+
+const RECENT_DOMAIN_LIMIT = _autocompleteCore.RECENT_DOMAIN_LIMIT;
+let acRecentDomains = [];
+const acRecentDomainPersistPromises = new Set();
+
+function _readRecentDomains() {
+  return acRecentDomains.slice(0, RECENT_DOMAIN_LIMIT);
+}
+
+function _writeRecentDomains(items) {
+  return setRecentDomains(items);
+}
+
+function _isDomainValue(value) {
+  return _autocompleteCore.isDomainValue(value);
+}
+
+function _normalizeRecentDomain(value) {
+  return _autocompleteCore.normalizeRecentDomain(value);
+}
+
+function _normalizeRecentDomainList(items) {
+  return _autocompleteCore.normalizeRecentDomainList(items);
+}
+
+function setRecentDomains(items) {
+  acRecentDomains = _normalizeRecentDomainList(items);
+  return _readRecentDomains();
+}
+
+function loadRecentDomains() {
+  if (typeof apiFetch !== 'function') return Promise.resolve(_readRecentDomains());
+  return apiFetch('/session/recent-domains')
+    .then(resp => (resp && typeof resp.json === 'function' ? resp.json() : {}))
+    .then((data) => {
+      if (data && Array.isArray(data.domains)) return setRecentDomains(data.domains);
+      return _readRecentDomains();
+    })
+    .catch((err) => {
+      if (typeof logClientError === 'function') logClientError('failed to load recent domains', err);
+      return _readRecentDomains();
+    });
+}
+
+function _persistRecentDomains(items) {
+  const domains = _normalizeRecentDomainList(items);
+  if (!domains.length || typeof apiFetch !== 'function') return Promise.resolve(null);
+  const request = apiFetch('/session/recent-domains', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ domains }),
+  })
+    .then(resp => (resp && typeof resp.json === 'function' ? resp.json() : null))
+    .then((data) => {
+      if (data && Array.isArray(data.domains)) setRecentDomains(data.domains);
+      return data;
+    })
+    .catch((err) => {
+      if (typeof logClientError === 'function') logClientError('failed to save recent domains', err);
+      return null;
+    });
+  const tracked = request.finally(() => {
+    acRecentDomainPersistPromises.delete(tracked);
   });
-  const filteredConcrete = concrete.filter(item => _acItemInsertValue(item).toLowerCase().startsWith(q));
-  return filteredConcrete.concat(hintOnly);
+  acRecentDomainPersistPromises.add(tracked);
+  return tracked;
+}
+
+function flushRecentDomains() {
+  if (!acRecentDomainPersistPromises.size) return Promise.resolve([]);
+  return Promise.all(Array.from(acRecentDomainPersistPromises)).catch(() => []);
+}
+
+function _itemLooksLikeDomainSlot(item) {
+  return String(item && item.value_type || '').trim().toLowerCase() === 'domain';
+}
+
+function _itemLooksLikeWordlistSlot(item) {
+  return String(item && item.value_type || '').trim().toLowerCase() === 'wordlist';
+}
+
+function _normalizeWordlistCategories(value) {
+  return _autocompleteCore.normalizeWordlistCategories(value);
+}
+
+function _domainArgHintTriggers(spec) {
+  const argHints = spec && spec.arg_hints && typeof spec.arg_hints === 'object' ? spec.arg_hints : {};
+  return Object.entries(argHints)
+    .filter(([trigger, hints]) => trigger !== '__positional__' && Array.isArray(hints) && hints.some(_itemLooksLikeDomainSlot))
+    .map(([trigger]) => String(trigger || ''));
+}
+
+function _wordlistArgHintTriggers(spec) {
+  const argHints = spec && spec.arg_hints && typeof spec.arg_hints === 'object' ? spec.arg_hints : {};
+  return Object.entries(argHints)
+    .filter(([trigger, hints]) => trigger !== '__positional__' && Array.isArray(hints) && hints.some(_itemLooksLikeWordlistSlot))
+    .map(([trigger]) => String(trigger || ''));
+}
+
+function _wordlistCategoriesFromHints(hints) {
+  const categories = [];
+  (Array.isArray(hints) ? hints : []).forEach((hint) => {
+    _normalizeWordlistCategories(hint && hint.wordlist_category).forEach((category) => {
+      if (!categories.includes(category)) categories.push(category);
+    });
+  });
+  return categories;
+}
+
+function _concreteAutocompleteTokens(spec) {
+  return new Set((spec && Array.isArray(spec.flags) ? spec.flags : [])
+    .map(flag => String(flag && flag.value || '').toLowerCase())
+    .filter(value => value && !value.startsWith('-') && !value.startsWith('+')));
+}
+
+function _positionalDomainSlots(spec) {
+  const hints = spec && spec.arg_hints && Array.isArray(spec.arg_hints.__positional__)
+    ? spec.arg_hints.__positional__
+    : [];
+  return hints.map(_itemLooksLikeDomainSlot);
+}
+
+function _positionalWordlistSlots(spec) {
+  const hints = spec && spec.arg_hints && Array.isArray(spec.arg_hints.__positional__)
+    ? spec.arg_hints.__positional__
+    : [];
+  return hints.map(hint => ({
+    active: _itemLooksLikeWordlistSlot(hint),
+    categories: _normalizeWordlistCategories(hint && hint.wordlist_category),
+  }));
+}
+
+function _countCompletedPositionalValues(ctx, spec, contextSpec = {}) {
+  const expectsValue = Array.isArray(spec && spec.expects_value) ? spec.expects_value : [];
+  const expectsExact = new Set(expectsValue.map(token => String(token || '')));
+  const expectsLower = new Set(expectsValue.map(token => String(token || '').toLowerCase()));
+  const concreteTokens = _concreteAutocompleteTokens(spec);
+  const subToken = contextSpec && contextSpec.subcommandToken ? contextSpec.subcommandToken : null;
+  const completedTokens = ctx.tokens.filter(token => token.end <= ctx.tokenStart);
+  let count = 0;
+  let skipNext = false;
+  for (let index = 1; index < completedTokens.length; index += 1) {
+    const token = completedTokens[index];
+    const tokenValue = String(token.value || '');
+    const lower = tokenValue.toLowerCase();
+    if (!tokenValue) continue;
+    if (subToken && token.start === subToken.start && token.end === subToken.end) continue;
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+    if (expectsExact.has(tokenValue) || expectsLower.has(lower)) {
+      skipNext = true;
+      continue;
+    }
+    if (tokenValue.startsWith('-') || tokenValue.startsWith('+') || concreteTokens.has(lower)) continue;
+    count += 1;
+  }
+  return count;
+}
+
+function _isAutocompleteDomainValueSlot(ctx, spec, contextSpec = {}) {
+  if (!spec) return false;
+  const previous = String(ctx.previousToken || '');
+  const previousLower = previous.toLowerCase();
+  const domainTriggers = _domainArgHintTriggers(spec);
+  if (domainTriggers.some(trigger => trigger === previous || trigger.toLowerCase() === previousLower)) return true;
+  if (ctx.currentToken.startsWith('-') || ctx.currentToken.startsWith('+')) return false;
+  const slots = _positionalDomainSlots(spec);
+  if (!slots.length) return false;
+  const index = _countCompletedPositionalValues(ctx, spec, contextSpec);
+  return !!slots[index];
+}
+
+function _autocompleteWordlistValueSlot(ctx, spec, contextSpec = {}) {
+  if (!spec) return { active: false, categories: [] };
+  const previous = String(ctx.previousToken || '');
+  const previousLower = previous.toLowerCase();
+  const argHints = spec.arg_hints || {};
+  const wordlistTriggers = _wordlistArgHintTriggers(spec);
+  for (const trigger of wordlistTriggers) {
+    if (trigger === previous || trigger.toLowerCase() === previousLower) {
+      const hints = Object.prototype.hasOwnProperty.call(argHints, trigger)
+        ? argHints[trigger]
+        : argHints[trigger.toLowerCase()];
+      return { active: true, categories: _wordlistCategoriesFromHints(hints) };
+    }
+  }
+  if (ctx.currentToken.startsWith('-') || ctx.currentToken.startsWith('+')) return { active: false, categories: [] };
+  const slots = _positionalWordlistSlots(spec);
+  if (!slots.length) return { active: false, categories: [] };
+  const index = _countCompletedPositionalValues(ctx, spec, contextSpec);
+  return slots[index] || { active: false, categories: [] };
+}
+
+function _recentDomainAutocompleteItems(ctx) {
+  return _readRecentDomains().map(domain => _buildAutocompleteItem({
+    value: domain,
+    description: 'Recent domain',
+    replaceStart: ctx.tokenStart,
+    replaceEnd: ctx.tokenEnd,
+  }));
+}
+
+function _wordlistAutocompleteItems(ctx, categories = []) {
+  const categorySet = new Set(_normalizeWordlistCategories(categories));
+  const source = (typeof acWordlists !== 'undefined' && Array.isArray(acWordlists)) ? acWordlists : [];
+  const filtered = source.filter((item) => {
+    if (!categorySet.size) return true;
+    const itemCategories = _normalizeWordlistCategories(item && (item.wordlist_category || item.category));
+    return itemCategories.some(category => categorySet.has(category));
+  });
+  const items = filtered.map(item => _buildAutocompleteItem({
+    value: String(item && item.value || ''),
+    label: String(item && (item.label || item.value) || ''),
+    description: String(item && item.description || 'Installed wordlist'),
+    replaceStart: ctx.tokenStart,
+    replaceEnd: ctx.tokenEnd,
+  })).filter(item => item.value);
+  return _filterAutocompleteItems(items, ctx && ctx.currentToken);
+}
+
+function _withRecentDomainSuggestions(ctx, baseItems) {
+  const recentItems = _filterAutocompleteItems(_recentDomainAutocompleteItems(ctx), ctx.currentToken);
+  if (!recentItems.length) return baseItems;
+  const seen = new Set(recentItems.map(item => _acItemInsertValue(item).toLowerCase()));
+  const rest = (Array.isArray(baseItems) ? baseItems : []).filter(item => {
+    const key = _acItemInsertValue(item).toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return recentItems.concat(rest);
+}
+
+function _withWordlistSuggestions(ctx, baseItems, categories = []) {
+  const wordlistItems = _wordlistAutocompleteItems(ctx, categories);
+  if (!wordlistItems.length) return baseItems;
+  const seen = new Set(wordlistItems.map(item => _acItemInsertValue(item).toLowerCase()));
+  const rest = (Array.isArray(baseItems) ? baseItems : []).filter(item => {
+    const key = _acItemInsertValue(item).toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return wordlistItems.concat(rest);
+}
+
+function _withTypedValueSlotSuggestions(ctx, baseItems, domainValueSlot, wordlistValueSlot) {
+  if (wordlistValueSlot && wordlistValueSlot.active) {
+    return _withWordlistSuggestions(ctx, baseItems, wordlistValueSlot.categories);
+  }
+  return domainValueSlot ? _withRecentDomainSuggestions(ctx, baseItems) : baseItems;
+}
+
+function rememberRecentDomainsFromCommand(command) {
+  const text = String(command || '').trim();
+  if (!text) return [];
+  const registry = _getAutocompleteRegistry();
+  const ctx = _autocompleteTokenContext(text, text.length);
+  const rootSpec = ctx.commandRoot ? registry[ctx.commandRoot] : null;
+  if (!rootSpec) return [];
+  const contextSpec = _autocompleteSpecForContext(ctx, rootSpec);
+  const spec = contextSpec.spec;
+  if (!spec) return [];
+
+  const domainTriggers = _domainArgHintTriggers(spec);
+  const triggerExact = new Set(domainTriggers);
+  const triggerLower = new Set(domainTriggers.map(trigger => trigger.toLowerCase()));
+  const expectsValue = Array.isArray(spec.expects_value) ? spec.expects_value : [];
+  const expectsExact = new Set(expectsValue.map(token => String(token || '')));
+  const expectsLower = new Set(expectsValue.map(token => String(token || '').toLowerCase()));
+  const concreteTokens = _concreteAutocompleteTokens(spec);
+  const positionalSlots = _positionalDomainSlots(spec);
+  const found = [];
+  let skipNext = false;
+  let positionalIndex = 0;
+
+  for (let index = 1; index < ctx.tokens.length; index += 1) {
+    const token = ctx.tokens[index];
+    const tokenValue = String(token.value || '');
+    const lower = tokenValue.toLowerCase();
+    const previous = index > 0 ? String(ctx.tokens[index - 1].value || '') : '';
+    const previousLower = previous.toLowerCase();
+    if (!tokenValue) continue;
+    if (contextSpec.subcommandToken && token.start === contextSpec.subcommandToken.start && token.end === contextSpec.subcommandToken.end) {
+      continue;
+    }
+    if (triggerExact.has(previous) || triggerLower.has(previousLower)) {
+      const domain = _normalizeRecentDomain(tokenValue);
+      if (domain) found.push(domain);
+      continue;
+    }
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+    if (expectsExact.has(tokenValue) || expectsLower.has(lower)) {
+      skipNext = true;
+      continue;
+    }
+    if (tokenValue.startsWith('-') || tokenValue.startsWith('+') || concreteTokens.has(lower)) continue;
+    if (positionalSlots[positionalIndex]) {
+      const domain = _normalizeRecentDomain(tokenValue);
+      if (domain) found.push(domain);
+    }
+    positionalIndex += 1;
+  }
+
+  if (!found.length) return [];
+  const existing = _readRecentDomains();
+  const next = [];
+  found.concat(existing).forEach(domain => {
+    if (!domain || next.includes(domain)) return;
+    next.push(domain);
+  });
+  _writeRecentDomains(next);
+  _persistRecentDomains(found);
+  return found;
 }
 
 function _mergeAutocompleteRegistry(base, overlay) {
   return Object.assign({}, base || {}, overlay || {});
+}
+
+function _workspaceAutocompleteHintsForFlag(spec, trigger) {
+  const flags = Array.isArray(spec && spec.workspace_file_flags) ? spec.workspace_file_flags : [];
+  const normalizedTrigger = String(trigger || '');
+  if (!flags.some(flag => String(flag || '') === normalizedTrigger)) return null;
+  if (typeof getWorkspaceAutocompleteFileHints !== 'function') return [];
+  const hints = getWorkspaceAutocompleteFileHints();
+  return Array.isArray(hints) ? hints : [];
 }
 
 function _getAutocompleteRegistry() {
@@ -185,29 +455,167 @@ function _countCompletedPositionalArgs(ctx, spec) {
   return count;
 }
 
+function _contextClosedByTokenArity(ctx, spec) {
+  const closeAfter = spec && spec.close_after && typeof spec.close_after === 'object'
+    ? spec.close_after
+    : {};
+  const entries = Object.entries(closeAfter);
+  if (!entries.length || !ctx.atWhitespace) return false;
+  const completedTokens = ctx.tokens.filter(token => token.end <= ctx.tokenStart);
+  for (let index = 1; index < completedTokens.length; index += 1) {
+    const token = String(completedTokens[index].value || '').toLowerCase();
+    if (!Object.prototype.hasOwnProperty.call(closeAfter, token)) continue;
+    const rawLimit = Number(closeAfter[token]);
+    const limit = Number.isFinite(rawLimit) && rawLimit >= 0 ? rawLimit : 0;
+    const following = completedTokens.slice(index + 1).filter(item => String(item.value || '').trim());
+    if (following.length >= limit) return true;
+  }
+  return false;
+}
+
+function _mergeAutocompleteSpecForSubcommand(baseSpec, subSpec) {
+  const merged = Object.assign({}, baseSpec || {}, subSpec || {});
+  const flags = [];
+  const seenFlags = new Set();
+  [...((baseSpec && baseSpec.flags) || []), ...((subSpec && subSpec.flags) || [])].forEach(flag => {
+    const key = String(flag && flag.value || '').toLowerCase();
+    if (!key || seenFlags.has(key)) return;
+    seenFlags.add(key);
+    flags.push(flag);
+  });
+  const expectsValue = [];
+  const seenValueTokens = new Set();
+  [...((baseSpec && baseSpec.expects_value) || []), ...((subSpec && subSpec.expects_value) || [])].forEach(token => {
+    const key = String(token || '');
+    if (!key || seenValueTokens.has(key)) return;
+    seenValueTokens.add(key);
+    expectsValue.push(token);
+  });
+  const argHints = Object.assign({}, (baseSpec && baseSpec.arg_hints) || {}, (subSpec && subSpec.arg_hints) || {});
+  if (subSpec && Object.prototype.hasOwnProperty.call(subSpec.arg_hints || {}, '__positional__')) {
+    argHints.__positional__ = subSpec.arg_hints.__positional__;
+  } else {
+    argHints.__positional__ = [];
+  }
+  return Object.assign(merged, {
+    flags,
+    expects_value: expectsValue,
+    arg_hints: argHints,
+    subcommands: {},
+    examples: (subSpec && subSpec.examples) || [],
+  });
+}
+
+function _autocompleteSpecForContext(ctx, spec) {
+  const subcommands = spec && spec.subcommands && typeof spec.subcommands === 'object'
+    ? spec.subcommands
+    : {};
+  const names = Object.keys(subcommands);
+  if (!names.length) return { spec, activeSubcommand: '', subcommandToken: null };
+  for (let index = 1; index < ctx.tokens.length; index += 1) {
+    const token = ctx.tokens[index];
+    if (!token) continue;
+    const isCurrentToken = token.start === ctx.tokenStart && token.end === ctx.tokenEnd;
+    if (token.end > ctx.tokenStart && !isCurrentToken) continue;
+    const value = String(token.value || '').toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(subcommands, value)) {
+      return {
+        spec: _mergeAutocompleteSpecForSubcommand(spec, subcommands[value]),
+        activeSubcommand: value,
+        subcommandToken: token,
+      };
+    }
+  }
+  return { spec, activeSubcommand: '', subcommandToken: null };
+}
+
+function _buildExampleAutocompleteItems(examples, { replaceStart, replaceEnd, completionPrefix }) {
+  return (examples || []).map(ex => Object.assign(_buildAutocompleteItem({
+    value: ex.value,
+    description: ex.description || '',
+    replaceStart,
+    replaceEnd,
+    insertValue: ex.value,
+  }), { isExample: true, completionPrefix }));
+}
+
+function _collectAutocompleteExamples(spec) {
+  const examples = [];
+  const seen = new Set();
+
+  function appendExample(example) {
+    if (!example || typeof example !== 'object') return;
+    const value = String(example.value || '').trim();
+    if (!value) return;
+    const key = value.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    examples.push(example);
+  }
+
+  ((spec && spec.examples) || []).forEach(appendExample);
+  Object.values((spec && spec.subcommands) || {}).forEach(subSpec => {
+    ((subSpec && subSpec.examples) || []).forEach(appendExample);
+  });
+  return examples;
+}
+
+function _filterExampleAutocompleteItems(items, typedPrefix) {
+  const filtered = _filterAutocompleteItems(items, typedPrefix);
+  const matched = new Set(filtered);
+  return items.filter(item => matched.has(item));
+}
+
+function _buildUniqueSubcommandExampleAutocomplete(ctx, rootSpec) {
+  const subcommands = rootSpec && rootSpec.subcommands && typeof rootSpec.subcommands === 'object'
+    ? rootSpec.subcommands
+    : {};
+  if (!Object.keys(subcommands).length) return [];
+  if (ctx.atWhitespace || ctx.tokens.length !== 2 || !ctx.currentToken || ctx.currentToken.startsWith('-')) return [];
+  const secondToken = ctx.tokens[1];
+  if (!secondToken || secondToken.start !== ctx.tokenStart || secondToken.end !== ctx.tokenEnd) return [];
+
+  const matches = _filterAutocompleteItems(Object.keys(subcommands), ctx.currentToken);
+  if (matches.length !== 1) return [];
+
+  const subcommand = matches[0];
+  const subSpec = subcommands[subcommand];
+  if (!subSpec || !Array.isArray(subSpec.examples) || !subSpec.examples.length) return [];
+
+  const typedPrefix = ctx.text.slice(0, ctx.tokenEnd);
+  return _filterExampleAutocompleteItems(
+    _buildExampleAutocompleteItems(subSpec.examples, {
+      replaceStart: 0,
+      replaceEnd: ctx.tokenEnd,
+      completionPrefix: `${ctx.commandRoot} ${subcommand}`,
+    }),
+    typedPrefix,
+  );
+}
+
 function _buildContextAutocomplete(ctx) {
   const registry = _getAutocompleteRegistry();
-  const spec = ctx.commandRoot ? registry[ctx.commandRoot] : null;
+  const rootSpec = ctx.commandRoot ? registry[ctx.commandRoot] : null;
+  const contextSpec = rootSpec ? _autocompleteSpecForContext(ctx, rootSpec) : { spec: null, activeSubcommand: '', subcommandToken: null };
+  const spec = contextSpec.spec;
 
   if (!spec) {
     // Unknown command root — suggest matching command roots from the registry
     // while the user is still typing the first token (no trailing space yet).
     if (ctx.tokens.length <= 1 && !ctx.atWhitespace && ctx.commandRoot) {
-      const q = ctx.commandRoot.toLowerCase();
-      const matchingRoots = Object.keys(registry).filter(root => root.toLowerCase().startsWith(q));
+      const matchingRoots = _filterAutocompleteItems(Object.keys(registry), ctx.commandRoot);
       // If exactly one command matches and it has examples, show those directly
       // so the user sees full invocation patterns while still typing the root.
       if (matchingRoots.length === 1) {
         const matchedSpec = registry[matchingRoots[0]];
-        if (matchedSpec && matchedSpec.examples && matchedSpec.examples.length) {
-          return _filterAutocompleteItems(
-            matchedSpec.examples.map(ex => Object.assign(_buildAutocompleteItem({
-              value: ex.value,
-              description: ex.description || '',
+        const examples = _collectAutocompleteExamples(matchedSpec);
+        if (examples.length) {
+          return _filterExampleAutocompleteItems(
+            _buildExampleAutocompleteItems(examples, {
               replaceStart: ctx.tokenStart,
               replaceEnd: ctx.tokenEnd,
-              insertValue: ex.value,
-            }), { isExample: true })),
+              completionPrefix: matchingRoots[0],
+            }),
             ctx.currentToken,
           );
         }
@@ -224,17 +632,41 @@ function _buildContextAutocomplete(ctx) {
 
   // Known command root being typed (no trailing space yet) — show examples so
   // users can discover full invocation patterns before they start adding flags.
-  if (spec.examples && spec.examples.length && ctx.tokens.length === 1 && !ctx.atWhitespace) {
-    return _filterAutocompleteItems(
-      spec.examples.map(ex => Object.assign(_buildAutocompleteItem({
-        value: ex.value,
-        description: ex.description || '',
+  if (ctx.tokens.length === 1 && !ctx.atWhitespace) {
+    const examples = _collectAutocompleteExamples(spec);
+    if (!examples.length) return [];
+    return _filterExampleAutocompleteItems(
+      _buildExampleAutocompleteItems(examples, {
         replaceStart: ctx.tokenStart,
         replaceEnd: ctx.tokenEnd,
-        insertValue: ex.value,
-      }), { isExample: true })),
+        completionPrefix: ctx.commandRoot,
+      }),
       ctx.currentToken,
     );
+  }
+
+  const uniqueSubcommandExamples = _buildUniqueSubcommandExampleAutocomplete(ctx, rootSpec);
+  if (uniqueSubcommandExamples.length) return uniqueSubcommandExamples;
+
+  if (_contextClosedByTokenArity(ctx, spec)) return [];
+
+  if (contextSpec.activeSubcommand && spec.examples && spec.examples.length) {
+    const prefixEnd = ctx.atWhitespace ? ctx.cursor : ctx.tokenEnd;
+    const typedPrefix = ctx.text.slice(0, prefixEnd);
+    const subcommandIsCurrentToken = contextSpec.subcommandToken
+      && ctx.tokenStart === contextSpec.subcommandToken.start
+      && ctx.tokenEnd === contextSpec.subcommandToken.end;
+    if (subcommandIsCurrentToken) {
+      const examples = _filterExampleAutocompleteItems(
+        _buildExampleAutocompleteItems(spec.examples, {
+          replaceStart: 0,
+          replaceEnd: prefixEnd,
+          completionPrefix: `${ctx.commandRoot} ${contextSpec.activeSubcommand}`,
+        }),
+        typedPrefix,
+      );
+      if (examples.length) return examples;
+    }
   }
 
   const currentIsFlag = ctx.currentToken.startsWith('-') || ctx.currentToken.startsWith('+');
@@ -258,8 +690,10 @@ function _buildContextAutocomplete(ctx) {
   const sequenceHints = Object.prototype.hasOwnProperty.call(sequenceArgHints, sequenceKey)
     ? sequenceArgHints[sequenceKey]
     : null;
+  const domainValueSlot = _isAutocompleteDomainValueSlot(ctx, spec, contextSpec);
+  const wordlistValueSlot = _autocompleteWordlistValueSlot(ctx, spec, contextSpec);
   if (sequenceHints !== null) {
-    return _filterAutocompleteItems(
+    const sequenceItems = _filterAutocompleteItems(
       sequenceHints.map(item => _buildAutocompleteItem({
         value: item.value,
         label: item.label || item.value,
@@ -270,17 +704,40 @@ function _buildContextAutocomplete(ctx) {
       })),
       ctx.currentToken,
     );
+    return _withTypedValueSlotSuggestions(ctx, sequenceItems, domainValueSlot, wordlistValueSlot);
   }
   if (directHints !== null) {
-    return _filterAutocompleteItems(
-      directHints.map(item => _buildAutocompleteItem({
+    const workspaceHints = _workspaceAutocompleteHintsForFlag(spec, ctx.previousToken || '');
+    const hints = workspaceHints !== null ? workspaceHints : directHints;
+    const directItems = _filterAutocompleteItems(
+      hints.map(item => _buildAutocompleteItem({
         value: item.value,
+        label: item.label || item.value,
         description: item.description || '',
         replaceStart: ctx.tokenStart,
         replaceEnd: ctx.tokenEnd,
+        insertValue: item.insertValue != null ? item.insertValue : null,
       })),
       ctx.currentToken,
     );
+    return _withTypedValueSlotSuggestions(ctx, directItems, domainValueSlot, wordlistValueSlot);
+  }
+
+  if (allowPositionalHints) {
+    const concreteCommandTokens = (spec.flags || [])
+      .filter(flag => {
+        const value = String(flag.value || '');
+        return value && !value.startsWith('-') && !value.startsWith('+');
+      })
+      .map(flag => _buildAutocompleteItem({
+        value: flag.value,
+        description: flag.description || '',
+        replaceStart: ctx.tokenStart,
+        replaceEnd: ctx.tokenEnd,
+        insertValue: flag.value,
+      }));
+    const matchingCommandTokens = _filterAutocompleteItems(concreteCommandTokens, ctx.currentToken);
+    if (matchingCommandTokens.length) return matchingCommandTokens;
   }
 
   const positionalHints = Object.prototype.hasOwnProperty.call(argHints, '__positional__')
@@ -313,13 +770,18 @@ function _buildContextAutocomplete(ctx) {
         replaceEnd: ctx.tokenEnd,
         insertValue: item.insertValue != null ? item.insertValue : null,
       }));
-      return filteredFlags.concat(positionalItems);
+      return _withTypedValueSlotSuggestions(
+        ctx,
+        filteredFlags.concat(positionalItems),
+        domainValueSlot,
+        wordlistValueSlot,
+      );
     }
     return filteredFlags;
   }
 
   if (positionalHints.length && allowPositionalHints) {
-    return _filterAutocompleteItems(
+    const positionalItems = _filterAutocompleteItems(
       positionalHints.map(item => _buildAutocompleteItem({
         value: item.value,
         label: item.label || item.value,
@@ -330,6 +792,7 @@ function _buildContextAutocomplete(ctx) {
       })),
       ctx.currentToken,
     );
+    return _withTypedValueSlotSuggestions(ctx, positionalItems, domainValueSlot, wordlistValueSlot);
   }
   return [];
 }
@@ -358,11 +821,9 @@ function _buildPipeAutocomplete(ctx) {
 }
 
 function _buildFlatAutocomplete(value) {
-  const q = String(value || '').trim().toLowerCase();
+  const q = String(value || '').trim();
   if (!q) return [];
-  return ((typeof acSuggestions !== 'undefined' && acSuggestions) || [])
-    .filter(s => String(s || '').toLowerCase().startsWith(q))
-    .slice(0, 24);
+  return _filterAutocompleteItems(((typeof acSuggestions !== 'undefined' && acSuggestions) || []), q).slice(0, 24);
 }
 
 function getAutocompleteMatches(value, cursorPos) {
@@ -398,6 +859,14 @@ function getAutocompleteMatches(value, cursorPos) {
   return items;
 }
 
+function limitAutocompleteMatchesForDisplay(items, maxItems = 12) {
+  return _autocompleteCore.limitItemsForDisplay(items, maxItems);
+}
+
+function _autocompleteHighlightedLabel(label, query) {
+  return _autocompleteCore.highlightedLabel(label, query);
+}
+
 function _positionAutocomplete(itemsCount) {
   // Desktop anchors the dropdown to the prompt row; mobile anchors it above the
   // simplified composer so suggestions never hide behind the keyboard.
@@ -431,6 +900,7 @@ function _positionAutocomplete(itemsCount) {
     acDropdown.style.top = 'auto';
     acDropdown.style.bottom = 'calc(100% + 4px)';
     acDropdown.classList.add('ac-up');
+    acDropdown.classList.add('dropdown-up');
     return true;
   }
   acDropdown.classList.remove('ac-mobile');
@@ -444,6 +914,7 @@ function _positionAutocomplete(itemsCount) {
 
   if (!anchor || typeof anchor.getBoundingClientRect !== 'function') {
     acDropdown.classList.remove('ac-up');
+    acDropdown.classList.remove('dropdown-up');
     return false;
   }
   const rect = anchor.getBoundingClientRect();
@@ -457,6 +928,7 @@ function _positionAutocomplete(itemsCount) {
   const canFitAbove = spaceAbove >= (targetHeight + safetyPad);
   const showAbove = mobileComposerMode || (!canFitBelow && (canFitAbove || spaceAbove > spaceBelow));
   acDropdown.classList.toggle('ac-up', showAbove);
+  acDropdown.classList.toggle('dropdown-up', showAbove);
   const available = showAbove ? spaceAbove : spaceBelow;
   const edgeBuffer = mobileComposerMode ? 12 : (showAbove ? 20 : 30);
   const maxHeight = Math.max(0, Math.min(mobileComposerMode ? 200 : 260, available > edgeBuffer ? available - edgeBuffer : available));
@@ -498,6 +970,10 @@ function _scrollAutocompleteActiveItem() {
 }
 
 function acShow(items) {
+  if (_isAutocompleteBlockedByTerminalConfirm()) {
+    acHide();
+    return;
+  }
   acDropdown.innerHTML = '';
   if (!items.length) { hideAcDropdown(); return; }
   _positionAutocomplete(items.length);
@@ -514,21 +990,18 @@ function acShow(items) {
     (s && s.isExample ? Math.max(max, _acItemText(s).length) : max), 0);
   items.forEach((s, i) => {
     const div = document.createElement('div');
-    div.className = 'ac-item' + (i === acIndex ? ' ac-active' : '') + (s && s.isExample ? ' ac-example' : '');
+    div.className = 'ac-item dropdown-item dropdown-item-dense'
+      + (i === acIndex ? ' ac-active dropdown-item-active' : '')
+      + (s && s.isExample ? ' ac-example' : '');
     const label = _acItemText(s);
     const description = _acItemDescription(s);
     const val = String(matchValue || '');
-    const idx = val ? label.toLowerCase().indexOf(val.toLowerCase()) : -1;
     const main = document.createElement('span');
     main.className = 'ac-item-main';
     if (s && s.isExample && maxExampleLabelLen > 0) main.style.minWidth = maxExampleLabelLen + 'ch';
-    if (idx >= 0 && val) {
-      main.innerHTML = escapeHtml(label.slice(0, idx))
-        + '<span class="ac-match">' + escapeHtml(label.slice(idx, idx + val.length)) + '</span>'
-        + escapeHtml(label.slice(idx + val.length));
-    } else {
-      main.textContent = label;
-    }
+    main.innerHTML = s && s.hintOnly
+      ? escapeHtml(label)
+      : _autocompleteHighlightedLabel(label, val);
     div.appendChild(main);
     if (description) {
       const desc = document.createElement('span');
@@ -565,20 +1038,7 @@ function acHide() {
 }
 
 function _getAutocompleteSharedPrefix(items) {
-  if (!Array.isArray(items) || !items.length) return '';
-  const first = _acItemInsertValue(items[0]);
-  if (!first) return '';
-  const lowerItems = items.map(item => _acItemInsertValue(item).toLowerCase());
-  let end = first.length;
-  for (let i = 1; i < lowerItems.length; i += 1) {
-    const candidate = lowerItems[i];
-    let j = 0;
-    const limit = Math.min(end, candidate.length);
-    while (j < limit && lowerItems[0][j] === candidate[j]) j += 1;
-    end = j;
-    if (!end) return '';
-  }
-  return first.slice(0, end);
+  return _autocompleteCore.sharedPrefix(items);
 }
 
 function acExpandSharedPrefix(items) {
@@ -608,6 +1068,11 @@ function acExpandSharedPrefix(items) {
 }
 
 function acAccept(s) {
+  if (_isAutocompleteBlockedByTerminalConfirm()) {
+    acHide();
+    refocusComposerAfterAction({ preventScroll: true });
+    return;
+  }
   if (s && typeof s === 'object') {
     // Placeholder-only hints (e.g. "<token>") are display-only: Tab should hide
     // the dropdown, not insert the literal placeholder text into the prompt.

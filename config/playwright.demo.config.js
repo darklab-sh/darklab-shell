@@ -2,6 +2,7 @@ import { defineConfig } from '@playwright/test'
 import { DESKTOP_VISUAL_CONTRACT } from './playwright.visual.contracts.js'
 
 const BASE_URL = process.env.DEMO_BASE_URL || 'http://localhost:8888'
+const HEADED_DEMO = process.env.DEMO_HEADED === '1'
 
 export default defineConfig({
   testDir: '../tests/js/e2e',
@@ -14,14 +15,22 @@ export default defineConfig({
   use: {
     browserName: 'chromium',
     baseURL: BASE_URL,
+    headless: !HEADED_DEMO,
     viewport: DESKTOP_VISUAL_CONTRACT.viewport,
-    // deviceScaleFactor: 2 makes page.screenshot() return 3200×1800 images —
-    // genuinely crisp on Retina displays. The built-in video recorder ignores
-    // this and always captures at CSS pixel dimensions (1600×900).
+    // Retained for the optional screenshot-frame fallback. The normal OBS
+    // wrapper disables frame capture and records the headed browser window.
     deviceScaleFactor: DESKTOP_VISUAL_CONTRACT.deviceScaleFactor,
+    launchOptions: HEADED_DEMO
+      ? {
+        args: [
+            '--force-color-profile=srgb',
+            '--window-size=1700,1000',
+          ],
+        }
+      : {},
     slowMo: 60,
-    // Video recording disabled — the spec captures frames via page.screenshot()
-    // and the shell script stitches them with ffmpeg + VideoToolbox on macOS.
+    // Playwright video is disabled. The wrapper records through OBS; the spec
+    // can still capture screenshot frames when DEMO_DISABLE_FRAME_CAPTURE is unset.
     video: { mode: 'off' },
   },
   projects: [{ name: 'demo' }],

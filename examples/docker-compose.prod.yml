@@ -1,7 +1,9 @@
 # Optional production Docker Compose override.
 # Use with the root compose file, for example:
-#   docker compose -f docker-compose.yml -f examples/docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.yml \
+#     -f examples/docker-compose.prod.yml up -d
 # This file is not a complete stack on its own.
+---
 services:
   shell:
     container_name: shell.darklab.sh
@@ -13,15 +15,32 @@ services:
       - WEB_THREADS=${WEB_THREADS:-4}
       - VIRTUAL_HOST=shell.darklab.sh
       - LETSENCRYPT_HOST=shell.darklab.sh
+      # Must match workspace_root in app/conf/config.yaml or config.local.yaml.
+      - WORKSPACE_ROOT=/workspaces
+    volumes:
+      # Session workspace bind mount. Prepare the host folder before startup:
+      #   mkdir -p ./workspaces
+      #   chown 995:995 ./workspaces  # appuser UID/GID in the built image
+      #   chmod 730 ./workspaces
+      # Existing sess_* dirs should be 3730 and owned by 995:995. Existing
+      # app-created files should be 0640; scanner-created writable outputs may
+      # be 0660 so scanner can update them through the shared appuser group.
+      - ./workspaces:/workspaces
     ulimits:
       nofile:
-        soft: 65535  # per-process soft limit on open file descriptors; scanner tools open one fd per probe
-        hard: 65535  # hard ceiling the process can raise itself to; must match soft for scanners that set their own limits
+        # Scanner tools open one fd per probe.
+        soft: 65535
+        # Must match soft for scanners that set their own limits.
+        hard: 65535
     sysctls:
-      net.ipv4.ip_local_port_range: "1024 65535"   # widen ephemeral port range (default ~32768-60999) so scanners have more source ports
-      net.ipv4.tcp_tw_reuse: 1                     # allow TIME_WAIT sockets to be reused for new outbound connections
-      net.ipv4.tcp_fin_timeout: 15                 # reduce FIN_WAIT_2 timeout from 60s default so sockets are released faster
-      net.ipv4.tcp_max_tw_buckets: 131072          # raise TIME_WAIT bucket ceiling before kernel starts silently dropping sockets
+      # Widen ephemeral port range so scanners have more source ports.
+      net.ipv4.ip_local_port_range: "1024 65535"
+      # Allow TIME_WAIT sockets to be reused for new outbound connections.
+      net.ipv4.tcp_tw_reuse: 1
+      # Reduce FIN_WAIT_2 timeout from 60s so sockets release faster.
+      net.ipv4.tcp_fin_timeout: 15
+      # Raise TIME_WAIT bucket ceiling before the kernel starts dropping.
+      net.ipv4.tcp_max_tw_buckets: 131072
     logging:
       driver: gelf
       options:
@@ -32,8 +51,7 @@ services:
       driver: gelf
       options:
         gelf-address: "${DOCKER_GELF_ADDRESS:-udp://loghost.darklab.sh:12201/}"
-
 networks:
   default:
     external: true
-    name: darklab-net
+    name: darklab_shell

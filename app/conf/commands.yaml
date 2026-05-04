@@ -1,0 +1,3682 @@
+---
+# yamllint disable rule:line-length
+# Command registry.
+# This file is the source of truth for external command policy, command
+# catalog grouping, autocomplete hints, and smoke-test examples.
+version: 1
+commands:
+  - root: ping
+    category: Network Diagnostics
+    policy:
+      allow:
+        - ping
+      # Deny rules take precedence when a command matches both allow and deny.
+      deny:
+        - ping -f
+    autocomplete:
+      examples:
+        - value: ping -h
+          description: Show help and usage
+        - value: ping -c 4 darklab.sh
+          description: Send 4 pings to a host
+        - value: ping -i 0.5 -c 20 darklab.sh
+          description: "Fast probe \u2014 20 pings at half-second intervals"
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: -c
+          description: Stop after count replies
+          takes_value: true
+          suggest:
+            - value: '4'
+              description: Send four probes
+            - value: '10'
+              description: Send ten probes
+        - value: -i
+          description: Wait interval seconds between probes
+          takes_value: true
+          suggest:
+            - value: '0.5'
+              description: Half-second probe interval
+        - value: -W
+          description: Per-packet timeout in seconds
+          takes_value: true
+        - value: -w
+          description: Deadline before ping exits
+          takes_value: true
+      arguments:
+        - placeholder: <host>
+          value_type: domain
+          description: Hostname or IP address to probe
+  - root: fping
+    category: Network Diagnostics
+    policy:
+      allow:
+        - fping
+      deny:
+        - fping -g
+        - fping --generate
+    autocomplete:
+      examples:
+        - value: fping -h
+          description: Show help and usage
+        - value: fping -c 4 darklab.sh
+          description: Send 4 probes with a summary
+        - value: fping -s darklab.sh
+          description: Probe with summary stats only
+        - value: fping -e darklab.sh
+          description: Show elapsed time per reply
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: -c
+          description: Count and summary mode
+          takes_value: true
+          suggest:
+            - value: '4'
+              description: Send four probes
+        - value: -s
+          description: Print summary only
+        - value: -e
+          description: Show elapsed time
+        - value: -t
+          description: Timeout per target
+          takes_value: true
+      arguments:
+        - placeholder: <host>
+          value_type: domain
+          description: Hostname or IP to probe
+  - root: traceroute
+    category: Network Diagnostics
+    policy:
+      allow:
+        - traceroute
+      deny: []
+    autocomplete:
+      examples:
+        - value: traceroute --help
+          description: Show help and usage
+        - value: traceroute -n ip.darklab.sh
+          description: Trace route without hostname resolution
+        - value: traceroute -m 30 ip.darklab.sh
+          description: Trace route with a 30-hop maximum
+      flags:
+        - value: --help
+          description: Show help and usage
+          closes: true
+        - value: -n
+          description: Do not resolve hop addresses
+        - value: -m
+          description: Set maximum hop count
+          takes_value: true
+          suggest:
+            - value: '30'
+              description: Common maximum hop count
+        - value: -w
+          description: Wait timeout per probe
+          takes_value: true
+          suggest:
+            - value: '2'
+              description: Two-second per-hop timeout
+        - value: -q
+          description: Number of probes per hop
+          takes_value: true
+          suggest:
+            - value: '3'
+              description: Three probes per hop
+        - value: -f
+          description: Set the first hop TTL
+          takes_value: true
+          suggest:
+            - value: '1'
+              description: Start probing from the first hop
+        - value: -I
+          description: Use ICMP ECHO probes
+        - value: -T
+          description: Use TCP SYN probes
+      arguments:
+        - placeholder: <host>
+          value_type: domain
+          description: Hostname or IP to trace
+  - root: tcptraceroute
+    category: Network Diagnostics
+    policy:
+      allow:
+        - tcptraceroute
+      deny: []
+    autocomplete:
+      examples:
+        - value: tcptraceroute ip.darklab.sh 80
+          description: Trace route to ip.darklab.sh on port 80
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: -n
+          description: Do not resolve hop addresses
+        - value: -m
+          description: Set maximum hop count
+          takes_value: true
+          suggest:
+            - value: '30'
+              description: Common maximum hop count
+        - value: -w
+          description: Wait timeout per probe
+          takes_value: true
+          suggest:
+            - value: '2'
+              description: Two-second per-hop timeout
+      arguments:
+        - placeholder: <host>
+          value_type: domain
+          description: Hostname or IP to trace
+        - placeholder: <port>
+          description: TCP port to probe
+  - root: nc
+    category: Network Diagnostics
+    policy:
+      allow:
+        - nc -z
+      deny:
+        - nc -e
+        - nc -c
+    autocomplete:
+      examples:
+        - value: nc -zv ip.darklab.sh 80
+          description: Check if port 80 is open
+        - value: nc -zv ip.darklab.sh 443 80
+          description: Check multiple ports at once
+      flags:
+        - value: -z
+          description: Zero-I/O mode for port scanning
+          allow_grouping: true
+        - value: -v
+          description: Verbose connection results
+          allow_grouping: true
+        - value: -n
+          description: Skip DNS lookups
+          allow_grouping: true
+        - value: -w
+          description: Timeout before giving up
+          takes_value: true
+          suggest:
+            - value: '3'
+              description: Short timeout in seconds
+      arguments:
+        - placeholder: <host>
+          value_type: domain
+          description: Hostname or IP followed by one or more ports
+  - root: mtr
+    category: Network Diagnostics
+    policy:
+      allow:
+        - mtr
+      deny: []
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - --report-wide
+          position: prepend
+          unless_any:
+            - --report
+            - --report-wide
+            - -r
+          notice: "Note: mtr has been run in --report-wide mode (non-interactive). See FAQ for details."
+    autocomplete:
+      examples:
+        - value: mtr -h
+          description: Show help and usage
+        - value: mtr -n ip.darklab.sh
+          description: Trace without hostname resolution
+        - value: mtr -c 20 ip.darklab.sh
+          description: Stop after 20 probes
+        - value: mtr -n -c 20 ip.darklab.sh
+          description: 20 probes, no DNS resolution
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: -n
+          description: Do not resolve hostnames
+        - value: -c
+          description: Stop after count pings
+          takes_value: true
+          suggest:
+            - value: '20'
+              description: Twenty probes before exit
+        - value: -r
+          description: Report mode summary
+        - value: -w
+          description: Wide report output
+      arguments:
+        - placeholder: <host>
+          value_type: domain
+          description: Hostname or IP to trace
+  - root: dig
+    category: Network Diagnostics
+    policy:
+      allow:
+        - dig
+      deny: []
+    autocomplete:
+      examples:
+        - value: dig -h
+          description: Show help and usage
+        - value: dig darklab.sh +short
+          description: A record lookup, short output
+        - value: dig MX darklab.sh +short
+          description: Mail exchanger records
+        - value: dig @8.8.8.8 darklab.sh
+          description: Query using Google's public resolver
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: +short
+          description: Short answer output
+        - value: +trace
+          description: Trace delegation path
+        - value: '@8.8.8.8'
+          description: Query a specific resolver
+        - value: AXFR
+          description: Attempt zone transfer
+        - value: AAAA
+          description: IPv6 address lookup
+        - value: MX
+          description: Mail exchanger lookup
+      arguments:
+        - placeholder: <domain>
+          value_type: domain
+          description: Domain name to query
+  - root: nslookup
+    category: Network Diagnostics
+    policy:
+      allow:
+        - nslookup
+      deny: []
+    autocomplete:
+      examples:
+        - value: nslookup -type=A darklab.sh
+          description: IPv4 address lookup
+        - value: nslookup -type=MX darklab.sh
+          description: Mail exchanger lookup
+        - value: nslookup -type=TXT darklab.sh
+          description: TXT record lookup
+      flags:
+        - value: -type=A
+          description: IPv4 address lookup
+        - value: -type=AAAA
+          description: IPv6 address lookup
+        - value: -type=MX
+          description: Mail exchanger lookup
+        - value: -type=TXT
+          description: TXT record lookup
+        - value: -type=NS
+          description: Name server lookup
+        - value: -type=CNAME
+          description: Canonical name lookup
+        - value: -debug
+          description: Print extra resolver details
+      arguments:
+        - placeholder: <domain>
+          value_type: domain
+          description: Domain name to query
+  - root: host
+    category: Network Diagnostics
+    policy:
+      allow:
+        - host
+      deny: []
+    autocomplete:
+      examples:
+        - value: host -t A darklab.sh
+          description: IPv4 address lookup
+        - value: host -t MX darklab.sh
+          description: Mail exchanger lookup
+        - value: host -t NS darklab.sh
+          description: Name server lookup
+      flags:
+        - value: -t
+          description: Select DNS record type
+          takes_value: true
+          suggest:
+            - value: A
+              description: IPv4 address lookup
+            - value: AAAA
+              description: IPv6 address lookup
+            - value: MX
+              description: Mail exchanger lookup
+            - value: TXT
+              description: TXT record lookup
+            - value: NS
+              description: Name server lookup
+      arguments:
+        - placeholder: <domain>
+          value_type: domain
+          description: Domain name to query
+  - root: whois
+    category: Network Diagnostics
+    policy:
+      allow:
+        - whois
+      deny: []
+    autocomplete:
+      examples:
+        - value: whois --help
+          description: Show help and usage
+        - value: whois darklab.sh
+          description: Domain registration lookup
+        - value: whois 104.21.4.35
+          description: IP allocation lookup
+        - value: whois -h whois.iana.org darklab.sh
+          description: Query a specific WHOIS server
+      flags:
+        - value: --help
+          description: Show help and usage
+          closes: true
+        - value: -h
+          description: WHOIS server to query
+          takes_value: true
+          suggest:
+            - value: whois.iana.org
+              description: IANA WHOIS server
+            - value: whois.verisign-grs.com
+              description: Verisign .com/.net WHOIS server
+            - value: whois.arin.net
+              description: ARIN WHOIS server for IP allocations
+        - value: -p
+          description: WHOIS server port
+          takes_value: true
+          suggest:
+            - value: '43'
+              description: Standard WHOIS port
+        - value: -H
+          description: Hide legal disclaimers when supported
+      arguments:
+        - placeholder: <domain-or-ip>
+          value_type: domain
+          description: Domain name, IP address, or ASN to query
+  - root: curl
+    category: Network Diagnostics
+    policy:
+      allow:
+        - curl
+      deny:
+        - curl -o
+        - curl --output
+        - curl -O
+        - curl --remote-name
+        - curl --upload-file
+        - curl -T
+        - curl -K
+        - curl --config
+        - curl localhost
+        - curl 127.0.0.1
+        - curl 0.0.0.0
+    workspace_flags:
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
+      - flag: --output
+        mode: write
+        value: separate_or_attached
+        format: text
+    autocomplete:
+      examples:
+        - value: curl -h
+          description: Show help and usage
+        - value: curl -I https://ip.darklab.sh
+          description: "HEAD request \u2014 show response headers only"
+        - value: curl -sv https://ip.darklab.sh
+          description: "Verbose \u2014 full request and response headers"
+        - value: curl -o /dev/null -w "%{http_code}" https://ip.darklab.sh
+          description: Print just the HTTP status code
+        - value: curl -L -o response.html https://noc.darklab.sh
+          description: Save the response body to a session file
+          feature_required: workspace
+      flags:
+        - value: -h
+          description: Show help and usage
+          takes_value: true
+          closes: true
+        - value: -I
+          description: HEAD request only
+        - value: -s
+          description: Silent mode
+        - value: -v
+          description: Verbose request and response details
+        - value: -o
+          description: Write body to file
+          takes_value: true
+          suggest:
+            - value: /dev/null
+              description: Discard body and keep metadata
+            - value: response.html
+              description: Save response body as a session file
+              feature_required: workspace
+        - value: -w
+          description: Write selected metadata after the transfer
+          takes_value: true
+          suggest:
+            - value: '"%{http_code}"'
+              description: Print the final HTTP status code
+            - value: '"%{remote_ip} %{http_code}"'
+              description: Print remote IP and status code
+        - value: -H
+          description: Add request header
+          takes_value: true
+          suggest:
+            - value: '"User-Agent: Mozilla/5.0"'
+              description: Example browser-style user agent
+            - value: '"Authorization: Bearer <token>"'
+              description: Example bearer token header
+        - value: -L
+          description: Follow redirects
+        - value: -k
+          description: Skip TLS verification
+        - value: --max-time
+          description: Maximum transfer time in seconds
+          takes_value: true
+          suggest:
+            - value: '10'
+              description: Ten-second transfer limit
+      arguments:
+        - placeholder: <url>
+          value_type: url
+          description: Target URL to request
+  - root: wget
+    category: Network Diagnostics
+    policy:
+      allow:
+        - wget
+      deny:
+        - wget -O
+        - wget --output-document
+        - wget --input-file
+        - wget -i
+        - wget localhost
+        - wget 127.0.0.1
+        - wget 0.0.0.0
+    workspace_flags:
+      - flag: -O
+        mode: write
+        value: separate
+        format: text
+      - flag: --output-document
+        mode: write
+        value: separate_or_attached
+        format: text
+      - flag: -i
+        mode: read
+        value: separate
+        format: text
+      - flag: --input-file
+        mode: read
+        value: separate_or_attached
+        format: text
+    autocomplete:
+      examples:
+        - value: wget -h
+          description: Show help and usage
+        - value: wget --spider https://ip.darklab.sh
+          description: Check URL without downloading
+        - value: wget -q -O /dev/null --server-response https://ip.darklab.sh
+          description: Show server response headers, discard body
+        - value: wget -q -O response.html https://noc.darklab.sh
+          description: Save a response body to a session file
+          feature_required: workspace
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: --spider
+          description: Check URL without downloading
+        - value: -q
+          description: Quiet output
+        - value: -O
+          description: Write output to a specific file
+          takes_value: true
+          suggest:
+            - value: /dev/null
+              description: Discard response body
+            - value: response.html
+              description: Save response body as a session file
+              feature_required: workspace
+        - value: --output-document
+          description: Write output to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: response.html
+              description: Save response body for later viewing
+        - value: -i
+          description: Read URLs from a session file
+          takes_value: true
+          feature_required: workspace
+          value_hint:
+            placeholder: <url-file>
+            value_type: url
+            description: Session file containing one URL per line
+          suggest:
+            - value: urls.txt
+              description: Session file containing one URL per line
+        - value: --input-file
+          description: Read URLs from a session file
+          takes_value: true
+          feature_required: workspace
+          value_hint:
+            placeholder: <url-file>
+            value_type: url
+            description: Session file containing one URL per line
+          suggest:
+            - value: urls.txt
+              description: Session file containing one URL per line
+        - value: --server-response
+          description: Print server response headers
+        - value: --timeout
+          description: Network timeout in seconds
+          takes_value: true
+          suggest:
+            - value: '10'
+              description: Ten-second network timeout
+        - value: --tries
+          description: Number of retry attempts
+          takes_value: true
+          suggest:
+            - value: '1'
+              description: Single attempt only
+        - value: --no-check-certificate
+          description: Skip TLS certificate validation
+      arguments:
+        - placeholder: <url>
+          value_type: url
+          description: Target URL to download or probe
+  - root: openssl
+    category: TLS / Certificates
+    policy:
+      allow:
+        - openssl s_client
+        - openssl ciphers
+      deny:
+        - openssl s_client -cert
+        - openssl s_client -key
+        - openssl s_client -CAfile
+        - openssl s_client -CApath
+    workspace_flags:
+      - flag: -CAfile
+        mode: read
+        value: separate
+        format: text
+    autocomplete:
+      examples:
+        - value: openssl s_client -help
+          description: Show s_client help and usage
+        - value: openssl ciphers -help
+          description: Show ciphers help and usage
+      flags:
+        - value: -help
+          description: Show top-level help and usage
+          closes: true
+      subcommands:
+        s_client:
+          description: Connect to a TLS service for diagnostics
+          examples:
+            - value: openssl s_client -connect ip.darklab.sh:443 -quiet
+              description: Inspect TLS connection and certificate
+            - value: openssl s_client -connect ip.darklab.sh:443 -showcerts
+              description: Show full certificate chain
+            - value: openssl s_client -connect ip.darklab.sh:443 -servername ip.darklab.sh -CAfile ca.pem
+              description: Validate with a CA bundle from session files
+              feature_required: workspace
+          flags:
+            - value: -help
+              description: Show s_client help and usage
+              closes: true
+            - value: -connect
+              description: Host and port to connect to (host:port)
+              takes_value: true
+              suggest:
+                - value: <host>:443
+                  description: HTTPS port
+                - value: <host>:465
+                  description: SMTPS port
+                - value: <host>:993
+                  description: IMAPS port
+            - value: -servername
+              description: SNI hostname
+              takes_value: true
+              value_hint:
+                placeholder: <hostname>
+                value_type: domain
+                description: SNI hostname matching the certificate
+            - value: -showcerts
+              description: Display the full certificate chain
+            - value: -starttls
+              description: Use STARTTLS for a plaintext protocol
+              takes_value: true
+              suggest:
+                - value: smtp
+                  description: STARTTLS for SMTP
+                - value: ftp
+                  description: STARTTLS for FTP
+                - value: imap
+                  description: STARTTLS for IMAP
+                - value: pop3
+                  description: STARTTLS for POP3
+            - value: -verify
+              description: Set certificate verification depth
+              takes_value: true
+            - value: -brief
+              description: Print a brief connection summary
+            - value: -tls1_2
+              description: Force TLS 1.2
+            - value: -tls1_3
+              description: Force TLS 1.3
+            - value: -quiet
+              description: Suppress session and certificate details
+            - value: -CAfile
+              description: Read a CA bundle from a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: ca.pem
+                  description: Session file containing trusted CA certificates
+        ciphers:
+          description: Display and filter OpenSSL cipher suites
+          examples:
+            - value: openssl ciphers -v
+              description: List all supported cipher suites verbosely
+            - value: openssl ciphers -s -v 'ALL:@SECLEVEL=2'
+              description: Show supported ciphers at security level 2
+          flags:
+            - value: -help
+              description: Show ciphers help and usage
+              closes: true
+            - value: -v
+              description: Verbose cipher listing
+            - value: -V
+              description: Include official cipher suite values in hex
+            - value: -stdname
+              description: Include standard cipher suite names
+            - value: -s
+              description: Only list ciphers supported by configured protocol/security settings
+            - value: -tls1_2
+              description: Limit supported-cipher filtering to TLS 1.2
+            - value: -tls1_3
+              description: Limit supported-cipher filtering to TLS 1.3
+            - value: -ciphersuites
+              description: Configure TLS 1.3 ciphersuites
+              takes_value: true
+              value_hint:
+                description: Colon-separated TLS 1.3 ciphersuite names
+  - root: sslscan
+    category: TLS / Certificates
+    policy:
+      allow:
+        - sslscan
+      deny:
+        - sslscan --xml
+    workspace_flags:
+      - flag: --xml
+        mode: write
+        value: separate_or_attached
+        format: xml
+    autocomplete:
+      examples:
+        - value: sslscan -h
+          description: Show help and usage
+        - value: sslscan ip.darklab.sh
+          description: Full TLS scan of a host
+        - value: sslscan --no-failed ip.darklab.sh
+          description: Scan but suppress failed cipher output
+        - value: sslscan --xml=sslscan.xml ip.darklab.sh
+          description: Save TLS scan XML to a session file
+          feature_required: workspace
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: --tls12
+          description: Only test TLS 1.2
+        - value: --tls13
+          description: Only test TLS 1.3
+        - value: --no-failed
+          description: Suppress failed cipher output
+        - value: --show-certificate
+          description: Display the full certificate chain
+        - value: --xml
+          description: Write XML results to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: sslscan.xml
+              description: Save XML scan results
+        - value: --bugs
+          description: Enable SSL implementation bug workarounds
+        - value: --timeout
+          description: Socket timeout in seconds
+          takes_value: true
+          suggest:
+            - value: '10'
+              description: Ten-second socket timeout
+      arguments:
+        - placeholder: <host>
+          value_type: domain
+          description: Hostname or host:port to scan
+  - root: sslyze
+    category: TLS / Certificates
+    policy:
+      allow:
+        - sslyze
+      deny:
+        - sslyze --json_out
+        - sslyze --targets_in
+    workspace_flags:
+      - flag: --targets_in
+        mode: read
+        value: separate_or_attached
+        format: text
+      - flag: --json_out
+        mode: write
+        value: separate_or_attached
+        format: json
+    autocomplete:
+      examples:
+        - value: sslyze --help
+          description: Show help and usage
+        - value: sslyze --certinfo ip.darklab.sh
+          description: Validate the certificate chain
+        - value: sslyze --heartbleed ip.darklab.sh
+          description: Test for the Heartbleed vulnerability
+        - value: sslyze --targets_in tls-targets.txt --json_out sslyze-results.json
+          description: Scan hosts from a session file and save JSON results
+          feature_required: workspace
+      flags:
+        - value: --help
+          description: Show help and usage
+          closes: true
+        - value: --certinfo
+          description: Retrieve and validate the certificate chain
+        - value: --heartbleed
+          description: Test for the Heartbleed vulnerability
+        - value: --robot
+          description: Test for the ROBOT vulnerability
+        - value: --http_headers
+          description: Test for security HTTP headers
+        - value: --early_data
+          description: Test for TLS 1.3 0-RTT early data support
+        - value: --compression
+          description: Test for TLS compression (CRIME)
+        - value: --reneg
+          description: Test for insecure TLS renegotiation
+        - value: --tlsv1_2
+          description: Run TLS 1.2 cipher suite scan
+        - value: --tlsv1_3
+          description: Run TLS 1.3 cipher suite scan
+        - value: --targets_in
+          description: Read TLS targets from a session file
+          takes_value: true
+          feature_required: workspace
+          value_hint:
+            placeholder: <target-file>
+            value_type: target
+            description: Session file containing one TLS target per line
+          suggest:
+            - value: tls-targets.txt
+              description: Session file containing host or host:port entries
+        - value: --json_out
+          description: Write JSON results to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: sslyze-results.json
+              description: Save JSON scan results
+      arguments:
+        - placeholder: <host>
+          value_type: domain
+          description: Hostname or host:port to scan
+  - root: dnsrecon
+    category: Network Reconnaissance
+    policy:
+      allow:
+        - dnsrecon
+      deny:
+        - dnsrecon -x
+        - dnsrecon --xml
+        - dnsrecon -c
+        - dnsrecon --csv
+    workspace_flags:
+      - flag: -D
+        mode: read
+        value: separate
+        format: text
+      - flag: -x
+        mode: write
+        value: separate
+        format: xml
+      - flag: --xml
+        mode: write
+        value: separate_or_attached
+        format: xml
+      - flag: -c
+        mode: write
+        value: separate
+        format: text
+      - flag: --csv
+        mode: write
+        value: separate_or_attached
+        format: text
+    autocomplete:
+      examples:
+        - value: dnsrecon -h
+          description: Show help and usage
+        - value: dnsrecon -d darklab.sh -t std
+          description: Standard DNS record enumeration
+        - value: dnsrecon -d darklab.sh -t axfr
+          description: Attempt zone transfer
+        - value: dnsrecon -d darklab.sh -t brt
+          description: Brute-force subdomain enumeration
+        - value: dnsrecon -d darklab.sh -t std -c dnsrecon-results.csv
+          description: Save DNS enumeration results to a session CSV file
+          feature_required: workspace
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: -d
+          description: Target domain
+          takes_value: true
+          value_hint:
+            placeholder: <domain>
+            value_type: domain
+            description: Target domain to enumerate
+        - value: -t
+          description: Discovery mode
+          takes_value: true
+          suggest:
+            - value: std
+              description: Standard DNS record checks
+            - value: axfr
+              description: Attempt zone transfer
+            - value: brt
+              description: Brute-force subdomains
+            - value: srv
+              description: Enumerate SRV records
+            - value: zonewalk
+              description: Attempt DNSSEC zone walk
+            - value: crt
+              description: Query certificate transparency data
+        - value: -n
+          description: Specific name server to query
+          takes_value: true
+        - value: -D
+          description: Wordlist for brute force mode
+          takes_value: true
+          value_type: wordlist
+          wordlist_category: dns
+          suggest:
+            - value: /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+              description: Common subdomain wordlist
+            - value: subdomains.txt
+              description: Session file containing candidate subdomains
+              feature_required: workspace
+        - value: -c
+          description: Write CSV results to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: dnsrecon-results.csv
+              description: Save CSV DNS results
+        - value: --csv
+          description: Write CSV results to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: dnsrecon-results.csv
+              description: Save CSV DNS results
+        - value: -x
+          description: Write XML results to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: dnsrecon-results.xml
+              description: Save XML DNS results
+        - value: --xml
+          description: Write XML results to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: dnsrecon-results.xml
+              description: Save XML DNS results
+      arguments:
+        - placeholder: <domain>
+          value_type: domain
+          description: Usually provided through -d
+  - root: subfinder
+    category: Network Reconnaissance
+    policy:
+      allow:
+        - subfinder
+      deny:
+        - subfinder -o
+        - subfinder --output
+        - subfinder -dL
+        - subfinder --list
+        - subfinder -oD
+        - subfinder -output-dir
+        - subfinder -config
+        - subfinder -pc
+        - subfinder -provider-config
+        - subfinder -rL
+        - subfinder -rlist
+    workspace_flags:
+      - flag: -dL
+        mode: read
+        value: separate
+        format: text
+      - flag: --list
+        mode: read
+        value: separate_or_attached
+        format: text
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
+      - flag: --output
+        mode: write
+        value: separate_or_attached
+        format: text
+      - flag: -oD
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -output-dir
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -config
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -pc
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -provider-config
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -rL
+        mode: read
+        value: separate
+        format: text
+      - flag: -rlist
+        mode: read
+        value: separate
+        format: text
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - env
+            - XDG_CONFIG_HOME={session_workspace}
+          position: command_prefix
+          requires_workspace: true
+    autocomplete:
+      examples:
+        - value: subfinder -h
+          description: Show help and usage
+        - value: subfinder -d darklab.sh
+          description: Discover subdomains for a domain
+        - value: subfinder -d darklab.sh -silent
+          description: Subdomain discovery with minimal output
+        - value: subfinder -d darklab.sh -silent -o subdomains.txt
+          description: Discover subdomains and save results to a session file
+          feature_required: workspace
+        - value: subfinder -dL domains.txt -silent -o subfinder-results.txt
+          description: Discover subdomains for domains in a session file and save results
+          feature_required: workspace
+        - value: subfinder -dL domains.txt -silent -oD subfinder-by-domain
+          description: Discover subdomains from a session file and save per-domain outputs
+          feature_required: workspace
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: -d
+          description: Target domain
+          takes_value: true
+          value_hint:
+            placeholder: <domain>
+            value_type: domain
+            description: Target domain to enumerate
+        - value: -silent
+          description: Minimal output
+        - value: -recursive
+          description: Recurse through discovered subdomains
+        - value: -all
+          description: Use all available sources
+        - value: -dL
+          description: Read domains from a session file
+          takes_value: true
+          feature_required: workspace
+          value_hint:
+            placeholder: <domain-file>
+            value_type: domain
+            description: Session file containing one domain per line
+          suggest:
+            - value: domains.txt
+              description: Session file containing one domain per line
+        - value: --list
+          description: Read domains from a session file
+          takes_value: true
+          feature_required: workspace
+          value_hint:
+            placeholder: <domain-file>
+            value_type: domain
+            description: Session file containing one domain per line
+          suggest:
+            - value: domains.txt
+              description: Session file containing one domain per line
+        - value: -o
+          description: Write discovered subdomains to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: subfinder-results.txt
+              description: Save discovered subdomains
+        - value: --output
+          description: Write discovered subdomains to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: subfinder-results.txt
+              description: Save discovered subdomains
+        - value: -oD
+          description: Write per-domain results to a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: subfinder-by-domain
+              description: Save per-domain subfinder outputs
+        - value: -output-dir
+          description: Write per-domain results to a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: subfinder-by-domain
+              description: Save per-domain subfinder outputs
+        - value: -config
+          description: Read subfinder config from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: subfinder-config.yaml
+              description: Session subfinder config file
+        - value: -pc
+          description: Read provider config from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: subfinder-provider-config.yaml
+              description: Session provider config file
+        - value: -provider-config
+          description: Read provider config from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: subfinder-provider-config.yaml
+              description: Session provider config file
+        - value: -rL
+          description: Read DNS resolvers from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: resolvers.txt
+              description: Session resolver list
+        - value: -rlist
+          description: Read DNS resolvers from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: resolvers.txt
+              description: Session resolver list
+  - root: amass
+    category: Network Reconnaissance
+    policy:
+      allow:
+        - amass
+      deny:
+        - amass -log
+        - amass -df
+        - amass -dir
+        - amass -config
+        - amass -nf
+        - amass -blf
+        - amass -rf
+        - amass -w
+        - amass -o
+    workspace_flags:
+      - flag: -df
+        mode: read
+        value: separate
+        format: text
+      - flag: -config
+        mode: read
+        value: separate
+        format: text
+      - flag: -nf
+        mode: read
+        value: separate
+        format: text
+      - flag: -blf
+        mode: read
+        value: separate
+        format: text
+      - flag: -rf
+        mode: read
+        value: separate
+        format: text
+      - flag: -w
+        mode: read
+        value: separate
+        format: text
+      - flag: -log
+        mode: write
+        value: separate
+        format: text
+      - flag: -dir
+        mode: read_write
+        value: separate
+        kind: directory
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
+        subcommands:
+          - subs
+      - flag: -o
+        mode: write
+        value: separate
+        kind: directory
+        subcommands:
+          - viz
+    runtime_adaptations:
+      managed_workspace_directory:
+        flag: -dir
+        directory: amass
+        subcommands:
+          - enum
+          - subs
+          - track
+          - viz
+        skip_if_any:
+          - -h
+          - -help
+          - --help
+        reject_alternate: true
+        reject_message: Amass database commands use the managed amass session directory.
+      environment:
+        - name: XDG_CONFIG_HOME
+          value: "{managed_workspace_parent}"
+          managed_directory_flag: -dir
+    autocomplete:
+      examples:
+        - value: amass -h
+          description: Show help and usage
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+      subcommands:
+        enum:
+          description: Enumerate attack surface assets
+          examples:
+            - value: amass enum -active -d darklab.sh
+              description: Enumerate a domain with active scanning using the session-scoped Amass database
+              feature_required: workspace
+            - value: amass enum -d darklab.sh
+              description: Enumerate using a session-scoped Amass database
+              feature_required: workspace
+          flags:
+            - value: -passive
+              description: Use passive data sources only (default in Amass v5)
+            - value: -active
+              description: Use active scanning which scans the target directly
+            - value: -d
+              description: Target domain
+              takes_value: true
+              value_hint:
+                placeholder: <domain>
+                value_type: domain
+                description: Target domain to enumerate
+            - value: -timeout
+              description: Minutes to run without progress before terminating
+              takes_value: true
+              suggest:
+                - value: "10"
+                  description: Short bounded run for testing
+            - value: -v
+              description: Output status and troubleshooting information
+            - value: -nocolor
+              description: Disable colorized output
+            - value: -df
+              description: Read target domains from a session file
+              takes_value: true
+              feature_required: workspace
+              value_hint:
+                placeholder: <domain-file>
+                value_type: domain
+                description: Session file containing one domain per line
+              suggest:
+                - value: domains.txt
+                  description: Session file containing one domain per line
+            - value: -config
+              description: Read Amass YAML configuration from a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: amass-config.yaml
+                  description: Session Amass config file
+            - value: -nf
+              description: Read known subdomain names from a session file
+              takes_value: true
+              feature_required: workspace
+              value_hint:
+                placeholder: <host-file>
+                value_type: host
+                description: Session file containing known names
+              suggest:
+                - value: known-subdomains.txt
+                  description: Session file containing known names
+            - value: -log
+              description: Write Amass errors to a session log file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: amass-errors.log
+                  description: Save Amass error log
+        subs:
+          description: Read discovered subdomains from the Amass database
+          examples:
+            - value: amass subs -d darklab.sh -names
+              description: Print names from the session-scoped Amass database
+              feature_required: workspace
+            - value: amass subs -d darklab.sh -show -ip -summary
+              description: Show discovered names with IP and ASN summary data
+              feature_required: workspace
+            - value: amass subs -d darklab.sh -show
+              description: Display subdomains and related ASNs from the session database
+              feature_required: workspace
+            - value: amass subs -d darklab.sh -names -o amass-subdomains.txt
+              description: Save discovered names from the session-scoped database
+              feature_required: workspace
+          flags:
+            - value: -d
+              description: Target domain
+              takes_value: true
+              value_hint:
+                placeholder: <domain>
+                value_type: domain
+                description: Target domain to read from the database
+            - value: -names
+              description: Print names only when reading Amass database results
+            - value: -ip
+              description: Show IP addresses for discovered names; use with -names
+            - value: -ipv4
+              description: Show IPv4 addresses for discovered names; use with -names
+            - value: -ipv6
+              description: Show IPv6 addresses for discovered names; use with -names
+            - value: -summary
+              description: Print ASN summary data from discovered names
+            - value: -show
+              description: Print subdomains and related ASN data for matching domains
+            - value: -demo
+              description: Censor output for demonstrations
+            - value: -nocolor
+              description: Disable colorized output
+            - value: -config
+              description: Read Amass YAML configuration from a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: amass-config.yaml
+                  description: Session Amass config file
+            - value: -o
+              description: Write amass subs output to a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: amass-subdomains.txt
+                  description: Save amass subs text output
+        track:
+          description: Show newly discovered assets over time from the database
+          examples:
+            - value: amass track -d darklab.sh
+              description: Show newly discovered assets from the session database
+              feature_required: workspace
+          flags:
+            - value: -d
+              description: Target domain
+              takes_value: true
+              value_hint:
+                placeholder: <domain>
+                value_type: domain
+                description: Target domain to track
+            - value: -since
+              description: Limit track output to assets after a timestamp
+              takes_value: true
+              suggest:
+                - value: "04/26 00:00:00 2026 CDT"
+                  description: Amass timestamp format example
+            - value: -df
+              description: Read target domains from a session file
+              takes_value: true
+              feature_required: workspace
+              value_hint:
+                placeholder: <domain-file>
+                value_type: domain
+                description: Session file containing one domain per line
+              suggest:
+                - value: domains.txt
+                  description: Session file containing one domain per line
+            - value: -config
+              description: Read Amass YAML configuration from a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: amass-config.yaml
+                  description: Session Amass config file
+        viz:
+          description: Generate graph visualizations from the Amass database
+          examples:
+            - value: amass viz -d darklab.sh -d3 -o amass-viz
+              description: Generate a D3 graph visualization in a session directory
+              feature_required: workspace
+            - value: amass viz -d darklab.sh -dot -o amass-viz-dot
+              description: Export database information for the domain as a flat DOT text file
+              feature_required: workspace
+          flags:
+            - value: -d
+              description: Target domain
+              takes_value: true
+              value_hint:
+                placeholder: <domain>
+                value_type: domain
+                description: Target domain to visualize
+            - value: -d3
+              description: Generate a D3 HTML graph with amass viz
+            - value: -dot
+              description: Generate Graphviz DOT output with amass viz
+            - value: -gexf
+              description: Generate Gephi GEXF output with amass viz
+            - value: -since
+              description: Limit viz output to assets after a timestamp
+              takes_value: true
+              suggest:
+                - value: "04/26 00:00:00 2026 CDT"
+                  description: Amass timestamp format example
+            - value: -df
+              description: Read target domains from a session file
+              takes_value: true
+              feature_required: workspace
+              value_hint:
+                placeholder: <domain-file>
+                value_type: domain
+                description: Session file containing one domain per line
+              suggest:
+                - value: domains.txt
+                  description: Session file containing one domain per line
+            - value: -config
+              description: Read Amass YAML configuration from a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: amass-config.yaml
+                  description: Session Amass config file
+            - value: -o
+              description: Write amass viz artifacts to a session directory
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: amass-viz
+                  description: Save amass viz artifacts in a session directory
+                - value: amass-viz-dot
+                  description: Save amass DOT artifacts in a session directory
+  - root: dnsx
+    category: Network Reconnaissance
+    policy:
+      allow:
+        - dnsx
+      deny:
+        - dnsx -o
+        - dnsx --output
+        - dnsx -l
+    workspace_flags:
+      - flag: -l
+        mode: read
+        value: separate
+        format: text
+      - flag: -w
+        mode: read
+        value: separate
+        format: text
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
+      - flag: --output
+        mode: write
+        value: separate_or_attached
+        format: text
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - env
+            - XDG_CONFIG_HOME={session_workspace}
+          position: command_prefix
+          requires_workspace: true
+    autocomplete:
+      examples:
+        - value: dnsx -h
+          description: Show help and usage
+        - value: dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+          description: Brute-force subdomains with a wordlist
+        - value: dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+            -resp
+          description: Brute-force subdomains and show DNS responses
+        - value: dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+            -a -resp
+          description: Filter for A records and show responses
+        - value: dnsx -l subdomains.txt -resp -o dnsx-results.txt
+          description: Resolve subdomains from a session file and save DNS responses
+          feature_required: workspace
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: -d
+          description: Target domain
+          takes_value: true
+          value_hint:
+            placeholder: <domain>
+            value_type: domain
+            description: Target domain to enumerate
+        - value: -w
+          description: Wordlist for brute force
+          takes_value: true
+          value_type: wordlist
+          wordlist_category: dns
+          suggest:
+            - value: /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+              description: Common subdomain wordlist
+            - value: subdomains.txt
+              description: Session file containing candidate subdomains
+              feature_required: workspace
+        - value: -l
+          description: Read hostnames from a session file
+          takes_value: true
+          feature_required: workspace
+          value_hint:
+            placeholder: <host-file>
+            value_type: host
+            description: Session file containing one hostname per line
+          suggest:
+            - value: subdomains.txt
+              description: Session file containing one hostname per line
+        - value: -resp
+          description: Show DNS responses
+        - value: -a
+          description: Query A records
+        - value: -cname
+          description: Query CNAME records
+        - value: -mx
+          description: Query MX records
+        - value: -o
+          description: Write DNS results to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: dnsx-results.txt
+              description: Save DNS responses
+        - value: --output
+          description: Write DNS results to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: dnsx-results.txt
+              description: Save DNS responses
+      arguments:
+        - placeholder: <domain>
+          value_type: domain
+          description: Usually provided through -d
+  - root: pd-httpx
+    category: Network Reconnaissance
+    policy:
+      allow:
+        - pd-httpx
+      deny:
+        - pd-httpx -l
+        - pd-httpx -list
+        - pd-httpx -o
+        - pd-httpx --output
+        - pd-httpx -rr
+        - pd-httpx -request
+        - pd-httpx -srd
+        - pd-httpx -store-response-dir
+        - pd-httpx -config
+    workspace_flags:
+      - flag: -l
+        mode: read
+        value: separate
+        format: text
+      - flag: -list
+        mode: read
+        value: separate
+        format: text
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
+      - flag: --output
+        mode: write
+        value: separate_or_attached
+        format: text
+      - flag: -rr
+        mode: read
+        value: separate
+        format: text
+      - flag: -request
+        mode: read
+        value: separate
+        format: text
+      - flag: -srd
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -store-response-dir
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -config
+        mode: read
+        value: separate
+        format: yaml
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - env
+            - XDG_CONFIG_HOME={session_workspace}
+          position: command_prefix
+          requires_workspace: true
+    autocomplete:
+      examples:
+        - value: pd-httpx -h
+          description: Show help and usage
+        - value: pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect
+          description: "Full recon \u2014 title, status code, and tech fingerprint"
+        - value: pd-httpx -u https://ip.darklab.sh -status-code
+          description: Check HTTP status code
+        - value: pd-httpx -u https://ip.darklab.sh -follow-redirects
+          description: Follow and report redirects
+        - value: pd-httpx -l urls.txt -status-code -title -o httpx-results.txt
+          description: Probe URLs from a session file and save results
+          feature_required: workspace
+        - value: pd-httpx -l subdomains.txt -silent -o live-urls.txt
+          description: Probe subdomains from a session file and save live URLs
+          feature_required: workspace
+        - value: pd-httpx -l live-urls.txt -status-code -title -tech-detect -o http-summary.txt
+          description: Summarize live URLs from a session file
+          feature_required: workspace
+        - value: pd-httpx -l urls.txt -status-code -sr -srd httpx-responses
+          description: Store HTTP responses in a session directory
+          feature_required: workspace
+        - value: pd-httpx -l urls.txt -screenshot -srd httpx-screenshots
+          description: Save screenshots in a session directory
+          feature_required: workspace
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: -u
+          description: Single target URL
+          takes_value: true
+          value_hint:
+            placeholder: <url>
+            value_type: url
+            description: Target URL to probe
+          suggest:
+            - value: https://
+              description: Start an HTTP or HTTPS URL
+        - value: -title
+          description: Show page title
+        - value: -status-code
+          description: Show HTTP status code
+        - value: -tech-detect
+          description: Detect technologies
+        - value: -follow-redirects
+          description: Follow redirects
+        - value: -silent
+          description: Minimal output
+        - value: -l
+          description: File with URLs to probe
+          takes_value: true
+          feature_required: workspace
+          value_hint:
+            placeholder: <url-file>
+            value_type: url
+            description: Session file containing one URL per line
+          suggest:
+            - value: urls.txt
+              description: Session file containing one URL per line
+        - value: -o
+          description: Write probe results to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: httpx-results.txt
+              description: Save probe results for later viewing
+        - value: -rr
+          description: Read a raw HTTP request from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: request.txt
+              description: Session raw request file
+        - value: -request
+          description: Read a raw HTTP request from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: request.txt
+              description: Session raw request file
+        - value: -sr
+          description: Store HTTP responses
+        - value: -srd
+          description: Store responses or screenshots in a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: httpx-responses
+              description: Store HTTP responses
+            - value: httpx-screenshots
+              description: Store screenshots
+        - value: -store-response-dir
+          description: Store responses or screenshots in a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: httpx-responses
+              description: Store HTTP responses
+            - value: httpx-screenshots
+              description: Store screenshots
+        - value: -ss
+          description: Save screenshots with headless browser
+        - value: -screenshot
+          description: Save screenshots with headless browser
+        - value: -config
+          description: Read httpx config from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: httpx-config.yaml
+              description: Session httpx config file
+  - root: assetfinder
+    category: Network Reconnaissance
+    policy:
+      allow:
+        - assetfinder
+      deny: []
+    autocomplete:
+      examples:
+        - value: assetfinder -subs-only darklab.sh
+          description: Discover subdomains for darklab.sh
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: -subs-only
+          description: Only discover subdomains of the target domain
+      arguments:
+        - placeholder: <domain>
+          value_type: domain
+          description: Domain name to enumerate
+  - root: fierce
+    category: Network Reconnaissance
+    policy:
+      allow:
+        - fierce
+      deny: []
+    autocomplete:
+      examples:
+        - value: fierce -h
+          description: Show help and usage
+        - value: fierce --domain darklab.sh
+          description: Enumerate subdomains for a domain
+        - value: fierce --domain darklab.sh --dns-servers 8.8.8.8
+          description: Enumerate using a specific resolver
+        - value: fierce --domain darklab.sh --traverse 5
+          description: Set traversal depth to 5
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: --domain
+          description: Target domain
+          takes_value: true
+          value_hint:
+            placeholder: <domain>
+            value_type: domain
+            description: Target domain to enumerate
+        - value: --dns-servers
+          description: Resolver or name server to use
+          takes_value: true
+          suggest:
+            - value: 8.8.8.8
+              description: Example resolver address
+        - value: --subdomain-file
+          description: Wordlist for subdomain brute force
+          takes_value: true
+          value_type: wordlist
+          wordlist_category: dns
+        - value: --traverse
+          description: Maximum recursive traversal depth
+          takes_value: true
+  - root: dnsenum
+    category: Network Reconnaissance
+    policy:
+      allow:
+        - dnsenum
+      deny: []
+    autocomplete:
+      examples:
+        - value: dnsenum -h
+          description: Show help and usage
+        - value: dnsenum --noreverse darklab.sh
+          description: Enumerate without reverse lookups
+        - value: dnsenum --enum darklab.sh
+          description: Full enumeration set
+        - value: dnsenum --dnsserver 8.8.8.8 darklab.sh
+          description: Enumerate using Google's public resolver
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: --noreverse
+          description: Skip reverse lookups
+        - value: --enum
+          description: Run full enumeration set
+        - value: --dnsserver
+          description: Query a specific resolver
+          takes_value: true
+          suggest:
+            - value: 8.8.8.8
+              description: Example public resolver
+        - value: -f
+          description: Wordlist for subdomain brute force
+          takes_value: true
+          value_type: wordlist
+          wordlist_category: dns
+        - value: --threads
+          description: Number of worker threads
+          takes_value: true
+      arguments:
+        - placeholder: <domain>
+          value_type: domain
+          description: Domain name to enumerate
+  - root: gobuster
+    category: Network Reconnaissance
+    policy:
+      allow:
+        - gobuster
+      deny:
+        - gobuster dir -o
+        - gobuster dns -o
+        - gobuster vhost -o
+    workspace_flags:
+      - flag: -w
+        mode: read
+        value: separate
+        format: text
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
+    autocomplete:
+      examples:
+        - value: gobuster -h
+          description: Show help and usage
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+      subcommands:
+        dir:
+          description: Directory or file brute force mode
+          examples:
+            - value: gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+              description: Directory brute force with common wordlist
+            - value: gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -x php,html,txt
+              description: Directory brute force with common file extensions
+            - value: gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -o gobuster-dir.txt
+              description: Save directory brute-force results to a session file
+              feature_required: workspace
+          flags:
+            - value: -u
+              description: Target URL
+              takes_value: true
+              value_hint:
+                placeholder: <url>
+                value_type: url
+                description: Target base URL
+              suggest:
+                - value: https://
+                  description: Target base URL
+            - value: -w
+              description: Wordlist path
+              takes_value: true
+              value_type: wordlist
+              wordlist_category: web-content
+              suggest:
+                - value: /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+                  description: Common web-content wordlist
+                - value: wordlist.txt
+                  description: Session wordlist file
+                  feature_required: workspace
+            - value: -x
+              description: File extensions to append
+              takes_value: true
+              suggest:
+                - value: php,html,txt
+                  description: Common extension list
+            - value: -s
+              description: Positive status-code filter
+              takes_value: true
+              suggest:
+                - value: 200,301,302,403
+                  description: Common interesting HTTP statuses
+            - value: -b
+              description: Negative status-code filter
+              takes_value: true
+            - value: -H
+              description: Add an HTTP header
+              takes_value: true
+              suggest:
+                - value: "Authorization: Bearer <token>"
+                  description: Bearer token header
+            - value: -c
+              description: Cookie header value
+              takes_value: true
+            - value: -k
+              description: Skip TLS certificate verification
+            - value: -l
+              description: Show response length
+            - value: -r
+              description: Follow redirects
+            - value: -o
+              description: Write results to a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: gobuster-dir.txt
+                  description: Save discovered paths to a session file
+        dns:
+          description: DNS subdomain brute force mode
+          examples:
+            - value: gobuster dns --domain darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+              description: DNS subdomain brute force
+            - value: gobuster dns --domain darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt --resolver 8.8.8.8
+              description: DNS brute force with a custom resolver
+          flags:
+            - value: --domain
+              description: Target domain
+              takes_value: true
+              value_hint:
+                placeholder: <domain>
+                value_type: domain
+                description: Target root domain
+            - value: -w
+              description: Wordlist path
+              takes_value: true
+              value_type: wordlist
+              wordlist_category: dns
+              suggest:
+                - value: /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+                  description: Common DNS wordlist
+                - value: subdomains.txt
+                  description: Session subdomain wordlist
+                  feature_required: workspace
+            - value: -r
+              description: DNS resolver to use
+              takes_value: true
+              suggest:
+                - value: 8.8.8.8
+                  description: Google Public DNS
+                - value: 1.1.1.1
+                  description: Cloudflare DNS
+            - value: -t
+              description: Number of concurrent threads
+              takes_value: true
+              suggest:
+                - value: "50"
+                  description: Faster scan
+            - value: --wildcard
+              description: Force scan even when wildcard DNS is detected
+            - value: -o
+              description: Write results to a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: gobuster-dns.txt
+                  description: Save discovered subdomains
+        vhost:
+          description: Virtual host brute force mode
+          examples:
+            - value: gobuster vhost -u https://ip.darklab.sh --append-domain -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+              description: Virtual host brute force
+            - value: gobuster vhost -u https://ip.darklab.sh --append-domain -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -o gobuster-vhost.txt
+              description: Save virtual-host brute-force results to a session file
+              feature_required: workspace
+          flags:
+            - value: -u
+              description: Target URL
+              takes_value: true
+              value_hint:
+                placeholder: <url>
+                value_type: url
+                description: Target base URL
+              suggest:
+                - value: https://
+                  description: Target base URL
+            - value: -w
+              description: Wordlist path
+              takes_value: true
+              value_type: wordlist
+              wordlist_category: dns
+              suggest:
+                - value: /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+                  description: Common virtual-host wordlist
+                - value: vhosts.txt
+                  description: Session virtual-host wordlist
+                  feature_required: workspace
+            - value: --append-domain
+              description: Append the target domain to each wordlist entry
+            - value: -H
+              description: Add an HTTP header
+              takes_value: true
+            - value: -k
+              description: Skip TLS certificate verification
+            - value: -s
+              description: Positive status-code filter
+              takes_value: true
+              suggest:
+                - value: 200,301,302,403
+                  description: Common interesting HTTP statuses
+            - value: --exclude-length
+              description: Exclude responses with a specific body length
+              takes_value: true
+            - value: -o
+              description: Write results to a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: gobuster-vhost.txt
+                  description: Save discovered virtual hosts
+        fuzz:
+          description: Fuzz requests using the FUZZ keyword
+          examples:
+            - value: gobuster fuzz -u https://ip.darklab.sh?FUZZ=test -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+              description: Fuzz a URL parameter
+          flags:
+            - value: -u
+              description: Target URL containing FUZZ
+              takes_value: true
+              value_hint:
+                placeholder: <url-with-FUZZ>
+                value_type: url
+                description: URL, query, or path containing FUZZ
+            - value: -w
+              description: Wordlist path
+              takes_value: true
+              value_type: wordlist
+              wordlist_category:
+                - web-content
+                - api
+                - fuzzing
+              suggest:
+                - value: /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+                  description: Common web-content wordlist
+                - value: fuzz.txt
+                  description: Session fuzz wordlist
+                  feature_required: workspace
+            - value: -H
+              description: Add an HTTP header
+              takes_value: true
+              suggest:
+                - value: "X-Custom-Header: FUZZ"
+                  description: Fuzz a request header
+            - value: -d
+              description: HTTP POST body
+              takes_value: true
+              suggest:
+                - value: "username=admin&password=FUZZ"
+                  description: Fuzz a form value
+            - value: -k
+              description: Skip TLS certificate verification
+            - value: -o
+              description: Write results to a session file
+              takes_value: true
+              feature_required: workspace
+              suggest:
+                - value: gobuster-fuzz.txt
+                  description: Save fuzz results
+        s3:
+          description: Amazon S3 bucket enumeration mode
+          examples:
+            - value: gobuster s3 -w bucket-names.txt
+              description: Enumerate S3 bucket names from a session wordlist
+              feature_required: workspace
+          flags:
+            - value: -w
+              description: Bucket-name wordlist path
+              takes_value: true
+              value_type: wordlist
+              wordlist_category: fuzzing
+              suggest:
+                - value: bucket-names.txt
+                  description: Session bucket-name wordlist
+                  feature_required: workspace
+            - value: --debug
+              description: Show debug output
+        gcs:
+          description: Google Cloud Storage bucket enumeration mode
+          examples:
+            - value: gobuster gcs -w bucket-names.txt
+              description: Enumerate GCS bucket names from a session wordlist
+              feature_required: workspace
+          flags:
+            - value: -w
+              description: Bucket-name wordlist path
+              takes_value: true
+              value_type: wordlist
+              wordlist_category: fuzzing
+              suggest:
+                - value: bucket-names.txt
+                  description: Session bucket-name wordlist
+                  feature_required: workspace
+            - value: --debug
+              description: Show debug output
+        tftp:
+          description: TFTP file brute force mode
+          examples:
+            - value: gobuster tftp -s 10.0.0.1 -w filenames.txt
+              description: Enumerate TFTP files from a session wordlist
+              feature_required: workspace
+          flags:
+            - value: -s
+              description: TFTP server address
+              takes_value: true
+              value_hint:
+                placeholder: <host>
+                value_type: host
+                description: TFTP server host or IP
+            - value: -w
+              description: File-name wordlist path
+              takes_value: true
+              value_type: wordlist
+              wordlist_category:
+                - web-content
+                - fuzzing
+              suggest:
+                - value: filenames.txt
+                  description: Session file-name wordlist
+                  feature_required: workspace
+  - root: ffuf
+    category: Network Reconnaissance
+    policy:
+      allow:
+        - ffuf
+      deny:
+        - ffuf -o
+        - ffuf --output
+    workspace_flags:
+      - flag: -w
+        mode: read
+        value: separate
+        format: text
+      - flag: -o
+        mode: write
+        value: separate
+        format: json
+      - flag: --output
+        mode: write
+        value: separate_or_attached
+        format: json
+    autocomplete:
+      examples:
+        - value: ffuf -h
+          description: Show help and usage
+        - value: ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+          description: Directory brute force with common wordlist
+        - value: ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+            -mc 200,301,302
+          description: Filter for successful and redirect responses
+        - value: 'ffuf -u https://FUZZ.ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+            -H "Host: FUZZ.ip.darklab.sh"'
+          description: Virtual host brute force with Host header injection
+        - value: ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -o ffuf-results.json
+          description: Save fuzzing results as JSON in session files
+          feature_required: workspace
+      flags:
+        - value: -h
+          description: Show help and usage
+          takes_value: true
+          closes: true
+        - value: -u
+          description: Target URL with FUZZ marker
+          takes_value: true
+          value_hint:
+            placeholder: <url-with-FUZZ>
+            value_type: url
+            description: Target URL including FUZZ
+        - value: -w
+          description: Wordlist path
+          takes_value: true
+          value_type: wordlist
+          wordlist_category:
+            - web-content
+            - api
+            - fuzzing
+            - dns
+          suggest:
+            - value: /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+              description: Common web-content wordlist
+        - value: -mc
+          description: Match status codes
+          takes_value: true
+        - value: -fc
+          description: Filter status codes
+          takes_value: true
+        - value: -H
+          description: Add request header
+          takes_value: true
+        - value: -t
+          description: Concurrent threads
+          takes_value: true
+        - value: -o
+          description: Write JSON results to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: ffuf-results.json
+              description: Save machine-readable fuzzing results
+      arguments:
+        - placeholder: <target-url>
+          value_type: url
+          description: Usually provided through -u
+  - root: naabu
+    category: Network Reconnaissance
+    policy:
+      allow:
+        - naabu
+      deny:
+        - naabu -o
+        - naabu --output
+        - naabu -l
+        - naabu --list
+        - naabu -list
+        - naabu -exclude-file
+        - naabu -ef
+        - naabu -ports-file
+        - naabu -pf
+    workspace_flags:
+      - flag: -l
+        mode: read
+        value: separate
+        format: text
+      - flag: --list
+        mode: read
+        value: separate
+        format: text
+      - flag: -list
+        mode: read
+        value: separate
+        format: text
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
+      - flag: --output
+        mode: write
+        value: separate_or_attached
+        format: text
+      - flag: -exclude-file
+        mode: read
+        value: separate
+        format: text
+      - flag: -ef
+        mode: read
+        value: separate
+        format: text
+      - flag: -ports-file
+        mode: read
+        value: separate
+        format: text
+      - flag: -pf
+        mode: read
+        value: separate
+        format: text
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - -scan-type
+            - c
+          position: prepend
+          unless_any:
+            - -scan-type
+            - -st
+        - flags:
+            - env
+            - XDG_CONFIG_HOME={session_workspace}
+          position: command_prefix
+          requires_workspace: true
+    autocomplete:
+      examples:
+        - value: naabu -help
+          description: Show help and usage
+        - value: naabu -host ip.darklab.sh -p 80,443
+          description: Scan web ports on a host
+        - value: naabu -host ip.darklab.sh -silent
+          description: Scan with minimal output
+        - value: naabu -l targets.txt -p 80,443 -o naabu-results.txt
+          description: Scan hosts from a session file and save open ports
+          feature_required: workspace
+        - value: naabu -l targets.txt -pf ports.txt -o naabu-results.txt
+          description: Scan hosts with ports loaded from a session file
+          feature_required: workspace
+      flags:
+        - value: -help
+          description: Show help and usage
+          closes: true
+        - value: -host
+          description: Target host or IP
+          takes_value: true
+          value_hint:
+            placeholder: <host>
+            value_type: domain
+            description: Target hostname or IP address
+        - value: -p
+          description: Ports or port ranges to scan
+          takes_value: true
+          suggest:
+            - value: 80,443
+              description: Common web ports
+            - value: 1-1000
+              description: First thousand ports
+            - value: '-'
+              description: All 65535 ports
+        - value: -rate
+          description: Packets per second rate limit
+          takes_value: true
+          suggest:
+            - value: '100'
+              description: Conservative rate limit
+            - value: '500'
+              description: Moderate rate limit
+        - value: -silent
+          description: Minimal output
+        - value: -v
+          description: Verbose output
+        - value: -l
+          description: File with hosts to scan
+          takes_value: true
+          feature_required: workspace
+          value_hint:
+            placeholder: <host-file>
+            value_type: host
+            description: Session file containing one host/IP per line
+          suggest:
+            - value: targets.txt
+              description: Session file containing one host per line
+        - value: -o
+          description: Write results to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: naabu-results.txt
+              description: Save open-port results
+        - value: -exclude-ports
+          description: Ports to exclude from scan
+          takes_value: true
+        - value: -ports-file
+          description: Read ports to scan from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: ports.txt
+              description: Session port list
+        - value: -pf
+          description: Read ports to scan from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: ports.txt
+              description: Session port list
+        - value: -exclude-file
+          description: Read hosts to exclude from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: excluded-hosts.txt
+              description: Session exclude list
+        - value: -ef
+          description: Read hosts to exclude from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: excluded-hosts.txt
+              description: Session exclude list
+      arguments:
+        - placeholder: <target>
+          value_type: domain
+          description: Usually provided through -host
+  - root: katana
+    category: Network Reconnaissance
+    policy:
+      allow:
+        - katana
+      deny:
+        - katana -o
+        - katana --output
+        - katana -list
+        - katana -config
+        - katana -fc
+        - katana -flc
+        - katana -elog
+        - katana -srd
+        - katana -store-response-dir
+        - katana -sfd
+        - katana -store-field-dir
+    workspace_flags:
+      - flag: -list
+        mode: read
+        value: separate
+        format: text
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
+      - flag: --output
+        mode: write
+        value: separate_or_attached
+        format: text
+      - flag: -config
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -fc
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -flc
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -elog
+        mode: write
+        value: separate
+        format: text
+      - flag: -srd
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -store-response-dir
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -sfd
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -store-field-dir
+        mode: write
+        value: separate
+        kind: directory
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - env
+            - XDG_CONFIG_HOME={session_workspace}
+          position: command_prefix
+          requires_workspace: true
+    autocomplete:
+      examples:
+        - value: katana -help
+          description: Show help and usage
+        - value: katana -u https://ip.darklab.sh -d 1 -silent
+          description: Shallow crawl with minimal output
+        - value: katana -u https://ip.darklab.sh -d 1 -silent -o crawled-urls.txt
+          description: Shallow crawl and save discovered URLs to a session file
+          feature_required: workspace
+        - value: katana -list urls.txt -d 1 -silent -o katana-urls.txt
+          description: Crawl URLs from a session file and save discovered URLs
+          feature_required: workspace
+        - value: katana -u https://ip.darklab.sh -sr -srd katana-responses
+          description: Store crawled HTTP requests and responses in a session directory
+          feature_required: workspace
+        - value: katana -u https://ip.darklab.sh -sf fqdn -sfd katana-fields
+          description: Store extracted fields in a session directory
+          feature_required: workspace
+      flags:
+        - value: -help
+          description: Show help and usage
+          closes: true
+        - value: -u
+          description: Single target URL to crawl
+          takes_value: true
+          value_hint:
+            placeholder: <url>
+            value_type: url
+            description: Target URL to start crawling from
+          suggest:
+            - value: https://
+              description: Target URL to start crawling from
+        - value: -d
+          description: Maximum crawl depth
+          takes_value: true
+          suggest:
+            - value: '2'
+              description: Shallow crawl depth
+            - value: '3'
+              description: Moderate crawl depth
+            - value: '5'
+              description: Deep crawl
+        - value: -jc
+          description: Enable JavaScript parsing and crawling
+        - value: -kf
+          description: Crawl known files (robots.txt, sitemap.xml, etc.)
+          suggest:
+            - value: all
+              description: All known file types
+        - value: -ef
+          description: Exclude file extensions
+          takes_value: true
+        - value: -ct
+          description: Concurrency level
+          takes_value: true
+        - value: -timeout
+          description: Request timeout in seconds
+          takes_value: true
+        - value: -silent
+          description: Suppress banner and output headers
+        - value: -config
+          description: Read katana config from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: katana-config.yaml
+              description: Session katana config file
+        - value: -fc
+          description: Read form-fill config from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: katana-form-config.yaml
+              description: Session katana form config file
+        - value: -flc
+          description: Read field extraction config from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: katana-field-config.yaml
+              description: Session katana field config file
+        - value: -elog
+          description: Write request error log to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: katana-errors.log
+              description: Save katana request errors
+        - value: -sr
+          description: Store HTTP requests and responses
+        - value: -srd
+          description: Store HTTP requests and responses in a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: katana-responses
+              description: Store crawled request/response files
+        - value: -store-response-dir
+          description: Store HTTP requests and responses in a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: katana-responses
+              description: Store crawled request/response files
+        - value: -sf
+          description: Store selected fields per host
+          takes_value: true
+          suggest:
+            - value: fqdn
+              description: Store discovered FQDNs
+            - value: url,path,key
+              description: Store URLs, paths, and parameter keys
+        - value: -sfd
+          description: Store extracted fields in a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: katana-fields
+              description: Store field extraction files
+        - value: -store-field-dir
+          description: Store extracted fields in a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: katana-fields
+              description: Store field extraction files
+        - value: -list
+          description: File with URLs to crawl
+          takes_value: true
+          feature_required: workspace
+          value_hint:
+            placeholder: <url-file>
+            value_type: url
+            description: Session file containing seed URLs
+          suggest:
+            - value: urls.txt
+              description: Session file containing seed URLs
+        - value: -o
+          description: Write crawl results to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: katana-urls.txt
+              description: Save crawled URLs
+      arguments:
+        - placeholder: <target>
+          value_type: url
+          description: Usually provided through -u
+  - root: wafw00f
+    category: Network Reconnaissance
+    policy:
+      allow:
+        - wafw00f
+      deny:
+        - wafw00f -o
+        - wafw00f --output
+        - wafw00f -i
+        - wafw00f --input-file
+        - wafw00f localhost
+        - wafw00f 127.0.0.1
+        - wafw00f 0.0.0.0
+    workspace_flags:
+      - flag: -i
+        mode: read
+        value: separate
+        format: text
+      - flag: --input-file
+        mode: read
+        value: separate_or_attached
+        format: text
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
+      - flag: --output
+        mode: write
+        value: separate_or_attached
+        format: text
+    autocomplete:
+      examples:
+        - value: wafw00f --help
+          description: Show help and usage
+        - value: wafw00f https://darklab.sh
+          description: Check darklab.sh for a WAF
+        - value: wafw00f -i urls.txt -o wafw00f-results.txt
+          description: Check URLs from a session file and save WAF results
+          feature_required: workspace
+      flags:
+        - value: --help
+          description: Show help and usage
+          closes: true
+        - value: -a
+          description: Find all matching WAFs (do not stop at first)
+        - value: -v
+          description: Verbose output
+        - value: -r
+          description: Disable automatic redirect following
+        - value: -t
+          description: Test for a specific WAF product
+          takes_value: true
+          value_hint:
+            placeholder: <waf-name>
+            description: Specific WAF to test for (e.g. Cloudflare)
+        - value: -i
+          description: Read URLs from a session file
+          takes_value: true
+          feature_required: workspace
+          value_hint:
+            placeholder: <url-file>
+            value_type: url
+            description: Session file containing one URL per line
+          suggest:
+            - value: urls.txt
+              description: Session file containing one URL per line
+        - value: --input-file
+          description: Read URLs from a session file
+          takes_value: true
+          feature_required: workspace
+          value_hint:
+            placeholder: <url-file>
+            value_type: url
+            description: Session file containing one URL per line
+          suggest:
+            - value: urls.txt
+              description: Session file containing one URL per line
+        - value: -o
+          description: Write WAF results to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: wafw00f-results.txt
+              description: Save WAF fingerprint results
+        - value: --output
+          description: Write WAF results to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: wafw00f-results.txt
+              description: Save WAF fingerprint results
+      arguments:
+        - placeholder: <url>
+          value_type: url
+          description: Target URL to fingerprint
+  - root: masscan
+    category: Vulnerability Scanning
+    policy:
+      allow:
+        - masscan
+      deny:
+        - masscan -oX
+        - masscan -oJ
+        - masscan -oG
+        - masscan -oB
+        - masscan -oL
+        - masscan -iL
+        - masscan --output-format
+        - masscan --output-filename
+        - masscan localhost
+        - masscan 127.0.0.1
+        - masscan 0.0.0.0
+    workspace_flags:
+      - flag: -iL
+        mode: read
+        value: separate
+        format: text
+      - flag: -oX
+        mode: write
+        value: separate_or_attached
+        format: xml
+      - flag: -oJ
+        mode: write
+        value: separate_or_attached
+        format: json
+      - flag: -oG
+        mode: write
+        value: separate_or_attached
+        format: text
+      - flag: -oB
+        mode: write
+        value: separate_or_attached
+        format: text
+      - flag: -oL
+        mode: write
+        value: separate_or_attached
+        format: text
+      - flag: --output-filename
+        mode: write
+        value: separate_or_attached
+        format: text
+    autocomplete:
+      examples:
+        - value: masscan --help
+          description: Show help and usage
+        - value: masscan -p 80,443 8.8.8.8
+          description: Fast scan of web ports
+        - value: masscan -p 80,443 -iL targets.txt -oL masscan-results.txt
+          description: Scan targets from a session file and save list output
+          feature_required: workspace
+      flags:
+        - value: --help
+          description: Show help and usage
+          closes: true
+        - value: -p
+          description: Ports or port ranges to scan
+          takes_value: true
+          suggest:
+            - value: 80,443
+              description: Common web ports
+            - value: 1-1000
+              description: First thousand ports
+            - value: 1-65535
+              description: Full port range
+        - value: --rate
+          description: Transmit rate in packets per second
+          takes_value: true
+          suggest:
+            - value: '500'
+              description: Conservative rate
+            - value: '1000'
+              description: Moderate rate
+        - value: --banner
+          description: Capture service banners
+        - value: --exclude
+          description: Exclude a host or range from scanning
+          takes_value: true
+        - value: -iL
+          description: Read targets from a session file
+          takes_value: true
+          feature_required: workspace
+          value_hint:
+            placeholder: <target-file>
+            value_type: target
+            description: Session file containing one IP/CIDR target per line
+          suggest:
+            - value: targets.txt
+              description: Session file containing one target per line
+        - value: -oL
+          description: Write list output to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: masscan-results.txt
+              description: Save list scan results
+        - value: -oX
+          description: Write XML output to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: masscan-results.xml
+              description: Save XML scan results
+        - value: -oJ
+          description: Write JSON output to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: masscan-results.json
+              description: Save JSON scan results
+        - value: --output-filename
+          description: Write scan output to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: masscan-results.txt
+              description: Save scan results
+      arguments:
+        - placeholder: <target>
+          value_type: cidr
+          description: IP address or CIDR range
+  - root: rustscan
+    category: Vulnerability Scanning
+    policy:
+      allow:
+        - rustscan
+      deny:
+        - rustscan -a localhost
+        - rustscan -a 127.0.0.1
+        - rustscan -a 0.0.0.0
+    autocomplete:
+      examples:
+        - value: rustscan --help
+          description: Show help and usage
+        - value: rustscan -a ip.darklab.sh -p 80,443
+          description: Scan specific ports on a host
+      flags:
+        - value: --help
+          description: Show help and usage
+          closes: true
+        - value: -a
+          description: Target address or IP
+          takes_value: true
+          value_hint:
+            placeholder: <host>
+            value_type: domain
+            description: Target hostname or IP address
+        - value: -p
+          description: Specific ports to scan
+          takes_value: true
+          suggest:
+            - value: 80,443
+              description: Common web ports
+        - value: --range
+          description: Port range to scan
+          takes_value: true
+          suggest:
+            - value: 1-1000
+              description: First thousand ports
+            - value: 1-65535
+              description: Full port range
+        - value: -b
+          description: Batch size (ports scanned simultaneously)
+          takes_value: true
+          suggest:
+            - value: '500'
+              description: Conservative batch size
+        - value: --ulimit
+          description: File descriptor ulimit override
+          takes_value: true
+        - value: -t
+          description: Timeout per port in milliseconds
+          takes_value: true
+          suggest:
+            - value: '1500'
+              description: 1.5 second per-port timeout
+      arguments:
+        - placeholder: <target>
+          value_type: domain
+          description: Usually provided through -a
+  - root: nmap
+    category: Vulnerability Scanning
+    policy:
+      allow:
+        - nmap
+      deny:
+        - nmap -sS
+        - nmap --privileged
+        - nmap -oN
+        - nmap -oX
+        - nmap -oG
+        - nmap -oA
+        - nmap -oS
+        - nmap --output
+        - nmap -iL
+        - nmap --script-args-file
+    workspace_flags:
+      - flag: -iL
+        mode: read
+        value: separate
+        format: text
+      - flag: -oN
+        mode: write
+        value: separate_or_attached
+        format: text
+      - flag: -oX
+        mode: write
+        value: separate_or_attached
+        format: xml
+      - flag: -oG
+        mode: write
+        value: separate_or_attached
+        format: text
+      - flag: --script-args-file
+        mode: read
+        value: separate_or_attached
+        format: text
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - -sT
+          position: prepend
+          unless_any:
+            - -h
+            - --help
+            - -V
+            - --version
+          unless_any_regex:
+            - "^-s[AFILMNOSTUWXYZn]"
+    autocomplete:
+      examples:
+        - value: nmap -h
+          description: Show help and usage
+        - value: nmap -sT -sV -p 80,443 ip.darklab.sh
+          description: TCP connect scan with service version detection on web ports
+        - value: nmap -sT -A -T4 ip.darklab.sh
+          description: Aggressive TCP connect scan with service and script detection
+        - value: nmap -sT -Pn --top-ports 100 ip.darklab.sh
+          description: Top 100 ports, skip host discovery
+        - value: nmap -sT -iL targets.txt -p 80,443 --open -oN nmap-web.txt
+          description: Scan targets from a session file and save normal output
+          feature_required: workspace
+        - value: nmap --script http-headers --script-args-file nmap-script-args.txt ip.darklab.sh
+          description: Run an NSE script with arguments loaded from a session file
+          feature_required: workspace
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: -sT
+          description: TCP connect scan
+        - value: -sV
+          description: Service/version detection
+        - value: -Pn
+          description: Skip host discovery
+        - value: -p
+          description: Ports to scan
+          takes_value: true
+          suggest:
+            - placeholder: <ports>
+              description: Comma-separated ports or ranges
+            - value: 80,443
+              description: Common web ports
+            - value: 1-1000
+              description: First thousand TCP ports
+        - value: --script
+          description: Run NSE script or script category
+          takes_value: true
+          suggest:
+            - value: http-headers
+              description: Fetch HTTP response headers
+            - value: http-title
+              description: Fetch HTTP page title
+            - value: ssl-cert
+              description: Inspect the TLS certificate
+            - value: ssl-enum-ciphers
+              description: Enumerate supported TLS ciphers
+            - value: vuln
+              description: Run vulnerability-focused scripts
+        - value: --top-ports
+          description: Scan common ports
+          takes_value: true
+          suggest:
+            - placeholder: <number>
+              description: Number of top ports to scan
+            - value: '100'
+              description: Top hundred ports
+            - value: '1000'
+              description: Top thousand ports
+        - value: -T4
+          description: Faster timing template
+        - value: -A
+          description: Aggressive detection bundle
+        - value: -n
+          description: Do not resolve DNS names
+        - value: -vv
+          description: More verbose output
+        - value: -iL
+          description: Read targets from a session file
+          takes_value: true
+          feature_required: workspace
+          value_hint:
+            placeholder: <target-file>
+            value_type: target
+            description: Session file containing one host/IP/CIDR per line
+          suggest:
+            - value: targets.txt
+              description: Session file containing one target per line
+        - value: -oN
+          description: Write normal output to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nmap-web.txt
+              description: Save scan output for the Files panel
+        - value: -oX
+          description: Write XML output to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nmap-web.xml
+              description: Save XML scan output
+        - value: --script-args-file
+          description: Read NSE script arguments from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nmap-script-args.txt
+              description: Session file containing NSE script arguments
+      arguments:
+        - placeholder: <target>
+          value_type: domain
+          description: Hostname, IP, or CIDR
+  - root: testssl
+    category: Vulnerability Scanning
+    policy:
+      allow:
+        - testssl
+      deny:
+        - testssl --logfile
+        - testssl --jsonfile
+        - testssl --csvfile
+        - testssl --htmlfile
+        - testssl -oJ
+        - testssl -oA
+        - testssl -oj
+        - testssl -oC
+    workspace_flags:
+      - flag: --logfile
+        mode: write
+        value: separate_or_attached
+        format: text
+      - flag: --jsonfile
+        mode: write
+        value: separate_or_attached
+        format: json
+      - flag: --csvfile
+        mode: write
+        value: separate_or_attached
+        format: text
+      - flag: --htmlfile
+        mode: write
+        value: separate_or_attached
+        format: html
+      - flag: -oJ
+        mode: write
+        value: separate_or_attached
+        format: json
+      - flag: -oA
+        mode: write
+        value: separate_or_attached
+        format: text
+      - flag: -oj
+        mode: write
+        value: separate_or_attached
+        format: json
+      - flag: -oC
+        mode: write
+        value: separate_or_attached
+        format: text
+    autocomplete:
+      examples:
+        - value: testssl --help
+          description: Show help and usage
+        - value: testssl --fast https://ip.darklab.sh
+          description: Quick, lightweight TLS scan
+        - value: testssl --severity HIGH https://ip.darklab.sh
+          description: Report only high-severity findings
+        - value: testssl --heartbleed https://ip.darklab.sh
+          description: Check for the Heartbleed vulnerability
+        - value: testssl --fast --jsonfile testssl-results.json https://ip.darklab.sh
+          description: Save testssl JSON findings to a session file
+          feature_required: workspace
+      flags:
+        - value: --help
+          description: Show help and usage
+          closes: true
+        - value: --fast
+          description: Faster, lighter scan profile
+        - value: --severity
+          description: Restrict findings by severity
+          takes_value: true
+          suggest:
+            - value: HIGH
+              description: High-severity findings only
+            - value: LOW
+              description: Low-severity findings only
+        - value: --full
+          description: Full test suite
+        - value: --sneaky
+          description: Slower, quieter checks
+        - value: -p
+          description: Protocol checks only
+        - value: --heartbleed
+          description: Check for Heartbleed
+        - value: --poodle
+          description: Check for POODLE
+        - value: --beast
+          description: Check for BEAST
+        - value: --logfile
+          description: Write text log output to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: testssl-results.txt
+              description: Save text TLS findings
+        - value: --jsonfile
+          description: Write JSON output to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: testssl-results.json
+              description: Save JSON TLS findings
+        - value: --csvfile
+          description: Write CSV output to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: testssl-results.csv
+              description: Save CSV TLS findings
+        - value: --htmlfile
+          description: Write HTML output to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: testssl-results.html
+              description: Save HTML TLS findings
+      arguments:
+        - placeholder: <url>
+          value_type: url
+          description: HTTPS target URL
+  - root: nikto
+    category: Vulnerability Scanning
+    policy:
+      allow:
+        - nikto
+      deny:
+        - nikto -o
+        - nikto --output
+        - nikto -Save
+    workspace_flags:
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
+      - flag: --output
+        mode: write
+        value: separate_or_attached
+        format: text
+    autocomplete:
+      examples:
+        - value: nikto -h ip.darklab.sh -p 443 -ssl
+          description: Scan HTTPS target on port 443
+        - value: nikto -h ip.darklab.sh -Tuning 1
+          description: Scan for interesting files only
+        - value: nikto -h ip.darklab.sh -maxtime 120
+          description: Time-limited scan of two minutes
+        - value: nikto -h ip.darklab.sh -p 443 -ssl -o nikto-results.txt
+          description: Save Nikto findings to a session file
+          feature_required: workspace
+      flags:
+        - value: -h
+          description: Target host or URL
+          takes_value: true
+          value_hint:
+            placeholder: <host>
+            value_type: domain
+            description: Target host, hostname, or URL
+        - value: -p
+          description: Target port
+          takes_value: true
+          suggest:
+            - value: '443'
+              description: Common HTTPS port
+            - value: '8080'
+              description: Common alternate HTTP port
+        - value: -ssl
+          description: Force SSL mode
+        - value: -Tuning
+          description: Select tuning category set
+          takes_value: true
+          suggest:
+            - value: '1'
+              description: Interesting file checks
+            - value: '4'
+              description: Injection checks
+        - value: -maxtime
+          description: Maximum scan duration
+          takes_value: true
+        - value: -o
+          description: Write findings to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nikto-results.txt
+              description: Save Nikto findings
+        - value: --output
+          description: Write findings to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nikto-results.txt
+              description: Save Nikto findings
+  - root: wpscan
+    category: Vulnerability Scanning
+    policy:
+      allow:
+        - wpscan
+      deny:
+        - wpscan -o
+        - wpscan --output
+    workspace_flags:
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
+      - flag: --output
+        mode: write
+        value: separate_or_attached
+        format: text
+    autocomplete:
+      examples:
+        - value: wpscan -h
+          description: Show help and usage
+        - value: wpscan --url https://ip.darklab.sh --enumerate vp
+          description: Enumerate vulnerable plugins
+        - value: wpscan --url https://ip.darklab.sh --enumerate u
+          description: Enumerate WordPress users
+        - value: wpscan --url https://ip.darklab.sh --detection-mode aggressive
+          description: Aggressive detection mode
+        - value: wpscan --url https://ip.darklab.sh --enumerate vp -o wpscan-results.txt
+          description: Save WPScan output to a session file
+          feature_required: workspace
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: --url
+          description: Target WordPress URL
+          takes_value: true
+          value_hint:
+            placeholder: <url>
+            value_type: url
+            description: Target WordPress URL
+          suggest:
+            - value: https://
+              description: Target WordPress URL
+        - value: --enumerate
+          description: Enumerate selected object types
+          takes_value: true
+          suggest:
+            - value: p
+              description: Enumerate plugins
+            - value: u
+              description: Enumerate users
+            - value: t
+              description: Enumerate themes
+            - value: vp
+              description: Enumerate vulnerable plugins
+            - value: ap
+              description: Enumerate all plugins
+        - value: --detection-mode
+          description: Detection mode strategy
+          takes_value: true
+          suggest:
+            - value: aggressive
+              description: Aggressive detection mode
+        - value: --force
+          description: Scan even if WordPress is not detected
+        - value: -o
+          description: Write output to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: wpscan-results.txt
+              description: Save WPScan output
+        - value: --output
+          description: Write output to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: wpscan-results.txt
+              description: Save WPScan output
+  - root: nuclei
+    category: Vulnerability Scanning
+    policy:
+      allow:
+        - nuclei
+      deny:
+        - nuclei -o
+        - nuclei --output
+        - nuclei -me
+        - nuclei -srd
+        - nuclei -store-resp-dir
+        - nuclei -se
+        - nuclei -sarif-export
+        - nuclei -je
+        - nuclei -json-export
+        - nuclei -jle
+        - nuclei -jsonl-export
+        - nuclei -rdb
+        - nuclei -report-db
+        - nuclei -tlog
+        - nuclei -trace-log
+        - nuclei -elog
+        - nuclei -error-log
+        - nuclei -config
+        - nuclei -rc
+        - nuclei -report-config
+        - nuclei -sf
+        - nuclei -secret-file
+        - nuclei -resume
+    workspace_flags:
+      - flag: -l
+        mode: read
+        value: separate
+        format: text
+      - flag: -o
+        mode: write
+        value: separate
+        format: text
+      - flag: --output
+        mode: write
+        value: separate_or_attached
+        format: text
+      - flag: -srd
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -store-resp-dir
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -me
+        mode: write
+        value: separate
+        kind: directory
+      - flag: -se
+        mode: write
+        value: separate
+        format: sarif
+      - flag: -sarif-export
+        mode: write
+        value: separate
+        format: sarif
+      - flag: -je
+        mode: write
+        value: separate
+        format: json
+      - flag: -json-export
+        mode: write
+        value: separate
+        format: json
+      - flag: -jle
+        mode: write
+        value: separate
+        format: jsonl
+      - flag: -jsonl-export
+        mode: write
+        value: separate
+        format: jsonl
+      - flag: -rdb
+        mode: write
+        value: separate
+      - flag: -report-db
+        mode: write
+        value: separate
+      - flag: -tlog
+        mode: write
+        value: separate
+        format: text
+      - flag: -trace-log
+        mode: write
+        value: separate
+        format: text
+      - flag: -elog
+        mode: write
+        value: separate
+        format: text
+      - flag: -error-log
+        mode: write
+        value: separate
+        format: text
+      - flag: -config
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -rc
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -report-config
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -sf
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -secret-file
+        mode: read
+        value: separate
+        format: yaml
+      - flag: -resume
+        mode: read
+        value: separate
+    runtime_adaptations:
+      inject_flags:
+        - flags:
+            - -ud
+            - /tmp/nuclei-templates
+          position: prepend
+          unless_any:
+            - -ud
+        - flags:
+            - env
+            - XDG_CONFIG_HOME={session_workspace}
+          position: command_prefix
+          requires_workspace: true
+    autocomplete:
+      examples:
+        - value: nuclei -h
+          description: Show help and usage
+        - value: nuclei -u https://ip.darklab.sh -t http/
+          description: Run HTTP detection templates
+        - value: nuclei -u https://ip.darklab.sh -severity high,critical
+          description: Run only high and critical severity templates
+        - value: nuclei -u https://ip.darklab.sh -t ssl/
+          description: Run TLS/SSL detection templates
+        - value: nuclei -l urls.txt -severity high,critical -o nuclei-findings.txt
+          description: Scan URLs from a session file and save findings
+          feature_required: workspace
+        - value: nuclei -u https://ip.darklab.sh -sresp -srd nuclei-responses
+          description: Store raw request/response evidence in a session directory
+          feature_required: workspace
+        - value: nuclei -u https://ip.darklab.sh -me nuclei-markdown
+          description: Export findings as Markdown files in a session directory
+          feature_required: workspace
+      flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
+        - value: -u
+          description: Single target URL
+          takes_value: true
+          value_hint:
+            placeholder: <url>
+            value_type: url
+            description: Target URL to scan
+        - value: -l
+          description: File with targets
+          takes_value: true
+          feature_required: workspace
+          value_hint:
+            placeholder: <target-file>
+            value_type: target
+            description: Session file containing one URL or host per line
+          suggest:
+            - value: urls.txt
+              description: Session file containing one URL per line
+        - value: -t
+          description: Template or template directory
+          takes_value: true
+        - value: -severity
+          description: Filter by severity
+          takes_value: true
+          suggest:
+            - value: low,medium,high,critical
+              description: Comma-separated severities
+        - value: -tags
+          description: Filter by tags
+          takes_value: true
+        - value: -rl
+          description: Rate limit requests
+          takes_value: true
+        - value: -o
+          description: Write findings to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-findings.txt
+              description: Save nuclei findings
+        - value: -sresp
+          description: Store raw request/response evidence
+        - value: -srd
+          description: Store raw request/response evidence in a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-responses
+              description: Store request/response evidence
+        - value: -store-resp-dir
+          description: Store raw request/response evidence in a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-responses
+              description: Store request/response evidence
+        - value: -me
+          description: Export Markdown findings to a session directory
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-markdown
+              description: Save Markdown finding reports
+        - value: -se
+          description: Export SARIF findings to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-results.sarif
+              description: Save SARIF findings
+        - value: -je
+          description: Export JSON findings to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-results.json
+              description: Save JSON findings
+        - value: -jle
+          description: Export JSONL findings to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-results.jsonl
+              description: Save JSONL findings
+        - value: -tlog
+          description: Write request trace log to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-trace.log
+              description: Save nuclei trace log
+        - value: -elog
+          description: Write request error log to a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-errors.log
+              description: Save nuclei error log
+        - value: -config
+          description: Read nuclei config from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-config.yaml
+              description: Session nuclei config file
+        - value: -rc
+          description: Read report integration config from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-report-config.yaml
+              description: Session nuclei report config file
+        - value: -sf
+          description: Read authenticated-scan secrets from a session file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-secrets.yaml
+              description: Session nuclei secrets file
+        - value: -resume
+          description: Resume from a session resume file
+          takes_value: true
+          feature_required: workspace
+          suggest:
+            - value: nuclei-resume.cfg
+              description: Session nuclei resume file
+      arguments:
+        - placeholder: <target>
+          value_type: target
+          description: Usually provided through -u or -l
+pipe_helpers:
+  - root: grep
+    autocomplete:
+      pipe:
+        enabled: true
+        description: Filter lines by pattern
+      flags:
+        - value: -i
+          description: Ignore case
+        - value: -v
+          description: Invert match
+        - value: -E
+          description: Extended regex
+      arguments:
+        - placeholder: <pattern>
+          description: Text or regex to match
+  - root: head
+    autocomplete:
+      pipe:
+        enabled: true
+        description: Show the first lines
+      flags:
+        - value: -n
+          description: Show the first N lines
+          takes_value: true
+          suggest:
+            - value: '5'
+              description: Show the first 5 lines
+            - value: '10'
+              description: Show the first 10 lines
+            - value: '20'
+              description: Show the first 20 lines
+            - value: '50'
+              description: Show the first 50 lines
+  - root: tail
+    autocomplete:
+      pipe:
+        enabled: true
+        description: Show the last lines
+      flags:
+        - value: -n
+          description: Show the last N lines
+          takes_value: true
+          suggest:
+            - value: '5'
+              description: Show the last 5 lines
+            - value: '10'
+              description: Show the last 10 lines
+            - value: '20'
+              description: Show the last 20 lines
+            - value: '50'
+              description: Show the last 50 lines
+  - root: wc
+    autocomplete:
+      pipe:
+        enabled: true
+        description: Count lines
+        insert: wc -l
+        label: wc -l
+      flags:
+        - value: -l
+          description: Count lines
+  - root: sort
+    autocomplete:
+      pipe:
+        enabled: true
+        description: Sort lines
+      flags:
+        - value: -r
+          description: Reverse order
+        - value: -n
+          description: Numeric sort
+        - value: -u
+          description: Remove duplicate lines
+        - value: -rn
+          description: Reverse numeric sort
+        - value: -ru
+          description: Reverse and deduplicate
+        - value: -nu
+          description: Numeric sort and deduplicate
+        - value: -rnu
+          description: Reverse numeric sort and deduplicate
+  - root: uniq
+    autocomplete:
+      pipe:
+        enabled: true
+        description: Remove duplicate lines
+      flags:
+        - value: -c
+          description: Prefix each line with its occurrence count

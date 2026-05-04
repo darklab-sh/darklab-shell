@@ -51,21 +51,13 @@
 }
 
 #mobile-run-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   background: transparent;
   color: var(--green);
   border: 1px solid var(--green-dim);
-  border-radius: 4px;
-  font-family: var(--font-mono);
   font-size: 12px;
   padding: 0 14px;
-  cursor: pointer;
   flex-shrink: 0;
   min-height: 34px;
-  touch-action: manipulation;
-  -webkit-tap-highlight-color: transparent;
 }
 
 #mobile-run-btn:active {
@@ -93,7 +85,7 @@
     position: sticky;
     top: 0;
     z-index: 70;
-    background: var(--bg);
+    background: var(--theme-chrome-bg);
     padding-top: max(0px, env(safe-area-inset-top));
     padding-bottom: 0px;
     min-height: 60px;
@@ -105,7 +97,6 @@
     min-height: 0;
     padding: 5px 12px;
   }
-  .terminal-wordmark { display: none; }
   .history-row {
     background: var(--surface);
     align-items: center;
@@ -119,7 +110,6 @@
   }
   .history-row::-webkit-scrollbar { display: none; }
   .history-label { flex: 0 0 auto; }
-  .terminal-bar-btns { display: none; }
   #hamburger-btn { display: block; }
   #mobile-header-actions { display: none; }
   .hist-chip { max-width: 140px; flex: 0 0 auto; }
@@ -153,33 +143,20 @@
     margin-top: auto;
     z-index: 40;
     padding: 8px 12px env(safe-area-inset-bottom);
-    background: var(--theme-mobile-composer-host-bg);
+    background: transparent;
   }
   body.mobile-terminal-mode #mobile-composer-host {
     padding: 0;
     background: transparent;
-  }
-  body.mobile-terminal-mode #mobile-edit-bar,
-  body.mobile-terminal-mode #mobile-composer-row {
-    margin: 0 0 8px;
   }
   body.mobile-terminal-mode #mobile-composer-row {
     display: flex;
     flex-direction: row;
     align-items: center;
     gap: 10px;
+    margin: 0 0 8px;
     padding: 0;
     position: relative;
-  }
-  body.mobile-terminal-mode #mobile-composer-prefix {
-    display: block;
-    flex: 0 0 auto;
-    color: var(--blue);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0.5px;
-    white-space: nowrap;
-    align-self: center;
   }
   body.mobile-terminal-mode #mobile-shell-composer #mobile-composer {
     display: flex;
@@ -194,8 +171,9 @@
     padding: 6px 10px 0;
     align-items: flex-end;
     gap: 0;
+    background: var(--theme-chrome-bg);
+    border-bottom-color: var(--theme-chrome-divider-color);
   }
-  body.mobile-terminal-mode .terminal-bar .dot,
   body.mobile-terminal-mode .terminal-bar .tabs-scroll-btn {
     display: none;
   }
@@ -207,8 +185,8 @@
      Rounded-top pill tabs with drag grip, active-only close, and inset green
      glow on active. */
   body.mobile-terminal-mode .tabs-bar {
-    background: var(--theme-panel-alt-bg);
-    border-bottom: 1px solid var(--border-bright);
+    background: var(--theme-chrome-bg);
+    border-bottom: 1px solid var(--theme-chrome-divider-color);
     gap: 6px;
     padding: 6px 10px 0;
   }
@@ -241,10 +219,10 @@
   }
   body.mobile-terminal-mode .terminal-bar .tab.active {
     color: var(--green);
-    background: var(--surface);
+    background: var(--theme-tab-active-bg);
     border: 1px solid var(--border-bright);
     border-top: 2px solid color-mix(in srgb, var(--green) 55%, transparent);
-    border-bottom-color: var(--surface);
+    border-bottom-color: var(--theme-tab-active-bg);
     box-shadow: none;
   }
   /* Inactive tabs collapse idle/ok/fail/killed to border-bright so only the
@@ -316,7 +294,7 @@
     z-index: 90;
     padding-left: 10px;
     padding-right: 10px;
-    background: var(--bg);
+    background: var(--theme-chrome-bg);
   }
   body.mobile-terminal-mode #mobile-header-actions {
     display: flex;
@@ -437,7 +415,7 @@
     margin: 0 10px 6px 4px;
     padding: 0 9px 0 8px;
     border-radius: 11px;
-    background: color-mix(in srgb, var(--amber) 12%, var(--theme-panel-alt-bg));
+    background: color-mix(in srgb, var(--amber) 12%, var(--theme-chrome-bg));
     border: 1px solid color-mix(in srgb, var(--amber) 55%, transparent);
     color: var(--amber);
     font-family: var(--font-mono);
@@ -446,7 +424,7 @@
     letter-spacing: 0.3px;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
-    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 1px 6px color-mix(in srgb, var(--theme-panel-shadow) 70%, transparent);
   }
   body.mobile-terminal-mode .mobile-running-chip.u-hidden {
     display: none;
@@ -483,9 +461,7 @@
       transparent);
   }
   body.mobile-terminal-mode .terminal-actions .btn:focus,
-  body.mobile-terminal-mode .terminal-actions .btn:focus-visible,
-  body.mobile-terminal-mode .history-action-btn:focus,
-  body.mobile-terminal-mode .history-action-btn:focus-visible {
+  body.mobile-terminal-mode .terminal-actions .btn:focus-visible {
     outline: none;
     box-shadow: none;
     color: var(--muted);
@@ -493,9 +469,7 @@
     background: transparent;
   }
   body.mobile-terminal-mode .terminal-actions .btn:hover,
-  body.mobile-terminal-mode .terminal-actions .btn:active,
-  body.mobile-terminal-mode .history-action-btn:hover,
-  body.mobile-terminal-mode .history-action-btn:active {
+  body.mobile-terminal-mode .terminal-actions .btn:active {
     color: var(--muted);
     border-color: var(--border-bright);
     background: transparent;
@@ -524,7 +498,7 @@
   }
   body.mobile-terminal-mode .history-actions {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
     margin-top: 8px;
   }
@@ -591,6 +565,12 @@
     font-size: 16px;
     line-height: 1.35;
   }
+  body.mobile-terminal-mode #workspace-path-input,
+  body.mobile-terminal-mode #workspace-text-input,
+  body.mobile-terminal-mode .workspace-folder-form .form-input {
+    font-size: 16px;
+    line-height: 1.35;
+  }
   body.mobile-terminal-mode #theme-modal {
     align-self: stretch;
     width: 100vw;
@@ -607,12 +587,66 @@
      height so max-height on the modal actually constrains it; -webkit-overflow-
      scrolling enables inertia scroll on iOS Safari. */
   body.mobile-terminal-mode .faq-body,
-  body.mobile-terminal-mode .workflows-body {
+  body.mobile-terminal-mode .workflows-body,
+  body.mobile-terminal-mode .workflow-editor-body {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
+  }
+  body.mobile-terminal-mode .workflows-body {
+    gap: 10px;
+    padding: 14px;
+  }
+  body.mobile-terminal-mode .workflow-header-actions {
+    margin-left: auto;
+  }
+  body.mobile-terminal-mode .workflow-editor {
+    min-height: 68svh;
+  }
+  body.mobile-terminal-mode .workflow-editor-footer {
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0));
+  }
+  body.mobile-terminal-mode .workflow-card {
+    padding: 0;
+    overflow: hidden;
+  }
+  body.mobile-terminal-mode .workflow-card-toggle {
+    min-height: 44px;
+    padding: 12px 14px;
+  }
+  body.mobile-terminal-mode .workflow-card-body {
+    margin-top: 0;
+    padding: 0 14px 14px;
+  }
+  body.mobile-terminal-mode .workflow-input-panel {
+    padding: 10px;
+  }
+  body.mobile-terminal-mode .workflow-steps {
+    gap: 12px;
+  }
+  body.mobile-terminal-mode .workflow-step {
+    grid-template-columns: 16px minmax(0, 1fr);
+    column-gap: 6px;
+  }
+  body.mobile-terminal-mode .workflow-step-main {
+    align-items: flex-start;
+    gap: 6px;
+  }
+  body.mobile-terminal-mode .workflow-step-cmd {
+    box-sizing: border-box;
+    display: block;
+    min-width: 0;
+    width: 100%;
+    padding: 6px 8px;
+    border-radius: 6px;
+    white-space: normal;
+    line-height: 1.45;
+    text-align: left;
+  }
+  body.mobile-terminal-mode .workflow-step-run {
+    margin-top: 1px;
   }
   body.mobile-terminal-mode .mobile-sheet-surface::before,
   body.mobile-terminal-mode #theme-modal::before,
@@ -634,11 +668,29 @@
     border-left: none;
     border-right: none;
     border-bottom: none;
-    box-shadow: 0 -4px 32px var(--theme-mobile-menu-shadow);
+    box-shadow: 0 -4px 32px var(--theme-chrome-shadow);
     z-index: 310;
   }
   body.mobile-terminal-mode #history-panel::before {
     display: none;
+  }
+  body.mobile-terminal-mode .history-compare-modal {
+    min-height: 68svh;
+    max-height: 88svh;
+  }
+  body.mobile-terminal-mode .history-compare-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 14px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  body.mobile-terminal-mode .history-compare-run-grid,
+  body.mobile-terminal-mode .history-compare-metrics {
+    grid-template-columns: 1fr;
+  }
+  body.mobile-terminal-mode .history-compare-subtitle {
+    max-width: 74vw;
   }
   body.mobile-terminal-mode .history-panel-header {
     padding: 12px 16px;
@@ -694,6 +746,8 @@
   }
   body.mobile-terminal-mode .history-panel-filters input,
   body.mobile-terminal-mode .history-panel-filters select,
+  body.mobile-terminal-mode .history-panel-filters .app-select,
+  body.mobile-terminal-mode .history-panel-filters .app-select-trigger,
   body.mobile-terminal-mode .history-filter-toggle,
   body.mobile-terminal-mode .history-filter-clear-btn {
     min-height: 40px;
@@ -708,6 +762,14 @@
   body.mobile-terminal-mode .history-filter-toggle,
   body.mobile-terminal-mode .history-filter-clear-btn {
     flex: 1 1 100%;
+  }
+  body.mobile-terminal-mode .options-body .app-select,
+  body.mobile-terminal-mode .options-body .app-select-trigger {
+    width: 100%;
+    font-size: 16px;
+  }
+  body.mobile-terminal-mode .options-body .app-select-trigger {
+    min-height: 44px;
   }
   body.mobile-terminal-mode .history-root-dropdown {
     border-radius: 6px;
@@ -735,7 +797,7 @@
     position: sticky;
     top: 0;
     z-index: 2;
-    background: var(--surface);
+    background: var(--theme-modal-bg);
   }
   body.mobile-terminal-mode .form-check {
     min-height: 44px;
@@ -778,9 +840,21 @@
     min-height: 32px;
     flex: 1 1 100%;
   }
+  body.mobile-terminal-mode .search-signal-summary {
+    display: none;
+  }
   body.mobile-terminal-mode .search-count {
     font-size: 13px;
     flex: 0 0 auto;
+  }
+  body.mobile-terminal-mode .search-scopes {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  body.mobile-terminal-mode .search-scopes .search-scope-btn {
+    min-height: 28px;
+    padding: 0 8px;
+    font-size: 13px;
   }
   body.mobile-terminal-mode .search-nav button {
     min-height: 28px;
@@ -816,66 +890,6 @@
   #mobile-cmd {
     font-size: 16px;
   }
-
-  #mobile-edit-bar {
-    display: none;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 4px;
-    overflow: visible;
-    scrollbar-width: none;
-  }
-
-  body.mobile-keyboard-open #mobile-edit-bar {
-    display: grid;
-  }
-
-  #mobile-edit-bar button {
-    width: 100%;
-    min-width: 0;
-    min-height: 34px;
-    appearance: none;
-    -webkit-appearance: none;
-    background: transparent;
-    border: 1px solid var(--border-bright);
-    color: var(--muted);
-    font-family: var(--font-mono);
-    font-size: 12px;
-    padding: 6px 4px;
-    border-radius: 3px;
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  #mobile-edit-bar button:active {
-    border-color: var(--green-dim);
-    color: var(--text);
-    opacity: 0.7;
-  }
-  @media (hover: hover) {
-    #mobile-edit-bar button:hover {
-      border-color: var(--green-dim);
-      color: var(--text);
-    }
-  }
-
-  #mobile-edit-bar button[data-mobile-edit="left"],
-  #mobile-edit-bar button[data-mobile-edit="right"] {
-    font-size: 25px;
-    font-weight: 700;
-    letter-spacing: 0;
-    line-height: 1;
-    padding-top: 2px;
-    padding-bottom: 2px;
-  }
-
-  #mobile-edit-bar button[data-mobile-edit="word-left"],
-  #mobile-edit-bar button[data-mobile-edit="word-right"] {
-    font-size: 11px;
-  }
-
 
 }
 

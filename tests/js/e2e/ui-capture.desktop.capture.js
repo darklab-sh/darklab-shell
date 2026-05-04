@@ -27,6 +27,8 @@ const freshCaptureHome = (page, opts = {}) => freshHome(page, {
   guardrailMode: 'desktop',
 })
 
+const WORKSPACE_CAPTURE_CMD = 'curl -L -o response.html https://noc.darklab.sh'
+
 async function runLongCaptureCommand(page) {
   await page.locator('#cmd').fill(LONG_RUN_CMD)
   await page.keyboard.press('Enter')
@@ -46,6 +48,44 @@ async function runFastCaptureCommand(page) {
   )
 }
 
+async function prepareStatusMonitorTelemetryScene(page) {
+  let activePollCount = 0
+  await page.unroute('**/history/active').catch(() => {})
+  await page.route('**/history/active', route => {
+    activePollCount += 1
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        runs: [{
+          run_id: 'capture-long-run',
+          pid: 4242,
+          started: new Date(Date.now() - 9000).toISOString(),
+          command: LONG_RUN_CMD,
+          resource_usage: {
+            cpu_seconds: Math.min(12, 4 + activePollCount * 1.4),
+            memory_bytes: 268435456 + activePollCount * 1024 * 1024 * 16,
+            source: 'capture-mock',
+          },
+        }],
+      }),
+    })
+  })
+}
+
+async function waitForStatusMonitorTelemetry(page) {
+  await expect(page.locator('#status-monitor')).toBeVisible()
+  await page.evaluate(async () => {
+    if (typeof window.refreshStatusMonitor === 'function') {
+      await window.refreshStatusMonitor()
+      await new Promise(resolve => window.setTimeout(resolve, 1100))
+      await window.refreshStatusMonitor()
+    }
+  })
+  await expect(page.locator('.status-monitor-meter-cpu').first()).toHaveAttribute('aria-label', /CPU (?!n\/a|collecting)/)
+  await expect(page.locator('.status-monitor-meter-mem').first()).toHaveAttribute('aria-label', /MEM (?!n\/a)/)
+}
+
 async function openScopedWorkflow(page) {
   await waitForWorkflowsReady(page)
   const workflowsClosed = await page.locator('#rail-section-workflows').evaluate((node) =>
@@ -54,6 +94,17 @@ async function openScopedWorkflow(page) {
   if (workflowsClosed) await page.locator('#rail-workflows-header').click()
   await page.locator('#rail-workflows-list .rail-item').first().click()
   await expect(page.locator('#workflows-modal')).toBeVisible()
+}
+
+async function createAndOpenWorkspaceResponseFile(page) {
+  await runCommand(page, WORKSPACE_CAPTURE_CMD)
+  await page.locator('.rail-nav [data-action="workspace"]').click()
+  await expect(page.locator('#workspace-modal')).toBeVisible()
+  const row = page.locator('.workspace-file-row', { hasText: 'response.html' }).first()
+  await expect(row).toBeVisible()
+  await row.locator('[data-workspace-action="view"]').click()
+  await expect(page.locator('#workspace-viewer')).toBeVisible()
+  await expect(page.locator('#workspace-viewer-title')).toHaveText('response.html')
 }
 
 const scenes = [
@@ -246,6 +297,15 @@ const scenes = [
     },
   },
   {
+    slug: 'files-panel-response-file',
+    title: 'Main UI - Files panel with captured response file',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await createAndOpenWorkspaceResponseFile(page)
+    },
+  },
+  {
     slug: 'workflow-modal-example',
     title: 'Main UI - workflow modal example',
     route: '/',
@@ -384,7 +444,7 @@ const scenes = [
       await freshCaptureHome(page, { themeName })
       await seedOutput(page, [
         { text: '$ hostname' },
-        { text: 'darklab-shell' },
+        { text: 'darklab_shell' },
         { text: '[process exited with code 0]', cls: 'exit-ok' },
       ])
       await page.evaluate(() => {
@@ -441,12 +501,27 @@ const scenes = [
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
       await runCommand(page, 'hostname')
-      await waitForHistoryRuns(page, 1)
-      await openHistory(page)
-      await page.locator('.history-entry').first().locator('[data-action="permalink"]').click()
+      await openHistoryWithEntries(page)
+      await page
+        .locator('#history-list .history-entry:not(.history-entry-snapshot)')
+        .first()
+        .locator('[data-action="permalink"]')
+        .click()
       const copied = await page.evaluate(() => window.__clipboardText || '')
       await page.goto(copied, { waitUntil: 'domcontentloaded' })
       await expect(page.locator('body.permalink-page')).toBeVisible()
+    },
+  },
+  {
+    slug: 'status-monitor-active-telemetry',
+    title: 'Main UI - Status Monitor with active telemetry',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await prepareStatusMonitorTelemetryScene(page)
+      await runLongCaptureCommand(page)
+      await page.locator('#hud-status-cell').click()
+      await waitForStatusMonitorTelemetry(page)
     },
   },
   {

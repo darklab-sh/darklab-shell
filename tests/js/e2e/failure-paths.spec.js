@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, openHistoryWithEntries, makeTestIp } from './helpers.js'
+import { runCommand, openHistoryWithEntries, waitForHistoryRuns, makeTestIp } from './helpers.js'
 
 const CMD = 'hostname'
 const TEST_IP = makeTestIp(42)
@@ -22,8 +22,8 @@ test.describe('failure paths', () => {
     await page.locator('#cmd').waitFor()
   })
 
-  test('a 403 /run response renders a denied command message', async ({ page }) => {
-    await page.route('**/run', (route) => {
+  test('a 403 /runs response renders a denied command message', async ({ page }) => {
+    await page.route('**/runs', (route) => {
       route.fulfill({
         status: 403,
         contentType: 'application/json',
@@ -39,8 +39,8 @@ test.describe('failure paths', () => {
     )
   })
 
-  test('a 429 /run response renders a rate limit message', async ({ page }) => {
-    await page.route('**/run', (route) => {
+  test('a 429 /runs response renders a rate limit message', async ({ page }) => {
+    await page.route('**/runs', (route) => {
       route.fulfill({
         status: 429,
         contentType: 'text/plain',
@@ -56,8 +56,8 @@ test.describe('failure paths', () => {
     )
   })
 
-  test('a rejected /run request renders a friendly offline message', async ({ page }) => {
-    await page.route('**/run', (route) => {
+  test('a rejected /runs request renders a friendly offline message', async ({ page }) => {
+    await page.route('**/runs', (route) => {
       route.abort('failed')
     })
 
@@ -65,7 +65,7 @@ test.describe('failure paths', () => {
 
     await expect(page.locator('.status-pill')).toHaveText('IDLE')
     await expect(page.locator('.tab-panel.active .output')).toContainText(
-      '[connection error] Unable to reach the server. Check that it is running and try again.',
+      '[connection error] Unable to contact the server right now. Please try again in a moment. If this keeps happening, contact the shell operator.',
     )
   })
 
@@ -117,7 +117,7 @@ test.describe('failure paths', () => {
     })
 
     await runCommand(page, CMD)
-    await page.waitForTimeout(1200)
+    await waitForHistoryRuns(page, 1)
     await runCommand(page, 'date')
     await page.locator('.rail-nav [data-action="history"]').click()
     await page.locator('#history-list > *').first().waitFor({ state: 'visible' })

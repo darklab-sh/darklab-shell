@@ -4,8 +4,8 @@
 // so the handle behavior cannot drift between sheets.
 //
 // Behavior contract for every bound sheet:
-// - Visual handle: a `:scope > .sheet-grab` element. If the sheet template
-//   doesn't ship one, an aria-hidden one is injected at the top.
+// - Visual handle: a `:scope > .sheet-grab.gesture-handle` element. If the
+//   sheet template doesn't ship one, an aria-hidden one is injected at the top.
 // - Tap: a finger-down + finger-up under `tapMaxMovement` pixels closes.
 // - Drag: pulling the sheet down translates it with the finger; releasing
 //   past `threshold` pixels animates it out and closes; releasing before the
@@ -28,7 +28,7 @@
     let grab = sheet.querySelector(':scope > .sheet-grab');
     if (grab) return grab;
     grab = document.createElement('div');
-    grab.className = 'sheet-grab';
+    grab.className = 'sheet-grab gesture-handle';
     grab.setAttribute('aria-hidden', 'true');
     sheet.insertBefore(grab, sheet.firstChild || null);
     return grab;

@@ -8,7 +8,10 @@
     activeTabId: null,
     acSuggestions: [],
     acContextRegistry: {},
+    acWordlists: [],
     acSpecialCommands: [],
+    acBuiltinCommandRoots: [],
+    sessionVariables: [],
     acFiltered: [],
     acIndex: -1,
     acSuppressInputOnce: false,
@@ -16,6 +19,9 @@
     searchMatchIdx: -1,
     searchCaseSensitive: false,
     searchRegexMode: false,
+    searchScope: 'text',
+    searchDiscoverabilityPrompted: false,
+    searchSignalCounts: null,
     cmdHistory: [],
     recentPreviewHistory: [],
     _cmdHistoryNavIndex: -1,
@@ -53,7 +59,10 @@
     'activeTabId',
     'acSuggestions',
     'acContextRegistry',
+    'acWordlists',
     'acSpecialCommands',
+    'acBuiltinCommandRoots',
+    'sessionVariables',
     'acFiltered',
     'acIndex',
     'acSuppressInputOnce',
@@ -61,6 +70,9 @@
     'searchMatchIdx',
     'searchCaseSensitive',
     'searchRegexMode',
+    'searchScope',
+    'searchDiscoverabilityPrompted',
+    'searchSignalCounts',
     'cmdHistory',
     'recentPreviewHistory',
     '_cmdHistoryNavIndex',
@@ -105,7 +117,6 @@
   }
 
   global.getAppState = () => state;
-  global.resetAppState = () => Object.assign(state, defaults);
   global.getComposerState = () => ({
     value: state._composerValue,
     selectionStart: state._composerSelectionStart,

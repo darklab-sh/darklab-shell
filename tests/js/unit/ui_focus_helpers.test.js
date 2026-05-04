@@ -104,3 +104,41 @@ describe('blurActiveElement', () => {
     expect(document.activeElement).not.toBe(input)
   })
 })
+
+describe('app-native select enhancement', () => {
+  beforeEach(() => {
+    document.body.innerHTML = `
+      <select id="demo-select" class="form-select" aria-label="Demo select">
+        <option value="one">One</option>
+        <option value="two">Two</option>
+      </select>
+    `
+  })
+
+  it('keeps the native select as state while rendering a themed trigger', () => {
+    const g = loadHelpers()
+    const select = document.getElementById('demo-select')
+    const trigger = document.querySelector('.app-select-trigger')
+
+    expect(select.classList.contains('app-select-native')).toBe(true)
+    expect(trigger).not.toBeNull()
+    expect(trigger.textContent).toContain('One')
+
+    select.value = 'two'
+    g.syncAppSelect(select)
+    expect(trigger.textContent).toContain('Two')
+  })
+
+  it('dispatches normal change events when choosing an app-native option', () => {
+    loadHelpers()
+    const select = document.getElementById('demo-select')
+    const onChange = vi.fn()
+    select.addEventListener('change', onChange)
+
+    document.querySelector('.app-select-trigger').click()
+    document.querySelector('.app-select-menu [data-value="two"]').click()
+
+    expect(select.value).toBe('two')
+    expect(onChange).toHaveBeenCalledTimes(1)
+  })
+})

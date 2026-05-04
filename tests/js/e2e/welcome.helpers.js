@@ -45,7 +45,7 @@ export async function setupWelcomePage(page) {
         '|  | |\\/| || (_) | (_) | (_) | (_) | (_) |     |',
         '|  |_|  |_| \\___/ \\___/ \\___/ \\___/ \\___/      |',
         '|                                              |',
-        "'----[ status: ready ]----[ prompt: anon@darklab:~$ ]----'",
+        "'----[ status: ready ]----[ prompt: anon@darklab:~ $ ]----'",
       ].join('\n'),
     })
   })
@@ -67,7 +67,14 @@ export async function setupWelcomePage(page) {
       }),
     })
   })
-  await page.route('**/run', (route) => {
+  await page.route('**/runs', (route) => {
+    route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({ run_id: 'welcome-test-run', stream: '/runs/welcome-test-run/stream' }),
+    })
+  })
+  await page.route('**/runs/welcome-test-run/stream**', (route) => {
     route.fulfill({
       status: 200,
       contentType: 'text/event-stream',

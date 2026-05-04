@@ -130,7 +130,7 @@ test.describe('mobile menu', () => {
     await expect(page.locator('.line.welcome-hint')).toBeVisible({ timeout: 15_000 })
     // Desktop run button stays hidden; the mobile helper row stays hidden until the keyboard opens
     await expect(page.locator('#run-btn')).toBeHidden()
-    await expect(page.locator('#mobile-edit-bar')).toBeHidden()
+    await expect(page.locator('#mobile-kb-helper')).toBeHidden()
     await expect(page.locator('#mobile-composer')).toBeVisible()
     await expect(page.locator('#mobile-shell-transcript')).toBeVisible()
     await expect(
@@ -143,7 +143,7 @@ test.describe('mobile menu', () => {
     expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(MOBILE.height)
   })
 
-  test('mobile edit bar appears when the mobile command input is focused', async ({ page }) => {
+  test('mobile keyboard helper appears when the mobile command input is focused', async ({ page }) => {
     await openMobileKeyboard(page)
     await expect(page.locator('#mobile-kb-helper')).toBeVisible()
   })
@@ -179,11 +179,11 @@ test.describe('mobile menu', () => {
     // scrollHeight — and the poll window expires before the help output fully
     // renders, leaving scrollHeight ≤ clientHeight + 40 for the full 5s.
     await ensurePromptReady(page)
-    await runCommandMobile(page, 'help')
+    await runCommandMobile(page, 'commands')
 
     const output = page.locator('.tab-panel.active .output')
     await expect
-      .poll(async () => output.evaluate((el) => el.scrollHeight > el.clientHeight + 40))
+      .poll(async () => output.evaluate((el) => el.scrollHeight > el.clientHeight))
       .toBe(true)
 
     await page.evaluate(async () => {
@@ -255,6 +255,41 @@ test.describe('mobile menu', () => {
     await expect(input).toHaveValue('nmap -sT')
     await expect(input).toBeFocused()
     await expect(dropdown).toBeHidden()
+  })
+
+  test('mobile autocomplete opens above the keyboard helper row', async ({ page }) => {
+    await ensurePromptReady(page)
+    await openMobileKeyboard(page)
+    await expect(page.locator('#mobile-kb-helper')).toBeVisible()
+    await setComposerValueForTest(page, 'nmap -', { mobile: true })
+
+    const dropdown = page.locator('#ac-dropdown')
+    await expect
+      .poll(async () => ({
+        hidden: await dropdown.evaluate((node) => node.classList.contains('u-hidden')),
+        text: (await dropdown.textContent()) || '',
+      }))
+      .toEqual(
+        expect.objectContaining({
+          hidden: false,
+          text: expect.stringContaining('-sT'),
+        }),
+      )
+
+    const gap = await page.evaluate(() => {
+      const menu = document.getElementById('ac-dropdown')?.getBoundingClientRect()
+      const helper = document.getElementById('mobile-kb-helper')?.getBoundingClientRect()
+      if (!menu || !helper) return null
+      return Math.round(helper.top - menu.bottom)
+    })
+    expect(gap).not.toBeNull()
+    expect(gap).toBeGreaterThanOrEqual(2)
+
+    const rowHeights = await dropdown.locator('.ac-item').evaluateAll((items) =>
+      items.slice(0, 5).map((item) => Math.round(item.getBoundingClientRect().height)),
+    )
+    expect(rowHeights.length).toBeGreaterThanOrEqual(5)
+    expect(Math.max(...rowHeights)).toBeLessThanOrEqual(42)
   })
 
   test('mobile contextual autocomplete shows value hints after accepting a value-taking flag', async ({
@@ -333,7 +368,7 @@ test.describe('mobile menu', () => {
     await page.locator('#new-tab-btn').click()
 
     await expect(page.locator('#mobile-cmd')).not.toBeFocused()
-    await expect(page.locator('#mobile-edit-bar')).toBeHidden()
+    await expect(page.locator('#mobile-kb-helper')).toBeHidden()
     await expect
       .poll(async () => page.evaluate(() => window.scrollY))
       .toBeLessThanOrEqual(startScrollY + 12)
@@ -348,7 +383,7 @@ test.describe('mobile menu', () => {
     await page.locator('.tab').nth(1).locator('.tab-close').click()
 
     await expect(page.locator('#mobile-cmd')).not.toBeFocused()
-    await expect(page.locator('#mobile-edit-bar')).toBeHidden()
+    await expect(page.locator('#mobile-kb-helper')).toBeHidden()
     await expect.poll(async () => page.evaluate(() => window.scrollY)).toBeLessThanOrEqual(12)
   })
 
@@ -386,10 +421,8 @@ test.describe('mobile menu', () => {
 
   test('mobile tabs bar can overflow and scroll horizontally', async ({ page }) => {
     await ensurePromptReady(page)
-    const overflowCmds = ['hostname', 'date', 'uptime', 'whoami', 'version', 'fortune']
     for (let i = 0; i < 6; i++) {
       await page.locator('#new-tab-btn').click()
-      await runCommandMobile(page, overflowCmds[i])
     }
 
     const tabsBar = page.locator('.terminal-bar .tabs-bar')
@@ -436,7 +469,56 @@ test.describe('mobile menu', () => {
     await page.locator('#hamburger-btn').click()
     const menu = page.locator('#mobile-menu-sheet')
     await expect(menu.locator('[data-menu-action="history"]')).toBeVisible()
+    await expect(menu.locator('[data-menu-action="status-monitor"] .menu-item-label')).toHaveText('status')
+    await expect(menu.locator('[data-menu-action="workspace"] .menu-item-label')).toHaveText('files')
     await expect(menu.locator('[data-menu-action="theme"]')).toBeVisible()
+  })
+
+  test('mobile menu opens the idle Status Monitor sheet', async ({ page }) => {
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="status-monitor"]').click()
+
+    await expect(page.locator('#mobile-menu-sheet')).toBeHidden()
+    await expect(page.locator('#status-monitor')).toBeVisible()
+    await expect(page.locator('#status-monitor > .sheet-grab.gesture-handle')).toBeVisible()
+    await expect(page.locator('#status-monitor-title')).toHaveText('Status Monitor')
+    await expect(page.locator('.status-monitor-summary')).toContainText('0 active')
+    await expect(page.locator('.status-monitor-summary')).toContainText('uptime')
+    await expect(page.locator('.status-monitor-close')).toBeHidden()
+  })
+
+  test('mobile Files create inputs use mobile-safe text defaults', async ({ page }) => {
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="workspace"]').click()
+    await expect(page.locator('#workspace-overlay')).toHaveClass(/open/)
+
+    await page.locator('#workspace-new-btn').click()
+    const fileName = page.locator('#workspace-path-input')
+    const fileContents = page.locator('#workspace-text-input')
+    for (const field of [fileName, fileContents]) {
+      await expect(field).toHaveAttribute('autocomplete', 'off')
+      await expect(field).toHaveAttribute('autocapitalize', 'none')
+      await expect(field).toHaveAttribute('autocorrect', 'off')
+      await expect(field).toHaveAttribute('spellcheck', 'false')
+      await expect(field).toHaveAttribute('inputmode', 'text')
+      await expect
+        .poll(async () => field.evaluate((el) => window.getComputedStyle(el).fontSize))
+        .toBe('16px')
+    }
+
+    await page.locator('#workspace-cancel-edit-btn').click()
+    await expect(page.locator('#workspace-editor')).not.toBeVisible()
+
+    await page.locator('#workspace-new-folder-btn').click()
+    const folderName = page.locator('#confirm-host .workspace-folder-form input')
+    await expect(folderName).toHaveAttribute('autocomplete', 'off')
+    await expect(folderName).toHaveAttribute('autocapitalize', 'none')
+    await expect(folderName).toHaveAttribute('autocorrect', 'off')
+    await expect(folderName).toHaveAttribute('spellcheck', 'false')
+    await expect(folderName).toHaveAttribute('inputmode', 'text')
+    await expect
+      .poll(async () => folderName.evaluate((el) => window.getComputedStyle(el).fontSize))
+      .toBe('16px')
   })
 
   test('timestamps menu expands inline and applies the selected mode', async ({ page }) => {
@@ -500,8 +582,8 @@ test.describe('mobile menu', () => {
     await page.locator('#hamburger-btn').click()
     await page.locator('#mobile-menu-sheet [data-menu-action="theme"]').click()
 
-    await page.locator('#theme-select [data-theme-name="blue_paper"]').click()
-    await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
+    await page.locator('#theme-select [data-theme-name="apricot_sand"]').click()
+    await expect(page.locator('body')).toHaveAttribute('data-theme', 'apricot_sand')
 
     const shellColors = await page.evaluate(() => {
       const root = getComputedStyle(document.documentElement)
@@ -513,10 +595,10 @@ test.describe('mobile menu', () => {
       }
     })
 
-    expect(shellColors.bg).toBe('#eef4fa')
-    expect(shellColors.surface).toBe('#fbfdff')
-    expect(shellColors.terminalBar).toBe('#d9e5f1')
-    expect(shellColors.panel).toBe('#edf4fb')
+    expect(shellColors.bg).toBe('#fbf2e8')
+    expect(shellColors.surface).toBe('#fffaf3')
+    expect(shellColors.terminalBar).toBe('#e7d2b9')
+    expect(shellColors.panel).toBe('#f1e3d0')
   })
 
   test('clicking outside the menu closes it', async ({ page }) => {
@@ -601,6 +683,35 @@ test.describe('mobile menu', () => {
     expect(box.height).toBeGreaterThan(viewport.height * 0.5)
   })
 
+  test('workflows sheet starts collapsed and wraps commands inside cards', async ({ page }) => {
+    await page.setViewportSize(MOBILE)
+    await page.goto('/')
+    await page.waitForFunction(() => document.querySelectorAll('#workflows-modal .workflow-card').length > 0)
+
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="workflows"]').click()
+    await expect(page.locator('#workflows-modal')).toBeVisible()
+
+    const cards = page.locator('#workflows-modal .workflow-card')
+    await expect(cards.first()).toHaveClass(/\bis-collapsed\b/)
+    await expect(cards.first().locator('.workflow-step').first()).toBeHidden()
+
+    await cards.first().locator('.workflow-card-toggle').click()
+    await expect(cards.first()).not.toHaveClass(/\bis-collapsed\b/)
+    await expect(cards.first().locator('.workflow-step').first()).toBeVisible()
+
+    await page.locator('#workflows-modal .workflow-card-toggle').evaluateAll(buttons => {
+      buttons.forEach(button => {
+        const card = button.closest('.workflow-card')
+        if (card?.classList.contains('is-collapsed')) button.click()
+      })
+    })
+    const overflowingChipCount = await page
+      .locator('#workflows-modal .workflow-step-cmd')
+      .evaluateAll(chips => chips.filter(chip => chip.scrollWidth > chip.clientWidth + 1).length)
+    expect(overflowingChipCount).toBe(0)
+  })
+
   test('mobile recent peek summarizes recent runs and opens the recents sheet on tap', async ({
     page,
   }) => {
@@ -611,10 +722,10 @@ test.describe('mobile menu', () => {
       'banner chip-overflow-test-4',
     ]
 
-    for (const [index, command] of commands.entries()) {
+    for (const command of commands) {
       await runCommandMobile(page, command)
-      if (index < commands.length - 1) await page.waitForTimeout(250)
     }
+    await waitForHistoryRuns(page, commands.length)
 
     const peek = page.locator('#mobile-recent-peek')
     await expect(peek).toBeVisible()
@@ -630,11 +741,11 @@ test.describe('mobile menu', () => {
   test('mobile recents sheet injects the tapped command into the composer and closes', async ({ page }) => {
     const commands = ['hostname', 'date', 'uptime']
 
-    for (const [index, command] of commands.entries()) {
+    for (const command of commands) {
       await runCommandMobile(page, command)
-      if (index < commands.length - 1) await page.waitForTimeout(250)
     }
     await waitForHistoryRuns(page, commands.length)
+    await expect(page.locator('#mobile-recent-peek')).toHaveAttribute('data-peek-mode', 'recents', { timeout: 5_000 })
 
     await page.locator('#mobile-recent-peek').click()
     await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
@@ -706,12 +817,44 @@ test.describe('mobile menu', () => {
   })
 
   test('mobile run button disables while a command is running', async ({ page }) => {
-    await page.locator('#mobile-cmd').fill(LONG_CMD)
+    let finishRun
+    const releaseRun = new Promise((resolve) => {
+      finishRun = resolve
+    })
+    await page.route('**/runs', async (route) => {
+      const payload = JSON.parse(route.request().postData() || '{}')
+      if (payload.command === LONG_CMD) {
+        await route.fulfill({
+          status: 202,
+          contentType: 'application/json',
+          body: JSON.stringify({ run_id: 'mobile-long-run', stream: '/runs/mobile-long-run/stream' }),
+        })
+        return
+      }
+      await route.continue()
+    })
+    await page.route('**/runs/mobile-long-run/stream**', async (route) => {
+      await releaseRun
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: [
+          'data: {"type":"started","run_id":"mobile-long-run"}\n\n',
+          'data: {"type":"output","text":"mobile long run finished\\n"}\n\n',
+          'data: {"type":"exit","code":0,"elapsed":0.1}\n\n',
+        ].join(''),
+      })
+    })
+
+    await ensurePromptReady(page)
+    await setComposerValueForTest(page, LONG_CMD, { mobile: true })
+    await expect(page.locator('#mobile-run-btn')).toBeEnabled()
     await page.locator('#mobile-run-btn').click()
 
     await expect(page.locator('#mobile-run-btn')).toBeDisabled()
     await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
 
+    finishRun()
     await expect(page.locator('.status-pill').filter({ hasNotText: 'RUNNING' })).toBeVisible({
       timeout: 15_000,
     })
@@ -748,7 +891,9 @@ test.describe('mobile menu', () => {
     await expect(page.evaluate(() => window.__copyFallbackUsed)).resolves.toBe(true)
   })
 
-  test('mobile edit bar moves the caret and deletes a word', async ({ page }) => {
+  test('mobile keyboard helper moves the caret and deletes a word', async ({ page }) => {
+    await ensurePromptReady(page)
+
     // Show the helper row through the real keyboard-state path rather than
     // toggling the CSS class directly, so the event-driven visibility sync in
     // mobile_chrome.js runs exactly the way production does.
@@ -759,28 +904,12 @@ test.describe('mobile menu', () => {
 
     await expect(page.locator('#mobile-kb-helper')).toBeVisible()
 
-    await page.locator('#mobile-cmd').evaluate((el) => {
-      el.value = 'ping -c 4 example.com'
-      el.focus()
-      el.setSelectionRange(el.value.length, el.value.length)
-      el.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-    await page.evaluate(() => {
-      const val = 'ping -c 4 example.com'
-      setComposerState({
-        value: val,
-        selectionStart: val.length,
-        selectionEnd: val.length,
-        activeInput: 'mobile',
-      })
-    })
+    await setComposerValueForTest(page, 'ping -c 4 example.com', { mobile: true })
+    await expect(page.locator('#mobile-cmd')).toBeFocused()
 
-    const fireKbAction = (action) =>
-      page.evaluate((act) => {
-        document
-          .querySelector(`#mobile-kb-helper [data-kb-action="${act}"]`)
-          .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }))
-      }, action)
+    const fireKbAction = async (action) => {
+      await page.locator(`#mobile-kb-helper [data-kb-action="${action}"]`).click()
+    }
 
     await fireKbAction('left')
     await expect

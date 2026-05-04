@@ -25,6 +25,7 @@ const specWeights = {
   'welcome-context.spec.js': 17,
   'mobile.spec.js': 21,
   'share.spec.js': 11,
+  'session-token.spec.js': 7,
   'history.spec.js': 10,
   'timestamps.spec.js': 10,
   'tabs.spec.js': 8,

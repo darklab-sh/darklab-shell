@@ -104,6 +104,9 @@ function loadPermalink({
     <button id="toggle-ts">timestamps: off</button>
     <div id="perm-save-wrap">
       <button id="perm-save-btn">save</button>
+      <div class="save-menu">
+        <button data-action="save-txt">Plain text (.txt)</button>
+      </div>
     </div>
     <div id="permalink-toast"></div>
   `
@@ -136,7 +139,11 @@ function loadPermalink({
   const URL = makeUrlMock()
   const win = Object.assign({}, window, {
     PermData: window.PermData,
+    innerWidth: window.innerWidth,
     jspdf: jspdf ?? { jsPDF: vi.fn(() => ({ save: vi.fn() })) },
+    matchMedia: window.matchMedia || (() => ({ matches: false })),
+    addEventListener: window.addEventListener.bind(window),
+    removeEventListener: window.removeEventListener.bind(window),
   })
 
   new Function(
@@ -158,6 +165,7 @@ function loadPermalink({
       toggleTs: document.getElementById('toggle-ts'),
       saveWrap: document.getElementById('perm-save-wrap'),
       saveBtn: document.getElementById('perm-save-btn'),
+      saveMenu: document.querySelector('#perm-save-wrap .save-menu'),
       toast: document.getElementById('permalink-toast'),
       container,
     },
@@ -603,6 +611,40 @@ describe('save dropdown', () => {
     el.saveBtn.click()
     el.saveBtn.click()
     expect(el.saveWrap.classList.contains('open')).toBe(false)
+  })
+
+  it('positions the permalink save menu inside the mobile viewport', () => {
+    const originalMatchMedia = window.matchMedia
+    const originalInnerWidth = window.innerWidth
+    try {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: 360 })
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        value: () => ({ matches: true }),
+      })
+      const { el } = loadPermalink()
+      el.saveBtn.getBoundingClientRect = () => ({
+        left: -20,
+        right: 28,
+        top: 40,
+        bottom: 68,
+        width: 48,
+        height: 28,
+        x: -20,
+        y: 40,
+        toJSON: () => {},
+      })
+
+      el.saveBtn.click()
+
+      expect(el.saveMenu.style.position).toBe('fixed')
+      expect(el.saveMenu.style.left).toBe('12px')
+      expect(el.saveMenu.style.top).toBe('67px')
+      expect(el.saveMenu.style.width).toBe('220px')
+    } finally {
+      Object.defineProperty(window, 'matchMedia', { configurable: true, value: originalMatchMedia })
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalInnerWidth })
+    }
   })
 })
 
