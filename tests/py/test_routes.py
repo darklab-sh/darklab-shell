@@ -4,6 +4,7 @@ These tests exercise HTTP-level behaviour without starting a real server.
 Run with: pytest tests/ (from the repo root)
 """
 
+import errno
 import json
 import logging
 import os
@@ -1652,6 +1653,14 @@ class TestWorkspaceRoutes:
             assert binary.status_code == 415
             assert "download it instead" in json.loads(binary.data)["error"]
 
+            with mock.patch("workspace.os.open", side_effect=PermissionError(errno.EACCES, "denied")):
+                unreadable = client.get(
+                    "/workspace/files/read?path=targets.txt",
+                    headers={"X-Session-ID": session},
+                )
+            assert unreadable.status_code == 403
+            assert json.loads(unreadable.data)["error"] == "session file is not readable"
+
             deleted = client.delete(
                 "/workspace/files?path=targets.txt",
                 headers={"X-Session-ID": session},
@@ -1728,6 +1737,107 @@ class TestWorkspaceRoutes:
             assert data["deleted"] == {"path": "reports", "kind": "directory", "file_count": 2}
             assert data["workspace"]["files"] == []
             assert data["workspace"]["directories"] == []
+
+    def test_move_file_and_folder_paths(self):
+        client = get_client()
+        session = "workspace-move-" + uuid.uuid4().hex[:8]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            client.post(
+                "/workspace/directories",
+                headers={"X-Session-ID": session},
+                json={"path": "archive"},
+            )
+            client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": "reports/one.txt", "text": "one\n"},
+            )
+            client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": "reports/nested/two.txt", "text": "two\n"},
+            )
+
+            moved_file = client.post(
+                "/workspace/files/move",
+                headers={"X-Session-ID": session},
+                json={"source": "reports/one.txt", "destination": "archive"},
+            )
+            assert moved_file.status_code == 200
+            assert moved_file.get_json()["moved"] == {
+                "source": "reports/one.txt",
+                "destination": "archive/one.txt",
+                "kind": "file",
+                "file_count": 1,
+            }
+            assert client.get(
+                "/workspace/files/read?path=reports/one.txt",
+                headers={"X-Session-ID": session},
+            ).status_code == 404
+            assert client.get(
+                "/workspace/files/read?path=archive/one.txt",
+                headers={"X-Session-ID": session},
+            ).get_json()["text"] == "one\n"
+
+            moved_folder = client.post(
+                "/workspace/files/move",
+                headers={"X-Session-ID": session},
+                json={"source": "reports", "destination": "archive/reports-renamed"},
+            )
+            assert moved_folder.status_code == 200
+            assert moved_folder.get_json()["moved"] == {
+                "source": "reports",
+                "destination": "archive/reports-renamed",
+                "kind": "directory",
+                "file_count": 1,
+            }
+            nested = client.get(
+                "/workspace/files/read?path=archive/reports-renamed/nested/two.txt",
+                headers={"X-Session-ID": session},
+            )
+            assert nested.status_code == 200
+            assert nested.get_json()["text"] == "two\n"
+
+            moved_to_root = client.post(
+                "/workspace/files/move",
+                headers={"X-Session-ID": session},
+                json={"source": "archive/one.txt", "destination": "/"},
+            )
+            assert moved_to_root.status_code == 200
+            assert moved_to_root.get_json()["moved"]["destination"] == "one.txt"
+
+    def test_move_rejects_invalid_paths_and_recursive_folder_moves(self):
+        client = get_client()
+        session = "workspace-move-invalid-" + uuid.uuid4().hex[:8]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": "reports/one.txt", "text": "one\n"},
+            )
+            client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": "reports/nested/two.txt", "text": "two\n"},
+            )
+
+            cases = [
+                {"source": "../escape.txt", "destination": "reports"},
+                {"source": "reports/one.txt", "destination": "../escape.txt"},
+                {"source": "reports/one.txt", "destination": "reports/nested/two.txt"},
+                {"source": "reports", "destination": "reports/nested"},
+            ]
+            for payload in cases:
+                resp = client.post(
+                    "/workspace/files/move",
+                    headers={"X-Session-ID": session},
+                    json=payload,
+                )
+                assert resp.status_code == 400
+
+            listed = client.get("/workspace/files", headers={"X-Session-ID": session})
+            files = {item["path"] for item in listed.get_json()["files"]}
+            assert files == {"reports/one.txt", "reports/nested/two.txt"}
 
     def test_rejects_unsafe_paths(self):
         client = get_client()

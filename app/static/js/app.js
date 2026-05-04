@@ -2458,12 +2458,40 @@ function _runtimeWorkspaceEntryHints(kind = 'file') {
     .filter(Boolean);
 }
 
+function _runtimeWorkspaceMoveSourceHints() {
+  return _runtimeWorkspaceFileHints().concat(_runtimeWorkspaceDirectoryHints());
+}
+
+function _runtimeWorkspaceMoveDestinationHints() {
+  return _runtimeWorkspaceDirectoryHints().concat([_runtimeHint('/', 'Session workspace root')]);
+}
+
+function _runtimeWorkspaceMoveDestinationHintsForSource(source, destinationHints) {
+  const sourcePath = String(source || '').trim();
+  return (Array.isArray(destinationHints) ? destinationHints : []).filter((hint) => {
+    const value = String(hint && hint.value || '').trim();
+    return value === '/' || (value && value !== sourcePath && !value.startsWith(`${sourcePath}/`));
+  });
+}
+
+function _runtimeWorkspaceMoveSequenceHints(prefix, sourceHints, destinationHints) {
+  const sequenceHints = {};
+  (Array.isArray(sourceHints) ? sourceHints : []).forEach((hint) => {
+    const value = String(hint && hint.value || '').trim().toLowerCase();
+    if (!value) return;
+    sequenceHints[`${prefix} ${value}`] = _runtimeWorkspaceMoveDestinationHintsForSource(value, destinationHints);
+  });
+  return sequenceHints;
+}
+
 function _runtimeWorkspaceContext() {
   const fileHints = _runtimeWorkspaceFileHints();
   const directoryHints = _runtimeWorkspaceDirectoryHints();
   const deleteHints = fileHints.concat(directoryHints);
+  const moveSourceHints = _runtimeWorkspaceMoveSourceHints();
+  const moveDestinationHints = _runtimeWorkspaceMoveDestinationHints();
   return _runtimeContextSpec({
-    expectsValue: ['show', 'add', 'add-dir', 'edit', 'download', 'rm', 'delete', 'ls'],
+    expectsValue: ['show', 'add', 'add-dir', 'edit', 'download', 'move', 'rm', 'delete', 'ls'],
     argHints: {
       list: [_runtimeHint('-l', 'Long listing'), _runtimeHint('-R', 'Recursive listing')].concat(directoryHints, [_runtimeHint('/', 'Session workspace root')]),
       ls: [_runtimeHint('-l', 'Long listing'), _runtimeHint('-R', 'Recursive listing')].concat(directoryHints, [_runtimeHint('/', 'Session workspace root')]),
@@ -2473,20 +2501,21 @@ function _runtimeWorkspaceContext() {
       'add-dir': directoryHints.concat([_runtimeHint('<folder>', 'New session folder')]),
       edit: fileHints,
       download: fileHints,
+      move: moveSourceHints,
       rm: [_runtimeHint('-r', 'Remove folders recursively'), _runtimeHint('-rf', 'Remove folders recursively')].concat(deleteHints),
       delete: [_runtimeHint('-r', 'Remove folders recursively'), _runtimeHint('-rf', 'Remove folders recursively')].concat(deleteHints),
       __positional__: [
-        _runtimeHint('list', 'List current session files'),
-        _runtimeHint('ls', 'List current session files'),
         _runtimeHint('show <file>', 'Print a session file in the terminal', 'show '),
         _runtimeHint('add <file>', 'Open the Files editor for a new session file', 'add '),
         _runtimeHint('add-dir <folder>', 'Create a session folder', 'add-dir '),
         _runtimeHint('edit <file>', 'Open the Files editor for an existing session file', 'edit '),
         _runtimeHint('download <file>', 'Download a session file through the browser', 'download '),
+        _runtimeHint('move <source> <destination>', 'Move or rename a session file or folder', 'move '),
         _runtimeHint('delete <file>', 'Remove a session file from this session', 'delete '),
         _runtimeHint('help', 'Show file command usage'),
       ],
     },
+    sequenceArgHints: _runtimeWorkspaceMoveSequenceHints('move', moveSourceHints, moveDestinationHints),
   });
 }
 
@@ -2657,6 +2686,17 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
       argHints: {
         __positional__: [_runtimeHint('-r', 'Remove folders recursively'), _runtimeHint('-rf', 'Remove folders recursively')].concat(deleteHints),
       },
+    }));
+  }
+  if (isWorkspaceFeatureEnabled() && baseRegistry.mv) {
+    const moveSourceHints = _runtimeWorkspaceMoveSourceHints();
+    context.mv = _runtimeMergeContextSpec(baseRegistry.mv, _runtimeContextSpec({
+      argHints: { __positional__: moveSourceHints },
+      sequenceArgHints: _runtimeWorkspaceMoveSequenceHints(
+        'mv',
+        moveSourceHints,
+        _runtimeWorkspaceMoveDestinationHints(),
+      ),
     }));
   }
   ['grep', 'head', 'tail', 'sort', 'uniq'].forEach((root) => {

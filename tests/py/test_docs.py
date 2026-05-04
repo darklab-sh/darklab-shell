@@ -773,6 +773,7 @@ def _parse_project_structure_tree(text: str) -> list[str]:
     Directory entries end with ``/`` and seed the parent stack for their
     children; file entries are leaves.
     """
+    in_section = False
     in_block = False
     parent_stack: list[str] = ["."]
     paths: list[str] = []
@@ -780,6 +781,12 @@ def _parse_project_structure_tree(text: str) -> list[str]:
     entry_re = re.compile(r"[├└]── ")
     for line in text.splitlines():
         stripped = line.strip()
+        if not in_section:
+            if stripped == "## Project Structure":
+                in_section = True
+            continue
+        if not in_block and stripped.startswith("## "):
+            break
         if not in_block:
             if stripped == "```text":
                 in_block = True

@@ -2,7 +2,7 @@
 
 This document records the main design decisions, tradeoffs, bugs, and lessons that shaped darklab_shell.
 
-Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagrams, persistence model, and deployment shape. Use this file for the reasoning behind those choices. If you're about to change something and want to know what has caused trouble before, start with [Known Gotchas and Lessons Learned](#known-gotchas-and-lessons-learned).
+Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagrams, and persistence model. Use [README.md](README.md#production-deployment) for production deployment setup. Use this file for the reasoning behind those choices. If you're about to change something and want to know what has caused trouble before, start with [Known Gotchas and Lessons Learned](#known-gotchas-and-lessons-learned).
 
 ---
 
@@ -17,6 +17,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, diagram
   - [Cross-User Process Killing](#cross-user-process-killing)
   - [Two-User Security Model](#two-user-security-model)
   - [Path Blocking (/data and /tmp)](#path-blocking-data-and-tmp)
+  - [Workspace Moves and Globs Stay App-Mediated](#workspace-moves-and-globs-stay-app-mediated)
   - [Loopback Address Blocking](#loopback-address-blocking)
   - [Session Token Security](#session-token-security)
   - [Deny Flag Matching (anywhere in command)](#deny-flag-matching-anywhere-in-command)
@@ -125,6 +126,22 @@ This is what motivated the Redis addition in the first place. Once Redis was a d
 The regex is `(?<![\w:/])/data\b` (and `/tmp`). The negative lookbehind `(?<![\w:/])` prevents false positives on URLs — `https://darklab.sh/data/` won't match because the `/data` segment is immediately preceded by `m` (the last character of `darklab.sh`), which satisfies `\w` in the lookbehind.
 
 Blocking happens at two layers: client-side (immediate feedback) and server-side (authoritative). Internal rewrites (for example `nuclei -ud /tmp/nuclei-templates` and ProjectDiscovery `XDG_CONFIG_HOME` wrappers) are injected by `rewrite_command()` after command validation, so app-owned runtime tokens can point at trusted internal paths without exposing arbitrary `/tmp` input to users.
+
+### Workspace Moves and Globs Stay App-Mediated
+
+**Workspace file convenience should feel shell-like without becoming shell filesystem access.**
+
+The Files feature now supports moving/renaming files and folders plus simple `*` patterns in common terminal flows. Those features deliberately live in the app layer instead of relying on `/bin/sh`, `mv`, or shell glob expansion.
+
+The decision is:
+
+- `file move` / `mv`, drag-and-drop, and the Files-row move action all use the shared workspace helpers
+- `*` patterns match within one path segment only and are expanded against the active session workspace listing
+- moving multiple matches requires the destination to already be a folder
+- deletes still require the transcript-owned confirmation flow, and folders still require `-r` / `-rf`
+- backend built-ins mirror the browser behavior so stale clients and server-rendered command paths do not get a different filesystem model
+
+This keeps the feature predictable for users while preserving the security boundary: every source and destination still goes through session-root validation, symlink rejection, traversal checks, overwrite checks, and the same group-permission model used for command-created files.
 
 ### Loopback Address Blocking
 

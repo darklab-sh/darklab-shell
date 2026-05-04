@@ -15,6 +15,8 @@ Key references for contributors:
 - [DECISIONS.md](DECISIONS.md) — design reasoning, known gotchas, and implementation history
 - [tests/README.md](tests/README.md) — test suite handbook and full appendix
 
+When adding app-owned shell behavior, keep the browser, backend, autocomplete, and docs in sync. Workspace file commands are a good example: user-visible paths must go through the workspace helpers, browser-side conveniences should have matching backend fallbacks when stale clients are possible, and new terminal grammar should be reflected in `app/builtin_autocomplete.yaml`, feature docs, and the test inventory.
+
 ---
 
 ## Acknowledgements

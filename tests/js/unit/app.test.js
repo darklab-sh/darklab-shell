@@ -123,9 +123,9 @@ function builtInAutocompleteBase() {
       },
     },
     file: {
-      ...emptyBuiltIn('built-in: list, view, create, edit, download, or remove session files'),
+      ...emptyBuiltIn('built-in: list, view, create, edit, download, move, or remove session files'),
       feature_required: 'workspace',
-      expects_value: ['show', 'add', 'add-dir', 'edit', 'download', 'rm', 'delete', 'ls'],
+      expects_value: ['show', 'add', 'add-dir', 'edit', 'download', 'move', 'rm', 'delete', 'ls'],
       arg_hints: {
         list: [],
         ls: [],
@@ -135,16 +135,18 @@ function builtInAutocompleteBase() {
         'add-dir': [hint('<folder>', 'New session folder')],
         edit: [],
         download: [],
+        move: [],
         rm: [],
         delete: [],
         __positional__: [
-          hint('list', 'List current session files'),
-          hint('ls', 'List current session files'),
+          hint('list <folder>', 'List current session files', 'list '),
+          hint('ls <folder>', 'List current session files', 'ls '),
           hint('show <file>', 'Print a session file in the terminal', 'show '),
           hint('add <file>', 'Open the Files editor for a new session file', 'add '),
           hint('add-dir <folder>', 'Create a session folder', 'add-dir '),
           hint('edit <file>', 'Open the Files editor for an existing session file', 'edit '),
           hint('download <file>', 'Download a session file through the browser', 'download '),
+          hint('move <source> <destination>', 'Move or rename a session file or folder', 'move '),
           hint('delete <file>', 'Remove a session file from this session', 'delete '),
           hint('help', 'Show file command usage'),
         ],
@@ -157,6 +159,7 @@ function builtInAutocompleteBase() {
     ll: { ...emptyBuiltIn('built-in: long-list session files'), feature_required: 'workspace', argument_limit: 1 },
     ls: { ...emptyBuiltIn('built-in: list session files'), feature_required: 'workspace', argument_limit: 1 },
     mkdir: { ...emptyBuiltIn('built-in: create a session folder'), feature_required: 'workspace', argument_limit: 1 },
+    mv: { ...emptyBuiltIn('built-in: move or rename a session file or folder'), feature_required: 'workspace', argument_limit: 2 },
     rm: {
       ...emptyBuiltIn('built-in: remove a session file after confirmation'),
       feature_required: 'workspace',
@@ -1068,13 +1071,14 @@ describe('app helpers', () => {
     expect(context['session-token'].arg_hints.__positional__.map(item => item.value)).toContain('set <token>')
     expect(context['session-token'].arg_hints.set[0].value).toBe('<token>')
     expect(context.file.arg_hints.__positional__.map(item => item.value)).toEqual([
-      'list',
-      'ls',
+      'list <folder>',
+      'ls <folder>',
       'show <file>',
       'add <file>',
       'add-dir <folder>',
       'edit <file>',
       'download <file>',
+      'move <source> <destination>',
       'delete <file>',
       'help',
     ])
@@ -1107,6 +1111,12 @@ describe('app helpers', () => {
     expect(context.file.arg_hints.show.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
     expect(context.file.arg_hints.edit.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
     expect(context.file.arg_hints.download.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
+    expect(context.file.arg_hints.move.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports'])
+    expect(context.file.sequence_arg_hints['move targets.txt'].map(item => item.value)).toEqual(['reports', '/'])
+    expect(context.file.sequence_arg_hints['move reports'].map(item => item.value)).toEqual(['/'])
+    expect(context.mv.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports'])
+    expect(context.mv.sequence_arg_hints['mv targets.txt'].map(item => item.value)).toEqual(['reports', '/'])
+    expect(context.mv.sequence_arg_hints['mv reports'].map(item => item.value)).toEqual(['/'])
     expect(context.file.arg_hints.rm.map(item => item.description)).toEqual([
       'Remove folders recursively',
       'Remove folders recursively',
@@ -1152,6 +1162,12 @@ describe('app helpers', () => {
     expect(context.file.arg_hints.show.map(item => item.value)).toEqual(['summary.txt'])
     expect(context.file.arg_hints.list.map(item => item.value)).toEqual(['-l', '-R', 'nested', '/'])
     expect(context.file.arg_hints.ls.map(item => item.value)).toEqual(['-l', '-R', 'nested', '/'])
+    expect(context.file.arg_hints.move.map(item => item.value)).toEqual(['summary.txt', 'nested'])
+    expect(context.file.sequence_arg_hints['move summary.txt'].map(item => item.value)).toEqual(['nested', '/'])
+    expect(context.file.sequence_arg_hints['move nested'].map(item => item.value)).toEqual(['/'])
+    expect(context.mv.arg_hints.__positional__.map(item => item.value)).toEqual(['summary.txt', 'nested'])
+    expect(context.mv.sequence_arg_hints['mv summary.txt'].map(item => item.value)).toEqual(['nested', '/'])
+    expect(context.mv.sequence_arg_hints['mv nested'].map(item => item.value)).toEqual(['/'])
   })
 
   it('hides workspace built-ins from runtime autocomplete when Files are disabled', async () => {
@@ -1168,6 +1184,7 @@ describe('app helpers', () => {
     expect(context.ll).toBeUndefined()
     expect(context.ls).toBeUndefined()
     expect(context.mkdir).toBeUndefined()
+    expect(context.mv).toBeUndefined()
     expect(context.rm).toBeUndefined()
     expect(context.man.arg_hints.__positional__.map(item => item.value)).not.toContain('file')
   })

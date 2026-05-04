@@ -10,9 +10,27 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Added
 
+- **Session files can now be moved and renamed** — the Files modal, terminal commands, and backend workspace route now share one validated move path.
+  - **Why:** users could create, edit, download, and delete session files, but reorganizing outputs still meant re-creating files by hand. That made folder-heavy workflows awkward once tools started writing more workspace output.
+  - **What:** added a row-level **move** action in Files, drag-and-drop from file rows onto folder rows, a `POST /workspace/files/move` route, `file move <source> <destination>`, and an `mv <source> <destination>` alias. Moves stay inside the active session workspace, reject traversal and symlink escapes, reject overwrites, reject moving a folder into itself, and preserve the source basename when the destination is an existing folder.
+  - **Tests:** added backend workspace-route and workspace-helper coverage, Files modal unit coverage for the row action and drag/drop flow, runner unit coverage for `file move` / `mv`, and an end-to-end Files workflow that moves a file through the modal and then moves it back from the terminal.
+- **Workspace file commands now support simple `*` patterns** — `file ls`, `file move` / `mv`, and confirmed `file delete` can operate on matching session files and folders.
+  - **Why:** common terminal workflows such as `ls darklab-*`, `mv darklab-* darklab/`, and `file delete scan-*` should feel natural without exposing raw shell glob expansion or host filesystem access.
+  - **What:** added browser-side glob expansion from the loaded workspace file/folder cache plus matching backend helpers for app-owned built-ins. A `*` matches within a single path segment only, so `reports/*.txt` is supported but the pattern does not cross `/`. Moving multiple matches requires the destination to already be a folder; deletes still use the existing confirmation flow and still require `-r` / `-rf` when any matched target is a folder.
+  - **Tests:** added runner unit coverage for glob listing, multi-file move, and confirmed multi-file delete, plus backend coverage for the one-segment matching rule.
+- **Workspace autocomplete now understands move source and destination slots** — `file move` and `mv` suggest loaded session files and folders at the right point in the command.
+  - **Why:** move commands are path-heavy, and typing paths by memory is easy to get wrong once folders are involved.
+  - **What:** added `value_type: target` workspace hints for move commands, dynamic source/destination suggestions, destination filtering that avoids suggesting the source or one of its children, and root-folder completion. The visible `file list` / `file ls` suggestions now come from `builtin_autocomplete.yaml`, while runtime autocomplete contributes only live workspace paths.
+  - **Tests:** added app/autocomplete unit coverage for workspace move hints and updated the built-in autocomplete registry expectations.
+
 ### Changed
 
+- **Session file docs and test inventory now reflect the v1.7 workspace command surface** — the docs count 2,400 total tests, including 1,187 pytest tests, 977 Vitest tests, and 236 Playwright tests.
+
 ### Fixed
+
+- **Autocomplete no longer shows duplicate `file list` and `file ls` rows** — the YAML-owned grammar entries keep their `<folder>` guidance, and the runtime layer no longer adds bare duplicates.
+- **Command-created workspace config folders now show up in Files instead of causing 500s** — workspace list/read operations repair scanner-created child directory/file modes before the app tries to traverse them, so tools using session-scoped `XDG_CONFIG_HOME` such as Subfinder remain visible and readable through the Files browser and `cat`.
 
 ---
 

@@ -338,6 +338,8 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 | `dropdown_item_text` | `#9a9a9a` | `#4a5868` | Text for autocomplete and menu items |
 | `overlay_backdrop_bg` | `rgba(0,0,0,0.76)` | `rgba(34,58,88,0.22)` | Shared backdrop behind modals and overlays |
 
+Files drag-and-drop feedback does not introduce its own theme keys. The dragged row uses opacity only, and folder drop targets derive their border/glow from existing semantic green and border tokens. If that state ever needs stronger per-theme tuning, add a chrome token here instead of hardcoding a new one-off color in `shell.css`.
+
 ### Search and Output Highlights
 
 | Key | Dark default | Light default | Used for |

@@ -167,6 +167,16 @@ function _itemLooksLikeWordlistSlot(item) {
   return String(item && item.value_type || '').trim().toLowerCase() === 'wordlist';
 }
 
+function _itemLooksLikeWorkspaceTargetSlot(item) {
+  return String(item && item.value_type || '').trim().toLowerCase() === 'target';
+}
+
+function _autocompleteSpecRequiresWorkspace(spec) {
+  const feature = spec && (spec.feature_required || spec.requires_feature || spec.feature);
+  const features = Array.isArray(feature) ? feature : [feature];
+  return features.some(item => String(item || '').trim().toLowerCase() === 'workspace');
+}
+
 function _normalizeWordlistCategories(value) {
   return _autocompleteCore.normalizeWordlistCategories(value);
 }
@@ -418,6 +428,25 @@ function _workspaceAutocompleteHintsForFlag(spec, trigger) {
   if (typeof getWorkspaceAutocompleteFileHints !== 'function') return [];
   const hints = getWorkspaceAutocompleteFileHints();
   return Array.isArray(hints) ? hints : [];
+}
+
+function _workspaceAutocompleteEntryHints() {
+  const fileHints = typeof getWorkspaceAutocompleteFileHints === 'function'
+    ? getWorkspaceAutocompleteFileHints()
+    : [];
+  const directoryHints = typeof getWorkspaceAutocompleteDirectoryHints === 'function'
+    ? getWorkspaceAutocompleteDirectoryHints()
+    : [];
+  return [
+    ...(Array.isArray(fileHints) ? fileHints : []),
+    ...(Array.isArray(directoryHints) ? directoryHints : []),
+  ];
+}
+
+function _workspaceAutocompleteHintsForTargetSlot(spec, hints) {
+  if (!_autocompleteSpecRequiresWorkspace(spec)) return null;
+  if (!(Array.isArray(hints) && hints.some(_itemLooksLikeWorkspaceTargetSlot))) return null;
+  return _workspaceAutocompleteEntryHints();
 }
 
 function _getAutocompleteRegistry() {
@@ -708,7 +737,8 @@ function _buildContextAutocomplete(ctx) {
   }
   if (directHints !== null) {
     const workspaceHints = _workspaceAutocompleteHintsForFlag(spec, ctx.previousToken || '');
-    const hints = workspaceHints !== null ? workspaceHints : directHints;
+    const targetHints = workspaceHints !== null ? null : _workspaceAutocompleteHintsForTargetSlot(spec, directHints);
+    const hints = workspaceHints !== null ? workspaceHints : (targetHints !== null ? targetHints : directHints);
     const directItems = _filterAutocompleteItems(
       hints.map(item => _buildAutocompleteItem({
         value: item.value,
@@ -762,7 +792,9 @@ function _buildContextAutocomplete(ctx) {
       }));
     const filteredFlags = _filterAutocompleteItems(flags, ctx.currentToken);
     if (!ctx.currentToken && ctx.atWhitespace && positionalHints.length && allowPositionalHints) {
-      const positionalItems = positionalHints.map(item => _buildAutocompleteItem({
+      const workspaceTargetHints = _workspaceAutocompleteHintsForTargetSlot(spec, positionalHints);
+      const hints = workspaceTargetHints !== null ? workspaceTargetHints : positionalHints;
+      const positionalItems = hints.map(item => _buildAutocompleteItem({
         value: item.value,
         label: item.label || item.value,
         description: item.description || '',
@@ -781,8 +813,10 @@ function _buildContextAutocomplete(ctx) {
   }
 
   if (positionalHints.length && allowPositionalHints) {
+    const workspaceTargetHints = _workspaceAutocompleteHintsForTargetSlot(spec, positionalHints);
+    const hints = workspaceTargetHints !== null ? workspaceTargetHints : positionalHints;
     const positionalItems = _filterAutocompleteItems(
-      positionalHints.map(item => _buildAutocompleteItem({
+      hints.map(item => _buildAutocompleteItem({
         value: item.value,
         label: item.label || item.value,
         description: item.description || '',

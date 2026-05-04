@@ -12,6 +12,7 @@ Tests for pure utility functions across the app modules:
 Run with: pytest tests/ (from the repo root)
 """
 
+import errno
 import gzip
 import importlib.util
 import os
@@ -50,8 +51,9 @@ from permalinks import _format_retention, _expiry_note, _permalink_error_page, _
 from output_signals import OutputSignalClassifier, classify_line, command_root, extract_target
 from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
 from workspace import (
-    InvalidWorkspacePath, WorkspaceDisabled, WorkspaceQuotaExceeded,
+    InvalidWorkspacePath, WorkspaceDisabled, WorkspacePermissionDenied, WorkspaceQuotaExceeded,
     cleanup_inactive_workspaces, create_workspace_directory, delete_workspace_file, delete_workspace_path,
+    expand_workspace_path_pattern,
     ensure_session_workspace, list_workspace_directories, list_workspace_files,
     prepare_workspace_directory_for_command, prepare_workspace_file_for_command, read_workspace_text_file, resolve_workspace_path,
     session_workspace_name, workspace_usage,
@@ -334,6 +336,34 @@ class TestSessionWorkspace:
                 ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "chmod", "3770", str(path)],
             ]
 
+    def test_list_repairs_command_created_workspace_modes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            root = ensure_session_workspace("session-1", cfg)
+            command_dir = root / "subfinder"
+            command_dir.mkdir()
+            command_file = command_dir / "provider-config.yaml"
+            command_file.write_text("sources: []\n")
+            os.chmod(command_dir, 0o2700)
+            os.chmod(command_file, 0o600)
+
+            with mock.patch("workspace._scanner_uid", return_value=command_dir.stat().st_uid):
+                assert list_workspace_files("session-1", cfg)[0]["path"] == "subfinder/provider-config.yaml"
+                assert list_workspace_directories("session-1", cfg)[0]["path"] == "subfinder"
+                assert read_workspace_text_file("session-1", "subfinder/provider-config.yaml", cfg) == "sources: []\n"
+                assert command_dir.stat().st_mode & 0o070 == 0o070
+                assert not command_dir.stat().st_mode & 0o007
+                assert (command_file.stat().st_mode & 0o777) == WORKSPACE_FILE_MODE
+
+    def test_read_workspace_permission_denied_is_not_raw_os_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            write_workspace_text_file("session-1", "provider-config.yaml", "sources: []\n", cfg)
+
+            with mock.patch("workspace.os.open", side_effect=PermissionError(errno.EACCES, "denied")):
+                with pytest.raises(WorkspacePermissionDenied):
+                    read_workspace_text_file("session-1", "provider-config.yaml", cfg)
+
     def test_delete_workspace_file_falls_back_to_scanner_owner_for_nested_command_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
@@ -388,6 +418,22 @@ class TestSessionWorkspace:
             }
             assert list_workspace_files("session-1", cfg) == []
             assert workspace_usage("session-1", cfg).file_count == 0
+
+    def test_workspace_glob_pattern_matches_one_path_segment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            create_workspace_directory("session-1", "darklab", cfg)
+            create_workspace_directory("session-1", "reports/darklab-nested", cfg)
+            write_workspace_text_file("session-1", "darklab-a.txt", "1", cfg)
+            write_workspace_text_file("session-1", "darklab-b.txt", "2", cfg)
+            write_workspace_text_file("session-1", "reports/darklab-c.txt", "3", cfg)
+
+            matches = expand_workspace_path_pattern("session-1", "darklab-*", cfg)
+
+            assert [(item.path, item.kind) for item in matches] == [
+                ("darklab-a.txt", "file"),
+                ("darklab-b.txt", "file"),
+            ]
 
     def test_rejects_absolute_traversal_and_backslash_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -951,6 +997,7 @@ class TestDerivedCommandRegistry:
             "add-dir <folder>",
             "edit <file>",
             "download <file>",
+            "move <source> <destination>",
             "delete <file>",
             "help",
         ]

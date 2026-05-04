@@ -641,6 +641,7 @@ function loadRunnerFns({
   refreshWorkspaceFileCache: refreshWorkspaceFileCacheOverride = undefined,
   openWorkspaceEditorFromCommand: openWorkspaceEditorFromCommandOverride = undefined,
   downloadWorkspaceFile: downloadWorkspaceFileOverride = undefined,
+  moveWorkspacePath: moveWorkspacePathOverride = undefined,
   readWorkspaceFile: readWorkspaceFileOverride = undefined,
   createWorkspaceDirectory: createWorkspaceDirectoryOverride = undefined,
   getWorkspaceDirectoryEntries: getWorkspaceDirectoryEntriesOverride = undefined,
@@ -805,6 +806,7 @@ function loadRunnerFns({
       ...(downloadWorkspaceFileOverride
         ? { downloadWorkspaceFile: downloadWorkspaceFileOverride }
         : {}),
+      ...(moveWorkspacePathOverride ? { moveWorkspacePath: moveWorkspacePathOverride } : {}),
       ...(readWorkspaceFileOverride ? { readWorkspaceFile: readWorkspaceFileOverride } : {}),
       ...(createWorkspaceDirectoryOverride ? { createWorkspaceDirectory: createWorkspaceDirectoryOverride } : {}),
       ...(getWorkspaceDirectoryEntriesOverride ? { getWorkspaceDirectoryEntries: getWorkspaceDirectoryEntriesOverride } : {}),
@@ -2560,6 +2562,36 @@ describe('workspace file delete confirmation', () => {
     expect(appendLine).toHaveBeenCalledWith('nested/deep.txt  file  2 B   later', '', 'tab-1')
   })
 
+  it('lists workspace files and folders matched by a glob pattern', async () => {
+    const appendLine = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: '' }],
+      appendLine,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [
+        { value: 'darklab', description: 'session folder' },
+        { value: 'darklab-archive', description: 'session folder' },
+      ],
+      getWorkspaceAutocompleteFileHints: () => [
+        { value: 'darklab-a.txt', description: 'session file · 1 B' },
+        { value: 'darklab-b.txt', description: 'session file · 2 B' },
+        { value: 'other.txt', description: 'session file · 3 B' },
+      ],
+    })
+
+    await submitCommand('file ls darklab-*')
+
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith(
+      'darklab-archive/ darklab-a.txt darklab-b.txt',
+      '',
+      'tab-1',
+    ))
+    expect(appendLine).not.toHaveBeenCalledWith(expect.stringContaining('other.txt'), '', 'tab-1')
+  })
+
   it('lists workspace folders in long format with ll', async () => {
     const appendLine = vi.fn()
     const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
@@ -2634,6 +2666,106 @@ describe('workspace file delete confirmation', () => {
     expect(createWorkspaceDirectory).toHaveBeenCalledWith('shared')
     expect(appendLine).toHaveBeenCalledWith('file: created folder reports/scans', '', 'tab-1')
     expect(appendLine).toHaveBeenCalledWith('file: created folder shared', '', 'tab-1')
+  })
+
+  it('moves workspace files and folders from file move and mv commands', async () => {
+    const appendLine = vi.fn()
+    const moveWorkspacePath = vi.fn((source, destination) => Promise.resolve({
+      moved: {
+        source,
+        destination: destination === 'archive' ? 'archive/targets.txt' : destination,
+      },
+    }))
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'reports' }],
+      appendLine,
+      moveWorkspacePath,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [
+        { value: 'reports', description: 'session folder' },
+        { value: 'archive', description: 'session folder' },
+      ],
+      getWorkspaceAutocompleteFileHints: () => [
+        { value: 'reports/targets.txt', description: 'session file · 11 B' },
+      ],
+    })
+
+    await submitCommand('file move targets.txt /archive')
+    await vi.waitFor(() => expect(moveWorkspacePath).toHaveBeenCalledWith('reports/targets.txt', 'archive'))
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith(
+      'file: moved reports/targets.txt to archive/targets.txt',
+      '',
+      'tab-1',
+    ))
+
+    await submitCommand('mv /archive/targets.txt moved.txt')
+    await vi.waitFor(() => expect(moveWorkspacePath).toHaveBeenCalledWith('archive/targets.txt', 'reports/moved.txt'))
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith(
+      'file: moved archive/targets.txt to reports/moved.txt',
+      '',
+      'tab-1',
+    ))
+    expect(refreshWorkspaceFileCache).toHaveBeenCalled()
+    expect(status.className).toBe('status-pill ok')
+  })
+
+  it('moves every workspace file matched by a glob pattern into an existing folder', async () => {
+    const appendLine = vi.fn()
+    const moveWorkspacePath = vi.fn((source, destination) => Promise.resolve({
+      moved: { source, destination: `${destination}/${source.split('/').pop()}` },
+    }))
+    const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: '' }],
+      appendLine,
+      moveWorkspacePath,
+      refreshWorkspaceFileCache,
+      normalizeWorkspaceCommandPath,
+      workspaceDisplayPath,
+      getWorkspaceAutocompleteDirectoryHints: () => [
+        { value: 'darklab', description: 'session folder' },
+      ],
+      getWorkspaceAutocompleteFileHints: () => [
+        { value: 'darklab-a.txt', description: 'session file · 1 B' },
+        { value: 'darklab-b.txt', description: 'session file · 2 B' },
+        { value: 'other.txt', description: 'session file · 3 B' },
+      ],
+    })
+
+    await submitCommand('mv darklab-* darklab/')
+
+    await vi.waitFor(() => expect(moveWorkspacePath).toHaveBeenCalledWith('darklab-a.txt', 'darklab'))
+    expect(moveWorkspacePath).toHaveBeenCalledWith('darklab-b.txt', 'darklab')
+    expect(moveWorkspacePath).toHaveBeenCalledTimes(2)
+    expect(appendLine).toHaveBeenCalledWith('file: moved darklab-a.txt to darklab/darklab-a.txt', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('file: moved darklab-b.txt to darklab/darklab-b.txt', '', 'tab-1')
+    expect(refreshWorkspaceFileCache).toHaveBeenCalled()
+    expect(status.className).toBe('status-pill ok')
+  })
+
+  it('shows usage for incomplete workspace move commands', async () => {
+    const appendLine = vi.fn()
+    const moveWorkspacePath = vi.fn()
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      moveWorkspacePath,
+    })
+
+    await submitCommand('file move targets.txt')
+    await submitCommand('mv targets.txt')
+
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith(
+      'Usage: file move <source> <destination>',
+      'exit-fail',
+      'tab-1',
+    ))
+    expect(appendLine).toHaveBeenCalledWith('Usage: mv <source> <destination>', 'exit-fail', 'tab-1')
+    expect(moveWorkspacePath).not.toHaveBeenCalled()
+    expect(status.className).toBe('status-pill fail')
   })
 
   it('runs standalone pipe helpers against workspace files', async () => {
@@ -2916,6 +3048,64 @@ describe('workspace file delete confirmation', () => {
     expect(appendLine).toHaveBeenCalledWith('file: removed folder reports', '', 'tab-1')
     expect(refreshWorkspaceFileCache).toHaveBeenCalled()
     expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
+    expect(status.className).toBe('status-pill ok')
+  })
+
+  it('deletes every workspace file matched by a glob pattern after confirmation', async () => {
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const refreshWorkspaceFileCache = vi.fn()
+    const apiFetch = vi.fn((url, opts) => {
+      if (String(url).startsWith('/workspace/files/info?path=darklab-a.txt')) {
+        return Promise.resolve(new Response(JSON.stringify({ path: 'darklab-a.txt', kind: 'file', file_count: 1 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      if (String(url).startsWith('/workspace/files/info?path=darklab-b.txt')) {
+        return Promise.resolve(new Response(JSON.stringify({ path: 'darklab-b.txt', kind: 'file', file_count: 1 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      if (String(url).startsWith('/workspace/files?path=darklab-') && opts?.method === 'DELETE') {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      if (url === '/run/client') {
+        return Promise.resolve(new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      return Promise.resolve(new Response('{}', { status: 404 }))
+    })
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      setComposerPromptMode,
+      apiFetch,
+      refreshWorkspaceFileCache,
+      getWorkspaceAutocompleteFileHints: () => [
+        { value: 'darklab-a.txt', description: 'session file · 1 B' },
+        { value: 'darklab-b.txt', description: 'session file · 2 B' },
+        { value: 'other.txt', description: 'session file · 3 B' },
+      ],
+    })
+
+    await submitCommand('file delete darklab-*')
+    await vi.waitFor(() => expect(setComposerPromptMode).toHaveBeenCalledWith('confirm'))
+    expect(appendLine).toHaveBeenCalledWith("delete 2 matched session items for 'darklab-*'?", '', 'tab-1')
+
+    await submitCommand('yes')
+
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/workspace/files?path=darklab-a.txt', { method: 'DELETE' }))
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files?path=darklab-b.txt', { method: 'DELETE' })
+    expect(appendLine).toHaveBeenCalledWith('file: removed darklab-a.txt', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('file: removed darklab-b.txt', '', 'tab-1')
+    expect(refreshWorkspaceFileCache).toHaveBeenCalled()
     expect(status.className).toBe('status-pill ok')
   })
 

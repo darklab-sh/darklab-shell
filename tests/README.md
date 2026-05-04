@@ -16,14 +16,16 @@ The suites are layered on purpose:
 2. Vitest checks client-side helper logic and browser-module failure paths in jsdom
 3. Playwright checks the full UI, network behavior, and cross-module interactions in a real browser
 
+Workspace file behavior is intentionally split across all three layers: pytest owns route/path-safety checks, Vitest owns browser command parsing and Files modal interactions, and Playwright covers the user-facing workflow in a live app.
+
 Current totals:
 
-- behavior tests: 2,356
+- behavior tests: 2,368
 - docs/inventory meta-tests: 30
-- `pytest`: 1182 (1152 behavior + 30 meta)
-- `vitest`: 970
+- `pytest`: 1187 (1157 behavior + 30 meta)
+- `vitest`: 977
 - `playwright`: 236
-- total: 2,388
+- total: 2,400
 
 This document is organized in two parts:
 
@@ -389,9 +391,12 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_write_read_list_delete_text_file` | Verifies the backend workspace text-file lifecycle for write, read, list, usage, and delete operations. |
 | `TestSessionWorkspace.test_prepare_workspace_file_for_command_uses_limited_write_mode` | Verifies that command output targets get limited group-write permissions without becoming world-readable. |
 | `TestSessionWorkspace.test_prepare_workspace_directory_for_command_does_not_temporarily_widen_mode` | Verifies that command-managed workspace directories go straight to the scanner-safe directory mode without a temporary world-readable chmod. |
+| `TestSessionWorkspace.test_list_repairs_command_created_workspace_modes` | Verifies that workspace listing repairs command-created folder/file modes so app-mediated reads can see tool config output. |
+| `TestSessionWorkspace.test_read_workspace_permission_denied_is_not_raw_os_error` | Verifies that unreadable workspace files raise an app-level permission error instead of a raw OS error. |
 | `TestSessionWorkspace.test_delete_workspace_file_falls_back_to_scanner_owner_for_nested_command_files` | Verifies that deleting scanner-owned nested workspace files falls back through the validated scanner sudo path when sticky directory permissions block direct unlink. |
 | `TestSessionWorkspace.test_workspace_path_info_and_delete_remove_folders_recursively` | Verifies that workspace path info counts files under folders and recursive folder delete removes nested files and directories. |
 | `TestSessionWorkspace.test_create_and_list_empty_directories_without_file_usage` | Verifies that explicit empty session folders can be created and listed without counting against file usage. |
+| `TestSessionWorkspace.test_workspace_glob_pattern_matches_one_path_segment` | Verifies that workspace glob expansion matches `*` within one path segment without crossing into nested folders. |
 | `TestSessionWorkspace.test_rejects_absolute_traversal_and_backslash_paths` | Verifies that unsafe workspace paths are rejected before touching the filesystem. |
 | `TestSessionWorkspace.test_allows_hidden_files_that_are_listed_by_workspace` | Verifies that hidden session file paths can be resolved so listed tool artifacts remain accessible. |
 | `TestSessionWorkspace.test_rejects_symlink_escape` | Verifies that symlinked workspace paths cannot escape the session directory. |
@@ -1000,6 +1005,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestWorkspaceRoutes.test_workspace_files_are_session_isolated` | Verifies that a file created under one session cannot be read from another session workspace. |
 | `TestWorkspaceRoutes.test_create_directory_lists_empty_folder` | Verifies that the Files API can create and list explicit empty session folders. |
 | `TestWorkspaceRoutes.test_info_and_delete_folder_recursively` | Verifies that the Files API reports folder file counts and deletes nested folder contents through the same validated delete endpoint. |
+| `TestWorkspaceRoutes.test_move_file_and_folder_paths` | Verifies that the Files API can move files into folders, rename folders while moving, and move files back to the workspace root. |
+| `TestWorkspaceRoutes.test_move_rejects_invalid_paths_and_recursive_folder_moves` | Verifies that workspace moves reject path escapes, existing file destinations, and moving a folder into itself. |
 | `TestWorkspaceRoutes.test_rejects_unsafe_paths` | Verifies that route writes reject traversal, absolute, and backslash paths. |
 | `TestWorkspaceRoutes.test_rejects_unsafe_paths_on_read_delete_and_download` | Verifies that workspace read, delete, and download routes reject traversal, absolute, and backslash file names before touching disk. |
 | `TestWorkspaceRoutes.test_allows_hidden_workspace_paths_when_listed` | Verifies that listed hidden session files can be written, listed, and read through the Files API. |
@@ -1971,9 +1978,13 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `does not double-prefix a root-relative autocomplete path from a workspace folder` | Verifies that stale root-relative folder suggestions do not get prefixed with the current folder twice. |
 | `lists the current workspace folder non-recursively on one short line` | Verifies that `ls` shows only direct current-folder entries in compact terminal-style output. |
 | `lists workspace folders recursively only when -R is present with flags in any order` | Verifies that recursive workspace listings require `-R` and support combined list flags in any order. |
+| `lists workspace files and folders matched by a glob pattern` | Verifies that `file ls <pattern>` expands `*` against direct workspace entries before rendering compact output. |
 | `lists workspace folders in long format with ll` | Verifies that `ll` shows the long workspace listing with aligned metadata columns. |
 | `pipes short ls output to grep as one workspace entry per line` | Verifies that compact `ls` display output feeds pipe helpers as one logical workspace entry per line. |
 | `creates workspace directories with mkdir and file add-dir` | Verifies that `mkdir` and `file add-dir` create folders through the workspace directory route. |
+| `moves workspace files and folders from file move and mv commands` | Verifies that `file move` and `mv` resolve tab-relative workspace paths and move entries through the Files route. |
+| `moves every workspace file matched by a glob pattern into an existing folder` | Verifies that `mv <pattern> <folder>` expands matching workspace entries and moves each one into an existing destination folder. |
+| `shows usage for incomplete workspace move commands` | Verifies that incomplete `file move` and `mv` commands show usage and do not call the Files move route. |
 | `runs standalone pipe helpers against workspace files` | Verifies that `grep`, `wc -l`, `sort`, and `uniq` can run directly against workspace files. |
 | `does not intercept workspace delete aliases when Files are disabled` | Verifies that the browser does not run the client-side workspace delete confirmation path when Files are disabled. |
 | `shows usage for bare rm and file delete commands` | Verifies that bare delete aliases are handled locally and return usage text instead of falling through as disallowed commands. |
@@ -1983,6 +1994,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `does not prompt before deleting a missing workspace file or folder` | Verifies that `file rm <path>` checks that the session file or folder exists before opening the confirmation prompt. |
 | `deletes the workspace file only after answering yes` | Verifies that `rm <file>` deletes through the workspace route only after an explicit `yes` answer. |
 | `deletes the workspace folder only after answering yes` | Verifies that `file rm <folder>` deletes through the workspace route only after an explicit `yes` answer. |
+| `deletes every workspace file matched by a glob pattern after confirmation` | Verifies that `file delete <pattern>` expands matching workspace files, asks once, and deletes each match after confirmation. |
 | `leaves the workspace file untouched when the user answers no` | Verifies that answering `no` cancels the workspace delete confirmation without calling the delete route. |
 | `opens the Files editor from file add and file edit commands` | Verifies that `file add`, `file add <file>`, and `file edit <file>` open the Files editor with blank or prefilled file names as appropriate. |
 | `keeps file edit usage strict when no filename is provided` | Verifies that `file edit` still requires a filename while `file add` can open a blank editor. |
@@ -2468,6 +2480,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders nested workspace paths as navigable folders with breadcrumbs` | Verifies that nested workspace paths render as folders, support entering/leaving folders, and update breadcrumbs. |
 | `renders explicit empty directories from the workspace payload` | Verifies that explicit empty folders render and remain navigable even when they contain no files. |
 | `confirms folder deletion with file counts before deleting from the browser` | Verifies that folder delete actions show count-aware confirmation copy before recursively deleting through the workspace route. |
+| `moves files from the row action through the app-native prompt` | Verifies that the file-row Move action uses the app-native prompt and posts the selected destination to the workspace move route. |
+| `moves a dragged file onto a workspace folder after confirmation` | Verifies that dragging a file onto a folder asks for confirmation and then moves the file through the workspace move route. |
 | `shows an empty state when the workspace has no files` | Verifies that the workspace modal explains the empty state before any files exist. |
 | `saves new files relative to the currently selected folder` | Verifies that New File keeps the name field clean while saving relative to the active folder. |
 | `keeps the editor hidden until the user starts or closes an edit` | Verifies that the workspace editor stays collapsed until New File or edit mode opens it, and closes cleanly afterward. |

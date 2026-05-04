@@ -855,6 +855,19 @@ body.mobile-terminal-mode .output-follow-btn {
   padding: 12px;
 }
 
+.workspace-file-row[draggable="true"] {
+  cursor: grab;
+}
+
+.workspace-file-row.workspace-dragging {
+  opacity: 0.56;
+}
+
+.workspace-folder-row.workspace-drop-target {
+  border-color: color-mix(in srgb, var(--green) 72%, var(--border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 38%, transparent);
+}
+
 .workspace-file-name {
   color: var(--text);
   font-family: var(--font-mono);

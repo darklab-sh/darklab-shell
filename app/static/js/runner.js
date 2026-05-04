@@ -1161,6 +1161,27 @@ function _workspaceDeleteTarget(cmd) {
   return parsed && !parsed.invalid ? parsed.target : '';
 }
 
+function _workspaceMoveCommand(cmd) {
+  const parts = _workspaceCommandTokens(cmd);
+  const root = (parts[0] || '').toLowerCase();
+  if (root === 'mv') {
+    return {
+      source: parts.length === 3 ? parts[1] : '',
+      destination: parts.length === 3 ? parts[2] : '',
+      usage: 'Usage: mv <source> <destination>',
+      invalid: parts.length !== 3,
+    };
+  }
+  const action = (parts[1] || '').toLowerCase();
+  if (root !== 'file' || action !== 'move') return null;
+  return {
+    source: parts.length === 4 ? parts[2] : '',
+    destination: parts.length === 4 ? parts[3] : '',
+    usage: 'Usage: file move <source> <destination>',
+    invalid: parts.length !== 4,
+  };
+}
+
 function _workspaceListCommand(parts) {
   const root = (parts[0] || '').toLowerCase();
   const parseListArgs = (args, usage) => {
@@ -1302,6 +1323,57 @@ function _workspacePathExists(path = '', kind = 'any') {
   return false;
 }
 
+function _workspacePathHasGlob(path = '') {
+  return String(path || '').includes('*');
+}
+
+function _workspaceGlobSegmentToRegExp(segment = '') {
+  const escaped = String(segment || '').replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*');
+  return new RegExp(`^${escaped}$`);
+}
+
+function _workspaceGlobMatches(pattern = '', path = '') {
+  const patternParts = String(pattern || '').split('/').filter(Boolean);
+  const pathParts = String(path || '').split('/').filter(Boolean);
+  if (patternParts.length !== pathParts.length) return false;
+  return patternParts.every((part, index) => _workspaceGlobSegmentToRegExp(part).test(pathParts[index]));
+}
+
+function _workspaceEntryHints(kind = 'any') {
+  const entries = [];
+  if (kind === 'directory' || kind === 'any') {
+    const dirHints = typeof getWorkspaceAutocompleteDirectoryHints === 'function'
+      ? getWorkspaceAutocompleteDirectoryHints()
+      : [];
+    (Array.isArray(dirHints) ? dirHints : []).forEach((item) => {
+      const path = String(item && item.value || '').split('/').filter(Boolean).join('/');
+      if (path) entries.push({ path, kind: 'directory' });
+    });
+  }
+  if (kind === 'file' || kind === 'any') {
+    const fileHints = typeof getWorkspaceAutocompleteFileHints === 'function'
+      ? getWorkspaceAutocompleteFileHints()
+      : [];
+    (Array.isArray(fileHints) ? fileHints : []).forEach((item) => {
+      const path = String(item && item.value || '').split('/').filter(Boolean).join('/');
+      if (path) entries.push({ path, kind: 'file', item });
+    });
+  }
+  return entries.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function _workspaceExpandPathPattern(rawPath = '', { cwd = _workspaceCwd(), kind = 'any', defaultToCwd = false } = {}) {
+  const target = _resolveWorkspaceCommandPath(rawPath, { cwd, defaultToCwd });
+  if (!_workspacePathHasGlob(target)) {
+    if (!_workspacePathExists(target, kind)) {
+      return [];
+    }
+    const entry = _workspaceEntryHints(kind).find(item => item.path === target);
+    return [entry || { path: target, kind: target && _workspacePathExists(target, 'file') ? 'file' : 'directory' }];
+  }
+  return _workspaceEntryHints(kind).filter(item => _workspaceGlobMatches(target, item.path));
+}
+
 function _resolveExistingWorkspaceCommandPath(rawPath = '', { cwd = _workspaceCwd(), kind = 'any', defaultToCwd = false } = {}) {
   const text = String(rawPath ?? '').trim();
   const target = _resolveWorkspaceCommandPath(text, { cwd, defaultToCwd });
@@ -1345,6 +1417,13 @@ function _isWorkspaceDownloadCommand(cmd) {
   }
   const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
   return (parts[0] || '').toLowerCase() === 'file' && (parts[1] || '').toLowerCase() === 'download';
+}
+
+function _isWorkspaceMoveCommand(cmd) {
+  if (!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true)) {
+    return false;
+  }
+  return !!_workspaceMoveCommand(cmd);
 }
 
 function _isWorkspaceTerminalCommand(cmd) {
@@ -2239,6 +2318,26 @@ async function _runWorkspaceListCommand(parts, tabId) {
   if (!parsed || parsed.invalid) throw new Error(parsed?.usage || 'Usage: ls [-l] [folder]');
   const rawTarget = parsed.target;
   await _ensureWorkspaceCache();
+  if (_workspacePathHasGlob(rawTarget)) {
+    const matches = _workspaceExpandPathPattern(rawTarget, { cwd: _workspaceCwd(tabId), kind: 'any', defaultToCwd: true });
+    if (!matches.length) throw new Error(`no matches: ${rawTarget}`);
+    const entries = {
+      folders: matches
+        .filter(item => item.kind === 'directory')
+        .map(item => ({
+          path: item.path,
+          name: _workspaceRelativeListName(item.path, _workspaceCwd(tabId), true).replace(/\/+$/, ''),
+        })),
+      files: matches
+        .filter(item => item.kind === 'file')
+        .map(item => ({
+          ...(item.item || {}),
+          path: item.path,
+          name: _workspaceRelativeListName(item.path, _workspaceCwd(tabId), false),
+        })),
+    };
+    return parsed.long ? _workspaceListLines(entries, '') : _workspaceShortListLines(entries);
+  }
   const target = _resolveExistingWorkspaceCommandPath(rawTarget, { cwd: _workspaceCwd(tabId), kind: 'directory', defaultToCwd: true });
   const entries = typeof getWorkspaceDirectoryEntries === 'function'
     ? getWorkspaceDirectoryEntries(target)
@@ -2264,6 +2363,18 @@ function _workspacePipeInputLinesForCommand(baseCommand, capturedLines, tabId) {
   if (!parsed || parsed.invalid || parsed.long) return capturedLines;
   try {
     const rawTarget = parsed.target;
+    if (_workspacePathHasGlob(rawTarget)) {
+      const matches = _workspaceExpandPathPattern(rawTarget, {
+        cwd: _workspaceCwd(tabId),
+        kind: 'any',
+        defaultToCwd: true,
+      });
+      if (!matches.length) return capturedLines;
+      return matches.map((item) => {
+        const name = _workspaceRelativeListName(item.path, _workspaceCwd(tabId), item.kind === 'directory');
+        return _workspacePlainLine(item.kind === 'directory' ? `${name.replace(/\/+$/, '')}/` : name);
+      });
+    }
     const target = _resolveExistingWorkspaceCommandPath(rawTarget, {
       cwd: _workspaceCwd(tabId),
       kind: 'directory',
@@ -2378,46 +2489,74 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
     return;
   }
   let targetInfo = null;
+  let targetInfos = [];
   try {
     await _ensureWorkspaceCache();
-    target = _resolveExistingWorkspaceCommandPath(target, { cwd: _workspaceCwd(tabId), kind: 'any' });
-    const existsResp = await apiFetch(`/workspace/files/info?path=${encodeURIComponent(target)}`);
-    if (!existsResp.ok) {
-      const data = await existsResp.json().catch(() => ({}));
-      throw new Error(data && data.error ? data.error : `file or folder was not found (${existsResp.status})`);
+    const expandedTargets = _workspacePathHasGlob(target)
+      ? _workspaceExpandPathPattern(target, { cwd: _workspaceCwd(tabId), kind: 'any' })
+      : [{ path: _resolveExistingWorkspaceCommandPath(target, { cwd: _workspaceCwd(tabId), kind: 'any' }) }];
+    if (!expandedTargets.length) {
+      throw new Error(`no matches: ${target}`);
     }
-    targetInfo = await existsResp.json().catch(() => ({}));
+    targetInfos = [];
+    for (const expandedTarget of expandedTargets) {
+      const path = String(expandedTarget && expandedTarget.path || '').split('/').filter(Boolean).join('/');
+      const existsResp = await apiFetch(`/workspace/files/info?path=${encodeURIComponent(path)}`);
+      if (!existsResp.ok) {
+        const data = await existsResp.json().catch(() => ({}));
+        throw new Error(data && data.error ? data.error : `file or folder was not found (${existsResp.status})`);
+      }
+      const info = await existsResp.json().catch(() => ({}));
+      targetInfos.push({ ...info, path: info && info.path ? String(info.path) : path });
+    }
+    targetInfo = targetInfos[0] || null;
+    target = targetInfos.length === 1 ? String(targetInfo && targetInfo.path || target) : target;
   } catch (err) {
     appendLine(`[error] ${err.message || 'file or folder was not found'}`, 'exit-fail', tabId);
     logClientError('file rm validate', err);
     setStatus('fail');
     return;
   }
+  const isMultiDelete = targetInfos.length > 1;
+  const directoryInfos = targetInfos.filter(info => info && info.kind === 'directory');
   const isDirectory = targetInfo && targetInfo.kind === 'directory';
-  const fileCount = Number(targetInfo && targetInfo.file_count) || 0;
-  if (isDirectory && !(parsedDelete && parsedDelete.recursive)) {
-    appendLine(`[error] ${target} is a folder; use rm -r ${target} or file delete -r ${target}`, 'exit-fail', tabId);
+  const fileCount = targetInfos.reduce((total, info) => total + (Number(info && info.file_count) || 0), 0);
+  if (directoryInfos.length && !(parsedDelete && parsedDelete.recursive)) {
+    const folderLabel = directoryInfos.length === 1 ? String(directoryInfos[0].path || target) : `${directoryInfos.length} folders`;
+    const matchedText = isMultiDelete ? `${folderLabel} matched` : `${folderLabel} is a folder`;
+    appendLine(`[error] ${matchedText}; use rm -r ${target} or file delete -r ${target}`, 'exit-fail', tabId);
     setStatus('fail');
     return;
   }
-  appendLine(`delete session ${isDirectory ? 'folder' : 'file'} '${target}'?`, '', tabId);
-  if (isDirectory && fileCount > 0) {
+  appendLine(
+    isMultiDelete
+      ? `delete ${targetInfos.length} matched session items for '${target}'?`
+      : `delete session ${isDirectory ? 'folder' : 'file'} '${target}'?`,
+    '',
+    tabId,
+  );
+  if (directoryInfos.length && fileCount > 0) {
     appendLine(`warning: this will also delete ${fileCount} ${fileCount === 1 ? 'file' : 'files'} in this folder.`, 'warning', tabId);
   }
   _setPendingTerminalConfirm({
     tabId,
     onYes: async () => {
       try {
-        const resp = await apiFetch(`/workspace/files?path=${encodeURIComponent(target)}`, { method: 'DELETE' });
-        if (!resp.ok) {
-          const data = await resp.json().catch(() => ({}));
-          throw new Error(data && data.error ? data.error : `file delete failed (${resp.status})`);
+        const removedLines = [];
+        for (const info of targetInfos) {
+          const path = String(info && info.path || '').split('/').filter(Boolean).join('/');
+          const resp = await apiFetch(`/workspace/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+          if (!resp.ok) {
+            const data = await resp.json().catch(() => ({}));
+            throw new Error(data && data.error ? data.error : `file delete failed (${resp.status})`);
+          }
+          const removedText = info && info.kind === 'directory' ? `file: removed folder ${path}` : `file: removed ${path}`;
+          removedLines.push({ text: removedText });
+          appendLine(removedText, '', tabId);
         }
-        const removedText = isDirectory ? `file: removed folder ${target}` : `file: removed ${target}`;
-        appendLine(removedText, '', tabId);
         if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache();
         _recordSuccessfulLocalCommand(cmd);
-        _persistClientSideRun(cmd, [{ text: removedText }], 'ok');
+        _persistClientSideRun(cmd, removedLines, 'ok');
         setStatus('ok');
       } catch (err) {
         appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
@@ -2426,11 +2565,57 @@ async function _handleWorkspaceDeleteCommand(cmd, tabId) {
       }
     },
     onNo: async () => {
-      appendLine(`Session ${isDirectory ? 'folder' : 'file'} delete canceled.`, '', tabId);
+      appendLine(`Session ${isMultiDelete ? 'items' : (isDirectory ? 'folder' : 'file')} delete canceled.`, '', tabId);
       setStatus('idle');
     },
   });
   setStatus('idle');
+}
+
+async function _handleWorkspaceMoveCommand(cmd, tabId) {
+  const parsed = _workspaceMoveCommand(cmd);
+  appendCommandEcho(cmd);
+  if (!parsed || parsed.invalid || !parsed.source || !parsed.destination) {
+    appendLine(parsed?.usage || 'Usage: file move <source> <destination>', 'exit-fail', tabId);
+    setStatus('fail');
+    return;
+  }
+  if (typeof moveWorkspacePath !== 'function') {
+    appendLine('[error] Files move is not ready — reload the page and try again', 'exit-fail', tabId);
+    setStatus('fail');
+    return;
+  }
+  try {
+    await _ensureWorkspaceCache();
+    const sources = _workspacePathHasGlob(parsed.source)
+      ? _workspaceExpandPathPattern(parsed.source, { cwd: _workspaceCwd(tabId), kind: 'any' })
+      : [{ path: _resolveExistingWorkspaceCommandPath(parsed.source, { cwd: _workspaceCwd(tabId), kind: 'any' }) }];
+    if (!sources.length) {
+      throw new Error(`no matches: ${parsed.source}`);
+    }
+    const destination = _resolveWorkspaceCommandPath(parsed.destination, { cwd: _workspaceCwd(tabId) });
+    const movingMultiple = sources.length > 1;
+    if (movingMultiple && !_workspacePathExists(destination, 'directory')) {
+      throw new Error('destination must be an existing folder when moving multiple matches');
+    }
+    const movedLines = [];
+    for (const sourceEntry of sources) {
+      const source = String(sourceEntry && sourceEntry.path || '').split('/').filter(Boolean).join('/');
+      const data = await moveWorkspacePath(source, destination);
+      const moved = data && data.moved ? data.moved : {};
+      const text = `file: moved ${moved.source || source} to ${moved.destination || destination}`;
+      movedLines.push({ text });
+      appendLine(text, '', tabId);
+    }
+    if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache();
+    _recordSuccessfulLocalCommand(cmd);
+    _persistClientSideRun(cmd, movedLines, 'ok');
+    setStatus('ok');
+  } catch (err) {
+    appendLine(`[error] ${err.message || 'file move failed'}`, 'exit-fail', tabId);
+    logClientError('file move', err);
+    setStatus('fail');
+  }
 }
 
 async function _handleWorkspaceEditorCommand(cmd, tabId) {
@@ -2675,6 +2860,13 @@ function submitCommand(rawCmd) {
   if (_isWorkspaceDeleteCommand(cmd)) {
     void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
       _handleWorkspaceDeleteCommand(baseCommand, activeTabId)
+    ));
+    return true;
+  }
+
+  if (_isWorkspaceMoveCommand(cmd)) {
+    void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
+      _handleWorkspaceMoveCommand(baseCommand, activeTabId)
     ));
     return true;
   }

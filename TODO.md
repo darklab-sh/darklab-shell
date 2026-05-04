@@ -17,26 +17,38 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 
 ## Open TODOs
 
-- **Workspace file and folder move support**
-  - Add a first-class move flow for Files so users can reorganize workspace contents without downloading/re-uploading or using command output paths.
-  - User flows:
-    - Files modal action: add a `Move` button/action for file and folder rows that opens an app-native destination picker.
-    - Files modal drag-and-drop: allow dragging a file or folder onto another folder to move it there.
-    - CLI command: add `file move <source> <destination>` with `mv` as an alias.
-  - Behavior:
-    - Moving a file to a folder keeps the original filename.
-    - Moving to a full destination path supports rename-on-move.
-    - Moving folders must reject recursive/self moves such as moving `reports/` into `reports/archive/`.
-    - Validate both source and destination paths through the existing workspace path validation layer so moves are limited to the user's valid session workspace.
-    - Existing workspace quota checks and session scoping must apply.
-    - If the destination exists, require confirmation or reject with a clear message rather than silently overwriting.
-  - Backend/API:
-    - Add an app-mediated move operation so UI and CLI share the same validation and filesystem behavior.
-    - Preserve workspace ownership/mode expectations for app-created and scanner-created files.
-  - Tests:
-    - Python route/helper coverage for file move, folder move, rename-on-move, destination exists, missing source, invalid source path, invalid destination path, cross-workspace escape attempts, and recursive folder rejection.
-    - JS unit coverage for Files modal move button, destination picker state, and drag/drop intent handling.
-    - E2E coverage for at least one modal move flow and one `file move`/`mv` command flow.
+- **Directory-aware workspace autocomplete**
+  - Goal: make workspace file commands suggest entries from the directory being typed, not only the current tab workspace folder.
+  - Current behavior:
+    - `cat ` suggests files in the current workspace folder.
+    - `cat darklab/` does not switch the suggestion scope to the `darklab` folder.
+    - `cat ../` and `cat ../darklab/` are not treated as folder-prefix navigation in autocomplete.
+  - Desired behavior:
+    - When a workspace-aware command is completing a file path, a token ending in `/` should resolve that typed path against the active tab workspace cwd and suggest direct child files.
+    - When a workspace-aware command is completing a folder path, a token ending in `/` should resolve that typed path against the active tab workspace cwd and suggest direct child folders.
+    - Preserve the path style the user typed in the inserted suggestion:
+      - `cat darklab/` should suggest `darklab/file.txt`.
+      - `cat ../` should suggest `../sibling.txt`.
+      - `cat ../darklab/` should suggest `../darklab/file.txt`.
+      - absolute workspace paths like `cat /darklab/` should keep the leading `/`.
+    - Continue to support current-directory suggestions when no directory prefix is typed.
+  - Initial command scope:
+    - File-only suggestions: `cat`, `file show`, `file edit`, `file download`, `grep`, `head`, `tail`, `sort`, `uniq`, and other workspace file readers.
+    - Folder-only suggestions: `cd`, `mkdir` existing-folder context, `file list`, `file ls`, `ls`, and `ll`.
+    - File-or-folder suggestions: `file delete`, `file rm`, `rm`, `file move` source, and `mv` source.
+    - Move destination suggestions should stay folder-focused and should keep excluding the selected source folder and its children.
+  - Implementation notes:
+    - Keep this browser-side and cache-backed; do not add a new autocomplete API call.
+    - Reuse the existing workspace cache from `/workspace/files`, the active tab `workspaceCwd`, `normalizeWorkspaceCommandPath(path, cwd)`, and `getWorkspaceDirectoryEntries(path)`.
+    - Add a small helper that splits the active token into `{ typedPrefix, resolvedDirectory, leafQuery }`.
+    - For tokens ending in `/`, use an empty `leafQuery` and list that resolved directory.
+    - For tokens containing a slash but not ending in `/`, use the path before the final slash as the resolved directory and the final segment as the filter query.
+    - Reject path prefixes that escape the session workspace; autocomplete should simply return no suggestions for those.
+    - Avoid changing substring/fuzzy ranking globally. Apply the directory-aware expansion before the existing item filtering so normal matching behavior remains intact.
+  - Testing:
+    - Add Vitest coverage for `cat darklab/`, `cat ../`, `cat ../darklab/`, `ls darklab/`, and `mv darklab/`.
+    - Cover insert values so suggestions preserve the user-typed relative or absolute prefix.
+    - Add at least one browser/e2e regression if the behavior depends on real tab cwd state.
 
 ---
 

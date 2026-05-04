@@ -71,7 +71,7 @@ commands:
       arguments: []
   - root: file
     description: >-
-      built-in: list, view, create, edit, download, or remove session files
+      built-in: list, view, create, edit, download, move, or remove session files
     feature_required: workspace
     autocomplete:
       subcommands:
@@ -124,6 +124,14 @@ commands:
           value_hint:
             value: "<file>"
             description: "Session file"
+        - value: move
+          description: "Move or rename a session file or folder"
+          takes_value: true
+          insert: "move "
+          value_hint:
+            value: "<source> <destination>"
+            value_type: target
+            description: "Session file or folder path"
         - value: rm
           description: "Remove a session file from this session"
           takes_value: true
@@ -251,6 +259,15 @@ commands:
     autocomplete:
       argument_limit: 1
       arguments: []
+  - root: mv
+    description: "built-in: move or rename a session file or folder"
+    feature_required: workspace
+    autocomplete:
+      argument_limit: 2
+      arguments:
+        - value: "<source> <destination>"
+          value_type: target
+          description: "Session file or folder path"
   - root: man
     description: "built-in: show a real or built-in manual page"
     autocomplete:

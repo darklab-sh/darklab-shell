@@ -146,6 +146,7 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
       readWorkspaceFile,
       deleteWorkspacePath,
       deleteWorkspaceFile,
+      moveWorkspacePath,
       openWorkspace,
       setWorkspaceMessage,
       showWorkspaceEditor,
@@ -157,6 +158,7 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
       handleWorkspaceFileAction,
       showWorkspaceViewerLoading,
       promptWorkspaceFolderName,
+      promptWorkspaceMove,
     };
   `
   const fns = new Function(...names, `${SEARCH_CORE_SRC}\n${SEARCH_SRC}\n${CORE_SRC}\n${SRC}\n${returnExpr}`)(...values)

@@ -1,6 +1,6 @@
 # Architecture
 
-This document explains how darklab_shell is put together today: runtime boundaries, request flow, browser code, backend code, persistence, observability, tests, and production deployment.
+This document explains how darklab_shell is put together today: runtime boundaries, request flow, browser code, backend code, persistence, observability, and tests.
 
 For the architectural rationale, tradeoffs, and implementation-history notes behind those structures, see [DECISIONS.md](DECISIONS.md).
 
@@ -21,7 +21,6 @@ For the architectural rationale, tradeoffs, and implementation-history notes beh
 - [Security Model](#security-model)
 - [Configuration Surfaces](#configuration-surfaces)
 - [Test Suite](#test-suite)
-- [Production Deployment Notes](#production-deployment-notes)
 - [Related Docs](#related-docs)
 
 ---
@@ -255,6 +254,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/workspace/files` | Returns current-session workspace directories, files, usage, and quota limits. |
 | `POST` | `/workspace/files` | Writes a text file into the current session workspace and returns the refreshed workspace payload. |
 | `DELETE` | `/workspace/files` | Deletes a file or folder from the current session workspace and returns the refreshed workspace payload. |
+| `POST` | `/workspace/files/move` | Moves or renames a file or folder inside the current session workspace and returns the refreshed workspace payload. |
 | `POST` | `/workspace/directories` | Creates a current-session workspace directory and returns the refreshed workspace payload. |
 | `GET` | `/workspace/files/read` | Reads a workspace text file for the UI viewer/editor; binary files return an explicit unsupported-media response. |
 | `GET` | `/workspace/files/info` | Returns metadata for a workspace path, including directory file counts used by delete confirmations. |
@@ -625,6 +625,8 @@ Session command variables are expanded inside the app before command policy vali
 
 Workspace-aware validation also rewrites declared file and directory flags from `app/conf/commands.yaml` into the active session workspace. Rewritten token lists are reassembled with shell-safe quoting before they cross the existing `sh -c` subprocess boundary, so app-injected workspace paths cannot accidentally change shell parsing when a valid session file or folder name contains spaces or shell metacharacters. The same command metadata drives target-value restrictions: flags and positional arguments declared with target-like `value_type` values (`domain`, `host`, `ip`, `cidr`, `target`, or `url`) can be checked against configured restricted networks without blanket string scanning. Runtime adaptation metadata also owns managed workspace directories, environment wrappers, and command-prefix injections; Amass declares its database-backed subcommands there, so `amass enum`, `amass subs`, `amass track`, and `amass viz` get a managed `-dir amass` workspace directory and `XDG_CONFIG_HOME` is pointed at the session workspace so `amass engine` and the CLI share the same per-session database path. ProjectDiscovery tools declare a workspace-required `env XDG_CONFIG_HOME=<session workspace>` prefix through the same metadata, and run output filters display absolute session-workspace paths as user-facing paths like `/katana/resume.cfg`. See [External Command Integrations](docs/external-command-integrations.md) for the command-specific integration contracts.
 
+Workspace move and glob behavior stays app-mediated too. `move_workspace_path()` resolves both source and destination through the same session-root checks used by reads and deletes, rejects overwrites, rejects symlink escapes, prevents moving a folder into itself, and falls back to the scanner user for command-owned files that need group-write movement. Browser-side `file ls`, `file move` / `mv`, and confirmed `file delete` expand simple `*` patterns from the loaded session workspace cache for fast terminal feedback; backend built-ins use `expand_workspace_path_pattern()` so stale-browser or server-rendered paths follow the same one-segment matching rule. The shell never asks `/bin/sh` to expand workspace patterns. Before list/read-style operations, `normalize_session_workspace_permissions()` also repairs scanner-created child modes so tool config folders written under session-scoped `XDG_CONFIG_HOME` remain visible to the app without making the workspace world-readable.
+
 Synthetic post-filters also sit on this run-lifecycle boundary rather than on the shell-parser path. `parse_synthetic_postfilter()` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the brokered stream applies the selected helper before lines are emitted or persisted.
 
 ### Spawn And Stream
@@ -937,12 +939,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,356
+- behavior tests: 2,368
 - docs/inventory meta-tests: 30
-- `pytest`: 1182 (1152 behavior + 30 meta)
-- `vitest`: 970
+- `pytest`: 1187 (1157 behavior + 30 meta)
+- `vitest`: 977
 - `playwright`: 236
-- total: 2,388
+- total: 2,400
 
 ### Testing Architecture
 
@@ -968,39 +970,9 @@ Keep the detailed suite appendix, focused run commands, and maintenance notes in
 
 ---
 
-## Production Deployment Notes
-
-The root `docker-compose.yml` remains the standalone/base deployment shape:
-
-- `shell` plus `redis`
-- health checks
-- tmpfs mounts
-- `init: true`
-
-That base file is intentionally usable for local and simple self-hosted deployments without bringing in reverse-proxy assumptions or environment-specific logging transport.
-
-Gunicorn runtime sizing is controlled through environment variables rather than hard-coded entrypoint edits:
-
-- `WEB_CONCURRENCY` for worker count
-- `WEB_THREADS` for threads per worker
-
-These remain optional and fall back to the built-in defaults when unset, which keeps production tuning in `.env` / Compose rather than in the startup script.
-
-Production-specific behavior is layered in through overrides such as `examples/docker-compose.prod.yml`. That override is meant for reverse-proxy-aware deployments and adds operational concerns without forcing them into the standalone base:
-
-- removes host port publishing and switches the shell service to `expose`
-- joins the external `darklab-net` Docker network
-- adds `VIRTUAL_HOST` / `LETSENCRYPT_HOST` environment variables for `nginx-proxy`
-- pins stable production container names for `shell` and `redis`
-- enables Docker GELF transport for both containers
-
-Application log format still remains an application-level choice, so operators must pair the Docker GELF transport with `log_format: gelf` in `config.yaml` or `config.local.yaml` when they want end-to-end GELF output.
-
----
-
 ## Related Docs
 
-- [README.md](README.md) — quick summary, quick start, installed tools, and configuration reference
+- [README.md](README.md) — quick summary, quick start, installed tools, configuration reference, and production deployment notes
 - [FEATURES.md](FEATURES.md) — full per-feature reference including purpose and use
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) — external-tool rewrite, environment, workspace, and smoke-test contracts
 - [CONTRIBUTING.md](CONTRIBUTING.md) — local setup, test workflow, linting, and merge request guidance

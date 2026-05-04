@@ -96,13 +96,13 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
             "answer": (
                 "Files are app-managed, session-scoped text files for commands that need small inputs "
                 "or outputs. Use the Files panel or run file help to create, view, edit, "
-                "download, or delete files."
+                "download, move, or delete files."
             ),
             "answer_html": (
                 "Files are app-managed, session-scoped text files for commands that need small "
                 "inputs or outputs. Use the <strong>Files</strong> panel or run "
                 "<span class=\"allowed-chip faq-chip\" data-faq-command=\"file help\">file help</span> "
-                "to create, view, edit, download, or delete files.<br><br>"
+                "to create, view, edit, download, move, or delete files.<br><br>"
                 "Commands can only read or write files through command flags explicitly enabled "
                 "in the command registry. Shell navigation and redirection are still blocked. "
                 "Files stay scoped to the current browser session or named session token."

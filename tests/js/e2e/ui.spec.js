@@ -306,12 +306,32 @@ test.describe('workspace modal', () => {
     ])
     expect(download.suggestedFilename()).toBe('targets.txt')
 
+    await page.locator('#workspace-new-folder-btn').click()
+    await page.locator('#confirm-host .form-input').fill('moved')
+    await page.locator('#confirm-host [data-confirm-action-id="create"]').click()
+    await expect(page.locator('#workspace-breadcrumbs')).toContainText('Files/moved')
+    await page.locator('#workspace-breadcrumbs [data-workspace-dir=""]').click()
+    await expect(page.locator('#workspace-breadcrumbs')).toHaveText('Files')
+
+    await row.locator('[data-workspace-action="move"]').click()
+    await page.locator('#confirm-host .form-input').fill('moved')
+    await page.locator('#confirm-host [data-confirm-action-id="move"]').click()
+    await expect(page.locator('#workspace-message')).toContainText('Moved targets.txt to moved/targets.txt')
+    await expect(row).toHaveCount(0)
+    await page.locator('.workspace-folder-row').filter({ hasText: 'moved' }).locator('.workspace-file-name').click()
+    await expect(page.locator('.workspace-file-row').filter({ hasText: 'targets.txt' })).toBeVisible()
+
     await page.locator('.workspace-close').click()
     await expect(page.locator('#workspace-overlay')).not.toHaveClass(/open/)
 
-    await runCommand(page, 'cat targets.txt')
+    await runCommand(page, 'cat moved/targets.txt')
     await expect(page.locator('.tab-panel.active .output')).toContainText('darklab.sh')
     await expect(page.locator('.tab-panel.active .output')).toContainText('ip.darklab.sh')
+
+    await runCommand(page, 'mv moved/targets.txt targets.txt')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('file: moved moved/targets.txt to targets.txt')
+    await runCommand(page, 'cat targets.txt')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('darklab.sh')
   })
 
   test('navigates nested file output folders and exposes viewer actions', async ({ page }) => {
