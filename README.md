@@ -727,11 +727,12 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── hooks/
 │   │   └── pre-commit          # Git pre-commit hook — runs all lint, security, and unit checks (activate with: git config core.hooksPath scripts/hooks)
 │   ├── lint_json.mjs           # Validates that all tracked JSON files parse cleanly — used by the lint pipeline
+│   ├── obs_recording.mjs       # Minimal OBS WebSocket helper used by the demo recording wrappers
 │   ├── playwright/
 │   │   ├── run_e2e_server.sh   # Starts one isolated Flask e2e server with per-worker APP_DATA_DIR state
 │   │   └── stop_e2e_servers.sh # Clears the configured Playwright test ports before local runs
-│   ├── record_demo.sh          # Records the desktop demo video — health/workspace checks, Playwright, ffmpeg stitch
-│   ├── record_demo_mobile.sh   # Same as record_demo.sh but for the mobile shell UI
+│   ├── record_demo.sh          # Records the desktop demo through OBS while Playwright drives the browser
+│   ├── record_demo_mobile.sh   # Records the mobile demo through OBS with the in-page keyboard overlay
 │   ├── run_playwright.sh       # Local Playwright wrapper — quiet by default, clears ports, and passes through specs/grep/config
 │   ├── run_pytest.sh           # Local pytest wrapper — pins repo config/rootdir and keeps collection scoped
 │   └── seed_history.py         # Populates history.db with registry-backed example runs under a UUID or tok_ session; includes the named visual-flows preset used by capture/demo work

@@ -16,11 +16,16 @@ function contractFor(mode) {
 
 export async function assertVisualFlowGuardrails(
   page,
-  { mode, requireSeededHistory = false, expectedSessionToken = CAPTURE_SESSION_TOKEN } = {},
+  {
+    mode,
+    requireSeededHistory = false,
+    expectedSessionToken = CAPTURE_SESSION_TOKEN,
+    expectedViewport = null,
+  } = {},
 ) {
   const contract = contractFor(mode)
   const viewport = page.viewportSize()
-  expect(viewport).toEqual(contract.viewport)
+  expect(viewport).toEqual(expectedViewport || contract.viewport)
 
   const state = await page.evaluate(async () => {
     const sessionToken = (() => {

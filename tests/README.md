@@ -172,12 +172,59 @@ The browser layer now uses a split config model:
 Standalone Playwright specs that record the README demo videos (`tests/js/e2e/demo.spec.js` desktop, `tests/js/e2e/demo.mobile.spec.js` mobile). **Not part of the normal test suite** — excluded from both Playwright configs, guarded by `test.skip(!process.env.RUN_DEMO, ...)`, and run only through wrapper scripts:
 
 ```bash
-scripts/record_demo.sh                              # desktop (1600×900 @2x)
-scripts/record_demo_mobile.sh                       # mobile (430×932 iPhone 15-class)
+scripts/record_demo.sh                              # desktop OBS recording, 1600×900 app viewport
+scripts/record_demo_mobile.sh                       # mobile OBS recording, 502×932 OBS canvas by default
 scripts/record_demo.sh --base-url http://localhost:9000
+scripts/record_demo.sh --no-arm                     # start immediately when OBS is already lined up
 ```
 
-Wrappers health-check the container, seed/register the demo session token, probe `GET /workspace/files` with that token so the Files segment can create `response.html`, set `RUN_DEMO=1`, run the spec, and stitch frames into `assets/darklab_shell_demo.mp4` / `assets/darklab_shell_mobile_demo.mp4` with ffmpeg (HEVC/VideoToolbox on macOS, VP9/libvpx on Linux). The desktop recording also opens the Status Monitor during the long-running ping segment and pauses after telemetry has populated so the CPU/RSS memory meters appear in the final video. See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
+Wrappers health-check the container, seed/register the demo session token, probe `GET /workspace/files` with that token so the Files segment can create `response.html`, set `RUN_DEMO=1`, open a headed Chromium window, and use `scripts/obs_recording.mjs` to start/stop OBS over its WebSocket API. By default the wrapper pauses on a holding screen before recording starts, which gives you time to select the correct Chromium window in OBS without missing the welcome animation. Use `--no-arm` when OBS is already lined up. The desktop and mobile demos both open the Status Monitor during the long-running ffuf segment so the active run rows and pulse strip are visible in the final video. See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
+
+OBS must be installed and running before you start either wrapper. Enable the WebSocket server in `Tools -> WebSocket Server Settings`; set `OBS_WS_PASSWORD` if your OBS WebSocket requires one.
+
+Desktop OBS preset:
+
+- `OBS -> Settings -> Video`
+  - Base (Canvas) Resolution: `1600x900`
+  - Output (Scaled) Resolution: `1600x900`
+- `OBS -> Settings -> Output -> Recording`
+  - Recording Quality: `Indistinguishable Quality, Large File Size`
+  - Recording Format: `MPEG-4 (.mpg)`
+  - Video Encoding: `Hardware (H.264)`
+- `OBS -> Settings -> Audio -> Global Audio Devices`
+  - All: `Disabled`
+- `Sources -> Add Source -> Screen Capture`
+  - Name: `Darklab Desktop Demo`
+  - Method: `Window Capture`
+  - Window: `[Google Chrome for Testing] darklab_shell`
+  - Leave all source options unchecked.
+- `Transform -> Edit Transform`
+  - Position: `X 0.00`, `Y 0.00`
+  - Size: `Width 1600 px`, `Height 900 px`
+  - Bounds: `Stretch`, `Width 1600 px`, `Height 900 px`
+  - Crop: `Left 0 px`, `Right 4 px`, `Top 174 px`, `Bottom 0 px`
+
+Mobile OBS preset:
+
+- `OBS -> Settings -> Video`
+  - Base (Canvas) Resolution: `502x932`
+  - Output (Scaled) Resolution: `502x932`
+- `OBS -> Settings -> Output -> Recording`
+  - Recording Quality: `Indistinguishable Quality, Large File Size`
+  - Recording Format: `MPEG-4 (.mpg)`
+  - Video Encoding: `Hardware (H.264)`
+- `OBS -> Settings -> Audio -> Global Audio Devices`
+  - All: `Disabled`
+- `Sources -> Add Source -> Screen Capture`
+  - Name: `Darklab Mobile Demo`
+  - Method: `Window Capture`
+  - Window: `[Google Chrome for Testing] darklab_shell`
+  - Leave all source options unchecked.
+- `Transform -> Edit Transform`
+  - Position: `X 0.00`, `Y 0.00`
+  - Size: `Width 502 px`, `Height 932 px`
+  - Bounds: `Stretch`, `Width 502 px`, `Height 932 px`
+  - Crop: `Left 0 px`, `Right 4 px`, `Top 174 px`, `Bottom 0 px`
 
 Desktop and mobile demo configs share a central visual contract in [config/playwright.visual.contracts.js](../config/playwright.visual.contracts.js), and both specs assert that contract at startup through `tests/js/e2e/visual_guardrails.js`. That keeps viewport, pixel density, touch/mobile-mode assumptions, and `/status` health aligned with the wrapper/config setup instead of drifting silently.
 
@@ -2470,19 +2517,19 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 
 #### `demo.mobile.spec.js`
 
-Mobile demo recording spec. Mirrors `demo.spec.js` for the mobile shell UI (`#mobile-cmd`, `#mobile-run-btn`, hamburger menu). Injects a fake iOS keyboard image to avoid Chromium's headless keyboard-simulation overlay, which would otherwise paint above all page content regardless of z-index and shrink the visual viewport. Captures frames via `page.screenshot()` at `deviceScaleFactor: 3` physical resolution (1290×2796) for the 430×932 iPhone 15-class viewport. Stitched at 15 fps.
+Mobile demo recording spec. Mirrors `demo.spec.js` for the mobile shell UI (`#mobile-cmd`, `#mobile-run-btn`, hamburger menu). Injects a fake iOS keyboard image to avoid Chromium's mobile keyboard overlay, which would otherwise paint above the app and shrink the visual viewport. The normal wrapper records the headed browser through OBS; the spec still has a screenshot-frame fallback for local experiments.
 
 | Test | Description |
 | --- | --- |
-| `demo-mobile` | Full mobile shell demo sequence: ping, nslookup, `curl -L -o response.html https://noc.darklab.sh`, Files panel, history sheet, workflows modal, theme switching with README-first pacing. |
+| `demo-mobile` | Full mobile shell demo sequence: ping, nslookup, `curl -L -o response.html https://noc.darklab.sh`, Files panel, ffuf with wordlist autocomplete, Status Monitor, history sheet, and theme switching with README-first pacing. |
 
 #### `demo.spec.js`
 
-Desktop demo recording spec. Drives a tightened README-first interaction sequence — ping tab, DNS lookup tab, history drawer scroll, workflows modal, and one theme switch — against a live container to produce `assets/darklab_shell_demo.mp4` (or `.webm` on Linux). Mocks the `/history` route with a realistic paginated history list. Captures frames via `page.screenshot()` (not Playwright's built-in video recorder) to get full `deviceScaleFactor: 2` resolution (3200×1800). Stitched at 15 fps. Theme transitions call `applyThemeSelection()` directly in the page context rather than dispatching a DOM click — clicking a `<button>` triggers Chromium's focus-scroll management and causes a one-frame container jump even when the card is already fully visible.
+Desktop demo recording spec. Drives a README-first interaction sequence — ping tab, DNS lookup tab, Files, ffuf with wordlist autocomplete, Status Monitor, history drawer scroll, and one theme switch — against a live container. The normal wrapper records the headed browser through OBS; the spec still has a screenshot-frame fallback for local experiments. Theme transitions call `applyThemeSelection()` directly in the page context rather than dispatching a DOM click because clicking a `<button>` inside a scroll container can cause a one-frame jump in Chromium.
 
 | Test | Description |
 | --- | --- |
-| `demo` | Full desktop shell demo sequence: ping, DNS lookup, `curl -L -o response.html https://noc.darklab.sh`, Files panel, history drawer, workflows modal, theme switching. |
+| `demo` | Full desktop shell demo sequence: ping, DNS lookup, `curl -L -o response.html https://noc.darklab.sh`, Files panel, ffuf with wordlist autocomplete, Status Monitor, history drawer, and theme switching. |
 
 #### `failure-paths.spec.js`
 

@@ -3,8 +3,8 @@
 # Changes to this file take effect after a container restart (docker compose restart).
 # No rebuild is needed.
 # Optional: add sibling *.local.* files for untracked server-specific overrides.
-# Examples: app/conf/config.local.yaml, app/conf/allowed_commands.local.txt,
-# app/conf/ascii.local.txt, app/conf/autocomplete_context.local.yaml,
+# Examples: app/conf/config.local.yaml, app/conf/commands.local.yaml,
+# app/conf/ascii.local.txt,
 # app/conf/app_hints.local.txt, app/conf/faq.local.yaml,
 # app/conf/welcome.local.yaml, app/conf/themes/<name>.local.yaml.
 # If present, each local overlay is applied after its checked-in base file.
@@ -53,8 +53,8 @@
 # Server default if unset: auto (/data if writable, otherwise /tmp)
 # data_dir: /data
 
-# Enable the built-in basic redaction model for snapshot permalinks and local
-# export actions (`save txt` / `save html`). When enabled, the app applies a
+# Enable the built-in basic redaction model for snapshot sharing. When enabled,
+# the app applies a
 # conservative built-in baseline before any operator-defined rules:
 #   - bearer tokens / Authorization: Bearer ...
 #   - email addresses
@@ -62,11 +62,12 @@
 #   - IPv6 addresses
 #   - hostnames / dotted domains
 # The app then appends any operator-defined rules from `share_redaction_rules`.
-# Normal run history remains unchanged in this first version.
+# Normal run history, history permalinks, and local `save txt` / `save html` /
+# `save pdf` exports remain raw.
 # Server default if unset: true
 # share_redaction_enabled: true
 #
-# Optional operator-defined regex rules appended after the built-in share/export
+# Optional operator-defined regex rules appended after the built-in snapshot-share
 # redaction rules.
 # Each rule supports:
 #   label:       optional human-readable name

@@ -6,7 +6,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
-## [1.6] — Unreleased
+## [1.6] — 2026-05-04
 
 ### Added
 
@@ -421,7 +421,7 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Tests:** backend classifier and persistence coverage in `tests/py/test_backend_modules.py`, route/history/share regression coverage in `tests/py/test_run_history_share.py`, `tests/py/test_routes.py`, and `tests/py/test_output_search.py`, plus frontend metadata coverage in `tests/js/unit/search.test.js`, `tests/js/unit/output.test.js`, and `tests/js/unit/runner.test.js`.
 - **External command policy, catalog metadata, autocomplete hints, and smoke examples now share `commands.yaml`** — the operator-facing command model has one source of truth instead of separate allowlist and autocomplete files.
   - **Before:** allowed-command prefixes lived in `allowed_commands.txt`, external-tool autocomplete lived in `autocomplete.yaml`, and related consumers had to keep their own merge, grouping, and example-loading logic in sync. That made drift easy: runnable tools such as `tcptraceroute` and `assetfinder` could be allowed without autocomplete entries, while removed or low-value tools could linger in only one surface.
-  - **After:** `app/conf/commands.yaml` owns each external command root, category, `policy.allow`, `policy.deny`, autocomplete metadata, pipe helpers, and user-facing examples. `commands.local.yaml` is the matching deployment overlay. The old `allowed_commands.txt` and `autocomplete.yaml` files are gone, the command catalog and `/run` gate derive from the registry, the smoke corpus reads registry examples plus workflows, seeded history uses registry examples, `amass` has been removed, and `assetfinder` now has `-h`, `-subs-only`, and `assetfinder -subs-only darklab.sh` coverage.
+  - **After:** `app/conf/commands.yaml` owns each external command root, category, `policy.allow`, `policy.deny`, autocomplete metadata, pipe helpers, and user-facing examples. `commands.local.yaml` is the matching deployment overlay. The old `allowed_commands.txt` and `autocomplete.yaml` files are gone, the command catalog and `/run` gate derive from the registry, the smoke corpus reads registry examples plus workflows, seeded history uses registry examples, and `assetfinder` now has `-h`, `-subs-only`, and `assetfinder -subs-only darklab.sh` coverage.
   - **Tests:** `tests/py/test_backend_modules.py` covers registry loading, local overlay merging, policy derivation, autocomplete derivation, seeded-history command pools, and smoke-corpus generation; `tests/py/test_routes.py` and `tests/js/unit/app.test.js` cover registry-backed route/frontend expectations; `tests/py/test_container_smoke_test.py` verifies expectation coverage for registry examples plus workflow commands.
 - **The new `stats` built-in summarizes current-session activity** — session analytics now have their own terminal-native command instead of bloating the quick health-oriented `status` output.
   - **Before:** `status` covered identity, counts, saved options, active-run count, and backend health, but there was no shell-native view of command-root activity, success rate, or average run duration for the current session.
@@ -494,6 +494,11 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Before:** the demo wrappers reused a fixed token, so repeated recordings could accumulate old stars and history rows even after the visual fixture was tightened.
   - **After:** the wrappers now generate a fresh demo token by default, seed the `visual-flows` fixture into that session, and the demo guardrails validate the actual seeded token in use.
   - **Tests:** updated `tests/js/e2e/demo.spec.js`, `tests/js/e2e/demo.mobile.spec.js`, and `tests/js/e2e/visual_guardrails.js`.
+- **Demo recording scripts now use OBS as the standard capture path** — desktop and mobile README demos are recorded from real headed Chromium windows instead of screenshot stitching.
+  - **Before:** the demo wrappers captured Playwright screenshots and encoded them into video, which worked for static UI but made animated surfaces such as the Status Monitor pulse strip look choppy and less representative of the app.
+  - **After:** `scripts/record_demo.sh` and `scripts/record_demo_mobile.sh` now drive OBS through `scripts/obs_recording.mjs`, verify the app is reachable, seed a fresh `visual-flows` session, launch a headed Chromium setup window, print the expected OBS canvas/window dimensions, wait for the operator to select/crop the OBS Window Capture source, then start recording and release the Playwright demo flow. The mobile wrapper keeps the in-page keyboard overlay while exposing safe-area, keyboard-width, gutter-color, and window-size environment knobs for capture tuning. Both wrappers still support `--no-arm` for immediate recording when OBS is already configured.
+  - **Docs:** `tests/README.md` now includes desktop and mobile OBS setup notes for canvas/output size, recording quality, audio-disabled capture, source selection, transform, and crop settings.
+  - **Tests:** updated the dedicated desktop/mobile demo Playwright specs and configs for the OBS-held startup flow, including the current command sequence, Status Monitor scene, History/Theme drawer scenes, and mobile parity flow.
 - **The welcome command set now keeps the Gobuster example on a host with meaningful directory results** — the curated startup examples continue to act like plausible commands a user can actually run against the project’s own infrastructure.
   - **Before:** the Gobuster welcome example targeted `https://darklab.sh`, which is less representative for directory enumeration than the project’s dedicated stats host.
   - **After:** the Gobuster example now targets `https://tor-stats.darklab.sh`.

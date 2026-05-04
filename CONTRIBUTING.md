@@ -141,6 +141,7 @@ Before merging a version branch back to `main`:
 
 - Confirm the branch is current with the target `main` branch, or intentionally document why it is not.
 - Ensure the new version is updated in [app/config.py](app/config.py) and [package.json](package.json).
+- Ensure the PROJECT_README variable in [app/config.py](app/config.py) is accurate and not branch-specific.
 - If the version bump changes tracked browser dependencies, regenerate and verify committed vendor assets with `npm run vendor:sync` and `npm run vendor:check`.
 - Ensure the matching [CHANGELOG.md](CHANGELOG.md) version section is marked released with the release date instead of `Unreleased`.
 - Ensure `docs/release-drafts/` draft files are removed from git unless the project intentionally keeps that release's draft artifacts.
