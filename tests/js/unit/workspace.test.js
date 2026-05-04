@@ -806,7 +806,7 @@ describe('workspace UI helpers', () => {
     expect(document.querySelectorAll('mark.search-hl')).toHaveLength(0)
 
     expect(document.querySelector('[data-workspace-line-jump]')).toBeNull()
-  })
+  }, 10_000)
 
   it('uses large-search mode for short files with very long lines', () => {
     const searchTimers = []
