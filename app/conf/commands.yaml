@@ -189,16 +189,22 @@ commands:
     policy:
       allow:
         - nc -z
+        - nc -h
       deny:
         - nc -e
         - nc -c
     autocomplete:
       examples:
+        - value: nc -h
+          description: Show help and usage
         - value: nc -zv ip.darklab.sh 80
           description: Check if port 80 is open
         - value: nc -zv ip.darklab.sh 443 80
           description: Check multiple ports at once
       flags:
+        - value: -h
+          description: Show help and usage
+          closes: true
         - value: -z
           description: Zero-I/O mode for port scanning
           allow_grouping: true
@@ -3281,6 +3287,9 @@ commands:
           description: Save Nikto findings to a session file
           feature_required: workspace
       flags:
+        - value: -Help
+          description: Show help and usage
+          closes: true
         - value: -h
           description: Target host or URL
           takes_value: true

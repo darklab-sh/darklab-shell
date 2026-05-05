@@ -22,10 +22,10 @@ Current totals:
 
 - behavior tests: 2,398
 - docs/inventory meta-tests: 30
-- `pytest`: 1196 (1166 behavior + 30 meta)
+- `pytest`: 1198 (1166 behavior + 30 meta)
 - `vitest`: 996
 - `playwright`: 236
-- total: 2,428
+- total: 2,430
 
 This document is organized in two parts:
 
