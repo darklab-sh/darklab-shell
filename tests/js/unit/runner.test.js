@@ -1649,7 +1649,7 @@ describe('runner helpers', () => {
     const appendLine = vi.fn()
     const { runCommand, status, runBtn } = loadRunnerFns({
       cmdValue: 'echo hello',
-      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'darklab' }],
       apiFetch,
       appendLine,
     })
@@ -1665,6 +1665,11 @@ describe('runner helpers', () => {
         headers: { 'Content-Type': 'application/json' },
       }),
     )
+    expect(JSON.parse(apiFetch.mock.calls[0][1].body)).toEqual({
+      command: 'echo hello',
+      tab_id: 'tab-1',
+      workspace_cwd: 'darklab',
+    })
     expect(appendLine).toHaveBeenLastCalledWith(
       '[connection error] Unable to contact the server right now. Please try again in a moment. If this keeps happening, contact the shell operator.',
       'exit-fail',
@@ -2026,7 +2031,7 @@ describe('submitCommand return contract', () => {
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: 'curl darklab.sh', tab_id: 'tab-1' }),
+        body: JSON.stringify({ command: 'curl darklab.sh', tab_id: 'tab-1', workspace_cwd: '' }),
       }),
     )
   })
@@ -2049,7 +2054,7 @@ describe('submitCommand return contract', () => {
       expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ command: 'curl explicit.sh', tab_id: 'tab-1' }),
+        body: JSON.stringify({ command: 'curl explicit.sh', tab_id: 'tab-1', workspace_cwd: '' }),
       }),
     )
   })

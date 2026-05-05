@@ -306,6 +306,94 @@ class TestIsCommandAllowedEdges:
         assert db_is_dir
         assert db_mode == 0o770
 
+    def test_workspace_file_flags_resolve_relative_to_workspace_cwd(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            registry = {
+                "commands": [
+                    {
+                        "root": "nmap",
+                        "category": "Scanning",
+                        "policy": {"allow": ["nmap"], "deny": ["nmap -iL", "nmap -oN"]},
+                        "workspace_flags": [
+                            {"flag": "-iL", "mode": "read", "value": "separate"},
+                            {"flag": "-oN", "mode": "write", "value": "separate"},
+                        ],
+                    },
+                ],
+                "pipe_helpers": [],
+            }
+            with mock.patch("commands.load_commands_registry", return_value=registry):
+                from workspace import resolve_workspace_path, write_workspace_text_file
+                write_workspace_text_file("session-1", "darklab/targets.txt", "ip.darklab.sh\n", cfg)
+
+                result = validate_command(
+                    "nmap -iL targets.txt -oN findings.txt",
+                    session_id="session-1",
+                    cfg=cfg,
+                    workspace_cwd="darklab",
+                )
+                expected_read = str(resolve_workspace_path("session-1", "darklab/targets.txt", cfg))
+                expected_write = str(resolve_workspace_path("session-1", "darklab/findings.txt", cfg))
+
+            assert result.allowed, result.reason
+            assert result.workspace_reads == ["darklab/targets.txt"]
+            assert result.workspace_writes == ["darklab/findings.txt"]
+            assert expected_read in result.exec_command
+            assert expected_write in result.exec_command
+
+    def test_workspace_file_flags_allow_parent_paths_without_escaping_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            registry = {
+                "commands": [
+                    {
+                        "root": "nmap",
+                        "category": "Scanning",
+                        "policy": {"allow": ["nmap"], "deny": ["nmap -iL"]},
+                        "workspace_flags": [{"flag": "-iL", "mode": "read", "value": "separate"}],
+                    },
+                ],
+                "pipe_helpers": [],
+            }
+            with mock.patch("commands.load_commands_registry", return_value=registry):
+                from workspace import write_workspace_text_file
+                write_workspace_text_file("session-1", "targets.txt", "ip.darklab.sh\n", cfg)
+
+                result = validate_command(
+                    "nmap -iL ../targets.txt",
+                    session_id="session-1",
+                    cfg=cfg,
+                    workspace_cwd="darklab",
+                )
+                denied = validate_command(
+                    "nmap -iL ../../targets.txt",
+                    session_id="session-1",
+                    cfg=cfg,
+                    workspace_cwd="darklab",
+                )
+
+        assert result.allowed, result.reason
+        assert result.workspace_reads == ["targets.txt"]
+        assert not denied.allowed
+        assert "escapes the session directory" in denied.reason
+
     def test_workspace_disabled_keeps_declared_file_flags_denied(self):
         registry = {
             "commands": [

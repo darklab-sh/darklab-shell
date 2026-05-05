@@ -2890,6 +2890,32 @@ def _workspace_flag_value(tokens: list[str], index: int, spec: dict[str, object]
     return None, None, None
 
 
+def _normalize_workspace_command_path(value: str, cwd: str = "") -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        raise InvalidWorkspacePath("file name is required")
+    if os.path.isabs(raw):
+        return raw
+    if "\x00" in raw or "\\" in raw:
+        raise InvalidWorkspacePath("file name contains unsupported characters")
+
+    base_parts = [part for part in str(cwd or "").split("/") if part]
+    for raw_part in raw.split("/"):
+        part = raw_part.strip()
+        if not part or part == ".":
+            continue
+        if part == "..":
+            if not base_parts:
+                raise InvalidWorkspacePath("file path escapes the session directory")
+            base_parts.pop()
+            continue
+        base_parts.append(part)
+    normalized = "/".join(base_parts)
+    if not normalized:
+        raise InvalidWorkspacePath("file name is required")
+    return normalized
+
+
 def _restricted_command_networks(cfg: dict | None = None) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
     active_cfg = cfg or app_config.CFG
     raw_values = active_cfg.get("restricted_command_input_cidrs") or []
@@ -3105,6 +3131,8 @@ def _workspace_read_file_restriction_reason(
     command: str,
     session_id: str,
     cfg: dict | None = None,
+    *,
+    workspace_cwd: str = "",
 ) -> str:
     networks = _restricted_command_networks(cfg)
     if not networks or not session_id:
@@ -3138,16 +3166,18 @@ def _workspace_read_file_restriction_reason(
             and _value_type_is_restrictable(value_type)
         ):
             try:
-                text = read_workspace_text_file(session_id, user_value, cfg)
+                normalized_value = _normalize_workspace_command_path(user_value, workspace_cwd)
+                text = read_workspace_text_file(session_id, normalized_value, cfg)
             except (InvalidWorkspacePath, WorkspaceDisabled, WorkspaceFileNotFound, OSError):
-                text = ""
+                index = (value_index + 1) if value_index is not None else index + 1
+                continue
             for raw_line in text.splitlines():
                 line = raw_line.strip()
                 if not line or line.startswith("#"):
                     continue
                 blocked = _restricted_value_match(line, networks)
                 if blocked:
-                    return f"Session file {user_value} contains restricted IP/CIDR value: {blocked}"
+                    return f"Session file {normalized_value} contains restricted IP/CIDR value: {blocked}"
         index = (value_index + 1) if value_index is not None else index + 1
     return ""
 
@@ -3156,6 +3186,8 @@ def _rewrite_workspace_file_flags(
     command: str,
     session_id: str,
     cfg: dict | None = None,
+    *,
+    workspace_cwd: str = "",
 ) -> tuple[str, set[str], list[str], list[str], list[str], str]:
     cfg = cfg or app_config.CFG
     tokens = split_command_argv(command)
@@ -3253,11 +3285,21 @@ def _rewrite_workspace_file_flags(
         if os.path.isabs(user_value):
             index = value_index + 1
             continue
+        workspace_value = user_value
+        if not (
+            managed_dir_applies
+            and flag == managed_dir_flag
+            and user_value.rstrip(os.sep) == managed_dir_name
+        ):
+            try:
+                workspace_value = _normalize_workspace_command_path(user_value, workspace_cwd)
+            except InvalidWorkspacePath as exc:
+                return command, set(), [], [], [], str(exc)
 
         try:
             resolved = resolve_workspace_path(
                 session_id,
-                user_value,
+                workspace_value,
                 cfg,
                 ensure_parent=mode in {"write", "read_write"} or kind == "directory",
             )
@@ -3265,7 +3307,7 @@ def _rewrite_workspace_file_flags(
                 prepare_workspace_directory_for_command(resolved, mode=mode)
             else:
                 if mode in {"read", "read_write"} and not resolved.is_file():
-                    raise WorkspaceFileNotFound(f"session file not found: {user_value}")
+                    raise WorkspaceFileNotFound(f"session file not found: {workspace_value}")
                 prepare_workspace_file_for_command(resolved, mode=mode)
         except (InvalidWorkspacePath, WorkspaceDisabled, WorkspaceFileNotFound) as exc:
             return command, set(), [], [], [], str(exc)
@@ -3279,9 +3321,9 @@ def _rewrite_workspace_file_flags(
         exempt_flags.add(flag)
         exec_paths.append(resolved_value)
         if kind != "directory" and mode in {"read", "read_write"}:
-            reads.append(user_value)
+            reads.append(workspace_value)
         if mode in {"write", "read_write"}:
-            writes.append(user_value)
+            writes.append(workspace_value)
         index = value_index + 1
 
     return shlex.join(rewritten_tokens), exempt_flags, reads, writes, exec_paths, ""
@@ -3387,6 +3429,7 @@ def validate_command(
     *,
     session_id: str = "",
     cfg: dict | None = None,
+    workspace_cwd: str = "",
 ) -> CommandValidationResult:
     """Validate a command and return the display command plus execution command.
 
@@ -3452,6 +3495,7 @@ def validate_command(
         command_to_validate,
         session_id,
         cfg,
+        workspace_cwd=workspace_cwd,
     )
     if workspace_error:
         return CommandValidationResult(
@@ -3461,7 +3505,12 @@ def validate_command(
             exec_command=command_to_validate,
         )
 
-    restricted_file_reason = _workspace_read_file_restriction_reason(command_to_validate, session_id, cfg)
+    restricted_file_reason = _workspace_read_file_restriction_reason(
+        command_to_validate,
+        session_id,
+        cfg,
+        workspace_cwd=workspace_cwd,
+    )
     if restricted_file_reason:
         return CommandValidationResult(
             False,

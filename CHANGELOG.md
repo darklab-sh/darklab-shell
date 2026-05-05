@@ -33,11 +33,15 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
-- **Session file docs and test inventory now reflect the v1.7 workspace command surface** — the docs count 2,425 total tests, including 1,194 pytest tests, 995 Vitest tests, and 236 Playwright tests.
+- **Session file docs and test inventory now reflect the v1.7 workspace command surface** — the docs count 2,428 total tests, including 1,196 pytest tests, 996 Vitest tests, and 236 Playwright tests.
 - **Autocomplete placeholder hints now have an explicit schema path and behavior** — frontend and backend autocomplete normalization accept `hint_only: true` as the author-owned display-only signal, placeholder-looking text no longer becomes display-only by regex inference, and hint-only rows now render as subtle italic guidance instead of selectable menu choices.
   - **Why:** rows such as `<file>` and `<domain>` should teach the shape of the command without blocking Tab from accepting the one real file, folder, or domain suggestion in the menu.
   - **What:** Tab, Enter, ArrowUp, ArrowDown, mouse, and touch interactions now skip hint-only rows while keeping them visible as guidance. Shared-prefix expansion also ignores hint rows, so concrete suggestions behave consistently even when the menu includes placeholder copy.
   - **Tests:** added autocomplete/app unit coverage for hint-only rendering, skipped keyboard navigation, single-concrete Tab acceptance, and non-accepting mouse clicks.
+- **Workspace file flags now follow the active tab folder** — external command input/output flags resolve relative file names against the tab's current Files CWD instead of always resolving from workspace root.
+  - **Why:** from `/darklab`, a command such as `nmap -iL targets.txt -oN findings.txt` should read and write inside `/darklab` without making the user type root-relative workspace paths.
+  - **What:** `/runs` now carries the active `workspace_cwd`; backend command validation normalizes declared workspace flag values against that folder; `..` can move upward inside the workspace but cannot escape it; packaged absolute paths such as `/usr/share/wordlists/...` remain untouched. External workspace-flag autocomplete now inserts CWD-relative values and keeps folder-prefix suggestions such as `nested/targets.txt`.
+  - **Tests:** added backend validation coverage for CWD-relative read/write flags and safe parent paths, plus browser unit coverage for CWD-relative external flag autocomplete.
 - **Status Monitor uptime now ticks locally between status polls** — the Uptime card and pulse-strip summary count upward every second from the last `/status` payload instead of showing a stale value until the next poll.
   - **Why:** the monitor already knew the polling cadence, so a frozen uptime clock made the dashboard feel less live than the rest of the surface.
   - **What:** status payloads are timestamped on receipt, the Uptime card carries a stable data hook, and the existing once-per-second monitor tick refreshes visible uptime text without making extra API calls.

@@ -3021,7 +3021,7 @@ function submitCommand(rawCmd) {
   apiFetch('/runs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ command: cmd, tab_id: tabId })
+    body: JSON.stringify({ command: cmd, tab_id: tabId, workspace_cwd: _workspaceCwd(tabId) })
   }).then(res => {
     if (res.status === 403) {
       return res.json().then(data => {

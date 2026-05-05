@@ -2609,6 +2609,12 @@ function getWorkspaceAutocompletePathHints(kind = 'file', token = '') {
   return _runtimeWorkspaceScopedHints(kind, token);
 }
 
+function getWorkspaceAutocompleteFlagFileHints(token = '') {
+  return String(token || '').includes('/')
+    ? _runtimeWorkspaceScopedHints('file', token)
+    : _runtimeWorkspaceFilePathHints();
+}
+
 function _runtimeWorkspaceContext() {
   const fileHints = _runtimeWorkspaceFileHints();
   const filePathHints = _runtimeWorkspaceFilePathHints();

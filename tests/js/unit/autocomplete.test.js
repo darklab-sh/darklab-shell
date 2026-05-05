@@ -2080,6 +2080,48 @@ describe('autocomplete helpers', () => {
     expect(items[0].description).toBe('session file · 42 B')
   })
 
+  it('uses cwd-relative workspace file hints for external workspace read flags', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'nmap -iL ',
+        acSuggestions: [],
+        acContextRegistry: {
+          nmap: {
+            flags: [{ value: '-iL', description: 'Read targets from a session file' }],
+            expects_value: ['-iL'],
+            workspace_file_flags: ['-iL'],
+            arg_hints: {
+              '-iL': [{ value: 'root-targets.txt', description: 'Static registry example' }],
+            },
+          },
+        },
+        getWorkspaceAutocompleteFlagFileHints: token => (
+          String(token || '').includes('/')
+            ? [{ value: 'nested/targets.txt', description: 'session file · 24 B' }]
+            : [
+                { value: 'targets.txt', description: 'session file · 42 B' },
+                { value: 'nested/', description: 'session folder' },
+              ]
+        ),
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('nmap -iL ', 10).map(item => item.value)).toEqual(['targets.txt', 'nested/'])
+    expect(getAutocompleteMatches('nmap -iL nested/', 17).map(item => item.value)).toEqual(['nested/targets.txt'])
+  })
+
   it('uses directory-aware workspace path hints for typed file-command prefixes', () => {
     const pathHints = {
       'file:darklab/': [

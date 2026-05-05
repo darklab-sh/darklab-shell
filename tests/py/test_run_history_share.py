@@ -2142,7 +2142,7 @@ class TestRunStreaming:
             headers={"X-Session-ID": session_id},
         )
 
-        def _deny_expanded(command, session_id=None, cfg=None):  # noqa: ARG001
+        def _deny_expanded(command, session_id=None, cfg=None, workspace_cwd=""):  # noqa: ARG001
             assert command == "curl https://blocked.darklab.sh"
             return run_routes.CommandValidationResult(
                 False,

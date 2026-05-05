@@ -437,10 +437,14 @@ function _mergeAutocompleteRegistry(base, overlay) {
   return Object.assign({}, base || {}, overlay || {});
 }
 
-function _workspaceAutocompleteHintsForFlag(spec, trigger) {
+function _workspaceAutocompleteHintsForFlag(spec, trigger, ctx = null) {
   const flags = Array.isArray(spec && spec.workspace_file_flags) ? spec.workspace_file_flags : [];
   const normalizedTrigger = String(trigger || '');
   if (!flags.some(flag => String(flag || '') === normalizedTrigger)) return null;
+  if (ctx && typeof getWorkspaceAutocompleteFlagFileHints === 'function') {
+    const hints = getWorkspaceAutocompleteFlagFileHints(ctx.currentToken);
+    return Array.isArray(hints) ? hints : [];
+  }
   if (typeof getWorkspaceAutocompleteFileHints !== 'function') return [];
   const hints = getWorkspaceAutocompleteFileHints();
   return Array.isArray(hints) ? hints : [];
@@ -516,7 +520,7 @@ function _resolveAutocompleteHintSource(ctx, spec, baseHints, options = {}) {
     ? options.workspaceFlag
     : null;
   const workspaceHints = workspaceFlag != null
-    ? _workspaceAutocompleteHintsForFlag(spec, workspaceFlag)
+    ? _workspaceAutocompleteHintsForFlag(spec, workspaceFlag, ctx)
     : null;
   if (workspaceHints !== null) {
     return {
