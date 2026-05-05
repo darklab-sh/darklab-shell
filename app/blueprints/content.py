@@ -230,13 +230,16 @@ def command_catalog_index():
     group_map = {}
     commands = []
     for entry in catalog:
+        examples = entry.get("examples")
+        subcommands = entry.get("subcommands")
+        flags = entry.get("flags")
         command = {
             "root": entry.get("root"),
             "category": entry.get("category"),
             "description": entry.get("description"),
-            "example_count": len(entry.get("examples") or []),
-            "subcommand_count": len(entry.get("subcommands") or []),
-            "flag_count": len(entry.get("flags") or []),
+            "example_count": len(examples) if isinstance(examples, list) else 0,
+            "subcommand_count": len(subcommands) if isinstance(subcommands, list) else 0,
+            "flag_count": len(flags) if isinstance(flags, list) else 0,
         }
         commands.append(command)
         category = str(command.get("category") or "Allowed commands")

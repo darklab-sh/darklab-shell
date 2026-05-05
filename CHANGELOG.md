@@ -33,6 +33,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Command Registry examples now read as stacked reference rows** — long clickable examples keep the command on its own line and place the description underneath instead of squeezing both onto one row.
+- **Workflow command actions now match the Command Registry style** — clickable workflow steps use the same compact terminal-link formatting as command examples instead of the older rounded chip treatment.
 - **Session file docs and test inventory now reflect the v1.7 workspace command surface** — the docs count 2,428 total tests, including 1,196 pytest tests, 996 Vitest tests, and 236 Playwright tests.
 - **Autocomplete placeholder hints now have an explicit schema path and behavior** — frontend and backend autocomplete normalization accept `hint_only: true` as the author-owned display-only signal, placeholder-looking text no longer becomes display-only by regex inference, and hint-only rows now render as subtle italic guidance instead of selectable menu choices.
   - **Why:** rows such as `<file>` and `<domain>` should teach the shape of the command without blocking Tab from accepting the one real file, folder, or domain suggestion in the menu.
@@ -53,6 +55,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Fixed
 
+- **Invalid workspace flag paths now name the bad path** — unsafe declared input/output paths such as `/../../scan.txt` now return `Invalid file path: /../../scan.txt` instead of falling through to a generic command-policy denial.
 - **Autocomplete no longer shows duplicate `file list` and `file ls` rows** — the YAML-owned grammar entries keep their `<folder>` guidance, and the runtime layer no longer adds bare duplicates.
 - **Command-created workspace config folders now show up in Files instead of causing 500s** — workspace list/read operations repair scanner-created child directory/file modes before the app tries to traverse them, so tools using session-scoped `XDG_CONFIG_HOME` such as Subfinder remain visible and readable through the Files browser and `cat`.
 - **Oversized workspace files no longer leave Files stuck in loading state** — known oversized files now toast before the viewer/editor modal opens, and server-side read-limit rejections close the loading viewer instead of leaving the spinner behind.

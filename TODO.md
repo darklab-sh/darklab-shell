@@ -17,28 +17,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 
 ## Open TODOs
 
-- **CWD-aware workspace file flags**
-  - Problem:
-    - External command workspace flags currently resolve non-absolute file values from the workspace root, even when the active tab CWD is a nested workspace folder.
-    - Example: from `/darklab`, `nmap -iL targets.txt -oN findings.txt` should read/write `/darklab/targets.txt` and `/darklab/findings.txt`, but today those values resolve at workspace root.
-    - Autocomplete partly hides the problem for reads by suggesting CWD-visible files and inserting root-relative paths.
-  - Implementation plan:
-    - Send the active tab `workspace_cwd` with `/runs` command-start requests.
-    - Thread `workspace_cwd` through `start_brokered_run`, command preparation, `validate_command`, workspace flag rewriting, and restricted-input file validation.
-    - Add a backend path normalizer that mirrors the browser's workspace command path rules:
-      - relative values resolve against `workspace_cwd`
-      - `.` is ignored
-      - `..` can move upward but cannot escape workspace root
-      - absolute container paths remain untouched so packaged paths like `/usr/share/wordlists/...` still work
-    - Rewrite known read/write/read-write workspace flag values after CWD normalization, then pass the normalized workspace-relative path to existing workspace validation and permission preparation.
-    - Keep workspace notices honest by reporting the normalized workspace path, such as `darklab/findings.txt`.
-    - Update external workspace-flag autocomplete so selected values remain CWD-relative instead of inserting root-relative workspace paths.
-    - Preserve directory-aware suggestions for typed prefixes like `nested/` and `../targets/`.
-  - Tests:
-    - Backend validation for read/write flags resolving against CWD.
-    - Backend validation for `..` resolving safely and rejecting workspace escapes.
-    - Backend validation that absolute packaged paths still bypass workspace rewriting.
-    - Browser unit coverage that external workspace-flag autocomplete inserts CWD-relative values and supports typed folder prefixes.
+No open TODOs are currently tracked.
 
 ## Research
 

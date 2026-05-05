@@ -2897,10 +2897,10 @@ def _normalize_workspace_command_path(value: str, cwd: str = "") -> str:
     raw = str(value or "").strip()
     if not raw:
         raise InvalidWorkspacePath("file name is required")
-    if os.path.isabs(raw):
-        return raw
     if "\x00" in raw or "\\" in raw:
         raise InvalidWorkspacePath("file name contains unsupported characters")
+    if os.path.isabs(raw):
+        return raw
 
     base_parts = [part for part in str(cwd or "").split("/") if part]
     for raw_part in raw.split("/"):
@@ -2917,6 +2917,27 @@ def _normalize_workspace_command_path(value: str, cwd: str = "") -> str:
     if not normalized:
         raise InvalidWorkspacePath("file name is required")
     return normalized
+
+
+def _invalid_workspace_file_path_reason(value: str, detail: str = "") -> str:
+    display_value = str(value or "").strip() or "<empty>"
+    detail = str(detail or "").strip()
+    if detail:
+        return f"Invalid file path: {display_value} ({detail})"
+    return f"Invalid file path: {display_value}"
+
+
+def _absolute_workspace_flag_path_error(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "file name is required"
+    if "\x00" in raw or "\\" in raw:
+        return "file name contains unsupported characters"
+    if os.path.isabs(raw):
+        parts = [part for part in raw.split("/") if part]
+        if any(part == ".." for part in parts):
+            return "file path escapes the session directory"
+    return ""
 
 
 def _restricted_command_networks(cfg: dict | None = None) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
@@ -3286,6 +3307,9 @@ def _rewrite_workspace_file_flags(
         mode = str(matched_spec.get("mode") or "")
         kind = str(matched_spec.get("kind") or "file")
         if os.path.isabs(user_value):
+            path_error = _absolute_workspace_flag_path_error(user_value)
+            if path_error:
+                return command, set(), [], [], [], _invalid_workspace_file_path_reason(user_value, path_error)
             index = value_index + 1
             continue
         workspace_value = user_value
@@ -3297,7 +3321,7 @@ def _rewrite_workspace_file_flags(
             try:
                 workspace_value = _normalize_workspace_command_path(user_value, workspace_cwd)
             except InvalidWorkspacePath as exc:
-                return command, set(), [], [], [], str(exc)
+                return command, set(), [], [], [], _invalid_workspace_file_path_reason(user_value, str(exc))
 
         try:
             resolved = resolve_workspace_path(
@@ -3312,7 +3336,9 @@ def _rewrite_workspace_file_flags(
                 if mode in {"read", "read_write"} and not resolved.is_file():
                     raise WorkspaceFileNotFound(f"session file not found: {workspace_value}")
                 prepare_workspace_file_for_command(resolved, mode=mode)
-        except (InvalidWorkspacePath, WorkspaceDisabled, WorkspaceFileNotFound) as exc:
+        except InvalidWorkspacePath as exc:
+            return command, set(), [], [], [], _invalid_workspace_file_path_reason(user_value, str(exc))
+        except (WorkspaceDisabled, WorkspaceFileNotFound) as exc:
             return command, set(), [], [], [], str(exc)
 
         resolved_value = str(resolved)

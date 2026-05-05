@@ -2056,7 +2056,14 @@ body.mobile-terminal-mode .output-follow-btn {
   border-top: 0;
 }
 
-.command-catalog-row .allowed-chip {
+.command-catalog-example-row {
+  grid-template-columns: 1fr;
+  gap: 4px;
+  align-items: start;
+}
+
+.command-catalog-row .allowed-chip,
+.workflow-step-cmd.allowed-chip {
   justify-self: start;
   max-width: min(42vw, 460px);
   padding: 0;
@@ -2071,8 +2078,14 @@ body.mobile-terminal-mode .output-follow-btn {
   box-shadow: inset 0 -1px 0 var(--border-bright);
 }
 
+.command-catalog-example-row .allowed-chip {
+  max-width: 100%;
+}
+
 .command-catalog-row .allowed-chip:hover,
-.command-catalog-row .allowed-chip:focus-visible {
+.command-catalog-row .allowed-chip:focus-visible,
+.workflow-step-cmd.allowed-chip:hover,
+.workflow-step-cmd.allowed-chip:focus-visible {
   color: var(--green);
   background: transparent;
   box-shadow: inset 0 -1px 0 var(--green-dim), 0 5px 18px var(--green-glow);
@@ -2644,15 +2657,24 @@ body .tab .tab-status.ok { background: var(--green); }
 }
 
 .workflow-step-cmd {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   max-width: 100%;
+  width: fit-content;
   overflow-wrap: anywhere;
 }
 
 .workflow-step-cmd.is-disabled {
   opacity: 0.72;
   cursor: default;
+}
+
+.workflow-step-cmd.allowed-chip.is-disabled,
+.workflow-step-cmd.allowed-chip.is-disabled:hover,
+.workflow-step-cmd.allowed-chip.is-disabled:focus-visible {
+  color: var(--muted);
+  background: transparent;
+  box-shadow: inset 0 -1px 0 var(--border-bright);
 }
 
 .workflow-step-run {

@@ -366,8 +366,11 @@ class TestIsCommandAllowedEdges:
                     {
                         "root": "nmap",
                         "category": "Scanning",
-                        "policy": {"allow": ["nmap"], "deny": ["nmap -iL"]},
-                        "workspace_flags": [{"flag": "-iL", "mode": "read", "value": "separate"}],
+                        "policy": {"allow": ["nmap"], "deny": ["nmap -iL", "nmap -oN"]},
+                        "workspace_flags": [
+                            {"flag": "-iL", "mode": "read", "value": "separate"},
+                            {"flag": "-oN", "mode": "write", "value": "separate"},
+                        ],
                     },
                 ],
                 "pipe_helpers": [],
@@ -388,11 +391,20 @@ class TestIsCommandAllowedEdges:
                     cfg=cfg,
                     workspace_cwd="darklab",
                 )
+                absolute_denied = validate_command(
+                    "nmap -iL ../targets.txt -oN /../../scan.txt",
+                    session_id="session-1",
+                    cfg=cfg,
+                    workspace_cwd="darklab",
+                )
 
         assert result.allowed, result.reason
         assert result.workspace_reads == ["targets.txt"]
         assert not denied.allowed
         assert "escapes the session directory" in denied.reason
+        assert not absolute_denied.allowed
+        assert "Invalid file path: /../../scan.txt" in absolute_denied.reason
+        assert "Command not allowed" not in absolute_denied.reason
 
     def test_workspace_disabled_keeps_declared_file_flags_denied(self):
         registry = {

@@ -3277,7 +3277,7 @@ function makeCommandCatalogExampleRow(item) {
   const value = commandCatalogText(item?.value);
   if (!value) return null;
   const row = document.createElement('div');
-  row.className = 'command-catalog-row';
+  row.className = 'command-catalog-row command-catalog-example-row';
   const chip = document.createElement('span');
   chip.className = 'allowed-chip faq-chip chip chip-action';
   chip.tabIndex = 0;
