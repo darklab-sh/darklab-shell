@@ -1155,6 +1155,20 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (
+    typeof isActiveTabRunning === 'function'
+    && isActiveTabRunning()
+    && !(typeof isConfirmOpen === 'function' && isConfirmOpen())
+    && !isEditableTarget(e.target)
+    && !e.metaKey
+    && !e.ctrlKey
+    && !e.altKey
+    && (e.key.length === 1 || e.key === 'Enter' || e.key === 'Tab' || e.key === 'Backspace' || e.key === 'Delete')
+  ) {
+    if (typeof acHide === 'function') acHide();
+    e.preventDefault();
+    return;
+  }
+  if (
     _welcomeActive && welcomeOwnsTab(activeTabId)
     && cmdInput
     && !e.metaKey && !e.ctrlKey && !e.altKey
@@ -1210,6 +1224,37 @@ document.addEventListener('keydown', e => {
   }
 });
 
+function acAutocompleteIsHintOnly(item) {
+  if (typeof acIsHintOnly === 'function') return acIsHintOnly(item);
+  return !!(item && typeof item === 'object' && item.hintOnly);
+}
+
+function acAutocompleteSelectableItems(items) {
+  if (typeof acSelectableItems === 'function') return acSelectableItems(items);
+  return (Array.isArray(items) ? items : []).filter(item => !acAutocompleteIsHintOnly(item));
+}
+
+function acAutocompleteSelectableIndexes(items) {
+  if (typeof acSelectableIndexes === 'function') return acSelectableIndexes(items);
+  return (Array.isArray(items) ? items : [])
+    .map((item, index) => (acAutocompleteIsHintOnly(item) ? -1 : index))
+    .filter(index => index >= 0);
+}
+
+function acAutocompleteNextSelectableIndex(items, currentIndex, direction = 1) {
+  if (typeof acNextSelectableIndex === 'function') {
+    return acNextSelectableIndex(items, currentIndex, direction);
+  }
+  const indexes = acAutocompleteSelectableIndexes(items);
+  if (!indexes.length) return -1;
+  const currentPos = indexes.indexOf(currentIndex);
+  if (currentPos < 0) return direction < 0 ? indexes[indexes.length - 1] : indexes[0];
+  const nextPos = direction < 0
+    ? (currentPos <= 0 ? indexes.length - 1 : currentPos - 1)
+    : ((currentPos + 1) % indexes.length);
+  return indexes[nextPos];
+}
+
 function _replayPromptShortcutAfterSelection(e) {
   // If the user has selected terminal output text, re-dispatch prompt-oriented
   // shortcuts so shell navigation still works after copy/select interactions.
@@ -1235,8 +1280,8 @@ function _replayPromptShortcutAfterSelection(e) {
       if (typeof acHide === 'function') acHide();
       return true;
     }
-    if (isAcDropdownOpen() && acFiltered.length) {
-      acIndex = (acIndex + 1) % acFiltered.length;
+    if (isAcDropdownOpen() && acAutocompleteSelectableItems(acFiltered).length) {
+      acIndex = acAutocompleteNextSelectableIndex(acFiltered, acIndex, 1);
       if (typeof acShow === 'function') acShow(acFiltered);
     } else if (typeof navigateCmdHistory === 'function' && navigateCmdHistory(-1)) {
       if (typeof acHide === 'function') acHide();
@@ -1248,8 +1293,8 @@ function _replayPromptShortcutAfterSelection(e) {
       if (typeof acHide === 'function') acHide();
       return true;
     }
-    if (isAcDropdownOpen() && acFiltered.length) {
-      acIndex = acIndex <= 0 ? acFiltered.length - 1 : acIndex - 1;
+    if (isAcDropdownOpen() && acAutocompleteSelectableItems(acFiltered).length) {
+      acIndex = acAutocompleteNextSelectableIndex(acFiltered, acIndex, -1);
       if (typeof acShow === 'function') acShow(acFiltered);
     } else if (typeof navigateCmdHistory === 'function' && navigateCmdHistory(1)) {
       if (typeof acHide === 'function') acHide();
@@ -1257,7 +1302,7 @@ function _replayPromptShortcutAfterSelection(e) {
     return true;
   }
   if (e.key === 'Enter') {
-    if (acIndex >= 0 && acFiltered[acIndex]) {
+    if (acIndex >= 0 && acFiltered[acIndex] && !acAutocompleteIsHintOnly(acFiltered[acIndex])) {
       if (typeof acAccept === 'function') acAccept(acFiltered[acIndex]);
     } else {
       if (typeof acHide === 'function') acHide();
@@ -1529,6 +1574,17 @@ cmdInput.addEventListener('keydown', e => {
     if (typeof handleHistSearchKey === 'function' && handleHistSearchKey(e)) return;
   }
 
+  if (typeof isActiveTabRunning === 'function' && isActiveTabRunning()) {
+    if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
+      e.preventDefault();
+      confirmKill(activeTabId);
+      return;
+    }
+    if (typeof acHide === 'function') acHide();
+    e.preventDefault();
+    return;
+  }
+
   const isWordArrowLeft = e.key === 'ArrowLeft' || eventMatchesCode(e, 'ArrowLeft');
   const isWordArrowRight = e.key === 'ArrowRight' || eventMatchesCode(e, 'ArrowRight');
   if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (isWordArrowLeft || isWordArrowRight)) {
@@ -1670,7 +1726,12 @@ cmdInput.addEventListener('keydown', e => {
       refocusComposerAfterAction({ defer: true });
       return;
     }
-    if (!hasActiveTerminalConfirm() && acIndex >= 0 && acFiltered[acIndex]) {
+    if (
+      !hasActiveTerminalConfirm()
+      && acIndex >= 0
+      && acFiltered[acIndex]
+      && !acAutocompleteIsHintOnly(acFiltered[acIndex])
+    ) {
       e.preventDefault();
       acAccept(acFiltered[acIndex]);
     } else {
@@ -1690,15 +1751,16 @@ cmdInput.addEventListener('keydown', e => {
       acHide();
       return;
     }
-    if (acFiltered.length === 1) { acAccept(acFiltered[0]); }
-    else if (acFiltered.length > 0) {
-      if (typeof acExpandSharedPrefix === 'function' && acExpandSharedPrefix(acFiltered)) return;
+    const selectableItems = acAutocompleteSelectableItems(acFiltered);
+    if (selectableItems.length === 1) { acAccept(selectableItems[0]); }
+    else if (selectableItems.length > 0) {
+      if (typeof acExpandSharedPrefix === 'function' && acExpandSharedPrefix(selectableItems)) return;
       if (acIndex < 0 || !isAcDropdownOpen()) {
-        acIndex = 0;
+        acIndex = acAutocompleteNextSelectableIndex(acFiltered, -1, 1);
       } else if (e.shiftKey) {
-        acIndex = acIndex <= 0 ? acFiltered.length - 1 : acIndex - 1;
+        acIndex = acAutocompleteNextSelectableIndex(acFiltered, acIndex, -1);
       } else {
-        acIndex = (acIndex + 1) % acFiltered.length;
+        acIndex = acAutocompleteNextSelectableIndex(acFiltered, acIndex, 1);
       }
       acShow(acFiltered);
     }
@@ -1711,8 +1773,8 @@ cmdInput.addEventListener('keydown', e => {
       return;
     }
     const acOpen = isAcDropdownOpen();
-    if (acOpen && acFiltered.length) {
-      acIndex = (acIndex + 1) % acFiltered.length;
+    if (acOpen && acAutocompleteSelectableItems(acFiltered).length) {
+      acIndex = acAutocompleteNextSelectableIndex(acFiltered, acIndex, 1);
       acShow(acFiltered);
       return;
     }
@@ -1726,8 +1788,8 @@ cmdInput.addEventListener('keydown', e => {
       return;
     }
     const acOpen = isAcDropdownOpen();
-    if (acOpen && acFiltered.length) {
-      acIndex = acIndex <= 0 ? acFiltered.length - 1 : acIndex - 1;
+    if (acOpen && acAutocompleteSelectableItems(acFiltered).length) {
+      acIndex = acAutocompleteNextSelectableIndex(acFiltered, acIndex, -1);
       acShow(acFiltered);
       return;
     }

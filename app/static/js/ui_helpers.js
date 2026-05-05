@@ -260,8 +260,17 @@
     }, closeDelay);
     return false;
   };
-  global.setComposerValue = (value, start = null, end = null, { dispatch = true, exclude = null } = {}) => {
+  global.isActiveTabRunning = () => {
+    const active = typeof getActiveTab === 'function' ? getActiveTab() : null;
+    return !!(active && active.st === 'running');
+  };
+  global.setComposerValue = (value, start = null, end = null, { dispatch = true, exclude = null, allowDuringRun = false } = {}) => {
     const nextValue = String(value ?? '');
+    if (!allowDuringRun && nextValue.trim() && global.isActiveTabRunning()) {
+      if (typeof acHide === 'function') acHide();
+      if (typeof global.syncRunButtonDisabled === 'function') global.syncRunButtonDisabled();
+      return typeof global.getComposerValue === 'function' ? global.getComposerValue() : '';
+    }
     const nextStart = typeof start === 'number' ? start : nextValue.length;
     const nextEnd = typeof end === 'number' ? end : nextStart;
     const target = typeof getActiveComposerInput === 'function'
@@ -350,6 +359,13 @@
     if (!sourceInput) return;
     // Typing always snaps the output back to bottom so the prompt stays visible.
     const _activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
+    if (_activeTab && _activeTab.st === 'running') {
+      sourceInput.value = '';
+      global.setComposerValue('', 0, 0, { dispatch: false, exclude: sourceInput, allowDuringRun: true });
+      if (typeof acHide === 'function') acHide();
+      if (typeof syncShellPrompt === 'function') syncShellPrompt();
+      return;
+    }
     if (_activeTab) _activeTab.followOutput = true;
     const _out = typeof document !== 'undefined'
       ? document.querySelector('.tab-panel.active .output') : null;

@@ -1,6 +1,6 @@
 import { fromDomScripts } from './helpers/extract.js'
 
-function loadAutocompleteFns() {
+function loadAutocompleteFns({ isActiveTabRunning = () => false } = {}) {
   const cmdInput = document.getElementById('cmd')
   const acDropdown = document.getElementById('ac')
   const mobileComposerHost = document.getElementById('mobile-composer-host')
@@ -20,6 +20,7 @@ function loadAutocompleteFns() {
       acFiltered: [],
       acIndex: -1,
       acSuppressInputOnce: false,
+      isActiveTabRunning,
     },
     `{
     acShow,
@@ -187,6 +188,9 @@ describe('autocomplete helpers', () => {
     expect(items[0].innerHTML).toContain('<span class="ac-match">work</span>')
     expect(items[1].querySelector('.ac-item-main')?.textContent).toBe('<workflow>')
     expect(items[1].innerHTML).not.toContain('ac-match')
+    expect(items[1].classList.contains('ac-hint-only')).toBe(true)
+    expect(items[1].classList.contains('ac-hint-separated')).toBe(true)
+    expect(items[1].getAttribute('aria-disabled')).toBe('true')
   })
 
   it('honors explicit snake_case hint_only hints without placeholder autodetect', () => {
@@ -2378,6 +2382,35 @@ describe('autocomplete helpers', () => {
     expect(input.value).toBe('whois darklab.sh')
     expect(document.getElementById('ac').style.display).toBe('none')
     expect(focusSpy).toHaveBeenCalled()
+  })
+
+  it('mousedown on a hint-only item keeps the guidance visible without accepting it', () => {
+    const { acShow } = loadAutocompleteFns()
+    const input = document.getElementById('cmd')
+    input.value = 'curl -o '
+    input.setSelectionRange(input.value.length, input.value.length)
+
+    acShow([
+      { value: '/dev/null', description: 'Discard body output' },
+      { value: '<file>', hintOnly: true, description: 'Destination file path' },
+    ])
+
+    const hint = [...document.querySelectorAll('.ac-item')].find(
+      item => item.textContent.includes('<file>'),
+    )
+    hint.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+
+    expect(input.value).toBe('curl -o ')
+    expect(document.getElementById('ac').style.display).toBe('block')
+  })
+
+  it('does not render suggestions while the active tab is running', () => {
+    const { acShow } = loadAutocompleteFns({ isActiveTabRunning: () => true })
+
+    acShow(['whois darklab.sh'])
+
+    expect(document.getElementById('ac').style.display).toBe('none')
+    expect(document.querySelector('.ac-item')).toBeNull()
   })
 
   it('positions dropdown above when space below is tight and preserves item order', () => {

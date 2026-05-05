@@ -505,6 +505,37 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
   content: '# ';
 }
 
+.ac-item.ac-hint-only {
+  color: var(--muted);
+  cursor: default;
+  font-style: italic;
+  opacity: 0.82;
+}
+
+.ac-item.ac-hint-only:hover,
+.ac-item.ac-hint-only.ac-active {
+  background: transparent;
+  color: var(--muted);
+}
+
+.ac-item.ac-hint-only .ac-item-desc,
+.ac-item.ac-hint-only:hover .ac-item-desc,
+.ac-item.ac-hint-only.ac-active .ac-item-desc {
+  color: var(--muted);
+}
+
+.ac-item.ac-hint-only::before,
+.ac-item.ac-hint-only.ac-active::before {
+  content: '  ';
+  color: var(--muted);
+}
+
+.ac-item.ac-hint-separated {
+  border-top: 1px solid var(--theme-dropdown-border-soft);
+  margin-top: 2px;
+  padding-top: 4px;
+}
+
 /* ── Ctrl+R history search dropdown ── */
 .hist-search-dropdown {
   position: fixed;

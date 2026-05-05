@@ -9,6 +9,7 @@ const _stalledRuns = new Set();
 const _runStreamStateByTabId = new Map();
 const _runnerCore = typeof DarklabRunnerCore !== 'undefined' ? DarklabRunnerCore : null;
 let _activeRunPollTimer = null;
+const DETACHED_ACTIVE_RUNS_STORAGE_PREFIX = 'detached_active_runs';
 
 // Pending terminal confirmation: used by transcript-owned yes/no flows such as
 // session-token migration and token-clear confirmation. While set, the next
@@ -61,6 +62,70 @@ function _activeRunIdsFromPayload(data) {
   return new Set((Array.isArray(data && data.runs) ? data.runs : [])
     .map(run => run && run.run_id)
     .filter(Boolean));
+}
+
+function _detachedActiveRunsStorageKey() {
+  const sessionId = typeof SESSION_ID !== 'undefined' ? String(SESSION_ID || 'session') : 'session';
+  return `${DETACHED_ACTIVE_RUNS_STORAGE_PREFIX}:${sessionId}`;
+}
+
+function _readDetachedActiveRunIds() {
+  if (typeof localStorage === 'undefined') return {};
+  try {
+    const parsed = JSON.parse(localStorage.getItem(_detachedActiveRunsStorageKey()) || '{}');
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function _writeDetachedActiveRunIds(detached) {
+  if (typeof localStorage === 'undefined') return;
+  const entries = Object.entries(detached || {})
+    .filter(([runId]) => String(runId || '').trim());
+  try {
+    if (!entries.length) {
+      localStorage.removeItem(_detachedActiveRunsStorageKey());
+      return;
+    }
+    localStorage.setItem(_detachedActiveRunsStorageKey(), JSON.stringify(Object.fromEntries(entries)));
+  } catch (_) {}
+}
+
+function markActiveRunDetachedForRestore(runId) {
+  const normalized = String(runId || '').trim();
+  if (!normalized) return;
+  const detached = _readDetachedActiveRunIds();
+  detached[normalized] = Date.now();
+  _writeDetachedActiveRunIds(detached);
+}
+
+function clearActiveRunDetachedForRestore(runId) {
+  const normalized = String(runId || '').trim();
+  if (!normalized) return;
+  const detached = _readDetachedActiveRunIds();
+  if (!Object.prototype.hasOwnProperty.call(detached, normalized)) return;
+  delete detached[normalized];
+  _writeDetachedActiveRunIds(detached);
+}
+
+function _isActiveRunDetachedForRestore(runId) {
+  const normalized = String(runId || '').trim();
+  if (!normalized) return false;
+  return Object.prototype.hasOwnProperty.call(_readDetachedActiveRunIds(), normalized);
+}
+
+function _pruneDetachedActiveRunRestoreIds(activeRunIds) {
+  const activeIds = activeRunIds instanceof Set ? activeRunIds : new Set();
+  const detached = _readDetachedActiveRunIds();
+  let changed = false;
+  Object.keys(detached).forEach((runId) => {
+    if (!activeIds.has(runId)) {
+      delete detached[runId];
+      changed = true;
+    }
+  });
+  if (changed) _writeDetachedActiveRunIds(detached);
 }
 
 function _tabRunGeneration(tabId) {
@@ -227,6 +292,7 @@ function _activeRunReconnectNotice(run) {
 
 function _shouldAutoRestoreActiveRun(run) {
   if (!run || typeof run !== 'object') return false;
+  if (_isActiveRunDetachedForRestore(run.run_id)) return false;
   if (run.owned_by_this_client) return true;
   if (run.owner_stale) return true;
   return !run.has_live_owner;
@@ -240,6 +306,9 @@ function _startedAtLabel(started) {
 }
 
 function restoreActiveRunsAfterReload(runs) {
+  _pruneDetachedActiveRunRestoreIds(new Set((Array.isArray(runs) ? runs : [])
+    .map(run => run && run.run_id)
+    .filter(Boolean)));
   const items = (Array.isArray(runs) ? runs : []).filter(_shouldAutoRestoreActiveRun);
   if (!items.length) {
     stopPollingActiveRunsAfterReload();
@@ -295,6 +364,7 @@ function restoreActiveRunsAfterReload(runs) {
 
 function _attachActiveRunToTab(run, tabId, { mode = 'attached' } = {}) {
   if (!run || !tabId) return false;
+  clearActiveRunDetachedForRestore(run.run_id);
   clearTab(tabId);
   const t = getTab(tabId);
   if (!t) return false;

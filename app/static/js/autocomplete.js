@@ -5,6 +5,10 @@ function _isAutocompleteBlockedByTerminalConfirm() {
   return typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm();
 }
 
+function _isAutocompleteBlockedByActiveRun() {
+  return typeof isActiveTabRunning === 'function' && isActiveTabRunning();
+}
+
 function _autocompleteTokenContext(value, cursorPos) {
   return autocompleteCore.tokenContextFromText(value, cursorPos, 0);
 }
@@ -910,6 +914,7 @@ function _buildFlatAutocomplete(value) {
 }
 
 function getAutocompleteMatches(value, cursorPos) {
+  if (_isAutocompleteBlockedByActiveRun()) return [];
   const text = String(value || '');
   const ctx = _autocompleteTokenContext(text, cursorPos);
   const pipeCtx = _autocompletePipeContext(text, cursorPos);
@@ -1048,15 +1053,51 @@ function _scrollAutocompleteActiveItem() {
   }
 }
 
+function acIsHintOnly(item) {
+  return !!(item && typeof item === 'object' && item.hintOnly);
+}
+
+function acSelectableItems(items) {
+  return (Array.isArray(items) ? items : []).filter(item => !acIsHintOnly(item));
+}
+
+function acSelectableIndexes(items) {
+  return (Array.isArray(items) ? items : [])
+    .map((item, index) => (acIsHintOnly(item) ? -1 : index))
+    .filter(index => index >= 0);
+}
+
+function acFirstSelectableIndex(items) {
+  const indexes = acSelectableIndexes(items);
+  return indexes.length ? indexes[0] : -1;
+}
+
+function acLastSelectableIndex(items) {
+  const indexes = acSelectableIndexes(items);
+  return indexes.length ? indexes[indexes.length - 1] : -1;
+}
+
+function acNextSelectableIndex(items, currentIndex, direction = 1) {
+  const indexes = acSelectableIndexes(items);
+  if (!indexes.length) return -1;
+  const currentPos = indexes.indexOf(currentIndex);
+  if (currentPos < 0) return direction < 0 ? indexes[indexes.length - 1] : indexes[0];
+  const nextPos = direction < 0
+    ? (currentPos <= 0 ? indexes.length - 1 : currentPos - 1)
+    : ((currentPos + 1) % indexes.length);
+  return indexes[nextPos];
+}
+
 function acShow(items) {
-  if (_isAutocompleteBlockedByTerminalConfirm()) {
+  if (_isAutocompleteBlockedByTerminalConfirm() || _isAutocompleteBlockedByActiveRun()) {
     acHide();
     return;
   }
   acDropdown.innerHTML = '';
   if (!items.length) { hideAcDropdown(); return; }
   _positionAutocomplete(items.length);
-  if (acIndex >= items.length) acIndex = items.length - 1;
+  if (acIndex >= items.length) acIndex = acLastSelectableIndex(items);
+  if (acIndex >= 0 && acIsHintOnly(items[acIndex])) acIndex = acFirstSelectableIndex(items);
   const currentValue = (typeof getComposerValue === 'function')
     ? getComposerValue()
     : cmdInput.value;
@@ -1067,11 +1108,18 @@ function acShow(items) {
   const matchValue = (items.length && typeof items[0] === 'object') ? tokenCtx.currentToken : currentValue;
   const maxExampleLabelLen = items.reduce((max, s) =>
     (s && s.isExample ? Math.max(max, autocompleteCore.itemText(s).length) : max), 0);
+  let hasRenderedConcrete = false;
+  let hasRenderedHint = false;
   items.forEach((s, i) => {
+    const hintOnly = acIsHintOnly(s);
+    const hintSeparated = hintOnly && hasRenderedConcrete && !hasRenderedHint;
     const div = document.createElement('div');
     div.className = 'ac-item dropdown-item dropdown-item-dense'
-      + (i === acIndex ? ' ac-active dropdown-item-active' : '')
-      + (s && s.isExample ? ' ac-example' : '');
+      + (!hintOnly && i === acIndex ? ' ac-active dropdown-item-active' : '')
+      + (s && s.isExample ? ' ac-example' : '')
+      + (hintOnly ? ' ac-hint-only' : '')
+      + (hintSeparated ? ' ac-hint-separated' : '');
+    if (hintOnly) div.setAttribute('aria-disabled', 'true');
     const label = autocompleteCore.itemText(s);
     const description = autocompleteCore.itemDescription(s);
     const val = s && typeof s === 'object' && s.matchQuery != null
@@ -1080,7 +1128,7 @@ function acShow(items) {
     const main = document.createElement('span');
     main.className = 'ac-item-main';
     if (s && s.isExample && maxExampleLabelLen > 0) main.style.minWidth = maxExampleLabelLen + 'ch';
-    main.innerHTML = s && s.hintOnly
+    main.innerHTML = hintOnly
       ? escapeHtml(label)
       : autocompleteCore.highlightedLabel(label, val);
     div.appendChild(main);
@@ -1090,7 +1138,10 @@ function acShow(items) {
       desc.textContent = description;
       div.appendChild(desc);
     }
-    div.addEventListener('mousedown', e => { e.preventDefault(); acAccept(s); });
+    div.addEventListener('mousedown', e => {
+      e.preventDefault();
+      if (!hintOnly) acAccept(s);
+    });
     // touchstart must not call preventDefault so the container can scroll.
     // We detect taps by checking that the finger barely moved; swipes fall
     // through to the browser's native scroll handling.
@@ -1104,9 +1155,14 @@ function acShow(items) {
       const t = e.changedTouches[0];
       const dx = t ? Math.abs(t.clientX - _touchStartX) : 99;
       const dy = t ? Math.abs(t.clientY - _touchStartY) : 99;
-      if (dx < 10 && dy < 10) { e.preventDefault(); acAccept(s); }
+      if (dx < 10 && dy < 10) {
+        e.preventDefault();
+        if (!hintOnly) acAccept(s);
+      }
     }, { passive: false });
     acDropdown.appendChild(div);
+    if (hintOnly) hasRenderedHint = true;
+    else hasRenderedConcrete = true;
   });
   showAcDropdown();
   _positionAutocomplete(items.length);
@@ -1167,7 +1223,6 @@ function acAccept(s) {
     // Placeholder-only hints (e.g. "<token>") are display-only: Tab should hide
     // the dropdown, not insert the literal placeholder text into the prompt.
     if (s.hintOnly) {
-      acHide();
       refocusComposerAfterAction({ preventScroll: true });
       return;
     }

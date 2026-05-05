@@ -23,9 +23,9 @@ Current totals:
 - behavior tests: 2,386
 - docs/inventory meta-tests: 30
 - `pytest`: 1194 (1164 behavior + 30 meta)
-- `vitest`: 986
+- `vitest`: 995
 - `playwright`: 236
-- total: 2,416
+- total: 2,425
 
 This document is organized in two parts:
 
@@ -1478,6 +1478,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `reads the visible mobile composer value through the shared accessor` | Verifies that reads the visible mobile composer value through the shared accessor. |
 | `syncs mobile composer input through the shared input handler` | Verifies that syncs mobile composer input through the shared input handler. |
 | `exposes the shared composer input handler for visible mobile input changes` | Verifies that exposes the shared composer input handler for visible mobile input changes. |
+| `blocks composer input and autocomplete while the active tab is running` | Verifies that hidden prompt input and autocomplete stay inactive while the active tab owns a running command. |
 | `publishes mobile focus and selection changes into composer state without mirroring the hidden input` | Verifies that publishes mobile focus and selection changes into composer state without mirroring the hidden input. |
 | `does not enter mobile mode on a narrow desktop viewport without touch support` | Verifies that does not enter mobile mode on a narrow desktop viewport without touch support. |
 | `sets the document title from the server config` | Verifies that sets the document title from the server config. |
@@ -1505,6 +1506,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `supports the mobile keyboard helper edit actions` | Verifies character moves, word-left / word-right jumps, Home / End, and delete-word actions in the mobile helper row. |
 | `keeps the mobile composer scrolled to the caret when helper navigation moves through long input` | Verifies that keeps the mobile composer scrolled to the caret when helper navigation moves through long input. |
 | `uses Ctrl+C to open kill confirm when active tab is running` | Verifies that uses Ctrl+C to open kill confirm when active tab is running. |
+| `swallows composer keydown while the active tab is running` | Verifies that prompt keydown input is ignored while the active tab owns a running command. |
 | `uses Ctrl+C to jump to a new prompt line when no command is running` | Verifies that uses Ctrl+C to jump to a new prompt line when no command is running. |
 | `uses Ctrl+C to cancel a pending terminal confirmation before opening a fresh prompt` | Verifies that a pending transcript-owned yes/no confirm consumes `Ctrl+C` as a cancel action before the normal fresh-prompt interrupt path runs. |
 | `supports Alt+T to create a new tab from the terminal prompt` | Verifies that supports Alt+T to create a new tab from the terminal prompt. |
@@ -1527,6 +1529,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `ArrowDown/Up wrap around and navigate the same direction regardless of whether the list is above or below the prompt` | ArrowDown/Up wrap around and navigate the same direction regardless of whether the list is above or below the prompt. |
 | `Tab expands the typed value to the longest shared autocomplete prefix before cycling` | Verifies that Tab expands the typed value to the longest shared autocomplete prefix before cycling. |
 | `Tab cycles autocomplete suggestions once the shared prefix is exhausted` | Verifies that Tab cycles autocomplete suggestions once the shared prefix is exhausted. |
+| `Tab accepts a single concrete autocomplete item while leaving hint-only guidance visible` | Verifies that display-only autocomplete hints do not prevent Tab from accepting the one real menu option. |
+| `ArrowDown skips hint-only autocomplete guidance while cycling menu items` | Verifies that arrow-key autocomplete navigation skips display-only hint rows. |
 | `Tab key with a modifier does not trigger autocomplete accept or selection` | Tab key with a modifier does not trigger autocomplete accept or selection. |
 | `routes hist-clear-all through confirmHistAction` | Verifies that the "Clear history" toolbar button opens the shared `showConfirm` prompt via `confirmHistAction` rather than binding its own modal. |
 | `uses the persistent share redaction default before showing the modal prompt` | Verifies that a persistent raw/redacted preference short-circuits `showConfirm` so the share-redaction prompt is never opened. |
@@ -1628,6 +1632,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `returns chained pipe-stage flag and value hints from the last helper stage` | Verifies that chained helper pipelines still expose flag and value hints from the last helper stage rather than the earlier stages. |
 | `does not offer chained pipe autocomplete after an invalid earlier stage` | Verifies that multi-pipe autocomplete fails closed when an earlier stage is not an allowlisted helper. |
 | `mousedown on a suggestion accepts it without blurring the input` | Verifies that mousedown on a suggestion accepts it without blurring the input. |
+| `mousedown on a hint-only item keeps the guidance visible without accepting it` | Verifies that display-only autocomplete hints stay visible and do not modify the prompt when clicked. |
+| `does not render suggestions while the active tab is running` | Verifies that autocomplete closes instead of rendering stale hidden-prompt suggestions while the active tab owns a running command. |
 | `positions dropdown above when space below is tight and preserves item order` | Verifies that positions dropdown above when space below is tight and preserves item order. |
 | `keeps the above-mode dropdown pinned to the prompt as the item count shrinks` | Verifies that a desktop autocomplete dropdown opened above the prompt keeps the same bottom offset as its item count shrinks, instead of drifting farther away from the prompt. |
 | `clamps the below-mode dropdown height so it does not extend past the viewport edge` | Verifies that clamps the below-mode dropdown height so it does not extend past the viewport edge. |
@@ -1927,6 +1933,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `doKill keeps an attached run active when the server denies the kill request` | Verifies that a denied kill request keeps an attached tab running with kill controls still visible. |
 | `restoreActiveRunsAfterReload subscribes restored tabs to brokered live output` | Verifies that reload continuity restores running tabs with preserved run IDs and subscribes them back to replay plus live output. |
 | `restoreActiveRunsAfterReload skips runs owned by another live client` | Verifies that reload continuity does not auto-create terminal tabs for active runs owned by another live browser. |
+| `restoreActiveRunsAfterReload skips runs explicitly detached by this browser` | Verifies that Keep running suppresses automatic reload reattachment for that active run in the same browser. |
+| `attachActiveRunFromMonitor clears explicit detach suppression for the run` | Verifies that manually attaching from Status Monitor opts a detached run back into normal reload continuity. |
 | `restoreActiveRunsAfterReload restores stale-owner runs` | Verifies that reload continuity can recover active runs once the previous owner is stale. |
 | `pauses background run streams for Status Monitor API calls and resumes from the last event id` | Verifies that Status Monitor connection relief pauses only background live streams and resubscribes them from the last broker event id. |
 | `restoreActiveRunsAfterReload does not overwrite a restored non-running tab` | Verifies that active-run reconnect creates a separate tab instead of clobbering an already-restored idle tab. |
@@ -2146,6 +2154,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `uses CPU hysteresis and recent samples for the pulse strip` | Verifies that the Status Monitor pulse strip preserves raw CPU readouts while damping small pulse-signature changes and keeping a recent CPU sample window. |
 | `shows active-run loading state on open instead of stale cached rows` | Verifies that opening the Status Monitor shows an active-run loading row until fresh active-run data arrives instead of flashing stale cached rows. |
 | `opens as a status dashboard when there are no active runs` | Verifies that the desktop Status Monitor opens to a dashboard with a `0 active runs` runs section when no commands are running. |
+| `ticks uptime locally between status polls` | Verifies that the Status Monitor summary and Uptime card count upward between `/status` polls without fetching a fresh status payload. |
 | `opens history from command territory tiles` | Verifies that Command Territory tiles open History with the clicked command root filter applied. |
 | `keeps dashboard fallbacks visible when status data routes fail` | Verifies that the Status Monitor keeps rendering dashboard fallback copy when status, workspace, stats, or insights requests fail. |
 | `shows fallback toasts when optional history helpers are unavailable` | Verifies that missing optional history filter and run restore helpers show user-visible fallback toasts instead of throwing. |

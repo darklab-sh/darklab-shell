@@ -702,7 +702,93 @@ That split is what allows the app to keep the interactive shell fast while still
 
 ### Database
 
-`<data_dir>/history.db` — SQLite, WAL mode. Seven persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable.
+`<data_dir>/history.db` — SQLite, WAL mode. Nine persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable.
+
+Logical relationships are owned by the app rather than SQLite foreign-key constraints. Anonymous browser sessions can appear as `session_id` values without a matching `session_tokens` row.
+
+```mermaid
+erDiagram
+  LOGICAL_SESSION {
+    TEXT session_id PK "not a table"
+  }
+  RUNS {
+    TEXT id PK
+    TEXT session_id
+    TEXT command
+    TEXT started
+    TEXT finished
+    INTEGER exit_code
+    TEXT output_preview
+    TEXT output_search_text
+  }
+  RUN_OUTPUT_ARTIFACTS {
+    TEXT run_id PK
+    TEXT rel_path
+    TEXT compression
+    INTEGER byte_size
+    INTEGER line_count
+    INTEGER truncated
+    TEXT created
+  }
+  RUNS_FTS {
+    INTEGER rowid PK
+    TEXT command
+    TEXT output_search_text
+  }
+  SNAPSHOTS {
+    TEXT id PK
+    TEXT session_id
+    TEXT label
+    TEXT created
+    TEXT content
+  }
+  SESSION_TOKENS {
+    TEXT token PK
+    TEXT created
+  }
+  SESSION_PREFERENCES {
+    TEXT session_id PK
+    TEXT preferences
+    TEXT updated
+  }
+  STARRED_COMMANDS {
+    TEXT session_id PK
+    TEXT command PK
+  }
+  SESSION_VARIABLES {
+    TEXT session_id PK
+    TEXT name PK
+    TEXT value
+    TEXT updated
+  }
+  USER_WORKFLOWS {
+    TEXT id PK
+    TEXT session_id
+    TEXT title
+    TEXT description
+    TEXT inputs
+    TEXT steps
+    TEXT created
+    TEXT updated
+  }
+  RECENT_DOMAINS {
+    TEXT session_id PK
+    TEXT domain PK
+    TEXT last_used
+    INTEGER use_count
+  }
+
+  SESSION_TOKENS ||--o| LOGICAL_SESSION : "named token"
+  LOGICAL_SESSION ||--o{ RUNS : "owns"
+  LOGICAL_SESSION ||--o{ SNAPSHOTS : "owns"
+  LOGICAL_SESSION ||--o| SESSION_PREFERENCES : "stores"
+  LOGICAL_SESSION ||--o{ STARRED_COMMANDS : "stars"
+  LOGICAL_SESSION ||--o{ SESSION_VARIABLES : "defines"
+  LOGICAL_SESSION ||--o{ USER_WORKFLOWS : "saves"
+  LOGICAL_SESSION ||--o{ RECENT_DOMAINS : "remembers"
+  RUNS ||--o| RUN_OUTPUT_ARTIFACTS : "full output"
+  RUNS ||--o| RUNS_FTS : "search index"
+```
 
 - `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews store structured `{text, cls, tsC, tsE}` entries so run permalinks can preserve prompt echo and timestamp metadata. Also stores `output_search_text` (plain text extracted from the full artifact when available, otherwise the preview) for FTS indexing. Persists across restarts. Pruned by `permalink_retention_days`.
 - `runs_fts` — FTS5 virtual table (content table backed by `runs`, `content_rowid=rowid`) indexing the `command` and `output_search_text` columns. Uses the trigram tokenizer when available (SQLite ≥ 3.38), falling back to unicode61. Kept in sync with `runs` via INSERT/DELETE triggers. Enables history drawer full-text search across both command text and stored run output.
@@ -713,6 +799,7 @@ That split is what allows the app to keep the interactive shell fast while still
 - `starred_commands` — one row per starred command per session `(session_id, command)`. Backs the `/session/starred` endpoints and follows session tokens across devices via the migration path.
 - `session_variables` — one row per session command variable `(session_id, name, value, updated)`. Backs the `var` built-in, `/session/variables`, and app-managed command expansion before validation.
 - `user_workflows` — one row per saved workflow `(id, session_id, title, description, inputs, steps, created, updated)`. Backs the Workflows panel's **My workflows** section, the `workflow` terminal command, and session-token migration.
+- `recent_domains` — one row per recently used domain per session `(session_id, domain, last_used, use_count)`. Backs domain autocomplete across browsers that share the same named session token and follows the session-token migration path.
 - Redis-backed active-run metadata plus browser `sessionStorage` form a second persistence layer for reload continuity:
   - `/history/active` covers in-flight runs owned by the server/session
   - browser `sessionStorage` covers non-running tabs, transcript previews, status, draft input, and active-tab selection
@@ -944,9 +1031,9 @@ Current totals:
 - behavior tests: 2,386
 - docs/inventory meta-tests: 30
 - `pytest`: 1194 (1164 behavior + 30 meta)
-- `vitest`: 986
+- `vitest`: 995
 - `playwright`: 236
-- total: 2,416
+- total: 2,425
 
 ### Testing Architecture
 

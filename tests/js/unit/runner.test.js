@@ -830,6 +830,8 @@ function loadRunnerFns({
     attachActiveRunFromMonitor,
     killActiveRunFromMonitor,
     restoreActiveRunsAfterReload,
+    markActiveRunDetachedForRestore,
+    clearActiveRunDetachedForRestore,
     pollActiveRunsAfterReload,
     syncActiveRunTimer,
     _subscribeRunStream,
@@ -864,6 +866,8 @@ function loadRunnerFns({
     restoreHistoryRunIntoTab,
     attachActiveRunFromMonitor: fns.attachActiveRunFromMonitor,
     killActiveRunFromMonitor: fns.killActiveRunFromMonitor,
+    markActiveRunDetachedForRestore: fns.markActiveRunDetachedForRestore,
+    clearActiveRunDetachedForRestore: fns.clearActiveRunDetachedForRestore,
     _subscribeRunStream: fns._subscribeRunStream,
     pauseBackgroundRunStreamsForStatusMonitor: fns.pauseBackgroundRunStreamsForStatusMonitor,
     resumeBackgroundRunStreamsAfterStatusMonitor: fns.resumeBackgroundRunStreamsAfterStatusMonitor,
@@ -1026,6 +1030,89 @@ describe('runner helpers', () => {
     expect(appendLine).not.toHaveBeenCalled()
     expect(tabs[0].st).toBe('idle')
     expect(status.className).toBe('')
+  })
+
+  it('restoreActiveRunsAfterReload skips runs explicitly detached by this browser', () => {
+    const appendLine = vi.fn()
+    const createTab = vi.fn(() => 'tab-2')
+    const { restoreActiveRunsAfterReload, markActiveRunDetachedForRestore, tabs, status } = loadRunnerFns({
+      tabs: [
+        { id: 'tab-1', st: 'idle', runId: null, rawLines: [], pendingKill: false, killed: false },
+      ],
+      appendLine,
+      createTab,
+    })
+
+    markActiveRunDetachedForRestore('run-1')
+    const restored = restoreActiveRunsAfterReload([
+      {
+        run_id: 'run-1',
+        command: 'ping darklab.sh',
+        started: '2026-01-01T00:00:00Z',
+        owned_by_this_client: true,
+        has_live_owner: false,
+        owner_stale: false,
+      },
+    ])
+
+    expect(restored).toBe(false)
+    expect(createTab).not.toHaveBeenCalled()
+    expect(appendLine).not.toHaveBeenCalled()
+    expect(tabs[0].st).toBe('idle')
+    expect(status.className).toBe('')
+  })
+
+  it('attachActiveRunFromMonitor clears explicit detach suppression for the run', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/runs/run-1/stream')) {
+        return Promise.resolve(pendingBrokerStreamResponse())
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
+    const {
+      attachActiveRunFromMonitor,
+      markActiveRunDetachedForRestore,
+      restoreActiveRunsAfterReload,
+      tabs,
+    } = loadRunnerFns({
+      tabs: [
+        { id: 'tab-1', st: 'idle', runId: null, rawLines: [], pendingKill: false, killed: false },
+      ],
+      appendLine,
+      apiFetch,
+    })
+
+    markActiveRunDetachedForRestore('run-1')
+    await attachActiveRunFromMonitor({
+      run_id: 'run-1',
+      command: 'ping darklab.sh',
+      started: '2026-01-01T00:00:00Z',
+      last_event_id: '1-1',
+    })
+
+    tabs.splice(0, tabs.length, {
+      id: 'tab-1',
+      st: 'idle',
+      runId: null,
+      rawLines: [],
+      pendingKill: false,
+      killed: false,
+      historyRunId: null,
+    })
+
+    const restored = restoreActiveRunsAfterReload([
+      {
+        run_id: 'run-1',
+        command: 'ping darklab.sh',
+        started: '2026-01-01T00:00:00Z',
+        owned_by_this_client: true,
+        has_live_owner: false,
+        owner_stale: false,
+      },
+    ])
+
+    expect(restored).toBe(true)
   })
 
   it('restoreActiveRunsAfterReload restores stale-owner runs', () => {

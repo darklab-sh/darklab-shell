@@ -267,6 +267,19 @@
     return `${total.toFixed(total >= 10 ? 0 : 1)}s`;
   }
 
+  function _currentStatusUptimeSeconds(status = cachedStatus) {
+    if (!status || !_isTelemetryNumber(status.uptime)) return null;
+    const base = Number(status.uptime);
+    const receivedAt = Number(status.uptime_received_at_ms || 0);
+    if (!Number.isFinite(receivedAt) || receivedAt <= 0) return base;
+    return base + Math.max(0, (Date.now() - receivedAt) / 1000);
+  }
+
+  function _statusMonitorUptimeText(status = cachedStatus) {
+    const uptime = _currentStatusUptimeSeconds(status);
+    return uptime === null ? 'n/a' : _formatDurationSeconds(uptime);
+  }
+
   function _formatCount(value) {
     const count = Number(value);
     if (!Number.isFinite(count)) return '0';
@@ -872,6 +885,18 @@
     });
   }
 
+  function _updateLiveUptimeDisplays() {
+    const uptime = _statusMonitorUptimeText();
+    document.querySelectorAll('[data-status-monitor-uptime-value]').forEach(el => {
+      if (el.textContent !== uptime) el.textContent = uptime;
+    });
+    const prefix = summaryEl?.dataset?.statusMonitorSummaryPrefix;
+    if (summaryEl && prefix) {
+      const text = `${prefix} · ${uptime} uptime`;
+      if (summaryEl.textContent !== text) summaryEl.textContent = text;
+    }
+  }
+
   async function _loadActiveRuns() {
     const resp = await apiFetch('/history/active');
     const data = await resp.json();
@@ -886,6 +911,7 @@
     if (!resp.ok) throw new Error(data?.error || `HTTP ${resp.status}`);
     const payload = data && typeof data === 'object' ? data : {};
     payload.latency_ms = Date.now() - startedAt;
+    payload.uptime_received_at_ms = Date.now();
     return payload;
   }
 
@@ -1038,7 +1064,7 @@
     return section;
   }
 
-  function _statusCard({ label, value, meta = '', tone = '', meterPercent = null, compact = false }) {
+  function _statusCard({ label, value, meta = '', tone = '', meterPercent = null, compact = false, valueDataset = null }) {
     const card = document.createElement('div');
     card.className = `status-monitor-card ${tone ? `status-monitor-card-${tone}` : ''} ${compact ? 'status-monitor-card-compact' : ''}`.trim();
     const labelEl = document.createElement('div');
@@ -1055,6 +1081,11 @@
     const valueEl = document.createElement('div');
     valueEl.className = 'status-monitor-card-value';
     valueEl.textContent = value;
+    if (valueDataset && typeof valueDataset === 'object') {
+      Object.entries(valueDataset).forEach(([key, datasetValue]) => {
+        valueEl.dataset[key] = String(datasetValue);
+      });
+    }
     valueRow.appendChild(valueEl);
     card.append(labelEl, valueRow);
     if (meta) {
@@ -1098,13 +1129,15 @@
       ? ` · ${_formatCpuPercent(avgCpu)} avg CPU`
       : '';
     const profile = _heartbeatProfile({ activeCount: activeRuns.length, averageCpu: avgCpu });
+    const summaryPrefix = `${activeRuns.length} active${cpuMeta}`;
     return {
       signature: `${activeRuns.length}:${signatureCpuBucket}`,
       activeCount: activeRuns.length,
       averageCpu: avgCpu,
       cpuSamples,
       ...profile,
-      meta: `${activeRuns.length} active${cpuMeta} · ${_formatDurationSeconds(status.uptime || 0)} uptime`,
+      summaryPrefix,
+      meta: `${summaryPrefix} · ${_statusMonitorUptimeText(status)} uptime`,
     };
   }
 
@@ -2688,7 +2721,7 @@
   function _renderServicesSection() {
     const status = cachedStatus || {};
     const section = _statusSection('System', status.error ? 'status unavailable' : '');
-    const uptime = _formatDurationSeconds(Number(status.uptime || 0));
+    const uptime = _statusMonitorUptimeText(status);
     const latency = _isTelemetryNumber(status.latency_ms) ? Number(status.latency_ms) : null;
     section.appendChild(_statusGrid([
       _statusCard({
@@ -2711,6 +2744,7 @@
         value: uptime,
         meta: latency === null ? '' : `${latency} ms poll`,
         tone: 'idle',
+        valueDataset: { statusMonitorUptimeValue: '1' },
       }),
     ]));
     return section;
@@ -3119,6 +3153,13 @@
       || _renderVisualShowcaseSection(activeRuns, options);
     if (showcase.parentElement === listEl) _updateVisualShowcaseSection(showcase, activeRuns, options);
     const fallbackSummary = activeRuns.length === 1 ? '1 active run' : `${activeRuns.length} active runs`;
+    if (summaryEl.dataset) {
+      if (!options.loadingActiveRuns && latestPulseData?.summaryPrefix) {
+        summaryEl.dataset.statusMonitorSummaryPrefix = latestPulseData.summaryPrefix;
+      } else {
+        delete summaryEl.dataset.statusMonitorSummaryPrefix;
+      }
+    }
     summaryEl.textContent = options.loadingActiveRuns ? 'Loading active runs...' : (latestPulseData?.meta || fallbackSummary);
     _replaceDashboardChildren([
       showcase,
@@ -3219,6 +3260,7 @@
     tickTimer = setInterval(() => {
       if (isOpen && document.visibilityState === 'visible') {
         _updateElapsedTimers();
+        _updateLiveUptimeDisplays();
       }
     }, 1000);
     _startPulseAnimation();

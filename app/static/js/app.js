@@ -2975,6 +2975,10 @@ function renderFaqLimits(cfg) {
 }
 
 function openAutocompleteForVisibleComposer() {
+  if (typeof isActiveTabRunning === 'function' && isActiveTabRunning()) {
+    if (typeof acHide === 'function') acHide();
+    return false;
+  }
   const input = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
   if (!input || typeof input.value !== 'string') return false;
   const value = input.value;
@@ -2995,6 +2999,10 @@ function openAutocompleteForVisibleComposer() {
 
 function activateFaqCommandChip(cmd) {
   if (!cmd) return;
+  if (typeof isActiveTabRunning === 'function' && isActiveTabRunning()) {
+    if (typeof acHide === 'function') acHide();
+    return;
+  }
   const next = `${cmd} `;
   setComposerValue(next, next.length, next.length, { dispatch: false });
   _closeMajorOverlays();

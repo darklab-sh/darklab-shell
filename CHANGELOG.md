@@ -33,14 +33,29 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
-- **Session file docs and test inventory now reflect the v1.7 workspace command surface** — the docs count 2,416 total tests, including 1,194 pytest tests, 986 Vitest tests, and 236 Playwright tests.
-- **Autocomplete placeholder hints now have an explicit schema path** — frontend and backend autocomplete normalization accept `hint_only: true` as the author-owned display-only signal, and placeholder-looking text no longer becomes display-only by regex inference.
+- **Session file docs and test inventory now reflect the v1.7 workspace command surface** — the docs count 2,425 total tests, including 1,194 pytest tests, 995 Vitest tests, and 236 Playwright tests.
+- **Autocomplete placeholder hints now have an explicit schema path and behavior** — frontend and backend autocomplete normalization accept `hint_only: true` as the author-owned display-only signal, placeholder-looking text no longer becomes display-only by regex inference, and hint-only rows now render as subtle italic guidance instead of selectable menu choices.
+  - **Why:** rows such as `<file>` and `<domain>` should teach the shape of the command without blocking Tab from accepting the one real file, folder, or domain suggestion in the menu.
+  - **What:** Tab, Enter, ArrowUp, ArrowDown, mouse, and touch interactions now skip hint-only rows while keeping them visible as guidance. Shared-prefix expansion also ignores hint rows, so concrete suggestions behave consistently even when the menu includes placeholder copy.
+  - **Tests:** added autocomplete/app unit coverage for hint-only rendering, skipped keyboard navigation, single-concrete Tab acceptance, and non-accepting mouse clicks.
+- **Status Monitor uptime now ticks locally between status polls** — the Uptime card and pulse-strip summary count upward every second from the last `/status` payload instead of showing a stale value until the next poll.
+  - **Why:** the monitor already knew the polling cadence, so a frozen uptime clock made the dashboard feel less live than the rest of the surface.
+  - **What:** status payloads are timestamped on receipt, the Uptime card carries a stable data hook, and the existing once-per-second monitor tick refreshes visible uptime text without making extra API calls.
+  - **Tests:** added Status Monitor unit coverage for local uptime interpolation between status polls.
+- **Active runs that a browser explicitly keeps running now stay detached after reload** — choosing **Keep running** suppresses automatic tab restoration for that run in the same browser until the user attaches again from Status Monitor.
+  - **Why:** "keep running" should mean "leave it in the background," not "bring it back as a terminal tab the next time this browser opens."
+  - **What:** the browser records detached active run IDs per session token in localStorage, prunes markers once runs are no longer active, skips those runs during reload restore, and clears the marker when the user manually attaches from Status Monitor.
+  - **Tests:** added runner and tab unit coverage for detach markers, reload skipping, marker pruning, and manual attach clearing.
 
 ### Fixed
 
 - **Autocomplete no longer shows duplicate `file list` and `file ls` rows** — the YAML-owned grammar entries keep their `<folder>` guidance, and the runtime layer no longer adds bare duplicates.
 - **Command-created workspace config folders now show up in Files instead of causing 500s** — workspace list/read operations repair scanner-created child directory/file modes before the app tries to traverse them, so tools using session-scoped `XDG_CONFIG_HOME` such as Subfinder remain visible and readable through the Files browser and `cat`.
 - **Oversized workspace files no longer leave Files stuck in loading state** — known oversized files now toast before the viewer/editor modal opens, and server-side read-limit rejections close the loading viewer instead of leaving the spinner behind.
+- **Hidden prompt input no longer leaks autocomplete while a command is running** — active tabs now block composer writes and autocomplete rendering until the run finishes, while keeping `Ctrl+C` kill handling and confirmation-modal shortcuts intact.
+  - **Why:** several flows could focus or write to the hidden desktop prompt while the active tab owned a running command, causing stray autocomplete menus to appear away from the prompt.
+  - **What:** shared composer setters, visible input handlers, FAQ command chips, visible autocomplete openers, prompt keydown handling, and global prompt-like key handling all fail closed while the active tab is running.
+  - **Tests:** added app/autocomplete unit coverage for blocked composer writes, swallowed keydown, FAQ chip no-ops, and autocomplete no-render behavior during active runs.
 
 ---
 

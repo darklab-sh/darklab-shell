@@ -1024,6 +1024,32 @@ describe('Status Monitor', () => {
     closeStatusMonitor()
   })
 
+  it('ticks uptime locally between status polls', async () => {
+    vi.useFakeTimers()
+    try {
+      const { apiFetch, openStatusMonitor, closeStatusMonitor } = loadStatusMonitor({
+        runs: [],
+        status: { uptime: 12, db: 'ok', redis: 'none', server_time: Date.now() },
+      })
+
+      await openStatusMonitor({ source: 'test' })
+
+      const statusFetchesBeforeTick = apiFetch.mock.calls.filter(([url]) => url === '/status').length
+      expect(document.querySelector('.status-monitor-summary')?.textContent).toBe('0 active · 12s uptime')
+      expect(document.querySelector('[data-status-monitor-uptime-value]')?.textContent).toBe('12s')
+
+      vi.advanceTimersByTime(2000)
+
+      expect(apiFetch.mock.calls.filter(([url]) => url === '/status').length).toBe(statusFetchesBeforeTick)
+      expect(document.querySelector('.status-monitor-summary')?.textContent).toBe('0 active · 14s uptime')
+      expect(document.querySelector('[data-status-monitor-uptime-value]')?.textContent).toBe('14s')
+
+      closeStatusMonitor()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('opens history from command territory tiles', async () => {
     const openHistoryWithFilters = vi.fn()
     const { openStatusMonitor } = loadStatusMonitor({ runs: [], openHistoryWithFilters })

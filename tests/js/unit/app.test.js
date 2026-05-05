@@ -2570,6 +2570,29 @@ describe('app helpers', () => {
     restoreViewport()
   })
 
+  it('blocks composer input and autocomplete while the active tab is running', async () => {
+    const acHide = vi.fn()
+    const acShow = vi.fn()
+    const { cmdInput, handleComposerInputChange, setComposerValue, getComposerValue } = await loadAppFns({
+      tabs: [{ id: 'tab-1', st: 'running' }],
+      acHide,
+      acShow,
+      acSuggestions: ['curl http://localhost:5001/health'],
+    })
+
+    expect(setComposerValue('curl', 4, 4)).toBe('')
+    expect(getComposerValue()).toBe('')
+
+    cmdInput.value = 'curl'
+    cmdInput.setSelectionRange(4, 4)
+    handleComposerInputChange(cmdInput)
+
+    expect(cmdInput.value).toBe('')
+    expect(getComposerValue()).toBe('')
+    expect(acHide).toHaveBeenCalled()
+    expect(acShow).not.toHaveBeenCalled()
+  })
+
   it('publishes mobile focus and selection changes into composer state without mirroring the hidden input', async () => {
     const { getComposerState, restoreViewport } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
@@ -3178,6 +3201,20 @@ describe('app helpers', () => {
     expect(interruptPromptLine).not.toHaveBeenCalled()
   })
 
+  it('swallows composer keydown while the active tab is running', async () => {
+    const acHide = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      tabs: [{ id: 'tab-1', st: 'running' }],
+      acHide,
+    })
+
+    const ev = new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true })
+    cmdInput.dispatchEvent(ev)
+
+    expect(ev.defaultPrevented).toBe(true)
+    expect(acHide).toHaveBeenCalled()
+  })
+
   it('uses Ctrl+C to jump to a new prompt line when no command is running', async () => {
     const interruptPromptLine = vi.fn()
     const { cmdInput, confirmKill } = await loadAppFns({
@@ -3660,6 +3697,42 @@ describe('app helpers', () => {
       new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }),
     )
     expect(_getAcIndex()).toBe(0)
+  })
+
+  it('Tab accepts a single concrete autocomplete item while leaving hint-only guidance visible', async () => {
+    const realItem = { value: 'targets.txt', replaceStart: 4, replaceEnd: 6 }
+    const hintItem = { value: '<file>', hintOnly: true, description: 'Session file path' }
+    const acAccept = vi.fn()
+    const { cmdInput, acDropdown } = await loadAppFns({
+      acFiltered: [realItem, hintItem],
+      acIndex: -1,
+      acAccept,
+    })
+
+    acDropdown.style.display = 'block'
+    cmdInput.value = 'cat ta'
+    cmdInput.setSelectionRange(6, 6)
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+
+    expect(acAccept).toHaveBeenCalledWith(realItem)
+  })
+
+  it('ArrowDown skips hint-only autocomplete guidance while cycling menu items', async () => {
+    const realA = { value: 'alpha.txt' }
+    const hintItem = { value: '<file>', hintOnly: true, description: 'Session file path' }
+    const realB = { value: 'bravo.txt' }
+    const acShow = vi.fn()
+    const { cmdInput, _getAcIndex, acDropdown } = await loadAppFns({
+      acFiltered: [realA, hintItem, realB],
+      acIndex: 0,
+      acShow,
+    })
+
+    acDropdown.style.display = 'block'
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+
+    expect(_getAcIndex()).toBe(2)
+    expect(acShow).toHaveBeenCalledWith([realA, hintItem, realB])
   })
 
   it('Tab key with a modifier does not trigger autocomplete accept or selection', async () => {
