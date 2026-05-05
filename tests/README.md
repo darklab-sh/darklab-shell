@@ -20,12 +20,12 @@ Workspace file behavior is intentionally split across all three layers: pytest o
 
 Current totals:
 
-- behavior tests: 2,407
+- behavior tests: 2,409
 - docs/inventory meta-tests: 30
 - `pytest`: 1205 (1175 behavior + 30 meta)
-- `vitest`: 996
+- `vitest`: 998
 - `playwright`: 236
-- total: 2,437
+- total: 2,439
 
 This document is organized in two parts:
 
@@ -1506,11 +1506,13 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `renders cursor and selection state from composer state` | Verifies that renders cursor and selection state from composer state. |
 | `refreshes prompt rendering from the focused input before drawing the caret` | Verifies that the visible prompt caret returns to the empty focused state when the DOM input has been cleared but shared composer state is stale. |
 | `supports ctrl+w to delete one word to the left` | Verifies that supports ctrl+w to delete one word to the left. |
+| `supports ctrl+w with punctuation-delimited terminal words` | Verifies that Ctrl+W uses terminal-style word boundaries around punctuation such as dots, slashes, underscores, and parentheses. |
 | `supports ctrl+u to delete to the beginning of the line` | Verifies that supports ctrl+u to delete to the beginning of the line. |
 | `supports ctrl+a to move to the beginning of the line` | Verifies that supports ctrl+a to move to the beginning of the line. |
 | `supports ctrl+k to delete to the end of the line` | Verifies that supports ctrl+k to delete to the end of the line. |
 | `supports ctrl+e to move to the end of the line` | Verifies that supports ctrl+e to move to the end of the line. |
 | `supports Alt+B and Alt+F to move by word` | Verifies that supports Alt+B and Alt+F to move by word. |
+| `treats punctuation as word boundaries for terminal word movement` | Verifies that Alt/Option word movement stops at punctuation-delimited terminal word segments. |
 | `supports macOS Option+B and Option+F word movement via physical key codes` | Verifies that supports macOS Option+B and Option+F word movement via physical key codes. |
 | `supports the mobile keyboard helper edit actions` | Verifies character moves, word-left / word-right jumps, Home / End, and delete-word actions in the mobile helper row. |
 | `keeps the mobile composer scrolled to the caret when helper navigation moves through long input` | Verifies that keeps the mobile composer scrolled to the caret when helper navigation moves through long input. |
@@ -1531,7 +1533,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `supports Alt+Shift+C to copy output for the active tab` | Verifies that supports Alt+Shift+C to copy output for the active tab. |
 | `supports macOS Option+Shift+C to copy output via physical key code` | Verifies that supports macOS Option+Shift+C to copy output via physical key code. |
 | `supports Alt+M to toggle the status monitor from the terminal prompt` | Verifies that Alt+M opens the Status Monitor when closed and closes it when already open. |
-| `supports Alt+Shift+F to open the Files modal from the terminal prompt` | Verifies that Alt+Shift+F opens Files while preserving Alt+F for word-forward. |
+| `supports Alt+Shift+F to toggle the Files modal from the terminal prompt` | Verifies that Alt+Shift+F opens and closes Files while preserving Alt+F for word-forward. |
 | `supports Ctrl+L to clear the active tab without dropping a running command` | Verifies that supports Ctrl+L to clear the active tab without dropping a running command. |
 | `does not apply Alt-based tab shortcuts while typing in non-terminal inputs` | Verifies that does not apply Alt-based tab shortcuts while typing in non-terminal inputs. |
 | `does not apply action shortcuts while typing in non-terminal inputs` | Verifies that does not apply action shortcuts while typing in non-terminal inputs. |
@@ -2804,7 +2806,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `Alt+G opens the workflows overlay from the composer` | Pressing Alt+G with the composer focused opens the guided workflows overlay without leaking `©`. |
 | `Alt+S toggles the transcript search bar from the composer` | Alt+S is the canonical search chord — works from the prompt because `S` has no readline conflict (unlike `F`, which the composer owns as word-forward). |
 | `Alt+M toggles the Status Monitor from the composer` | Alt+M opens and closes the status monitor without leaking `µ` into the prompt. |
-| `Alt+Shift+F opens the Files modal from the composer` | Alt+Shift+F opens Files without stealing the terminal's Alt+F word-forward chord. |
+| `Alt+Shift+F toggles the Files modal from the composer` | Alt+Shift+F opens and closes Files without stealing the terminal's Alt+F word-forward chord. |
 | `Alt+\ toggles the rail collapsed state from the composer` | Pressing Alt+\ with the composer focused toggles the desktop left rail between collapsed and expanded without leaking `«`. |
 | `Alt+/ toggles the FAQ overlay from the composer` | Alt+/ opens the FAQ overlay from the prompt and closes it on a second press without leaking `÷`. |
 

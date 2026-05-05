@@ -2995,6 +2995,23 @@ describe('app helpers', () => {
     expect(cmdInput.value).toBe('dig darklab.sh ')
   })
 
+  it('supports ctrl+w with punctuation-delimited terminal words', async () => {
+    const { cmdInput, setComposerState } = await loadAppFns()
+
+    cmdInput.value = 'cat /tmp/darklab_findings(1).txt'
+    cmdInput.focus()
+    cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
+    setComposerState({
+      value: cmdInput.value,
+      selectionStart: cmdInput.value.length,
+      selectionEnd: cmdInput.value.length,
+      activeInput: 'desktop',
+    })
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', ctrlKey: true, bubbles: true }))
+
+    expect(cmdInput.value).toBe('cat /tmp/darklab_findings(1).')
+  })
+
   it('supports ctrl+u to delete to the beginning of the line', async () => {
     const { cmdInput, setComposerState } = await loadAppFns()
 
@@ -3075,12 +3092,38 @@ describe('app helpers', () => {
     expect(cmdInput.selectionEnd).toBe(15)
 
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', altKey: true, bubbles: true }))
-    expect(cmdInput.selectionStart).toBe(4)
-    expect(cmdInput.selectionEnd).toBe(4)
+    expect(cmdInput.selectionStart).toBe(12)
+    expect(cmdInput.selectionEnd).toBe(12)
 
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', altKey: true, bubbles: true }))
     expect(cmdInput.selectionStart).toBe(14)
     expect(cmdInput.selectionEnd).toBe(14)
+  })
+
+  it('treats punctuation as word boundaries for terminal word movement', async () => {
+    const { cmdInput, setComposerState } = await loadAppFns()
+    const value = 'cat /tmp/darklab_findings(1).txt'
+
+    cmdInput.value = value
+    cmdInput.setSelectionRange(value.length, value.length)
+    setComposerState({
+      value,
+      selectionStart: value.length,
+      selectionEnd: value.length,
+      activeInput: 'desktop',
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', altKey: true, bubbles: true }))
+    expect(cmdInput.selectionStart).toBe(29)
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', altKey: true, bubbles: true }))
+    expect(cmdInput.selectionStart).toBe(26)
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', altKey: true, bubbles: true }))
+    expect(cmdInput.selectionStart).toBe(17)
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', altKey: true, bubbles: true }))
+    expect(cmdInput.selectionStart).toBe(25)
   })
 
   it('supports macOS Option+B and Option+F word movement via physical key codes', async () => {
@@ -3154,7 +3197,7 @@ describe('app helpers', () => {
     expect(visibleInput.selectionStart).toBe(visibleInput.value.length)
 
     performMobileEditAction('delete-word')
-    expect(visibleInput.value).toBe('ping -c 4 ')
+    expect(visibleInput.value).toBe('ping -c 4 example.')
 
     performMobileEditAction('delete-line')
     expect(visibleInput.value).toBe('')
@@ -3355,8 +3398,8 @@ describe('app helpers', () => {
       preventDefault: vi.fn(),
       stopPropagation: vi.fn(),
     })
-    expect(getComposerState().selectionStart).toBe(4)
-    expect(getComposerState().selectionEnd).toBe(4)
+    expect(getComposerState().selectionStart).toBe(12)
+    expect(getComposerState().selectionEnd).toBe(12)
 
     handleComposerWordArrowShortcut({
       key: 'ArrowRight',
@@ -3526,10 +3569,14 @@ describe('app helpers', () => {
     expect(closeStatusMonitor).toHaveBeenCalledTimes(1)
   })
 
-  it('supports Alt+Shift+F to open the Files modal from the terminal prompt', async () => {
+  it('supports Alt+Shift+F to toggle the Files modal from the terminal prompt', async () => {
     const openWorkspace = vi.fn()
+    const closeWorkspace = vi.fn()
+    let workspaceOpen = false
     const { cmdInput } = await loadAppFns({
       openWorkspace,
+      closeWorkspace,
+      isWorkspaceOverlayOpen: vi.fn(() => workspaceOpen),
       tabs: [{ id: 'tab-1', st: 'idle' }],
     })
 
@@ -3544,6 +3591,19 @@ describe('app helpers', () => {
     )
 
     expect(openWorkspace).toHaveBeenCalled()
+
+    workspaceOpen = true
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'F',
+        code: 'KeyF',
+        altKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    )
+
+    expect(closeWorkspace).toHaveBeenCalled()
   })
 
   it('supports Ctrl+L to clear the active tab without dropping a running command', async () => {

@@ -1204,7 +1204,12 @@ function handleChromeShortcut(e) {
     return true;
   }
   if (e.shiftKey && eventMatchesLetter(e, 'f')) {
-    if (typeof openWorkspace === 'function') openWorkspace();
+    if (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen()) {
+      if (typeof closeWorkspace === 'function') closeWorkspace();
+      else if (typeof hideWorkspaceOverlay === 'function') hideWorkspaceOverlay();
+    } else if (typeof openWorkspace === 'function') {
+      openWorkspace();
+    }
     e.preventDefault();
     return true;
   }
@@ -1606,17 +1611,21 @@ function bindMobileComposerSubmitAndInputListeners(mobileInput) {
   });
 }
 
+function isTerminalWordChar(char) {
+  return /[A-Za-z0-9]/.test(char || '');
+}
+
 function findWordBoundaryLeft(value, index) {
   let next = Math.max(0, index);
-  while (next > 0 && /\s/.test(value[next - 1])) next--;
-  while (next > 0 && !/\s/.test(value[next - 1])) next--;
+  while (next > 0 && !isTerminalWordChar(value[next - 1])) next--;
+  while (next > 0 && isTerminalWordChar(value[next - 1])) next--;
   return next;
 }
 
 function findWordBoundaryRight(value, index) {
   let next = Math.min(value.length, index);
-  while (next < value.length && /\s/.test(value[next])) next++;
-  while (next < value.length && !/\s/.test(value[next])) next++;
+  while (next < value.length && !isTerminalWordChar(value[next])) next++;
+  while (next < value.length && isTerminalWordChar(value[next])) next++;
   return next;
 }
 

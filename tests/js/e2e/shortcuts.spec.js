@@ -127,8 +127,8 @@ test.describe('keyboard shortcuts', () => {
       start: el.selectionStart,
       end: el.selectionEnd,
     }))
-    expect(selection.start).toBe(4)
-    expect(selection.end).toBe(4)
+    expect(selection.start).toBe(12)
+    expect(selection.end).toBe(12)
 
     await dispatchMacOptionKey(page, '#cmd', {
       key: 'ArrowRight',
@@ -607,9 +607,12 @@ test.describe('desktop chrome keyboard shortcuts', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
-  test('Alt+Shift+F opens the Files modal from the composer', async ({ page }) => {
+  test('Alt+Shift+F toggles the Files modal from the composer', async ({ page }) => {
     await dispatchMacOptionKey(page, '#cmd', { key: 'Ï', code: 'KeyF', altKey: true, shiftKey: true })
     await expect(page.locator('#workspace-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await dispatchMacOptionKey(page, '#cmd', { key: 'Ï', code: 'KeyF', altKey: true, shiftKey: true })
+    await expect(page.locator('#workspace-overlay')).not.toHaveClass(/\bopen\b/)
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 

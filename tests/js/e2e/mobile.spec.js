@@ -935,7 +935,7 @@ test.describe('mobile menu', () => {
       .toBe(21)
 
     await fireKbAction('delete-word')
-    await expect(page.locator('#mobile-cmd')).toHaveValue('ping -c 4 ')
+    await expect(page.locator('#mobile-cmd')).toHaveValue('ping -c 4 example.')
 
     await fireKbAction('delete-line')
     await expect(page.locator('#mobile-cmd')).toHaveValue('')

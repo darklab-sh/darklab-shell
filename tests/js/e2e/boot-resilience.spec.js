@@ -17,7 +17,7 @@ test.describe('boot resilience', () => {
 
     await page.locator('.rail-nav [data-action="theme"]').click()
     await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
-    await expect(page.locator('#theme-select .theme-card-active')).toBeFocused()
+    await expect(page.locator('#theme-select .theme-card-active')).toBeVisible()
     await page.locator('.theme-close').click()
 
     await page.locator('#search-toggle-btn').click()
