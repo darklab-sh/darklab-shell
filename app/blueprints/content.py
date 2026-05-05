@@ -9,6 +9,7 @@ from flask import Blueprint, Response, jsonify, render_template, request
 
 import config as _config
 from commands import (
+    command_catalog_from_registry,
     command_catalog_entry,
     load_all_faq,
     load_all_workflows,
@@ -219,6 +220,39 @@ def allowed_commands():
         return jsonify({"restricted": False, "commands": [], "groups": []})
     _log_content_view("/allowed-commands", restricted=True, count=len(prefixes))
     return jsonify({"restricted": True, "commands": prefixes, "groups": groups})
+
+
+@content_bp.route("/commands/catalog")
+def command_catalog_index():
+    """Return compact command reference data for browsing the registry."""
+    catalog = command_catalog_from_registry()
+    groups = []
+    group_map = {}
+    commands = []
+    for entry in catalog:
+        command = {
+            "root": entry.get("root"),
+            "category": entry.get("category"),
+            "description": entry.get("description"),
+            "example_count": len(entry.get("examples") or []),
+            "subcommand_count": len(entry.get("subcommands") or []),
+            "flag_count": len(entry.get("flags") or []),
+        }
+        commands.append(command)
+        category = str(command.get("category") or "Allowed commands")
+        group = group_map.get(category)
+        if group is None:
+            group = {"name": category, "commands": []}
+            group_map[category] = group
+            groups.append(group)
+        group["commands"].append(command)
+
+    _log_content_view("/commands/catalog", count=len(commands), grouped=True)
+    return jsonify({
+        "restricted": bool(commands),
+        "commands": commands,
+        "groups": groups,
+    })
 
 
 @content_bp.route("/commands/catalog/<root>")

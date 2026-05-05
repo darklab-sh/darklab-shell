@@ -185,6 +185,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/config` | Returns browser-facing runtime config derived from `config.yaml` and `config.local.yaml`. |
 | `GET` | `/themes` | Returns the active theme plus the complete theme registry used by the Options modal. |
 | `GET` | `/allowed-commands` | Returns the allowed command prefixes grouped from `commands.yaml` for command reference surfaces. |
+| `GET` | `/commands/catalog` | Returns compact command registry entries for the Command Registry modal and sheet. |
 | `GET` | `/commands/catalog/<root>` | Returns the app-native command reference payload for one supported external command root. |
 | `GET` | `/commands/catalog/<root>/<subcommand>` | Returns a subcommand-scoped command reference payload when the registry has subcommand metadata. |
 | `GET` | `/faq` | Returns built-in FAQ entries plus custom `faq.yaml` entries. |

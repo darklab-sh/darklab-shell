@@ -98,7 +98,7 @@ test.describe('FAQ modal', () => {
     await expect(page.locator('#faq-overlay')).not.toHaveClass(/open/)
   })
 
-  test('renders backend-driven FAQ content and allowlist chips', async ({ page }) => {
+  test('renders backend-driven FAQ content and command registry pointer', async ({ page }) => {
     await page.locator('.rail-nav [data-action="faq"]').click()
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
 
@@ -113,6 +113,11 @@ test.describe('FAQ modal', () => {
     // The allowed-commands section is inside a collapsed accordion — expand it first
     await page.locator('.faq-q').filter({ hasText: 'What commands are allowed?' }).click()
     await expect(page.locator('#faq-allowed-text')).toBeVisible()
+    await expect(page.locator('#faq-allowed-text')).toContainText('Open the Command Registry')
+
+    await page.locator('#faq-allowed-text').getByRole('button', { name: 'Open Command Registry' }).click()
+    await expect(page.locator('#command-registry-overlay')).toHaveClass(/open/)
+    await expect(page.locator('#command-registry-body')).toContainText('curl')
   })
 })
 

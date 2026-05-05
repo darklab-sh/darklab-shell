@@ -1554,7 +1554,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `clears the session token only after confirming the destructive action` | Verifies that the active session token is only removed after the destructive clear action is explicitly confirmed. |
 | `persists options changes through cookies and syncs quick-toggle state` | Verifies that option changes update cookies, quick-toggle UI, and the persisted `/session/preferences` snapshot together. |
 | `renders backend-driven FAQ items with HTML answers and dynamic sections` | Verifies that renders backend-driven FAQ items with HTML answers and dynamic sections. |
-| `opens command catalog details from allowed-command FAQ chips` | Verifies that supported-command FAQ chips open the command catalog modal without loading the prompt directly. |
+| `opens command catalog details from the command registry browser` | Verifies that the Command Registry opens command details without loading the prompt directly. |
 | `opens autocomplete after loading a command catalog example chip` | Verifies that command catalog example chips load the prompt and trigger the normal composer autocomplete flow. |
 | `loads custom FAQ chips into the prompt with the same command-chip behavior` | Verifies that loads custom FAQ chips into the prompt with the same command-chip behavior. |
 | `returns off when no cookie is set` | Verifies that returns off when no cookie is set. |
@@ -2868,7 +2868,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | `FAQ button opens the overlay` | FAQ button opens the overlay. |
 | `close button inside the FAQ modal closes it` | Verifies that close button inside the FAQ modal closes it. |
 | `clicking the overlay backdrop closes the FAQ modal` | Verifies that clicking the overlay backdrop closes the FAQ modal. |
-| `renders backend-driven FAQ content and allowlist chips` | Verifies that renders backend-driven FAQ content and allowlist chips. |
+| `renders backend-driven FAQ content and command registry pointer` | Verifies that FAQ content points users to the Command Registry instead of rendering the full command list. |
 | `desktop rail opens the idle Status Monitor modal` | Verifies that the desktop rail opens Status Monitor as a centered modal when no commands are active. |
 | `desktop Status Monitor loads dashboard endpoints together without route stubs` | Verifies that the Status Monitor opens against real dashboard endpoints for status, workspace files, history stats, and history insights. |
 | `active rows sit under the pulse strip with wide telemetry` | Verifies that active Status Monitor rows render directly under the pulse strip with wide telemetry and meter rails. |

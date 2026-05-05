@@ -88,7 +88,10 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "What commands are allowed?",
-            "answer": "Use the grouped allowlist shown in the FAQ modal or run commands --external in the web shell.",
+            "answer": (
+                "Open the Command Registry from the menu, or run commands, commands --external, "
+                "or commands info <command> in the web shell."
+            ),
             "ui_kind": "allowed_commands",
         },
         {

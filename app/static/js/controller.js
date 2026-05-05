@@ -47,6 +47,10 @@ function closeFaq() {
   refocusComposerAfterAction({ defer: true });
 }
 
+function closeCommandRegistryPanel() {
+  if (typeof closeCommandRegistry === 'function') closeCommandRegistry();
+}
+
 function openShortcuts() {
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
@@ -123,6 +127,7 @@ function setupMobileSheetDragClose() {
   bindMobileSheet(workspaceModal,     { onClose: () => { if (typeof closeWorkspace === 'function') closeWorkspace(); } });
   bindMobileSheet(workflowEditor,     { onClose: () => { if (typeof closeWorkflowEditor === 'function') closeWorkflowEditor(); } });
   bindMobileSheet(faqModal,           { onClose: () => closeFaq() });
+  bindMobileSheet(document.getElementById('command-registry-modal'), { onClose: () => closeCommandRegistryPanel() });
   bindMobileSheet(optionsModal,       { onClose: () => closeOptions() });
 }
 
@@ -183,6 +188,12 @@ function setupDismissibleOverlays() {
     onClose: closeFaq,
     closeButtons: faqCloseBtn,
   });
+  bindDismissible(_uiOverlayRefs.commandRegistryOverlay, {
+    level: 'panel',
+    isOpen: () => typeof isCommandRegistryOverlayOpen === 'function' && isCommandRegistryOverlayOpen(),
+    onClose: closeCommandRegistryPanel,
+    closeButtons: typeof commandRegistryCloseBtn !== 'undefined' ? commandRegistryCloseBtn : null,
+  });
   bindDismissible(commandCatalogOverlay, {
     level: 'modal',
     isOpen: () => typeof isCommandCatalogOverlayOpen === 'function' && isCommandCatalogOverlayOpen(),
@@ -232,7 +243,15 @@ function setupModalFocusTraps() {
   // hidden (display: none on the overlay wrapper), so the listener is only
   // reachable while the modal is open.
   if (typeof bindFocusTrap !== 'function') return;
-  const ids = ['options-modal', 'theme-modal', 'faq-modal', 'workspace-modal', 'workflows-modal', 'workflow-editor-form'];
+  const ids = [
+    'options-modal',
+    'theme-modal',
+    'faq-modal',
+    'command-registry-modal',
+    'workspace-modal',
+    'workflows-modal',
+    'workflow-editor-form',
+  ];
   ids.forEach((id) => {
     const card = document.getElementById(id);
     if (card) bindFocusTrap(card);
@@ -347,6 +366,7 @@ function dispatchMobileMenuAction(action, btn = null) {
   if (action === 'status-monitor' && typeof openStatusMonitor === 'function') {
     void openStatusMonitor({ source: 'mobile-menu' });
   }
+  if (action === 'command-registry' && typeof openCommandRegistry === 'function') openCommandRegistry();
   if (action === 'theme') openThemeSelector();
   if (action === 'workflows') openWorkflows();
   if (action === 'workspace' && typeof openWorkspace === 'function') openWorkspace();
@@ -862,6 +882,16 @@ apiFetch('/allowed-commands').then(r => r.json()).then(data => {
   renderAllowedCommandsFaq(data);
 }).catch(err => {
   logClientError('failed to load /allowed-commands', err);
+});
+
+apiFetch('/commands/catalog').then(r => r.json()).then(data => {
+  commandRegistryData = data;
+  if (typeof isCommandRegistryOverlayOpen === 'function' && isCommandRegistryOverlayOpen()) {
+    renderCommandRegistry();
+  }
+}).catch(err => {
+  logClientError('failed to load /commands/catalog', err);
+  commandRegistryData = { restricted: false, commands: [], groups: [] };
 });
 
 apiFetch('/faq').then(r => r.json()).then(data => {

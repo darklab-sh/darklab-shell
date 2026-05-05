@@ -166,6 +166,7 @@ const _confirmHostHomeParent = _confirmHostEl ? _confirmHostEl.parentElement : n
 const _workflowsOverlayHomeParent = typeof workflowsOverlay !== 'undefined' && workflowsOverlay ? workflowsOverlay.parentElement : null;
 const _workspaceOverlayHomeParent = typeof workspaceOverlay !== 'undefined' && workspaceOverlay ? workspaceOverlay.parentElement : null;
 const _faqOverlayHomeParent = typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay.parentElement : null;
+const _commandRegistryOverlayHomeParent = typeof commandRegistryOverlay !== 'undefined' && commandRegistryOverlay ? commandRegistryOverlay.parentElement : null;
 const _themeOverlayHomeParent = typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay.parentElement : null;
 const _optionsOverlayHomeParent = typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay.parentElement : null;
 const _statusHomeParent = typeof status !== 'undefined' && status ? status.parentElement : null;
@@ -244,6 +245,7 @@ const _uiOverlayRefs = {
   workspaceViewerOverlay: typeof workspaceViewerOverlay !== 'undefined' && workspaceViewerOverlay ? workspaceViewerOverlay : null,
   workspaceEditorOverlay: typeof workspaceEditorOverlay !== 'undefined' && workspaceEditorOverlay ? workspaceEditorOverlay : null,
   faqOverlay: typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay : null,
+  commandRegistryOverlay: typeof commandRegistryOverlay !== 'undefined' && commandRegistryOverlay ? commandRegistryOverlay : null,
   themeOverlay: typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay : null,
   optionsOverlay: typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay : null,
   historyPanel: typeof historyPanel !== 'undefined' && historyPanel ? historyPanel : null,
@@ -266,7 +268,8 @@ const _mobileShellOverlayNodes = [
   { node: historyPanel, homeParent: _historyPanelHomeParent, desktopAnchor: permalinkToast || null },
   { node: permalinkToast, homeParent: _permalinkToastHomeParent, desktopAnchor: _confirmHostEl || faqOverlay || null },
   { node: _confirmHostEl, homeParent: _confirmHostHomeParent, desktopAnchor: faqOverlay || null },
-  { node: faqOverlay, homeParent: _faqOverlayHomeParent, desktopAnchor: themeOverlay || null },
+  { node: faqOverlay, homeParent: _faqOverlayHomeParent, desktopAnchor: commandRegistryOverlay || themeOverlay || null },
+  { node: commandRegistryOverlay, homeParent: _commandRegistryOverlayHomeParent, desktopAnchor: themeOverlay || null },
   { node: themeOverlay, homeParent: _themeOverlayHomeParent, desktopAnchor: optionsOverlay || null },
   { node: optionsOverlay, homeParent: _optionsOverlayHomeParent, desktopAnchor: _workspaceOverlayEl || workflowsOverlay || null },
   { node: _workspaceOverlayEl, homeParent: _workspaceOverlayHomeParent, desktopAnchor: workflowsOverlay || null },
@@ -736,6 +739,9 @@ function applyPromptUsernamePreference(username, persist = true) {
 function _closeMajorOverlays() {
   if (typeof isCommandCatalogOverlayOpen === 'function' && isCommandCatalogOverlayOpen()) {
     hideCommandCatalogOverlay();
+  }
+  if (typeof isCommandRegistryOverlayOpen === 'function' && isCommandRegistryOverlayOpen()) {
+    hideCommandRegistryOverlay();
   }
   if (isHistoryPanelOpen()) hideHistoryPanel();
   if (isWorkflowsOverlayOpen()) {
@@ -2918,6 +2924,9 @@ async function loadSessionVariables() {
 }
 
 let allowedCommandsFaqData = null;
+let commandRegistryData = null;
+let commandRegistryCategory = 'All';
+let commandRegistryQuery = '';
 
 function _buildFaqLimitsContent(cfg) {
   if (!cfg) return '';
@@ -2979,6 +2988,191 @@ function renderFaqLimits(cfg) {
   if (!limitsEl || !cfg) return;
   limitsEl.replaceChildren(_buildFaqLimitsContent(cfg));
 }
+
+function showCommandRegistryOverlay() {
+  if (!commandRegistryOverlay) return;
+  commandRegistryOverlay.classList.remove('u-hidden');
+  commandRegistryOverlay.classList.add('open');
+  commandRegistryOverlay.setAttribute('aria-hidden', 'false');
+}
+
+function hideCommandRegistryOverlay() {
+  if (!commandRegistryOverlay) return;
+  commandRegistryOverlay.classList.add('u-hidden');
+  commandRegistryOverlay.classList.remove('open');
+  commandRegistryOverlay.setAttribute('aria-hidden', 'true');
+}
+
+function isCommandRegistryOverlayOpen() {
+  return !!(commandRegistryOverlay && commandRegistryOverlay.classList.contains('open'));
+}
+
+function closeCommandRegistry() {
+  hideCommandRegistryOverlay();
+  refocusComposerAfterAction({ defer: true });
+}
+
+function _commandRegistryCommands() {
+  if (!commandRegistryData || !Array.isArray(commandRegistryData.commands)) return [];
+  return commandRegistryData.commands.filter(item => item && item.root);
+}
+
+function _commandRegistryCategories() {
+  const categories = new Set();
+  _commandRegistryCommands().forEach(item => {
+    const category = commandCatalogText(item.category, 'Allowed commands');
+    if (category) categories.add(category);
+  });
+  return ['All', ...Array.from(categories)];
+}
+
+function _commandRegistryMatches(command, query) {
+  if (!query) return true;
+  const haystack = [
+    command.root,
+    command.category,
+    command.description,
+  ].map(value => String(value || '').toLowerCase()).join(' ');
+  return haystack.includes(query);
+}
+
+function _commandRegistryFilteredCommands() {
+  const query = commandRegistryQuery.trim().toLowerCase();
+  return _commandRegistryCommands().filter(command => {
+    const category = commandCatalogText(command.category, 'Allowed commands');
+    if (commandRegistryCategory !== 'All' && category !== commandRegistryCategory) return false;
+    return _commandRegistryMatches(command, query);
+  });
+}
+
+function _commandRegistrySummaryText(command) {
+  const bits = [];
+  const examples = Number(command.example_count || 0);
+  const subcommands = Number(command.subcommand_count || 0);
+  const flags = Number(command.flag_count || 0);
+  if (examples > 0) bits.push(`${examples} example${examples === 1 ? '' : 's'}`);
+  if (subcommands > 0) bits.push(`${subcommands} subcommand${subcommands === 1 ? '' : 's'}`);
+  if (flags > 0) bits.push(`${flags} flag${flags === 1 ? '' : 's'}`);
+  return bits.join(' · ');
+}
+
+function renderCommandRegistryCategories() {
+  if (!commandRegistryCategories) return;
+  commandRegistryCategories.replaceChildren();
+  _commandRegistryCategories().forEach(category => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'command-registry-category chip chip-action';
+    button.dataset.commandRegistryCategory = category;
+    button.textContent = category;
+    button.setAttribute('aria-pressed', category === commandRegistryCategory ? 'true' : 'false');
+    if (category === commandRegistryCategory) button.classList.add('active');
+    button.addEventListener('click', () => {
+      commandRegistryCategory = category;
+      renderCommandRegistry();
+    });
+    commandRegistryCategories.appendChild(button);
+  });
+}
+
+function makeCommandRegistryRow(command) {
+  const root = commandCatalogText(command.root);
+  if (!root) return null;
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'command-registry-row';
+  row.dataset.commandRegistryRoot = root;
+  row.title = `View ${root} details`;
+
+  const rootEl = document.createElement('span');
+  rootEl.className = 'command-registry-root';
+  rootEl.textContent = root;
+
+  const text = document.createElement('span');
+  text.className = 'command-registry-text';
+  const desc = document.createElement('span');
+  desc.className = 'command-registry-description';
+  desc.textContent = commandCatalogText(command.description, 'No description is available yet.');
+  const meta = document.createElement('span');
+  meta.className = 'command-registry-meta';
+  const summary = _commandRegistrySummaryText(command);
+  meta.textContent = [
+    commandCatalogText(command.category, 'Allowed commands'),
+    summary,
+  ].filter(Boolean).join(' · ');
+  text.append(desc, meta);
+
+  const chev = document.createElement('span');
+  chev.className = 'command-registry-chev';
+  chev.setAttribute('aria-hidden', 'true');
+  chev.textContent = '›';
+
+  row.append(rootEl, text, chev);
+  row.addEventListener('click', () => openCommandCatalogModal(root));
+  return row;
+}
+
+function renderCommandRegistry() {
+  if (!commandRegistryBody) return;
+  renderCommandRegistryCategories();
+  const total = _commandRegistryCommands().length;
+  if (commandRegistrySubtitle) {
+    commandRegistrySubtitle.textContent = total
+      ? `${total} supported command${total === 1 ? '' : 's'} from the command registry.`
+      : 'Browse supported tools, examples, flags, and subcommands.';
+  }
+  commandRegistryBody.replaceChildren();
+  if (!commandRegistryData) {
+    const loading = document.createElement('div');
+    loading.className = 'command-registry-empty';
+    loading.textContent = 'Loading command registry...';
+    commandRegistryBody.appendChild(loading);
+    return;
+  }
+  const commands = _commandRegistryFilteredCommands();
+  if (!commands.length) {
+    const empty = document.createElement('div');
+    empty.className = 'command-registry-empty';
+    empty.textContent = total
+      ? 'No commands match that search.'
+      : 'No command registry entries are available right now.';
+    commandRegistryBody.appendChild(empty);
+    return;
+  }
+  commands.forEach(command => {
+    const row = makeCommandRegistryRow(command);
+    if (row) commandRegistryBody.appendChild(row);
+  });
+}
+
+function openCommandRegistry() {
+  if (!commandRegistryOverlay || !commandRegistryBody) return;
+  _closeMajorOverlays();
+  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+  renderCommandRegistry();
+  showCommandRegistryOverlay();
+  if (typeof markInteractionSurfaceReady === 'function') {
+    markInteractionSurfaceReady('command-registry', commandRegistryOverlay, document.getElementById('command-registry-modal'));
+  }
+  const mobileMode = document.body && document.body.classList.contains('mobile-terminal-mode');
+  if (!mobileMode && commandRegistrySearch) {
+    window.setTimeout(() => commandRegistrySearch.focus(), 0);
+  }
+}
+
+function wireCommandRegistryOpenButtons(root = document) {
+  if (!root) return;
+  root.querySelectorAll('[data-command-registry-open]').forEach(btn => {
+    if (btn.dataset.commandRegistryOpenWired === '1') return;
+    btn.dataset.commandRegistryOpenWired = '1';
+    btn.addEventListener('click', () => openCommandRegistry());
+  });
+}
+
+commandRegistrySearch?.addEventListener('input', () => {
+  commandRegistryQuery = commandRegistrySearch.value || '';
+  renderCommandRegistry();
+});
 
 function openAutocompleteForVisibleComposer() {
   if (typeof isActiveTabRunning === 'function' && isActiveTabRunning()) {
@@ -3113,22 +3307,6 @@ function wireCommandCatalogExamples(root = commandCatalogBody) {
   });
 }
 
-function wireCommandCatalogChips(root = faqBody) {
-  if (!root) return;
-  root.querySelectorAll('[data-command-catalog-root]').forEach(chip => {
-    if (chip.dataset.commandCatalogWired === '1') return;
-    chip.dataset.commandCatalogWired = '1';
-    chip.addEventListener('click', () => {
-      openCommandCatalogModal(chip.dataset.commandCatalogRoot || '');
-    });
-    chip.addEventListener('keydown', e => {
-      if (e.key !== 'Enter' && e.key !== ' ') return;
-      e.preventDefault();
-      openCommandCatalogModal(chip.dataset.commandCatalogRoot || '');
-    });
-  });
-}
-
 function renderCommandCatalogModal(data) {
   if (!commandCatalogBody) return;
   commandCatalogBody.replaceChildren();
@@ -3190,55 +3368,31 @@ function wireFaqCommandChips(root = faqBody) {
   });
 }
 
-function makeAllowedCommandChip(cmd) {
-  const chip = document.createElement('span');
-  chip.className = 'allowed-chip faq-chip chip chip-action';
-  chip.textContent = cmd;
-  chip.title = 'View command details';
-  chip.tabIndex = 0;
-  chip.setAttribute('role', 'button');
-  chip.dataset.commandCatalogRoot = cmd;
-  return chip;
-}
-
 function renderAllowedCommandsFaq(data) {
   const el = document.getElementById('faq-allowed-text');
   if (!el || !data) return;
-  if (!data.restricted) {
-    el.textContent = 'No restrictions are configured — all commands are permitted.';
-    return;
-  }
-
   el.replaceChildren();
   const intro = document.createElement('div');
   intro.className = 'allowed-intro';
-  intro.textContent = 'Click any command to view examples, flags, and app-specific handling:';
+  const count = Array.isArray(data.commands) ? data.commands.length : 0;
+  intro.textContent = count
+    ? `Open the Command Registry to browse ${count} supported command${count === 1 ? '' : 's'}, examples, flags, and subcommands.`
+    : 'Open the Command Registry to browse supported commands, examples, flags, and subcommands.';
   el.appendChild(intro);
-  if (data.groups && data.groups.length > 0) {
-    data.groups.forEach(group => {
-      const groupEl = document.createElement('div');
-      groupEl.className = 'allowed-group';
-      if (group.name) {
-        const header = document.createElement('div');
-        header.className = 'allowed-group-header';
-        header.textContent = group.name;
-        groupEl.appendChild(header);
-      }
-      const list = document.createElement('div');
-      list.className = 'allowed-list';
-      group.commands.forEach(cmd => list.appendChild(makeAllowedCommandChip(cmd)));
-      groupEl.appendChild(list);
-      el.appendChild(groupEl);
-    });
-    wireCommandCatalogChips(el);
-    return;
-  }
-
-  const list = document.createElement('div');
-  list.className = 'allowed-list';
-  data.commands.forEach(cmd => list.appendChild(makeAllowedCommandChip(cmd)));
-  el.appendChild(list);
-  wireCommandCatalogChips(el);
+  const actions = document.createElement('div');
+  actions.className = 'allowed-actions';
+  const openBtn = document.createElement('button');
+  openBtn.type = 'button';
+  openBtn.className = 'btn btn-secondary btn-compact';
+  openBtn.textContent = 'Open Command Registry';
+  openBtn.dataset.commandRegistryOpen = '1';
+  actions.appendChild(openBtn);
+  const cliHint = document.createElement('span');
+  cliHint.className = 'allowed-cli-hint';
+  cliHint.textContent = 'Terminal helpers: commands, commands --external, commands info <command>';
+  actions.appendChild(cliHint);
+  el.appendChild(actions);
+  wireCommandRegistryOpenButtons(el);
 }
 
 function renderFaqItems(items) {

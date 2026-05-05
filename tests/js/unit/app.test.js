@@ -336,6 +336,7 @@ describe('app helpers', () => {
     })
     await Promise.resolve()
     await Promise.resolve()
+    await Promise.resolve()
 
     expect(document.body.dataset.theme).toBe('theme_light_blue')
     expect(document.body.classList.contains('ts-clock')).toBe(true)
@@ -1542,9 +1543,11 @@ describe('app helpers', () => {
     const { storage, logClientError } = await loadAppFns({ apiFetch })
     await Promise.resolve()
     await Promise.resolve()
+    await Promise.resolve()
 
     expect(apiFetch).toHaveBeenCalledWith('/config')
     expect(apiFetch).toHaveBeenCalledWith('/allowed-commands')
+    expect(apiFetch).toHaveBeenCalledWith('/commands/catalog')
     expect(apiFetch).toHaveBeenCalledWith('/autocomplete')
     expect(logClientError).toHaveBeenCalledWith('failed to load /config', expect.any(Error))
     expect(logClientError).toHaveBeenCalledWith(
@@ -4437,12 +4440,12 @@ describe('app helpers', () => {
     const questions = [...document.querySelectorAll('.faq-q')].map((el) => el.textContent)
     expect(questions).toContain('What is this?')
     expect(document.querySelector('.faq-a strong')?.textContent).toBe('HTML')
-    expect(document.getElementById('faq-allowed-text')?.textContent).toContain('Click any command')
+    expect(document.getElementById('faq-allowed-text')?.textContent).toContain('Open the Command Registry')
     expect(document.getElementById('faq-limits-text')?.innerHTML).toContain('Command timeout')
-    expect(document.querySelectorAll('.allowed-chip')).toHaveLength(2)
+    expect(document.querySelectorAll('#faq-allowed-text .allowed-chip')).toHaveLength(0)
   })
 
-  it('opens command catalog details from allowed-command FAQ chips', async () => {
+  it('opens command catalog details from the command registry browser', async () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/config') {
         return Promise.resolve({
@@ -4467,6 +4470,39 @@ describe('app helpers', () => {
               restricted: true,
               commands: ['curl'],
               groups: [{ name: 'Network', commands: ['curl'] }],
+            }),
+        })
+      }
+      if (url === '/commands/catalog') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              restricted: true,
+              commands: [
+                {
+                  root: 'curl',
+                  category: 'Network',
+                  description: 'Transfer data from URLs.',
+                  example_count: 1,
+                  subcommand_count: 0,
+                  flag_count: 1,
+                },
+              ],
+              groups: [
+                {
+                  name: 'Network',
+                  commands: [
+                    {
+                      root: 'curl',
+                      category: 'Network',
+                      description: 'Transfer data from URLs.',
+                      example_count: 1,
+                      subcommand_count: 0,
+                      flag_count: 1,
+                    },
+                  ],
+                },
+              ],
             }),
         })
       }
@@ -4497,16 +4533,18 @@ describe('app helpers', () => {
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
 
-    const { openFaq } = await loadAppFns({ apiFetch, mobileViewport: { height: 500, offsetTop: 0 } })
+    const { openFaq, openCommandRegistry } = await loadAppFns({ apiFetch, mobileViewport: { height: 500, offsetTop: 0 } })
     await new Promise((resolve) => setImmediate(resolve))
 
     const mobileCmdInput = document.getElementById('mobile-cmd')
-    const chip = document.querySelector('.allowed-chip')
-
     openFaq()
     expect(mobileCmdInput.blur).toHaveBeenCalled()
 
-    chip.click()
+    openCommandRegistry()
+    expect(document.getElementById('command-registry-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('command-registry-body').textContent).toContain('curl')
+
+    document.querySelector('[data-command-registry-root="curl"]').click()
     await Promise.resolve()
     await Promise.resolve()
 
@@ -4546,6 +4584,25 @@ describe('app helpers', () => {
             }),
         })
       }
+      if (url === '/commands/catalog') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              restricted: true,
+              commands: [
+                {
+                  root: 'nc',
+                  category: 'Network',
+                  description: 'Open TCP connections.',
+                  example_count: 1,
+                  subcommand_count: 0,
+                  flag_count: 1,
+                },
+              ],
+              groups: [],
+            }),
+        })
+      }
       if (url === '/faq') {
         return Promise.resolve({
           json: () =>
@@ -4573,7 +4630,7 @@ describe('app helpers', () => {
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
 
-    await loadAppFns({
+    const { openCommandRegistry } = await loadAppFns({
       apiFetch,
       getAutocompleteMatches: (value, cursor) => (
         value === 'nc ' && cursor === 3
@@ -4584,7 +4641,8 @@ describe('app helpers', () => {
     })
     await new Promise((resolve) => setImmediate(resolve))
 
-    document.querySelector('.allowed-chip').click()
+    openCommandRegistry()
+    document.querySelector('[data-command-registry-root="nc"]').click()
     await Promise.resolve()
     await Promise.resolve()
 

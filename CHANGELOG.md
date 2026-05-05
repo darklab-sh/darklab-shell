@@ -28,8 +28,8 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Tests:** added app/autocomplete unit coverage for typed workspace path prefixes, source/destination move slots, prefix preservation, slash-terminated folder accepts, and workspace-escape rejection.
 - **Supported commands now have an app-native catalog view** — every external command root in `commands.yaml` has a one-sentence description, and the shell can surface examples, flags, and subcommands from the registry.
   - **Why:** the allowed-commands FAQ answered "what can I run?" but did not explain what each tool is for or which examples and flags the app understands.
-  - **What:** added shared command-catalog helpers, `commands info <root> [subcommand]`, a `/commands/catalog/<root>` route, and a FAQ command-details modal. Supported-command FAQ chips now open the detail modal; example chips inside the modal still load the prompt and trigger autocomplete.
-  - **Tests:** added backend catalog-helper, CLI, route, and browser unit coverage, plus a registry drift guard requiring descriptions for all top-level external commands.
+  - **What:** added shared command-catalog helpers, `commands info <root> [subcommand]`, `/commands/catalog` and `/commands/catalog/<root>` routes, a dedicated Command Registry modal/sheet in the desktop rail and mobile menu, and a reusable command-details modal. The FAQ now points users to the Command Registry instead of owning the full command list; example chips inside command details still load the prompt and trigger autocomplete.
+  - **Tests:** added backend catalog-helper, CLI, route, browser unit, and e2e coverage, plus a registry drift guard requiring descriptions for all top-level external commands.
 
 ### Changed
 

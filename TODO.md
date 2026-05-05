@@ -76,7 +76,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Add optional richer registry fields such as `details`, `notes`, `common_flags`, or `gotchas` when a flag or tool needs more than a short autocomplete description.
   - Add command-specific guidance for web-shell behavior, including injected safe defaults, quiet-running tools, generated Files output, and managed session state.
   - Add autocomplete side previews later: when a root, subcommand, or flag is highlighted, show the command description or flag note in a small help pane.
-  - Add a dedicated “Command Library” modal/sheet reachable outside the FAQ, with category filters and search.
   - Add hover/focus cards for FAQ chips once the command-details modal behavior has settled.
   - Consider including pipe helpers in a separate “Pipes” section once command catalog UX exists.
   - Consider linking command catalog entries to real `man` output where available, while keeping app-native allowed-subset details primary.

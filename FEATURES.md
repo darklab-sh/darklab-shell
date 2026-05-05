@@ -635,7 +635,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 
 **Full-text search:** the history surfaces support a shared `type` filter plus full-text search across command text and stored run output for run rows, with additional filters for command name, exit status, recent date range, and starred-only. The search field placeholder reads "search history". Search is backed by a SQLite FTS5 virtual table (`runs_fts`) indexed on `command` and `output_search_text`. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so early lines of long runs stay reachable; otherwise it falls back to the capped preview window. Snapshot search in the first pass matches the snapshot label only. On mobile, advanced filters stay behind a dedicated `filters` toggle to preserve result space, the command-name field uses app-owned autocomplete, and row actions keep the sheet open where that matches the desktop action contract.
 
-On mobile, the **☰** menu in the top-right header opens a bottom-sheet that groups session-scoped actions (search, clear, line numbers, timestamps) and overlays (options, history, workflows, theme, FAQ, diag) — see the Mobile Shell section below for the full layout.
+On mobile, the **☰** menu in the top-right header opens a bottom-sheet that groups session-scoped actions (search, clear, line numbers, timestamps) and overlays (options, history, status, commands, workflows, files, theme, FAQ, diag) — see the Mobile Shell section below for the full layout.
 
 ---
 
@@ -741,7 +741,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - **Output follow** — when the keyboard opens, the active output re-sticks to the bottom so the last line stays visible.
 - **Stable layout** — the mobile shell uses a normal-flow layout that avoids Firefox keyboard flash, gap, and floating-composer regressions.
 - **Shared state** — desktop and mobile Run buttons stay in sync: both disable together for blank prompts and running tabs.
-- The **☰** menu in the top-right header opens a bottom-sheet with two grouped sections: a **session** group (search, clear, line numbers toggle, timestamps picker) that affects the current terminal in place, and an **overlays** group (options, history, workflows, theme, FAQ, diag). The sheet closes through the backdrop, Escape, or the shared grab/drag contract rather than a visible `X` button. `clear` wipes the active tab's output while preserving its run state; `line numbers` is a single on/off row; `timestamps` expands inline into a three-mode picker (off / elapsed / clock). The history drawer's advanced filters stay behind a dedicated `filters` toggle to preserve result space.
+- The **☰** menu in the top-right header opens a bottom-sheet with two grouped sections: a **session** group (search, clear, line numbers toggle, timestamps picker) that affects the current terminal in place, and an **overlays** group (options, history, status, commands, workflows, files, theme, FAQ, diag). The sheet closes through the backdrop, Escape, or the shared grab/drag contract rather than a visible `X` button. `clear` wipes the active tab's output while preserving its run state; `line numbers` is a single on/off row; `timestamps` expands inline into a three-mode picker (off / elapsed / clock). The history drawer's advanced filters stay behind a dedicated `filters` toggle to preserve result space.
 
 **Limits:** the diag entry appears only for clients whose IP matches `diagnostics_allowed_cidrs`. The mobile layout activates on touch-sized viewports — desktop browsers at narrow widths keep the desktop chrome.
 
@@ -850,6 +850,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Allow entries match by prefix — a prefix of `ping` permits `ping google.com`, `ping -c 4 1.1.1.1`, etc. Be as specific or broad as you like: `nmap -sT` permits only TCP connect scans while `nmap` permits any nmap invocation.
 - Deny entries take priority over allow entries and match anywhere in the command as space-separated tokens (not as a prefix).
 - Category metadata also drives the command catalog; deny entries are not shown to users.
+- The desktop rail and mobile menu expose a Command Registry modal/sheet that lists supported external commands by category, supports search, and opens the same per-command details used by `commands info <root>`.
 - The registry is re-read on every request for command policy, so edits take effect without a restart. Deleting or emptying the registry disables restrictions entirely.
 - Tool names and subcommand prefixes are matched **case-insensitively**; flag names are matched **with exact case** (so `!curl -K` blocks `-K` without blocking `-k`).
 - `/dev/null` exception: denied output flags (`-o`, `-O`) are permitted when their argument is `/dev/null`, allowing patterns like `curl -o /dev/null -w "%{http_code}"`.

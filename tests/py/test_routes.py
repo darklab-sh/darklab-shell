@@ -1313,8 +1313,21 @@ class TestCommandCatalogRoute:
             "pipe_helpers": [],
         }
         with mock.patch("commands.load_commands_registry", return_value=registry):
+            index_resp = client.get("/commands/catalog")
             resp = client.get("/commands/catalog/sentinel")
 
+        assert index_resp.status_code == 200
+        index_data = json.loads(index_resp.data)
+        assert index_data["commands"] == [{
+            "root": "sentinel",
+            "category": "Registry Group",
+            "description": "Inspect a target.",
+            "example_count": 1,
+            "subcommand_count": 0,
+            "flag_count": 1,
+        }]
+        assert index_data["groups"][0]["name"] == "Registry Group"
+        assert index_data["groups"][0]["commands"] == index_data["commands"]
         assert resp.status_code == 200
         data = json.loads(resp.data)
         assert data["root"] == "sentinel"

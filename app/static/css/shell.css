@@ -554,6 +554,11 @@ body.mobile-terminal-mode .output-follow-btn {
   height: 85vh;
 }
 
+#command-registry-modal {
+  width: min(1040px, 94vw);
+  height: min(760px, 86vh);
+}
+
 #command-catalog-modal {
   width: min(820px, 92vw);
   max-height: min(760px, 86vh);
@@ -1857,6 +1862,140 @@ body.mobile-terminal-mode .output-follow-btn {
   background: var(--green-glow);
 }
 
+.allowed-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.allowed-cli-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.command-registry-subtitle {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  font-family: var(--font-ui);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.command-registry-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.34fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--theme-panel-border);
+}
+
+.command-registry-categories {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  min-width: 0;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--theme-chrome-row-bg);
+}
+
+.command-registry-category {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  color: var(--muted);
+  background: transparent;
+}
+
+.command-registry-category:hover,
+.command-registry-category:focus-visible {
+  color: var(--text);
+  background: var(--surface);
+  outline: none;
+}
+
+.command-registry-category.active {
+  color: var(--green);
+  background: var(--green-glow);
+}
+
+.command-registry-body {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px 18px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  align-content: start;
+}
+
+.command-registry-row {
+  display: grid;
+  grid-template-columns: minmax(86px, 0.16fr) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 86px;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--theme-chrome-row-bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.command-registry-row:hover,
+.command-registry-row:focus-visible {
+  border-color: var(--green-dim);
+  background: var(--green-glow);
+  outline: none;
+}
+
+.command-registry-root {
+  font-family: var(--font-mono);
+  color: var(--green);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.command-registry-text {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.command-registry-description {
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.command-registry-meta,
+.command-registry-chev {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.command-registry-chev {
+  font-size: 18px;
+}
+
+.command-registry-empty {
+  color: var(--muted);
+  padding: 22px 4px;
+  text-align: center;
+}
+
 .command-catalog-body {
   gap: 18px;
 }
@@ -1906,8 +2045,8 @@ body.mobile-terminal-mode .output-follow-btn {
 
 .command-catalog-row {
   display: grid;
-  grid-template-columns: minmax(120px, 0.42fr) 1fr;
-  gap: 10px;
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
+  gap: 18px;
   align-items: baseline;
   padding: 8px 0;
   border-top: 1px solid var(--border);
@@ -1919,8 +2058,25 @@ body.mobile-terminal-mode .output-follow-btn {
 
 .command-catalog-row .allowed-chip {
   justify-self: start;
-  width: fit-content;
-  max-width: 100%;
+  max-width: min(42vw, 460px);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  box-shadow: inset 0 -1px 0 var(--border-bright);
+}
+
+.command-catalog-row .allowed-chip:hover,
+.command-catalog-row .allowed-chip:focus-visible {
+  color: var(--green);
+  background: transparent;
+  box-shadow: inset 0 -1px 0 var(--green-dim), 0 5px 18px var(--green-glow);
+  outline: none;
 }
 
 .command-catalog-token {
@@ -1937,6 +2093,10 @@ body.mobile-terminal-mode .output-follow-btn {
   .command-catalog-row {
     grid-template-columns: 1fr;
     gap: 3px;
+  }
+
+  .command-catalog-row .allowed-chip {
+    max-width: 100%;
   }
 }
 
