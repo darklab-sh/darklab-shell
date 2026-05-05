@@ -785,11 +785,13 @@ class TestBuiltinCommandResolution:
                 {
                     "root": "sentinel-scan",
                     "category": "Registry Group",
+                    "description": "Runs sentinel scans.",
                     "policy": {"allow": ["sentinel-scan"]},
                 },
                 {
                     "root": "sentinel-http",
                     "category": "Registry Group",
+                    "description": "Checks sentinel HTTP targets.",
                     "policy": {"allow": ["sentinel-http --safe"]},
                 },
                 {
@@ -808,8 +810,8 @@ class TestBuiltinCommandResolution:
         assert loader.call_count == 1
         assert "Allowed external commands:" in text
         assert "[Registry Group]" in text
-        assert "sentinel-scan" in text
-        assert "sentinel-http" in text
+        assert "sentinel-scan  - Runs sentinel scans." in text
+        assert "sentinel-http  - Checks sentinel HTTP targets." in text
         assert "policyless-tool" not in text
         assert "grep" not in text
 

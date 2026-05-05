@@ -781,8 +781,18 @@ class TestRunStreaming:
 
         with mock.patch("builtin_commands.load_commands_registry", return_value={
             "commands": [
-                {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
-                {"root": "dig", "category": "Networking", "policy": {"allow": ["dig"], "deny": []}},
+                {
+                    "root": "ping",
+                    "category": "Networking",
+                    "description": "Checks host reachability.",
+                    "policy": {"allow": ["ping"], "deny": []},
+                },
+                {
+                    "root": "dig",
+                    "category": "Networking",
+                    "description": "Queries DNS records.",
+                    "policy": {"allow": ["dig"], "deny": []},
+                },
             ],
             "pipe_helpers": [],
         }):
@@ -795,8 +805,8 @@ class TestRunStreaming:
         assert "Built-in commands:\\n" in body
         assert "Allowed external commands:\\n" in body
         assert "[Networking]\\n" in body
-        assert "ping\\n" in body
-        assert "dig\\n" in body
+        assert "ping  - Checks host reachability.\\n" in body
+        assert "dig   - Queries DNS records.\\n" in body
         assert '"type": "exit"' in body
 
         hist = client.get("/history", headers={"X-Session-ID": "sess-built-in-commands"})
@@ -853,8 +863,18 @@ class TestRunStreaming:
 
         with mock.patch("builtin_commands.load_commands_registry", return_value={
             "commands": [
-                {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
-                {"root": "dig", "category": "Networking", "policy": {"allow": ["dig +short", "dig MX"], "deny": []}},
+                {
+                    "root": "ping",
+                    "category": "Networking",
+                    "description": "Checks host reachability.",
+                    "policy": {"allow": ["ping"], "deny": []},
+                },
+                {
+                    "root": "dig",
+                    "category": "Networking",
+                    "description": "Queries DNS records.",
+                    "policy": {"allow": ["dig +short", "dig MX"], "deny": []},
+                },
             ],
             "pipe_helpers": [],
         }):
@@ -867,8 +887,8 @@ class TestRunStreaming:
         assert "help" in body and "Show guidance for README, FAQ, shortcuts, and command discovery." in body
         assert "Allowed external commands:\\n" in body
         assert "[Networking]\\n" in body
-        assert "ping\\n" in body
-        assert "dig\\n" in body
+        assert "ping  - Checks host reachability.\\n" in body
+        assert "dig   - Queries DNS records.\\n" in body
         assert "dig +short\\n" not in body
         assert '"type": "exit"' in body
 
@@ -891,8 +911,18 @@ class TestRunStreaming:
 
         with mock.patch("builtin_commands.load_commands_registry", return_value={
             "commands": [
-                {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
-                {"root": "curl", "category": "Networking", "policy": {"allow": ["curl -I"], "deny": []}},
+                {
+                    "root": "ping",
+                    "category": "Networking",
+                    "description": "Checks host reachability.",
+                    "policy": {"allow": ["ping"], "deny": []},
+                },
+                {
+                    "root": "curl",
+                    "category": "Networking",
+                    "description": "Makes HTTP requests.",
+                    "policy": {"allow": ["curl -I"], "deny": []},
+                },
             ],
             "pipe_helpers": [],
         }):
@@ -902,8 +932,8 @@ class TestRunStreaming:
         assert resp.status_code == 200
         assert "Built-in commands:\\n" not in body
         assert "Allowed external commands:\\n" in body
-        assert "ping\\n" in body
-        assert "curl\\n" in body
+        assert "ping  - Checks host reachability.\\n" in body
+        assert "curl  - Makes HTTP requests.\\n" in body
         assert "curl -I\\n" not in body
         assert '"type": "exit"' in body
 

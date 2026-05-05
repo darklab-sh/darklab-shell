@@ -707,14 +707,14 @@ def _documented_builtin_rows() -> list[tuple[str, str]]:
     return sorted(rows, key=lambda item: item[0].lower())
 
 
-def _allowed_external_command_groups() -> list[tuple[str, list[str]]] | None:
+def _allowed_external_command_groups() -> list[tuple[str, list[tuple[str, str]]]] | None:
     registry = load_commands_registry()
     commands = registry.get("commands", [])
     if not commands:
         return None
 
-    rows: list[tuple[str, list[str]]] = []
-    group_map: dict[str, list[str]] = {}
+    rows: list[tuple[str, list[tuple[str, str]]]] = []
+    group_map: dict[str, list[tuple[str, str]]] = {}
     seen_roots: set[str] = set()
     for entry in commands:
         root = str(entry.get("root") or "").strip().lower()
@@ -730,7 +730,8 @@ def _allowed_external_command_groups() -> list[tuple[str, list[str]]] | None:
             roots = []
             group_map[category] = roots
             rows.append((category, roots))
-        roots.append(root)
+        description = str(entry.get("description") or "").strip()
+        roots.append((root, description))
     return rows or None
 
 
@@ -843,7 +844,10 @@ def _run_builtin_commands(command: str) -> list[dict[str, str]]:
             for name, commands in external_groups:
                 if name:
                     lines.append(_output_line(f"[{name}]", "builtin-section"))
-                lines.extend(_output_line(f"  {cmd}", "builtin-catalog-item") for cmd in commands)
+                width = max((len(root) for root, _description in commands), default=0)
+                for cmd, description in commands:
+                    suffix = f"  - {description}" if description else ""
+                    lines.append(_output_line(f"  {cmd:<{width}}{suffix}", "builtin-catalog-item"))
                 lines.append(_output_line("", "builtin-spacer"))
             if lines and lines[-1].get("text", "") == "":
                 lines.pop()
