@@ -2231,11 +2231,16 @@ async function handleConfigCommand(cmd, tabId = null) {
   return true;
 }
 
-function _runtimeHint(value, description = '', insertValue = null, label = null) {
+function _runtimeHint(value, description = '', insertValue = null, label = null, hintOnly = null) {
   const item = { value, description };
   if (insertValue != null) item.insertValue = insertValue;
   if (label != null) item.label = label;
+  if (hintOnly != null) item.hintOnly = !!hintOnly;
   return item;
+}
+
+function _runtimePlaceholderHint(value, description = '') {
+  return _runtimeHint(value, description, null, null, true);
 }
 
 function _runtimeContextSpec({
@@ -2402,7 +2407,7 @@ function _runtimeCommandLookupHints(baseRegistry = {}, descriptionForExternal = 
   [...builtinNames].sort().forEach(root => {
     items.push(_runtimeHint(root, _runtimeBuiltinDescription(root, baseRegistry)));
   });
-  items.push(_runtimeHint('<command>', 'Any built-in or allowed command'));
+  items.push(_runtimePlaceholderHint('<command>', 'Any built-in or allowed command'));
   return items;
 }
 
@@ -2615,8 +2620,8 @@ function _runtimeWorkspaceContext() {
       ls: [_runtimeHint('-l', 'Long listing'), _runtimeHint('-R', 'Recursive listing')].concat(directoryHints, [_runtimeHint('/', 'Session workspace root')]),
       help: [],
       show: filePathHints,
-      add: [_runtimeHint('<file>', 'New session file name')],
-      'add-dir': directoryHints.concat([_runtimeHint('<folder>', 'New session folder')]),
+      add: [_runtimePlaceholderHint('<file>', 'New session file name')],
+      'add-dir': directoryHints.concat([_runtimePlaceholderHint('<folder>', 'New session folder')]),
       edit: filePathHints,
       download: filePathHints,
       move: moveSourceHints,
@@ -2688,7 +2693,7 @@ function _runtimeConfigContext() {
   entries.forEach((entry) => {
     sequenceArgHints[`set ${entry.key}`] = Array.isArray(entry.values)
       ? entry.values.map(value => _runtimeHint(value, entry.description))
-      : [_runtimeHint(entry.valueHelp || '<value>', entry.description)];
+      : [_runtimePlaceholderHint(entry.valueHelp || '<value>', entry.description)];
     sequenceArgHints[`get ${entry.key}`] = [];
     if (Array.isArray(entry.values)) entry.values.forEach(value => { argHints[value] = []; });
   });
@@ -2715,7 +2720,7 @@ function _runtimeVarContext() {
   variableHints.concat(starterNames.map(name => _runtimeHint(name))).forEach(item => {
     const name = String(item && item.value || '').trim();
     if (name) {
-      sequenceArgHints[`set ${name.toLowerCase()}`] = [_runtimeHint('<value>', `Value for ${name}`)];
+      sequenceArgHints[`set ${name.toLowerCase()}`] = [_runtimePlaceholderHint('<value>', `Value for ${name}`)];
       sequenceArgHints[`unset ${name.toLowerCase()}`] = [];
     }
   });
@@ -2809,7 +2814,7 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
   }
   if (isWorkspaceFeatureEnabled() && baseRegistry.mkdir) {
     context.mkdir = _runtimeMergeContextSpec(baseRegistry.mkdir, _runtimeContextSpec({
-      argHints: { __positional__: _runtimeWorkspaceDirectoryHints().concat([_runtimeHint('<folder>', 'New session folder')]) },
+      argHints: { __positional__: _runtimeWorkspaceDirectoryHints().concat([_runtimePlaceholderHint('<folder>', 'New session folder')]) },
       workspacePathArgKinds: { __positional__: ['directory'] },
     }));
   }
@@ -4141,10 +4146,9 @@ function _workflowRuntimeHintFor(workflow) {
 }
 
 function _workflowInputHint(input) {
-  const item = _runtimeHint(
+  const item = _runtimePlaceholderHint(
     `<${input.id}>`,
     input.label || input.id,
-    null,
   );
   if (input.type === 'domain') item.value_type = 'domain';
   return item;

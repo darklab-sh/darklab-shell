@@ -37,10 +37,6 @@ var DarklabAutocompleteCore = (function (global) {
     return String(item || '');
   }
 
-  function isPlaceholderValue(value) {
-    return typeof value === 'string' && /^<[^<>\s][^<>]*>$/.test(value.trim());
-  }
-
   function itemDescription(item) {
     if (!item || typeof item !== 'object') return '';
     return String(item.description || '').trim();
@@ -83,7 +79,7 @@ var DarklabAutocompleteCore = (function (global) {
   }
 
   function buildItem({ value, description = '', replaceStart, replaceEnd, insertValue = null, label = null, hintOnly = null }) {
-    const resolvedHintOnly = hintOnly != null ? !!hintOnly : (insertValue == null && isPlaceholderValue(value));
+    const resolvedHintOnly = hintOnly != null ? !!hintOnly : false;
     return {
       value,
       label: label || value,
@@ -326,7 +322,6 @@ var DarklabAutocompleteCore = (function (global) {
     itemInsertValue,
     itemInsertText,
     itemDescription,
-    isPlaceholderValue,
     tokenContextFromText,
     buildItem,
     boundaryIndex,

@@ -30,7 +30,7 @@ function loadAutocompleteFns() {
     limitAutocompleteMatchesForDisplay,
     rememberRecentDomainsFromCommand,
     _readRecentDomains,
-    _getAutocompleteSharedPrefix,
+    _getAutocompleteSharedPrefix: autocompleteCore.sharedPrefix,
     _setAcIndex: (value) => { acIndex = value; },
     _setAcFiltered: (value) => { acFiltered = value; },
     _getAcFiltered: () => acFiltered,
@@ -136,6 +136,23 @@ describe('autocomplete helpers', () => {
     expect(item?.querySelector('.ac-item-desc')?.textContent).toBe('Service detection')
   })
 
+  it('highlights contextual suggestions with an item-specific match query', () => {
+    const { acShow } = loadAutocompleteFns()
+    document.getElementById('cmd').value = 'cat darklab/find'
+
+    acShow([{
+      value: 'darklab/darklab_findings.txt',
+      description: 'session file',
+      replaceStart: 4,
+      replaceEnd: 16,
+      matchQuery: 'find',
+    }])
+
+    const item = document.querySelector('.ac-item')
+    expect(item?.querySelector('.ac-item-main')?.textContent).toBe('darklab/darklab_findings.txt')
+    expect(item?.innerHTML).toContain('<span class="ac-match">find</span>')
+  })
+
   it('does not highlight typed text inside hint-only placeholders', () => {
     const input = document.getElementById('cmd')
     input.value = 'workflow run work'
@@ -170,6 +187,54 @@ describe('autocomplete helpers', () => {
     expect(items[0].innerHTML).toContain('<span class="ac-match">work</span>')
     expect(items[1].querySelector('.ac-item-main')?.textContent).toBe('<workflow>')
     expect(items[1].innerHTML).not.toContain('ac-match')
+  })
+
+  it('honors explicit snake_case hint_only hints without placeholder autodetect', () => {
+    const { getAutocompleteMatches, acAccept } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => document.getElementById('cmd').value,
+        setComposerValue: (value, start, end) => {
+          const input = document.getElementById('cmd')
+          input.value = value
+          input.selectionStart = start
+          input.selectionEnd = end == null ? start : end
+        },
+        acSuggestions: [],
+        acContextRegistry: {
+          tokenctl: {
+            expects_value: ['set'],
+            arg_hints: {
+              set: [{ value: 'token value', description: 'Paste a token', hint_only: true }],
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+      acAccept,
+    }`,
+    )
+
+    const items = getAutocompleteMatches('tokenctl set ', 13)
+    expect(items).toHaveLength(1)
+    expect(items[0].value).toBe('token value')
+    expect(items[0].hintOnly).toBe(true)
+    expect(items[0].insertValue).toBe('')
+
+    const input = document.getElementById('cmd')
+    input.value = 'tokenctl set '
+    input.selectionStart = input.selectionEnd = 13
+    acAccept(items[0])
+    expect(input.value).toBe('tokenctl set ')
   })
 
   it('acAccept updates the input, hides the dropdown, and refocuses the input', () => {
@@ -440,7 +505,7 @@ describe('autocomplete helpers', () => {
             ],
             expects_value: ['-d'],
             arg_hints: {
-              __positional__: [{ value: '<domain>', description: 'Domain name' }],
+              __positional__: [{ value: '<domain>', hintOnly: true, description: 'Domain name' }],
             },
           },
         },
@@ -898,12 +963,12 @@ describe('autocomplete helpers', () => {
               { value: '@8.8.8.8', description: 'Resolver' },
             ],
             expects_value: [],
-            arg_hints: { __positional__: [{ value: '<domain>', value_type: 'domain', description: 'Domain name to query' }] },
+            arg_hints: { __positional__: [{ value: '<domain>', hintOnly: true, value_type: 'domain', description: 'Domain name to query' }] },
           },
           subfinder: {
             flags: [{ value: '-d', description: 'Target domain' }],
             expects_value: ['-d'],
-            arg_hints: { '-d': [{ value: '<domain>', value_type: 'domain', description: 'Target domain to enumerate' }] },
+            arg_hints: { '-d': [{ value: '<domain>', hintOnly: true, value_type: 'domain', description: 'Target domain to enumerate' }] },
           },
         },
         acFiltered: [],
@@ -993,7 +1058,7 @@ describe('autocomplete helpers', () => {
           dig: {
             flags: [],
             expects_value: [],
-            arg_hints: { __positional__: [{ value: '<domain>', value_type: 'domain', description: 'Domain name to query' }] },
+            arg_hints: { __positional__: [{ value: '<domain>', hintOnly: true, value_type: 'domain', description: 'Domain name to query' }] },
           },
         },
         acFiltered: [],
@@ -1037,14 +1102,14 @@ describe('autocomplete helpers', () => {
             ],
             expects_value: ['-d', '-o'],
             arg_hints: {
-              '-d': [{ value: '<domain>', value_type: 'domain', description: 'Target domain to enumerate' }],
+              '-d': [{ value: '<domain>', hintOnly: true, value_type: 'domain', description: 'Target domain to enumerate' }],
               '-o': [{ value: 'subdomains.txt', description: 'Save results' }],
             },
           },
           dig: {
             flags: [{ value: 'MX', description: 'Mail exchanger lookup' }],
             expects_value: [],
-            arg_hints: { __positional__: [{ value: '<domain>', value_type: 'domain', description: 'Domain name to query' }] },
+            arg_hints: { __positional__: [{ value: '<domain>', hintOnly: true, value_type: 'domain', description: 'Domain name to query' }] },
           },
           ping: {
             flags: [
@@ -1055,7 +1120,7 @@ describe('autocomplete helpers', () => {
             arg_hints: {
               '-c': [{ value: '4', description: 'Send four probes' }],
               '-i': [{ value: '0.5', description: 'Half-second probe interval' }],
-              __positional__: [{ value: '<host>', value_type: 'domain', description: 'Hostname or IP address to probe' }],
+              __positional__: [{ value: '<host>', hintOnly: true, value_type: 'domain', description: 'Hostname or IP address to probe' }],
             },
           },
         },
@@ -1106,12 +1171,12 @@ describe('autocomplete helpers', () => {
           legacydig: {
             flags: [],
             expects_value: [],
-            arg_hints: { __positional__: [{ value: '<domain>', description: 'Domain name to query' }] },
+            arg_hints: { __positional__: [{ value: '<domain>', hintOnly: true, description: 'Domain name to query' }] },
           },
           dig: {
             flags: [],
             expects_value: [],
-            arg_hints: { __positional__: [{ value: '<domain>', value_type: 'domain', description: 'Domain name to query' }] },
+            arg_hints: { __positional__: [{ value: '<domain>', hintOnly: true, value_type: 'domain', description: 'Domain name to query' }] },
           },
         },
         acFiltered: [],
@@ -1162,13 +1227,13 @@ describe('autocomplete helpers', () => {
             flags: [{ value: '-w', description: 'Wordlist' }],
             expects_value: ['-w'],
             arg_hints: {
-              '-w': [{ value: '<wordlist>', value_type: 'wordlist', wordlist_category: 'dns' }],
+              '-w': [{ value: '<wordlist>', hintOnly: true, value_type: 'wordlist', wordlist_category: 'dns' }],
             },
           },
           legacy: {
             flags: [{ value: '-w', description: 'Wordlist' }],
             expects_value: ['-w'],
-            arg_hints: { '-w': [{ value: '<wordlist>', description: 'Wordlist path' }] },
+            arg_hints: { '-w': [{ value: '<wordlist>', hintOnly: true, description: 'Wordlist path' }] },
           },
         },
         acFiltered: [],
@@ -1215,7 +1280,7 @@ describe('autocomplete helpers', () => {
             workspace_file_flags: ['-w'],
             expects_value: ['-w'],
             arg_hints: {
-              '-w': [{ value: '<wordlist>', value_type: 'wordlist', wordlist_category: 'web-content' }],
+              '-w': [{ value: '<wordlist>', hintOnly: true, value_type: 'wordlist', wordlist_category: 'web-content' }],
             },
           },
         },
@@ -1296,7 +1361,7 @@ describe('autocomplete helpers', () => {
         acContextRegistry: {
           curl: {
             arg_hints: {
-              __positional__: [{ value: '<url>', description: 'Target URL' }],
+              __positional__: [{ value: '<url>', hintOnly: true, description: 'Target URL' }],
             },
           },
         },
@@ -1427,7 +1492,7 @@ describe('autocomplete helpers', () => {
               ],
             },
             sequence_arg_hints: {
-              'set host': [{ value: '<value>', description: 'Value for HOST' }],
+              'set host': [{ value: '<value>', hintOnly: true, description: 'Value for HOST' }],
               'unset host': [],
             },
             close_after: { list: 0, set: 2, unset: 1 },
@@ -1536,7 +1601,7 @@ describe('autocomplete helpers', () => {
             ],
             expects_value: [],
             arg_hints: {
-              __positional__: [{ value: '<target>', description: 'Hostname, IP, or CIDR' }],
+              __positional__: [{ value: '<target>', hintOnly: true, description: 'Hostname, IP, or CIDR' }],
             },
           },
         },
@@ -1578,7 +1643,7 @@ describe('autocomplete helpers', () => {
             })),
             expects_value: [],
             arg_hints: {
-              __positional__: [{ value: '<target>', description: 'Hostname, IP, or CIDR' }],
+              __positional__: [{ value: '<target>', hintOnly: true, description: 'Hostname, IP, or CIDR' }],
             },
           },
         },
@@ -1623,7 +1688,7 @@ describe('autocomplete helpers', () => {
           'session-token': {
             expects_value: ['set'],
             arg_hints: {
-              set: [{ value: '<token>', description: 'Paste a token' }],
+              set: [{ value: '<token>', hintOnly: true, description: 'Paste a token' }],
               __positional__: [
                 { value: 'generate' },
                 { value: 'set <token>', insertValue: 'set ' },
@@ -1684,7 +1749,7 @@ describe('autocomplete helpers', () => {
           'session-token': {
             expects_value: ['set'],
             arg_hints: {
-              set: [{ value: '<token>', description: 'Paste a token' }],
+              set: [{ value: '<token>', hintOnly: true, description: 'Paste a token' }],
               __positional__: [{ value: 'set <token>', insertValue: 'set ' }],
             },
           },
@@ -1756,7 +1821,7 @@ describe('autocomplete helpers', () => {
             arg_hints: {
               '-o': [
                 { value: '/dev/null', description: 'Discard body output' },
-                { value: '<file>', description: 'Destination file path' },
+                { value: '<file>', hintOnly: true, description: 'Destination file path' },
               ],
             },
           },
@@ -1796,7 +1861,7 @@ describe('autocomplete helpers', () => {
             expects_value: ['-c', '-i'],
             arg_hints: {
               '-c': [{ value: '4', description: 'Send four probes' }],
-              __positional__: [{ value: '<host>', description: 'Hostname or IP address to probe' }],
+              __positional__: [{ value: '<host>', hintOnly: true, description: 'Hostname or IP address to probe' }],
             },
           },
         },
@@ -1835,7 +1900,7 @@ describe('autocomplete helpers', () => {
             expects_value: ['-c', '-i'],
             arg_hints: {
               '-c': [{ value: '4', description: 'Send four probes' }],
-              __positional__: [{ value: '<host>', description: 'Hostname or IP address to probe' }],
+              __positional__: [{ value: '<host>', hintOnly: true, description: 'Hostname or IP address to probe' }],
             },
           },
         },
@@ -1868,7 +1933,7 @@ describe('autocomplete helpers', () => {
             arg_hints: {
               __positional__: [
                 { value: 'https://', description: 'Start an HTTP or HTTPS URL' },
-                { value: '<url>', description: 'Target URL to request' },
+                { value: '<url>', hintOnly: true, description: 'Target URL to request' },
               ],
             },
           },
@@ -1908,7 +1973,7 @@ describe('autocomplete helpers', () => {
             arg_hints: {
               __positional__: [
                 { value: 'curl', description: 'curl manual page' },
-                { value: '<command>', description: 'Manual page for any allowed command' },
+                { value: '<command>', hintOnly: true, description: 'Manual page for any allowed command' },
               ],
             },
           },
@@ -1916,7 +1981,7 @@ describe('autocomplete helpers', () => {
             argument_limit: 1,
             flags: [{ value: '-c', description: 'Stop after count replies' }],
             arg_hints: {
-              __positional__: [{ value: '<host>', description: 'Hostname or IP address to probe' }],
+              __positional__: [{ value: '<host>', hintOnly: true, description: 'Hostname or IP address to probe' }],
             },
           },
         },
@@ -2063,7 +2128,7 @@ describe('autocomplete helpers', () => {
             argument_limit: 2,
             arg_hints: {
               __positional__: [
-                { value: '<source> <destination>', value_type: 'target', description: 'Session file or folder path' },
+                { value: '<source> <destination>', hintOnly: true, value_type: 'target', description: 'Session file or folder path' },
                 { value: 'root.txt', description: 'session file · 1 B' },
               ],
             },
@@ -2130,7 +2195,7 @@ describe('autocomplete helpers', () => {
               { value: '-E', description: 'Extended regex' },
             ],
             arg_hints: {
-              __positional__: [{ value: '<pattern>', description: 'Text or regex to match' }],
+              __positional__: [{ value: '<pattern>', hintOnly: true, description: 'Text or regex to match' }],
             },
           },
         },
@@ -2244,7 +2309,7 @@ describe('autocomplete helpers', () => {
           grep: {
             pipe_command: true,
             arg_hints: {
-              __positional__: [{ value: '<pattern>', description: 'Text or regex to match' }],
+              __positional__: [{ value: '<pattern>', hintOnly: true, description: 'Text or regex to match' }],
             },
           },
           head: {

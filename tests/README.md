@@ -20,12 +20,12 @@ Workspace file behavior is intentionally split across all three layers: pytest o
 
 Current totals:
 
-- behavior tests: 2,374
+- behavior tests: 2,376
 - docs/inventory meta-tests: 30
 - `pytest`: 1187 (1157 behavior + 30 meta)
-- `vitest`: 981
+- `vitest`: 983
 - `playwright`: 236
-- total: 2,404
+- total: 2,406
 
 This document is organized in two parts:
 
@@ -1564,7 +1564,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `renders suggestions from the shared composer value accessor when present` | Verifies that renders suggestions from the shared composer value accessor when present. |
 | `applies the active class to the indexed suggestion` | Verifies that applies the active class to the indexed suggestion. |
 | `renders contextual suggestions with descriptions` | Verifies that contextual suggestions can render a separate description alongside the inserted value. |
+| `highlights contextual suggestions with an item-specific match query` | Verifies that scoped path suggestions can highlight the final typed segment even when the displayed value includes a folder prefix. |
 | `does not highlight typed text inside hint-only placeholders` | Verifies that visible placeholder guidance remains unhighlighted even when the typed token appears inside the placeholder text. |
+| `honors explicit snake_case hint_only hints without placeholder autodetect` | Verifies that YAML-style `hint_only` autocomplete hints stay display-only even when their value is not shaped like a placeholder. |
 | `acAccept updates the input, hides the dropdown, and refocuses the input` | Verifies that acAccept updates the input, hides the dropdown, and refocuses the input. |
 | `acAccept keeps focus on the visible mobile composer when mobile mode is active` | Verifies that acAccept keeps focus on the visible mobile composer when mobile mode is active. |
 | `acAccept replaces only the current token for contextual suggestions` | Verifies that accepting a contextual suggestion replaces only the active token instead of rewriting the full command. |

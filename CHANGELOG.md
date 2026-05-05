@@ -29,7 +29,8 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
-- **Session file docs and test inventory now reflect the v1.7 workspace command surface** — the docs count 2,404 total tests, including 1,187 pytest tests, 981 Vitest tests, and 236 Playwright tests.
+- **Session file docs and test inventory now reflect the v1.7 workspace command surface** — the docs count 2,406 total tests, including 1,187 pytest tests, 983 Vitest tests, and 236 Playwright tests.
+- **Autocomplete placeholder hints now have an explicit schema path** — frontend and backend autocomplete normalization accept `hint_only: true` as the author-owned display-only signal, and placeholder-looking text no longer becomes display-only by regex inference.
 
 ### Fixed
 

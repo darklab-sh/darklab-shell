@@ -47,6 +47,7 @@ commands:
           takes_value: true
       arguments:
         - placeholder: <host>
+          hint_only: true
           value_type: domain
           description: Hostname or IP address to probe
   - root: fping
@@ -86,6 +87,7 @@ commands:
           takes_value: true
       arguments:
         - placeholder: <host>
+          hint_only: true
           value_type: domain
           description: Hostname or IP to probe
   - root: traceroute
@@ -138,6 +140,7 @@ commands:
           description: Use TCP SYN probes
       arguments:
         - placeholder: <host>
+          hint_only: true
           value_type: domain
           description: Hostname or IP to trace
   - root: tcptraceroute
@@ -170,9 +173,11 @@ commands:
               description: Two-second per-hop timeout
       arguments:
         - placeholder: <host>
+          hint_only: true
           value_type: domain
           description: Hostname or IP to trace
         - placeholder: <port>
+          hint_only: true
           description: TCP port to probe
   - root: nc
     category: Network Diagnostics
@@ -206,6 +211,7 @@ commands:
               description: Short timeout in seconds
       arguments:
         - placeholder: <host>
+          hint_only: true
           value_type: domain
           description: Hostname or IP followed by one or more ports
   - root: mtr
@@ -252,6 +258,7 @@ commands:
           description: Wide report output
       arguments:
         - placeholder: <host>
+          hint_only: true
           value_type: domain
           description: Hostname or IP to trace
   - root: dig
@@ -288,6 +295,7 @@ commands:
           description: Mail exchanger lookup
       arguments:
         - placeholder: <domain>
+          hint_only: true
           value_type: domain
           description: Domain name to query
   - root: nslookup
@@ -321,6 +329,7 @@ commands:
           description: Print extra resolver details
       arguments:
         - placeholder: <domain>
+          hint_only: true
           value_type: domain
           description: Domain name to query
   - root: host
@@ -354,6 +363,7 @@ commands:
               description: Name server lookup
       arguments:
         - placeholder: <domain>
+          hint_only: true
           value_type: domain
           description: Domain name to query
   - root: whois
@@ -396,6 +406,7 @@ commands:
           description: Hide legal disclaimers when supported
       arguments:
         - placeholder: <domain-or-ip>
+          hint_only: true
           value_type: domain
           description: Domain name, IP address, or ASN to query
   - root: curl
@@ -485,6 +496,7 @@ commands:
               description: Ten-second transfer limit
       arguments:
         - placeholder: <url>
+          hint_only: true
           value_type: url
           description: Target URL to request
   - root: wget
@@ -558,6 +570,7 @@ commands:
           feature_required: workspace
           value_hint:
             placeholder: <url-file>
+            hint_only: true
             value_type: url
             description: Session file containing one URL per line
           suggest:
@@ -569,6 +582,7 @@ commands:
           feature_required: workspace
           value_hint:
             placeholder: <url-file>
+            hint_only: true
             value_type: url
             description: Session file containing one URL per line
           suggest:
@@ -592,6 +606,7 @@ commands:
           description: Skip TLS certificate validation
       arguments:
         - placeholder: <url>
+          hint_only: true
           value_type: url
           description: Target URL to download or probe
   - root: openssl
@@ -650,6 +665,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <hostname>
+                hint_only: true
                 value_type: domain
                 description: SNI hostname matching the certificate
             - value: -showcerts
@@ -764,6 +780,7 @@ commands:
               description: Ten-second socket timeout
       arguments:
         - placeholder: <host>
+          hint_only: true
           value_type: domain
           description: Hostname or host:port to scan
   - root: sslyze
@@ -822,6 +839,7 @@ commands:
           feature_required: workspace
           value_hint:
             placeholder: <target-file>
+            hint_only: true
             value_type: target
             description: Session file containing one TLS target per line
           suggest:
@@ -836,6 +854,7 @@ commands:
               description: Save JSON scan results
       arguments:
         - placeholder: <host>
+          hint_only: true
           value_type: domain
           description: Hostname or host:port to scan
   - root: dnsrecon
@@ -891,6 +910,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <domain>
+            hint_only: true
             value_type: domain
             description: Target domain to enumerate
         - value: -t
@@ -953,6 +973,7 @@ commands:
               description: Save XML DNS results
       arguments:
         - placeholder: <domain>
+          hint_only: true
           value_type: domain
           description: Usually provided through -d
   - root: subfinder
@@ -1050,6 +1071,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <domain>
+            hint_only: true
             value_type: domain
             description: Target domain to enumerate
         - value: -silent
@@ -1064,6 +1086,7 @@ commands:
           feature_required: workspace
           value_hint:
             placeholder: <domain-file>
+            hint_only: true
             value_type: domain
             description: Session file containing one domain per line
           suggest:
@@ -1075,6 +1098,7 @@ commands:
           feature_required: workspace
           value_hint:
             placeholder: <domain-file>
+            hint_only: true
             value_type: domain
             description: Session file containing one domain per line
           suggest:
@@ -1250,6 +1274,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <domain>
+                hint_only: true
                 value_type: domain
                 description: Target domain to enumerate
             - value: -timeout
@@ -1268,6 +1293,7 @@ commands:
               feature_required: workspace
               value_hint:
                 placeholder: <domain-file>
+                hint_only: true
                 value_type: domain
                 description: Session file containing one domain per line
               suggest:
@@ -1286,6 +1312,7 @@ commands:
               feature_required: workspace
               value_hint:
                 placeholder: <host-file>
+                hint_only: true
                 value_type: host
                 description: Session file containing known names
               suggest:
@@ -1319,6 +1346,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <domain>
+                hint_only: true
                 value_type: domain
                 description: Target domain to read from the database
             - value: -names
@@ -1363,6 +1391,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <domain>
+                hint_only: true
                 value_type: domain
                 description: Target domain to track
             - value: -since
@@ -1377,6 +1406,7 @@ commands:
               feature_required: workspace
               value_hint:
                 placeholder: <domain-file>
+                hint_only: true
                 value_type: domain
                 description: Session file containing one domain per line
               suggest:
@@ -1404,6 +1434,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <domain>
+                hint_only: true
                 value_type: domain
                 description: Target domain to visualize
             - value: -d3
@@ -1424,6 +1455,7 @@ commands:
               feature_required: workspace
               value_hint:
                 placeholder: <domain-file>
+                hint_only: true
                 value_type: domain
                 description: Session file containing one domain per line
               suggest:
@@ -1502,6 +1534,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <domain>
+            hint_only: true
             value_type: domain
             description: Target domain to enumerate
         - value: -w
@@ -1521,6 +1554,7 @@ commands:
           feature_required: workspace
           value_hint:
             placeholder: <host-file>
+            hint_only: true
             value_type: host
             description: Session file containing one hostname per line
           suggest:
@@ -1550,6 +1584,7 @@ commands:
               description: Save DNS responses
       arguments:
         - placeholder: <domain>
+          hint_only: true
           value_type: domain
           description: Usually provided through -d
   - root: pd-httpx
@@ -1645,6 +1680,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <url>
+            hint_only: true
             value_type: url
             description: Target URL to probe
           suggest:
@@ -1666,6 +1702,7 @@ commands:
           feature_required: workspace
           value_hint:
             placeholder: <url-file>
+            hint_only: true
             value_type: url
             description: Session file containing one URL per line
           suggest:
@@ -1741,6 +1778,7 @@ commands:
           description: Only discover subdomains of the target domain
       arguments:
         - placeholder: <domain>
+          hint_only: true
           value_type: domain
           description: Domain name to enumerate
   - root: fierce
@@ -1768,6 +1806,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <domain>
+            hint_only: true
             value_type: domain
             description: Target domain to enumerate
         - value: --dns-servers
@@ -1824,6 +1863,7 @@ commands:
           takes_value: true
       arguments:
         - placeholder: <domain>
+          hint_only: true
           value_type: domain
           description: Domain name to enumerate
   - root: gobuster
@@ -1869,6 +1909,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <url>
+                hint_only: true
                 value_type: url
                 description: Target base URL
               suggest:
@@ -1935,6 +1976,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <domain>
+                hint_only: true
                 value_type: domain
                 description: Target root domain
             - value: -w
@@ -1985,6 +2027,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <url>
+                hint_only: true
                 value_type: url
                 description: Target base URL
               suggest:
@@ -2035,6 +2078,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <url-with-FUZZ>
+                hint_only: true
                 value_type: url
                 description: URL, query, or path containing FUZZ
             - value: -w
@@ -2120,6 +2164,7 @@ commands:
               takes_value: true
               value_hint:
                 placeholder: <host>
+                hint_only: true
                 value_type: host
                 description: TFTP server host or IP
             - value: -w
@@ -2179,6 +2224,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <url-with-FUZZ>
+            hint_only: true
             value_type: url
             description: Target URL including FUZZ
         - value: -w
@@ -2214,6 +2260,7 @@ commands:
               description: Save machine-readable fuzzing results
       arguments:
         - placeholder: <target-url>
+          hint_only: true
           value_type: url
           description: Usually provided through -u
   - root: naabu
@@ -2305,6 +2352,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <host>
+            hint_only: true
             value_type: domain
             description: Target hostname or IP address
         - value: -p
@@ -2335,6 +2383,7 @@ commands:
           feature_required: workspace
           value_hint:
             placeholder: <host-file>
+            hint_only: true
             value_type: host
             description: Session file containing one host/IP per line
           suggest:
@@ -2380,6 +2429,7 @@ commands:
               description: Session exclude list
       arguments:
         - placeholder: <target>
+          hint_only: true
           value_type: domain
           description: Usually provided through -host
   - root: katana
@@ -2478,6 +2528,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <url>
+            hint_only: true
             value_type: url
             description: Target URL to start crawling from
           suggest:
@@ -2583,6 +2634,7 @@ commands:
           feature_required: workspace
           value_hint:
             placeholder: <url-file>
+            hint_only: true
             value_type: url
             description: Session file containing seed URLs
           suggest:
@@ -2597,6 +2649,7 @@ commands:
               description: Save crawled URLs
       arguments:
         - placeholder: <target>
+          hint_only: true
           value_type: url
           description: Usually provided through -u
   - root: wafw00f
@@ -2653,6 +2706,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <waf-name>
+            hint_only: true
             description: Specific WAF to test for (e.g. Cloudflare)
         - value: -i
           description: Read URLs from a session file
@@ -2660,6 +2714,7 @@ commands:
           feature_required: workspace
           value_hint:
             placeholder: <url-file>
+            hint_only: true
             value_type: url
             description: Session file containing one URL per line
           suggest:
@@ -2671,6 +2726,7 @@ commands:
           feature_required: workspace
           value_hint:
             placeholder: <url-file>
+            hint_only: true
             value_type: url
             description: Session file containing one URL per line
           suggest:
@@ -2692,6 +2748,7 @@ commands:
               description: Save WAF fingerprint results
       arguments:
         - placeholder: <url>
+          hint_only: true
           value_type: url
           description: Target URL to fingerprint
   - root: masscan
@@ -2782,6 +2839,7 @@ commands:
           feature_required: workspace
           value_hint:
             placeholder: <target-file>
+            hint_only: true
             value_type: target
             description: Session file containing one IP/CIDR target per line
           suggest:
@@ -2817,6 +2875,7 @@ commands:
               description: Save scan results
       arguments:
         - placeholder: <target>
+          hint_only: true
           value_type: cidr
           description: IP address or CIDR range
   - root: rustscan
@@ -2843,6 +2902,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <host>
+            hint_only: true
             value_type: domain
             description: Target hostname or IP address
         - value: -p
@@ -2876,6 +2936,7 @@ commands:
               description: 1.5 second per-port timeout
       arguments:
         - placeholder: <target>
+          hint_only: true
           value_type: domain
           description: Usually provided through -a
   - root: nmap
@@ -2959,6 +3020,7 @@ commands:
           takes_value: true
           suggest:
             - placeholder: <ports>
+              hint_only: true
               description: Comma-separated ports or ranges
             - value: 80,443
               description: Common web ports
@@ -2983,6 +3045,7 @@ commands:
           takes_value: true
           suggest:
             - placeholder: <number>
+              hint_only: true
               description: Number of top ports to scan
             - value: '100'
               description: Top hundred ports
@@ -3002,6 +3065,7 @@ commands:
           feature_required: workspace
           value_hint:
             placeholder: <target-file>
+            hint_only: true
             value_type: target
             description: Session file containing one host/IP/CIDR per line
           suggest:
@@ -3030,6 +3094,7 @@ commands:
               description: Session file containing NSE script arguments
       arguments:
         - placeholder: <target>
+          hint_only: true
           value_type: domain
           description: Hostname, IP, or CIDR
   - root: testssl
@@ -3148,6 +3213,7 @@ commands:
               description: Save HTML TLS findings
       arguments:
         - placeholder: <url>
+          hint_only: true
           value_type: url
           description: HTTPS target URL
   - root: nikto
@@ -3185,6 +3251,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <host>
+            hint_only: true
             value_type: domain
             description: Target host, hostname, or URL
         - value: -p
@@ -3261,6 +3328,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <url>
+            hint_only: true
             value_type: url
             description: Target WordPress URL
           suggest:
@@ -3466,6 +3534,7 @@ commands:
           takes_value: true
           value_hint:
             placeholder: <url>
+            hint_only: true
             value_type: url
             description: Target URL to scan
         - value: -l
@@ -3474,6 +3543,7 @@ commands:
           feature_required: workspace
           value_hint:
             placeholder: <target-file>
+            hint_only: true
             value_type: target
             description: Session file containing one URL or host per line
           suggest:
@@ -3589,6 +3659,7 @@ commands:
               description: Session nuclei resume file
       arguments:
         - placeholder: <target>
+          hint_only: true
           value_type: target
           description: Usually provided through -u or -l
 pipe_helpers:
@@ -3606,6 +3677,7 @@ pipe_helpers:
           description: Extended regex
       arguments:
         - placeholder: <pattern>
+          hint_only: true
           description: Text or regex to match
   - root: head
     autocomplete:

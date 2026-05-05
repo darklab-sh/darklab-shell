@@ -1764,8 +1764,9 @@ def _normalize_context_suggestion(item):
         label = str(raw_label).strip()
         if label:
             result["label"] = label
-    if "hintOnly" in item:
-        result["hintOnly"] = bool(item.get("hintOnly"))
+    if "hintOnly" in item or "hint_only" in item:
+        raw_hint_only = item.get("hintOnly") if "hintOnly" in item else item.get("hint_only")
+        result["hintOnly"] = bool(raw_hint_only)
     value_type = str(item.get("value_type") or item.get("value_kind") or item.get("type") or "").strip().lower()
     if value_type:
         result["value_type"] = value_type
