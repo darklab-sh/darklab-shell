@@ -14,6 +14,8 @@ from urllib.parse import urlparse
 
 SIGNAL_SCOPES = ("findings", "warnings", "errors", "summaries")
 
+_ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
+
 _SIGNAL_PATTERNS = {
     "findings": [
         re.compile(r"^\d+/(?:tcp|udp)\s+open\b", re.I),
@@ -96,6 +98,55 @@ _APP_SIGNAL_EXCLUDES = [
 ]
 
 _DNS_SIGNAL_ROOTS = {"dig", "host", "nslookup"}
+_CRAWL_URL_ROOTS = {"katana"}
+_PD_HTTPX_RESULT_RE = re.compile(r"^https?://\S+\s+\[\d{3}\](?:\s+\[[^\]]*\])*", re.I)
+_WAFW00F_RESULT_RE = re.compile(r"^\[\+\]\s+The site\s+https?://\S+\s+is behind\s+.+\bWAF\.", re.I)
+_WAFW00F_REQUESTS_RE = re.compile(r"^\[~\]\s+Number of requests:\s*\d+\b", re.I)
+_NIKTO_SKIP_RE = re.compile(
+    r"^\+\s+(?:Start Time|End Time|1 host\(s\) tested|ERROR|No CGI Directories found|Scan terminated):?",
+    re.I,
+)
+_NIKTO_FINDING_RE = re.compile(
+    r"^(?:\+\s+(?:Target IP|Target Hostname|Target Port|SSL Info|Server|Platform):|"
+    r"(?:CN|SAN|Ciphers|Issuer):\s+)",
+    re.I,
+)
+_WPSCAN_API_TOKEN_WARNING_RE = re.compile(r"^\[!\]\s+No WPScan API Token\b", re.I)
+_WPSCAN_SKIP_RE = re.compile(
+    r"^\[\+\]\s+(?:Started|Finished|Requests Done|Cached Requests|Data Sent|Data Received|Memory used|Elapsed time|"
+    r"Enumerating|Checking Plugin Versions)",
+    re.I,
+)
+_WPSCAN_FINDING_RE = re.compile(
+    r"^\[\+\]\s+(?:Headers|robots\.txt found:|XML-RPC seems to be enabled:|WordPress readme found:|"
+    r"Debug Log found:|The external WP-Cron seems to be enabled:|WordPress version .* identified|"
+    r"WordPress theme in use:)",
+    re.I,
+)
+_TESTSSL_FINDING_RE = re.compile(
+    r"^(?:TLS\s+1(?:\.\d)?\s+offered|ALPN/HTTP2\b|Forward Secrecy\b|FS is offered|"
+    r"Elliptic curves offered:|Common Name \(CN\)|subjectAltName \(SAN\)|Trust \(hostname\)|"
+    r"Certificate Validity \(UTC\)|Issuer\s+|HTTP Status Code|Strict Transport Security|Server banner|"
+    r"Overall Grade|ROBOT\s+|Secure Renegotiation|BREACH \(CVE-|LOGJAM \(CVE-)",
+    re.I,
+)
+_SSLSCAN_FINDING_RE = re.compile(
+    r"^(?:TLSv1\.[23]\s+enabled|Server supports TLS Fallback SCSV|(?:Preferred|Accepted)\s+TLSv1\.[23]\s+|"
+    r"Signature Algorithm:|RSA Key Strength:|Subject:|Altnames:|Issuer:|Not valid before:|Not valid after:)",
+    re.I,
+)
+_SSLYZE_FINDING_RE = re.compile(
+    r"^(?:Common Name:|Issuer:|Not Before:|Not After:|Key Size:|SubjAltName - DNS Names:|"
+    r"Received Chain:|Verified Chain:|TLS_[A-Z0-9_]+\s+\d+\s+|Forward Secrecy\s+OK - Supported|"
+    r"TLS_FALLBACK_SCSV:\s+OK - Supported|Supported curves:)",
+    re.I,
+)
+_HOST_PORT_RE = re.compile(r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}:\d+$", re.I)
+_RUSTSCAN_OPEN_RE = re.compile(r"^Open\s+[0-9a-f:.]+:\d+$", re.I)
+_NAABU_FOUND_PORTS_RE = re.compile(r"^\[INF\]\s+Found\s+\d+\s+ports?\s+on host\b", re.I)
+_NUCLEI_RESULT_RE = re.compile(r"^\[[^\]]+\]\s+\[[a-z0-9_-]+\]\s+\[(?:info|low|medium|high|critical)\]\s+\S+", re.I)
+_SCAN_COMPLETED_RE = re.compile(r"^\[INF\]\s+Scan completed\b.*\bmatches found\.", re.I)
+_CIDR_RE = re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}/\d{1,2}$")
 _DNS_BARE_IP_RE = re.compile(
     r"^(?:(?:\d{1,3}\.){3}\d{1,3}|[0-9a-f:]*[0-9a-f]+:[0-9a-f:]*[0-9a-f]+)$",
     re.I,
@@ -106,6 +157,75 @@ _HOSTNAME_RE = re.compile(
     re.I,
 )
 _NMAP_REPORT_TARGET_RE = re.compile(r"^Nmap scan report for\s+(.+?)(?:\s+\(([^)]+)\))?$", re.I)
+
+
+def _strip_ansi_codes(value: str) -> str:
+    return _ANSI_ESCAPE_RE.sub("", str(value or ""))
+
+
+def _normalize_signal_text(value: str) -> str:
+    # Match against plain text while preserving the original ANSI-rich line for
+    # terminal rendering, history, exports, and shares.
+    return _strip_ansi_codes(str(value or "")).strip()
+
+
+def _looks_like_clean_url(value: str) -> bool:
+    raw = _normalize_signal_text(value)
+    if not re.match(r"^https?://\S+$", raw, re.I):
+        return False
+    return not re.search(r"(?:'\+|\+'\$|/\$1\b)", raw)
+
+
+def _is_command_scoped_finding(root: str, stripped: str) -> bool:
+    if root in {"dnsx", "subfinder"}:
+        return bool(_HOSTNAME_RE.search(stripped))
+    if root == "fierce":
+        return bool(re.match(r"^(?:Found:|NS:|SOA:)\s+\S+", stripped, re.I))
+    if root == "dnsenum":
+        return bool(_CIDR_RE.search(stripped))
+    if root == "dnsrecon":
+        return bool(re.match(r"^\[\*\]\s+DNSSEC is configured for\s+\S+", stripped, re.I))
+    if root in {"pd-httpx", "httpx"}:
+        return bool(_PD_HTTPX_RESULT_RE.search(stripped))
+    if root in _CRAWL_URL_ROOTS:
+        return _looks_like_clean_url(stripped)
+    if root == "wafw00f":
+        return bool(_WAFW00F_RESULT_RE.search(stripped))
+    if root == "nikto":
+        return not _NIKTO_SKIP_RE.search(stripped) and (
+            bool(_NIKTO_FINDING_RE.search(stripped)) or bool(re.match(r"^\+\s+\S", stripped))
+        )
+    if root == "wpscan":
+        return not _WPSCAN_SKIP_RE.search(stripped) and bool(_WPSCAN_FINDING_RE.search(stripped))
+    if root == "testssl":
+        return bool(_TESTSSL_FINDING_RE.search(stripped))
+    if root == "sslscan":
+        return bool(_SSLSCAN_FINDING_RE.search(stripped))
+    if root == "sslyze":
+        return bool(_SSLYZE_FINDING_RE.search(stripped))
+    if root == "naabu":
+        return bool(_HOST_PORT_RE.search(stripped))
+    if root == "rustscan":
+        return bool(_RUSTSCAN_OPEN_RE.search(stripped))
+    if root == "nuclei":
+        return bool(_NUCLEI_RESULT_RE.search(stripped))
+    return False
+
+
+def _is_command_scoped_warning(root: str, stripped: str) -> bool:
+    if root == "wpscan":
+        return bool(_WPSCAN_API_TOKEN_WARNING_RE.search(stripped))
+    return False
+
+
+def _is_command_scoped_summary(root: str, stripped: str) -> bool:
+    if root == "wafw00f":
+        return bool(_WAFW00F_REQUESTS_RE.search(stripped))
+    if root == "naabu":
+        return bool(_NAABU_FOUND_PORTS_RE.search(stripped))
+    if root == "nuclei":
+        return bool(_SCAN_COMPLETED_RE.search(stripped))
+    return False
 
 
 def tokenize_command(command: str) -> list[str]:
@@ -281,7 +401,7 @@ class OutputSignalClassifier:
         self.previous_text = ""
 
     def _line_target(self, text: str) -> str | None:
-        stripped = str(text or "").strip()
+        stripped = _normalize_signal_text(text)
         if self.root == "nmap":
             report_match = _NMAP_REPORT_TARGET_RE.match(stripped)
             if report_match:
@@ -313,7 +433,7 @@ class OutputSignalClassifier:
         if scopes:
             metadata["signals"] = scopes
         self.line_index += 1
-        self.previous_text = text.strip()
+        self.previous_text = _normalize_signal_text(text)
         return metadata
 
 
@@ -328,7 +448,7 @@ def classify_line(
 ) -> list[str]:
     if not include_signals:
         return []
-    stripped = str(text or "").strip()
+    stripped = _normalize_signal_text(text)
     if not stripped:
         return []
     if any(pattern.search(stripped) for pattern in _APP_SIGNAL_EXCLUDES):
@@ -358,13 +478,19 @@ def classify_line(
             finding = True
         elif root == "assetfinder" and _HOSTNAME_RE.search(stripped):
             finding = True
+        elif _is_command_scoped_finding(root, stripped):
+            finding = True
         elif any(pattern.search(stripped) for pattern in _SIGNAL_PATTERNS["findings"]):
             finding = True
         if finding:
             scopes.append("findings")
 
     for scope in ("warnings", "errors", "summaries"):
-        if any(pattern.search(stripped) for pattern in _SIGNAL_PATTERNS[scope]):
+        command_scoped_match = (
+            (scope == "warnings" and _is_command_scoped_warning(root, stripped))
+            or (scope == "summaries" and _is_command_scoped_summary(root, stripped))
+        )
+        if command_scoped_match or any(pattern.search(stripped) for pattern in _SIGNAL_PATTERNS[scope]):
             scopes.append(scope)
 
     return list(dict.fromkeys(scopes))

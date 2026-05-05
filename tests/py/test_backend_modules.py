@@ -2974,6 +2974,173 @@ class TestOutputSignals:
         assert classify_line("104.21.4.35", command="cat ips.txt") == []
         assert classify_line("fw-vx1.darklab.sh", command="cat hosts.txt") == []
 
+    def test_classifies_dns_enumeration_findings_by_command(self):
+        assert classify_line("ip.darklab.sh", command="dnsx -d darklab.sh -w dns.txt") == ["findings"]
+        assert classify_line("www.darklab.sh", command="dnsx -d darklab.sh -w dns.txt") == ["findings"]
+        assert classify_line("[INF] Current dnsx version 1.2.3 (latest)", command="dnsx -d darklab.sh") == []
+        assert classify_line("Found: ip.darklab.sh. (107.178.109.44)", command="fierce --domain darklab.sh") == ["findings"]
+        assert classify_line(
+            "SOA: frank.ns.cloudflare.com. (173.245.59.166)",
+            command="fierce --domain darklab.sh",
+        ) == ["findings"]
+        assert classify_line("104.21.4.0/24", command="dnsenum --noreverse darklab.sh") == ["findings"]
+        assert classify_line("[*] DNSSEC is configured for darklab.sh", command="dnsrecon -d darklab.sh -t std") == ["findings"]
+        assert classify_line("ip.darklab.sh", command="cat hosts.txt") == []
+
+    def test_classifies_web_enumeration_findings_by_command(self):
+        assert classify_line(
+            "https://ip.darklab.sh [200] [Nginx]",
+            command="pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
+        ) == ["findings"]
+        assert classify_line(
+            "https://p.darklab.sh/js/privatebin.js?2.0.4",
+            command="katana -u https://p.darklab.sh",
+        ) == [
+            "findings",
+        ]
+        assert classify_line("https://p.darklab.sh/js/'+t+'", command="katana -u https://p.darklab.sh") == []
+        assert classify_line(
+            "[+] The site https://darklab.sh is behind Cloudflare (Cloudflare Inc.) WAF.",
+            command="wafw00f https://darklab.sh",
+        ) == ["findings"]
+        assert classify_line("[~] Number of requests: 2", command="wafw00f https://darklab.sh") == ["summaries"]
+
+    def test_classifies_web_scanner_findings_by_command(self):
+        assert classify_line("+ Target IP:          107.178.109.44", command="nikto -h ip.darklab.sh -p 443 -ssl") == [
+            "findings",
+        ]
+        assert classify_line("+ Server: nginx", command="nikto -h ip.darklab.sh -p 443 -ssl") == ["findings"]
+        assert classify_line("+ Start Time:         2026-05-05 20:24:44 (GMT0)", command="nikto -h ip.darklab.sh") == []
+        assert classify_line(
+            "[+] XML-RPC seems to be enabled: https://churchint.org/xmlrpc.php",
+            command="wpscan --url https://churchint.org",
+        ) == [
+            "findings",
+        ]
+        assert classify_line("[+] Finished: Tue May  5 20:26:53 2026", command="wpscan --url https://churchint.org") == []
+        assert classify_line(
+            "[!] No WPScan API Token given, as a result vulnerability data has not been output.",
+            command="wpscan --url https://churchint.org",
+        ) == [
+            "warnings",
+        ]
+
+    def test_classifies_tls_scanner_findings_by_command(self):
+        assert classify_line("TLS 1.3    offered (OK): final", command="testssl --fast https://ip.darklab.sh") == [
+            "findings",
+        ]
+        assert classify_line("Overall Grade                A+", command="testssl --fast https://ip.darklab.sh") == [
+            "findings",
+        ]
+        assert classify_line("TLSv1.3   enabled", command="sslscan ip.darklab.sh") == ["findings"]
+        assert classify_line("Subject:  ip.darklab.sh", command="sslscan ip.darklab.sh") == ["findings"]
+        assert classify_line("Common Name:                       ip.darklab.sh", command="sslyze ip.darklab.sh") == [
+            "findings",
+        ]
+        assert classify_line("TLS_FALLBACK_SCSV:                 OK - Supported", command="sslyze ip.darklab.sh") == [
+            "findings",
+        ]
+        assert classify_line("ip.darklab.sh:443: FAILED - Not compliant.", command="sslyze ip.darklab.sh") == [
+            "errors",
+        ]
+
+    def test_classifies_projectdiscovery_and_port_scanner_findings(self):
+        assert classify_line("ip.darklab.sh:443", command="naabu -host ip.darklab.sh -p 80,443") == ["findings"]
+        assert classify_line(
+            "[INF] Found 2 ports on host ip.darklab.sh (107.178.109.44)",
+            command="naabu -host ip.darklab.sh",
+        ) == [
+            "summaries",
+        ]
+        assert classify_line("Open 107.178.109.44:443", command="rustscan -a ip.darklab.sh -p 80,443") == [
+            "findings",
+        ]
+        assert classify_line(
+            "[waf-detect:nginxgeneric] [http] [info] https://ip.darklab.sh",
+            command="nuclei -u https://ip.darklab.sh",
+        ) == [
+            "findings",
+        ]
+        assert classify_line(
+            "[tls-version] [ssl] [info] ip.darklab.sh:443 [\"tls12\"]",
+            command="nuclei -u https://ip.darklab.sh",
+        ) == [
+            "findings",
+        ]
+        assert classify_line("[INF] Scan completed in 4m. 21 matches found.", command="nuclei -u https://ip.darklab.sh") == [
+            "summaries",
+        ]
+
+    def test_signal_matching_uses_ansi_normalized_text(self):
+        examples = [
+            (
+                "https://ip.darklab.sh [200] [Nginx]",
+                "pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
+                ["findings"],
+            ),
+            (
+                "[+] The site https://darklab.sh is behind Cloudflare (Cloudflare Inc.) WAF.",
+                "wafw00f https://darklab.sh",
+                ["findings"],
+            ),
+            (
+                "[+] Headers",
+                "wpscan --url https://churchint.org",
+                ["findings"],
+            ),
+            (
+                "[waf-detect:nginxgeneric] [http] [info] https://ip.darklab.sh",
+                "nuclei -u https://ip.darklab.sh",
+                ["findings"],
+            ),
+            (
+                "[tls-version] [ssl] [info] ip.darklab.sh:443 [\"tls13\"]",
+                "nuclei -u https://ip.darklab.sh",
+                ["findings"],
+            ),
+            (
+                "[INF] Scan completed in 4m. 21 matches found.",
+                "nuclei -u https://ip.darklab.sh",
+                ["summaries"],
+            ),
+        ]
+
+        for plain_text, command, expected in examples:
+            assert classify_line(plain_text, command=command) == expected
+            assert classify_line(f"\x1b[32m{plain_text}\x1b[0m", command=command) == expected
+            assert classify_line(
+                plain_text.replace("[", "[\x1b[36m").replace("]", "\x1b[0m]"),
+                command=command,
+            ) == expected
+
+    def test_classifies_nuclei_findings_by_command(self):
+        nuclei_findings = [
+            "[waf-detect:nginxgeneric] [http] [info] https://ip.darklab.sh",
+            "[tls-version] [ssl] [info] ip.darklab.sh:443 [\"tls12\"]",
+            "[tls-version] [ssl] [info] ip.darklab.sh:443 [\"tls13\"]",
+            "[tech-detect:nginx] [http] [info] https://ip.darklab.sh",
+            "[cpanel-backup-exclude-exposure] [http] [info] https://ip.darklab.sh/cpbackup-exclude.conf",
+            "[http-missing-security-headers:referrer-policy] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:clear-site-data] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:cross-origin-resource-policy] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:missing-content-type] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:x-frame-options] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:x-content-type-options] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:x-permitted-cross-domain-policies] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:cross-origin-embedder-policy] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:cross-origin-opener-policy] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:strict-transport-security] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:content-security-policy] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:permissions-policy] [http] [info] https://ip.darklab.sh",
+            "[caa-fingerprint] [dns] [info] ip.darklab.sh",
+            "[dns-saas-service-detection] [dns] [info] ip.darklab.sh [\"fw-vx2-vp1.darklab.sh\"]",
+            "[ssl-issuer] [ssl] [info] ip.darklab.sh:443 [\"Let's Encrypt\"]",
+            "[ssl-dns-names] [ssl] [info] ip.darklab.sh:443 [\"ip.darklab.sh\"]",
+        ]
+
+        for line in nuclei_findings:
+            assert classify_line(line, command="nuclei -u https://ip.darklab.sh") == ["findings"]
+
     def test_classifies_warning_error_and_summary_lines(self):
         assert classify_line("warning: retrying request", cls="notice", command="curl https://darklab.sh") == ["warnings"]
         assert classify_line("connection timed out", cls="exit-fail", command="nc -zv ip.darklab.sh 80") == ["errors"]
