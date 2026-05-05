@@ -894,14 +894,7 @@ test.describe('mobile menu', () => {
   test('mobile keyboard helper moves the caret and deletes a word', async ({ page }) => {
     await ensurePromptReady(page)
 
-    // Show the helper row through the real keyboard-state path rather than
-    // toggling the CSS class directly, so the event-driven visibility sync in
-    // mobile_chrome.js runs exactly the way production does.
-    await page.evaluate(() => {
-      if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true)
-      else document.body.classList.add('mobile-keyboard-open')
-    })
-
+    await openMobileKeyboard(page)
     await expect(page.locator('#mobile-kb-helper')).toBeVisible()
 
     await setComposerValueForTest(page, 'ping -c 4 example.com', { mobile: true })

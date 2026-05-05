@@ -45,7 +45,7 @@ from commands import (
     load_mobile_welcome_hints, autocomplete_context_from_commands_registry,
     load_autocomplete_context_from_commands_registry, load_command_policy, load_container_smoke_test_commands,
     load_allow_grouping_flags, load_commands_registry, load_workflows,
-    is_command_allowed, rewrite_command,
+    command_catalog_entry, command_catalog_from_registry, is_command_allowed, rewrite_command,
 )
 from permalinks import _format_retention, _expiry_note, _permalink_error_page, _normalize_permalink_lines, _prompt_echo_text
 from output_signals import OutputSignalClassifier, classify_line, command_root, extract_target
@@ -753,6 +753,70 @@ class TestDerivedCommandRegistry:
         assert grep["autocomplete"]["pipe_command"] is True
         assert grep["autocomplete"]["pipe_description"] == "Filter lines"
 
+    def test_command_catalog_derives_reference_data_from_registry(self):
+        registry = {
+            "commands": [
+                {
+                    "root": "sentinel",
+                    "category": "Registry Group",
+                    "description": "Inspect a target.",
+                    "policy": {"allow": ["sentinel"], "deny": ["sentinel --unsafe"]},
+                    "workspace_flags": [
+                        {"flag": "-i", "mode": "read", "value": "separate"},
+                    ],
+                    "runtime_adaptations": {
+                        "inject_flags": [{"flags": ["--safe"], "position": "append"}],
+                    },
+                    "autocomplete": {
+                        "examples": [{"value": "sentinel darklab.sh"}],
+                        "flags": [
+                            {"value": "-i", "description": "Input file", "takes_value": True},
+                        ],
+                        "subcommands": {
+                            "scan": {
+                                "description": "Run a scan.",
+                                "examples": [{"value": "sentinel scan darklab.sh"}],
+                                "flags": [{"value": "--json", "description": "Emit JSON"}],
+                            },
+                        },
+                    },
+                },
+                {
+                    "root": "policyless",
+                    "policy": {"allow": []},
+                    "autocomplete": {},
+                },
+            ],
+            "pipe_helpers": [{"root": "grep"}],
+        }
+
+        catalog = command_catalog_from_registry(registry)
+        entry = command_catalog_entry("sentinel", registry=registry)
+        subcommand = command_catalog_entry("sentinel", "scan", registry=registry)
+
+        assert [item["root"] for item in catalog] == ["sentinel"]
+        assert entry is not None
+        assert entry["description"] == "Inspect a target."
+        entry_flags = entry.get("flags")
+        workspace_flags = entry.get("workspace_flags")
+        assert isinstance(entry_flags, list)
+        assert isinstance(entry_flags[0], dict)
+        assert entry_flags[0]["value"] == "-i"
+        assert isinstance(workspace_flags, list)
+        assert isinstance(workspace_flags[0], dict)
+        assert workspace_flags[0]["flag"] == "-i"
+        assert entry["runtime_notes"] == ["Adds `--safe` automatically when needed."]
+        assert subcommand is not None
+        assert subcommand["subcommand"] == "scan"
+        subcommand_examples = subcommand.get("examples")
+        subcommand_flags = subcommand.get("flags")
+        assert isinstance(subcommand_examples, list)
+        assert isinstance(subcommand_examples[0], dict)
+        assert subcommand_examples[0]["value"] == "sentinel scan darklab.sh"
+        assert isinstance(subcommand_flags, list)
+        assert isinstance(subcommand_flags[0], dict)
+        assert subcommand_flags[0]["value"] == "--json"
+
     def test_commands_registry_local_overlay_appends_policy_and_context(self):
         with tempfile.TemporaryDirectory() as tmp:
             base_path = Path(tmp) / "commands.yaml"
@@ -974,6 +1038,8 @@ class TestDerivedCommandRegistry:
         context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
 
         assert context["commands"]["flags"][0]["value"] == "--built-in"
+        assert context["commands"]["arg_hints"]["__positional__"][0]["value"] == "info"
+        assert "info" in context["commands"]["expects_value"]
         assert context["runs"]["flags"][-1]["value"] == "--json"
         assert context["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
         assert [item["value"] for item in context["var"]["arg_hints"]["__positional__"]] == [
@@ -1003,6 +1069,17 @@ class TestDerivedCommandRegistry:
         ]
         assert "rm" in enabled["file"]["expects_value"]
         assert "rm" in enabled["file"]["arg_hints"]
+
+    def test_real_registry_commands_have_root_descriptions(self):
+        registry = load_commands_registry()
+
+        missing = [
+            str(item.get("root") or "<unknown>").strip()
+            for item in registry.get("commands", [])
+            if not str(item.get("description") or "").strip()
+        ]
+
+        assert missing == []
 
     def test_real_registry_workspace_file_flags_cover_supported_file_io_tools(self):
         with tempfile.TemporaryDirectory() as tmp:

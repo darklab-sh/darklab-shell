@@ -1294,6 +1294,43 @@ class TestAllowedCommandsRoute:
         ]
 
 
+class TestCommandCatalogRoute:
+    def test_returns_catalog_entry_for_allowed_command(self):
+        client = get_client()
+        registry = {
+            "commands": [
+                {
+                    "root": "sentinel",
+                    "category": "Registry Group",
+                    "description": "Inspect a target.",
+                    "policy": {"allow": ["sentinel"]},
+                    "autocomplete": {
+                        "examples": [{"value": "sentinel darklab.sh"}],
+                        "flags": [{"value": "--json", "description": "Emit JSON"}],
+                    },
+                },
+            ],
+            "pipe_helpers": [],
+        }
+        with mock.patch("commands.load_commands_registry", return_value=registry):
+            resp = client.get("/commands/catalog/sentinel")
+
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["root"] == "sentinel"
+        assert data["description"] == "Inspect a target."
+        assert data["examples"][0]["value"] == "sentinel darklab.sh"
+        assert data["flags"][0]["value"] == "--json"
+
+    def test_returns_404_for_unknown_command(self):
+        client = get_client()
+        with mock.patch("commands.load_commands_registry", return_value={"commands": [], "pipe_helpers": []}):
+            resp = client.get("/commands/catalog/nope")
+
+        assert resp.status_code == 404
+        assert json.loads(resp.data)["error"] == "Command not found"
+
+
 class TestAutocompleteWorkspaceRoute:
     def test_workspace_roots_follow_workspace_config(self):
         client = get_client()

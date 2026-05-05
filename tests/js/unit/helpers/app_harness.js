@@ -149,6 +149,13 @@ export async function loadAppFns({
     <div id="faq-overlay"></div>
     <button class="faq-close"></button>
     <div class="faq-body"></div>
+    <div id="command-catalog-overlay" class="u-hidden">
+      <div id="command-catalog-modal">
+        <span id="command-catalog-title"></span>
+        <button class="command-catalog-close"></button>
+        <div id="command-catalog-body"></div>
+      </div>
+    </div>
     <div id="theme-overlay"></div>
     <button class="theme-close"></button>
     <div id="theme-modal"></div>
@@ -307,6 +314,9 @@ export async function loadAppFns({
     historyLoadOverlay: document.getElementById('history-load-overlay'),
     acDropdown,
     faqOverlay: document.getElementById('faq-overlay'),
+    commandCatalogOverlay: document.getElementById('command-catalog-overlay'),
+    commandCatalogBody: document.getElementById('command-catalog-body'),
+    commandCatalogCloseBtn: document.querySelector('.command-catalog-close'),
     optionsOverlay: document.getElementById('options-overlay'),
     workflowsOverlay: document.getElementById('workflows-overlay'),
     workflowsCloseBtn: document.querySelector('.workflows-close'),

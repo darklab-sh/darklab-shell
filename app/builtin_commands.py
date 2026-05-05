@@ -16,6 +16,7 @@ import sys
 from typing import Callable, Sequence, TypedDict, cast
 
 from commands import (
+    command_catalog_entry,
     command_root,
     load_ascii_art,
     load_all_faq,
@@ -689,6 +690,10 @@ def _run_builtin_help() -> list[dict[str, str]]:
         _output_line("Run `shortcuts` to see the current keyboard shortcuts.", "builtin-plain"),
         _output_line("Run `commands` to browse built-in and allowed external commands.", "builtin-plain"),
         _output_line("Use `commands --built-in` or `commands --external` to filter that catalog.", "builtin-plain"),
+        _output_line(
+            "Use `commands info <command>` to see examples, flags, and subcommands for a supported command.",
+            "builtin-plain",
+        ),
         _output_line("Autocomplete appears as you type; press Tab to accept or cycle suggestions.", "builtin-plain"),
     ]
     return lines
@@ -729,13 +734,81 @@ def _allowed_external_command_groups() -> list[tuple[str, list[str]]] | None:
     return rows or None
 
 
+def _run_builtin_commands_info(parts: list[str]) -> list[dict[str, str]]:
+    if len(parts) not in {3, 4}:
+        return [_output_line("Usage: commands info <command> [subcommand]")]
+    root = parts[2].lower()
+    subcommand = parts[3].lower() if len(parts) == 4 else None
+    entry = command_catalog_entry(root, subcommand)
+    if not entry:
+        target = f"{root} {subcommand}" if subcommand else root
+        return [_output_line(f"commands: no catalog entry for {target}")]
+
+    lines: list[dict[str, str]] = [
+        _output_line(str(entry.get("root") or root), "builtin-section"),
+    ]
+    if entry.get("subcommand"):
+        lines.append(_output_line(f"Subcommand: {entry['subcommand']}", "builtin-plain"))
+    description = str(entry.get("description") or "").strip()
+    if description:
+        lines.append(_output_line(description, "builtin-plain"))
+    category = str(entry.get("category") or "").strip()
+    if category:
+        lines.append(_output_line(f"Category: {category}", "builtin-note"))
+
+    examples = cast(list[dict[str, object]], entry.get("examples")) if isinstance(entry.get("examples"), list) else []
+    if examples:
+        lines.append(_output_line("", "builtin-spacer"))
+        lines.append(_output_line("Examples:", "builtin-section"))
+        for example in examples[:8]:
+            if not isinstance(example, dict):
+                continue
+            value = str(example.get("value") or "").strip()
+            description = str(example.get("description") or "").strip()
+            suffix = f"  {description}" if description else ""
+            if value:
+                lines.append(_output_line(f"  {value}{suffix}", "builtin-catalog-item"))
+
+    subcommands = cast(list[dict[str, object]], entry.get("subcommands")) if isinstance(entry.get("subcommands"), list) else []
+    if subcommands:
+        lines.append(_output_line("", "builtin-spacer"))
+        lines.append(_output_line("Subcommands:", "builtin-section"))
+        for sub in subcommands:
+            if not isinstance(sub, dict):
+                continue
+            name = str(sub.get("name") or "").strip()
+            description = str(sub.get("description") or "").strip()
+            suffix = f"  {description}" if description else ""
+            if name:
+                lines.append(_output_line(f"  {name}{suffix}", "builtin-catalog-item"))
+
+    flags = cast(list[dict[str, object]], entry.get("flags")) if isinstance(entry.get("flags"), list) else []
+    if flags:
+        lines.append(_output_line("", "builtin-spacer"))
+        lines.append(_output_line("Flags:", "builtin-section"))
+        for flag in flags:
+            if not isinstance(flag, dict):
+                continue
+            value = str(flag.get("value") or "").strip()
+            description = str(flag.get("description") or "").strip()
+            marker = " <value>" if flag.get("takes_value") else ""
+            suffix = f"  {description}" if description else ""
+            if value:
+                lines.append(_output_line(f"  {value}{marker}{suffix}", "builtin-catalog-item"))
+
+    return lines
+
+
 def _run_builtin_commands(command: str) -> list[dict[str, str]]:
     parts = _split_command(command)
+    if len(parts) > 1 and parts[1].lower() == "info":
+        return _run_builtin_commands_info(parts)
+
     filters = {part.lower() for part in parts[1:]}
     valid_filters = {"--built-in", "--external"}
     invalid_filters = sorted(filters - valid_filters)
     if invalid_filters:
-        return [_output_line("Usage: commands [--built-in] [--external]")]
+        return [_output_line("Usage: commands [--built-in] [--external] | commands info <command> [subcommand]")]
 
     show_builtins = True
     show_external = True

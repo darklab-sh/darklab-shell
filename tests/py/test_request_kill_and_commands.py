@@ -15,6 +15,7 @@ from builtin_commands import (
     _DOCUMENTED_BUILTIN_COMMANDS,
     _BUILTIN_COMMAND_DISPATCH,
     _SPECIAL_BUILTIN_COMMANDS,
+    _run_builtin_commands,
     resolve_builtin_command,
 )
 from commands import (
@@ -677,6 +678,84 @@ class TestBuiltinCommandResolution:
             assert resolve_builtin_command("ls") is None
             assert resolve_builtin_command("cat targets.txt") is None
             assert resolve_builtin_command("rm targets.txt") is None
+
+    def test_commands_external_catalog_uses_commands_registry(self):
+        registry = {
+            "commands": [
+                {
+                    "root": "sentinel-scan",
+                    "category": "Registry Group",
+                    "policy": {"allow": ["sentinel-scan"]},
+                },
+                {
+                    "root": "sentinel-http",
+                    "category": "Registry Group",
+                    "policy": {"allow": ["sentinel-http --safe"]},
+                },
+                {
+                    "root": "policyless-tool",
+                    "category": "Registry Group",
+                    "policy": {"allow": []},
+                },
+            ],
+            "pipe_helpers": [{"root": "grep"}],
+        }
+
+        with mock.patch("builtin_commands.load_commands_registry", return_value=registry) as loader:
+            lines = _run_builtin_commands("commands --external")
+
+        text = "\n".join(line.get("text", "") for line in lines)
+        assert loader.call_count == 1
+        assert "Allowed external commands:" in text
+        assert "[Registry Group]" in text
+        assert "sentinel-scan" in text
+        assert "sentinel-http" in text
+        assert "policyless-tool" not in text
+        assert "grep" not in text
+
+    def test_commands_info_renders_registry_catalog_entry(self):
+        registry = {
+            "commands": [
+                {
+                    "root": "sentinel-scan",
+                    "category": "Registry Group",
+                    "description": "Probe a target safely.",
+                    "policy": {"allow": ["sentinel-scan"]},
+                    "workspace_flags": [
+                        {"flag": "-i", "mode": "read", "value": "separate"},
+                    ],
+                    "runtime_adaptations": {
+                        "inject_flags": [{"flags": ["--safe"], "position": "append"}],
+                    },
+                    "autocomplete": {
+                        "examples": [
+                            {"value": "sentinel-scan example.test", "description": "Basic probe"},
+                        ],
+                        "flags": [
+                            {"value": "-i", "description": "Read targets", "takes_value": True},
+                        ],
+                    },
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("commands.load_commands_registry", return_value=registry):
+            lines = _run_builtin_commands("commands info sentinel-scan")
+
+        text = "\n".join(line.get("text", "") for line in lines)
+        assert "sentinel-scan" in text
+        assert "Probe a target safely." in text
+        assert "sentinel-scan example.test" in text
+        assert "-i <value>" in text
+        assert "App handling:" not in text
+        assert "Adds `--safe` automatically when needed." not in text
+
+    def test_commands_info_unknown_root_returns_usage_hint(self):
+        with mock.patch("commands.load_commands_registry", return_value={"commands": [], "pipe_helpers": []}):
+            lines = _run_builtin_commands("commands info nope")
+
+        assert lines[0]["text"] == "commands: no catalog entry for nope"
 
     def test_rejects_non_builtin_commands(self):
         assert resolve_builtin_command("ping darklab.sh") is None

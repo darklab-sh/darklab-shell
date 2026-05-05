@@ -9,6 +9,7 @@ from flask import Blueprint, Response, jsonify, render_template, request
 
 import config as _config
 from commands import (
+    command_catalog_entry,
     load_all_faq,
     load_all_workflows,
     load_ascii_art,
@@ -218,6 +219,18 @@ def allowed_commands():
         return jsonify({"restricted": False, "commands": [], "groups": []})
     _log_content_view("/allowed-commands", restricted=True, count=len(prefixes))
     return jsonify({"restricted": True, "commands": prefixes, "groups": groups})
+
+
+@content_bp.route("/commands/catalog/<root>")
+@content_bp.route("/commands/catalog/<root>/<subcommand>")
+def command_catalog(root: str, subcommand: str | None = None):
+    """Return app-native reference details for one allowed external command."""
+    entry = command_catalog_entry(root, subcommand)
+    if not entry:
+        _log_content_view("/commands/catalog", root=root, subcommand=subcommand or "", found=False)
+        return jsonify({"error": "Command not found"}), 404
+    _log_content_view("/commands/catalog", root=root, subcommand=subcommand or "", found=True)
+    return jsonify(entry)
 
 
 @content_bp.route("/faq")

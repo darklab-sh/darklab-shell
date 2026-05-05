@@ -13,6 +13,7 @@ import os
 import re
 import shlex
 import shutil
+from typing import cast
 import yaml
 from urllib.parse import urlparse
 
@@ -1019,6 +1020,196 @@ def load_commands_registry():
     root, ext = os.path.splitext(COMMANDS_REGISTRY_FILE)
     local = _load_commands_registry_file(f"{root}.local{ext}")
     return _merge_commands_registry(base, local)
+
+
+def _catalog_suggestions(items: object) -> list[dict[str, object]]:
+    suggestions: list[dict[str, object]] = []
+    seen = set()
+    if not isinstance(items, list):
+        return suggestions
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        value = str(item.get("value") or "").strip()
+        if not value:
+            continue
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        suggestion: dict[str, object] = {
+            "value": value,
+            "description": str(item.get("description") or "").strip(),
+        }
+        if item.get("takes_value"):
+            suggestion["takes_value"] = True
+        suggestions.append(suggestion)
+    return suggestions
+
+
+def _catalog_autocomplete_spec(spec: object) -> dict[str, object]:
+    autocomplete = cast(dict[str, object], spec) if isinstance(spec, dict) else {}
+    raw_expects_value = autocomplete.get("expects_value")
+    expects_value = {
+        str(item)
+        for item in raw_expects_value
+        if str(item)
+    } if isinstance(raw_expects_value, (list, tuple, set)) else set()
+    raw_arg_hints = autocomplete.get("arg_hints")
+    arg_hints = cast(dict[str, object], raw_arg_hints) if isinstance(raw_arg_hints, dict) else {}
+    flags: list[dict[str, object]] = []
+    for item in _catalog_suggestions(autocomplete.get("flags")):
+        flag = dict(item)
+        value = str(flag.get("value") or "")
+        if value in expects_value or item.get("takes_value"):
+            flag["takes_value"] = True
+            hints = _catalog_suggestions(arg_hints.get(value))
+            if hints:
+                flag["value_hints"] = hints
+        flags.append(flag)
+
+    positional_hints = _catalog_suggestions(arg_hints.get("__positional__"))
+    examples = _catalog_suggestions(autocomplete.get("examples"))
+    subcommands: list[dict[str, object]] = []
+    raw_subcommands = autocomplete.get("subcommands")
+    if isinstance(raw_subcommands, dict):
+        for name, sub_spec in raw_subcommands.items():
+            sub_name = str(name or "").strip()
+            if not sub_name:
+                continue
+            sub_catalog = _catalog_autocomplete_spec(sub_spec)
+            if isinstance(sub_spec, dict):
+                description = str(sub_spec.get("description") or "").strip()
+                if description:
+                    sub_catalog["description"] = description
+            sub_catalog["name"] = sub_name
+            subcommands.append(sub_catalog)
+
+    return {
+        "flags": flags,
+        "arguments": positional_hints,
+        "examples": examples,
+        "subcommands": subcommands,
+    }
+
+
+def _catalog_workspace_flags(items: object) -> list[dict[str, object]]:
+    flags: list[dict[str, object]] = []
+    if not isinstance(items, list):
+        return flags
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        flag = str(item.get("flag") or "").strip()
+        if not flag:
+            continue
+        entry: dict[str, object] = {
+            "flag": flag,
+            "mode": str(item.get("mode") or "").strip(),
+            "value": str(item.get("value") or "").strip(),
+        }
+        kind = str(item.get("kind") or "").strip()
+        if kind:
+            entry["kind"] = kind
+        subcommands = [
+            str(subcommand).strip()
+            for subcommand in item.get("subcommands", []) or []
+            if str(subcommand).strip()
+        ]
+        if subcommands:
+            entry["subcommands"] = subcommands
+        flags.append(entry)
+    return flags
+
+
+def _catalog_runtime_notes(runtime_adaptations: object) -> list[str]:
+    runtime = runtime_adaptations if isinstance(runtime_adaptations, dict) else {}
+    notes: list[str] = []
+    for inject in runtime.get("inject_flags", []) or []:
+        if not isinstance(inject, dict):
+            continue
+        flags = " ".join(str(flag) for flag in inject.get("flags", []) or [] if str(flag).strip())
+        if flags:
+            notes.append(f"Adds `{flags}` automatically when needed.")
+    managed = runtime.get("managed_workspace_directory")
+    if isinstance(managed, dict) and managed.get("directory"):
+        notes.append(
+            f"Uses a managed `{managed['directory']}` directory in the session workspace."
+        )
+    environment = runtime.get("environment")
+    if isinstance(environment, list) and environment:
+        notes.append("Uses session-scoped runtime state for tool configuration.")
+    return _dedupe_preserve_order(notes)
+
+
+def command_catalog_from_registry(registry: dict | None = None) -> list[dict[str, object]]:
+    """Return user-facing command reference data from the external command registry."""
+    active_registry = registry or load_commands_registry()
+    catalog = []
+    for entry in active_registry.get("commands", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        root = str(entry.get("root") or "").strip().lower()
+        if not root:
+            continue
+        raw_policy_value = entry.get("policy")
+        policy = raw_policy_value if isinstance(raw_policy_value, dict) else {}
+        allowed = [
+            str(item).strip()
+            for item in policy.get("allow", []) or []
+            if str(item).strip()
+        ]
+        if not allowed:
+            continue
+        autocomplete = _catalog_autocomplete_spec(entry.get("autocomplete"))
+        catalog.append({
+            "root": root,
+            "category": str(entry.get("category") or "Allowed commands").strip(),
+            "description": str(entry.get("description") or "").strip(),
+            "allow": allowed,
+            "deny": [
+                str(item).strip()
+                for item in policy.get("deny", []) or []
+                if str(item).strip()
+            ],
+            "examples": autocomplete["examples"],
+            "flags": autocomplete["flags"],
+            "arguments": autocomplete["arguments"],
+            "subcommands": autocomplete["subcommands"],
+            "workspace_flags": _catalog_workspace_flags(entry.get("workspace_flags")),
+            "runtime_notes": _catalog_runtime_notes(entry.get("runtime_adaptations")),
+        })
+    return catalog
+
+
+def command_catalog_entry(root: str, subcommand: str | None = None, registry: dict | None = None) -> dict[str, object] | None:
+    """Return catalog details for one command root, optionally scoped to a subcommand."""
+    wanted_root = str(root or "").strip().lower()
+    wanted_subcommand = str(subcommand or "").strip().lower()
+    if not wanted_root:
+        return None
+    for entry in command_catalog_from_registry(registry):
+        if str(entry.get("root") or "").lower() != wanted_root:
+            continue
+        if not wanted_subcommand:
+            return entry
+        raw_subcommands = entry.get("subcommands")
+        subcommands = raw_subcommands if isinstance(raw_subcommands, list) else []
+        for sub in subcommands:
+            if not isinstance(sub, dict):
+                continue
+            if str(sub.get("name") or "").strip().lower() != wanted_subcommand:
+                continue
+            scoped = dict(entry)
+            scoped["subcommand"] = wanted_subcommand
+            scoped["description"] = str(sub.get("description") or scoped.get("description") or "")
+            scoped["examples"] = sub.get("examples") or entry.get("examples") or []
+            scoped["flags"] = sub.get("flags") or []
+            scoped["arguments"] = sub.get("arguments") or []
+            scoped["subcommands"] = []
+            return scoped
+        return None
+    return None
 
 
 def load_builtin_autocomplete_registry():

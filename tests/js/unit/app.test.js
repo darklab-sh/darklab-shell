@@ -46,6 +46,11 @@ function builtInAutocompleteBase() {
     commands: {
       ...emptyBuiltIn('built-in: list built-in and allowed external commands'),
       flags: [hint('--built-in', 'Show only built-in shell commands'), hint('--external', 'Show only allowed external commands')],
+      expects_value: ['info'],
+      arg_hints: {
+        info: [],
+        __positional__: [hint('info', 'Show details for one supported command', 'info ')],
+      },
     },
     config: {
       ...emptyBuiltIn('built-in: show or update user options'),
@@ -1066,6 +1071,10 @@ describe('app helpers', () => {
     })
 
     expect(context.commands.flags.map(item => item.value)).toEqual(['--built-in', '--external'])
+    expect(context.commands.arg_hints.__positional__.map(item => item.value)).toContain('info')
+    expect(context.commands.arg_hints.info.map(item => item.value)).toEqual(
+      expect.arrayContaining(['curl', 'nmap', 'commands', 'man']),
+    )
     expect(context.runs.flags.map(item => item.value)).toEqual(['-v', '--verbose', '--json'])
     expect(context.jobs.flags.map(item => item.value)).toEqual(['-v', '--verbose', '--json'])
     expect(context['session-token'].arg_hints.__positional__.map(item => item.value)).toContain('set <token>')
@@ -4360,7 +4369,7 @@ describe('app helpers', () => {
     expect(document.querySelectorAll('.allowed-chip')).toHaveLength(2)
   })
 
-  it('loads FAQ command chips into the visible mobile composer and refocuses it', async () => {
+  it('opens command catalog details from allowed-command FAQ chips', async () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/config') {
         return Promise.resolve({
@@ -4396,6 +4405,22 @@ describe('app helpers', () => {
             }),
         })
       }
+      if (url === '/commands/catalog/curl') {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              root: 'curl',
+              category: 'Network',
+              description: 'Transfer data from URLs.',
+              examples: [{ value: 'curl https://darklab.sh', description: 'Fetch a URL' }],
+              subcommands: [],
+              flags: [{ value: '-L', description: 'Follow redirects' }],
+              workspace_flags: [],
+              runtime_notes: [],
+            }),
+        })
+      }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
 
@@ -4409,12 +4434,17 @@ describe('app helpers', () => {
     expect(mobileCmdInput.blur).toHaveBeenCalled()
 
     chip.click()
+    await Promise.resolve()
+    await Promise.resolve()
 
-    expect(mobileCmdInput.value).toBe('curl ')
+    expect(document.getElementById('command-catalog-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('command-catalog-body').textContent).toContain('Transfer data from URLs.')
+    expect(document.getElementById('command-catalog-body').textContent).not.toContain('App Handling')
+    expect(mobileCmdInput.value).toBe('')
     expect(mobileCmdInput.focus).not.toHaveBeenCalled()
   })
 
-  it('opens autocomplete after loading an FAQ command chip', async () => {
+  it('opens autocomplete after loading a command catalog example chip', async () => {
     const acShow = vi.fn()
     const apiFetch = vi.fn((url) => {
       if (url === '/config') {
@@ -4451,6 +4481,22 @@ describe('app helpers', () => {
             }),
         })
       }
+      if (url === '/commands/catalog/nc') {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              root: 'nc',
+              category: 'Network',
+              description: 'Open TCP connections.',
+              examples: [{ value: 'nc', description: 'Check port' }],
+              subcommands: [],
+              flags: [{ value: '-z', description: 'Zero-I/O mode' }],
+              workspace_flags: [],
+              runtime_notes: [],
+            }),
+        })
+      }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
 
@@ -4466,6 +4512,12 @@ describe('app helpers', () => {
     await new Promise((resolve) => setImmediate(resolve))
 
     document.querySelector('.allowed-chip').click()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(document.getElementById('command-catalog-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('command-catalog-body').textContent).toContain('Open TCP connections.')
+    document.querySelector('[data-command-example]').click()
 
     expect(document.getElementById('mobile-cmd').value).toBe('nc ')
     expect(acShow).toHaveBeenCalledWith([

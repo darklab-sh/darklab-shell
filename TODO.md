@@ -17,9 +17,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 
 ## Open TODOs
 
-No open implementation TODOs are currently tracked.
-
----
+No TODOs are currently tracked.
 
 ## Research
 
@@ -29,13 +27,13 @@ No research items are currently tracked.
 
 ## Known Issues
 
-No active known issues are currently tracked.
+No known issues are currently tracked.
 
 ---
 
 ## Technical Debt
 
-No active technical debt items are currently tracked.
+No technical debt items are currently tracked.
 
 ---
 
@@ -50,6 +48,17 @@ These are product ideas and possible enhancements, not committed TODOs or planne
     - command-specific caveats
     - what to expect while a tool runs
     - examples of when to use one tool vs another
+
+- **Command catalog future-state**
+  - Add `commands search <term>` for roots, descriptions, categories, examples, and flag text.
+  - Add `commands --json` or `commands info --json <root>` for debugging, export, and future UI reuse.
+  - Add optional richer registry fields such as `details`, `notes`, `common_flags`, or `gotchas` when a flag or tool needs more than a short autocomplete description.
+  - Add command-specific guidance for web-shell behavior, including injected safe defaults, quiet-running tools, generated Files output, and managed session state.
+  - Add autocomplete side previews later: when a root, subcommand, or flag is highlighted, show the command description or flag note in a small help pane.
+  - Add a dedicated “Command Library” modal/sheet reachable outside the FAQ, with category filters and search.
+  - Add hover/focus cards for FAQ chips once the command-details modal behavior has settled.
+  - Consider including pipe helpers in a separate “Pipes” section once command catalog UX exists.
+  - Consider linking command catalog entries to real `man` output where available, while keeping app-native allowed-subset details primary.
 
 - **Command outcome summaries**
   - For selected tools, generate short app-native summaries below the raw output. Security tool output is high-volume; a clear findings layer is what separates a purpose-built tool from a raw terminal.

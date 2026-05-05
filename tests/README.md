@@ -20,12 +20,12 @@ Workspace file behavior is intentionally split across all three layers: pytest o
 
 Current totals:
 
-- behavior tests: 2,379
+- behavior tests: 2,386
 - docs/inventory meta-tests: 30
-- `pytest`: 1187 (1157 behavior + 30 meta)
+- `pytest`: 1194 (1164 behavior + 30 meta)
 - `vitest`: 986
 - `playwright`: 236
-- total: 2,409
+- total: 2,416
 
 This document is organized in two parts:
 
@@ -408,6 +408,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_cleanup_can_skip_current_session_directory` | Verifies that workspace cleanup can preserve the request session while sweeping other expired session directories. |
 | `TestEntrypointWorkspaceRepair.test_workspace_repair_targets_children_inside_session_directories` | Verifies that entrypoint workspace permission repair explicitly targets files and folders inside hashed session directories. |
 | `TestDerivedCommandRegistry.test_commands_registry_loader_normalizes_policy_and_autocomplete` | Verifies that the `commands.yaml` loader normalizes policy entries and autocomplete metadata, including pipe-helper entries. |
+| `TestDerivedCommandRegistry.test_command_catalog_derives_reference_data_from_registry` | Verifies that the command catalog helper derives descriptions, examples, flags, workspace file handling, runtime notes, and subcommand-scoped details from the command registry. |
 | `TestDerivedCommandRegistry.test_commands_registry_local_overlay_appends_policy_and_context` | Verifies that `commands.local.yaml` appends policy entries, adds new roots, overrides categories, and merges autocomplete hints without replacing the base registry. |
 | `TestDerivedCommandRegistry.test_real_registry_amass_uses_subcommand_scoped_autocomplete` | Verifies that Amass autocomplete exposes root subcommands and keeps subcommand-specific flags and examples scoped to the matching subcommand. |
 | `TestDerivedCommandRegistry.test_real_registry_openssl_uses_subcommand_scoped_autocomplete` | Verifies that OpenSSL autocomplete exposes allowlisted subcommands and keeps `s_client` and `ciphers` flags scoped to the matching subcommand. |
@@ -417,6 +418,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDerivedCommandRegistry.test_autocomplete_context_can_be_derived_from_commands_registry` | Verifies that browser autocomplete context can be derived from command and pipe-helper registry entries. |
 | `TestDerivedCommandRegistry.test_builtin_autocomplete_registry_uses_app_owned_yaml` | Verifies that built-in autocomplete grammar is loaded from the app-owned YAML registry and normalized into the browser context shape. |
 | `TestDerivedCommandRegistry.test_builtin_autocomplete_workspace_roots_follow_feature_flag` | Verifies that Files-only built-in autocomplete roots are hidden unless workspace support is enabled. |
+| `TestDerivedCommandRegistry.test_real_registry_commands_have_root_descriptions` | Verifies that every supported external command root in `commands.yaml` declares a one-sentence description. |
 | `TestDerivedCommandRegistry.test_real_registry_workspace_file_flags_cover_supported_file_io_tools` | Verifies that supported file input/output flags in the real command registry are rewritten through session workspace paths. |
 | `TestDerivedCommandRegistry.test_workspace_rewrites_quote_shell_sensitive_paths` | Verifies that workspace file rewrites quote absolute paths containing shell-sensitive characters. |
 | `TestDerivedCommandRegistry.test_amass_runtime_environment_quotes_rewritten_workspace_paths` | Verifies that the Amass managed-directory runtime environment wrapper quotes rewritten workspace paths safely. |
@@ -861,6 +863,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestBuiltinCommandResolution.test_documented_builtin_commands_are_backed_by_runtime_dispatch` | Checks that every entry in `_DOCUMENTED_BUILTIN_COMMANDS` has a corresponding runtime dispatch handler. |
 | `TestBuiltinCommandResolution.test_resolves_supported_builtin_commands` | Checks that resolves supported built-in commands. |
 | `TestBuiltinCommandResolution.test_workspace_builtin_commands_are_hidden_when_disabled` | Verifies that file built-ins and aliases stop resolving when Files are disabled. |
+| `TestBuiltinCommandResolution.test_commands_external_catalog_uses_commands_registry` | Verifies that `commands --external` renders allowed external roots from `commands.yaml` rather than a duplicated list. |
+| `TestBuiltinCommandResolution.test_commands_info_renders_registry_catalog_entry` | Verifies that `commands info <root>` renders command descriptions, examples, and value-taking flags from the registry catalog without exposing internal app-handling notes. |
+| `TestBuiltinCommandResolution.test_commands_info_unknown_root_returns_usage_hint` | Verifies that `commands info` returns a clear no-entry message for unknown roots. |
 | `TestBuiltinCommandResolution.test_rejects_non_builtin_commands` | Checks that rejects non built-in commands. |
 
 #### `test_routes.py`
@@ -973,6 +978,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestAllowedCommandsRoute.test_restricted_when_file_present` | Checks that restricted when file present. |
 | `TestAllowedCommandsRoute.test_returns_grouped_commands_when_restricted` | Returns grouped commands when restricted. |
 | `TestAllowedCommandsRoute.test_returns_root_commands_for_prefixed_policy_entries` | Verifies that the FAQ-facing allowed-command payload collapses prefixed allow policy entries to unique command roots. |
+| `TestCommandCatalogRoute.test_returns_catalog_entry_for_allowed_command` | Verifies that `/commands/catalog/<root>` returns the shared registry-derived command reference payload. |
+| `TestCommandCatalogRoute.test_returns_404_for_unknown_command` | Verifies that unknown command catalog roots return HTTP 404 with a JSON error. |
 | `TestAutocompleteWorkspaceRoute.test_workspace_roots_follow_workspace_config` | Verifies that file built-in roots are included in autocomplete only when Files are enabled. |
 | `TestAutocompleteWorkspaceRoute.test_workspace_autocomplete_examples_follow_workspace_config` | Verifies that workspace-only command examples and file flags are hidden from `/autocomplete` until Files are enabled. |
 | `TestFaqRoute.test_returns_200` | Checks returns 200 handling. |
@@ -1541,8 +1548,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `clears the session token only after confirming the destructive action` | Verifies that the active session token is only removed after the destructive clear action is explicitly confirmed. |
 | `persists options changes through cookies and syncs quick-toggle state` | Verifies that option changes update cookies, quick-toggle UI, and the persisted `/session/preferences` snapshot together. |
 | `renders backend-driven FAQ items with HTML answers and dynamic sections` | Verifies that renders backend-driven FAQ items with HTML answers and dynamic sections. |
-| `loads FAQ command chips into the visible mobile composer and refocuses it` | Verifies that loads FAQ command chips into the visible mobile composer and refocuses it. |
-| `opens autocomplete after loading an FAQ command chip` | Verifies that FAQ command chips trigger the normal composer autocomplete flow after loading the command into the prompt. |
+| `opens command catalog details from allowed-command FAQ chips` | Verifies that supported-command FAQ chips open the command catalog modal without loading the prompt directly. |
+| `opens autocomplete after loading a command catalog example chip` | Verifies that command catalog example chips load the prompt and trigger the normal composer autocomplete flow. |
 | `loads custom FAQ chips into the prompt with the same command-chip behavior` | Verifies that loads custom FAQ chips into the prompt with the same command-chip behavior. |
 | `returns off when no cookie is set` | Verifies that returns off when no cookie is set. |
 | `returns on when cookie is set to on` | Verifies that returns on when cookie is set to on. |

@@ -183,6 +183,12 @@ function setupDismissibleOverlays() {
     onClose: closeFaq,
     closeButtons: faqCloseBtn,
   });
+  bindDismissible(commandCatalogOverlay, {
+    level: 'modal',
+    isOpen: () => typeof isCommandCatalogOverlayOpen === 'function' && isCommandCatalogOverlayOpen(),
+    onClose: () => { if (typeof closeCommandCatalogModal === 'function') closeCommandCatalogModal(); },
+    closeButtons: commandCatalogCloseBtn,
+  });
   bindDismissible(_uiOverlayRefs.themeOverlay, {
     level: 'panel',
     isOpen: isThemeOverlayOpen,

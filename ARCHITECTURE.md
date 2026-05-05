@@ -185,6 +185,8 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/config` | Returns browser-facing runtime config derived from `config.yaml` and `config.local.yaml`. |
 | `GET` | `/themes` | Returns the active theme plus the complete theme registry used by the Options modal. |
 | `GET` | `/allowed-commands` | Returns the allowed command prefixes grouped from `commands.yaml` for command reference surfaces. |
+| `GET` | `/commands/catalog/<root>` | Returns the app-native command reference payload for one supported external command root. |
+| `GET` | `/commands/catalog/<root>/<subcommand>` | Returns a subcommand-scoped command reference payload when the registry has subcommand metadata. |
 | `GET` | `/faq` | Returns built-in FAQ entries plus custom `faq.yaml` entries. |
 | `GET` | `/workflows` | Returns current-session user workflows followed by built-in and custom `workflows.yaml` entries, filtered by feature gates such as Files/workspace support. |
 | `GET` | `/shortcuts` | Returns the keyboard shortcut reference used by the `shortcuts` built-in and the browser overlay. |
@@ -939,12 +941,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,379
+- behavior tests: 2,386
 - docs/inventory meta-tests: 30
-- `pytest`: 1187 (1157 behavior + 30 meta)
+- `pytest`: 1194 (1164 behavior + 30 meta)
 - `vitest`: 986
 - `playwright`: 236
-- total: 2,409
+- total: 2,416
 
 ### Testing Architecture
 

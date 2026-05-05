@@ -32,6 +32,11 @@ commands:
           description: "Show only built-in shell commands"
         - value: --external
           description: "Show only allowed external commands"
+      subcommands:
+        - value: info
+          description: "Show details for one supported command"
+          takes_value: true
+          insert: "info "
   - root: config
     description: "built-in: show or update user options"
     autocomplete:
