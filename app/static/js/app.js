@@ -2243,6 +2243,7 @@ function _runtimeContextSpec({
   expectsValue = [],
   argHints = {},
   sequenceArgHints = {},
+  workspacePathArgKinds = {},
   argumentLimit = null,
   pipeCommand = false,
   pipeInsertValue = '',
@@ -2256,6 +2257,7 @@ function _runtimeContextSpec({
     expects_value: expectsValue,
     arg_hints: argHints,
     sequence_arg_hints: sequenceArgHints,
+    workspace_path_arg_kinds: workspacePathArgKinds,
     argument_limit: argumentLimit,
     pipe_command: pipeCommand,
     pipe_insert_value: pipeInsertValue,
@@ -2341,6 +2343,11 @@ function _runtimeMergeContextSpec(baseSpec = {}, overlaySpec = {}) {
   appendItems('examples');
   merged.arg_hints = _runtimeMergeHints(merged.arg_hints, overlaySpec.arg_hints);
   merged.sequence_arg_hints = _runtimeMergeHints(merged.sequence_arg_hints, overlaySpec.sequence_arg_hints);
+  merged.workspace_path_arg_kinds = Object.assign(
+    {},
+    merged.workspace_path_arg_kinds || {},
+    overlaySpec.workspace_path_arg_kinds || {},
+  );
   merged.close_after = Object.assign({}, merged.close_after || {}, overlaySpec.close_after || {});
   if (Number.isInteger(overlaySpec.argument_limit) && overlaySpec.argument_limit > 0) {
     merged.argument_limit = overlaySpec.argument_limit;
@@ -2407,6 +2414,18 @@ function _runtimeWorkspaceDirectoryHints() {
   return _runtimeWorkspaceEntryHints('directory');
 }
 
+function _runtimeWorkspaceDirectoryNavigationHints() {
+  return _runtimeWorkspaceDirectoryHints().map((hint) => {
+    const value = String(hint && hint.value || '').trim();
+    if (!value || value === '/' || value.endsWith('/')) return hint;
+    return _runtimeHint(`${value}/`, hint.description || 'session folder');
+  });
+}
+
+function _runtimeWorkspaceFilePathHints() {
+  return _runtimeWorkspaceFileHints().concat(_runtimeWorkspaceDirectoryNavigationHints());
+}
+
 function _runtimeWorkspaceCwd() {
   if (typeof _workspaceCwd === 'function') return _workspaceCwd(activeTabId);
   if (typeof getTab === 'function') {
@@ -2425,10 +2444,98 @@ function _runtimeWorkspaceRelativeValue(path = '', cwd = '') {
   return normalizedPath.slice(normalizedCwd.length + 1);
 }
 
-function _runtimeWorkspaceDirectHintFromPath(item, cwd = '') {
+function _runtimeWorkspaceDirectHintFromPath(item, cwd = '', kind = 'file') {
   const relative = _runtimeWorkspaceRelativeValue(item && item.value, cwd);
   if (!relative || relative.includes('/')) return null;
-  return _runtimeHint(relative, item && item.description || '');
+  const value = kind === 'directory' && relative !== '/' && !relative.endsWith('/')
+    ? `${relative}/`
+    : relative;
+  return _runtimeHint(value, item && item.description || '');
+}
+
+function _runtimeNormalizeWorkspaceCommandPath(path = '', cwd = '') {
+  if (typeof normalizeWorkspaceCommandPath === 'function') {
+    return String(normalizeWorkspaceCommandPath(path, cwd) || '').split('/').filter(Boolean).join('/');
+  }
+  const raw = String(path ?? '').trim();
+  const baseParts = raw.startsWith('/') ? [] : String(cwd || '').split('/').filter(Boolean);
+  raw.split('/').forEach((part) => {
+    const trimmed = String(part || '').trim();
+    if (!trimmed || trimmed === '.') return;
+    if (trimmed === '..') {
+      if (!baseParts.length) throw new Error('path escapes the session workspace');
+      baseParts.pop();
+      return;
+    }
+    if (trimmed.includes('\\') || trimmed.includes('\x00')) {
+      throw new Error('file name contains unsupported characters');
+    }
+    baseParts.push(trimmed);
+  });
+  return baseParts.join('/');
+}
+
+function _runtimeWorkspaceCompletionParts(token = '') {
+  const rawToken = String(token || '');
+  const slashIndex = rawToken.lastIndexOf('/');
+  if (slashIndex < 0) return null;
+  const typedPrefix = rawToken.slice(0, slashIndex + 1);
+  try {
+    return {
+      typedPrefix,
+      resolvedDirectory: _runtimeNormalizeWorkspaceCommandPath(typedPrefix || '.', _runtimeWorkspaceCwd()),
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function _runtimeWorkspaceAllHints(kind = 'file') {
+  return kind === 'directory'
+    ? (typeof getWorkspaceAutocompleteDirectoryHints === 'function' ? getWorkspaceAutocompleteDirectoryHints() : [])
+    : (typeof getWorkspaceAutocompleteFileHints === 'function' ? getWorkspaceAutocompleteFileHints() : []);
+}
+
+function _runtimeWorkspaceHintDescription(path = '', kind = 'file') {
+  const normalized = String(path || '').split('/').filter(Boolean).join('/');
+  const allHints = _runtimeWorkspaceAllHints(kind);
+  const existing = (Array.isArray(allHints) ? allHints : [])
+    .find(item => String(item && item.value || '').split('/').filter(Boolean).join('/') === normalized);
+  return existing && existing.description
+    ? existing.description
+    : (kind === 'directory' ? 'session folder' : 'session file');
+}
+
+function _runtimeWorkspaceCompletionKinds(kind = 'file') {
+  const normalized = String(kind || 'file').toLowerCase();
+  if (normalized === 'any') return ['file', 'directory'];
+  if (normalized === 'directory') return ['directory'];
+  return ['file', 'directory'];
+}
+
+function _runtimeWorkspaceEntryValue(parts, name, wantedKind) {
+  const value = `${parts.typedPrefix}${name}`;
+  return wantedKind === 'directory' ? `${value}/` : value;
+}
+
+function _runtimeWorkspaceScopedHints(kind = 'file', token = '') {
+  const parts = _runtimeWorkspaceCompletionParts(token);
+  if (!parts || typeof getWorkspaceDirectoryEntries !== 'function') return [];
+  const entries = getWorkspaceDirectoryEntries(parts.resolvedDirectory) || {};
+  const hints = [];
+  _runtimeWorkspaceCompletionKinds(kind).forEach((wantedKind) => {
+    const source = wantedKind === 'directory' ? entries.folders : entries.files;
+    (Array.isArray(source) ? source : []).forEach((entry) => {
+      const name = String(entry && entry.name || '').trim();
+      const path = String(entry && entry.path || '').split('/').filter(Boolean).join('/');
+      if (!name) return;
+      hints.push(_runtimeHint(
+        _runtimeWorkspaceEntryValue(parts, name, wantedKind),
+        _runtimeWorkspaceHintDescription(path, wantedKind),
+      ));
+    });
+  });
+  return hints;
 }
 
 function _runtimeWorkspaceEntryHints(kind = 'file') {
@@ -2441,7 +2548,10 @@ function _runtimeWorkspaceEntryHints(kind = 'file') {
       : (typeof getWorkspaceAutocompleteFileHints === 'function' ? getWorkspaceAutocompleteFileHints() : []);
     return (Array.isArray(source) ? source : []).map((entry) => {
       const path = String(entry && entry.path || '').split('/').filter(Boolean).join('/');
-      const value = String(entry && entry.name || _runtimeWorkspaceRelativeValue(path, cwd)).trim();
+      const name = String(entry && entry.name || _runtimeWorkspaceRelativeValue(path, cwd)).trim();
+      const value = kind === 'directory' && name && name !== '/' && !name.endsWith('/')
+        ? `${name}/`
+        : name;
       const existing = allHints.find(item => String(item && item.value || '') === path);
       return value ? _runtimeHint(value, existing && existing.description || (kind === 'directory' ? 'session folder' : 'session file')) : null;
     }).filter(Boolean);
@@ -2449,7 +2559,7 @@ function _runtimeWorkspaceEntryHints(kind = 'file') {
   if (kind === 'directory') {
     if (typeof getWorkspaceAutocompleteDirectoryHints !== 'function') return [];
     return getWorkspaceAutocompleteDirectoryHints()
-      .map(item => _runtimeWorkspaceDirectHintFromPath(item, cwd))
+      .map(item => _runtimeWorkspaceDirectHintFromPath(item, cwd, 'directory'))
       .filter(Boolean);
   }
   if (typeof getWorkspaceAutocompleteFileHints !== 'function') return [];
@@ -2468,9 +2578,12 @@ function _runtimeWorkspaceMoveDestinationHints() {
 
 function _runtimeWorkspaceMoveDestinationHintsForSource(source, destinationHints) {
   const sourcePath = String(source || '').trim();
+  const normalizedSource = sourcePath.split('/').filter(Boolean).join('/');
   return (Array.isArray(destinationHints) ? destinationHints : []).filter((hint) => {
     const value = String(hint && hint.value || '').trim();
-    return value === '/' || (value && value !== sourcePath && !value.startsWith(`${sourcePath}/`));
+    const normalizedValue = value.split('/').filter(Boolean).join('/');
+    return value === '/'
+      || (normalizedValue && normalizedValue !== normalizedSource && !normalizedValue.startsWith(`${normalizedSource}/`));
   });
 }
 
@@ -2484,8 +2597,13 @@ function _runtimeWorkspaceMoveSequenceHints(prefix, sourceHints, destinationHint
   return sequenceHints;
 }
 
+function getWorkspaceAutocompletePathHints(kind = 'file', token = '') {
+  return _runtimeWorkspaceScopedHints(kind, token);
+}
+
 function _runtimeWorkspaceContext() {
   const fileHints = _runtimeWorkspaceFileHints();
+  const filePathHints = _runtimeWorkspaceFilePathHints();
   const directoryHints = _runtimeWorkspaceDirectoryHints();
   const deleteHints = fileHints.concat(directoryHints);
   const moveSourceHints = _runtimeWorkspaceMoveSourceHints();
@@ -2496,11 +2614,11 @@ function _runtimeWorkspaceContext() {
       list: [_runtimeHint('-l', 'Long listing'), _runtimeHint('-R', 'Recursive listing')].concat(directoryHints, [_runtimeHint('/', 'Session workspace root')]),
       ls: [_runtimeHint('-l', 'Long listing'), _runtimeHint('-R', 'Recursive listing')].concat(directoryHints, [_runtimeHint('/', 'Session workspace root')]),
       help: [],
-      show: fileHints,
+      show: filePathHints,
       add: [_runtimeHint('<file>', 'New session file name')],
       'add-dir': directoryHints.concat([_runtimeHint('<folder>', 'New session folder')]),
-      edit: fileHints,
-      download: fileHints,
+      edit: filePathHints,
+      download: filePathHints,
       move: moveSourceHints,
       rm: [_runtimeHint('-r', 'Remove folders recursively'), _runtimeHint('-rf', 'Remove folders recursively')].concat(deleteHints),
       delete: [_runtimeHint('-r', 'Remove folders recursively'), _runtimeHint('-rf', 'Remove folders recursively')].concat(deleteHints),
@@ -2516,6 +2634,16 @@ function _runtimeWorkspaceContext() {
       ],
     },
     sequenceArgHints: _runtimeWorkspaceMoveSequenceHints('move', moveSourceHints, moveDestinationHints),
+    workspacePathArgKinds: {
+      list: ['directory'],
+      ls: ['directory'],
+      show: ['file'],
+      edit: ['file'],
+      download: ['file'],
+      move: ['any', 'directory'],
+      rm: ['any'],
+      delete: ['any'],
+    },
   });
 }
 
@@ -2657,27 +2785,32 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
   }
   if (isWorkspaceFeatureEnabled() && baseRegistry.cat) {
     context.cat = _runtimeMergeContextSpec(baseRegistry.cat, _runtimeContextSpec({
-      argHints: { __positional__: _runtimeWorkspaceFileHints() },
+      argHints: { __positional__: _runtimeWorkspaceFilePathHints() },
+      workspacePathArgKinds: { __positional__: ['file'] },
     }));
   }
   if (isWorkspaceFeatureEnabled() && baseRegistry.cd) {
     context.cd = _runtimeMergeContextSpec(baseRegistry.cd, _runtimeContextSpec({
       argHints: { __positional__: _runtimeWorkspaceNavigableDirectoryHints() },
+      workspacePathArgKinds: { __positional__: ['directory'] },
     }));
   }
   if (isWorkspaceFeatureEnabled() && baseRegistry.ls) {
     context.ls = _runtimeMergeContextSpec(baseRegistry.ls, _runtimeContextSpec({
       argHints: { __positional__: [_runtimeHint('-l', 'Long listing'), _runtimeHint('-R', 'Recursive listing')].concat(_runtimeWorkspaceNavigableDirectoryHints()) },
+      workspacePathArgKinds: { __positional__: ['directory'] },
     }));
   }
   if (isWorkspaceFeatureEnabled() && baseRegistry.ll) {
     context.ll = _runtimeMergeContextSpec(baseRegistry.ll, _runtimeContextSpec({
       argHints: { __positional__: [_runtimeHint('-R', 'Recursive listing')].concat(_runtimeWorkspaceNavigableDirectoryHints()) },
+      workspacePathArgKinds: { __positional__: ['directory'] },
     }));
   }
   if (isWorkspaceFeatureEnabled() && baseRegistry.mkdir) {
     context.mkdir = _runtimeMergeContextSpec(baseRegistry.mkdir, _runtimeContextSpec({
       argHints: { __positional__: _runtimeWorkspaceDirectoryHints().concat([_runtimeHint('<folder>', 'New session folder')]) },
+      workspacePathArgKinds: { __positional__: ['directory'] },
     }));
   }
   if (isWorkspaceFeatureEnabled() && baseRegistry.rm) {
@@ -2686,6 +2819,7 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
       argHints: {
         __positional__: [_runtimeHint('-r', 'Remove folders recursively'), _runtimeHint('-rf', 'Remove folders recursively')].concat(deleteHints),
       },
+      workspacePathArgKinds: { __positional__: ['any'] },
     }));
   }
   if (isWorkspaceFeatureEnabled() && baseRegistry.mv) {
@@ -2697,19 +2831,22 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
         moveSourceHints,
         _runtimeWorkspaceMoveDestinationHints(),
       ),
+      workspacePathArgKinds: { __positional__: ['any', 'directory'] },
     }));
   }
   ['grep', 'head', 'tail', 'sort', 'uniq'].forEach((root) => {
     if (isWorkspaceFeatureEnabled() && baseRegistry[root]) {
       context[root] = _runtimeMergeContextSpec(baseRegistry[root], _runtimeContextSpec({
-        argHints: { __positional__: _runtimeWorkspaceFileHints() },
+        argHints: { __positional__: _runtimeWorkspaceFilePathHints() },
+        workspacePathArgKinds: { __positional__: ['file'] },
       }));
     }
   });
   if (isWorkspaceFeatureEnabled() && baseRegistry.wc) {
     context.wc = _runtimeMergeContextSpec(baseRegistry.wc, _runtimeContextSpec({
-      argHints: { '-l': _runtimeWorkspaceFileHints() },
-      sequenceArgHints: { '-l': _runtimeWorkspaceFileHints() },
+      argHints: { '-l': _runtimeWorkspaceFilePathHints() },
+      sequenceArgHints: { '-l': _runtimeWorkspaceFilePathHints() },
+      workspacePathArgKinds: { __positional__: ['file'], '-l': ['file'] },
     }));
   }
   context.man = _runtimeMergeContextSpec(baseRegistry.man, _runtimeContextSpec({

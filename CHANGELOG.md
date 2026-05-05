@@ -22,10 +22,14 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Why:** move commands are path-heavy, and typing paths by memory is easy to get wrong once folders are involved.
   - **What:** added `value_type: target` workspace hints for move commands, dynamic source/destination suggestions, destination filtering that avoids suggesting the source or one of its children, and root-folder completion. The visible `file list` / `file ls` suggestions now come from `builtin_autocomplete.yaml`, while runtime autocomplete contributes only live workspace paths.
   - **Tests:** added app/autocomplete unit coverage for workspace move hints and updated the built-in autocomplete registry expectations.
+- **Workspace autocomplete is now directory-aware** — file commands can suggest entries inside a typed folder prefix instead of only suggesting entries from the current folder.
+  - **Why:** commands such as `cat darklab/` and `cat ../darklab/` should feel like normal terminal path completion, especially now that Files supports folders and move operations.
+  - **What:** runtime autocomplete now marks workspace path argument slots as file-only, folder-only, or file-or-folder. The browser resolves typed prefixes such as `darklab/`, `../`, `../darklab/`, and `/darklab/` against the active tab workspace cwd, then suggests direct children from the cached workspace tree while preserving the path style the user typed. Folder suggestions now display and insert with a trailing `/`, and accepting one immediately refreshes autocomplete for the next path segment.
+  - **Tests:** added app/autocomplete unit coverage for typed workspace path prefixes, source/destination move slots, prefix preservation, slash-terminated folder accepts, and workspace-escape rejection.
 
 ### Changed
 
-- **Session file docs and test inventory now reflect the v1.7 workspace command surface** — the docs count 2,400 total tests, including 1,187 pytest tests, 977 Vitest tests, and 236 Playwright tests.
+- **Session file docs and test inventory now reflect the v1.7 workspace command surface** — the docs count 2,404 total tests, including 1,187 pytest tests, 981 Vitest tests, and 236 Playwright tests.
 
 ### Fixed
 

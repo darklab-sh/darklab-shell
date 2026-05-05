@@ -449,6 +449,54 @@ function _workspaceAutocompleteHintsForTargetSlot(spec, hints) {
   return _workspaceAutocompleteEntryHints();
 }
 
+function _autocompleteWorkspacePathKindFromArray(kinds, index) {
+  if (!Array.isArray(kinds) || index < 0 || index >= kinds.length) return '';
+  const kind = String(kinds[index] || '').trim().toLowerCase();
+  return ['file', 'directory', 'any'].includes(kind) ? kind : '';
+}
+
+function _autocompleteWorkspacePathKind(ctx, spec) {
+  const pathKinds = spec && spec.workspace_path_arg_kinds;
+  if (!pathKinds || typeof pathKinds !== 'object') return '';
+  const completedTokens = ctx.tokens.filter(token => token.end <= ctx.tokenStart);
+  for (let index = 1; index < completedTokens.length; index += 1) {
+    const trigger = String(completedTokens[index].value || '').toLowerCase();
+    const kinds = pathKinds[trigger];
+    if (!Array.isArray(kinds)) continue;
+    const argIndex = completedTokens
+      .slice(index + 1)
+      .filter(token => {
+        const value = String(token && token.value || '');
+        return value && !value.startsWith('-') && !value.startsWith('+');
+      })
+      .length;
+    return _autocompleteWorkspacePathKindFromArray(kinds, argIndex);
+  }
+  return _autocompleteWorkspacePathKindFromArray(
+    pathKinds.__positional__,
+    _countCompletedPositionalArgs(ctx, spec),
+  );
+}
+
+function _workspaceAutocompletePathHintsForContext(ctx, spec) {
+  if (!String(ctx.currentToken || '').includes('/')) return null;
+  const kind = _autocompleteWorkspacePathKind(ctx, spec);
+  if (!kind) return null;
+  if (typeof getWorkspaceAutocompletePathHints !== 'function') return [];
+  const hints = getWorkspaceAutocompletePathHints(kind, ctx.currentToken);
+  return Array.isArray(hints) ? hints : [];
+}
+
+function _workspaceAutocompletePathFilterQuery(ctx) {
+  const token = String(ctx && ctx.currentToken || '');
+  const slashIndex = token.lastIndexOf('/');
+  return slashIndex >= 0 ? token.slice(slashIndex + 1) : token;
+}
+
+function _autocompleteSpecHasWorkspacePathKinds(spec) {
+  return !!(spec && spec.workspace_path_arg_kinds && typeof spec.workspace_path_arg_kinds === 'object');
+}
+
 function _getAutocompleteRegistry() {
   const yamlRegistry = (typeof acContextRegistry !== 'undefined' && acContextRegistry) || {};
   const runtimeRegistry = typeof getRuntimeAutocompleteContext === 'function'
@@ -722,8 +770,11 @@ function _buildContextAutocomplete(ctx) {
   const domainValueSlot = _isAutocompleteDomainValueSlot(ctx, spec, contextSpec);
   const wordlistValueSlot = _autocompleteWordlistValueSlot(ctx, spec, contextSpec);
   if (sequenceHints !== null) {
+    const workspacePathHints = _workspaceAutocompletePathHintsForContext(ctx, spec);
+    const hints = workspacePathHints !== null ? workspacePathHints : sequenceHints;
+    const filterQuery = workspacePathHints !== null ? _workspaceAutocompletePathFilterQuery(ctx) : ctx.currentToken;
     const sequenceItems = _filterAutocompleteItems(
-      sequenceHints.map(item => _buildAutocompleteItem({
+      hints.map(item => _buildAutocompleteItem({
         value: item.value,
         label: item.label || item.value,
         description: item.description || '',
@@ -731,14 +782,20 @@ function _buildContextAutocomplete(ctx) {
         replaceEnd: ctx.tokenEnd,
         insertValue: item.insertValue != null ? item.insertValue : null,
       })),
-      ctx.currentToken,
+      filterQuery,
     );
     return _withTypedValueSlotSuggestions(ctx, sequenceItems, domainValueSlot, wordlistValueSlot);
   }
   if (directHints !== null) {
     const workspaceHints = _workspaceAutocompleteHintsForFlag(spec, ctx.previousToken || '');
-    const targetHints = workspaceHints !== null ? null : _workspaceAutocompleteHintsForTargetSlot(spec, directHints);
-    const hints = workspaceHints !== null ? workspaceHints : (targetHints !== null ? targetHints : directHints);
+    const workspacePathHints = workspaceHints !== null ? null : _workspaceAutocompletePathHintsForContext(ctx, spec);
+    const targetHints = workspaceHints !== null || workspacePathHints !== null || _autocompleteSpecHasWorkspacePathKinds(spec)
+      ? null
+      : _workspaceAutocompleteHintsForTargetSlot(spec, directHints);
+    const hints = workspaceHints !== null
+      ? workspaceHints
+      : (workspacePathHints !== null ? workspacePathHints : (targetHints !== null ? targetHints : directHints));
+    const filterQuery = workspacePathHints !== null ? _workspaceAutocompletePathFilterQuery(ctx) : ctx.currentToken;
     const directItems = _filterAutocompleteItems(
       hints.map(item => _buildAutocompleteItem({
         value: item.value,
@@ -748,7 +805,7 @@ function _buildContextAutocomplete(ctx) {
         replaceEnd: ctx.tokenEnd,
         insertValue: item.insertValue != null ? item.insertValue : null,
       })),
-      ctx.currentToken,
+      filterQuery,
     );
     return _withTypedValueSlotSuggestions(ctx, directItems, domainValueSlot, wordlistValueSlot);
   }
@@ -792,7 +849,9 @@ function _buildContextAutocomplete(ctx) {
       }));
     const filteredFlags = _filterAutocompleteItems(flags, ctx.currentToken);
     if (!ctx.currentToken && ctx.atWhitespace && positionalHints.length && allowPositionalHints) {
-      const workspaceTargetHints = _workspaceAutocompleteHintsForTargetSlot(spec, positionalHints);
+      const workspaceTargetHints = _autocompleteSpecHasWorkspacePathKinds(spec)
+        ? null
+        : _workspaceAutocompleteHintsForTargetSlot(spec, positionalHints);
       const hints = workspaceTargetHints !== null ? workspaceTargetHints : positionalHints;
       const positionalItems = hints.map(item => _buildAutocompleteItem({
         value: item.value,
@@ -813,8 +872,12 @@ function _buildContextAutocomplete(ctx) {
   }
 
   if (positionalHints.length && allowPositionalHints) {
-    const workspaceTargetHints = _workspaceAutocompleteHintsForTargetSlot(spec, positionalHints);
-    const hints = workspaceTargetHints !== null ? workspaceTargetHints : positionalHints;
+    const workspacePathHints = _workspaceAutocompletePathHintsForContext(ctx, spec);
+    const workspaceTargetHints = workspacePathHints !== null || _autocompleteSpecHasWorkspacePathKinds(spec)
+      ? null
+      : _workspaceAutocompleteHintsForTargetSlot(spec, positionalHints);
+    const hints = workspacePathHints !== null ? workspacePathHints : (workspaceTargetHints !== null ? workspaceTargetHints : positionalHints);
+    const filterQuery = workspacePathHints !== null ? _workspaceAutocompletePathFilterQuery(ctx) : ctx.currentToken;
     const positionalItems = _filterAutocompleteItems(
       hints.map(item => _buildAutocompleteItem({
         value: item.value,
@@ -824,9 +887,25 @@ function _buildContextAutocomplete(ctx) {
         replaceEnd: ctx.tokenEnd,
         insertValue: item.insertValue != null ? item.insertValue : null,
       })),
-      ctx.currentToken,
+      filterQuery,
     );
     return _withTypedValueSlotSuggestions(ctx, positionalItems, domainValueSlot, wordlistValueSlot);
+  }
+  const workspacePathHints = allowPositionalHints ? _workspaceAutocompletePathHintsForContext(ctx, spec) : null;
+  if (workspacePathHints !== null) {
+    const filterQuery = _workspaceAutocompletePathFilterQuery(ctx);
+    const pathItems = _filterAutocompleteItems(
+      workspacePathHints.map(item => _buildAutocompleteItem({
+        value: item.value,
+        label: item.label || item.value,
+        description: item.description || '',
+        replaceStart: ctx.tokenStart,
+        replaceEnd: ctx.tokenEnd,
+        insertValue: item.insertValue != null ? item.insertValue : null,
+      })),
+      filterQuery,
+    );
+    return _withTypedValueSlotSuggestions(ctx, pathItems, domainValueSlot, wordlistValueSlot);
   }
   return [];
 }
@@ -1069,6 +1148,7 @@ function acShow(items) {
 function acHide() {
   hideAcDropdown();
   acIndex = -1;
+  if (typeof acFiltered !== 'undefined' && Array.isArray(acFiltered)) acFiltered = [];
 }
 
 function _getAutocompleteSharedPrefix(items) {
@@ -1101,7 +1181,19 @@ function acExpandSharedPrefix(items) {
   return true;
 }
 
+function _scheduleAutocompleteRefreshAfterAccept(insertValue) {
+  if (!String(insertValue || '').endsWith('/')) return;
+  setTimeout(() => {
+    if (typeof openAutocompleteForVisibleComposer === 'function' && openAutocompleteForVisibleComposer()) return;
+    const input = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : cmdInput;
+    if (input && typeof input.dispatchEvent === 'function') {
+      input.dispatchEvent(new Event('input'));
+    }
+  }, 0);
+}
+
 function acAccept(s) {
+  let acceptedInsertValue = '';
   if (_isAutocompleteBlockedByTerminalConfirm()) {
     acHide();
     refocusComposerAfterAction({ preventScroll: true });
@@ -1119,6 +1211,7 @@ function acAccept(s) {
       ? getComposerValue()
       : (cmdInput ? cmdInput.value || '' : '');
     const insertValue = _acItemInsertText(s);
+    acceptedInsertValue = insertValue;
     const replaceStart = Number(s.replaceStart);
     const replaceEnd = Number(s.replaceEnd);
     if (typeof acSuppressInputOnce !== 'undefined') acSuppressInputOnce = true;
@@ -1132,9 +1225,11 @@ function acAccept(s) {
       setComposerValue(insertValue, insertValue.length, insertValue.length);
     }
   } else {
+    acceptedInsertValue = String(s || '');
     if (typeof acSuppressInputOnce !== 'undefined') acSuppressInputOnce = true;
     acHide();
     setComposerValue(s, s.length, s.length);
   }
   refocusComposerAfterAction({ preventScroll: true });
+  _scheduleAutocompleteRefreshAfterAccept(acceptedInsertValue);
 }

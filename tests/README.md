@@ -20,12 +20,12 @@ Workspace file behavior is intentionally split across all three layers: pytest o
 
 Current totals:
 
-- behavior tests: 2,368
+- behavior tests: 2,374
 - docs/inventory meta-tests: 30
 - `pytest`: 1187 (1157 behavior + 30 meta)
-- `vitest`: 977
+- `vitest`: 981
 - `playwright`: 236
-- total: 2,400
+- total: 2,404
 
 This document is organized in two parts:
 
@@ -1428,6 +1428,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `serves runtime autocomplete context for built-in command lookup helpers` | Verifies that runtime built-in context covers `session-token`, simple built-ins, and dynamic `man` / `which` / `type` lookup suggestions. |
 | `serves loaded workspace files as file command autocomplete values` | Verifies that loaded session files are offered as autocomplete values for `file show`, `file edit`, `file download`, `file rm`, and `cat`. |
 | `serves workspace autocomplete values relative to the active workspace folder` | Verifies that workspace autocomplete offers current-folder file and folder names instead of root-relative paths. |
+| `serves directory-aware workspace autocomplete hints while preserving typed prefixes` | Verifies that typed workspace path prefixes such as `darklab/`, `../`, and `../darklab/` resolve against the active tab cwd while preserving the user's typed prefix. |
 | `hides workspace built-ins from runtime autocomplete when Files are disabled` | Verifies that file commands and aliases are removed from runtime autocomplete when the operator disables Files. |
 | `keeps code-owned built-ins out of commands.yaml` | Verifies that app-owned built-ins are not duplicated in the operator-facing command registry. |
 | `groups theme cards into labeled sections in the preview modal` | Verifies that groups theme cards into labeled sections in the preview modal. |
@@ -1567,6 +1568,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `acAccept updates the input, hides the dropdown, and refocuses the input` | Verifies that acAccept updates the input, hides the dropdown, and refocuses the input. |
 | `acAccept keeps focus on the visible mobile composer when mobile mode is active` | Verifies that acAccept keeps focus on the visible mobile composer when mobile mode is active. |
 | `acAccept replaces only the current token for contextual suggestions` | Verifies that accepting a contextual suggestion replaces only the active token instead of rewriting the full command. |
+| `acAccept clears stale suggestions after accepting a single contextual match` | Verifies that accepting the only contextual suggestion clears the hidden suggestion list so a second Tab cannot reapply stale replacement bounds. |
+| `acAccept refreshes autocomplete after accepting a slash-terminated folder` | Verifies that accepting a folder-like completion reopens autocomplete so the next path segment can be completed immediately. |
 | `acAccept suppresses one synthetic input cycle so the dropdown does not immediately reopen` | Verifies that accepting a suggestion hides the dropdown and suppresses the one programmatic input update caused by the accept path, so the menu does not immediately reopen. |
 | `computes the shared prefix across multiple suggestions` | Verifies that computes the shared prefix across multiple suggestions. |
 | `expands the composer value to the longest shared prefix when one exists` | Verifies that expands the composer value to the longest shared prefix when one exists. |
@@ -1609,6 +1612,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `stops suggesting more positional arguments after reaching argument_limit, but still allows flags` | Verifies that `argument_limit` suppresses further positional guidance once the configured number of positional arguments is filled, while still allowing flag suggestions in a later flag slot. |
 | `suggests built-in pipe commands after a supported command pipe` | Verifies that typing a piped command can switch autocomplete into the narrow built-in pipe stage. |
 | `uses live workspace file hints for workspace read flags instead of static examples` | Verifies that workspace-aware input flags prefer current session file names over baked registry examples. |
+| `uses directory-aware workspace path hints for typed file-command prefixes` | Verifies that workspace-aware file commands use scoped suggestions for typed prefixes such as `darklab/`, `../`, and `../darklab/`. |
 | `returns pipe-stage flag hints for grep` | Verifies that the built-in pipe stage can expose contextual `grep` flags such as `-i`, `-v`, and `-E`. |
 | `returns pipe-stage count hints after head -n and wc flag hints after wc space` | Verifies that pipe-stage value hints work for `head -n` and that `wc ` narrows correctly to `-l`. |
 | `suggests additional pipe helpers after an earlier helper stage` | Checks that suggests additional pipe helpers after an earlier helper stage. |

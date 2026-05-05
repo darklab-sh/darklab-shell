@@ -32,6 +32,8 @@ function loadAutocompleteFns() {
     _readRecentDomains,
     _getAutocompleteSharedPrefix,
     _setAcIndex: (value) => { acIndex = value; },
+    _setAcFiltered: (value) => { acFiltered = value; },
+    _getAcFiltered: () => acFiltered,
   }`,
   )
 }
@@ -210,6 +212,64 @@ describe('autocomplete helpers', () => {
     acAccept({ value: '-sV', replaceStart: 5, replaceEnd: 6 })
 
     expect(input.value).toBe('nmap -sV')
+  })
+
+  it('acAccept clears stale suggestions after accepting a single contextual match', () => {
+    const { acAccept, _getAcFiltered, _setAcFiltered } = loadAutocompleteFns()
+    const input = document.getElementById('cmd')
+    const suggestion = { value: 'naabu/', replaceStart: 3, replaceEnd: 6 }
+    input.value = 'cd naa'
+    input.setSelectionRange(6, 6)
+    _setAcFiltered([suggestion])
+
+    acAccept(suggestion)
+
+    expect(input.value).toBe('cd naabu/')
+    expect(_getAcFiltered()).toEqual([])
+  })
+
+  it('acAccept refreshes autocomplete after accepting a slash-terminated folder', () => {
+    vi.useFakeTimers()
+    try {
+      const openAutocompleteForVisibleComposer = vi.fn(() => true)
+      const { acAccept } = fromDomScripts(
+        ['app/static/js/utils.js', 'app/static/js/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+        {
+          document,
+          cmdInput: document.getElementById('cmd'),
+          acDropdown: document.getElementById('ac'),
+          mobileComposerHost: document.getElementById('mobile-composer-host'),
+          mobileCmdInput: document.getElementById('mobile-cmd'),
+          getComposerValue: () => document.getElementById('cmd').value,
+          setComposerValue: (value, start, end) => {
+            const input = document.getElementById('cmd')
+            input.value = value
+            input.selectionStart = start
+            input.selectionEnd = end == null ? start : end
+          },
+          openAutocompleteForVisibleComposer,
+          acSuggestions: [],
+          acContextRegistry: {},
+          acFiltered: [],
+          acIndex: -1,
+          acSuppressInputOnce: false,
+        },
+        `{
+        acAccept,
+      }`,
+      )
+      const input = document.getElementById('cmd')
+      input.value = 'cd naa'
+      input.setSelectionRange(6, 6)
+
+      acAccept({ value: 'naabu/', replaceStart: 3, replaceEnd: 6 })
+      vi.runOnlyPendingTimers()
+
+      expect(input.value).toBe('cd naabu/')
+      expect(openAutocompleteForVisibleComposer).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('acAccept suppresses one synthetic input cycle so the dropdown does not immediately reopen', () => {
@@ -1949,6 +2009,105 @@ describe('autocomplete helpers', () => {
 
     expect(items.map(item => item.value)).toEqual(['inputs.txt'])
     expect(items[0].description).toBe('session file · 42 B')
+  })
+
+  it('uses directory-aware workspace path hints for typed file-command prefixes', () => {
+    const pathHints = {
+      'file:darklab/': [
+        { value: 'darklab/targets.txt', description: 'session file · 11 B' },
+      ],
+      'file:../': [
+        { value: '../root.txt', description: 'session file · 1 B' },
+      ],
+      'file:../darklab/': [
+        { value: '../darklab/targets.txt', description: 'session file · 11 B' },
+        { value: '../darklab/nested/', description: 'session folder' },
+      ],
+      'file:darklab/find': [
+        { value: 'darklab/darklab_findings.txt', description: 'session file · 42 B' },
+        { value: 'darklab/targets.txt', description: 'session file · 11 B' },
+      ],
+      'directory:darklab/': [
+        { value: 'darklab/nested/', description: 'session folder' },
+      ],
+      'any:darklab/': [
+        { value: 'darklab/targets.txt', description: 'session file · 11 B' },
+        { value: 'darklab/nested/', description: 'session folder' },
+      ],
+      'directory:../': [
+        { value: '../archive/', description: 'session folder' },
+      ],
+    }
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => '',
+        acSuggestions: [],
+        acContextRegistry: {
+          cat: {
+            argument_limit: 1,
+            arg_hints: { __positional__: [{ value: 'root.txt', description: 'session file · 1 B' }] },
+            workspace_path_arg_kinds: { __positional__: ['file'] },
+          },
+          ls: {
+            argument_limit: 1,
+            arg_hints: { __positional__: [{ value: 'darklab', description: 'session folder' }] },
+            workspace_path_arg_kinds: { __positional__: ['directory'] },
+          },
+          mv: {
+            argument_limit: 2,
+            arg_hints: {
+              __positional__: [
+                { value: '<source> <destination>', value_type: 'target', description: 'Session file or folder path' },
+                { value: 'root.txt', description: 'session file · 1 B' },
+              ],
+            },
+            workspace_path_arg_kinds: { __positional__: ['any', 'directory'] },
+          },
+          file: {
+            expects_value: ['show', 'move'],
+            arg_hints: {
+              show: [{ value: 'root.txt', description: 'session file · 1 B' }],
+              move: [{ value: 'root.txt', description: 'session file · 1 B' }],
+            },
+            workspace_path_arg_kinds: {
+              show: ['file'],
+              move: ['any', 'directory'],
+            },
+          },
+        },
+        getWorkspaceAutocompletePathHints: (kind, token) => pathHints[`${kind}:${token}`] || [],
+        getWorkspaceAutocompleteFileHints: () => [
+          { value: 'deep/from-root.txt', description: 'session file · 99 B' },
+        ],
+        getWorkspaceAutocompleteDirectoryHints: () => [
+          { value: 'deep', description: 'session folder' },
+        ],
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('cat darklab/', 12).map(item => item.value)).toEqual(['darklab/targets.txt'])
+    expect(getAutocompleteMatches('cat darklab/find', 16).map(item => item.value)).toEqual(['darklab/darklab_findings.txt'])
+    expect(getAutocompleteMatches('cat ../', 7).map(item => item.value)).toEqual(['../root.txt'])
+    expect(getAutocompleteMatches('cat ../darklab/', 16).map(item => item.value)).toEqual(['../darklab/targets.txt', '../darklab/nested/'])
+    expect(getAutocompleteMatches('ls darklab/', 11).map(item => item.value)).toEqual(['darklab/nested/'])
+    expect(getAutocompleteMatches('mv ', 3).map(item => item.value)).toContain('root.txt')
+    expect(getAutocompleteMatches('mv ', 3).map(item => item.value)).not.toContain('deep/from-root.txt')
+    expect(getAutocompleteMatches('mv darklab/', 11).map(item => item.value)).toEqual(['darklab/targets.txt', 'darklab/nested/'])
+    expect(getAutocompleteMatches('mv root.txt ../', 14).map(item => item.value)).toEqual(['../archive/'])
+    expect(getAutocompleteMatches('file show darklab/', 18).map(item => item.value)).toEqual(['darklab/targets.txt'])
+    expect(getAutocompleteMatches('file move root.txt ../', 22).map(item => item.value)).toEqual(['../archive/'])
   })
 
   it('returns pipe-stage flag hints for grep', () => {

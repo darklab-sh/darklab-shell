@@ -559,6 +559,7 @@ export async function loadAppFns({
     reloadWorkflowCatalog,
     handleWorkflowTerminalCommand,
     getRuntimeAutocompleteContext,
+    getWorkspaceAutocompletePathHints,
     getRuntimeAutocompleteItems,
     openOptions,
     openThemeSelector,

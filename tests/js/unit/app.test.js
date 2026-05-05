@@ -1108,15 +1108,15 @@ describe('app helpers', () => {
 
     const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
 
-    expect(context.file.arg_hints.show.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
-    expect(context.file.arg_hints.edit.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
-    expect(context.file.arg_hints.download.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
-    expect(context.file.arg_hints.move.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports'])
-    expect(context.file.sequence_arg_hints['move targets.txt'].map(item => item.value)).toEqual(['reports', '/'])
-    expect(context.file.sequence_arg_hints['move reports'].map(item => item.value)).toEqual(['/'])
-    expect(context.mv.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports'])
-    expect(context.mv.sequence_arg_hints['mv targets.txt'].map(item => item.value)).toEqual(['reports', '/'])
-    expect(context.mv.sequence_arg_hints['mv reports'].map(item => item.value)).toEqual(['/'])
+    expect(context.file.arg_hints.show.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
+    expect(context.file.arg_hints.edit.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
+    expect(context.file.arg_hints.download.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
+    expect(context.file.arg_hints.move.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
+    expect(context.file.sequence_arg_hints['move targets.txt'].map(item => item.value)).toEqual(['reports/', '/'])
+    expect(context.file.sequence_arg_hints['move reports/'].map(item => item.value)).toEqual(['/'])
+    expect(context.mv.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
+    expect(context.mv.sequence_arg_hints['mv targets.txt'].map(item => item.value)).toEqual(['reports/', '/'])
+    expect(context.mv.sequence_arg_hints['mv reports/'].map(item => item.value)).toEqual(['/'])
     expect(context.file.arg_hints.rm.map(item => item.description)).toEqual([
       'Remove folders recursively',
       'Remove folders recursively',
@@ -1124,14 +1124,14 @@ describe('app helpers', () => {
       'session file · 2 KB',
       'session folder',
     ])
-    expect(context.cat.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
-    expect(context.cd.arg_hints.__positional__.map(item => item.value)).toEqual(['reports', '/'])
-    expect(context.ll.arg_hints.__positional__.map(item => item.value)).toEqual(['-R', 'reports', '/'])
-    expect(context.ls.arg_hints.__positional__.map(item => item.value)).toEqual(['-l', '-R', 'reports', '/'])
-    expect(context.mkdir.arg_hints.__positional__.map(item => item.value)).toEqual(['reports', '<folder>'])
-    expect(context.grep.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
-    expect(context.head.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
-    expect(context.rm.arg_hints.__positional__.map(item => item.value)).toEqual(['-r', '-rf', 'targets.txt', 'ffuf.json', 'reports'])
+    expect(context.cat.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
+    expect(context.cd.arg_hints.__positional__.map(item => item.value)).toEqual(['reports/', '/'])
+    expect(context.ll.arg_hints.__positional__.map(item => item.value)).toEqual(['-R', 'reports/', '/'])
+    expect(context.ls.arg_hints.__positional__.map(item => item.value)).toEqual(['-l', '-R', 'reports/', '/'])
+    expect(context.mkdir.arg_hints.__positional__.map(item => item.value)).toEqual(['reports/', '<folder>'])
+    expect(context.grep.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
+    expect(context.head.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
+    expect(context.rm.arg_hints.__positional__.map(item => item.value)).toEqual(['-r', '-rf', 'targets.txt', 'ffuf.json', 'reports/'])
   })
 
   it('serves workspace autocomplete values relative to the active workspace folder', async () => {
@@ -1154,20 +1154,64 @@ describe('app helpers', () => {
 
     const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
 
-    expect(context.cd.arg_hints.__positional__.map(item => item.value)).toEqual(['../', 'nested', '/'])
-    expect(context.ll.arg_hints.__positional__.map(item => item.value)).toEqual(['-R', '../', 'nested', '/'])
-    expect(context.ls.arg_hints.__positional__.map(item => item.value)).toEqual(['-l', '-R', '../', 'nested', '/'])
-    expect(context.cat.arg_hints.__positional__.map(item => item.value)).toEqual(['summary.txt'])
-    expect(context.grep.arg_hints.__positional__.map(item => item.value)).toEqual(['summary.txt'])
-    expect(context.file.arg_hints.show.map(item => item.value)).toEqual(['summary.txt'])
-    expect(context.file.arg_hints.list.map(item => item.value)).toEqual(['-l', '-R', 'nested', '/'])
-    expect(context.file.arg_hints.ls.map(item => item.value)).toEqual(['-l', '-R', 'nested', '/'])
-    expect(context.file.arg_hints.move.map(item => item.value)).toEqual(['summary.txt', 'nested'])
-    expect(context.file.sequence_arg_hints['move summary.txt'].map(item => item.value)).toEqual(['nested', '/'])
-    expect(context.file.sequence_arg_hints['move nested'].map(item => item.value)).toEqual(['/'])
-    expect(context.mv.arg_hints.__positional__.map(item => item.value)).toEqual(['summary.txt', 'nested'])
-    expect(context.mv.sequence_arg_hints['mv summary.txt'].map(item => item.value)).toEqual(['nested', '/'])
-    expect(context.mv.sequence_arg_hints['mv nested'].map(item => item.value)).toEqual(['/'])
+    expect(context.cd.arg_hints.__positional__.map(item => item.value)).toEqual(['../', 'nested/', '/'])
+    expect(context.ll.arg_hints.__positional__.map(item => item.value)).toEqual(['-R', '../', 'nested/', '/'])
+    expect(context.ls.arg_hints.__positional__.map(item => item.value)).toEqual(['-l', '-R', '../', 'nested/', '/'])
+    expect(context.cat.arg_hints.__positional__.map(item => item.value)).toEqual(['summary.txt', 'nested/'])
+    expect(context.grep.arg_hints.__positional__.map(item => item.value)).toEqual(['summary.txt', 'nested/'])
+    expect(context.file.arg_hints.show.map(item => item.value)).toEqual(['summary.txt', 'nested/'])
+    expect(context.file.arg_hints.list.map(item => item.value)).toEqual(['-l', '-R', 'nested/', '/'])
+    expect(context.file.arg_hints.ls.map(item => item.value)).toEqual(['-l', '-R', 'nested/', '/'])
+    expect(context.file.arg_hints.move.map(item => item.value)).toEqual(['summary.txt', 'nested/'])
+    expect(context.file.sequence_arg_hints['move summary.txt'].map(item => item.value)).toEqual(['nested/', '/'])
+    expect(context.file.sequence_arg_hints['move nested/'].map(item => item.value)).toEqual(['/'])
+    expect(context.mv.arg_hints.__positional__.map(item => item.value)).toEqual(['summary.txt', 'nested/'])
+    expect(context.mv.sequence_arg_hints['mv summary.txt'].map(item => item.value)).toEqual(['nested/', '/'])
+    expect(context.mv.sequence_arg_hints['mv nested/'].map(item => item.value)).toEqual(['/'])
+  })
+
+  it('serves directory-aware workspace autocomplete hints while preserving typed prefixes', async () => {
+    const entriesByDirectory = {
+      '': {
+        folders: [{ name: 'darklab', path: 'darklab' }, { name: 'reports', path: 'reports' }],
+        files: [{ name: 'root.txt', path: 'root.txt' }],
+      },
+      darklab: {
+        folders: [{ name: 'nested', path: 'darklab/nested' }],
+        files: [{ name: 'targets.txt', path: 'darklab/targets.txt' }],
+      },
+      'reports/darklab': {
+        folders: [{ name: 'child', path: 'reports/darklab/child' }],
+        files: [{ name: 'summary.txt', path: 'reports/darklab/summary.txt' }],
+      },
+    }
+    const { getRuntimeAutocompleteContext, getWorkspaceAutocompletePathHints } = await loadAppFns({
+      workspaceCwd: 'reports',
+      getWorkspaceAutocompleteFileHints: () => [
+        { value: 'root.txt', description: 'session file · 1 B' },
+        { value: 'darklab/targets.txt', description: 'session file · 11 B' },
+        { value: 'reports/darklab/summary.txt', description: 'session file · 42 B' },
+      ],
+      getWorkspaceAutocompleteDirectoryHints: () => [
+        { value: 'darklab', description: 'session folder' },
+        { value: 'reports', description: 'session folder' },
+        { value: 'darklab/nested', description: 'session folder' },
+        { value: 'reports/darklab/child', description: 'session folder' },
+      ],
+      getWorkspaceDirectoryEntries: path => entriesByDirectory[path] || { folders: [], files: [] },
+    })
+
+    const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
+
+    expect(context.cat.workspace_path_arg_kinds.__positional__).toEqual(['file'])
+    expect(context.ls.workspace_path_arg_kinds.__positional__).toEqual(['directory'])
+    expect(context.mv.workspace_path_arg_kinds.__positional__).toEqual(['any', 'directory'])
+    expect(context.file.workspace_path_arg_kinds.move).toEqual(['any', 'directory'])
+    expect(getWorkspaceAutocompletePathHints('file', 'darklab/').map(item => item.value)).toEqual(['darklab/summary.txt', 'darklab/child/'])
+    expect(getWorkspaceAutocompletePathHints('directory', '../').map(item => item.value)).toEqual(['../darklab/', '../reports/'])
+    expect(getWorkspaceAutocompletePathHints('file', '../darklab/').map(item => item.value)).toEqual(['../darklab/targets.txt', '../darklab/nested/'])
+    expect(getWorkspaceAutocompletePathHints('any', '../darklab/').map(item => item.value)).toEqual(['../darklab/targets.txt', '../darklab/nested/'])
+    expect(getWorkspaceAutocompletePathHints('file', '../../')).toEqual([])
   })
 
   it('hides workspace built-ins from runtime autocomplete when Files are disabled', async () => {

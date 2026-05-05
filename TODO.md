@@ -17,38 +17,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 
 ## Open TODOs
 
-- **Directory-aware workspace autocomplete**
-  - Goal: make workspace file commands suggest entries from the directory being typed, not only the current tab workspace folder.
-  - Current behavior:
-    - `cat ` suggests files in the current workspace folder.
-    - `cat darklab/` does not switch the suggestion scope to the `darklab` folder.
-    - `cat ../` and `cat ../darklab/` are not treated as folder-prefix navigation in autocomplete.
-  - Desired behavior:
-    - When a workspace-aware command is completing a file path, a token ending in `/` should resolve that typed path against the active tab workspace cwd and suggest direct child files.
-    - When a workspace-aware command is completing a folder path, a token ending in `/` should resolve that typed path against the active tab workspace cwd and suggest direct child folders.
-    - Preserve the path style the user typed in the inserted suggestion:
-      - `cat darklab/` should suggest `darklab/file.txt`.
-      - `cat ../` should suggest `../sibling.txt`.
-      - `cat ../darklab/` should suggest `../darklab/file.txt`.
-      - absolute workspace paths like `cat /darklab/` should keep the leading `/`.
-    - Continue to support current-directory suggestions when no directory prefix is typed.
-  - Initial command scope:
-    - File-only suggestions: `cat`, `file show`, `file edit`, `file download`, `grep`, `head`, `tail`, `sort`, `uniq`, and other workspace file readers.
-    - Folder-only suggestions: `cd`, `mkdir` existing-folder context, `file list`, `file ls`, `ls`, and `ll`.
-    - File-or-folder suggestions: `file delete`, `file rm`, `rm`, `file move` source, and `mv` source.
-    - Move destination suggestions should stay folder-focused and should keep excluding the selected source folder and its children.
-  - Implementation notes:
-    - Keep this browser-side and cache-backed; do not add a new autocomplete API call.
-    - Reuse the existing workspace cache from `/workspace/files`, the active tab `workspaceCwd`, `normalizeWorkspaceCommandPath(path, cwd)`, and `getWorkspaceDirectoryEntries(path)`.
-    - Add a small helper that splits the active token into `{ typedPrefix, resolvedDirectory, leafQuery }`.
-    - For tokens ending in `/`, use an empty `leafQuery` and list that resolved directory.
-    - For tokens containing a slash but not ending in `/`, use the path before the final slash as the resolved directory and the final segment as the filter query.
-    - Reject path prefixes that escape the session workspace; autocomplete should simply return no suggestions for those.
-    - Avoid changing substring/fuzzy ranking globally. Apply the directory-aware expansion before the existing item filtering so normal matching behavior remains intact.
-  - Testing:
-    - Add Vitest coverage for `cat darklab/`, `cat ../`, `cat ../darklab/`, `ls darklab/`, and `mv darklab/`.
-    - Cover insert values so suggestions preserve the user-typed relative or absolute prefix.
-    - Add at least one browser/e2e regression if the behavior depends on real tab cwd state.
+No open implementation TODOs are currently tracked.
 
 ---
 
@@ -66,7 +35,36 @@ No active known issues are currently tracked.
 
 ## Technical Debt
 
-No active technical debt items are currently tracked.
+- **Autocomplete client: hint-source resolution and item construction duplication**
+  - `app/static/js/autocomplete.js` rebuilds the same hint-array → item mapping in five separate places (lines 776–786, 799–809, 856–863, 881–890, 897–906), each with the same `value`/`label`/`description`/`replaceStart`/`replaceEnd`/`insertValue` shape. A single `_hintsToItems(hints, ctx)` helper would collapse all five.
+  - `_buildContextAutocomplete` repeats a four-step "pick the right hint source" dance four times (sequence-hints branch, direct-hints branch, and two positional branches): compute workspace-path hints, optionally compute workspace-target hints, fall back to the base hints, choose the filter query depending on whether path hints are active, build items, then wrap in `_withTypedValueSlotSuggestions`. Extracting one resolver makes each call site a few lines and removes the drift risk.
+  - `_withRecentDomainSuggestions` and `_withWordlistSuggestions` (lines 321–345) are the same function with different special-item producers — both build a lowercased `seen` key set from insert values, then prefix the specials onto a deduped base. One `_prependDedupedItems(specials, base)` covers both; `_withTypedValueSlotSuggestions` keeps the routing.
+
+- **Autocomplete client: three near-identical positional-arg walks**
+  - `_countCompletedPositionalValues` (lines 231–258) and `_countCompletedPositionalArgs` (lines 508–533) implement the same skip-next/expects-value/skip-flag/skip-concrete-token traversal. The first is a strict superset; the second can be the more general one called with empty options, or they can be unified outright.
+  - `rememberRecentDomainsFromCommand` (lines 354–418) re-implements the same walk a third time to *collect* values instead of *count* them. A shared `walkPositionalArgs(ctx, spec, contextSpec, callback)` that yields `{slotIndex, token, isTriggered, triggeringFlag}` would let counters and collectors share one implementation. Three copies of the same walk is the highest drift-risk surface in this file.
+
+- **Autocomplete client: tiny duplicated predicate and extractor families**
+  - `_itemLooksLikeDomainSlot` / `_itemLooksLikeWordlistSlot` / `_itemLooksLikeWorkspaceTargetSlot` (lines 162–172) only differ by the `value_type` constant they compare against — collapse into `_itemValueTypeIs(item, type)`.
+  - `_domainArgHintTriggers` (line 184) and `_wordlistArgHintTriggers` (line 191) only differ by predicate — collapse into `_argHintTriggersBy(spec, predicate)`.
+  - `_positionalDomainSlots` (line 214) and `_positionalWordlistSlots` (line 221) share shape and differ only by the per-element transform — pass the transform in.
+
+- **Autocomplete client: thin wrappers around `DarklabAutocompleteCore`**
+  - About a dozen one-line passthroughs at the top of `autocomplete.js` (lines 4–40, 86–88, 102–112, 154–155, 980) rename `_autocompleteCore.method` to `_acMethod`. They add no indirection and force the reader to map two names to one function. Aliasing the module once (`const core = DarklabAutocompleteCore;`) and calling `core.itemText(...)` at use sites would remove the layer.
+  - `_writeRecentDomains` (line 98) is a wrapper that just calls `setRecentDomains` — same category.
+
+- **Autocomplete client: suspected defects to verify while refactoring**
+  - Line 848: `flag.value + (ctx.atWhitespace ? '' : '')` — both ternary branches are the empty string. Either dead code or lost intent.
+  - `_filterExampleAutocompleteItems` (lines 640–644): filters once, builds a Set of survivors, then re-filters the original list. The only effect is to restore YAML-author order after `_filterAutocompleteItems` sorts by score. If intentional, deserves a one-line comment; otherwise a single `filterItems` call is enough.
+  - `_buildPipeAutocomplete` (lines 927–934) with a command root delegates to `_buildContextAutocomplete(ctx)` and never uses the `baseCommand` / `pipeIndex` fields the pipe context attaches. Either those fields are dead weight or the context-builder should be using them and isn't.
+
+- **Autocomplete value-type slot routing should be data-driven**
+  - The mapping `value_type → suggestion source` is spread across `_isAutocompleteDomainValueSlot`, `_autocompleteWordlistValueSlot`, and `_workspaceAutocompleteHintsForTargetSlot`. Adding a new typed slot today requires JS edits in several places even though the YAML side already declares `value_type: <kind>`.
+  - A small in-JS registry like `{ domain: {...}, wordlist: {...}, target: {...} }` keyed on `value_type` would let new slot kinds be added in one place, with the YAML remaining the source of truth for *which* slot type each hint represents.
+
+- **Placeholder detection should be an explicit YAML flag, not a regex**
+  - `DarklabAutocompleteCore.isPlaceholderValue` (autocomplete_core.js:40) decides whether a value is a hint-only placeholder by matching `/^<[^<>\s][^<>]*>$/`. Whether something is a placeholder is fundamentally an authorial choice, and `buildItem` already accepts an explicit `hintOnly`.
+  - Promote `hint_only: true` on the YAML entry as the canonical signal, leave the regex as a fallback that emits a warning, then remove the autodetect once authors have migrated.
 
 ---
 
