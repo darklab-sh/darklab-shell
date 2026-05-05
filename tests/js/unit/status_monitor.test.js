@@ -1435,25 +1435,38 @@ describe('Status Monitor', () => {
     closeStatusMonitor()
   })
 
-  it('adds the running status affordance and pulses it once per session', async () => {
-    loadStatusMonitor()
+  it('keeps HUD status monitor triggers clickable without running-state affordances', async () => {
+    document.body.innerHTML = `
+      <div id="rail"></div>
+      <div id="hud-status-cell">
+        <span id="status">IDLE</span>
+      </div>
+      <div id="hud-last-exit-cell">
+        <span id="hud-last-exit">—</span>
+      </div>
+      <div id="hud-tabs-cell">
+        <span id="hud-tabs">0</span>
+      </div>
+    `
+    const { closeStatusMonitor } = loadStatusMonitor()
     const cell = document.getElementById('hud-status-cell')
 
     document.dispatchEvent(new CustomEvent('app:status-changed', { detail: { status: 'running' } }))
 
-    expect(cell.classList.contains('hud-status-expandable')).toBe(true)
-    expect(cell.classList.contains('hud-status-affordance-pulse')).toBe(true)
-    expect(cell.title).toBe('Open Status Monitor')
-
-    cell.classList.remove('hud-status-affordance-pulse')
-    document.dispatchEvent(new CustomEvent('app:status-changed', { detail: { status: 'idle' } }))
-    document.dispatchEvent(new CustomEvent('app:status-changed', { detail: { status: 'running' } }))
-
-    expect(cell.classList.contains('hud-status-expandable')).toBe(true)
-    expect(cell.classList.contains('hud-status-affordance-pulse')).toBe(false)
-
-    document.dispatchEvent(new CustomEvent('app:status-changed', { detail: { status: 'ok' } }))
     expect(cell.classList.contains('hud-status-expandable')).toBe(false)
+    expect(cell.classList.contains('hud-status-affordance-pulse')).toBe(false)
+    expect(cell.querySelector('.status-monitor-status-glyph')).toBeNull()
     expect(cell.title).toBe('')
+
+    cell.click()
+    await vi.waitFor(() => expect(document.getElementById('status-monitor')).not.toBeNull())
+    closeStatusMonitor()
+
+    document.getElementById('hud-last-exit-cell').click()
+    await vi.waitFor(() => expect(document.getElementById('status-monitor')?.classList.contains('u-hidden')).toBe(false))
+    closeStatusMonitor()
+
+    document.getElementById('hud-tabs-cell').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await vi.waitFor(() => expect(document.getElementById('status-monitor')?.classList.contains('u-hidden')).toBe(false))
   })
 })

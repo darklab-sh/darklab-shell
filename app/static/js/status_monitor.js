@@ -29,7 +29,6 @@
   const POLL_MS = 3000;
   const CLOSED_POLL_MS = 8000;
   const CPU_SAMPLE_WARMUP_MS = 900;
-  const STATUS_AFFORDANCE_PULSE_KEY = 'status_monitor_status_affordance_seen';
   const resourceStateByRunId = new Map();
   const resourceTrendByRunId = new Map();
   const pulseStateByStrip = new WeakMap();
@@ -3346,40 +3345,12 @@
     });
   }
 
-  function _maybePulseStatusAffordance(cell) {
-    try {
-      if (sessionStorage.getItem(STATUS_AFFORDANCE_PULSE_KEY) === '1') return;
-      sessionStorage.setItem(STATUS_AFFORDANCE_PULSE_KEY, '1');
-    } catch (_) {
-      if (cell.dataset.statusMonitorAffordancePulsed === '1') return;
-      cell.dataset.statusMonitorAffordancePulsed = '1';
-    }
-    cell.classList.add('hud-status-affordance-pulse');
-    window.setTimeout(() => {
-      cell.classList.remove('hud-status-affordance-pulse');
-    }, 1400);
-  }
-
-  function _ensureStatusAffordanceGlyph(cell) {
-    let glyph = cell.querySelector('.status-monitor-status-glyph');
-    if (glyph) return glyph;
-    glyph = document.createElement('span');
-    glyph.className = 'status-monitor-status-glyph';
-    glyph.setAttribute('aria-hidden', 'true');
-    glyph.textContent = '»';
-    cell.appendChild(glyph);
-    return glyph;
-  }
-
-  function _syncStatusAffordance(statusValue = '') {
+  function _clearStatusAffordance() {
     const cell = document.getElementById('hud-status-cell');
     if (!cell) return;
-    const statusText = String(statusValue || document.getElementById('status')?.textContent || '').trim().toUpperCase();
-    const running = statusText === 'RUNNING';
-    _ensureStatusAffordanceGlyph(cell);
-    cell.classList.toggle('hud-status-expandable', running);
-    cell.title = running ? 'Open Status Monitor' : '';
-    if (running) _maybePulseStatusAffordance(cell);
+    cell.classList.remove('hud-status-expandable', 'hud-status-affordance-pulse');
+    cell.querySelector('.status-monitor-status-glyph')?.remove();
+    cell.title = '';
   }
 
   function _activeHudStatusIsRunning() {
@@ -3419,7 +3390,7 @@
   });
   document.addEventListener('app:status-changed', event => {
     const status = String(event?.detail?.status || '').trim().toLowerCase();
-    _syncStatusAffordance(status);
+    _clearStatusAffordance();
     if (status === 'running') {
       _primeStatusMonitorSamples();
     } else if (!isOpen) {
@@ -3434,7 +3405,7 @@
   });
 
   _bindHudTriggers();
-  _syncStatusAffordance();
+  _clearStatusAffordance();
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', _bindHudTriggers, { once: true });
   }

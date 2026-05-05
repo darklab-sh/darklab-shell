@@ -2178,7 +2178,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `keeps an ambient constellation visible before real run history exists` | Verifies that the Status Monitor keeps the ambient constellation visible and uses calm sparse-state copy when no real runs are plotted. |
 | `uses mobile sheet chrome and shared sheet binding on mobile` | Verifies that the mobile Status Monitor opens with sheet chrome and shared mobile-sheet dismissal behavior. |
 | `calculates CPU from cumulative samples, keeps the last value, and caps display at 100%` | Verifies that the Status Monitor derives CPU percentage from adjacent cumulative CPU samples, preserves the last value when a later poll lacks CPU data, and display-caps at 100%. |
-| `adds the running status affordance and pulses it once per session` | Verifies that the STATUS HUD cell gets the Status Monitor expansion affordance while running and only pulses once per browser session. |
+| `keeps HUD status monitor triggers clickable without running-state affordances` | Verifies that STATUS, LAST EXIT, and TABS still open Status Monitor without adding the old running-state glyph or pulse. |
 
 #### `tabs.test.js`
 
