@@ -4,6 +4,7 @@
 
 let _workspaceFiles = [];
 let _workspaceDirs = [];
+let _workspaceLimits = {};
 let _workspaceLoaded = false;
 let _workspaceCurrentDir = '';
 let _workspaceViewedPath = '';
@@ -85,6 +86,14 @@ function _workspaceViewerFileSize(path = '') {
   const file = _workspaceFiles.find(item => String(item?.path || '').split('/').filter(Boolean).join('/') === target);
   const size = Number(file?.size);
   return Number.isFinite(size) ? size : null;
+}
+
+function _workspaceFileReadBlockedReason(path = '') {
+  const maxFileBytes = Number(_workspaceLimits?.max_file_bytes);
+  if (!(maxFileBytes > 0)) return '';
+  const fileSize = _workspaceViewerFileSize(path);
+  if (!(Number.isFinite(fileSize) && fileSize > maxFileBytes)) return '';
+  return 'file exceeds session max file size';
 }
 
 function _workspaceAutoRefreshDisabledReason() {
@@ -1032,6 +1041,7 @@ function renderWorkspaceFiles(payload = {}) {
   _workspaceLoaded = true;
   _workspaceDirs = Array.isArray(payload.directories) ? payload.directories : [];
   _workspaceFiles = Array.isArray(payload.files) ? payload.files : [];
+  _workspaceLimits = payload.limits && typeof payload.limits === 'object' ? payload.limits : {};
   const currentHasEntries = !_workspaceCurrentDir || _workspaceFiles.some(file => {
     const path = String(file.path || '').split('/').filter(Boolean).join('/');
     return path === _workspaceCurrentDir || path.startsWith(`${_workspaceCurrentDir}/`);
@@ -1391,12 +1401,18 @@ async function openWorkspaceEditorFromCommand(action = 'add', path = '') {
   hideWorkspaceViewer();
   const fileName = String(path || '').trim();
   if (String(action || '').toLowerCase() === 'edit' && fileName) {
+    const blockedReason = _workspaceFileReadBlockedReason(fileName);
+    if (blockedReason) {
+      _showWorkspaceToast(blockedReason, 'error');
+      return false;
+    }
     try {
       const data = await readWorkspaceFile(fileName);
       showWorkspaceEditor(data.path || fileName, data.text || '', { readOnlyPath: true });
     } catch (err) {
-      showWorkspaceEditor(fileName, '', { readOnlyPath: true });
-      setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to load session file'), 'error');
+      hideWorkspaceEditor();
+      _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to load session file'), 'error');
+      return false;
     }
     return true;
   }
@@ -1419,12 +1435,22 @@ async function handleWorkspaceFileAction(action, path) {
       hideWorkspaceViewer();
       renderWorkspaceBrowser();
     } else if (action === 'view') {
+      const blockedReason = _workspaceFileReadBlockedReason(path);
+      if (blockedReason) {
+        _showWorkspaceToast(blockedReason, 'error');
+        return;
+      }
       showWorkspaceViewerLoading(path);
       await _workspaceAfterPaint();
       const data = await readWorkspaceFile(path);
       if (_workspaceViewedPath !== String(path || '').trim()) return;
       showWorkspaceViewer(data.path || path, data.text || '', { size: data.size });
     } else if (action === 'edit') {
+      const blockedReason = _workspaceFileReadBlockedReason(path);
+      if (blockedReason) {
+        _showWorkspaceToast(blockedReason, 'error');
+        return;
+      }
       showWorkspaceViewerLoading(path, 'Loading file for edit...');
       await _workspaceAfterPaint();
       const data = await readWorkspaceFile(path);
@@ -1466,6 +1492,7 @@ async function handleWorkspaceFileAction(action, path) {
       await promptWorkspaceMove(path, { kind: 'folder' });
     }
   } catch (err) {
+    if (action === 'view' || action === 'edit') hideWorkspaceViewer();
     _showWorkspaceToast(_workspaceErrorMessage(err), 'error');
   }
 }

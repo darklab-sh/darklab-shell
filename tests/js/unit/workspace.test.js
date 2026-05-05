@@ -499,6 +499,62 @@ describe('workspace UI helpers', () => {
     expect(document.getElementById('workspace-text-input').value).toBe('large file contents\n')
   })
 
+  it('toasts and does not open the viewer for files that exceed the read limit', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve(responseJson({})))
+    const { renderWorkspaceFiles, handleWorkspaceFileAction, globals } = setupWorkspace(apiFetch)
+
+    renderWorkspaceFiles({
+      files: [{ path: 'too-large.txt', size: 2048 }],
+      usage: { bytes_used: 2048, file_count: 1 },
+      limits: { quota_bytes: 4096, max_file_bytes: 1024, max_files: 10 },
+    })
+
+    await handleWorkspaceFileAction('view', 'too-large.txt')
+    await flushWorkspacePromises()
+
+    expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/workspace/files/read'))).toBe(false)
+    expect(document.getElementById('workspace-viewer-overlay').classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('workspace-viewer').classList.contains('u-hidden')).toBe(true)
+    expect(globals.showToast).toHaveBeenCalledWith('file exceeds session max file size', 'error')
+  })
+
+  it('toasts and does not open the editor for oversized edit actions', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve(responseJson({})))
+    const { renderWorkspaceFiles, handleWorkspaceFileAction, globals } = setupWorkspace(apiFetch)
+
+    renderWorkspaceFiles({
+      files: [{ path: 'huge.log', size: 4096 }],
+      usage: { bytes_used: 4096, file_count: 1 },
+      limits: { quota_bytes: 8192, max_file_bytes: 1024, max_files: 10 },
+    })
+
+    await handleWorkspaceFileAction('edit', 'huge.log')
+    await flushWorkspacePromises()
+
+    expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/workspace/files/read'))).toBe(false)
+    expect(document.getElementById('workspace-viewer-overlay').classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('workspace-editor-overlay').classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('workspace-editor').classList.contains('u-hidden')).toBe(true)
+    expect(globals.showToast).toHaveBeenCalledWith('file exceeds session max file size', 'error')
+  })
+
+  it('closes the loading viewer when a read is rejected after opening', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/workspace/files/read')) {
+        return Promise.resolve(responseJson({ error: 'file exceeds session max file size' }, 413))
+      }
+      return Promise.resolve(responseJson({}))
+    })
+    const { handleWorkspaceFileAction, globals } = setupWorkspace(apiFetch)
+
+    await handleWorkspaceFileAction('view', 'unknown-large.txt')
+    await flushWorkspacePromises()
+
+    expect(document.getElementById('workspace-viewer-overlay').classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('workspace-viewer').classList.contains('u-hidden')).toBe(true)
+    expect(globals.showToast).toHaveBeenCalledWith('file exceeds session max file size', 'error')
+  })
+
   it('refreshes the currently viewed file when the files list is refreshed', async () => {
     const apiFetch = vi.fn((url) => {
       if (String(url) === '/workspace/files') {

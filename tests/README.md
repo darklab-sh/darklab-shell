@@ -20,12 +20,12 @@ Workspace file behavior is intentionally split across all three layers: pytest o
 
 Current totals:
 
-- behavior tests: 2,376
+- behavior tests: 2,379
 - docs/inventory meta-tests: 30
 - `pytest`: 1187 (1157 behavior + 30 meta)
-- `vitest`: 983
+- `vitest`: 986
 - `playwright`: 236
-- total: 2,406
+- total: 2,409
 
 This document is organized in two parts:
 
@@ -2495,6 +2495,9 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `shows file contents in a read-only viewer and keeps edit mode separate` | Verifies that View opens a read-only file display at the top of the file without exposing the larger edit form. |
 | `opens the viewer with a loading preview while a file read is pending` | Verifies that clicking View opens the viewer immediately with loading feedback before the file read and preview rendering finish. |
 | `shows loading feedback before opening the editor for large files` | Verifies that Edit opens with loading feedback before large file contents are loaded into the editor modal. |
+| `toasts and does not open the viewer for files that exceed the read limit` | Verifies that known oversized files show a toast without opening the loading viewer or requesting file contents. |
+| `toasts and does not open the editor for oversized edit actions` | Verifies that known oversized files show a toast without opening the edit modal or requesting file contents. |
+| `closes the loading viewer when a read is rejected after opening` | Verifies that server-side read-limit rejections close the loading viewer and surface the error as a toast. |
 | `refreshes the currently viewed file when the files list is refreshed` | Verifies that Refresh updates both the file browser and the currently open read-only viewer. |
 | `refreshes the viewer directly and keeps following when scrolled to the bottom` | Verifies that the viewer Refresh button reloads the active file, keeps bottom-following scroll behavior, and shows the refresh spinner. |
 | `keeps auto-refresh off by default and refreshes only after opt-in` | Verifies that open viewer files do not poll by default, and that the Auto control starts the five-second poll only after the user enables it. |

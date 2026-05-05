@@ -29,13 +29,14 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
-- **Session file docs and test inventory now reflect the v1.7 workspace command surface** — the docs count 2,406 total tests, including 1,187 pytest tests, 983 Vitest tests, and 236 Playwright tests.
+- **Session file docs and test inventory now reflect the v1.7 workspace command surface** — the docs count 2,409 total tests, including 1,187 pytest tests, 986 Vitest tests, and 236 Playwright tests.
 - **Autocomplete placeholder hints now have an explicit schema path** — frontend and backend autocomplete normalization accept `hint_only: true` as the author-owned display-only signal, and placeholder-looking text no longer becomes display-only by regex inference.
 
 ### Fixed
 
 - **Autocomplete no longer shows duplicate `file list` and `file ls` rows** — the YAML-owned grammar entries keep their `<folder>` guidance, and the runtime layer no longer adds bare duplicates.
 - **Command-created workspace config folders now show up in Files instead of causing 500s** — workspace list/read operations repair scanner-created child directory/file modes before the app tries to traverse them, so tools using session-scoped `XDG_CONFIG_HOME` such as Subfinder remain visible and readable through the Files browser and `cat`.
+- **Oversized workspace files no longer leave Files stuck in loading state** — known oversized files now toast before the viewer/editor modal opens, and server-side read-limit rejections close the loading viewer instead of leaving the spinner behind.
 
 ---
 
