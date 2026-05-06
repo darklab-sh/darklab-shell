@@ -2074,6 +2074,57 @@ describe('history panel actions', () => {
     expect(hideTabKillBtn).toHaveBeenCalledWith('tab-2')
   })
 
+  it('restores a same-command history run into a new tab when run ids differ', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              runs: [
+                {
+                  id: 'run-new',
+                  command: 'ping darklab.sh',
+                  started: '2026-01-01T00:00:00Z',
+                  exit_code: 0,
+                },
+              ],
+            }),
+        })
+      }
+      if (url === '/history/run-new?json&preview=1') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              id: 'run-new',
+              command: 'ping darklab.sh',
+              output: ['new output'],
+              exit_code: 0,
+            }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+    const { refreshHistoryPanel, tabs, createTab, activateTab, appendCommandEcho, appendLine } =
+      loadHistoryPanel({ apiFetchImpl: apiFetch })
+    tabs[0].command = 'ping darklab.sh'
+    tabs[0].historyRunId = 'run-old'
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    document
+      .querySelector('.history-entry [data-action="restore"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(activateTab).not.toHaveBeenCalledWith('tab-1')
+    expect(createTab).toHaveBeenCalledWith('ping darklab.sh')
+    expect(tabs[1].historyRunId).toBe('run-new')
+    expect(appendCommandEcho).toHaveBeenCalledWith('ping darklab.sh', 'tab-2')
+    expect(appendLine).toHaveBeenCalledWith('new output', '', 'tab-2')
+  })
+
   it('clears the history loading overlay and shows a failure toast when a restore fetch fails', async () => {
     const apiFetch = vi.fn((url) => {
       if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {

@@ -20,12 +20,12 @@ Workspace file behavior is intentionally split across all three layers: pytest o
 
 Current totals:
 
-- behavior tests: 2,435
+- behavior tests: 2,440
 - docs/inventory meta-tests: 30
-- `pytest`: 1226 (1196 behavior + 30 meta)
-- `vitest`: 1003
+- `pytest`: 1229 (1199 behavior + 30 meta)
+- `vitest`: 1007
 - `playwright`: 236
-- total: 2,465
+- total: 2,472
 
 This document is organized in two parts:
 
@@ -516,6 +516,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPtyTerminalCapture.test_terminal_capture_omits_marker_when_only_scrollback_exists` | Verifies that scrollback-only PTY output is saved without an empty separator marker. |
 | `TestPtyTerminalCapture.test_terminal_capture_persists_notice_when_output_is_empty` | Verifies that empty PTY output saves a coherent notice line. |
 | `TestPtyTerminalCapture.test_terminal_capture_falls_back_after_first_feed_error` | Verifies that PTY capture logs one pyte feed failure and falls back to plain-text capture for later chunks. |
+| `TestPtyTerminalCapture.test_terminal_capture_fallback_treats_carriage_return_as_overwrite` | Verifies that fallback PTY capture treats carriage-return progress updates as overwrites instead of appending duplicate status lines. |
 | `TestPtyTerminalCapture.test_terminal_history_line_limit_is_bounded` | Verifies that PTY capture history uses a sensible default, floor, and ceiling around `max_output_lines`. |
 | `TestFormatRetention.test_zero_returns_unlimited` | Checks zero returns unlimited handling. |
 | `TestFormatRetention.test_365_returns_one_year` | Checks that 365 returns one year. |
@@ -560,6 +561,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestOutputSignals.test_user_killed_process_is_not_an_error` | Verifies that user-killed process notices are not classified as errors. |
 | `TestOutputSignals.test_builtin_classifier_keeps_metadata_but_omits_signals` | Verifies that built-in command output keeps line metadata while omitting findings, warnings, errors, and summaries. |
 | `TestRunOutputCapture.test_preview_keeps_only_last_n_lines` | Checks that preview keeps only last n lines. |
+| `TestRunOutputCapture.test_preview_byte_cap_drops_oldest_lines` | Checks that the SQLite preview byte cap drops oldest preview lines before storing oversized previews. |
+| `TestRunOutputCapture.test_preview_byte_cap_truncates_single_huge_line` | Checks that one huge output line is truncated inside the SQLite preview while preserving the run line count. |
 | `TestRunOutputCapture.test_full_output_artifact_round_trips_lines` | Checks that full output artifact round trips lines. |
 | `TestRunOutputCapture.test_full_output_artifact_round_trips_signal_metadata` | Verifies that persisted full-output artifacts preserve backend signal metadata with each line. |
 | `TestRunOutputCapture.test_full_output_artifact_respects_byte_cap` | Checks that full output artifact respects byte cap. |
@@ -1477,6 +1480,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `_setTsMode marks the timestamps button inactive in off mode` | _setTsMode marks the timestamps button inactive in off mode. |
 | `bootstraps cleanly when config and allowed-commands fetches fail` | Verifies that bootstraps cleanly when config and allowed-commands fetches fail. |
 | `settles the welcome intro immediately when the user types into the active welcome tab` | Verifies that settles the welcome intro immediately when the user types into the active welcome tab. |
+| `keeps macOS double-space substitution out of the command composer` | Verifies that macOS double-space period substitution is normalized back to literal spaces before the composer state updates. |
 | `settles welcome immediately when Enter is pressed during welcome playback` | Verifies that settles welcome immediately when Enter is pressed during welcome playback. |
 | `does not run command when Enter is pressed in cmd input during welcome playback` | Verifies that does not run command when Enter is pressed in cmd input during welcome playback. |
 | `renders the shell prompt line from composer state instead of the stale hidden input` | Verifies that renders the shell prompt line from composer state instead of the stale hidden input. |
@@ -1807,6 +1811,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `executeHistAction shows a failure toast when clearing non-favorite history fails` | Verifies that executeHistAction shows a failure toast when clearing non-favorite history fails. |
 | `shows and clears the history loading overlay while a run is being restored` | Verifies that shows and clears the history loading overlay while a run is being restored. |
 | `restores the full history payload when full output is available` | Verifies that restores the full history payload when full output is available. |
+| `restores a same-command history run into a new tab when run ids differ` | Verifies that restoring history uses run identity instead of command text so separate runs with the same command can both be restored. |
 | `clears the history loading overlay and shows a failure toast when a restore fetch fails` | Verifies that clears the history loading overlay and shows a failure toast when a restore fetch fails. |
 | `enterHistSearch activates search mode and shows the dropdown` | Verifies that enterHistSearch activates search mode and shows the dropdown. |
 | `enterHistSearch saves the current input as the pre-draft` | Verifies that enterHistSearch saves the current input as the pre-draft. |
@@ -1934,7 +1939,9 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `reports missing xterm globals before mounting a PTY terminal` | Verifies that the PTY path reports missing xterm assets before trying to mount a terminal. |
 | `creates an xterm terminal with the fit addon and opens it in the screen` | Verifies that the PTY browser surface mounts xterm with the fit addon and requested dimensions. |
 | `keeps focus on the active PTY terminal while the PTY tab is running` | Verifies that live interactive PTY tabs retain keyboard focus on xterm instead of the hidden prompt. |
+| `opens kill confirmation instead of sending Ctrl+C to the PTY` | Verifies that Ctrl+C inside the interactive PTY modal opens the shared kill confirmation instead of sending a raw interrupt to the PTY process. |
 | `finalizes PTY tabs like normal completed runs` | Verifies that completed interactive PTY tabs update recent commands, history refreshes, workspace cache, and last-exit state like normal runs. |
+| `appends the saved PTY final frame before the exit status line` | Verifies that modal PTY completion loads the saved final screen into the parent transcript before appending the exit status line. |
 
 #### `runner.test.js`
 

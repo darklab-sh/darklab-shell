@@ -230,6 +230,12 @@
 # Server default if unset: 5000
 # max_output_lines: 5000
 
+# Hard cap for the SQLite run preview payload, expressed in megabytes.
+# This protects history reads from huge single-line outputs such as JSON.
+# Set to 0 for unlimited.
+# Server default if unset: 1 MB
+# output_preview_max_mb: 1MB
+
 # Persist the full output of completed runs as compressed artifact files under /data.
 # The history drawer and normal run permalink continue to use the capped preview stored
 # in SQLite; this enables a separate "view full output" page for completed runs.

@@ -27,6 +27,8 @@ from config import CFG, SCANNER_PREFIX
 from process import active_run_register, active_run_remove, pid_pop, pid_register, redis_client
 
 try:
+    # importlib + Any | None lets us treat pyte as optional at runtime without
+    # binding a typed module symbol; pyte ships no type stubs.
     pyte: Any | None = importlib.import_module("pyte")
 except ImportError:  # pragma: no cover - exercised in deploys after requirements install
     pyte = None
@@ -44,11 +46,18 @@ _PTY_STREAM_FETCH_COUNT = 100
 _PTY_STREAM_MAXLEN = 5000
 _PTY_CAPTURE_MIN_HISTORY_LINES = 2000
 _PTY_CAPTURE_MAX_HISTORY_LINES = 10000
-_ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+_ANSI_ESCAPE_RE = re.compile(
+    r"\x1b(?:"
+    r"\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC: ESC ] ... (BEL | ST)
+    r"|[PX^_][^\x1b]*\x1b\\"           # DCS / SOS / PM / APC: ESC <intro> ... ST
+    r"|\[[0-?]*[ -/]*[@-~]"            # CSI
+    r"|[@-Z\\-_]"                      # other 2-char ESC sequences
+    r")"
+)
 
 
 def _plain_terminal_text(value: str) -> str:
-    return _ANSI_ESCAPE_RE.sub("", value.replace("\r\n", "\n").replace("\r", "\n"))
+    return _ANSI_ESCAPE_RE.sub("", value)
 
 
 def _coerce_non_negative_int(value: object, default: int) -> int:
@@ -119,6 +128,7 @@ class PtyTerminalCapture:
         self._stream = None
         self._stream_failed = False
         self._fallback_pending = ""
+        self._fallback_cursor_col = 0
         self._fallback_lines: deque[str] = deque(maxlen=max(1, self.history_lines + rows))
         pyte_module = pyte
         if pyte_module is None:
@@ -178,11 +188,38 @@ class PtyTerminalCapture:
         plain = _plain_terminal_text(text)
         if not plain:
             return
-        self._fallback_pending += plain
-        parts = self._fallback_pending.split("\n")
-        self._fallback_pending = parts.pop() if parts else ""
-        for line in parts:
-            self._fallback_lines.append(line.rstrip())
+        i = 0
+        while i < len(plain):
+            char = plain[i]
+            if char == "\r":
+                if i + 1 < len(plain) and plain[i + 1] == "\n":
+                    self._fallback_commit_line()
+                    i += 2
+                    continue
+                self._fallback_cursor_col = 0
+            elif char == "\n":
+                self._fallback_commit_line()
+            elif char == "\b":
+                self._fallback_cursor_col = max(0, self._fallback_cursor_col - 1)
+            else:
+                self._fallback_write_char(char)
+            i += 1
+
+    def _fallback_commit_line(self) -> None:
+        self._fallback_lines.append(self._fallback_pending.rstrip())
+        self._fallback_pending = ""
+        self._fallback_cursor_col = 0
+
+    def _fallback_write_char(self, char: str) -> None:
+        cursor = self._fallback_cursor_col
+        pending = self._fallback_pending
+        if cursor < len(pending):
+            self._fallback_pending = f"{pending[:cursor]}{char}{pending[cursor + 1:]}"
+        else:
+            if cursor > len(pending):
+                self._fallback_pending += " " * (cursor - len(pending))
+            self._fallback_pending += char
+        self._fallback_cursor_col = cursor + 1
 
     def _scrollback_lines(self) -> list[str]:
         if self._screen is not None:

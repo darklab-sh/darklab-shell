@@ -179,6 +179,7 @@ All application settings live in `app/conf/config.yaml`. The values below are th
 | `rate_limit_per_second` | `5` | Max `/runs` requests per second per IP |
 | `max_tabs` | `8` | Maximum number of tabs a user can have open at once. `0` = unlimited |
 | `max_output_lines` | `5000` | Max rows retained in the live tab DOM and in the SQLite run preview. Oldest rendered rows are dropped from the top when exceeded, while visible line numbers continue reflecting emitted output order. `0` = unlimited |
+| `output_preview_max_mb` | `1 MB` | Server-side only. Hard cap on the SQLite run preview payload so huge single-line outputs, such as JSON, cannot make history rows enormous. `0` = unlimited |
 | `persist_full_run_output` | `true` | Server-side only. Persists full output for completed runs as compressed artifacts while the history drawer and normal run permalink keep using the capped SQLite preview |
 | `full_output_max_mb` | `5 MB` | Server-side only. Hard cap on the uncompressed UTF-8 payload written into a full-output artifact before gzip compression. The app multiplies this value by `1024 * 1024` internally. `0` = unlimited |
 | `workspace_enabled` | `false` | Server-side only. Enables the app-managed per-session workspace foundation. This does not enable shell navigation or redirection by itself |
@@ -731,10 +732,13 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── data/                       # Writable volume — SQLite database (auto-created)
 │   └── history.db              #   stores run history and tab snapshots
 ├── docker-compose.yml
-├── docs/
-│   ├── ROADMAP.md              # Product roadmap for projects, annotations, artifacts, notes, exports, and target context
-│   └── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
-├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser
+	├── docs/
+	│   ├── ROADMAP.md              # Product roadmap for projects, annotations, artifacts, notes, exports, and target context
+	│   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
+	│   └── release-drafts/
+	│       ├── v2.0-merge-request.md # Draft merge-request notes for the next major release
+	│       └── v2.0-release-notes.md # Draft user-facing release notes for the next major release
+	├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser
 ├── examples/
 │   ├── docker-compose.prod.yml  # Optional production Docker Compose override (GELF, proxy env, external network)
 │   └── run_local.sh             # Script to run without Docker using Python directly

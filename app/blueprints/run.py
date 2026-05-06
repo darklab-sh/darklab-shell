@@ -165,6 +165,7 @@ def _run_output_capture(run_id):
         preview_limit=CFG["max_output_lines"],
         persist_full_output=CFG.get("persist_full_run_output", False),
         full_output_max_bytes=CFG.get("full_output_max_bytes", 0),
+        preview_max_bytes=CFG.get("output_preview_max_bytes", 0),
     )
 
 

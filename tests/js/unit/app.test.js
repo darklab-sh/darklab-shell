@@ -1568,6 +1568,28 @@ describe('app helpers', () => {
     expect(requestWelcomeSettle).toHaveBeenCalledWith('tab-1')
   })
 
+  it('keeps macOS double-space substitution out of the command composer', async () => {
+    const { cmdInput, getComposerState, setComposerState } = await loadAppFns()
+
+    setComposerState({
+      value: 'echo ',
+      selectionStart: 5,
+      selectionEnd: 5,
+      activeInput: 'desktop',
+    })
+    cmdInput.value = 'echo. '
+    cmdInput.setSelectionRange(6, 6)
+    cmdInput.dispatchEvent(new Event('input', { bubbles: true }))
+
+    expect(cmdInput.value).toBe('echo  ')
+    expect(getComposerState()).toMatchObject({
+      value: 'echo  ',
+      selectionStart: 6,
+      selectionEnd: 6,
+      activeInput: 'desktop',
+    })
+  })
+
   it('settles welcome immediately when Enter is pressed during welcome playback', async () => {
     const requestWelcomeSettle = vi.fn()
     const welcomeOwnsTab = vi.fn(() => true)

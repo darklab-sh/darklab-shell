@@ -25,12 +25,22 @@ def ensure_run_output_dir():
 
 
 class RunOutputCapture:
-    def __init__(self, run_id: str, preview_limit: int, persist_full_output: bool, full_output_max_bytes: int):
+    def __init__(
+        self,
+        run_id: str,
+        preview_limit: int,
+        persist_full_output: bool,
+        full_output_max_bytes: int,
+        preview_max_bytes: int = 0,
+    ):
         self.run_id = run_id
         self.preview_limit = max(0, int(preview_limit or 0))
+        self.preview_max_bytes = max(0, int(preview_max_bytes or 0))
         self.persist_full_output = bool(persist_full_output)
         self.full_output_max_bytes = max(0, int(full_output_max_bytes or 0))
         self.preview_lines: deque[dict[str, object]] = deque()
+        self.preview_line_bytes: deque[int] = deque()
+        self.preview_bytes = 0
         self.preview_truncated = False
         self.output_line_count = 0
         self.full_output_available = False
@@ -44,6 +54,57 @@ class RunOutputCapture:
             self.artifact_rel_path = f"{run_id}.txt.gz"
             artifact_path = get_artifact_path(self.artifact_rel_path)
             self._artifact_file = gzip.open(artifact_path, "wt", encoding="utf-8")
+
+    @staticmethod
+    def _entry_storage_bytes(entry: dict[str, object]) -> int:
+        # Match the SQLite preview serializer closely enough to keep the byte
+        # cap conservative while avoiding re-serializing the whole preview.
+        return len(json.dumps(entry).encode("utf-8")) + 2
+
+    def _truncate_preview_entry(self, entry: dict[str, object]) -> dict[str, object]:
+        if not self.preview_max_bytes:
+            return dict(entry)
+        preview_entry = dict(entry)
+        if self._entry_storage_bytes(preview_entry) <= self.preview_max_bytes:
+            return preview_entry
+        original_text = str(preview_entry.get("text", ""))
+        marker = " [preview line truncated]"
+        low = 0
+        high = len(original_text)
+        best = ""
+        while low <= high:
+            mid = (low + high) // 2
+            candidate = original_text[:mid] + marker
+            preview_entry["text"] = candidate
+            if self._entry_storage_bytes(preview_entry) <= self.preview_max_bytes:
+                best = candidate
+                low = mid + 1
+            else:
+                high = mid - 1
+        preview_entry["text"] = best or marker.strip()
+        self.preview_truncated = True
+        return preview_entry
+
+    def _drop_oldest_preview_line(self) -> None:
+        if not self.preview_lines:
+            return
+        self.preview_lines.popleft()
+        if self.preview_line_bytes:
+            self.preview_bytes = max(0, self.preview_bytes - self.preview_line_bytes.popleft())
+        self.preview_truncated = True
+
+    def _append_preview_entry(self, entry: dict[str, object]) -> None:
+        preview_entry = self._truncate_preview_entry(entry)
+        entry_bytes = self._entry_storage_bytes(preview_entry)
+        if self.preview_limit > 0:
+            while len(self.preview_lines) >= self.preview_limit:
+                self._drop_oldest_preview_line()
+        self.preview_lines.append(preview_entry)
+        self.preview_line_bytes.append(entry_bytes)
+        self.preview_bytes += entry_bytes
+        if self.preview_max_bytes > 0:
+            while self.preview_bytes > self.preview_max_bytes and len(self.preview_lines) > 1:
+                self._drop_oldest_preview_line()
 
     def add_line(
         self,
@@ -74,13 +135,7 @@ class RunOutputCapture:
             entry["target"] = str(target)
         self.output_line_count += 1
 
-        if self.preview_limit == 0:
-            self.preview_lines.append(entry)
-        else:
-            if len(self.preview_lines) >= self.preview_limit:
-                self.preview_lines.popleft()
-                self.preview_truncated = True
-            self.preview_lines.append(entry)
+        self._append_preview_entry(entry)
 
         if not self._artifact_file:
             return

@@ -141,6 +141,7 @@ class TestLoadConfig:
                     prompt_username: base
                     prompt_domain: local
                     default_theme: base-theme.yaml
+                    output_preview_max_mb: 2MB
                     full_output_max_mb: 7MB
                     rate_limit_per_minute: 30
                     """
@@ -159,6 +160,8 @@ class TestLoadConfig:
         assert cfg["prompt_username"] == "local"
         assert cfg["prompt_domain"] == "local"
         assert cfg["default_theme"] == "base-theme.yaml"
+        assert cfg["output_preview_max_mb"] == 2
+        assert cfg["output_preview_max_bytes"] == 2 * 1024 * 1024
         assert cfg["full_output_max_mb"] == 7
         assert cfg["full_output_max_bytes"] == 7 * 1024 * 1024
         assert cfg["rate_limit_per_minute"] == 99
@@ -2900,6 +2903,9 @@ class TestPtyTerminalCapture:
                 self.screen = screen
 
             def feed(self, text):
+                # Record-then-raise: even when feed_error is set, the call is
+                # recorded first so a future test combining both still observes
+                # the input that triggered the failure.
                 if feed_calls is not None:
                     feed_calls.append(text)
                 if feed_error:
@@ -2957,12 +2963,26 @@ class TestPtyTerminalCapture:
              mock.patch.object(pty_service.log, "warning") as warning:
             capture = pty_service.PtyTerminalCapture(rows=24, cols=100, history_lines=20)
             capture.feed("\x1b[31mfirst\x1b[0m\n")
-            capture.feed("second\n")
+            capture.feed("\x1b]0;Window Title\x07second\n")
+            capture.feed("\x1bPstatus\x1b\\third\n")
 
         assert warning.call_count == 1
         assert capture.synthesize_entries() == [
             {"text": "first", "cls": ""},
             {"text": "second", "cls": ""},
+            {"text": "third", "cls": ""},
+        ]
+
+    def test_terminal_capture_fallback_treats_carriage_return_as_overwrite(self):
+        with mock.patch.object(pty_service, "pyte", None):
+            capture = pty_service.PtyTerminalCapture(rows=24, cols=100, history_lines=20)
+            capture.feed("Discovered open port 443/tcp on 192.168.1.5\r\n")
+            capture.feed("rate:  0.00-kpps, 50.00% done, found=1\r")
+            capture.feed("rate:  0.00-kpps, 100.00% done, found=2\r")
+
+        assert capture.synthesize_entries() == [
+            {"text": "Discovered open port 443/tcp on 192.168.1.5", "cls": ""},
+            {"text": "rate:  0.00-kpps, 100.00% done, found=2", "cls": ""},
         ]
 
     def test_terminal_history_line_limit_is_bounded(self):
@@ -3438,6 +3458,44 @@ class TestRunOutputCapture:
         ]
         assert capture.preview_truncated is True
         assert capture.output_line_count == 3
+
+    def test_preview_byte_cap_drops_oldest_lines(self):
+        capture = RunOutputCapture(
+            "test-run-output-preview-bytes",
+            preview_limit=10,
+            persist_full_output=False,
+            full_output_max_bytes=0,
+            preview_max_bytes=150,
+        )
+        capture.add_line("a" * 20)
+        capture.add_line("b" * 20)
+        capture.add_line("c" * 20)
+        capture.finalize()
+
+        assert list(capture.preview_lines) == [
+            {"text": "b" * 20, "cls": "", "tsC": "", "tsE": ""},
+            {"text": "c" * 20, "cls": "", "tsC": "", "tsE": ""},
+        ]
+        assert capture.preview_truncated is True
+        assert capture.output_line_count == 3
+
+    def test_preview_byte_cap_truncates_single_huge_line(self):
+        capture = RunOutputCapture(
+            "test-run-output-preview-huge-line",
+            preview_limit=10,
+            persist_full_output=False,
+            full_output_max_bytes=0,
+            preview_max_bytes=120,
+        )
+        capture.add_line("x" * 1000)
+        capture.finalize()
+
+        assert len(capture.preview_lines) == 1
+        preview = capture.preview_lines[0]
+        assert str(preview["text"]).endswith("[preview line truncated]")
+        assert len(json.dumps(list(capture.preview_lines)).encode("utf-8")) <= 122
+        assert capture.preview_truncated is True
+        assert capture.output_line_count == 1
 
     def test_full_output_artifact_round_trips_lines(self):
         capture = RunOutputCapture("test-run-output-artifact", preview_limit=2, persist_full_output=True, full_output_max_bytes=0)
@@ -4166,10 +4224,17 @@ class TestDatabaseInit:
             conn = sqlite3.connect(db_path)
             indexes = {row[1] for row in conn.execute("PRAGMA index_list('runs')").fetchall()}
             snapshot_indexes = {row[1] for row in conn.execute("PRAGMA index_list('snapshots')").fetchall()}
+            workflow_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('user_workflows')").fetchall()
+            }
             conn.close()
 
         assert "idx_session" in indexes
+        assert "idx_runs_session_started" in indexes
+        assert "idx_runs_session_command_started" in indexes
         assert "idx_snapshots_session" in snapshot_indexes
+        assert "idx_snapshots_session_created" in snapshot_indexes
+        assert "idx_user_workflows_session_updated_created" in workflow_indexes
 
     def test_init_is_idempotent(self):
         # Calling db_init() twice on the same DB must not raise

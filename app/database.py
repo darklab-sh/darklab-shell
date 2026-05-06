@@ -142,11 +142,27 @@ def _create_schema(conn):
 def _create_indexes(conn):
     """Create supporting indexes after schema migrations have run."""
     conn.execute("CREATE INDEX IF NOT EXISTS idx_session ON runs (session_id)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_runs_session_started "
+        "ON runs (session_id, started DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_runs_session_command_started "
+        "ON runs (session_id, command, started DESC)"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_run_output_artifacts_created ON run_output_artifacts (created)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots (session_id)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_snapshots_session_created "
+        "ON snapshots (session_id, created DESC)"
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_starred_commands_session ON starred_commands (session_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_session_variables_session ON session_variables (session_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_user_workflows_session ON user_workflows (session_id)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_user_workflows_session_updated_created "
+        "ON user_workflows (session_id, updated DESC, created DESC)"
+    )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_recent_domains_session_last_used "
         "ON recent_domains (session_id, last_used DESC)"

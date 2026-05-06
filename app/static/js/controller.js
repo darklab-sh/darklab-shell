@@ -1570,6 +1570,7 @@ apiFetch('/autocomplete').then(r => r.json()).then(data => {
 });
 
 cmdInput.addEventListener('input', () => {
+  if (typeof normalizeComposerSmartPeriod === 'function') normalizeComposerSmartPeriod(cmdInput);
   if (isHistoryPanelOpen()) hideHistoryPanel();
   if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
     if (typeof handleHistSearchInput === 'function') {

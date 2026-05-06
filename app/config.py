@@ -98,6 +98,7 @@ def load_config(conf_dir=None):
         "rate_limit_per_minute":      30,
         "rate_limit_per_second":      5,
         "max_output_lines":           5000,
+        "output_preview_max_mb":      1,
         "persist_full_run_output":    True,
         "full_output_max_mb":         5,
         "workspace_enabled":          False,
@@ -151,11 +152,16 @@ def load_config(conf_dir=None):
             legacy_bytes = 0
         defaults["full_output_max_mb"] = max(0, (legacy_bytes + (1024 * 1024) - 1) // (1024 * 1024))
         defaults["full_output_max_bytes"] = legacy_bytes
-        return defaults
-    if full_output_max_mb is None:
-        full_output_max_mb = 5
-    defaults["full_output_max_mb"] = full_output_max_mb
-    defaults["full_output_max_bytes"] = full_output_max_mb * 1024 * 1024
+    else:
+        if full_output_max_mb is None:
+            full_output_max_mb = 5
+        defaults["full_output_max_mb"] = full_output_max_mb
+        defaults["full_output_max_bytes"] = full_output_max_mb * 1024 * 1024
+    output_preview_max_mb = _coerce_mb_value(defaults.get("output_preview_max_mb"))
+    if output_preview_max_mb is None:
+        output_preview_max_mb = 1
+    defaults["output_preview_max_mb"] = output_preview_max_mb
+    defaults["output_preview_max_bytes"] = output_preview_max_mb * 1024 * 1024
     # Share/export redaction rules are normalized up front so the browser and
     # the snapshot endpoint both receive the same validated rule set.
     defaults["share_redaction_rules"] = normalize_redaction_rules(

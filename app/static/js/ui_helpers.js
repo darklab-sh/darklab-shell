@@ -86,6 +86,26 @@
     input.setAttribute('spellcheck', 'false');
     input.setAttribute('inputmode', 'text');
   };
+  global.normalizeComposerSmartPeriod = (sourceInput) => {
+    if (!sourceInput || typeof sourceInput.value !== 'string') return false;
+    const composer = typeof getComposerState === 'function' ? getComposerState() : null;
+    if (!composer || typeof composer.value !== 'string') return false;
+    const prevValue = composer.value;
+    const prevStart = typeof composer.selectionStart === 'number' ? composer.selectionStart : prevValue.length;
+    const prevEnd = typeof composer.selectionEnd === 'number' ? composer.selectionEnd : prevStart;
+    if (prevStart !== prevEnd || prevStart < 1 || prevValue[prevStart - 1] !== ' ') return false;
+
+    const smartPeriodValue = `${prevValue.slice(0, prevStart - 1)}. ${prevValue.slice(prevStart)}`;
+    if (sourceInput.value !== smartPeriodValue) return false;
+
+    const normalizedValue = `${prevValue.slice(0, prevStart)} ${prevValue.slice(prevStart)}`;
+    const nextCaret = prevStart + 1;
+    sourceInput.value = normalizedValue;
+    if (typeof sourceInput.setSelectionRange === 'function') {
+      sourceInput.setSelectionRange(nextCaret, nextCaret);
+    }
+    return true;
+  };
   function _estimateComposerTextWidth(input, text) {
     if (!input || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') return 0;
     const style = window.getComputedStyle(input);
@@ -365,6 +385,9 @@
       if (typeof acHide === 'function') acHide();
       if (typeof syncShellPrompt === 'function') syncShellPrompt();
       return;
+    }
+    if (typeof global.normalizeComposerSmartPeriod === 'function') {
+      global.normalizeComposerSmartPeriod(sourceInput);
     }
     if (_activeTab) _activeTab.followOutput = true;
     const _out = typeof document !== 'undefined'

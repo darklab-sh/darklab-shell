@@ -6,6 +6,25 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
+## [2.0] - Unreleased
+
+### Added
+
+- **Interactive PTY mode has a guarded first pass** — `mtr --interactive <host>`, `ffuf --interactive ...`, and `masscan --interactive ...` can run in a constrained terminal-style tab when the instance explicitly enables the feature.
+  - **Why:** screen-redrawing tools and TTY-aware progress displays do not fit the normal line-oriented `/runs` stream, but they are much more useful when given a real terminal.
+  - **What:** added a dedicated PTY lifecycle service, `/pty/runs` start/stream/input/resize routes, config gating, Redis-brokered PTY output/input/resize events for multi-worker deployments, a single-worker local fallback, vendored xterm.js rendering with the fit addon, an app-modal live terminal surface, server-side terminal capture for saved history/search/findings, plus `interactive:` registry metadata on `mtr`, `ffuf`, and `masscan`. The `interactive:` block in `commands.yaml` drives PTY trigger flags, default terminal size, input policy, and max runtime instead of those values being hardcoded in the route or service, so adding a new interactive tool is now a registry-only change. Normal `mtr` still defaults to non-interactive report mode, while `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive` are denied on the normal `/runs` path and reserved for the PTY route. The live browser terminal preserves normal terminal formatting in its modal while the parent tab remains the history owner, `Ctrl+C` opens the standard kill confirmation instead of sending a raw interrupt, and the tab appends the saved static PTY transcript plus exit status when the run finishes.
+  - **Tests:** added route coverage for disabled mode, broker guardrails, trigger stripping, registry-driven PTY settings, PTY history persistence, normal command-policy reservation, Redis-backed PTY control queuing, cross-worker stream replay, terminal-capture synthesis, xterm vendor routes, xterm terminal mounting, active PTY focus ownership, PTY Ctrl+C kill confirmation, and PTY transcript finalization.
+
+### Changed
+
+- **SQLite run previews are now byte-bounded** — `output_preview_max_mb` caps the preview JSON stored in SQLite, so huge single-line output such as JSON scanner results cannot turn a short run preview into a multi-megabyte history row. Full-output artifacts still retain larger output up to `full_output_max_mb` when full-output persistence is enabled.
+- **Startup history queries now use targeted SQLite indexes** — recent-command, snapshot, and workflow lookups are backed by session-aware ordering indexes so the rail and startup restore paths do not scan large history tables before the UI finishes loading.
+
+### Fixed
+
+- **macOS double-space period substitution no longer changes terminal commands** — the desktop command composer now opts out of autocorrect/smart text behavior like the mobile composer, and the shared composer input path normalizes the exact `word. ` substitution back to two literal spaces before autocomplete or draft state sees it.
+- **History restore now keys existing tabs by run identity** — restoring a run no longer jumps to an unrelated tab just because that tab has the same command text; only the same `runId` / `historyRunId` is reused.
+
 ## [1.7] — 2026-05-05
 
 ### Added
@@ -30,10 +49,6 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Why:** the allowed-commands FAQ answered "what can I run?" but did not explain what each tool is for or which examples and flags the app understands.
   - **What:** added shared command-catalog helpers, `commands info <root> [subcommand]`, `/commands/catalog` and `/commands/catalog/<root>` routes, a dedicated Command Registry modal/sheet in the desktop rail and mobile menu, and a reusable command-details modal. The FAQ now points users to the Command Registry instead of owning the full command list; example chips inside command details still load the prompt and trigger autocomplete.
   - **Tests:** added backend catalog-helper, CLI, route, browser unit, and e2e coverage, plus a registry drift guard requiring descriptions for all top-level external commands.
-- **Interactive PTY mode has a guarded first pass** — `mtr --interactive <host>`, `ffuf --interactive ...`, and `masscan --interactive ...` can run in a constrained terminal-style tab when the instance explicitly enables the feature.
-  - **Why:** screen-redrawing tools and TTY-aware progress displays do not fit the normal line-oriented `/runs` stream, but they are much more useful when given a real terminal.
-  - **What:** added a dedicated PTY lifecycle service, `/pty/runs` start/stream/input/resize routes, config gating, Redis-brokered PTY output/input/resize events for multi-worker deployments, a single-worker local fallback, vendored xterm.js rendering with the fit addon, server-side terminal capture for saved history/search/findings, plus `interactive:` registry metadata on `mtr`, `ffuf`, and `masscan`. The `interactive:` block in `commands.yaml` drives PTY trigger flags, default terminal size, input policy, and max runtime instead of those values being hardcoded in the route or service, so adding a new interactive tool is now a registry-only change. Normal `mtr` still defaults to non-interactive report mode, while `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive` are denied on the normal `/runs` path and reserved for the PTY route. The browser terminal preserves normal terminal formatting and keeps focus on the PTY until the run exits.
-  - **Tests:** added route coverage for disabled mode, broker guardrails, trigger stripping, registry-driven PTY settings, PTY history persistence, normal command-policy reservation, Redis-backed PTY control queuing, cross-worker stream replay, terminal-capture synthesis, xterm vendor routes, xterm terminal mounting, and active PTY focus ownership.
 
 ### Changed
 
@@ -49,7 +64,6 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Why:** the previous word-jump behavior treated only spaces as delimiters, so paths and domains such as `/tmp/darklab_findings(1).txt` or `example.com` moved as one large chunk instead of stopping at useful terminal word segments.
   - **What:** the shared word-boundary helpers now treat letters and digits as word characters and punctuation such as `(`, `)`, `.`, `,`, `/`, `\`, and `_` as delimiters.
   - **Tests:** added Vitest coverage for punctuation-delimited Alt/Option movement and Ctrl+W behavior, and updated mobile helper expectations to match the new boundary rules.
-- **Session file docs and test inventory now reflect the v1.7 workspace command surface** — the docs count 2,458 total tests, including 1,220 pytest tests, 1,002 Vitest tests, and 236 Playwright tests.
 - **Autocomplete placeholder hints now have an explicit schema path and behavior** — frontend and backend autocomplete normalization accept `hint_only: true` as the author-owned display-only signal, placeholder-looking text no longer becomes display-only by regex inference, and hint-only rows now render as subtle italic guidance instead of selectable menu choices.
   - **Why:** rows such as `<file>` and `<domain>` should teach the shape of the command without blocking Tab from accepting the one real file, folder, or domain suggestion in the menu.
   - **What:** Tab, Enter, ArrowUp, ArrowDown, mouse, and touch interactions now skip hint-only rows while keeping them visible as guidance. Shared-prefix expansion also ignores hint rows, so concrete suggestions behave consistently even when the menu includes placeholder copy.

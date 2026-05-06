@@ -235,17 +235,30 @@ class TestInteractivePtyRuns:
             fake_run,
             datetime.now(timezone.utc).isoformat(),
             0,
-            [{"text": "hop 1 ip.darklab.sh", "cls": ""}],
+            [
+                {"text": "hop 1 ip.darklab.sh", "cls": ""},
+                {"text": "Discovered open port 80/tcp on 192.0.2.1", "cls": ""},
+            ],
         )
-        assert summary["output_line_count"] == 1
+        assert summary["output_line_count"] == 2
         with db_connect() as conn:
             row = conn.execute(
-                "SELECT command, exit_code, output_search_text FROM runs WHERE id = ?",
+                "SELECT command, exit_code, output_search_text, output_preview FROM runs WHERE id = ?",
                 ("pty-run-1",),
             ).fetchone()
         assert row["command"] == "mtr --interactive darklab.sh"
         assert row["exit_code"] == 0
         assert "hop 1 ip.darklab.sh" in row["output_search_text"]
+        assert "Discovered open port 80/tcp on 192.0.2.1" in row["output_search_text"]
+        preview_lines = json.loads(row["output_preview"])
+        finding_line = next(
+            (line for line in preview_lines if "open port 80/tcp" in str(line.get("text", ""))),
+            None,
+        )
+        assert finding_line is not None, "expected the synthesized finding line in output_preview"
+        assert "findings" in (finding_line.get("signals") or []), (
+            "OutputSignalClassifier should tag the synthesized finding line as a finding"
+        )
 
     def test_start_interactive_pty_uses_registry_spec(self):
         client = get_client()

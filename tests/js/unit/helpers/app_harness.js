@@ -211,7 +211,7 @@ export async function loadAppFns({
       <input id="options-prompt-username-input" />
       <div id="options-prompt-username-error" class="u-hidden"></div>
       <div id="shell-input-row" data-mobile-label="$">
-        <input id="cmd" />
+        <input id="cmd" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="none" />
       </div>
       <div id="history-panel"></div>
       <div id="history-list"></div>
