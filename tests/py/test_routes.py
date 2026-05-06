@@ -159,6 +159,150 @@ class TestHealthRoute:
         assert data["redis"] is False
 
 
+# ── /projects ────────────────────────────────────────────────────────────────
+
+class TestProjectRoutes:
+    def _session_id(self, prefix="projects"):
+        return f"{prefix}-" + uuid.uuid4().hex[:8]
+
+    def _create_project(self, client, session_id, name="External Review"):
+        resp = client.post(
+            "/projects",
+            json={"name": name, "description": "Quarterly case folder", "color": "green"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert resp.status_code == 201
+        return json.loads(resp.data)["project"]
+
+    def test_create_list_get_update_archive_and_delete_project(self):
+        client = get_client()
+        session_id = self._session_id()
+        project = self._create_project(client, session_id)
+
+        assert project["name"] == "External Review"
+        assert project["slug"] == "external-review"
+        assert project["status"] == "active"
+
+        listed = json.loads(client.get("/projects", headers={"X-Session-ID": session_id}).data)
+        assert [item["id"] for item in listed["projects"]] == [project["id"]]
+
+        get_resp = client.get(f"/projects/{project['id']}", headers={"X-Session-ID": session_id})
+        assert json.loads(get_resp.data)["project"]["description"] == "Quarterly case folder"
+
+        update_resp = client.put(
+            f"/projects/{project['id']}",
+            json={"name": "Renamed Review", "status": "archived", "notes": "private notes"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert update_resp.status_code == 200
+        updated = json.loads(update_resp.data)["project"]
+        assert updated["name"] == "Renamed Review"
+        assert updated["slug"] == "renamed-review"
+        assert updated["status"] == "archived"
+        assert updated["notes"] == "private notes"
+
+        default_list = json.loads(client.get("/projects", headers={"X-Session-ID": session_id}).data)
+        assert default_list["projects"] == []
+        archived_list = json.loads(
+            client.get("/projects?include_archived=1", headers={"X-Session-ID": session_id}).data
+        )
+        assert [item["id"] for item in archived_list["projects"]] == [project["id"]]
+
+        delete_resp = client.delete(f"/projects/{project['id']}", headers={"X-Session-ID": session_id})
+        assert delete_resp.status_code == 200
+        missing_resp = client.get(f"/projects/{project['id']}", headers={"X-Session-ID": session_id})
+        assert missing_resp.status_code == 404
+
+    def test_projects_are_session_scoped_and_slugs_are_unique_per_session(self):
+        client = get_client()
+        session_a = self._session_id("project-a")
+        session_b = self._session_id("project-b")
+        first = self._create_project(client, session_a, "Case")
+        second = self._create_project(client, session_a, "Case")
+        other_session = self._create_project(client, session_b, "Case")
+
+        assert first["slug"] == "case"
+        assert second["slug"] == "case-2"
+        assert other_session["slug"] == "case"
+
+        hidden = client.get(f"/projects/{first['id']}", headers={"X-Session-ID": session_b})
+        assert hidden.status_code == 404
+
+    def test_links_run_and_unlinks_without_duplicate_rows(self):
+        client = get_client()
+        session_id = self._session_id("project-link")
+        project = self._create_project(client, session_id)
+        run_id = "run-" + uuid.uuid4().hex
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                (run_id, session_id, "nmap darklab.sh"),
+            )
+            conn.commit()
+
+        payload = {"entity_type": "run", "entity_id": run_id, "source": "manual"}
+        link_resp = client.post(
+            f"/projects/{project['id']}/links",
+            json=payload,
+            headers={"X-Session-ID": session_id},
+        )
+        duplicate_resp = client.post(
+            f"/projects/{project['id']}/links",
+            json=payload,
+            headers={"X-Session-ID": session_id},
+        )
+        assert link_resp.status_code == 201
+        assert duplicate_resp.status_code == 201
+        first_link = json.loads(link_resp.data)["link"]
+        duplicate_link = json.loads(duplicate_resp.data)["link"]
+        assert first_link["id"] == duplicate_link["id"]
+
+        links = json.loads(
+            client.get(f"/projects/{project['id']}/links", headers={"X-Session-ID": session_id}).data
+        )
+        assert links["links"] == [first_link]
+
+        unlink_resp = client.delete(
+            f"/projects/{project['id']}/links",
+            json={"entity_type": "run", "entity_id": run_id},
+            headers={"X-Session-ID": session_id},
+        )
+        assert unlink_resp.status_code == 200
+        empty_links = json.loads(
+            client.get(f"/projects/{project['id']}/links", headers={"X-Session-ID": session_id}).data
+        )
+        assert empty_links["links"] == []
+
+    def test_rejects_cross_session_or_unsupported_project_links(self):
+        client = get_client()
+        session_id = self._session_id("project-link")
+        other_session = self._session_id("project-other")
+        project = self._create_project(client, session_id)
+        other_run_id = "run-" + uuid.uuid4().hex
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                (other_run_id, other_session, "dig darklab.sh"),
+            )
+            conn.commit()
+
+        cross_session = client.post(
+            f"/projects/{project['id']}/links",
+            json={"entity_type": "run", "entity_id": other_run_id},
+            headers={"X-Session-ID": session_id},
+        )
+        unsupported = client.post(
+            f"/projects/{project['id']}/links",
+            json={"entity_type": "annotation", "entity_id": "ann_1"},
+            headers={"X-Session-ID": session_id},
+        )
+
+        assert cross_session.status_code == 400
+        assert "not found" in json.loads(cross_session.data)["error"]
+        assert unsupported.status_code == 400
+        assert "do not support" in json.loads(unsupported.data)["error"]
+
+
 # ── /log ──────────────────────────────────────────────────────────────────────
 
 class TestClientLogRoute:

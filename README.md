@@ -607,6 +607,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── assets.py           # /vendor/*, /favicon.ico, /health, /diag (IP-gated operator diagnostics)
 │   │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*
 │   │   ├── history.py          # /history*, /share*; preview/full-output shaping helpers
+│   │   ├── projects.py         # /projects* project workspace CRUD and relationship routes
 │   │   ├── run.py              # /runs broker starts/streams, /run/client history persistence, /kill, and run-output capture helpers
 │   │   ├── session.py          # /session/token/*, /session/preferences, /session/variables, /session/workflows*, /session/recent-domains, /session/migrate, /session/starred*
 │   │   └── workspace.py        # /workspace/files* app-managed session file routes
@@ -637,6 +638,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── output_signals.py       # Server-side findings/warnings/errors/summaries classifier
 │   ├── permalinks.py           # Flask context/render helpers for /history/<id> and /share/<id>
 │   ├── process.py              # Redis setup, pid_register/pid_pop, in-process fallback
+│   ├── project_workspace.py    # Session-scoped project/case folder helpers and relationship validation
 │   ├── pty_service.py          # Interactive PTY process/service helpers for allowlisted screen tools
 │   ├── redaction.py            # Snapshot-share redaction helpers and built-in rule application
 │   ├── requirements.txt        # Python runtime dependencies

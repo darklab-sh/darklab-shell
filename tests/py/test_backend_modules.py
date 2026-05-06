@@ -4524,6 +4524,39 @@ class TestDatabaseInit:
         assert "snapshots" in tables
         assert "session_variables" in tables
 
+    def test_creates_project_workspace_tables(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            tables = {
+                row[0] for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            conn.close()
+
+        assert {
+            "projects",
+            "project_links",
+            "run_file_artifacts",
+            "project_targets",
+            "findings",
+            "entity_labels",
+            "annotations",
+        }.issubset(tables)
+
+    def test_project_workspace_entity_and_link_source_constants_are_validated(self):
+        assert database.validate_project_entity_type("run") == "run"
+        assert database.validate_project_entity_type("workspace_file") == "workspace_file"
+        assert database.validate_project_link_source("manual") == "manual"
+        assert database.validate_project_link_source("active_project") == "active_project"
+
+        with pytest.raises(ValueError):
+            database.validate_project_entity_type("ticket")
+        with pytest.raises(ValueError):
+            database.validate_project_link_source("guessed")
+
     def test_creates_session_indexes(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
@@ -4545,6 +4578,32 @@ class TestDatabaseInit:
         assert "idx_snapshots_session" in snapshot_indexes
         assert "idx_snapshots_session_created" in snapshot_indexes
         assert "idx_user_workflows_session_updated_created" in workflow_indexes
+
+    def test_creates_project_workspace_indexes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            project_indexes = {row[1] for row in conn.execute("PRAGMA index_list('projects')").fetchall()}
+            link_indexes = {row[1] for row in conn.execute("PRAGMA index_list('project_links')").fetchall()}
+            artifact_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('run_file_artifacts')").fetchall()
+            }
+            target_indexes = {row[1] for row in conn.execute("PRAGMA index_list('project_targets')").fetchall()}
+            finding_indexes = {row[1] for row in conn.execute("PRAGMA index_list('findings')").fetchall()}
+            label_indexes = {row[1] for row in conn.execute("PRAGMA index_list('entity_labels')").fetchall()}
+            annotation_indexes = {row[1] for row in conn.execute("PRAGMA index_list('annotations')").fetchall()}
+            conn.close()
+
+        assert "idx_projects_session_status_updated" in project_indexes
+        assert "idx_project_links_project_entity_created" in link_indexes
+        assert "idx_project_links_entity_lookup" in link_indexes
+        assert "idx_run_file_artifacts_session_run_path" in artifact_indexes
+        assert "idx_project_targets_project_type_value" in target_indexes
+        assert "idx_findings_session_run_created" in finding_indexes
+        assert "idx_findings_target_created" in finding_indexes
+        assert "idx_entity_labels_entity_created" in label_indexes
+        assert "idx_annotations_entity_created" in annotation_indexes
 
     def test_init_is_idempotent(self):
         # Calling db_init() twice on the same DB must not raise
@@ -4668,6 +4727,11 @@ class TestDatabaseInit:
 
             conn = sqlite3.connect(db_path)
             columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
+            tables = {
+                row[0] for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
             session_id = conn.execute(
                 "SELECT session_id FROM runs WHERE id='legacy-run'"
             ).fetchone()[0]
@@ -4675,6 +4739,8 @@ class TestDatabaseInit:
 
         assert "session_id" in columns
         assert session_id == ""
+        assert "projects" in tables
+        assert "project_links" in tables
 
     def test_migrate_schema_ignores_existing_column_error(self):
         conn = mock.MagicMock()

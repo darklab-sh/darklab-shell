@@ -12,6 +12,7 @@ from flask import Blueprint, jsonify, request
 
 from database import db_connect
 from helpers import get_client_ip, get_log_session_id, get_session_id, is_valid_anonymous_session_id
+from project_workspace import migrate_project_workspace_session
 from session_variables import list_session_variables
 from user_workflows import (
     UserWorkflowError,
@@ -429,6 +430,7 @@ def session_migrate():
             "UPDATE user_workflows SET session_id = ? WHERE session_id = ?",
             (to_session_id, from_session_id),
         )
+        project_migration = migrate_project_workspace_session(conn, from_session_id, to_session_id)
         migrated_recent_domains = _migrate_recent_domains(conn, from_session_id, to_session_id)
         conn.execute(
             "DELETE FROM starred_commands WHERE session_id = ?",
@@ -469,6 +471,7 @@ def session_migrate():
         "migrated_preferences": migrated_preferences,
         "migrated_variables": migrated_variables,
         "migrated_workflows": migrated_workflows,
+        **project_migration,
         "migrated_recent_domains": migrated_recent_domains,
         "migrated_workspace_files": workspace_migration.migrated_files,
         "skipped_workspace_files": workspace_migration.skipped_files,
@@ -483,6 +486,7 @@ def session_migrate():
         "migrated_preferences": migrated_preferences,
         "migrated_variables": migrated_variables,
         "migrated_workflows": migrated_workflows,
+        **project_migration,
         "migrated_recent_domains": migrated_recent_domains,
         "migrated_workspace_files": workspace_migration.migrated_files,
         "skipped_workspace_files": workspace_migration.skipped_files,

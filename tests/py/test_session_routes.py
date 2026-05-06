@@ -185,6 +185,40 @@ class TestSessionMigrate:
                 )
             conn.commit()
 
+    def _seed_project_workspace_records(self, session_id, *, project_id="prj_migrate_test", slug="case"):
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO projects "
+                "(id, session_id, name, slug, description, status, color, notes, created, updated) "
+                "VALUES (?, ?, 'Case', ?, '', 'active', '', '', datetime('now'), datetime('now'))",
+                (project_id, session_id, slug),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, created) "
+                "VALUES (?, ?, ?, ?, datetime('now'))",
+                ("rfa_migrate_test", session_id, "run_migrate_test", "findings.txt"),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO findings "
+                "(id, session_id, run_id, scope, raw_line, created) "
+                "VALUES (?, ?, ?, 'finding', 'open port 443', datetime('now'))",
+                ("fnd_migrate_test", session_id, "run_migrate_test"),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO entity_labels "
+                "(id, session_id, entity_type, entity_id, label, created) "
+                "VALUES (?, ?, 'run', 'run_migrate_test', 'baseline', datetime('now'))",
+                ("lbl_migrate_test", session_id),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO annotations "
+                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES (?, ?, 'run', 'run_migrate_test', 'note', datetime('now'), datetime('now'))",
+                ("ann_migrate_test", session_id),
+            )
+            conn.commit()
+
     def _enable_workspace(self, monkeypatch, tmp_path, **overrides):
         cfg = {
             "workspace_enabled": True,
@@ -474,6 +508,47 @@ class TestSessionMigrate:
         assert data["migrated_workflows"] == 1
         assert self._count_rows("user_workflows", from_id) == 0
         assert self._count_rows("user_workflows", to_id) == 1
+
+    def test_migrates_project_workspace_records(self):
+        client = get_client()
+        from_id = "migrate-projects-from-" + __import__("uuid").uuid4().hex[:8]
+        to_id = str(__import__("uuid").uuid4())
+        self._seed_project_workspace_records(from_id)
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO projects "
+                "(id, session_id, name, slug, description, status, color, notes, created, updated) "
+                "VALUES ('prj_existing_dest', ?, 'Case', 'case', '', 'active', '', '', "
+                "datetime('now'), datetime('now'))",
+                (to_id,),
+            )
+            conn.commit()
+
+        resp = client.post(
+            "/session/migrate",
+            json={"from_session_id": from_id, "to_session_id": to_id},
+            headers={"X-Session-ID": from_id},
+        )
+        data = json.loads(resp.data)
+
+        with sqlite3.connect(DB_PATH) as conn:
+            migrated_slug = conn.execute(
+                "SELECT slug FROM projects WHERE session_id = ? AND id = 'prj_migrate_test'",
+                (to_id,),
+            ).fetchone()[0]
+        assert resp.status_code == 200
+        assert data["migrated_projects"] == 1
+        assert data["migrated_run_file_artifacts"] == 1
+        assert data["migrated_findings"] == 1
+        assert data["migrated_entity_labels"] == 1
+        assert data["migrated_annotations"] == 1
+        assert self._count_rows("projects", from_id) == 0
+        assert self._count_rows("projects", to_id) == 2
+        assert self._count_rows("run_file_artifacts", from_id) == 0
+        assert self._count_rows("findings", from_id) == 0
+        assert self._count_rows("entity_labels", from_id) == 0
+        assert self._count_rows("annotations", from_id) == 0
+        assert migrated_slug == "case-2"
 
     def test_migrates_recent_domains_and_merges_destination(self):
         client = get_client()
