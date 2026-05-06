@@ -17,7 +17,33 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 
 ## Open TODOs
 
-No open TODOs are currently tracked.
+- **Interactive PTY mode follow-ups after the first pass**
+  - **Current state:** `mtr --interactive <host>` has a guarded PTY path behind `interactive_pty_enabled`, uses dedicated `/pty/runs` start/stream/input/resize routes, brokers PTY events through Redis in multi-worker deployments, and renders the browser terminal with vendored xterm.js.
+  - Add lifecycle cleanup beyond process exit and max runtime, including stale closed-run cleanup and clearer browser-disconnect behavior.
+  - **Implementation plan: persist PTY runs through server-side terminal capture**
+    - Add a lightweight server-side terminal emulator, likely `pyte`, to each `PtyRun` so every PTY output chunk is fed to both the existing live SSE/Redis stream and a backend screen model. Keep live rendering in xterm.js; the server-side emulator is for persistence, search, signal discovery, and future reattach snapshots.
+    - Size pyte's `HistoryScreen` to roughly `2 * max_output_lines` so its built-in scrollback ceiling does not silently truncate earlier than the existing preview/artifact spillover; the existing config knob continues to govern disk usage.
+    - On resize, resize the server-side screen model alongside the real PTY and browser terminal so persisted scrollback geometry matches what the user saw.
+    - Refactor the PTY reader loop's `finally` clause to flow through the same `_save_completed_run` plumbing used by `/runs`; today it only calls `pid_pop` and `active_run_remove`, so extracting a shared finalizer is the bulk of the implementation work.
+    - Persist on every exit path — clean process exit, max-runtime timeout, `/kill`, and stream errors — by keeping synthesis inside `finally` rather than only the success branch.
+    - On exit, synthesize ANSI-free saved output from terminal scrollback plus the final visible frame.
+    - rstrip each synthesized line so pyte's column padding does not bleed into preview snippets or FTS results.
+    - Trim trailing blank lines from the final frame while preserving useful internal spacing.
+    - Always include the final frame, even if it duplicates the tail of scrollback, so saved interactive runs clearly show the last visible terminal state.
+    - Emit the separator between scrollback and final frame as a `cls`-tagged line (for example `cls="pty-marker"`) rather than a literal text marker, so downstream consumers can filter the seam without regex-matching the marker text.
+    - Skip the separator when scrollback is empty (the `mtr` case), so a lone marker with nothing above it does not appear in saved output.
+    - When both scrollback and final frame are blank, persist a single notice line such as `[interactive PTY exited with no output]` so the history row stays coherent.
+    - Remove the unused `run.capture: list[str]` buffer on `PtyRun` once pyte owns persistence-side capture, so two parallel captured-bytes paths cannot drift.
+    - Persist the synthesized lines through the normal run history/output path so previews, full-output artifacts, FTS, permalinks, shares, retention, and exports keep working without a PTY-specific database fork.
+    - Keep the saved `runs.command` value as the user-typed original (including the trigger flag) so History re-run sends users back through the PTY route; use the stripped `execution_command` only when initializing `OutputSignalClassifier`, so signal rules see the same command shape they would for a normal `/runs` invocation.
+    - Run `OutputSignalClassifier` once after PTY exit against the stable synthesized text, not incrementally against live redraw bytes.
+    - Verify quit-by-keystroke (`q` for mtr, etc.) already exits with code 0 for each interactive tool before adding any special-case mapping; most ncurses tools already do.
+    - Treat worker-death mid-run as a known limitation: the pyte screen lives on the worker that owns `master_fd`, so a worker crash before exit drops the run from history. Periodic pyte-state snapshots into Redis would address this and are deferred until real usage shows they are needed.
+    - Consider a small run metadata marker later, such as `run_type=pty`, so the UI can badge saved interactive runs without changing how their plain-text output is stored.
+    - Defer asciinema-style raw byte replay, input auditing, and per-tool capture profiles until real usage shows they are needed.
+  - Add browser unit coverage for PTY tab state transitions and disabled normal-terminal behaviors.
+  - Add one Playwright smoke test that starts the first supported PTY command, receives screen output, resizes, and kills it cleanly.
+  - Revisit transport after real usage: the current pass uses Redis-brokered SSE plus narrow POST input/resize endpoints to avoid adding a WebSocket server dependency; WebSocket may still be useful if latency or throughput becomes a problem.
 
 ## Research
 

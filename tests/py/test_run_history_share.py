@@ -16,6 +16,7 @@ import unittest.mock as mock
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -158,6 +159,112 @@ def _sse_events(body: str) -> list[dict[str, object]]:
             event["event_id"] = event_id
         events.append(event)
     return events
+
+
+class TestInteractivePtyRuns:
+    def test_start_interactive_pty_rejects_when_disabled(self):
+        client = get_client()
+        with mock.patch("blueprints.run.pty_enabled", return_value=False):
+            resp = client.post(
+                "/pty/runs",
+                json={"command": "mtr --interactive darklab.sh"},
+                headers={"X-Session-ID": "sess-pty-disabled"},
+            )
+
+        assert resp.status_code == 403
+        assert "disabled" in resp.get_json()["error"]
+
+    def test_start_interactive_pty_requires_broker_or_single_worker(self):
+        client = get_client()
+        with mock.patch("blueprints.run.pty_enabled", return_value=True), \
+             mock.patch("blueprints.run.pty_broker_available", return_value=False), \
+             mock.patch("blueprints.run.pty_broker_unavailable_reason", return_value="needs broker"):
+            resp = client.post(
+                "/pty/runs",
+                json={"command": "mtr --interactive darklab.sh"},
+                headers={"X-Session-ID": "sess-pty-workers"},
+            )
+
+        assert resp.status_code == 503
+        assert "needs broker" in resp.get_json()["error"]
+
+    def test_start_interactive_pty_strips_trigger_before_validation(self):
+        client = get_client()
+        fake_run = SimpleNamespace(run_id="pty-run-1", rows=24, cols=100)
+
+        def _allow(command, session_id=None, cfg=None, workspace_cwd=""):  # noqa: ARG001
+            assert command == "mtr darklab.sh"
+            return run_routes.CommandValidationResult(
+                True,
+                "",
+                display_command=command,
+                exec_command=command,
+            )
+
+        with mock.patch("blueprints.run.pty_enabled", return_value=True), \
+             mock.patch("blueprints.run.pty_broker_available", return_value=True), \
+             mock.patch("blueprints.run.validate_command", side_effect=_allow), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.start_pty_run", return_value=fake_run) as start_pty:
+            resp = client.post(
+                "/pty/runs",
+                json={"command": "mtr --interactive darklab.sh", "rows": 30, "cols": 120},
+                headers={
+                    "X-Session-ID": "sess-pty-start",
+                    "X-Client-ID": "client-1",
+                },
+            )
+
+        assert resp.status_code == 202
+        data = resp.get_json()
+        assert data["run_id"] == "pty-run-1"
+        assert data["stream"] == "/pty/runs/pty-run-1/stream"
+        kwargs = start_pty.call_args.kwargs
+        assert kwargs["command"] == "mtr --interactive darklab.sh"
+        assert kwargs["argv"] == ["mtr", "darklab.sh"]
+        assert kwargs["owner_client_id"] == "client-1"
+
+    def test_start_interactive_pty_uses_registry_spec(self):
+        client = get_client()
+        fake_run = SimpleNamespace(run_id="pty-run-custom", rows=35, cols=120)
+        spec = {
+            "root": "watcher",
+            "trigger_flag": "--live",
+            "default_rows": 35,
+            "default_cols": 120,
+            "max_runtime_seconds": 180,
+            "allow_input": False,
+            "requires_args": False,
+        }
+
+        def _allow(command, session_id=None, cfg=None, workspace_cwd=""):  # noqa: ARG001
+            assert command == "watcher"
+            return run_routes.CommandValidationResult(
+                True,
+                "",
+                display_command=command,
+                exec_command=command,
+            )
+
+        with mock.patch("blueprints.run.pty_enabled", return_value=True), \
+             mock.patch("blueprints.run.pty_broker_available", return_value=True), \
+             mock.patch("blueprints.run.interactive_pty_spec_for_command", return_value=spec), \
+             mock.patch("blueprints.run.validate_command", side_effect=_allow), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.start_pty_run", return_value=fake_run) as start_pty:
+            resp = client.post(
+                "/pty/runs",
+                json={"command": "watcher --live"},
+                headers={"X-Session-ID": "sess-pty-custom"},
+            )
+
+        assert resp.status_code == 202
+        kwargs = start_pty.call_args.kwargs
+        assert kwargs["argv"] == ["watcher"]
+        assert kwargs["default_rows"] == 35
+        assert kwargs["default_cols"] == 120
+        assert kwargs["allow_input"] is False
+        assert kwargs["max_runtime_seconds"] == 180
 
 
 # ── /runs streaming ───────────────────────────────────────────────────────────

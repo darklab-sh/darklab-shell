@@ -271,6 +271,58 @@ body.ln-on.ts-clock .output .shell-prompt-wrap::before {
   overflow-wrap: normal;
 }
 
+.pty-session {
+  margin: 8px 0;
+  border: 1px solid var(--theme-border);
+  background: color-mix(in srgb, var(--surface) 88%, var(--bg));
+  min-width: 0;
+}
+
+.pty-session-label {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--theme-border);
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.pty-screen {
+  display: block;
+  min-height: 22rem;
+  height: clamp(22rem, 52vh, 36rem);
+  margin: 0;
+  padding: 10px;
+  overflow: hidden;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  font-family: var(--font-mono);
+  font-size: var(--terminal-font-size);
+  line-height: var(--terminal-line-height);
+  word-break: normal;
+  overflow-wrap: normal;
+  tab-size: 8;
+}
+
+.pty-screen:focus {
+  outline: 1px solid var(--green-dim);
+  outline-offset: -2px;
+}
+
+.pty-screen .xterm {
+  height: 100%;
+}
+
+.pty-screen .xterm-viewport,
+.pty-screen .xterm-screen {
+  background: transparent !important;
+}
+
+.pty-screen .xterm-rows {
+  font-family: var(--font-mono);
+}
+
 .output .shell-prompt-line {
   display: flex;
 }

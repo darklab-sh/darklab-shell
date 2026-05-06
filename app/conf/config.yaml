@@ -294,6 +294,18 @@
 # Server default if unset: 75
 # run_broker_owner_stale_seconds: 75
 
+# Enable first-pass interactive PTY mode for allowlisted screen tools such as
+# mtr --interactive. Multi-worker deployments require Redis so PTY output,
+# input, and resize events can be brokered across workers. Without Redis, this
+# mode is limited to single-worker local/dev deployments.
+# Server default if unset: false
+# interactive_pty_enabled: false
+
+# Maximum lifetime for an interactive PTY command before the server terminates
+# it, in seconds.
+# Server default if unset: 900
+# interactive_pty_max_runtime_seconds: 900
+
 # ── Welcome Animation ─────────────────────────────────────────────────────────
 
 # Base delay between each typed character in the welcome animation (milliseconds).

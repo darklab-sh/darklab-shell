@@ -176,8 +176,8 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1205 pytest + 998 Vitest + 236 Playwright = 2,439 tests**.
-That total includes 2,409 behavior tests plus 30 docs/inventory meta-tests.
+Current totals: **1220 pytest + 1002 Vitest + 236 Playwright = 2,458 tests**.
+That total includes 2,428 behavior tests plus 30 docs/inventory meta-tests.
 
 Playwright notes:
 
@@ -229,7 +229,7 @@ These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `bui
 
 ## Vendor JS Workflow
 
-The two browser libraries used at runtime — `ansi_up` and `jspdf` — are tracked in `package.json` under `dependencies` and built into `app/static/js/vendor/` by `scripts/build_vendor.mjs`. The generated files are committed so the app works without a build step in local development and docker-compose.
+The browser libraries used at runtime — `ansi_up`, `jspdf`, `@xterm/xterm`, and `@xterm/addon-fit` — are tracked in `package.json` under `dependencies` and built into `app/static/js/vendor/` by `scripts/build_vendor.mjs`. The generated files are committed so the app works without a build step in local development and docker-compose.
 
 **Regenerate vendor files after a version bump:**
 
@@ -247,7 +247,7 @@ npm run vendor:check    # runs vendor:sync then git diff --exit-code
 
 `vendor:check` runs automatically as part of `npm run lint` and the pre-commit hook (when `node_modules` is present).
 
-**Why committed vendor files?** `ansi_up` v6 is ESM-only and cannot be loaded via a plain `<script>` tag. `scripts/build_vendor.mjs` wraps it in an IIFE that exposes `window.AnsiUp`. `jspdf` ships a UMD build that is copied as-is. Committing the generated output means local development and docker-compose runs never need an explicit build step, and the exact library version in use is always visible in git history.
+**Why committed vendor files?** `ansi_up` v6 is ESM-only and cannot be loaded via a plain `<script>` tag. `scripts/build_vendor.mjs` wraps it in an IIFE that exposes `window.AnsiUp`. `jspdf`, xterm, and the xterm fit addon ship browser builds that are copied as-is. Committing the generated output means local development and docker-compose runs never need an explicit build step, and the exact library version in use is always visible in git history.
 
 ---
 

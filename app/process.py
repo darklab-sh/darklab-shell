@@ -446,6 +446,7 @@ def active_run_register(
     started: str,
     owner_client_id: str = "",
     owner_tab_id: str = "",
+    run_type: str = "command",
 ) -> None:
     """Register the metadata needed to restore an in-flight run after reload."""
     payload = {
@@ -458,6 +459,7 @@ def active_run_register(
         "owner_client_id": owner_client_id,
         "owner_tab_id": owner_tab_id,
         "owner_last_seen": time.time() if owner_client_id else None,
+        "run_type": run_type,
     }
     if redis_client:
         meta_key = f"procmeta:{run_id}"
@@ -536,6 +538,7 @@ def _active_run_public_item(item: dict[str, Any], source: str, client_id: str = 
         "command": str(item.get("command", "")),
         "started": str(item.get("started", "")),
         "source": source,
+        "run_type": str(item.get("run_type", "command") or "command"),
     }
     public_item.update(_active_run_owner_state(item, client_id=client_id))
     usage = _active_run_resource_usage(run_id, pid)

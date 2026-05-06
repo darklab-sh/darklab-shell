@@ -15,6 +15,9 @@ __pycache__/
 app/static/js/vendor/*
 !app/static/js/vendor/ansi_up.js
 !app/static/js/vendor/jspdf.umd.min.js
+!app/static/js/vendor/xterm-addon-fit.js
+!app/static/js/vendor/xterm.css
+!app/static/js/vendor/xterm.js
  
 # Persistent workspaces bind mount, if in use
 workspaces/

@@ -39,4 +39,8 @@ chmod -R 755 /tmp/.config /tmp/.cache
 # kernel module is absent in unusual environments.
 iptables -A OUTPUT -m owner --uid-owner scanner -p tcp --dport "${APP_PORT:-8888}" -j REJECT --reject-with tcp-reset 2>/dev/null || true
 
-exec gosu appuser gunicorn --bind "0.0.0.0:${APP_PORT:-8888}" --workers "${WEB_CONCURRENCY:-4}" --threads "${WEB_THREADS:-4}" --timeout 3600 --control-socket /tmp/.gunicorn app:app
+WEB_CONCURRENCY="${WEB_CONCURRENCY:-4}"
+WEB_THREADS="${WEB_THREADS:-4}"
+export WEB_CONCURRENCY WEB_THREADS
+
+exec gosu appuser gunicorn --bind "0.0.0.0:${APP_PORT:-8888}" --workers "$WEB_CONCURRENCY" --threads "$WEB_THREADS" --timeout 3600 --control-socket /tmp/.gunicorn app:app

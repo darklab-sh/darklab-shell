@@ -11,6 +11,7 @@ import config as _config
 from commands import (
     command_catalog_from_registry,
     command_catalog_entry,
+    interactive_pty_specs_from_registry,
     load_all_faq,
     load_all_workflows,
     load_ascii_art,
@@ -124,6 +125,8 @@ def _frontend_config_payload():
         "command_timeout_seconds":  cfg["command_timeout_seconds"],
         "permalink_retention_days": cfg["permalink_retention_days"],
         "workspace_enabled":       bool(cfg.get("workspace_enabled", False)),
+        "interactive_pty_enabled": bool(cfg.get("interactive_pty_enabled", False)),
+        "interactive_pty_commands": interactive_pty_specs_from_registry(),
         "welcome_char_ms":          cfg["welcome_char_ms"],
         "welcome_jitter_ms":      cfg["welcome_jitter_ms"],
         "welcome_post_cmd_ms":    cfg["welcome_post_cmd_ms"],

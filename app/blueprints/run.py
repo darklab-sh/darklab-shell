@@ -10,6 +10,7 @@ import os
 import re
 import selectors
 import codecs
+import shlex
 import shutil
 import signal
 import subprocess  # nosec B404
@@ -25,11 +26,13 @@ from flask import Blueprint, Response, jsonify, request
 from commands import (
     CommandValidationResult,
     command_root,
+    interactive_pty_spec_for_command,
     is_command_allowed,
     parse_synthetic_postfilter,
     rewrite_command,
     runtime_missing_command_message,
     runtime_missing_command_name,
+    split_command_argv,
     validate_command,
 )
 from config import CFG, SCANNER_PREFIX
@@ -61,6 +64,16 @@ from run_output_store import RunOutputCapture, load_full_output_entries
 from output_signals import OutputSignalClassifier
 from session_variables import SessionVariableError, expand_session_variables
 from workspace import session_workspace_dir, WorkspaceDisabled
+from pty_service import (
+    pty_broker_available,
+    pty_broker_unavailable_reason,
+    pty_enabled,
+    pty_run_belongs_to_session,
+    resize_pty,
+    start_pty_run,
+    stream_pty_events,
+    write_pty_input,
+)
 
 log = logging.getLogger("shell")
 
@@ -674,6 +687,58 @@ def _preparation_error_response(exc: _RunPreparationError):
     return jsonify({"error": str(exc)}), exc.status_code
 
 
+def _coerce_positive_int(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        number = value
+    elif isinstance(value, float):
+        number = int(value)
+    elif isinstance(value, (str, bytes, bytearray)):
+        try:
+            number = int(value)
+        except ValueError:
+            return default
+    else:
+        return default
+    return number if number > 0 else default
+
+
+def _prepare_interactive_pty_command(
+    original_command: str,
+    session_id: str,
+    client_ip: str,
+) -> tuple[list[str], str, dict[str, object]]:
+    tokens = split_command_argv(original_command)
+    spec = interactive_pty_spec_for_command(original_command)
+    if not tokens or not spec:
+        root = tokens[0].lower() if tokens else "command"
+        raise _RunPreparationError(f"Interactive PTY mode is not available for {root}", status_code=403)
+    trigger_flag = str(spec.get("trigger_flag") or "").strip()
+    if not trigger_flag or trigger_flag not in tokens[1:]:
+        root = str(spec.get("root") or tokens[0].lower())
+        raise _RunPreparationError(
+            f"{root} interactive PTY commands must include {trigger_flag or 'the configured trigger flag'}",
+            status_code=400,
+        )
+    argv = [token for token in tokens if token != trigger_flag]
+    if bool(spec.get("requires_args", False)) and len(argv) < 2:
+        root = str(spec.get("root") or tokens[0].lower())
+        raise _RunPreparationError(f"{root} {trigger_flag} requires command arguments", status_code=400)
+    execution_command = shlex.join(argv)
+    validation = _validate_command_for_run(execution_command, session_id)
+    if not validation.allowed:
+        log.warning("CMD_DENIED", extra={
+            "ip": client_ip, "session": get_log_session_id(session_id),
+            "cmd": original_command, "reason": validation.reason,
+        })
+        raise _RunPreparationError(validation.reason)
+    missing_runtime = runtime_missing_command_name(execution_command)
+    if missing_runtime:
+        raise _RunPreparationError(runtime_missing_command_message(missing_runtime), status_code=503)
+    return argv, execution_command, spec
+
+
 def _prepare_command_input(
     original_command: str,
     session_id: str,
@@ -1063,6 +1128,106 @@ def _run_belongs_to_session(run_id: str, session_id: str) -> bool:
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
+
+@run_bp.route("/pty/runs", methods=["POST"])
+@limiter.limit(lambda: (
+    f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second"
+))
+def start_interactive_pty_run():
+    if not pty_enabled():
+        return jsonify({"error": "Interactive PTY mode is disabled on this instance"}), 403
+    if not pty_broker_available():
+        return jsonify({"error": pty_broker_unavailable_reason()}), 503
+
+    data = request.get_json() or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    original_command = data.get("command", "")
+    if not isinstance(original_command, str):
+        return jsonify({"error": "Command must be a string"}), 400
+    original_command = original_command.strip()
+    if not original_command:
+        return jsonify({"error": "No command provided"}), 400
+
+    session_id = get_session_id()
+    client_ip = get_client_ip()
+    try:
+        argv, execution_command, pty_spec = _prepare_interactive_pty_command(
+            original_command,
+            session_id,
+            client_ip,
+        )
+    except _RunPreparationError as exc:
+        return _preparation_error_response(exc)
+
+    try:
+        run = start_pty_run(
+            session_id=session_id,
+            client_ip=client_ip,
+            command=original_command,
+            argv=argv,
+            rows=data.get("rows"),
+            cols=data.get("cols"),
+            default_rows=pty_spec.get("default_rows"),
+            default_cols=pty_spec.get("default_cols"),
+            owner_client_id=_active_run_owner_value(request.headers.get("X-Client-ID", "")),
+            owner_tab_id=_active_run_owner_value(data.get("tab_id", "")),
+            allow_input=bool(pty_spec.get("allow_input", True)),
+            max_runtime_seconds=_coerce_positive_int(
+                pty_spec.get("max_runtime_seconds"),
+                _coerce_positive_int(CFG.get("interactive_pty_max_runtime_seconds", 900), 900),
+            ),
+        )
+    except Exception as exc:
+        log.error("PTY_SPAWN_ERROR", exc_info=True, extra={
+            "ip": client_ip, "session": get_log_session_id(session_id), "cmd": original_command,
+        })
+        return jsonify({"error": str(exc)}), 500
+    return jsonify({
+        "run_id": run.run_id,
+        "stream": f"/pty/runs/{run.run_id}/stream",
+        "command": execution_command,
+        "interactive": True,
+        "rows": run.rows,
+        "cols": run.cols,
+    }), 202
+
+
+@run_bp.route("/pty/runs/<run_id>/stream")
+def stream_interactive_pty_run(run_id):
+    session_id = get_session_id()
+    if not pty_run_belongs_to_session(run_id, session_id):
+        return jsonify({"error": "Run not found"}), 404
+    return Response(
+        stream_pty_events(run_id, session_id, after=request.args.get("after", "0-0") or "0-0"),
+        mimetype="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
+
+
+@run_bp.route("/pty/runs/<run_id>/input", methods=["POST"])
+def send_interactive_pty_input(run_id):
+    session_id = get_session_id()
+    data = request.get_json() or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    ok, message = write_pty_input(run_id, session_id, data.get("data", ""))
+    if not ok:
+        return jsonify({"error": message or "Input rejected"}), 404 if message == "Run not found" else 400
+    return jsonify({"ok": True})
+
+
+@run_bp.route("/pty/runs/<run_id>/resize", methods=["POST"])
+def resize_interactive_pty_run(run_id):
+    session_id = get_session_id()
+    data = request.get_json() or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    ok, message, rows, cols = resize_pty(run_id, session_id, data.get("rows"), data.get("cols"))
+    if not ok:
+        return jsonify({"error": message or "Resize rejected"}), 404 if message == "Run not found" else 400
+    return jsonify({"ok": True, "rows": rows, "cols": cols})
+
 
 @run_bp.route("/runs", methods=["POST"])
 @limiter.limit(lambda: (

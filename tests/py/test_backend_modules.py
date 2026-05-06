@@ -15,6 +15,7 @@ Run with: pytest tests/ (from the repo root)
 import errno
 import gzip
 import importlib.util
+import json
 import os
 import random
 import re
@@ -30,6 +31,7 @@ from pathlib import Path
 import pytest
 import yaml
 import process
+import pty_service
 import run_broker
 import database
 import app as shell_app
@@ -45,6 +47,7 @@ from commands import (
     load_mobile_welcome_hints, autocomplete_context_from_commands_registry,
     load_autocomplete_context_from_commands_registry, load_command_policy, load_container_smoke_test_commands,
     load_allow_grouping_flags, load_commands_registry, load_workflows,
+    interactive_pty_specs_from_registry,
     command_catalog_entry, command_catalog_from_registry, is_command_allowed, rewrite_command,
 )
 from permalinks import _format_retention, _expiry_note, _permalink_error_page, _normalize_permalink_lines, _prompt_echo_text
@@ -650,6 +653,14 @@ class TestDerivedCommandRegistry:
                     - name: XDG_CONFIG_HOME
                       value: "{managed_workspace_parent}"
                       managed_directory_flag: -dir
+                interactive:
+                  mode: pty
+                  trigger_flag: --live
+                  default_rows: 33
+                  default_cols: 132
+                  max_runtime_seconds: 321
+                  allow_input: false
+                  requires_args: true
                 autocomplete:
                   flags:
                     - value: -c
@@ -726,6 +737,24 @@ class TestDerivedCommandRegistry:
             "name": "XDG_CONFIG_HOME",
             "value": "{managed_workspace_parent}",
             "managed_directory_flag": "-dir",
+        }]
+        assert ping["interactive"] == {
+            "mode": "pty",
+            "trigger_flag": "--live",
+            "default_rows": 33,
+            "default_cols": 132,
+            "max_runtime_seconds": 321,
+            "allow_input": False,
+            "requires_args": True,
+        }
+        assert interactive_pty_specs_from_registry(registry) == [{
+            "root": "ping",
+            "trigger_flag": "--live",
+            "default_rows": 33,
+            "default_cols": 132,
+            "max_runtime_seconds": 321,
+            "allow_input": False,
+            "requires_args": True,
         }]
         assert ping["autocomplete"]["flags"][0] == {"value": "-c", "description": "Count"}
         assert ping["autocomplete"]["flags"][1] == {"value": "-v", "description": "Verbose"}
@@ -2170,6 +2199,29 @@ class TestIsDeniedMultiWordTool:
         ok, _ = _check("nmap -sV 10.0.0.1", allow=["nmap"], deny=["nc"])
         assert ok
 
+    def test_mtr_interactive_is_reserved_for_pty_route(self):
+        ok, reason = _check("mtr --interactive darklab.sh", allow=["mtr"], deny=["mtr --interactive"])
+        assert not ok
+        assert "Command not allowed" in reason
+
+    def test_ffuf_interactive_is_reserved_for_pty_route(self):
+        ok, reason = _check(
+            "ffuf --interactive -u https://x/FUZZ -w /list.txt",
+            allow=["ffuf"],
+            deny=["ffuf --interactive"],
+        )
+        assert not ok
+        assert "Command not allowed" in reason
+
+    def test_masscan_interactive_is_reserved_for_pty_route(self):
+        ok, reason = _check(
+            "masscan --interactive -p 80 1.2.3.0/24",
+            allow=["masscan"],
+            deny=["masscan --interactive"],
+        )
+        assert not ok
+        assert "Command not allowed" in reason
+
 
 # ── rewrite_command: case insensitivity ──────────────────────────────────────
 
@@ -2481,6 +2533,7 @@ class TestActiveRunMetadata:
                     "command": "ping darklab.sh",
                     "started": "2026-01-01T00:00:00Z",
                     "source": "memory",
+                    "run_type": "command",
                     "owner_client_id": "",
                     "owner_tab_id": "",
                     "owner_last_seen": None,
@@ -2746,6 +2799,88 @@ class TestActiveRunMetadata:
             "memory_bytes": 300,
             "process_count": 2,
         }
+
+
+class TestInteractivePtyRegistry:
+    def test_live_registry_publishes_each_supported_interactive_tool(self):
+        specs = {spec["root"]: spec for spec in interactive_pty_specs_from_registry()}
+        assert set(specs) == {"mtr", "ffuf", "masscan"}
+        for root, expected in (
+            ("mtr", {"trigger_flag": "--interactive", "requires_args": True}),
+            ("ffuf", {"trigger_flag": "--interactive", "requires_args": True}),
+            ("masscan", {"trigger_flag": "--interactive", "requires_args": True}),
+        ):
+            spec = specs[root]
+            assert spec["trigger_flag"] == expected["trigger_flag"]
+            assert spec["requires_args"] is expected["requires_args"]
+            assert spec["allow_input"] is True
+            max_runtime = spec["max_runtime_seconds"]
+            assert isinstance(max_runtime, int) and max_runtime > 0
+
+
+class TestPtyBrokerService:
+    def test_pty_broker_is_available_with_redis_even_when_workers_are_not_sticky(self):
+        with mock.patch.object(pty_service, "redis_client", object()), \
+             mock.patch.object(pty_service, "pty_worker_supported", return_value=False):
+            assert pty_service.pty_broker_available() is True
+
+    def test_pty_input_and_resize_queue_through_redis_without_local_run(self):
+        fake = process._FakeRedisClient()
+        run_id = "pty-run-redis"
+        fake.set(
+            pty_service._meta_key(run_id),
+            json.dumps({
+                "run_id": run_id,
+                "session_id": "session-1",
+                "command": "mtr --interactive darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "closed": False,
+            }),
+        )
+
+        with mock.patch.object(pty_service, "redis_client", fake):
+            assert pty_service.write_pty_input(run_id, "session-1", "q") == (True, "")
+            assert pty_service.resize_pty(run_id, "session-1", 33, 120) == (True, "", 33, 120)
+            rows = fake.xread({pty_service._control_key(run_id): "0-0"}, count=10)
+
+        payloads = [
+            json.loads(fields["payload"])
+            for _key, stream_rows in rows
+            for _event_id, fields in stream_rows
+        ]
+        assert payloads == [
+            {"data": "q", "action": "input"},
+            {"rows": 33, "cols": 120, "action": "resize"},
+        ]
+
+    def test_pty_stream_replays_redis_output_events_for_any_worker(self):
+        fake = process._FakeRedisClient()
+        run_id = "pty-run-stream"
+        fake.set(
+            pty_service._meta_key(run_id),
+            json.dumps({
+                "run_id": run_id,
+                "session_id": "session-1",
+                "command": "mtr --interactive darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "closed": False,
+            }),
+        )
+
+        with mock.patch.object(pty_service, "redis_client", fake):
+            pty_service.publish_pty_event(run_id, "output", {"text": "live hop"})
+            stream = pty_service.stream_pty_events(run_id, "session-1")
+            chunk = next(stream)
+            close_stream = getattr(stream, "close", None)
+            if callable(close_stream):
+                close_stream()
+
+        assert "live hop" in chunk
+        assert '"type": "output"' in chunk
 
 
 # ── _format_retention ─────────────────────────────────────────────────────────

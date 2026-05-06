@@ -460,6 +460,12 @@
     // after every chrome action.
     if (isMobileMode) return false;
     if (typeof global.isConfirmOpen === 'function' && global.isConfirmOpen()) return false;
+    if (
+      typeof global.focusActiveInteractivePty === 'function'
+      && global.focusActiveInteractivePty({ preventScroll })
+    ) {
+      return true;
+    }
     const target = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
     if (target && typeof focusComposerInput === 'function' && focusComposerInput(target, { preventScroll })) {
       return true;

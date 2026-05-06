@@ -20,12 +20,12 @@ Workspace file behavior is intentionally split across all three layers: pytest o
 
 Current totals:
 
-- behavior tests: 2,409
+- behavior tests: 2,428
 - docs/inventory meta-tests: 30
-- `pytest`: 1205 (1175 behavior + 30 meta)
-- `vitest`: 998
+- `pytest`: 1220 (1190 behavior + 30 meta)
+- `vitest`: 1002
 - `playwright`: 236
-- total: 2,439
+- total: 2,458
 
 This document is organized in two parts:
 
@@ -471,6 +471,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIsDeniedMultiWordTool.test_subcommand_specific_deny_fires_for_correct_subcommand` | Checks that subcommand specific deny fires for correct subcommand. |
 | `TestIsDeniedMultiWordTool.test_deny_tool_only_no_flag` | Checks that deny tool only no flag. |
 | `TestIsDeniedMultiWordTool.test_deny_tool_only_does_not_block_other_tool` | Checks that deny tool only does not block other tool. |
+| `TestIsDeniedMultiWordTool.test_mtr_interactive_is_reserved_for_pty_route` | Verifies that `mtr --interactive` is reserved for the interactive PTY route instead of normal `/runs`. |
+| `TestIsDeniedMultiWordTool.test_ffuf_interactive_is_reserved_for_pty_route` | Verifies that `ffuf --interactive` is reserved for the interactive PTY route instead of normal `/runs`. |
+| `TestIsDeniedMultiWordTool.test_masscan_interactive_is_reserved_for_pty_route` | Verifies that `masscan --interactive` is reserved for the interactive PTY route instead of normal `/runs`. |
 | `TestRewriteCaseInsensitive.test_mtr_uppercase` | Checks mtr uppercase handling. |
 | `TestRewriteCaseInsensitive.test_nmap_uppercase` | Checks nmap uppercase handling. |
 | `TestRewriteCaseInsensitive.test_nuclei_uppercase` | Checks nuclei uppercase handling. |
@@ -504,6 +507,10 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestActiveRunMetadata.test_pid_pop_for_session_requires_matching_session` | Verifies that active-run PID lookup only pops processes owned by the requesting session. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_legacy_metadata_on_linux` | Checks that legacy Redis metadata without PID start-time tracking is pruned on Linux instead of trusting a reused PID. |
 | `TestActiveRunMetadata.test_active_run_resource_usage_reports_cumulative_cpu_and_memory` | Verifies that active-run resource telemetry reports process-tree CPU seconds and RSS memory for Status Monitor display. |
+| `TestInteractivePtyRegistry.test_live_registry_publishes_each_supported_interactive_tool` | Verifies that `commands.yaml` exposes the expected interactive PTY tools (`mtr`, `ffuf`, `masscan`) with their trigger flag and runtime settings. |
+| `TestPtyBrokerService.test_pty_broker_is_available_with_redis_even_when_workers_are_not_sticky` | Verifies that Redis-backed PTY brokering works without requiring sticky Gunicorn workers. |
+| `TestPtyBrokerService.test_pty_input_and_resize_queue_through_redis_without_local_run` | Verifies that PTY input and resize requests enqueue Redis control events without needing the local worker that owns the PTY file descriptor. |
+| `TestPtyBrokerService.test_pty_stream_replays_redis_output_events_for_any_worker` | Verifies that Redis-backed PTY output can be streamed by any web worker. |
 | `TestFormatRetention.test_zero_returns_unlimited` | Checks zero returns unlimited handling. |
 | `TestFormatRetention.test_365_returns_one_year` | Checks that 365 returns one year. |
 | `TestFormatRetention.test_730_returns_two_years` | Checks that 730 returns two years. |
@@ -904,6 +911,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestStatusRoute.test_server_time_is_ms_epoch` | `server_time` is a millisecond-epoch integer in a plausible range. |
 | `TestConfigRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestConfigRoute.test_contains_expected_keys` | Checks contains expected keys handling. |
+| `TestConfigRoute.test_interactive_pty_commands_reflect_registry` | Verifies that the browser config exposes interactive PTY command metadata from the command registry. |
 | `TestConfigRoute.test_workspace_menu_affordances_follow_config` | Checks that test workspace menu affordances follow config. |
 | `TestConfigRoute.test_max_tabs_is_int` | Checks that max tabs is int. |
 | `TestConfigRoute.test_contains_timeout_and_welcome_keys` | Contains timeout and welcome keys. |
@@ -929,6 +937,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestThemesRoute.test_empty_registry_falls_back_to_built_in_dark_theme` | Checks that empty registry falls back to built in dark theme. |
 | `TestVendorAssets.test_ansi_up_js_is_served` | Checks that ansi_up.js is served with correct content type. |
 | `TestVendorAssets.test_jspdf_js_is_served` | Checks that jspdf.umd.min.js is served with correct content type. |
+| `TestVendorAssets.test_xterm_js_is_served` | Checks that xterm.js is served with correct content type. |
+| `TestVendorAssets.test_xterm_fit_js_is_served` | Checks that xterm-addon-fit.js is served with correct content type. |
+| `TestVendorAssets.test_xterm_css_is_served` | Checks that xterm.css is served with correct content type. |
 | `TestVendorAssets.test_font_route_serves_committed_file` | Checks that font route serves the committed file from the static fonts directory. |
 | `TestVendorAssets.test_font_route_rejects_unknown_or_traversal_paths` | Checks that font route rejects unknown or traversal paths. |
 | `TestDiagRoute.test_returns_404_when_cidrs_empty` | Returns 404 when cidrs empty. |
@@ -1141,6 +1152,10 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 
 | Test | Description |
 | --- | --- |
+| `TestInteractivePtyRuns.test_start_interactive_pty_rejects_when_disabled` | Verifies that interactive PTY runs stay disabled unless the instance opts in. |
+| `TestInteractivePtyRuns.test_start_interactive_pty_requires_broker_or_single_worker` | Verifies that interactive PTY mode requires Redis in multi-worker deployments or a single-worker local fallback. |
+| `TestInteractivePtyRuns.test_start_interactive_pty_strips_trigger_before_validation` | Verifies that `mtr --interactive` validates and starts as an `mtr` PTY command without passing the trigger flag to the tool. |
+| `TestInteractivePtyRuns.test_start_interactive_pty_uses_registry_spec` | Verifies that interactive PTY start requests use trigger, size, input, and runtime settings from the command registry. |
 | `TestRunStreaming.test_brokered_synthetic_run_publishes_events_and_persists_history` | Verifies that brokered synthetic runs publish started/output/clear/exit events and persist searchable history. |
 | `TestRunStreaming.test_broker_worker_publishes_notices_filtered_output_exit_and_cleans_up` | Verifies that the broker worker publishes notices, filtered output, exit metadata, and cleanup calls. |
 | `TestRunStreaming.test_broker_worker_times_out_and_publishes_timeout_notice` | Verifies that the broker worker terminates timed-out commands and publishes the timeout notice before exit. |
@@ -1904,6 +1919,15 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `save-html download uses appName and exportTimestamp` | Verifies that save-html download uses appName and exportTimestamp. |
 | `includes line numbers in copied text when lnMode is on` | Verifies that includes line numbers in copied text when lnMode is on. |
 | `omits prefix in copied text when both lnMode and tsMode are off` | Verifies that omits prefix in copied text when both lnMode and tsMode are off. |
+
+#### `pty.test.js`
+
+| Test | Description |
+| --- | --- |
+| `detects the reserved mtr interactive command form` | Verifies that only the `mtr --interactive` command form is routed to the guarded PTY path. |
+| `reports missing xterm globals before mounting a PTY terminal` | Verifies that the PTY path reports missing xterm assets before trying to mount a terminal. |
+| `creates an xterm terminal with the fit addon and opens it in the screen` | Verifies that the PTY browser surface mounts xterm with the fit addon and requested dimensions. |
+| `keeps focus on the active PTY terminal while the PTY tab is running` | Verifies that live interactive PTY tabs retain keyboard focus on xterm instead of the hidden prompt. |
 
 #### `runner.test.js`
 

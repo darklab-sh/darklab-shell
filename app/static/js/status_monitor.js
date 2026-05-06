@@ -802,6 +802,10 @@
     )) || null;
   }
 
+  function _isPtyRun(run) {
+    return String(run?.run_type || '').toLowerCase() === 'pty';
+  }
+
   function _tabLabelForRun(run) {
     const tab = _tabForRun(run);
     if (!tab) return '';
@@ -2874,7 +2878,7 @@
   function _activeRunActionsSignature(run) {
     const hasAttach = (
       (typeof activateTab === 'function' && !!_tabForRun(run))
-      || typeof attachActiveRunFromMonitor === 'function'
+      || (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function')
     );
     const hasKill = typeof killActiveRunFromMonitor === 'function';
     return `${hasAttach ? 'A' : ''}${hasKill ? 'K' : ''}`;
@@ -2886,7 +2890,7 @@
       activateTab(currentTab.id, { focusComposer: false });
       return Promise.resolve(true);
     }
-    if (typeof attachActiveRunFromMonitor === 'function') {
+    if (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function') {
       return Promise.resolve(attachActiveRunFromMonitor(run));
     }
     return Promise.resolve(false);
@@ -2896,7 +2900,8 @@
     const actions = document.createElement('div');
     actions.className = 'status-monitor-actions';
     actions.dataset.actionsSignature = _activeRunActionsSignature(run);
-    if ((typeof activateTab === 'function' && !!_tabForRun(run)) || typeof attachActiveRunFromMonitor === 'function') {
+    if ((typeof activateTab === 'function' && !!_tabForRun(run))
+      || (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function')) {
       actions.append(_statusMonitorActionButton('Attach', 'Open or attach this run in a tab', () => {
         const latest = activeRunByRow.get(actions.closest('.status-monitor-item')) || run;
         return _openOrAttachActiveRun(latest);
@@ -2926,7 +2931,7 @@
     };
 
     const tab = _tabForRun(run);
-    if (tab || typeof attachActiveRunFromMonitor === 'function') {
+    if (tab || (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function')) {
       item.classList.add('status-monitor-item-clickable', 'chrome-row-clickable');
       item.setAttribute('role', 'button');
       item.setAttribute('tabindex', '0');

@@ -7,11 +7,14 @@
 <title>{{ app_name }}</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="stylesheet" href="/static/css/fonts.css">
+<link rel="stylesheet" href="/vendor/xterm.css">
 <link rel="stylesheet" href="/static/css/styles.css">
 {% include "theme_vars_style.html" %}
 {% include "theme_vars_script.html" %}
 <script src="/vendor/ansi_up.js"></script>
 <script src="/vendor/jspdf.umd.min.js"></script>
+<script src="/vendor/xterm.js"></script>
+<script src="/vendor/xterm-addon-fit.js"></script>
 <script src="/static/js/export_html.js"></script>
 </head>
 <body data-theme="{{ current_theme.name }}">
@@ -797,6 +800,7 @@
 <script src="/static/js/welcome.js"></script>
 <script src="/static/js/status_monitor.js"></script>
 <script src="/static/js/runner_core.js"></script>
+<script src="/static/js/pty.js"></script>
 <script src="/static/js/runner.js"></script>
 <script src="/static/js/app_preferences_core.js"></script>
 <script src="/static/js/app.js"></script>
