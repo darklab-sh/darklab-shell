@@ -13,6 +13,7 @@ import select
 import signal
 import struct
 import subprocess  # nosec B404
+import tempfile
 import termios
 import threading
 import time
@@ -46,6 +47,27 @@ _PTY_STREAM_FETCH_COUNT = 100
 _PTY_STREAM_MAXLEN = 5000
 _PTY_CAPTURE_MIN_HISTORY_LINES = 2000
 _PTY_CAPTURE_MAX_HISTORY_LINES = 10000
+_PTY_ENV_PASSTHROUGH_KEYS = (
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_DATA_HOME",
+    "TMPDIR",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "NO_COLOR",
+    "CLICOLOR",
+    "COLORTERM",
+)
 _ANSI_ESCAPE_RE = re.compile(
     r"\x1b(?:"
     r"\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC: ESC ] ... (BEL | ST)
@@ -114,6 +136,10 @@ def _terminal_line_to_text(line: object) -> str:
         if isinstance(value_cells, Iterable):
             return "".join(str(getattr(cell, "data", cell) or "") for cell in value_cells)
     return str(line)
+
+
+class PtyDependencyError(RuntimeError):
+    """Raised when an enabled PTY run cannot meet required dependencies."""
 
 
 class PtyTerminalCapture:
@@ -396,12 +422,17 @@ def _set_pty_size(fd: int, rows: int, cols: int) -> None:
 
 
 def _command_env() -> dict[str, str]:
-    return {
-        "TERM": "xterm-256color",
-        "LANG": os.environ.get("LANG", "C.UTF-8"),
-        "LC_ALL": os.environ.get("LC_ALL", "C.UTF-8"),
-        "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+    env = {
+        key: value
+        for key in _PTY_ENV_PASSTHROUGH_KEYS
+        if (value := os.environ.get(key))
     }
+    env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
+    env.setdefault("HOME", tempfile.gettempdir())
+    env.setdefault("LANG", "C.UTF-8")
+    env.setdefault("LC_ALL", env.get("LANG", "C.UTF-8"))
+    env["TERM"] = "xterm-256color"
+    return env
 
 
 def _terminate_run(run: PtyRun) -> None:
@@ -439,6 +470,13 @@ def _store_pty_meta(run: PtyRun, *, closed: bool = False) -> None:
     )
 
 
+def _delete_pty_meta(run_id: str) -> None:
+    if not redis_client:
+        return
+    redis_client.delete(_meta_key(run_id))
+    redis_client.delete(_control_key(run_id))
+
+
 def _load_pty_meta(run_id: str) -> dict[str, Any] | None:
     if redis_client:
         raw = redis_client.get(_meta_key(run_id))
@@ -468,6 +506,20 @@ def _load_pty_meta(run_id: str) -> dict[str, Any] | None:
 def pty_run_belongs_to_session(run_id: str, session_id: str) -> bool:
     meta = _load_pty_meta(run_id)
     return bool(meta and meta.get("session_id") == session_id)
+
+
+def notify_pty_killed_event(run_id: str, session_id: str, payload: dict[str, Any] | None = None) -> bool:
+    meta = _load_pty_meta(run_id)
+    if not meta or meta.get("session_id") != session_id or meta.get("closed"):
+        return False
+    if redis_client:
+        publish_pty_event(run_id, "killed", payload or {})
+        return True
+    run = get_pty_run(run_id, session_id)
+    if not run:
+        return False
+    run.append_event("killed", payload or {})
+    return True
 
 
 def publish_pty_event(run_id: str, event_type: str, payload: dict[str, Any] | None = None) -> str:
@@ -645,6 +697,11 @@ def start_pty_run(
     max_runtime_seconds: int = 900,
     completion_callback: Callable[[PtyRun, str, int, Sequence[dict[str, str]]], dict[str, object]] | None = None,
 ) -> PtyRun:
+    if pyte is None:
+        raise PtyDependencyError(
+            "Interactive PTY startup requires pyte for server-side terminal capture; "
+            "install pyte or disable interactive PTY mode."
+        )
     default_rows_i = _bounded_dimension(default_rows, 24, 10, 60)
     default_cols_i = _bounded_dimension(default_cols, 100, 40, 240)
     rows_i = _bounded_dimension(rows, default_rows_i, 10, 60)
@@ -652,9 +709,16 @@ def start_pty_run(
     terminal_history_lines = _terminal_history_line_limit(CFG.get("max_output_lines", 0))
     run_id = str(uuid.uuid4())
     started = datetime.now(timezone.utc).isoformat()
-    master_fd, slave_fd = pty.openpty()
-    _set_pty_size(slave_fd, rows_i, cols_i)
+    master_fd = -1
+    slave_fd = -1
+    proc: subprocess.Popen | None = None
+    run: PtyRun | None = None
+    meta_stored = False
+    pid_registered = False
+    active_registered = False
     try:
+        master_fd, slave_fd = pty.openpty()
+        _set_pty_size(slave_fd, rows_i, cols_i)
         proc = subprocess.Popen(
             SCANNER_PREFIX + argv if SCANNER_PREFIX else argv,
             stdin=slave_fd,
@@ -665,63 +729,100 @@ def start_pty_run(
             preexec_fn=_prepare_child,
             env=_command_env(),
         )  # nosec B603
-    except Exception:
-        try:
-            os.close(master_fd)
-        except OSError:
-            pass
-        raise
-    finally:
         try:
             os.close(slave_fd)
         except OSError:
             pass
+        slave_fd = -1
 
-    run = PtyRun(
-        run_id=run_id,
-        session_id=session_id,
-        command=command,
-        argv=list(argv),
-        started=started,
-        master_fd=master_fd,
-        proc=proc,
-        rows=rows_i,
-        cols=cols_i,
-        allow_input=allow_input,
-        max_runtime_seconds=max_runtime_seconds,
-        brokered=bool(redis_client),
-        terminal_capture=PtyTerminalCapture(rows_i, cols_i, terminal_history_lines),
-        completion_callback=completion_callback,
-    )
-    with _runs_lock:
-        _runs[run_id] = run
-    _store_pty_meta(run)
-    pid_register(run_id, proc.pid)
-    active_run_register(
-        run_id,
-        proc.pid,
-        session_id,
-        command,
-        started,
-        owner_client_id=owner_client_id,
-        owner_tab_id=owner_tab_id,
-        run_type="pty",
-    )
-    log.info("RUN_START", extra={
-        "run_id": run_id,
-        "session": session_id,
-        "ip": client_ip,
-        "pid": proc.pid,
-        "cmd": command,
-        "cmd_type": "pty",
-    })
-    threading.Thread(
-        target=_reader_loop,
-        args=(run, client_ip),
-        name=f"pty-run-{run_id[:8]}",
-        daemon=True,
-    ).start()
-    return run
+        run = PtyRun(
+            run_id=run_id,
+            session_id=session_id,
+            command=command,
+            argv=list(argv),
+            started=started,
+            master_fd=master_fd,
+            proc=proc,
+            rows=rows_i,
+            cols=cols_i,
+            allow_input=allow_input,
+            max_runtime_seconds=max_runtime_seconds,
+            brokered=bool(redis_client),
+            terminal_capture=PtyTerminalCapture(rows_i, cols_i, terminal_history_lines),
+            completion_callback=completion_callback,
+        )
+        with _runs_lock:
+            _runs[run_id] = run
+        _store_pty_meta(run)
+        meta_stored = True
+        pid_register(run_id, proc.pid)
+        pid_registered = True
+        active_run_register(
+            run_id,
+            proc.pid,
+            session_id,
+            command,
+            started,
+            owner_client_id=owner_client_id,
+            owner_tab_id=owner_tab_id,
+            run_type="pty",
+        )
+        active_registered = True
+        log.info("RUN_START", extra={
+            "run_id": run_id,
+            "session": session_id,
+            "ip": client_ip,
+            "pid": proc.pid,
+            "cmd": command,
+            "cmd_type": "pty",
+        })
+        threading.Thread(
+            target=_reader_loop,
+            args=(run, client_ip),
+            name=f"pty-run-{run_id[:8]}",
+            daemon=True,
+        ).start()
+        return run
+    except Exception:
+        if run is not None:
+            _terminate_run(run)
+        elif proc is not None and proc.poll() is None:
+            try:
+                pgid = proc.pid
+                if SCANNER_PREFIX:
+                    subprocess.run(
+                        [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", f"-{pgid}"],
+                        timeout=5,
+                    )  # nosec B603
+                else:
+                    os.killpg(pgid, signal.SIGTERM)
+            except (ProcessLookupError, subprocess.TimeoutExpired, OSError):
+                pass
+        if proc is not None:
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+        if pid_registered:
+            pid_pop(run_id)
+        if active_registered:
+            active_run_remove(run_id)
+        if meta_stored:
+            _delete_pty_meta(run_id)
+        with _runs_lock:
+            _runs.pop(run_id, None)
+        if master_fd >= 0:
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
+        raise
+    finally:
+        if slave_fd >= 0:
+            try:
+                os.close(slave_fd)
+            except OSError:
+                pass
 
 
 def get_pty_run(run_id: str, session_id: str) -> PtyRun | None:

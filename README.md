@@ -732,13 +732,13 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── data/                       # Writable volume — SQLite database (auto-created)
 │   └── history.db              #   stores run history and tab snapshots
 ├── docker-compose.yml
-	├── docs/
-	│   ├── ROADMAP.md              # Product roadmap for projects, annotations, artifacts, notes, exports, and target context
-	│   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
-	│   └── release-drafts/
-	│       ├── v2.0-merge-request.md # Draft merge-request notes for the next major release
-	│       └── v2.0-release-notes.md # Draft user-facing release notes for the next major release
-	├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser
+├── docs/
+│   ├── ROADMAP.md              # Product roadmap for projects, annotations, artifacts, notes, exports, and target context
+│   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
+│   └── release-drafts/
+│       ├── v2.0-merge-request.md # Draft merge-request notes for the next major release
+│       └── v2.0-release-notes.md # Draft user-facing release notes for the next major release
+├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser
 ├── examples/
 │   ├── docker-compose.prod.yml  # Optional production Docker Compose override (GELF, proxy env, external network)
 │   └── run_local.sh             # Script to run without Docker using Python directly

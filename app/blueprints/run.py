@@ -65,6 +65,8 @@ from output_signals import OutputSignalClassifier
 from session_variables import SessionVariableError, expand_session_variables
 from workspace import session_workspace_dir, WorkspaceDisabled
 from pty_service import (
+    PtyDependencyError,
+    notify_pty_killed_event,
     pty_broker_available,
     pty_broker_unavailable_reason,
     pty_enabled,
@@ -735,6 +737,7 @@ def _prepare_interactive_pty_command(
     original_command: str,
     session_id: str,
     client_ip: str,
+    workspace_cwd: str = "",
 ) -> tuple[list[str], str, dict[str, object]]:
     tokens = split_command_argv(original_command)
     spec = interactive_pty_spec_for_command(original_command)
@@ -753,17 +756,18 @@ def _prepare_interactive_pty_command(
         root = str(spec.get("root") or tokens[0].lower())
         raise _RunPreparationError(f"{root} {trigger_flag} requires command arguments", status_code=400)
     execution_command = shlex.join(argv)
-    validation = _validate_command_for_run(execution_command, session_id)
+    validation = _validate_command_for_run(execution_command, session_id, workspace_cwd)
     if not validation.allowed:
         log.warning("CMD_DENIED", extra={
             "ip": client_ip, "session": get_log_session_id(session_id),
             "cmd": original_command, "reason": validation.reason,
         })
         raise _RunPreparationError(validation.reason)
+    execution_command = validation.exec_command or execution_command
     missing_runtime = runtime_missing_command_name(execution_command)
     if missing_runtime:
         raise _RunPreparationError(runtime_missing_command_message(missing_runtime), status_code=503)
-    return argv, execution_command, spec
+    return split_command_argv(execution_command), execution_command, spec
 
 
 def _prepare_command_input(
@@ -1178,11 +1182,26 @@ def start_interactive_pty_run():
 
     session_id = get_session_id()
     client_ip = get_client_ip()
+    workspace_cwd = _active_run_owner_value(data.get("workspace_cwd", ""))
+    active_pty = next(
+        (
+            run for run in active_runs_for_session(session_id)
+            if str(run.get("run_type", "")).lower() == "pty"
+        ),
+        None,
+    )
+    if active_pty:
+        return jsonify({
+            "error": "An interactive PTY is already running in this session.",
+            "run_id": active_pty.get("run_id", ""),
+            "command": active_pty.get("command", ""),
+        }), 409
     try:
         argv, execution_command, pty_spec = _prepare_interactive_pty_command(
             original_command,
             session_id,
             client_ip,
+            workspace_cwd,
         )
     except _RunPreparationError as exc:
         return _preparation_error_response(exc)
@@ -1214,6 +1233,11 @@ def start_interactive_pty_run():
                 )
             ),
         )
+    except PtyDependencyError as exc:
+        log.error("PTY_DEPENDENCY_ERROR", extra={
+            "ip": client_ip, "session": get_log_session_id(session_id), "cmd": original_command,
+        })
+        return jsonify({"error": str(exc)}), 503
     except Exception as exc:
         log.error("PTY_SPAWN_ERROR", exc_info=True, extra={
             "ip": client_ip, "session": get_log_session_id(session_id), "cmd": original_command,
@@ -1234,14 +1258,27 @@ def stream_interactive_pty_run(run_id):
     session_id = get_session_id()
     if not pty_run_belongs_to_session(run_id, session_id):
         return jsonify({"error": "Run not found"}), 404
+    after_id = request.args.get("after", "0-0") or "0-0"
+    owner_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
+    owner_tab_id = _active_run_owner_value(request.args.get("tab_id", ""))
+
+    def generate():
+        for item in stream_pty_events(run_id, session_id, after=after_id):
+            if owner_client_id:
+                active_run_touch_owner(run_id, owner_client_id, owner_tab_id)
+            yield item
+
     return Response(
-        stream_pty_events(run_id, session_id, after=request.args.get("after", "0-0") or "0-0"),
+        generate(),
         mimetype="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
     )
 
 
 @run_bp.route("/pty/runs/<run_id>/input", methods=["POST"])
+@limiter.limit(lambda: (
+    f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second"
+))
 def send_interactive_pty_input(run_id):
     session_id = get_session_id()
     data = request.get_json() or {}
@@ -1254,6 +1291,9 @@ def send_interactive_pty_input(run_id):
 
 
 @run_bp.route("/pty/runs/<run_id>/resize", methods=["POST"])
+@limiter.limit(lambda: (
+    f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second"
+))
 def resize_interactive_pty_run(run_id):
     session_id = get_session_id()
     data = request.get_json() or {}
@@ -1407,6 +1447,11 @@ def kill_command():
         return jsonify({"error": "run_id must be a string"}), 400
     session_id = get_session_id()
     killer_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
+    active_run = next(
+        (run for run in active_runs_for_session(session_id) if run.get("run_id") == run_id),
+        {},
+    )
+    run_type = str(active_run.get("run_type", "command") or "command").lower()
     pid       = pid_pop_for_session(run_id, session_id)
     if not pid:
         log.debug("KILL_MISS", extra={
@@ -1415,10 +1460,14 @@ def kill_command():
             "session": get_log_session_id(session_id),
         })
         return jsonify({"error": "No such process"}), 404
-    publish_run_event(run_id, "killed", {
+    killed_payload = {
         "killer_client_id": killer_client_id,
         "killer_tab_id": killer_tab_id,
-    })
+    }
+    if run_type == "pty":
+        notify_pty_killed_event(run_id, session_id, killed_payload)
+    else:
+        publish_run_event(run_id, "killed", killed_payload)
     try:
         # Subprocesses call os.setsid() during child setup, which makes PGID
         # == PID at creation time. Use the stored PID directly as the

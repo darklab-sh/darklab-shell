@@ -151,7 +151,7 @@ function loadStatusMonitor({
       document,
       window,
       apiFetch,
-      showToast: vi.fn(),
+      showToast,
       getTabs: vi.fn(() => tabs),
       activateTab,
       ...(pauseBackgroundRunStreamsForStatusMonitor
@@ -333,6 +333,39 @@ describe('Status Monitor', () => {
       expect.objectContaining({ run_id: 'run-other-client' }),
     )
     expect(document.getElementById('status-monitor')?.classList.contains('u-hidden')).toBe(false)
+  })
+
+  it('explains that active PTY runs cannot be reattached from Status Monitor yet', async () => {
+    const killActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
+    const { openStatusMonitor, showToast } = loadStatusMonitor({
+      killActiveRunFromMonitor,
+      runs: [
+        {
+          run_id: 'run-pty',
+          run_type: 'pty',
+          pid: 1234,
+          command: 'mtr --interactive darklab.sh',
+          started: new Date().toISOString(),
+          has_live_owner: true,
+          owned_by_this_client: false,
+        },
+      ],
+    })
+
+    await openStatusMonitor({ source: 'test' })
+
+    expect(document.querySelector('.status-monitor-pty-note')?.textContent).toContain(
+      'Return to the owning browser tab',
+    )
+    const buttons = [...document.querySelectorAll('.status-monitor-action-btn')]
+    expect(buttons.map(button => button.textContent)).toEqual(['Attach', 'Kill'])
+    expect(buttons[0].getAttribute('aria-disabled')).toBe('true')
+    buttons[0].click()
+    await Promise.resolve()
+    expect(showToast).toHaveBeenCalledWith(
+      expect.stringContaining('Interactive PTY is still running in another browser'),
+      'error',
+    )
   })
 
   it('keeps attach and kill available when another browser owns a run already attached locally', async () => {

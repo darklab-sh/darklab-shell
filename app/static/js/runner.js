@@ -410,7 +410,10 @@ function _attachActiveRunToTab(run, tabId, { mode = 'attached' } = {}) {
 function attachActiveRunFromMonitor(run) {
   if (!run || !run.run_id) return Promise.resolve(false);
   if (run.run_type === 'pty') {
-    if (typeof showToast === 'function') showToast('Interactive PTY runs can only be reopened from their existing tab.', 'error');
+    const message = run.has_live_owner && !run.owned_by_this_client
+      ? 'Interactive PTY is still running in another browser. Return to the owning browser tab for the live terminal, or use Status Monitor to kill it.'
+      : 'Interactive PTY is still running, but this browser cannot reconstruct the terminal after reload yet. Use the owning tab while it is open, or Status Monitor to track and kill the run.';
+    if (typeof showToast === 'function') showToast(message, 'error');
     return Promise.resolve(false);
   }
   const tabId = createTab();

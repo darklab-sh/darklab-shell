@@ -806,6 +806,17 @@
     return String(run?.run_type || '').toLowerCase() === 'pty';
   }
 
+  function _ptyAttachUnavailableMessage(run) {
+    if (!_isPtyRun(run) || _tabForRun(run)) return '';
+    if (run?.has_live_owner && !run?.owned_by_this_client) {
+      return 'Interactive PTY is still running in another browser. Return to the owning browser tab for the live terminal, or use Kill here if it should stop.';
+    }
+    if (run?.owner_stale) {
+      return 'Interactive PTY is still running, but this browser cannot reconstruct the terminal after reload yet. Status Monitor can track or kill it until saved output lands.';
+    }
+    return 'Interactive PTY is still running. Live reattach from Status Monitor is not available yet; use the owning tab while it remains open.';
+  }
+
   function _tabLabelForRun(run) {
     const tab = _tabForRun(run);
     if (!tab) return '';
@@ -2876,12 +2887,18 @@
   }
 
   function _activeRunActionsSignature(run) {
+    const ptyUnavailable = _isPtyRun(run) && !_tabForRun(run);
     const hasAttach = (
       (typeof activateTab === 'function' && !!_tabForRun(run))
       || (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function')
     );
     const hasKill = typeof killActiveRunFromMonitor === 'function';
-    return `${hasAttach ? 'A' : ''}${hasKill ? 'K' : ''}`;
+    return [
+      hasAttach ? 'A' : '',
+      ptyUnavailable ? 'P' : '',
+      ptyUnavailable ? _ptyAttachUnavailableMessage(run) : '',
+      hasKill ? 'K' : '',
+    ].join('|');
   }
 
   function _openOrAttachActiveRun(run) {
@@ -2889,6 +2906,10 @@
     if (currentTab && typeof activateTab === 'function') {
       activateTab(currentTab.id, { focusComposer: false });
       return Promise.resolve(true);
+    }
+    if (_isPtyRun(run)) {
+      if (typeof showToast === 'function') showToast(_ptyAttachUnavailableMessage(run), 'error');
+      return Promise.resolve(false);
     }
     if (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function') {
       return Promise.resolve(attachActiveRunFromMonitor(run));
@@ -2906,6 +2927,16 @@
         const latest = activeRunByRow.get(actions.closest('.status-monitor-item')) || run;
         return _openOrAttachActiveRun(latest);
       }));
+    } else if (_isPtyRun(run)) {
+      const unavailable = _statusMonitorActionButton('Attach', _ptyAttachUnavailableMessage(run), () => {
+        const latest = activeRunByRow.get(actions.closest('.status-monitor-item')) || run;
+        return _openOrAttachActiveRun(latest);
+      }, {
+        className: 'status-monitor-action-btn-disabled',
+        closeOnSuccess: false,
+      });
+      unavailable.setAttribute('aria-disabled', 'true');
+      actions.append(unavailable);
     }
     if (typeof killActiveRunFromMonitor === 'function') {
       actions.append(_statusMonitorActionButton('Kill', 'Kill this active run', () => {
@@ -2931,11 +2962,11 @@
     };
 
     const tab = _tabForRun(run);
-    if (tab || (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function')) {
+    if (tab || (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function') || _isPtyRun(run)) {
       item.classList.add('status-monitor-item-clickable', 'chrome-row-clickable');
       item.setAttribute('role', 'button');
       item.setAttribute('tabindex', '0');
-      item.setAttribute('aria-label', `${tab ? 'Open tab for' : 'Attach to'} ${String(run?.command || 'active run')}`);
+      item.setAttribute('aria-label', `${tab ? 'Open tab for' : _isPtyRun(run) ? 'Show PTY attach note for' : 'Attach to'} ${String(run?.command || 'active run')}`);
       item.addEventListener('click', event => {
         if (event.target && event.target.closest && event.target.closest('.status-monitor-action-btn')) return;
         openRun().catch(err => {
@@ -2962,6 +2993,13 @@
     const details = document.createElement('div');
     details.className = 'status-monitor-details';
     details.append(command, meta);
+    const ptyNoticeText = _ptyAttachUnavailableMessage(run);
+    if (ptyNoticeText) {
+      const ptyNotice = document.createElement('div');
+      ptyNotice.className = 'status-monitor-pty-note';
+      ptyNotice.textContent = ptyNoticeText;
+      details.appendChild(ptyNotice);
+    }
 
     const usage = _runResourceUsage(run);
     const telemetry = _runSparklinePanel(run, usage);
@@ -3012,6 +3050,22 @@
           elapsed.setAttribute('data-status-monitor-started', started);
           elapsed.textContent = _formatElapsed(run?.started);
         }
+      }
+    }
+
+    const details = row.querySelector(':scope > .status-monitor-details');
+    if (details) {
+      const expectedNotice = _ptyAttachUnavailableMessage(run);
+      let notice = details.querySelector(':scope > .status-monitor-pty-note');
+      if (expectedNotice) {
+        if (!notice) {
+          notice = document.createElement('div');
+          notice.className = 'status-monitor-pty-note';
+          details.appendChild(notice);
+        }
+        if (notice.textContent !== expectedNotice) notice.textContent = expectedNotice;
+      } else if (notice) {
+        notice.remove();
       }
     }
 

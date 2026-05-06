@@ -316,7 +316,7 @@ body #hamburger-btn:active {
 #new-tab-btn:disabled { opacity: 0.25; cursor: not-allowed; }
 #new-tab-btn:disabled:hover { color: var(--theme-tab-text); }
 
-.tab-panel { display: none; flex: 1; flex-direction: column; overflow: hidden; min-height: 0; }
+.tab-panel { display: none; flex: 1; flex-direction: column; overflow: hidden; min-height: 0; position: relative; }
 .tab-panel.active { display: flex; }
 
 /* ── Output search ── */

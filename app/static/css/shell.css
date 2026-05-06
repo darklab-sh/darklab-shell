@@ -307,6 +307,49 @@ body.ln-on.ts-clock .output .shell-prompt-wrap::before {
   font-family: var(--font-mono);
 }
 
+.pty-running-indicator {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  align-items: center;
+  margin: 10px 12px 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--green) 38%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--green) 9%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+.pty-running-indicator[data-state="detached"] {
+  border-color: color-mix(in srgb, var(--warning) 46%, transparent);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
+.pty-running-indicator-label {
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.pty-running-indicator[data-state="detached"] .pty-running-indicator-label {
+  color: var(--warning);
+}
+
+.pty-running-indicator-detail {
+  grid-column: 1;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.pty-running-indicator-action {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  white-space: nowrap;
+}
+
 #pty-modal {
   display: grid;
   grid-template-rows: auto 1fr;
@@ -314,6 +357,24 @@ body.ln-on.ts-clock .output .shell-prompt-wrap::before {
   width: min(1080px, 94vw);
   background: var(--bg);
   color: var(--fg);
+}
+
+.tab-panel > .pty-tab-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  background: color-mix(in srgb, var(--theme-overlay-backdrop-bg) 82%, transparent);
+  border-radius: inherit;
+}
+
+.tab-panel > .pty-tab-overlay.open {
+  display: flex;
+}
+
+.tab-panel > .pty-tab-overlay #pty-modal {
+  width: min(1040px, calc(100% - 32px));
+  height: min(700px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
 }
 
 .pty-modal-header {

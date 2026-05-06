@@ -2885,6 +2885,90 @@ class TestPtyBrokerService:
         assert "live hop" in chunk
         assert '"type": "output"' in chunk
 
+    def test_pty_start_cleans_up_if_reader_thread_fails_to_start(self):
+        class FakeProc:
+            pid = 4242
+
+            def poll(self):
+                return None
+
+            def wait(self, timeout=None):  # noqa: ARG002
+                return -15
+
+        fake_proc = FakeProc()
+        closed = []
+        fake_pyte = type("FakePyte", (), {
+            "HistoryScreen": lambda *args, **kwargs: object(),
+            "Stream": lambda *args, **kwargs: object(),
+        })()
+
+        with mock.patch.object(pty_service.pty, "openpty", return_value=(10, 11)), \
+             mock.patch.object(pty_service, "pyte", fake_pyte), \
+             mock.patch.object(pty_service, "_set_pty_size"), \
+             mock.patch.object(pty_service.subprocess, "Popen", return_value=fake_proc), \
+             mock.patch.object(pty_service.os, "close", side_effect=lambda fd: closed.append(fd)), \
+             mock.patch.object(pty_service.os, "killpg") as killpg, \
+             mock.patch.object(pty_service, "pid_register"), \
+             mock.patch.object(pty_service, "pid_pop") as pid_pop, \
+             mock.patch.object(pty_service, "active_run_register"), \
+             mock.patch.object(pty_service, "active_run_remove") as active_run_remove, \
+             mock.patch.object(pty_service.threading.Thread, "start", side_effect=RuntimeError("thread failed")):
+            with pytest.raises(RuntimeError, match="thread failed"):
+                pty_service.start_pty_run(
+                    session_id="session-1",
+                    client_ip="127.0.0.1",
+                    command="mtr --interactive darklab.sh",
+                    argv=["mtr", "darklab.sh"],
+                )
+
+        killpg.assert_called_once_with(4242, pty_service.signal.SIGTERM)
+        assert 10 in closed
+        assert 11 in closed
+        pid_pop.assert_called_once()
+        active_run_remove.assert_called_once()
+
+    def test_pty_start_requires_pyte_for_saved_terminal_capture(self):
+        with mock.patch.object(pty_service, "pyte", None), \
+             mock.patch.object(pty_service.pty, "openpty") as openpty:
+            with pytest.raises(pty_service.PtyDependencyError, match="requires pyte"):
+                pty_service.start_pty_run(
+                    session_id="session-1",
+                    client_ip="127.0.0.1",
+                    command="mtr --interactive darklab.sh",
+                    argv=["mtr", "darklab.sh"],
+                )
+
+        openpty.assert_not_called()
+
+    def test_pty_command_env_inherits_only_vetted_keys(self):
+        with mock.patch.dict(pty_service.os.environ, {
+            "PATH": "/custom/bin",
+            "HOME": "/home/appuser",
+            "USER": "appuser",
+            "LOGNAME": "appuser",
+            "XDG_CONFIG_HOME": "/tmp/config",
+            "LANG": "en_US.UTF-8",
+            "SECRET_TOKEN": "do-not-pass",
+            "LD_PRELOAD": "/tmp/inject.so",
+        }, clear=True):
+            env = pty_service._command_env()
+
+        assert env["PATH"] == "/custom/bin"
+        assert env["HOME"] == "/home/appuser"
+        assert env["USER"] == "appuser"
+        assert env["LOGNAME"] == "appuser"
+        assert env["XDG_CONFIG_HOME"] == "/tmp/config"
+        assert env["LANG"] == "en_US.UTF-8"
+        assert env["LC_ALL"] == "en_US.UTF-8"
+        assert env["TERM"] == "xterm-256color"
+        assert "SECRET_TOKEN" not in env
+        assert "LD_PRELOAD" not in env
+
+        with mock.patch.dict(pty_service.os.environ, {}, clear=True):
+            env = pty_service._command_env()
+
+        assert env["HOME"] == tempfile.gettempdir()
+
 
 class TestPtyTerminalCapture:
     @staticmethod
