@@ -10,6 +10,7 @@ import os
 import re
 import selectors
 import codecs
+import shlex
 import shutil
 import signal
 import subprocess  # nosec B404
@@ -25,11 +26,13 @@ from flask import Blueprint, Response, jsonify, request
 from commands import (
     CommandValidationResult,
     command_root,
+    interactive_pty_spec_for_command,
     is_command_allowed,
     parse_synthetic_postfilter,
     rewrite_command,
     runtime_missing_command_message,
     runtime_missing_command_name,
+    split_command_argv,
     validate_command,
 )
 from config import CFG, SCANNER_PREFIX
@@ -42,6 +45,7 @@ from builtin_commands import (
 )
 from helpers import get_client_ip, get_log_session_id, get_session_id
 from process import (
+    active_run_claim_owner,
     active_run_register,
     active_run_remove,
     active_run_touch_owner,
@@ -61,6 +65,19 @@ from run_output_store import RunOutputCapture, load_full_output_entries
 from output_signals import OutputSignalClassifier
 from session_variables import SessionVariableError, expand_session_variables
 from workspace import session_workspace_dir, WorkspaceDisabled
+from pty_service import (
+    PtyDependencyError,
+    notify_pty_killed_event,
+    pty_broker_available,
+    pty_broker_unavailable_reason,
+    pty_enabled,
+    pty_run_snapshot,
+    pty_run_belongs_to_session,
+    resize_pty,
+    start_pty_run,
+    stream_pty_events,
+    write_pty_input,
+)
 
 log = logging.getLogger("shell")
 
@@ -152,6 +169,7 @@ def _run_output_capture(run_id):
         preview_limit=CFG["max_output_lines"],
         persist_full_output=CFG.get("persist_full_run_output", False),
         full_output_max_bytes=CFG.get("full_output_max_bytes", 0),
+        preview_max_bytes=CFG.get("output_preview_max_bytes", 0),
     )
 
 
@@ -269,6 +287,93 @@ def _finalize_completed_run(run_id, session_id, client_ip, original_command, run
         finished.isoformat(), exit_code, capture,
     )
     return elapsed
+
+
+_PTY_TRANSIENT_LINE_PATTERNS = (
+    re.compile(r"^rate:\s+.*\bdone\b.*\bfound=\d+\b", re.IGNORECASE),
+    re.compile(r"^::\s*Progress:\s*\[", re.IGNORECASE),
+)
+
+
+def _normalize_pty_entry(entry) -> dict[str, str]:
+    if isinstance(entry, dict):
+        return {
+            "text": str(entry.get("text", "")),
+            "cls": str(entry.get("cls", "")),
+        }
+    return {"text": str(entry), "cls": ""}
+
+
+def _is_transient_pty_line(text: str) -> bool:
+    value = text.strip()
+    if not value:
+        return False
+    return any(pattern.search(value) for pattern in _PTY_TRANSIENT_LINE_PATTERNS)
+
+
+def _split_pty_entries(entries: list[dict[str, str]]) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    marker_index = next(
+        (index for index, entry in enumerate(entries) if entry.get("cls") == "pty-marker"),
+        -1,
+    )
+    if marker_index < 0:
+        return entries, []
+    return entries[:marker_index], entries[marker_index + 1:]
+
+
+def _filter_transient_pty_entries(entries: list[dict[str, str]]) -> list[dict[str, str]]:
+    return [
+        entry for entry in entries
+        if entry.get("cls") != "pty-marker" and not _is_transient_pty_line(entry.get("text", ""))
+    ]
+
+
+def _shape_completed_pty_entries(synthesized_lines, transcript_mode: object) -> list[dict[str, str]]:
+    mode = str(transcript_mode or "final_frame").strip().lower()
+    entries = [_normalize_pty_entry(item) for item in synthesized_lines]
+    scrollback, final_frame = _split_pty_entries(entries)
+    if mode == "scrollback_findings":
+        shaped = _filter_transient_pty_entries(scrollback)
+        if shaped:
+            return shaped
+        return _filter_transient_pty_entries(final_frame or entries)
+    if mode == "all_sanitized":
+        return _filter_transient_pty_entries(entries)
+    return final_frame if final_frame else _filter_transient_pty_entries(entries)
+
+
+def _persist_completed_pty_run(
+    run,
+    execution_command: str,
+    finished_iso: str,
+    exit_code: int,
+    synthesized_lines,
+    *,
+    transcript_mode: object = "final_frame",
+):
+    capture = _run_output_capture(run.run_id)
+    signal_classifier = OutputSignalClassifier(execution_command, cmd_type="real")
+    for item in _shape_completed_pty_entries(synthesized_lines, transcript_mode):
+        text = str(item.get("text", ""))
+        cls = str(item.get("cls", ""))
+        if cls == "pty-marker":
+            capture.add_line(text, cls=cls)
+            continue
+        _capture_add_line_with_signals(capture, signal_classifier, text, cls=cls)
+    _save_completed_run(
+        run.run_id,
+        run.session_id,
+        run.command,
+        run.started,
+        finished_iso,
+        exit_code,
+        capture,
+    )
+    return {
+        "preview_truncated": capture.preview_truncated,
+        "output_line_count": capture.output_line_count,
+        "full_output_available": capture.full_output_available,
+    }
 
 
 def _timeout_notice(command_timeout):
@@ -674,6 +779,71 @@ def _preparation_error_response(exc: _RunPreparationError):
     return jsonify({"error": str(exc)}), exc.status_code
 
 
+def _coerce_positive_int(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        number = value
+    elif isinstance(value, float):
+        number = int(value)
+    elif isinstance(value, (str, bytes, bytearray)):
+        try:
+            number = int(value)
+        except ValueError:
+            return default
+    else:
+        return default
+    return number if number > 0 else default
+
+
+def _interactive_pty_concurrency_limit() -> int:
+    return _coerce_positive_int(CFG.get("interactive_pty_max_concurrent_per_session", 4), 4)
+
+
+def _active_interactive_pty_count(session_id: str) -> int:
+    return sum(
+        1 for item in active_runs_for_session(session_id)
+        if str(item.get("run_type", "command") or "command") == "pty"
+    )
+
+
+def _prepare_interactive_pty_command(
+    original_command: str,
+    session_id: str,
+    client_ip: str,
+    workspace_cwd: str = "",
+) -> tuple[list[str], str, dict[str, object]]:
+    tokens = split_command_argv(original_command)
+    spec = interactive_pty_spec_for_command(original_command)
+    if not tokens or not spec:
+        root = tokens[0].lower() if tokens else "command"
+        raise _RunPreparationError(f"Interactive PTY mode is not available for {root}", status_code=403)
+    trigger_flag = str(spec.get("trigger_flag") or "").strip()
+    if not trigger_flag or trigger_flag not in tokens[1:]:
+        root = str(spec.get("root") or tokens[0].lower())
+        raise _RunPreparationError(
+            f"{root} interactive PTY commands must include {trigger_flag or 'the configured trigger flag'}",
+            status_code=400,
+        )
+    argv = [token for token in tokens if token != trigger_flag]
+    if bool(spec.get("requires_args", False)) and len(argv) < 2:
+        root = str(spec.get("root") or tokens[0].lower())
+        raise _RunPreparationError(f"{root} {trigger_flag} requires command arguments", status_code=400)
+    execution_command = shlex.join(argv)
+    validation = _validate_command_for_run(execution_command, session_id, workspace_cwd)
+    if not validation.allowed:
+        log.warning("CMD_DENIED", extra={
+            "ip": client_ip, "session": get_log_session_id(session_id),
+            "cmd": original_command, "reason": validation.reason,
+        })
+        raise _RunPreparationError(validation.reason)
+    execution_command = validation.exec_command or execution_command
+    missing_runtime = runtime_missing_command_name(execution_command)
+    if missing_runtime:
+        raise _RunPreparationError(runtime_missing_command_message(missing_runtime), status_code=503)
+    return split_command_argv(execution_command), execution_command, spec
+
+
 def _prepare_command_input(
     original_command: str,
     session_id: str,
@@ -1064,6 +1234,186 @@ def _run_belongs_to_session(run_id: str, session_id: str) -> bool:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+@run_bp.route("/pty/runs", methods=["POST"])
+@limiter.limit(lambda: (
+    f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second"
+))
+def start_interactive_pty_run():
+    if not pty_enabled():
+        return jsonify({"error": "Interactive PTY mode is disabled on this instance"}), 403
+    if not pty_broker_available():
+        return jsonify({"error": pty_broker_unavailable_reason()}), 503
+
+    data = request.get_json() or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    original_command = data.get("command", "")
+    if not isinstance(original_command, str):
+        return jsonify({"error": "Command must be a string"}), 400
+    original_command = original_command.strip()
+    if not original_command:
+        return jsonify({"error": "No command provided"}), 400
+
+    session_id = get_session_id()
+    client_ip = get_client_ip()
+    workspace_cwd = _active_run_owner_value(data.get("workspace_cwd", ""))
+    try:
+        argv, execution_command, pty_spec = _prepare_interactive_pty_command(
+            original_command,
+            session_id,
+            client_ip,
+            workspace_cwd,
+        )
+    except _RunPreparationError as exc:
+        return _preparation_error_response(exc)
+
+    pty_limit = _interactive_pty_concurrency_limit()
+    active_pty_count = _active_interactive_pty_count(session_id)
+    if active_pty_count >= pty_limit:
+        return jsonify({
+            "error": (
+                "Interactive PTY limit reached for this session "
+                f"({active_pty_count}/{pty_limit} active). Close or kill an active PTY before starting another."
+            ),
+        }), 429
+
+    try:
+        run = start_pty_run(
+            session_id=session_id,
+            client_ip=client_ip,
+            command=original_command,
+            argv=argv,
+            rows=data.get("rows"),
+            cols=data.get("cols"),
+            default_rows=pty_spec.get("default_rows"),
+            default_cols=pty_spec.get("default_cols"),
+            owner_client_id=_active_run_owner_value(request.headers.get("X-Client-ID", "")),
+            owner_tab_id=_active_run_owner_value(data.get("tab_id", "")),
+            allow_input=(
+                bool(pty_spec.get("allow_input", True))
+                and str(pty_spec.get("input_safety") or "") != "no_input"
+            ),
+            max_runtime_seconds=_coerce_positive_int(
+                pty_spec.get("max_runtime_seconds"),
+                _coerce_positive_int(CFG.get("interactive_pty_max_runtime_seconds", 900), 900),
+            ),
+            completion_callback=lambda completed_run, finished_iso, exit_code, synthesized_lines: (
+                _persist_completed_pty_run(
+                    completed_run,
+                    execution_command,
+                    finished_iso,
+                    exit_code,
+                    synthesized_lines,
+                    transcript_mode=pty_spec.get("transcript_mode"),
+                )
+            ),
+        )
+    except PtyDependencyError as exc:
+        log.error("PTY_DEPENDENCY_ERROR", extra={
+            "ip": client_ip, "session": get_log_session_id(session_id), "cmd": original_command,
+        })
+        return jsonify({"error": str(exc)}), 503
+    except Exception as exc:
+        log.error("PTY_SPAWN_ERROR", exc_info=True, extra={
+            "ip": client_ip, "session": get_log_session_id(session_id), "cmd": original_command,
+        })
+        return jsonify({"error": str(exc)}), 500
+    return jsonify({
+        "run_id": run.run_id,
+        "stream": f"/pty/runs/{run.run_id}/stream",
+        "command": execution_command,
+        "interactive": True,
+        "rows": run.rows,
+        "cols": run.cols,
+    }), 202
+
+
+@run_bp.route("/pty/runs/<run_id>/stream")
+def stream_interactive_pty_run(run_id):
+    session_id = get_session_id()
+    if not pty_run_belongs_to_session(run_id, session_id):
+        return jsonify({"error": "Run not found"}), 404
+    after_id = request.args.get("after", "0-0") or "0-0"
+    owner_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
+    owner_tab_id = _active_run_owner_value(request.args.get("tab_id", ""))
+    if owner_client_id and pty_run_belongs_to_session(run_id, session_id):
+        active_run_claim_owner(run_id, owner_client_id, owner_tab_id)
+
+    def generate():
+        for item in stream_pty_events(run_id, session_id, after=after_id):
+            if owner_client_id:
+                active_run_touch_owner(run_id, owner_client_id, owner_tab_id)
+            yield item
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
+
+
+def _pty_snapshot_error_response(message: str):
+    text = message or "PTY snapshot is not available"
+    headers = {}
+    if text == "Run not found":
+        status = 404
+    elif text in {"Run is closed", "PTY run is no longer active"}:
+        status = 410
+    elif "snapshot is not available" in text:
+        status = 503
+        headers["Retry-After"] = "1"
+    else:
+        status = 409
+    return jsonify({"error": text}), status, headers
+
+
+@run_bp.route("/pty/runs/<run_id>/snapshot")
+def snapshot_interactive_pty_run(run_id):
+    session_id = get_session_id()
+    ok, message, snapshot = pty_run_snapshot(run_id, session_id)
+    if not ok:
+        return _pty_snapshot_error_response(message)
+    return jsonify(snapshot)
+
+
+@run_bp.route("/pty/runs/<run_id>/input", methods=["POST"])
+@limiter.limit(lambda: (
+    f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second"
+))
+def send_interactive_pty_input(run_id):
+    session_id = get_session_id()
+    data = request.get_json() or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    ok, message = write_pty_input(
+        run_id,
+        session_id,
+        data.get("data", ""),
+        _active_run_owner_value(request.headers.get("X-Client-ID", "")),
+        _active_run_owner_value(data.get("tab_id", "")),
+    )
+    if not ok:
+        status = 404 if message == "Run not found" else 409 if "no longer active" in message else 400
+        return jsonify({"error": message or "Input rejected"}), status
+    return jsonify({"ok": True})
+
+
+@run_bp.route("/pty/runs/<run_id>/resize", methods=["POST"])
+@limiter.limit(lambda: (
+    f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second"
+))
+def resize_interactive_pty_run(run_id):
+    session_id = get_session_id()
+    data = request.get_json() or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    ok, message, rows, cols = resize_pty(run_id, session_id, data.get("rows"), data.get("cols"))
+    if not ok:
+        status = 404 if message == "Run not found" else 409 if "no longer active" in message else 400
+        return jsonify({"error": message or "Resize rejected"}), status
+    return jsonify({"ok": True, "rows": rows, "cols": cols})
+
+
 @run_bp.route("/runs", methods=["POST"])
 @limiter.limit(lambda: (
     f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second"
@@ -1206,6 +1556,11 @@ def kill_command():
         return jsonify({"error": "run_id must be a string"}), 400
     session_id = get_session_id()
     killer_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
+    active_run = next(
+        (run for run in active_runs_for_session(session_id) if run.get("run_id") == run_id),
+        {},
+    )
+    run_type = str(active_run.get("run_type", "command") or "command").lower()
     pid       = pid_pop_for_session(run_id, session_id)
     if not pid:
         log.debug("KILL_MISS", extra={
@@ -1214,10 +1569,14 @@ def kill_command():
             "session": get_log_session_id(session_id),
         })
         return jsonify({"error": "No such process"}), 404
-    publish_run_event(run_id, "killed", {
+    killed_payload = {
         "killer_client_id": killer_client_id,
         "killer_tab_id": killer_tab_id,
-    })
+    }
+    if run_type == "pty":
+        notify_pty_killed_event(run_id, session_id, killed_payload)
+    else:
+        publish_run_event(run_id, "killed", killed_payload)
     try:
         # Subprocesses call os.setsid() during child setup, which makes PGID
         # == PID at creation time. Use the stored PID directly as the

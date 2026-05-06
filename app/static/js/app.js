@@ -1917,6 +1917,9 @@ function applyThemeSelection(themeName, persist = true) {
   }
   if (persist) _persistThemeEntry(entry);
   syncThemeSelectionControls();
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:theme-changed', { theme: entry.name });
+  }
 }
 
 // ── Timestamps ──

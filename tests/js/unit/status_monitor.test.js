@@ -77,6 +77,7 @@ function loadStatusMonitor({
   mobile = false,
   bindMobileSheet = undefined,
   attachActiveRunFromMonitor = undefined,
+  attachInteractivePtyCommand = undefined,
   killActiveRunFromMonitor = undefined,
   openHistoryWithFilters = undefined,
   restoreHistoryRun = undefined,
@@ -151,7 +152,7 @@ function loadStatusMonitor({
       document,
       window,
       apiFetch,
-      showToast: vi.fn(),
+      showToast,
       getTabs: vi.fn(() => tabs),
       activateTab,
       ...(pauseBackgroundRunStreamsForStatusMonitor
@@ -161,6 +162,7 @@ function loadStatusMonitor({
         ? { resumeBackgroundRunStreamsAfterStatusMonitor }
         : {}),
       ...(attachActiveRunFromMonitor ? { attachActiveRunFromMonitor } : {}),
+      ...(attachInteractivePtyCommand ? { attachInteractivePtyCommand } : {}),
       ...(killActiveRunFromMonitor ? { killActiveRunFromMonitor } : {}),
       ...(bindMobileSheet ? { bindMobileSheet } : {}),
     },
@@ -333,6 +335,38 @@ describe('Status Monitor', () => {
       expect.objectContaining({ run_id: 'run-other-client' }),
     )
     expect(document.getElementById('status-monitor')?.classList.contains('u-hidden')).toBe(false)
+  })
+
+  it('attaches active PTY runs from Status Monitor when PTY reattach is available', async () => {
+    const attachInteractivePtyCommand = vi.fn(() => Promise.resolve(true))
+    const killActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
+    const { openStatusMonitor } = loadStatusMonitor({
+      attachInteractivePtyCommand,
+      killActiveRunFromMonitor,
+      runs: [
+        {
+          run_id: 'run-pty',
+          run_type: 'pty',
+          pid: 1234,
+          command: 'mtr --interactive darklab.sh',
+          started: new Date().toISOString(),
+          has_live_owner: true,
+          owned_by_this_client: false,
+        },
+      ],
+    })
+
+    await openStatusMonitor({ source: 'test' })
+
+    expect(document.querySelector('.status-monitor-pty-note')).toBeNull()
+    const buttons = [...document.querySelectorAll('.status-monitor-action-btn')]
+    expect(buttons.map(button => button.textContent)).toEqual(['Attach', 'Kill'])
+    expect(buttons[0].getAttribute('aria-disabled')).toBeNull()
+    buttons[0].click()
+    await Promise.resolve()
+    expect(attachInteractivePtyCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ run_id: 'run-pty' }),
+    )
   })
 
   it('keeps attach and kill available when another browser owns a run already attached locally', async () => {

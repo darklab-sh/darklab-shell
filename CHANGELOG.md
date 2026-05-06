@@ -6,6 +6,35 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
+## [2.0] - Unreleased
+
+### Added
+
+- **Interactive PTY mode** — `mtr --interactive <host>`, `ffuf --interactive ...`, and `masscan --interactive ...` can run in a constrained terminal-style tab when the instance explicitly enables the feature.
+  - **Why:** screen-redrawing tools and TTY-aware progress displays do not fit the normal line-oriented `/runs` stream, but they are much more useful when given a real terminal.
+  - **What:**
+    - Ships with a dedicated PTY lifecycle service, `/pty/runs` start/stream/input/resize routes, config gating, Redis-brokered PTY output/input/resize events for multi-worker deployments, and a single-worker local fallback. Normal `mtr` remains in non-interactive report mode, while `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive` are reserved for the PTY route.
+    - Uses `interactive:` registry metadata on `mtr`, `ffuf`, and `masscan` so trigger flags, default terminal size, input policy, input-safety profile, max runtime, and completed transcript mode are command-registry owned.
+    - Renders the live browser terminal in a tab-scoped xterm.js modal with the fit addon, startup asset preloading, asset-load retry handling, live theme refresh, reusable tab overlays, hidden-tab resize suppression, and desktop-only startup guardrails for mobile terminal mode.
+    - Supports multiple concurrent PTY runs per browser session while enforcing the `interactive_pty_max_concurrent_per_session` limit, defaulting to four active PTYs. Each live terminal is scoped to its owning tab, and modal close/kill controls follow the same running-tab confirmation flow used by normal command tabs.
+    - Supports reload recovery and Status Monitor Attach through bounded pyte-backed terminal snapshots that preserve colors, text attributes, cursor position, and the latest visible screen, with a plain-text fallback for degraded cases. Redis-backed deployments publish distributed, rate-capped snapshots so any worker can serve reattach without sticky routing.
+    - Persists completed PTY output as normal saved history/search/finding content using registry-owned transcript shaping: `mtr` saves the final visible frame, while `ffuf` and `masscan` save scrolled findings without common transient progress/status redraw lines.
+    - Includes first-pass PTY safety guardrails: explicit registry-owned `input_safety` profiles, native `Ctrl+C` forwarding, rate-limited input and resize routes, UTF-8 byte-aware input truncation, workspace-CWD-aware validation before spawn, a vetted command environment, clear `pyte` dependency errors, process/file-descriptor cleanup on failed startup, kill notices through the PTY stream, streaming owner-liveness refresh, stale Redis metadata pruning, and specific snapshot failure statuses for missing, closed, stale, or not-yet-available runs.
+  - **Tests:**
+    - Added backend route/service coverage for the PTY lifecycle, command-registry settings, concurrency limits, validation, broker/Redis behavior, snapshots, persistence, safety guardrails, stale-state handling, and completed transcript shaping.
+    - Added browser coverage for the xterm modal surface, asset loading, theme refresh, mobile denial, tab-scoped ownership, concurrent terminals, Status Monitor attach, native PTY input behavior, byte-aware input handling, stream-detach handling, transcript finalization, and Playwright PTY smoke flows that cover start/stream/resize/kill plus reload reattach from a snapshot.
+
+### Changed
+
+- **SQLite run previews are now byte-bounded** — `output_preview_max_mb` caps the preview JSON stored in SQLite, so huge single-line output such as JSON scanner results cannot turn a short run preview into a multi-megabyte history row. Full-output artifacts still retain larger output up to `full_output_max_mb` when full-output persistence is enabled.
+- **Startup history queries now use targeted SQLite indexes** — recent-command, snapshot, and workflow lookups are backed by session-aware ordering indexes so the rail and startup restore paths do not scan large history tables before the UI finishes loading.
+
+### Fixed
+
+- **Recent domain capture now preserves IPv4 addresses** — values captured from `value_type: domain` slots keep complete IPv4 addresses such as `192.168.1.5` instead of treating partial numeric labels like `192.168.1` as domains.
+- **macOS double-space period substitution no longer changes terminal commands** — the desktop command composer now opts out of autocorrect/smart text behavior like the mobile composer, and the shared composer input path normalizes the exact `word. ` substitution back to two literal spaces before autocomplete or draft state sees it.
+- **History restore now keys existing tabs by run identity** — restoring a run no longer jumps to an unrelated tab just because that tab has the same command text; only the same `runId` / `historyRunId` is reused.
+
 ## [1.7] — 2026-05-05
 
 ### Added
@@ -45,7 +74,6 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Why:** the previous word-jump behavior treated only spaces as delimiters, so paths and domains such as `/tmp/darklab_findings(1).txt` or `example.com` moved as one large chunk instead of stopping at useful terminal word segments.
   - **What:** the shared word-boundary helpers now treat letters and digits as word characters and punctuation such as `(`, `)`, `.`, `,`, `/`, `\`, and `_` as delimiters.
   - **Tests:** added Vitest coverage for punctuation-delimited Alt/Option movement and Ctrl+W behavior, and updated mobile helper expectations to match the new boundary rules.
-- **Session file docs and test inventory now reflect the v1.7 workspace command surface** — the docs count 2,439 total tests, including 1,205 pytest tests, 998 Vitest tests, and 236 Playwright tests.
 - **Autocomplete placeholder hints now have an explicit schema path and behavior** — frontend and backend autocomplete normalization accept `hint_only: true` as the author-owned display-only signal, placeholder-looking text no longer becomes display-only by regex inference, and hint-only rows now render as subtle italic guidance instead of selectable menu choices.
   - **Why:** rows such as `<file>` and `<domain>` should teach the shape of the command without blocking Tab from accepting the one real file, folder, or domain suggestion in the menu.
   - **What:** Tab, Enter, ArrowUp, ArrowDown, mouse, and touch interactions now skip hint-only rows while keeping them visible as guidance. Shared-prefix expansion also ignores hint rows, so concrete suggestions behave consistently even when the menu includes placeholder copy.

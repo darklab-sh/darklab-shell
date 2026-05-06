@@ -59,6 +59,9 @@ def _diag_sqlite_identifier(name: str) -> str:
 
 _ANSI_UP_JS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "ansi_up.js"
 _JSPDF_JS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "jspdf.umd.min.js"
+_XTERM_JS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "xterm.js"
+_XTERM_FIT_JS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "xterm-addon-fit.js"
+_XTERM_CSS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "xterm.css"
 _FONT_DIR = Path(__file__).resolve().parent.parent / "static" / "fonts"
 _VENDOR_FONT_FILES = frozenset(filename for _, _, filename in FONT_FILES)
 _APP_BOOT_TIME = time.time()
@@ -476,6 +479,21 @@ def vendor_ansi_up_js():
 @assets_bp.route("/vendor/jspdf.umd.min.js")
 def vendor_jspdf_js():
     return send_file(_JSPDF_JS, mimetype="application/javascript")
+
+
+@assets_bp.route("/vendor/xterm.js")
+def vendor_xterm_js():
+    return send_file(_XTERM_JS, mimetype="application/javascript")
+
+
+@assets_bp.route("/vendor/xterm-addon-fit.js")
+def vendor_xterm_fit_js():
+    return send_file(_XTERM_FIT_JS, mimetype="application/javascript")
+
+
+@assets_bp.route("/vendor/xterm.css")
+def vendor_xterm_css():
+    return send_file(_XTERM_CSS, mimetype="text/css")
 
 
 @assets_bp.route("/vendor/fonts/<path:filename>")

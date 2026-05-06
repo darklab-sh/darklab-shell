@@ -293,6 +293,7 @@ function _activeRunReconnectNotice(run) {
 function _shouldAutoRestoreActiveRun(run) {
   if (!run || typeof run !== 'object') return false;
   if (_isActiveRunDetachedForRestore(run.run_id)) return false;
+  if (run.run_type === 'pty' && typeof attachInteractivePtyCommand !== 'function') return false;
   if (run.owned_by_this_client) return true;
   if (run.owner_stale) return true;
   return !run.has_live_owner;
@@ -329,6 +330,13 @@ function restoreActiveRunsAfterReload(runs) {
     const tabId = canReuseBootstrapTab ? bootstrapTab.id : createTab();
     if (!tabId) return;
     if (!firstRestoredTabId) firstRestoredTabId = tabId;
+    if (run.run_type === 'pty' && typeof attachInteractivePtyCommand === 'function') {
+      attachInteractivePtyCommand(run, tabId).catch(err => {
+        appendLine(`[server error] ${err.message || 'Interactive PTY reattach failed'}`, 'exit-fail', tabId);
+        setTabStatus(tabId, 'fail');
+      });
+      return;
+    }
     clearTab(tabId);
     const t = getTab(tabId);
     if (!t) return;
@@ -408,6 +416,10 @@ function _attachActiveRunToTab(run, tabId, { mode = 'attached' } = {}) {
 
 function attachActiveRunFromMonitor(run) {
   if (!run || !run.run_id) return Promise.resolve(false);
+  if (run.run_type === 'pty') {
+    if (typeof attachInteractivePtyCommand !== 'function') return Promise.resolve(false);
+    return attachInteractivePtyCommand(run);
+  }
   const tabId = createTab();
   if (!tabId) return Promise.resolve(false);
   activateTab(tabId, { focusComposer: false });
@@ -2913,6 +2925,11 @@ function submitCommand(rawCmd) {
   addToHistory(_historySafeCommand(cmd));
   if (typeof rememberRecentDomainsFromCommand === 'function') {
     try { rememberRecentDomainsFromCommand(cmd); } catch (_) { /* autocomplete recents are best-effort */ }
+  }
+
+  if (typeof isInteractivePtyCommand === 'function' && isInteractivePtyCommand(cmd)) {
+    void startInteractivePtyCommand(cmd, activeTabId);
+    return true;
   }
 
   // Session-token subcommands (generate / set / clear / rotate) run entirely

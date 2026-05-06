@@ -352,7 +352,9 @@
       <div id="ac-dropdown" class="ac-dropdown dropdown-surface nice-scroll u-hidden"></div>
       <div id="hist-search-dropdown" class="hist-search-dropdown dropdown-surface u-hidden"></div>
       <div id="shell-input-row" class="shell-input-row" aria-hidden="true">
-        <input id="cmd" type="text" placeholder="" autocomplete="new-password" spellcheck="false" inputmode="none" aria-label="Command">
+        <input id="cmd" type="text" placeholder=""
+               autocomplete="new-password" autocapitalize="none" autocorrect="off"
+               spellcheck="false" inputmode="none" aria-label="Command">
         <button id="run-btn" class="btn btn-primary" hidden aria-hidden="true" tabindex="-1">Run</button>
       </div>
     </div>
@@ -648,6 +650,26 @@
   </div>
 </div>
 
+<div id="pty-overlay" class="modal-overlay mobile-sheet-overlay pty-tab-overlay u-hidden" aria-hidden="true">
+  <div id="pty-modal" class="modal-card mobile-sheet-surface pty-modal" role="dialog" aria-modal="false" aria-labelledby="pty-modal-title">
+    <div class="pty-modal-header">
+      <div class="pty-modal-title-wrap">
+        <span class="faq-title" id="pty-modal-title">INTERACTIVE PTY</span>
+        <span id="pty-modal-command" class="pty-modal-command">waiting for command</span>
+      </div>
+      <div class="pty-modal-actions">
+        <span id="pty-modal-status" class="pty-modal-status" data-tone="">
+          <span id="pty-modal-status-label" class="pty-modal-status-label">waiting</span>
+          <span id="pty-modal-elapsed" class="pty-modal-elapsed">00:00</span>
+        </span>
+        <button id="pty-modal-kill" type="button" class="btn btn-destructive btn-compact pty-modal-kill" disabled>Kill</button>
+        <button type="button" class="close-btn pty-modal-close" aria-label="Close interactive PTY" disabled>✕</button>
+      </div>
+    </div>
+    <section id="pty-modal-screen" class="pty-screen pty-modal-screen" role="application" aria-label="Interactive PTY terminal"></section>
+  </div>
+</div>
+
 <!-- Keyboard Shortcuts Overlay (triggered by `?`) -->
 <div id="shortcuts-overlay" class="mobile-sheet-overlay" aria-hidden="true">
   <div id="shortcuts-modal" class="mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
@@ -797,6 +819,7 @@
 <script src="/static/js/welcome.js"></script>
 <script src="/static/js/status_monitor.js"></script>
 <script src="/static/js/runner_core.js"></script>
+<script src="/static/js/pty.js"></script>
 <script src="/static/js/runner.js"></script>
 <script src="/static/js/app_preferences_core.js"></script>
 <script src="/static/js/app.js"></script>

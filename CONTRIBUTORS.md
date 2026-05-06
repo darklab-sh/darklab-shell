@@ -29,6 +29,9 @@ darklab_shell uses or builds on:
 - [SQLite](https://sqlite.org/) — persistent run history and snapshots
 - [ansi_up](https://github.com/drudru/ansi_up) — ANSI-to-HTML rendering
 - [jsPDF](https://github.com/parallax/jsPDF) — client-side PDF generation
+- [xterm.js](https://github.com/xtermjs/xterm.js) — browser terminal emulator for interactive PTY tabs
+- [xterm.js Fit Addon](https://github.com/xtermjs/xterm.js/tree/master/addons/addon-fit) — terminal sizing for interactive PTY tabs
+- [pyte](https://pyte.readthedocs.io/) — server-side terminal emulation for saved interactive PTY output
 - [JetBrains Mono](https://www.jetbrains.com/lp/mono/) — terminal font
 - [Syne](https://www.tunera.xyz/fonts/syne/) — UI heading font
 - [SecLists](https://github.com/danielmiessler/SecLists) — wordlist collection included in the container image

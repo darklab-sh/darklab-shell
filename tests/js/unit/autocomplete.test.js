@@ -1009,6 +1009,40 @@ describe('autocomplete helpers', () => {
     expect(sessionStorage.getItem('recent_domains:session-a')).toBeNull()
   })
 
+  it('stores complete IPv4 values from domain slots without keeping partial numeric hosts', () => {
+    const { rememberRecentDomainsFromCommand, _readRecentDomains } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        SESSION_ID: 'session-a',
+        acSuggestions: [],
+        acContextRegistry: {
+          subfinder: {
+            flags: [{ value: '-d', description: 'Target domain' }],
+            expects_value: ['-d'],
+            arg_hints: { '-d': [{ value: '<domain>', hintOnly: true, value_type: 'domain', description: 'Target domain to enumerate' }] },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      rememberRecentDomainsFromCommand,
+      _readRecentDomains,
+    }`,
+    )
+
+    rememberRecentDomainsFromCommand('subfinder -d 192.168.1.5')
+    rememberRecentDomainsFromCommand('subfinder -d 192.168.1')
+
+    expect(_readRecentDomains()).toEqual(['192.168.1.5'])
+  })
+
   it('loads recent domains from the session endpoint', async () => {
     const apiFetch = vi.fn(() => Promise.resolve({
       json: () => Promise.resolve({

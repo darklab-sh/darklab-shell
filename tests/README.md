@@ -20,12 +20,12 @@ Workspace file behavior is intentionally split across all three layers: pytest o
 
 Current totals:
 
-- behavior tests: 2,409
+- behavior tests: 2,479
 - docs/inventory meta-tests: 30
-- `pytest`: 1205 (1175 behavior + 30 meta)
-- `vitest`: 998
-- `playwright`: 236
-- total: 2,439
+- `pytest`: 1247 (1217 behavior + 30 meta)
+- `vitest`: 1024
+- `playwright`: 238
+- total: 2,509
 
 This document is organized in two parts:
 
@@ -471,6 +471,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIsDeniedMultiWordTool.test_subcommand_specific_deny_fires_for_correct_subcommand` | Checks that subcommand specific deny fires for correct subcommand. |
 | `TestIsDeniedMultiWordTool.test_deny_tool_only_no_flag` | Checks that deny tool only no flag. |
 | `TestIsDeniedMultiWordTool.test_deny_tool_only_does_not_block_other_tool` | Checks that deny tool only does not block other tool. |
+| `TestIsDeniedMultiWordTool.test_mtr_interactive_is_reserved_for_pty_route` | Verifies that `mtr --interactive` is reserved for the interactive PTY route instead of normal `/runs`. |
+| `TestIsDeniedMultiWordTool.test_ffuf_interactive_is_reserved_for_pty_route` | Verifies that `ffuf --interactive` is reserved for the interactive PTY route instead of normal `/runs`. |
+| `TestIsDeniedMultiWordTool.test_masscan_interactive_is_reserved_for_pty_route` | Verifies that `masscan --interactive` is reserved for the interactive PTY route instead of normal `/runs`. |
 | `TestRewriteCaseInsensitive.test_mtr_uppercase` | Checks mtr uppercase handling. |
 | `TestRewriteCaseInsensitive.test_nmap_uppercase` | Checks nmap uppercase handling. |
 | `TestRewriteCaseInsensitive.test_nuclei_uppercase` | Checks nuclei uppercase handling. |
@@ -504,6 +507,25 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestActiveRunMetadata.test_pid_pop_for_session_requires_matching_session` | Verifies that active-run PID lookup only pops processes owned by the requesting session. |
 | `TestActiveRunMetadata.test_active_runs_for_session_prunes_redis_legacy_metadata_on_linux` | Checks that legacy Redis metadata without PID start-time tracking is pruned on Linux instead of trusting a reused PID. |
 | `TestActiveRunMetadata.test_active_run_resource_usage_reports_cumulative_cpu_and_memory` | Verifies that active-run resource telemetry reports process-tree CPU seconds and RSS memory for Status Monitor display. |
+| `TestInteractivePtyRegistry.test_live_registry_publishes_each_supported_interactive_tool` | Verifies that `commands.yaml` exposes the expected interactive PTY tools (`mtr`, `ffuf`, `masscan`) with their trigger flag and runtime settings. |
+| `TestPtyBrokerService.test_pty_broker_is_available_with_redis_even_when_workers_are_not_sticky` | Verifies that Redis-backed PTY brokering works without requiring sticky Gunicorn workers. |
+| `TestPtyBrokerService.test_pty_input_and_resize_queue_through_redis_without_local_run` | Verifies that PTY input and resize requests enqueue Redis control events without needing the local worker that owns the PTY file descriptor. |
+| `TestPtyBrokerService.test_pty_stream_replays_redis_output_events_for_any_worker` | Verifies that Redis-backed PTY output can be streamed by any web worker. |
+| `TestPtyBrokerService.test_pty_snapshot_loads_distributed_redis_snapshot_without_local_run` | Verifies that PTY reattach snapshots can be served from Redis by a worker that does not own the PTY file descriptor. |
+| `TestPtyBrokerService.test_pty_snapshot_prunes_stale_redis_state_without_active_process` | Verifies that stale Redis PTY metadata, snapshots, control streams, and output streams are pruned when no active process remains. |
+| `TestPtyBrokerService.test_pty_snapshot_publish_rate_is_capped_even_after_byte_threshold` | Verifies that high-throughput PTY output cannot force Redis snapshot publishes more often than the minimum publish interval. |
+| `TestPtyBrokerService.test_pty_stream_reports_stale_run_before_heartbeating_forever` | Verifies that stale PTY streams emit a terminal error instead of heartbeating forever after the process metadata disappears. |
+| `TestPtyBrokerService.test_pty_start_cleans_up_if_reader_thread_fails_to_start` | Verifies that PTY startup cleans up the process, file descriptor, and active-run metadata if the reader thread cannot start. |
+| `TestPtyBrokerService.test_pty_start_requires_pyte_for_saved_terminal_capture` | Verifies that interactive PTY startup fails before spawning when the required server-side terminal capture dependency is missing. |
+| `TestPtyBrokerService.test_pty_command_env_inherits_only_vetted_keys` | Verifies that PTY command environments preserve useful terminal variables without passing unvetted process state. |
+| `TestPtyTerminalCapture.test_terminal_capture_synthesizes_scrollback_and_final_frame` | Verifies that PTY capture persists scrollback and final visible frame with a marker between them. |
+| `TestPtyTerminalCapture.test_terminal_capture_builds_ansi_snapshot_with_attrs_and_cursor` | Verifies that PTY capture serializes visible terminal state with ANSI attributes and cursor position for reattach. |
+| `TestPtyTerminalCapture.test_terminal_capture_omits_marker_when_only_final_frame_exists` | Verifies that final-frame-only PTY output is saved without an empty separator marker. |
+| `TestPtyTerminalCapture.test_terminal_capture_omits_marker_when_only_scrollback_exists` | Verifies that scrollback-only PTY output is saved without an empty separator marker. |
+| `TestPtyTerminalCapture.test_terminal_capture_persists_notice_when_output_is_empty` | Verifies that empty PTY output saves a coherent notice line. |
+| `TestPtyTerminalCapture.test_terminal_capture_falls_back_after_first_feed_error` | Verifies that PTY capture logs one pyte feed failure and falls back to plain-text capture for later chunks. |
+| `TestPtyTerminalCapture.test_terminal_capture_fallback_treats_carriage_return_as_overwrite` | Verifies that fallback PTY capture treats carriage-return progress updates as overwrites instead of appending duplicate status lines. |
+| `TestPtyTerminalCapture.test_terminal_history_line_limit_is_bounded` | Verifies that PTY capture history uses a sensible default, floor, and ceiling around `max_output_lines`. |
 | `TestFormatRetention.test_zero_returns_unlimited` | Checks zero returns unlimited handling. |
 | `TestFormatRetention.test_365_returns_one_year` | Checks that 365 returns one year. |
 | `TestFormatRetention.test_730_returns_two_years` | Checks that 730 returns two years. |
@@ -547,6 +569,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestOutputSignals.test_user_killed_process_is_not_an_error` | Verifies that user-killed process notices are not classified as errors. |
 | `TestOutputSignals.test_builtin_classifier_keeps_metadata_but_omits_signals` | Verifies that built-in command output keeps line metadata while omitting findings, warnings, errors, and summaries. |
 | `TestRunOutputCapture.test_preview_keeps_only_last_n_lines` | Checks that preview keeps only last n lines. |
+| `TestRunOutputCapture.test_preview_byte_cap_drops_oldest_lines` | Checks that the SQLite preview byte cap drops oldest preview lines before storing oversized previews. |
+| `TestRunOutputCapture.test_preview_byte_cap_truncates_single_huge_line` | Checks that one huge output line is truncated inside the SQLite preview while preserving the run line count. |
 | `TestRunOutputCapture.test_full_output_artifact_round_trips_lines` | Checks that full output artifact round trips lines. |
 | `TestRunOutputCapture.test_full_output_artifact_round_trips_signal_metadata` | Verifies that persisted full-output artifacts preserve backend signal metadata with each line. |
 | `TestRunOutputCapture.test_full_output_artifact_respects_byte_cap` | Checks that full output artifact respects byte cap. |
@@ -904,6 +928,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestStatusRoute.test_server_time_is_ms_epoch` | `server_time` is a millisecond-epoch integer in a plausible range. |
 | `TestConfigRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestConfigRoute.test_contains_expected_keys` | Checks contains expected keys handling. |
+| `TestConfigRoute.test_interactive_pty_commands_reflect_registry` | Verifies that the browser config exposes interactive PTY command metadata from the command registry. |
 | `TestConfigRoute.test_workspace_menu_affordances_follow_config` | Checks that test workspace menu affordances follow config. |
 | `TestConfigRoute.test_max_tabs_is_int` | Checks that max tabs is int. |
 | `TestConfigRoute.test_contains_timeout_and_welcome_keys` | Contains timeout and welcome keys. |
@@ -929,6 +954,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestThemesRoute.test_empty_registry_falls_back_to_built_in_dark_theme` | Checks that empty registry falls back to built in dark theme. |
 | `TestVendorAssets.test_ansi_up_js_is_served` | Checks that ansi_up.js is served with correct content type. |
 | `TestVendorAssets.test_jspdf_js_is_served` | Checks that jspdf.umd.min.js is served with correct content type. |
+| `TestVendorAssets.test_xterm_js_is_served` | Checks that xterm.js is served with correct content type. |
+| `TestVendorAssets.test_xterm_fit_js_is_served` | Checks that xterm-addon-fit.js is served with correct content type. |
+| `TestVendorAssets.test_xterm_css_is_served` | Checks that xterm.css is served with correct content type. |
 | `TestVendorAssets.test_font_route_serves_committed_file` | Checks that font route serves the committed file from the static fonts directory. |
 | `TestVendorAssets.test_font_route_rejects_unknown_or_traversal_paths` | Checks that font route rejects unknown or traversal paths. |
 | `TestDiagRoute.test_returns_404_when_cidrs_empty` | Returns 404 when cidrs empty. |
@@ -1141,6 +1169,20 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 
 | Test | Description |
 | --- | --- |
+| `TestInteractivePtyRuns.test_start_interactive_pty_rejects_when_disabled` | Verifies that interactive PTY runs stay disabled unless the instance opts in. |
+| `TestInteractivePtyRuns.test_start_interactive_pty_requires_broker_or_single_worker` | Verifies that interactive PTY mode requires Redis in multi-worker deployments or a single-worker local fallback. |
+| `TestInteractivePtyRuns.test_start_interactive_pty_strips_trigger_before_validation` | Verifies that `mtr --interactive` validates and starts as an `mtr` PTY command without passing the trigger flag to the tool. |
+| `TestInteractivePtyRuns.test_start_interactive_pty_uses_workspace_cwd_and_validated_exec_command` | Verifies that PTY start requests pass the tab workspace CWD into validation and spawn the validated workspace-aware command argv. |
+| `TestInteractivePtyRuns.test_start_interactive_pty_uses_registry_spec` | Verifies that interactive PTY start requests use trigger, size, input, and runtime settings from the command registry. |
+| `TestInteractivePtyRuns.test_completed_pty_transcript_modes_shape_saved_output` | Verifies that completed PTY transcript modes can preserve final-frame output or scrollback findings while dropping transient status redraws. |
+| `TestInteractivePtyRuns.test_start_interactive_pty_allows_multiple_active_pty_runs_for_session` | Verifies that a session can start another interactive PTY while one is already active. |
+| `TestInteractivePtyRuns.test_start_interactive_pty_rejects_when_session_reaches_concurrency_limit` | Verifies that interactive PTY startup returns a clear limit error instead of spawning when the session already has the configured maximum active PTYs. |
+| `TestInteractivePtyRuns.test_stream_interactive_pty_touches_active_run_owner` | Verifies that active PTY streams refresh owner liveness like normal brokered run streams. |
+| `TestInteractivePtyRuns.test_snapshot_interactive_pty_returns_terminal_resume_state` | Verifies that the PTY snapshot endpoint returns terminal frame state and resume event id for active PTY reattach. |
+| `TestInteractivePtyRuns.test_snapshot_interactive_pty_reports_worker_local_limit` | Verifies that PTY snapshot requests explain when the run belongs to the session but is not available on the current worker. |
+| `TestInteractivePtyRuns.test_snapshot_interactive_pty_uses_specific_failure_statuses` | Verifies that PTY snapshot failures use specific HTTP statuses for missing, closed, stale, and not-yet-available runs. |
+| `TestInteractivePtyRuns.test_kill_routes_pty_killed_event_to_pty_stream` | Verifies that `/kill` publishes PTY kill notices through the PTY event stream instead of the normal run stream. |
+| `TestInteractivePtyRuns.test_interactive_pty_control_routes_are_rate_limited` | Verifies that PTY input and resize control routes use the shared rate limiter. |
 | `TestRunStreaming.test_brokered_synthetic_run_publishes_events_and_persists_history` | Verifies that brokered synthetic runs publish started/output/clear/exit events and persist searchable history. |
 | `TestRunStreaming.test_broker_worker_publishes_notices_filtered_output_exit_and_cleans_up` | Verifies that the broker worker publishes notices, filtered output, exit metadata, and cleanup calls. |
 | `TestRunStreaming.test_broker_worker_times_out_and_publishes_timeout_notice` | Verifies that the broker worker terminates timed-out commands and publishes the timeout notice before exit. |
@@ -1456,6 +1498,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `_setTsMode marks the timestamps button inactive in off mode` | _setTsMode marks the timestamps button inactive in off mode. |
 | `bootstraps cleanly when config and allowed-commands fetches fail` | Verifies that bootstraps cleanly when config and allowed-commands fetches fail. |
 | `settles the welcome intro immediately when the user types into the active welcome tab` | Verifies that settles the welcome intro immediately when the user types into the active welcome tab. |
+| `keeps macOS double-space substitution out of the command composer` | Verifies that macOS double-space period substitution is normalized back to literal spaces before the composer state updates. |
 | `settles welcome immediately when Enter is pressed during welcome playback` | Verifies that settles welcome immediately when Enter is pressed during welcome playback. |
 | `does not run command when Enter is pressed in cmd input during welcome playback` | Verifies that does not run command when Enter is pressed in cmd input during welcome playback. |
 | `renders the shell prompt line from composer state instead of the stale hidden input` | Verifies that renders the shell prompt line from composer state instead of the stale hidden input. |
@@ -1612,6 +1655,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `keeps ambiguous partial subcommands as token suggestions instead of examples` | Verifies that ambiguous partial subcommands such as `gobuster d` keep showing matching subcommand tokens instead of prematurely expanding examples. |
 | `uses subcommand-scoped value hints` | Verifies that value hints for repeated flags such as `-o` come from the active subcommand context. |
 | `tracks recent domains from structured flag and positional slots, capped in memory` | Verifies that recent domain capture reads known domain argument slots, preserves recency order in the browser cache, and enforces the autocomplete cap without using browser storage. |
+| `stores complete IPv4 values from domain slots without keeping partial numeric hosts` | Verifies that recent value capture preserves complete IPv4 addresses from domain slots without saving partial numeric host values. |
 | `loads recent domains from the session endpoint` | Verifies that recent-domain autocomplete loads persisted session domains from the backend and normalizes the returned values. |
 | `persists captured recent domains without requiring browser storage` | Verifies that captured domain values are posted to the session endpoint while the local autocomplete cache remains usable immediately. |
 | `suggests recent domains only inside known domain value slots` | Verifies that recent domain autocomplete appears only where command metadata identifies a domain value. |
@@ -1786,6 +1830,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `executeHistAction shows a failure toast when clearing non-favorite history fails` | Verifies that executeHistAction shows a failure toast when clearing non-favorite history fails. |
 | `shows and clears the history loading overlay while a run is being restored` | Verifies that shows and clears the history loading overlay while a run is being restored. |
 | `restores the full history payload when full output is available` | Verifies that restores the full history payload when full output is available. |
+| `restores a same-command history run into a new tab when run ids differ` | Verifies that restoring history uses run identity instead of command text so separate runs with the same command can both be restored. |
 | `clears the history loading overlay and shows a failure toast when a restore fetch fails` | Verifies that clears the history loading overlay and shows a failure toast when a restore fetch fails. |
 | `enterHistSearch activates search mode and shows the dropdown` | Verifies that enterHistSearch activates search mode and shows the dropdown. |
 | `enterHistSearch saves the current input as the pre-draft` | Verifies that enterHistSearch saves the current input as the pre-draft. |
@@ -1904,6 +1949,33 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `save-html download uses appName and exportTimestamp` | Verifies that save-html download uses appName and exportTimestamp. |
 | `includes line numbers in copied text when lnMode is on` | Verifies that includes line numbers in copied text when lnMode is on. |
 | `omits prefix in copied text when both lnMode and tsMode are off` | Verifies that omits prefix in copied text when both lnMode and tsMode are off. |
+
+#### `pty.test.js`
+
+| Test | Description |
+| --- | --- |
+| `detects the reserved mtr interactive command form` | Verifies that only the `mtr --interactive` command form is routed to the guarded PTY path. |
+| `preloads xterm assets at boot when interactive PTY is enabled` | Verifies that enabled interactive PTY mode schedules xterm asset preloading during browser startup. |
+| `does not schedule xterm preloading when interactive PTY is disabled` | Verifies that disabled interactive PTY mode leaves xterm assets unloaded until the feature is enabled. |
+| `replaces failed xterm script tags before retrying vendor asset loads` | Verifies that failed xterm vendor script tags are removed before a retry attaches to a fresh script load. |
+| `detects mobile terminal mode as unsupported for interactive PTY shells` | Verifies that mobile terminal mode blocks interactive PTY shell startup before opening xterm or starting a backend run. |
+| `reports missing xterm globals before mounting a PTY terminal` | Verifies that the PTY path reports missing xterm assets before trying to mount a terminal. |
+| `creates an xterm terminal with the fit addon and opens it in the screen` | Verifies that the PTY browser surface mounts xterm with the fit addon and requested dimensions. |
+| `refreshes the live xterm theme when the app theme changes` | Verifies that an open interactive PTY terminal applies the latest app theme palette without recreating the terminal. |
+| `keeps focus on the active PTY terminal while the PTY tab is running` | Verifies that live interactive PTY tabs retain keyboard focus on xterm instead of the hidden prompt. |
+| `scopes the PTY modal overlay to the owning tab panel` | Verifies that the live PTY modal is mounted inside the tab that owns the interactive run. |
+| `reuses the tab-scoped PTY overlay across repeated runs in one tab` | Verifies that repeated interactive PTY runs in one tab reuse a single overlay and clear stale run ownership between runs. |
+| `skips PTY fit and resize while the owning tab is hidden` | Verifies that hidden-tab PTY terminals skip xterm fitting and resize POSTs until their tab becomes active again. |
+| `uses the running-tab close confirmation from the PTY modal close button` | Verifies that the PTY modal close button opens the same Cancel, Keep running, and Kill confirmation used by running tab close. |
+| `allows multiple tab-scoped PTY modals to run concurrently` | Verifies that a failed PTY in one tab does not close or dispose another tab's live PTY modal. |
+| `lets Ctrl+C flow through xterm as native PTY input` | Verifies that Ctrl+C inside the interactive PTY modal reaches the PTY as a native interrupt instead of opening the kill confirmation. |
+| `truncates PTY input by UTF-8 byte length and reports truncation before posting` | Verifies that large PTY input is capped by the server's byte limit before posting and surfaces a transcript notice when truncation happens. |
+| `reattaches an active PTY from a snapshot and follows the live stream` | Verifies that PTY reattach writes the plain-text snapshot to a fresh xterm and resumes streaming from the supplied event id. |
+| `does not create a PTY reattach tab when the snapshot is unavailable` | Verifies that failed PTY snapshot fetches report the error without consuming a new tab. |
+| `finalizes PTY tabs like normal completed runs` | Verifies that completed interactive PTY tabs update recent commands, history refreshes, workspace cache, and last-exit state like normal runs. |
+| `appends the saved PTY final frame before the exit status line` | Verifies that modal PTY completion loads the saved final screen into the parent transcript before appending the exit status line. |
+| `marks a PTY tab detached when the stream ends without an exit event but the run is still active` | Verifies that a dropped PTY stream keeps the run marked active, preserves Kill, and starts the saved-result polling path. |
+| `marks a PTY tab failed when the stream ends and the run is not active` | Verifies that a stale PTY stream finalizes the tab as failed instead of treating an unknown exit as success. |
 
 #### `runner.test.js`
 
@@ -2150,6 +2222,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders unavailable telemetry chips when backend stats are absent` | Verifies that the Status Monitor still shows CPU and memory meter placeholders when backend resource telemetry is not available. |
 | `labels active runs owned by another live browser as monitor-only` | Verifies that active runs owned by another live browser render as monitor-only instead of tab-owned rows. |
 | `offers attach and kill actions for runs owned by another live browser` | Verifies that another browser's live runs expose Attach and Kill actions from the Status Monitor. |
+| `attaches active PTY runs from Status Monitor when PTY reattach is available` | Verifies that active PTY rows use the shared Attach action when the PTY reattach helper is available. |
 | `keeps attach and kill available when another browser owns a run already attached locally` | Verifies that Status Monitor still offers Attach and Kill when the current browser already has an attached tab for a run started elsewhere. |
 | `keeps attach visible before and after an attached tab is closed` | Verifies that Status Monitor keeps Attach visible while a run has a local tab and after that tab is closed. |
 | `warms CPU samples while closed so first open can show a percent` | Verifies that a background warmup sample pair can populate CPU percentage before the monitor is opened. |
@@ -2573,6 +2646,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `output appears in the terminal after running a command` | Verifies that output appears in the terminal after running a command. |
 | `HUD LAST EXIT shows 0 after a successful run and output has exit-ok line` | Verifies that HUD LAST EXIT shows 0 after a successful run and output has exit-ok line. |
 | `denied command shows [denied] in output and non-zero LAST EXIT` | Verifies that denied command shows [denied] in output and non-zero LAST EXIT. |
+| `starts, streams, resizes, and kills an interactive PTY command` | Verifies that the browser PTY path can start an interactive command, render streamed output in xterm, post resize events, and kill the run through the confirmation flow. |
+| `reattaches an active interactive PTY after reload` | Verifies that reload recovery can rebuild an active PTY modal from the snapshot endpoint and resume the live stream. |
 
 #### `demo.mobile.spec.js`
 

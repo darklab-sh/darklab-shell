@@ -890,6 +890,7 @@ function detachRunningTabAndClose(id) {
   const runId = tab.runId || tab.historyRunId || '';
   if (typeof markActiveRunDetachedForRestore === 'function') markActiveRunDetachedForRestore(runId);
   if (typeof detachRunStreamForTab === 'function') detachRunStreamForTab(id);
+  if (typeof detachInteractivePtyForTab === 'function') detachInteractivePtyForTab(id);
   tab.closing = false;
   if (tabs.length === 1) {
     _resetPreservedSingleTabState(tab);

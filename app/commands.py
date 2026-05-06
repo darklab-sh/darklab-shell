@@ -843,6 +843,54 @@ def _normalize_registry_autocomplete(root: str, raw_spec) -> dict:
     return _normalize_autocomplete_context({root: raw_spec}).get(root, {})
 
 
+def _coerce_positive_int(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        number = value
+    elif isinstance(value, float):
+        number = int(value)
+    elif isinstance(value, (str, bytes, bytearray)):
+        try:
+            number = int(value)
+        except ValueError:
+            return default
+    else:
+        return default
+    return number if number > 0 else default
+
+def _normalize_interactive_spec(raw_spec: object) -> dict:
+    if not isinstance(raw_spec, dict) or not raw_spec:
+        return {}
+    mode = str(raw_spec.get("mode") or "").strip().lower()
+    trigger_flag = str(raw_spec.get("trigger_flag") or "").strip()
+    if mode != "pty" or not trigger_flag:
+        return {}
+    transcript_mode = str(raw_spec.get("transcript_mode") or "final_frame").strip().lower()
+    if transcript_mode not in {"final_frame", "scrollback_findings", "all_sanitized"}:
+        transcript_mode = "final_frame"
+    allow_input = bool(raw_spec.get("allow_input", True))
+    input_safety = str(raw_spec.get("input_safety") or "").strip().lower()
+    allowed_input_safety = {"no_input", "navigation_only", "scanner_controls"}
+    if not input_safety and not allow_input:
+        input_safety = "no_input"
+    if input_safety not in allowed_input_safety:
+        return {}
+    if allow_input and input_safety == "no_input":
+        return {}
+    return {
+        "mode": "pty",
+        "trigger_flag": trigger_flag,
+        "default_rows": _coerce_positive_int(raw_spec.get("default_rows"), 24),
+        "default_cols": _coerce_positive_int(raw_spec.get("default_cols"), 100),
+        "max_runtime_seconds": _coerce_positive_int(raw_spec.get("max_runtime_seconds"), 900),
+        "allow_input": allow_input,
+        "requires_args": bool(raw_spec.get("requires_args", False)),
+        "transcript_mode": transcript_mode,
+        "input_safety": input_safety,
+    }
+
+
 def _normalize_commands_registry_entry(raw_entry, *, pipe_helper: bool = False) -> dict | None:
     if not isinstance(raw_entry, dict):
         return None
@@ -878,6 +926,9 @@ def _normalize_commands_registry_entry(raw_entry, *, pipe_helper: bool = False) 
     entry["workspace_flags"] = _normalize_workspace_flags(raw_entry.get("workspace_flags"))
     entry["allow_grouping_flags"] = _normalize_allow_grouping_flags(raw_entry)
     entry["runtime_adaptations"] = _normalize_runtime_adaptations(raw_entry.get("runtime_adaptations"))
+    interactive = _normalize_interactive_spec(raw_entry.get("interactive"))
+    if interactive:
+        entry["interactive"] = interactive
     return entry
 
 
@@ -977,6 +1028,9 @@ def _merge_command_registry_entries(base_entry: dict, overlay_entry: dict, *, pi
                 if key not in existing_env:
                     runtime_adaptations.setdefault("environment", []).append(deepcopy(env_item))
                     existing_env.add(key)
+        if overlay_entry.get("interactive"):
+            interactive = merged.setdefault("interactive", {})
+            interactive.update(deepcopy(overlay_entry["interactive"]))
 
     base_autocomplete = merged.get("autocomplete") or _empty_autocomplete_context_entry()
     overlay_autocomplete = overlay_entry.get("autocomplete") or {}
@@ -1023,6 +1077,45 @@ def load_commands_registry():
     root, ext = os.path.splitext(COMMANDS_REGISTRY_FILE)
     local = _load_commands_registry_file(f"{root}.local{ext}")
     return _merge_commands_registry(base, local)
+
+
+def interactive_pty_specs_from_registry(registry: dict | None = None) -> list[dict[str, object]]:
+    """Return command-registry entries that opt into interactive PTY mode."""
+    active_registry = registry or load_commands_registry()
+    specs: list[dict[str, object]] = []
+    for entry in active_registry.get("commands", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        root = str(entry.get("root") or "").strip().lower()
+        interactive = entry.get("interactive")
+        if not root or not isinstance(interactive, dict) or interactive.get("mode") != "pty":
+            continue
+        trigger_flag = str(interactive.get("trigger_flag") or "").strip()
+        if not trigger_flag:
+            continue
+        specs.append({
+            "root": root,
+            "trigger_flag": trigger_flag,
+            "default_rows": _coerce_positive_int(interactive.get("default_rows"), 24),
+            "default_cols": _coerce_positive_int(interactive.get("default_cols"), 100),
+            "max_runtime_seconds": _coerce_positive_int(interactive.get("max_runtime_seconds"), 900),
+            "allow_input": bool(interactive.get("allow_input", True)),
+            "requires_args": bool(interactive.get("requires_args", False)),
+            "transcript_mode": str(interactive.get("transcript_mode") or "final_frame"),
+            "input_safety": str(interactive.get("input_safety") or "no_input"),
+        })
+    return specs
+
+
+def interactive_pty_spec_for_command(command: str, registry: dict | None = None) -> dict[str, object] | None:
+    """Return the interactive PTY registry spec matching a command root."""
+    root = command_root(command)
+    if not root:
+        return None
+    for spec in interactive_pty_specs_from_registry(registry):
+        if spec.get("root") == root:
+            return spec
+    return None
 
 
 def _catalog_suggestions(items: object) -> list[dict[str, object]]:

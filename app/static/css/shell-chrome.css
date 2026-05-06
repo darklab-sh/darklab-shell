@@ -1768,6 +1768,13 @@
   color: var(--green);
 }
 
+.status-monitor-pty-note {
+  margin-top: 7px;
+  color: var(--amber);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
 .status-monitor-actions {
   display: flex;
   flex: 0 0 auto;
@@ -1848,6 +1855,11 @@
 
 .status-monitor-action-btn-kill {
   border-color: color-mix(in srgb, var(--red) 72%, var(--border));
+}
+
+.status-monitor-action-btn-disabled {
+  border-color: color-mix(in srgb, var(--amber) 45%, var(--border));
+  color: var(--amber);
 }
 
 .status-monitor-elapsed {

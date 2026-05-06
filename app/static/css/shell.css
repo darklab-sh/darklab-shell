@@ -271,6 +271,161 @@ body.ln-on.ts-clock .output .shell-prompt-wrap::before {
   overflow-wrap: normal;
 }
 
+.pty-screen {
+  display: block;
+  min-height: 22rem;
+  height: clamp(22rem, 52vh, 36rem);
+  margin: 0;
+  padding: 10px;
+  overflow: hidden;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  font-family: var(--font-mono);
+  font-size: var(--terminal-font-size);
+  line-height: var(--terminal-line-height);
+  word-break: normal;
+  overflow-wrap: normal;
+  tab-size: 8;
+}
+
+.pty-screen:focus {
+  outline: 1px solid var(--green-dim);
+  outline-offset: -2px;
+}
+
+.pty-screen .xterm {
+  height: 100%;
+}
+
+.pty-screen .xterm-viewport,
+.pty-screen .xterm-screen {
+  background: transparent !important;
+}
+
+.pty-screen .xterm-rows {
+  font-family: var(--font-mono);
+}
+
+#pty-modal,
+.pty-modal {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: min(760px, 86vh);
+  width: min(1080px, 94vw);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.modal-card.pty-modal,
+.mobile-sheet-surface.pty-modal {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.tab-panel > .pty-tab-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  background: color-mix(in srgb, var(--theme-overlay-backdrop-bg) 82%, transparent);
+  border-radius: inherit;
+}
+
+.tab-panel > .pty-tab-overlay.open {
+  display: flex;
+}
+
+.tab-panel > .pty-tab-overlay #pty-modal,
+.tab-panel > .pty-tab-overlay .pty-modal {
+  width: min(1080px, calc(100% - 32px));
+  height: min(760px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+}
+
+.pty-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--theme-border);
+  background: color-mix(in srgb, var(--surface) 86%, var(--bg));
+}
+
+.pty-modal-title-wrap {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.pty-modal-command {
+  overflow: hidden;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pty-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+.pty-modal-status {
+  align-items: center;
+  background: color-mix(in srgb, var(--surface) 72%, var(--bg));
+  border: 1px solid var(--theme-border);
+  border-radius: 999px;
+  color: var(--muted);
+  display: inline-flex;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  gap: 8px;
+  line-height: 1;
+  min-height: 26px;
+  padding: 0 10px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pty-modal-status[data-tone="running"] {
+  background: color-mix(in srgb, var(--green) 10%, var(--surface));
+  border-color: color-mix(in srgb, var(--green) 42%, var(--theme-border));
+  color: var(--green);
+}
+
+.pty-modal-status[data-tone="ok"] {
+  background: color-mix(in srgb, var(--green) 10%, var(--surface));
+  border-color: color-mix(in srgb, var(--green) 42%, var(--theme-border));
+  color: var(--green);
+}
+
+.pty-modal-status[data-tone="fail"] {
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--theme-border));
+  color: var(--danger);
+}
+
+.pty-modal-status-label {
+  font-weight: 700;
+}
+
+.pty-modal-elapsed {
+  color: inherit;
+  min-width: 4.6ch;
+  text-align: right;
+}
+
+.pty-modal-screen {
+  height: auto;
+  min-height: 0;
+  padding: 10px;
+}
+
 .output .shell-prompt-line {
   display: flex;
 }

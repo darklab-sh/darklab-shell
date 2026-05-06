@@ -231,7 +231,18 @@ commands:
     policy:
       allow:
         - mtr
-      deny: []
+      deny:
+        - mtr --interactive
+    interactive:
+      mode: pty
+      trigger_flag: --interactive
+      default_rows: 24
+      default_cols: 100
+      max_runtime_seconds: 900
+      allow_input: true
+      input_safety: navigation_only
+      requires_args: true
+      transcript_mode: final_frame
     runtime_adaptations:
       inject_flags:
         - flags:
@@ -268,6 +279,8 @@ commands:
           description: Report mode summary
         - value: -w
           description: Wide report output
+        - value: --interactive
+          description: Start the constrained interactive PTY view
       arguments:
         - placeholder: <host>
           hint_only: true
@@ -2217,6 +2230,17 @@ commands:
       deny:
         - ffuf -o
         - ffuf --output
+        - ffuf --interactive
+    interactive:
+      mode: pty
+      trigger_flag: --interactive
+      default_rows: 30
+      default_cols: 120
+      max_runtime_seconds: 900
+      allow_input: true
+      input_safety: scanner_controls
+      requires_args: true
+      transcript_mode: scrollback_findings
     workspace_flags:
       - flag: -w
         mode: read
@@ -2289,6 +2313,8 @@ commands:
           suggest:
             - value: ffuf-results.json
               description: Save machine-readable fuzzing results
+        - value: --interactive
+          description: Start the constrained interactive PTY view
       arguments:
         - placeholder: <target-url>
           hint_only: true
@@ -2800,9 +2826,20 @@ commands:
         - masscan -iL
         - masscan --output-format
         - masscan --output-filename
+        - masscan --interactive
         - masscan localhost
         - masscan 127.0.0.1
         - masscan 0.0.0.0
+    interactive:
+      mode: pty
+      trigger_flag: --interactive
+      default_rows: 30
+      default_cols: 120
+      max_runtime_seconds: 900
+      allow_input: true
+      input_safety: scanner_controls
+      requires_args: true
+      transcript_mode: scrollback_findings
     workspace_flags:
       - flag: -iL
         mode: read
@@ -2908,6 +2945,8 @@ commands:
           suggest:
             - value: masscan-results.txt
               description: Save scan results
+        - value: --interactive
+          description: Start the constrained interactive PTY view
       arguments:
         - placeholder: <target>
           hint_only: true

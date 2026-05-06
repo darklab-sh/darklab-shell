@@ -15,21 +15,25 @@ Run with: pytest tests/ (from the repo root)
 import errno
 import gzip
 import importlib.util
+import json
 import os
 import random
 import re
 import shlex
 import sqlite3
+import subprocess
 import tempfile
 import textwrap
 import unittest.mock as mock
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import cast
 
 import pytest
 import yaml
 import process
+import pty_service
 import run_broker
 import database
 import app as shell_app
@@ -45,6 +49,7 @@ from commands import (
     load_mobile_welcome_hints, autocomplete_context_from_commands_registry,
     load_autocomplete_context_from_commands_registry, load_command_policy, load_container_smoke_test_commands,
     load_allow_grouping_flags, load_commands_registry, load_workflows,
+    interactive_pty_specs_from_registry,
     command_catalog_entry, command_catalog_from_registry, is_command_allowed, rewrite_command,
 )
 from permalinks import _format_retention, _expiry_note, _permalink_error_page, _normalize_permalink_lines, _prompt_echo_text
@@ -138,6 +143,7 @@ class TestLoadConfig:
                     prompt_username: base
                     prompt_domain: local
                     default_theme: base-theme.yaml
+                    output_preview_max_mb: 2MB
                     full_output_max_mb: 7MB
                     rate_limit_per_minute: 30
                     """
@@ -156,6 +162,8 @@ class TestLoadConfig:
         assert cfg["prompt_username"] == "local"
         assert cfg["prompt_domain"] == "local"
         assert cfg["default_theme"] == "base-theme.yaml"
+        assert cfg["output_preview_max_mb"] == 2
+        assert cfg["output_preview_max_bytes"] == 2 * 1024 * 1024
         assert cfg["full_output_max_mb"] == 7
         assert cfg["full_output_max_bytes"] == 7 * 1024 * 1024
         assert cfg["rate_limit_per_minute"] == 99
@@ -650,6 +658,15 @@ class TestDerivedCommandRegistry:
                     - name: XDG_CONFIG_HOME
                       value: "{managed_workspace_parent}"
                       managed_directory_flag: -dir
+                interactive:
+                  mode: pty
+                  trigger_flag: --live
+                  default_rows: 33
+                  default_cols: 132
+                  max_runtime_seconds: 321
+                  allow_input: false
+                  requires_args: true
+                  transcript_mode: scrollback_findings
                 autocomplete:
                   flags:
                     - value: -c
@@ -726,6 +743,28 @@ class TestDerivedCommandRegistry:
             "name": "XDG_CONFIG_HOME",
             "value": "{managed_workspace_parent}",
             "managed_directory_flag": "-dir",
+        }]
+        assert ping["interactive"] == {
+            "mode": "pty",
+            "trigger_flag": "--live",
+            "default_rows": 33,
+            "default_cols": 132,
+            "max_runtime_seconds": 321,
+            "allow_input": False,
+            "requires_args": True,
+            "transcript_mode": "scrollback_findings",
+            "input_safety": "no_input",
+        }
+        assert interactive_pty_specs_from_registry(registry) == [{
+            "root": "ping",
+            "trigger_flag": "--live",
+            "default_rows": 33,
+            "default_cols": 132,
+            "max_runtime_seconds": 321,
+            "allow_input": False,
+            "requires_args": True,
+            "transcript_mode": "scrollback_findings",
+            "input_safety": "no_input",
         }]
         assert ping["autocomplete"]["flags"][0] == {"value": "-c", "description": "Count"}
         assert ping["autocomplete"]["flags"][1] == {"value": "-v", "description": "Verbose"}
@@ -2170,6 +2209,29 @@ class TestIsDeniedMultiWordTool:
         ok, _ = _check("nmap -sV 10.0.0.1", allow=["nmap"], deny=["nc"])
         assert ok
 
+    def test_mtr_interactive_is_reserved_for_pty_route(self):
+        ok, reason = _check("mtr --interactive darklab.sh", allow=["mtr"], deny=["mtr --interactive"])
+        assert not ok
+        assert "Command not allowed" in reason
+
+    def test_ffuf_interactive_is_reserved_for_pty_route(self):
+        ok, reason = _check(
+            "ffuf --interactive -u https://x/FUZZ -w /list.txt",
+            allow=["ffuf"],
+            deny=["ffuf --interactive"],
+        )
+        assert not ok
+        assert "Command not allowed" in reason
+
+    def test_masscan_interactive_is_reserved_for_pty_route(self):
+        ok, reason = _check(
+            "masscan --interactive -p 80 1.2.3.0/24",
+            allow=["masscan"],
+            deny=["masscan --interactive"],
+        )
+        assert not ok
+        assert "Command not allowed" in reason
+
 
 # ── rewrite_command: case insensitivity ──────────────────────────────────────
 
@@ -2481,6 +2543,7 @@ class TestActiveRunMetadata:
                     "command": "ping darklab.sh",
                     "started": "2026-01-01T00:00:00Z",
                     "source": "memory",
+                    "run_type": "command",
                     "owner_client_id": "",
                     "owner_tab_id": "",
                     "owner_last_seen": None,
@@ -2746,6 +2809,496 @@ class TestActiveRunMetadata:
             "memory_bytes": 300,
             "process_count": 2,
         }
+
+
+class TestInteractivePtyRegistry:
+    def test_live_registry_publishes_each_supported_interactive_tool(self):
+        specs = {spec["root"]: spec for spec in interactive_pty_specs_from_registry()}
+        assert set(specs) == {"mtr", "ffuf", "masscan"}
+        for root, expected in (
+            ("mtr", {
+                "trigger_flag": "--interactive",
+                "requires_args": True,
+                "transcript_mode": "final_frame",
+                "input_safety": "navigation_only",
+            }),
+            ("ffuf", {
+                "trigger_flag": "--interactive",
+                "requires_args": True,
+                "transcript_mode": "scrollback_findings",
+                "input_safety": "scanner_controls",
+            }),
+            ("masscan", {
+                "trigger_flag": "--interactive",
+                "requires_args": True,
+                "transcript_mode": "scrollback_findings",
+                "input_safety": "scanner_controls",
+            }),
+        ):
+            spec = specs[root]
+            assert spec["trigger_flag"] == expected["trigger_flag"]
+            assert spec["requires_args"] is expected["requires_args"]
+            assert spec["transcript_mode"] == expected["transcript_mode"]
+            assert spec["input_safety"] == expected["input_safety"]
+            assert spec["allow_input"] is True
+            max_runtime = spec["max_runtime_seconds"]
+            assert isinstance(max_runtime, int) and max_runtime > 0
+
+
+class TestPtyBrokerService:
+    def test_pty_broker_is_available_with_redis_even_when_workers_are_not_sticky(self):
+        with mock.patch.object(pty_service, "redis_client", object()), \
+             mock.patch.object(pty_service, "pty_worker_supported", return_value=False):
+            assert pty_service.pty_broker_available() is True
+
+    def test_pty_input_and_resize_queue_through_redis_without_local_run(self):
+        fake = process._FakeRedisClient()
+        run_id = "pty-run-redis"
+        fake.set(
+            pty_service._meta_key(run_id),
+            json.dumps({
+                "run_id": run_id,
+                "session_id": "session-1",
+                "command": "mtr --interactive darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "closed": False,
+            }),
+        )
+
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(
+                 pty_service,
+                 "active_runs_for_session",
+                 return_value=[{"run_id": run_id, "run_type": "pty"}],
+             ):
+            assert pty_service.write_pty_input(run_id, "session-1", "q") == (True, "")
+            assert pty_service.resize_pty(run_id, "session-1", 33, 120) == (True, "", 33, 120)
+            rows = fake.xread({pty_service._control_key(run_id): "0-0"}, count=10)
+
+        payloads = [
+            json.loads(fields["payload"])
+            for _key, stream_rows in rows
+            for _event_id, fields in stream_rows
+        ]
+        assert payloads == [
+            {"data": "q", "action": "input"},
+            {"rows": 33, "cols": 120, "action": "resize"},
+        ]
+
+    def test_pty_stream_replays_redis_output_events_for_any_worker(self):
+        fake = process._FakeRedisClient()
+        run_id = "pty-run-stream"
+        fake.set(
+            pty_service._meta_key(run_id),
+            json.dumps({
+                "run_id": run_id,
+                "session_id": "session-1",
+                "command": "mtr --interactive darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "closed": False,
+            }),
+        )
+
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(
+                 pty_service,
+                 "active_runs_for_session",
+                 return_value=[{"run_id": run_id, "run_type": "pty"}],
+             ):
+            pty_service.publish_pty_event(run_id, "output", {"text": "live hop"})
+            stream = pty_service.stream_pty_events(run_id, "session-1")
+            chunk = next(stream)
+            close_stream = getattr(stream, "close", None)
+            if callable(close_stream):
+                close_stream()
+
+        assert "live hop" in chunk
+        assert '"type": "output"' in chunk
+
+    def test_pty_snapshot_loads_distributed_redis_snapshot_without_local_run(self):
+        class FakeProc:
+            pid = 4242
+
+        class FakeCapture:
+            def synthesize_entries(self):
+                return [{"text": "plain fallback", "cls": ""}]
+
+            def ansi_snapshot(self):
+                return "\x1b[0m\x1b[2J\x1b[Hredis snapshot\x1b[1;1H", False
+
+        fake = process._FakeRedisClient()
+        run = pty_service.PtyRun(
+            run_id="pty-run-snapshot-redis",
+            session_id="session-1",
+            command="mtr --interactive darklab.sh",
+            argv=["mtr", "darklab.sh"],
+            started="2026-01-01T00:00:00Z",
+            master_fd=-1,
+            proc=cast(subprocess.Popen, FakeProc()),
+            rows=24,
+            cols=100,
+            allow_input=True,
+            max_runtime_seconds=900,
+            brokered=True,
+            terminal_capture=cast(pty_service.PtyTerminalCapture, FakeCapture()),
+        )
+        run.capture_event_id = "1770000000000-2"
+
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(
+                 pty_service,
+                 "active_runs_for_session",
+                 return_value=[{"run_id": run.run_id, "run_type": "pty"}],
+             ):
+            pty_service._store_pty_meta(run)
+            pty_service._store_pty_snapshot(run, force=True)
+            ok, message, snapshot = pty_service.pty_run_snapshot(run.run_id, "session-1")
+
+        assert ok is True
+        assert message == ""
+        assert snapshot is not None
+        assert snapshot["snapshot_format"] == "ansi"
+        assert snapshot["ansi_snapshot"].endswith("redis snapshot\x1b[1;1H")
+        assert snapshot["after_event_id"] == "1770000000000-2"
+        assert snapshot["entries"] == []
+
+    def test_pty_snapshot_prunes_stale_redis_state_without_active_process(self):
+        fake = process._FakeRedisClient()
+        run_id = "pty-run-stale"
+        fake.set(
+            pty_service._meta_key(run_id),
+            json.dumps({
+                "run_id": run_id,
+                "session_id": "session-1",
+                "command": "mtr --interactive darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "closed": False,
+            }),
+        )
+        fake.set(pty_service._snapshot_key(run_id), json.dumps({"session_id": "session-1"}))
+        fake.xadd(pty_service._control_key(run_id), {"payload": "{}"})
+        fake.xadd(pty_service._stream_key(run_id), {"payload": "{}"})
+
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(pty_service, "active_runs_for_session", return_value=[]):
+            ok, message, snapshot = pty_service.pty_run_snapshot(run_id, "session-1")
+
+        assert ok is False
+        assert message == "PTY run is no longer active"
+        assert snapshot is None
+        assert fake.get(pty_service._meta_key(run_id)) is None
+        assert fake.get(pty_service._snapshot_key(run_id)) is None
+        assert fake.xread({pty_service._control_key(run_id): "0-0"}, count=10) == []
+        assert fake.xread({pty_service._stream_key(run_id): "0-0"}, count=10) == []
+
+    def test_pty_snapshot_publish_rate_is_capped_even_after_byte_threshold(self):
+        class FakeProc:
+            pid = 4242
+
+        class FakeCapture:
+            def synthesize_entries(self):
+                return [{"text": "plain fallback", "cls": ""}]
+
+            def ansi_snapshot(self):
+                return "\x1b[0m\x1b[2J\x1b[Hsnapshot\x1b[1;1H", False
+
+        fake = process._FakeRedisClient()
+        run = pty_service.PtyRun(
+            run_id="pty-run-snapshot-rate",
+            session_id="session-1",
+            command="ffuf --interactive -u https://darklab.sh/FUZZ -w words.txt",
+            argv=["ffuf"],
+            started="2026-01-01T00:00:00Z",
+            master_fd=-1,
+            proc=cast(subprocess.Popen, FakeProc()),
+            rows=24,
+            cols=100,
+            allow_input=True,
+            max_runtime_seconds=900,
+            brokered=True,
+            terminal_capture=cast(pty_service.PtyTerminalCapture, FakeCapture()),
+        )
+        run.capture_event_id = "1770000000000-2"
+        run.snapshot_published_event_id = "1770000000000-1"
+        run.snapshot_pending_bytes = pty_service._PTY_SNAPSHOT_PUBLISH_BYTES * 2
+        run.snapshot_last_published = 999.95
+
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(pty_service.time, "time", return_value=1000.0):
+            pty_service._store_pty_snapshot(run)
+
+        assert fake.get(pty_service._snapshot_key(run.run_id)) is None
+        assert run.snapshot_pending_bytes == pty_service._PTY_SNAPSHOT_PUBLISH_BYTES * 2
+
+        run.snapshot_last_published = 999.7
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(pty_service.time, "time", return_value=1000.0):
+            pty_service._store_pty_snapshot(run)
+            stored_snapshot = fake.get(pty_service._snapshot_key(run.run_id))
+
+        assert stored_snapshot is not None
+        assert run.snapshot_pending_bytes == 0
+
+    def test_pty_stream_reports_stale_run_before_heartbeating_forever(self):
+        fake = process._FakeRedisClient()
+        run_id = "pty-run-stale-stream"
+        fake.set(
+            pty_service._meta_key(run_id),
+            json.dumps({
+                "run_id": run_id,
+                "session_id": "session-1",
+                "command": "mtr --interactive darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "closed": False,
+            }),
+        )
+
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(pty_service, "active_runs_for_session", return_value=[]):
+            chunk = next(pty_service.stream_pty_events(run_id, "session-1"))
+
+        assert "PTY run is no longer active" in chunk
+        assert '"type": "error"' in chunk
+
+    def test_pty_start_cleans_up_if_reader_thread_fails_to_start(self):
+        class FakeProc:
+            pid = 4242
+
+            def poll(self):
+                return None
+
+            def wait(self, timeout=None):  # noqa: ARG002
+                return -15
+
+        fake_proc = FakeProc()
+        closed = []
+        fake_pyte = type("FakePyte", (), {
+            "HistoryScreen": lambda *args, **kwargs: object(),
+            "Stream": lambda *args, **kwargs: object(),
+        })()
+
+        with mock.patch.object(pty_service.pty, "openpty", return_value=(10, 11)), \
+             mock.patch.object(pty_service, "pyte", fake_pyte), \
+             mock.patch.object(pty_service, "_set_pty_size"), \
+             mock.patch.object(pty_service.subprocess, "Popen", return_value=fake_proc), \
+             mock.patch.object(pty_service.os, "close", side_effect=lambda fd: closed.append(fd)), \
+             mock.patch.object(pty_service.os, "killpg") as killpg, \
+             mock.patch.object(pty_service, "pid_register"), \
+             mock.patch.object(pty_service, "pid_pop") as pid_pop, \
+             mock.patch.object(pty_service, "active_run_register"), \
+             mock.patch.object(pty_service, "active_run_remove") as active_run_remove, \
+             mock.patch.object(pty_service.threading.Thread, "start", side_effect=RuntimeError("thread failed")):
+            with pytest.raises(RuntimeError, match="thread failed"):
+                pty_service.start_pty_run(
+                    session_id="session-1",
+                    client_ip="127.0.0.1",
+                    command="mtr --interactive darklab.sh",
+                    argv=["mtr", "darklab.sh"],
+                )
+
+        killpg.assert_called_once_with(4242, pty_service.signal.SIGTERM)
+        assert 10 in closed
+        assert 11 in closed
+        pid_pop.assert_called_once()
+        active_run_remove.assert_called_once()
+
+    def test_pty_start_requires_pyte_for_saved_terminal_capture(self):
+        with mock.patch.object(pty_service, "pyte", None), \
+             mock.patch.object(pty_service.pty, "openpty") as openpty:
+            with pytest.raises(pty_service.PtyDependencyError, match="requires pyte"):
+                pty_service.start_pty_run(
+                    session_id="session-1",
+                    client_ip="127.0.0.1",
+                    command="mtr --interactive darklab.sh",
+                    argv=["mtr", "darklab.sh"],
+                )
+
+        openpty.assert_not_called()
+
+    def test_pty_command_env_inherits_only_vetted_keys(self):
+        with mock.patch.dict(pty_service.os.environ, {
+            "PATH": "/custom/bin",
+            "HOME": "/home/appuser",
+            "USER": "appuser",
+            "LOGNAME": "appuser",
+            "XDG_CONFIG_HOME": "/tmp/config",
+            "LANG": "en_US.UTF-8",
+            "SECRET_TOKEN": "do-not-pass",
+            "LD_PRELOAD": "/tmp/inject.so",
+        }, clear=True):
+            env = pty_service._command_env()
+
+        assert env["PATH"] == "/custom/bin"
+        assert env["HOME"] == "/home/appuser"
+        assert env["USER"] == "appuser"
+        assert env["LOGNAME"] == "appuser"
+        assert env["XDG_CONFIG_HOME"] == "/tmp/config"
+        assert env["LANG"] == "en_US.UTF-8"
+        assert env["LC_ALL"] == "en_US.UTF-8"
+        assert env["TERM"] == "xterm-256color"
+        assert "SECRET_TOKEN" not in env
+        assert "LD_PRELOAD" not in env
+
+        with mock.patch.dict(pty_service.os.environ, {}, clear=True):
+            env = pty_service._command_env()
+
+        assert env["HOME"] == tempfile.gettempdir()
+
+
+class TestPtyTerminalCapture:
+    @staticmethod
+    def _fake_pyte(
+        scrollback=None,
+        final_frame=None,
+        *,
+        buffer=None,
+        cursor=None,
+        feed_error=False,
+        feed_calls=None,
+    ):
+        class FakeHistoryScreen:
+            def __init__(self, cols, rows, history):  # noqa: ARG002
+                self.history = type("FakeHistory", (), {"top": scrollback or []})()
+                self.display = final_frame or []
+                if buffer is not None:
+                    self.buffer = buffer
+                cursor_y, cursor_x = cursor or (0, 0)
+                self.cursor = type("FakeCursor", (), {"y": cursor_y, "x": cursor_x})()
+                self.resized = None
+
+            def resize(self, *, lines, columns):
+                self.resized = (lines, columns)
+
+        class FakeStream:
+            def __init__(self, screen):
+                self.screen = screen
+
+            def feed(self, text):
+                # Record-then-raise: even when feed_error is set, the call is
+                # recorded first so a future test combining both still observes
+                # the input that triggered the failure.
+                if feed_calls is not None:
+                    feed_calls.append(text)
+                if feed_error:
+                    raise ValueError("bad escape")
+
+        return type("FakePyte", (), {"HistoryScreen": FakeHistoryScreen, "Stream": FakeStream})()
+
+    def test_terminal_capture_synthesizes_scrollback_and_final_frame(self):
+        feed_calls = []
+        fake_pyte = self._fake_pyte(
+            scrollback=["scrolled line   "],
+            final_frame=["visible line   ", "   "],
+            feed_calls=feed_calls,
+        )
+        with mock.patch.object(pty_service, "pyte", fake_pyte):
+            capture = pty_service.PtyTerminalCapture(rows=24, cols=100, history_lines=20)
+            capture.feed("\x1b[1mbold\x1b[0m")
+            capture.resize(30, 120)
+            entries = capture.synthesize_entries()
+
+        assert any("bold" in call for call in feed_calls)
+        assert entries == [
+            {"text": "scrolled line", "cls": ""},
+            {"text": "", "cls": "pty-marker"},
+            {"text": "visible line", "cls": ""},
+        ]
+
+    def test_terminal_capture_builds_ansi_snapshot_with_attrs_and_cursor(self):
+        cell = type(
+            "FakeCell",
+            (),
+            {
+                "data": "R",
+                "fg": "red",
+                "bg": "default",
+                "bold": True,
+                "italics": False,
+                "underscore": False,
+                "strikethrough": False,
+                "reverse": False,
+            },
+        )()
+        fake_pyte = self._fake_pyte(
+            scrollback=["older row"],
+            buffer={0: {0: cell, 1: "!"}, 1: "plain row"},
+            cursor=(1, 2),
+        )
+        with mock.patch.object(pty_service, "pyte", fake_pyte):
+            capture = pty_service.PtyTerminalCapture(rows=2, cols=10, history_lines=20)
+            snapshot, truncated = capture.ansi_snapshot()
+
+        assert truncated is False
+        assert snapshot.startswith("\x1b[0m\x1b[2J\x1b[H")
+        assert "older row" in snapshot
+        assert "\x1b[1;31mR\x1b[0m!" in snapshot
+        assert "plain row" in snapshot
+        assert snapshot.endswith("\x1b[0m\x1b[2;3H")
+
+    def test_terminal_capture_omits_marker_when_only_final_frame_exists(self):
+        fake_pyte = self._fake_pyte(final_frame=["mtr final row  ", ""])
+        with mock.patch.object(pty_service, "pyte", fake_pyte):
+            capture = pty_service.PtyTerminalCapture(rows=24, cols=100, history_lines=20)
+
+        assert capture.synthesize_entries() == [{"text": "mtr final row", "cls": ""}]
+
+    def test_terminal_capture_omits_marker_when_only_scrollback_exists(self):
+        fake_pyte = self._fake_pyte(scrollback=["match one  "])
+        with mock.patch.object(pty_service, "pyte", fake_pyte):
+            capture = pty_service.PtyTerminalCapture(rows=24, cols=100, history_lines=20)
+
+        assert capture.synthesize_entries() == [{"text": "match one", "cls": ""}]
+
+    def test_terminal_capture_persists_notice_when_output_is_empty(self):
+        fake_pyte = self._fake_pyte()
+        with mock.patch.object(pty_service, "pyte", fake_pyte):
+            capture = pty_service.PtyTerminalCapture(rows=24, cols=100, history_lines=20)
+
+        assert capture.synthesize_entries() == [{
+            "text": "[interactive PTY exited with no output]",
+            "cls": "notice",
+        }]
+
+    def test_terminal_capture_falls_back_after_first_feed_error(self):
+        fake_pyte = self._fake_pyte(feed_error=True)
+        with mock.patch.object(pty_service, "pyte", fake_pyte), \
+             mock.patch.object(pty_service.log, "warning") as warning:
+            capture = pty_service.PtyTerminalCapture(rows=24, cols=100, history_lines=20)
+            capture.feed("\x1b[31mfirst\x1b[0m\n")
+            capture.feed("\x1b]0;Window Title\x07second\n")
+            capture.feed("\x1bPstatus\x1b\\third\n")
+
+        assert warning.call_count == 1
+        assert capture.synthesize_entries() == [
+            {"text": "first", "cls": ""},
+            {"text": "second", "cls": ""},
+            {"text": "third", "cls": ""},
+        ]
+
+    def test_terminal_capture_fallback_treats_carriage_return_as_overwrite(self):
+        with mock.patch.object(pty_service, "pyte", None):
+            capture = pty_service.PtyTerminalCapture(rows=24, cols=100, history_lines=20)
+            capture.feed("Discovered open port 443/tcp on 192.168.1.5\r\n")
+            capture.feed("rate:  0.00-kpps, 50.00% done, found=1\r")
+            capture.feed("rate:  0.00-kpps, 100.00% done, found=2\r")
+
+        assert capture.synthesize_entries() == [
+            {"text": "Discovered open port 443/tcp on 192.168.1.5", "cls": ""},
+            {"text": "rate:  0.00-kpps, 100.00% done, found=2", "cls": ""},
+        ]
+
+    def test_terminal_history_line_limit_is_bounded(self):
+        assert pty_service._terminal_history_line_limit(0) == 10000
+        assert pty_service._terminal_history_line_limit(10) == 2000
+        assert pty_service._terminal_history_line_limit(100000) == 10000
 
 
 # ── _format_retention ─────────────────────────────────────────────────────────
@@ -3215,6 +3768,44 @@ class TestRunOutputCapture:
         ]
         assert capture.preview_truncated is True
         assert capture.output_line_count == 3
+
+    def test_preview_byte_cap_drops_oldest_lines(self):
+        capture = RunOutputCapture(
+            "test-run-output-preview-bytes",
+            preview_limit=10,
+            persist_full_output=False,
+            full_output_max_bytes=0,
+            preview_max_bytes=150,
+        )
+        capture.add_line("a" * 20)
+        capture.add_line("b" * 20)
+        capture.add_line("c" * 20)
+        capture.finalize()
+
+        assert list(capture.preview_lines) == [
+            {"text": "b" * 20, "cls": "", "tsC": "", "tsE": ""},
+            {"text": "c" * 20, "cls": "", "tsC": "", "tsE": ""},
+        ]
+        assert capture.preview_truncated is True
+        assert capture.output_line_count == 3
+
+    def test_preview_byte_cap_truncates_single_huge_line(self):
+        capture = RunOutputCapture(
+            "test-run-output-preview-huge-line",
+            preview_limit=10,
+            persist_full_output=False,
+            full_output_max_bytes=0,
+            preview_max_bytes=120,
+        )
+        capture.add_line("x" * 1000)
+        capture.finalize()
+
+        assert len(capture.preview_lines) == 1
+        preview = capture.preview_lines[0]
+        assert str(preview["text"]).endswith("[preview line truncated]")
+        assert len(json.dumps(list(capture.preview_lines)).encode("utf-8")) <= 122
+        assert capture.preview_truncated is True
+        assert capture.output_line_count == 1
 
     def test_full_output_artifact_round_trips_lines(self):
         capture = RunOutputCapture("test-run-output-artifact", preview_limit=2, persist_full_output=True, full_output_max_bytes=0)
@@ -3943,10 +4534,17 @@ class TestDatabaseInit:
             conn = sqlite3.connect(db_path)
             indexes = {row[1] for row in conn.execute("PRAGMA index_list('runs')").fetchall()}
             snapshot_indexes = {row[1] for row in conn.execute("PRAGMA index_list('snapshots')").fetchall()}
+            workflow_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('user_workflows')").fetchall()
+            }
             conn.close()
 
         assert "idx_session" in indexes
+        assert "idx_runs_session_started" in indexes
+        assert "idx_runs_session_command_started" in indexes
         assert "idx_snapshots_session" in snapshot_indexes
+        assert "idx_snapshots_session_created" in snapshot_indexes
+        assert "idx_user_workflows_session_updated_created" in workflow_indexes
 
     def test_init_is_idempotent(self):
         # Calling db_init() twice on the same DB must not raise

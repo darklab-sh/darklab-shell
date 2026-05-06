@@ -446,6 +446,7 @@ def active_run_register(
     started: str,
     owner_client_id: str = "",
     owner_tab_id: str = "",
+    run_type: str = "command",
 ) -> None:
     """Register the metadata needed to restore an in-flight run after reload."""
     payload = {
@@ -458,6 +459,7 @@ def active_run_register(
         "owner_client_id": owner_client_id,
         "owner_tab_id": owner_tab_id,
         "owner_last_seen": time.time() if owner_client_id else None,
+        "run_type": run_type,
     }
     if redis_client:
         meta_key = f"procmeta:{run_id}"
@@ -505,6 +507,55 @@ def active_run_touch_owner(run_id: str, owner_client_id: str = "", owner_tab_id:
         return True
 
 
+def active_run_claim_owner(run_id: str, owner_client_id: str = "", owner_tab_id: str = "") -> bool:
+    """Make this browser/tab the current owner for an active run."""
+    if not run_id or not owner_client_id:
+        return False
+
+    if redis_client:
+        meta_key = f"procmeta:{run_id}"
+        raw = redis_client.get(meta_key)
+        payload = _load_active_run_payload(raw)
+        if not payload:
+            return False
+        payload["owner_client_id"] = owner_client_id
+        payload["owner_tab_id"] = owner_tab_id
+        payload["owner_last_seen"] = time.time()
+        redis_client.set(meta_key, json.dumps(payload), ex=_PID_TTL)
+        session_id = str(payload.get("session_id", "") or "")
+        if session_id:
+            redis_client.expire(f"sessionprocs:{session_id}", _PID_TTL)
+        return True
+
+    with _pid_lock:
+        payload = _active_run_meta.get(run_id)
+        if not payload:
+            return False
+        payload["owner_client_id"] = owner_client_id
+        payload["owner_tab_id"] = owner_tab_id
+        payload["owner_last_seen"] = time.time()
+        return True
+
+
+def active_run_owned_by(run_id: str, owner_client_id: str = "", owner_tab_id: str = "") -> bool:
+    """Return whether the active run is currently owned by this browser/tab."""
+    if not run_id or not owner_client_id:
+        return False
+
+    if redis_client:
+        payload = _load_active_run_payload(redis_client.get(f"procmeta:{run_id}"))
+    else:
+        with _pid_lock:
+            payload = dict(_active_run_meta.get(run_id) or {})
+    if not payload:
+        return False
+    if str(payload.get("owner_client_id", "") or "") != owner_client_id:
+        return False
+    if owner_tab_id and str(payload.get("owner_tab_id", "") or "") != owner_tab_id:
+        return False
+    return True
+
+
 def active_run_remove(run_id: str) -> None:
     """Remove active-run metadata after completion or explicit kill."""
     if redis_client:
@@ -536,6 +587,7 @@ def _active_run_public_item(item: dict[str, Any], source: str, client_id: str = 
         "command": str(item.get("command", "")),
         "started": str(item.get("started", "")),
         "source": source,
+        "run_type": str(item.get("run_type", "command") or "command"),
     }
     public_item.update(_active_run_owner_state(item, client_id=client_id))
     usage = _active_run_resource_usage(run_id, pid)

@@ -1111,6 +1111,7 @@ function isAnyPanelOverlayOpen() {
 }
 
 document.addEventListener('keydown', e => {
+  if (e.defaultPrevented) return;
   // Unified Escape dispatch: closes the topmost open dismissible
   // (modal > sheet > panel) via the registry populated by
   // setupDismissibleOverlays(). Replaces the per-overlay if-chain that
@@ -1361,6 +1362,7 @@ function _isMajorSurfaceOpenForPromptPaste() {
 }
 
 document.addEventListener('paste', e => {
+  if (e.defaultPrevented) return;
   if (!cmdInput || isEditableTarget(e.target) || _isMajorSurfaceOpenForPromptPaste()) return;
   const clipboard = e.clipboardData || (typeof window !== 'undefined' ? window.clipboardData : null);
   const text = clipboard && typeof clipboard.getData === 'function'
@@ -1568,6 +1570,7 @@ apiFetch('/autocomplete').then(r => r.json()).then(data => {
 });
 
 cmdInput.addEventListener('input', () => {
+  if (typeof normalizeComposerSmartPeriod === 'function') normalizeComposerSmartPeriod(cmdInput);
   if (isHistoryPanelOpen()) hideHistoryPanel();
   if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
     if (typeof handleHistSearchInput === 'function') {

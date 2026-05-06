@@ -1694,9 +1694,21 @@ function _setHistoryLoadState(loading) {
   else hideHistoryLoadOverlay();
 }
 
+function _historyRunIdentity(run) {
+  return String(run?.id || run?.run_id || '').trim();
+}
+
+function _tabForHistoryRun(run) {
+  const runId = _historyRunIdentity(run);
+  if (!runId) return null;
+  return tabs.find(t => (
+    t && (String(t.historyRunId || '') === runId || String(t.runId || '') === runId)
+  )) || null;
+}
+
 function restoreHistoryRunIntoTab(run, { targetTabId = null, hidePanelOnSuccess = true } = {}) {
   if (!run || !run.id) return Promise.reject(new Error('missing run id'));
-  const existing = targetTabId ? getTab(targetTabId) : tabs.find(t => t.command === run.command);
+  const existing = targetTabId ? getTab(targetTabId) : _tabForHistoryRun(run);
   const canUpgradeExisting = !!(existing && run.full_output_available && existing.previewTruncated);
   const restoreUrl = run.full_output_available
     ? `/history/${run.id}?json`
@@ -1847,7 +1859,7 @@ function refreshHistoryPanel() {
 
       bindPressable(entry.querySelector('[data-action="restore"]'), {
         onActivate: () => {
-          const existing = tabs.find(t => t.command === run.command);
+          const existing = _tabForHistoryRun(run);
           const canUpgradeExisting = !!(existing && run.full_output_available && existing.previewTruncated);
           if (existing && !canUpgradeExisting) {
             activateTab(existing.id);

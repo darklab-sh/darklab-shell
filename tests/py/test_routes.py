@@ -255,11 +255,43 @@ class TestConfigRoute:
         data = json.loads(client.get("/config").data)
         for key in (
             "app_name", "project_readme", "prompt_username", "prompt_domain", "default_theme",
-            "max_tabs", "max_output_lines", "workspace_enabled",
+            "max_tabs", "max_output_lines", "workspace_enabled", "interactive_pty_commands",
         ):
             assert key in data
         assert "share_redaction_enabled" in data
         assert "share_redaction_rules" in data
+
+    def test_interactive_pty_commands_reflect_registry(self):
+        client = get_client()
+        registry = {
+            "commands": [{
+                "root": "watcher",
+                "interactive": {
+                    "mode": "pty",
+                    "trigger_flag": "--live",
+                    "default_rows": 35,
+                    "default_cols": 120,
+                    "max_runtime_seconds": 180,
+                    "allow_input": False,
+                    "requires_args": False,
+                },
+            }],
+            "pipe_helpers": [],
+        }
+        with mock.patch("commands.load_commands_registry", return_value=registry):
+            data = json.loads(client.get("/config").data)
+
+        assert data["interactive_pty_commands"] == [{
+            "root": "watcher",
+            "trigger_flag": "--live",
+            "default_rows": 35,
+            "default_cols": 120,
+            "max_runtime_seconds": 180,
+            "allow_input": False,
+            "requires_args": False,
+            "transcript_mode": "final_frame",
+            "input_safety": "no_input",
+        }]
 
     def test_workspace_menu_affordances_follow_config(self):
         client = get_client()
@@ -501,6 +533,24 @@ class TestVendorAssets:
         resp = client.get("/vendor/jspdf.umd.min.js")
         assert resp.status_code == 200
         assert "javascript" in resp.content_type
+
+    def test_xterm_js_is_served(self):
+        client = get_client()
+        resp = client.get("/vendor/xterm.js")
+        assert resp.status_code == 200
+        assert "javascript" in resp.content_type
+
+    def test_xterm_fit_js_is_served(self):
+        client = get_client()
+        resp = client.get("/vendor/xterm-addon-fit.js")
+        assert resp.status_code == 200
+        assert "javascript" in resp.content_type
+
+    def test_xterm_css_is_served(self):
+        client = get_client()
+        resp = client.get("/vendor/xterm.css")
+        assert resp.status_code == 200
+        assert "text/css" in resp.content_type
 
     def test_font_route_serves_committed_file(self, tmp_path, monkeypatch):
         client = get_client()

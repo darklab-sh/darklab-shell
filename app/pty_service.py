@@ -1,0 +1,1373 @@
+from __future__ import annotations
+
+"""Constrained PTY lifecycle for first-pass interactive runs."""
+
+import fcntl
+import importlib
+import json
+import logging
+import os
+import pty
+import re
+import select
+import signal
+import struct
+import subprocess  # nosec B404
+import tempfile
+import termios
+import threading
+import time
+import uuid
+from collections import deque
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Iterator, cast
+
+from config import CFG, SCANNER_PREFIX
+from process import (
+    active_run_owned_by,
+    active_run_register,
+    active_run_remove,
+    active_runs_for_session,
+    pid_pop,
+    pid_register,
+    redis_client,
+)
+
+try:
+    # importlib + Any | None lets us treat pyte as optional at runtime without
+    # binding a typed module symbol; pyte ships no type stubs.
+    pyte: Any | None = importlib.import_module("pyte")
+except ImportError:  # pragma: no cover - exercised in deploys after requirements install
+    pyte = None
+
+log = logging.getLogger("shell")
+
+SUDO_BIN = "/usr/bin/sudo"
+KILL_BIN = "/bin/kill"
+RUN_SUBPROCESS_UMASK = 0o027
+_PTY_BUFFER_LIMIT = 512
+_PTY_INPUT_MAX_BYTES = 4096
+_PTY_HEARTBEAT_SECONDS = 15.0
+_PTY_CONTROL_POLL_SECONDS = 0.2
+_PTY_STREAM_FETCH_COUNT = 100
+_PTY_STREAM_MAXLEN = 5000
+_PTY_CAPTURE_MIN_HISTORY_LINES = 2000
+_PTY_CAPTURE_MAX_HISTORY_LINES = 10000
+_PTY_SNAPSHOT_MAX_BYTES = 128 * 1024
+_PTY_SNAPSHOT_PUBLISH_BYTES = 8192
+_PTY_SNAPSHOT_PUBLISH_SECONDS = 1.0
+_PTY_SNAPSHOT_MIN_PUBLISH_SECONDS = 0.2
+_PTY_SNAPSHOT_FALLBACK_ENTRY_LIMIT = 200
+_PTY_STALE_MESSAGE = "PTY run is no longer active"
+_PTY_ENV_PASSTHROUGH_KEYS = (
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_DATA_HOME",
+    "TMPDIR",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "NO_COLOR",
+    "CLICOLOR",
+    "COLORTERM",
+)
+_ANSI_ESCAPE_RE = re.compile(
+    r"\x1b(?:"
+    r"\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC: ESC ] ... (BEL | ST)
+    r"|[PX^_][^\x1b]*\x1b\\"           # DCS / SOS / PM / APC: ESC <intro> ... ST
+    r"|\[[0-?]*[ -/]*[@-~]"            # CSI
+    r"|[@-Z\\-_]"                      # other 2-char ESC sequences
+    r")"
+)
+
+
+def _plain_terminal_text(value: str) -> str:
+    return _ANSI_ESCAPE_RE.sub("", value)
+
+
+def _coerce_non_negative_int(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        number = value
+    elif isinstance(value, float):
+        number = int(value)
+    elif isinstance(value, (str, bytes, bytearray)):
+        try:
+            number = int(value)
+        except ValueError:
+            return default
+    else:
+        return default
+    return number if number >= 0 else default
+
+
+def _terminal_history_line_limit(value: object) -> int:
+    max_output_lines = _coerce_non_negative_int(value, 0)
+    if max_output_lines <= 0:
+        return _PTY_CAPTURE_MAX_HISTORY_LINES
+    return max(
+        _PTY_CAPTURE_MIN_HISTORY_LINES,
+        min(max_output_lines * 2, _PTY_CAPTURE_MAX_HISTORY_LINES),
+    )
+
+
+def _trim_trailing_blank_lines(lines: list[str]) -> list[str]:
+    trimmed = list(lines)
+    while trimmed and not trimmed[-1].strip():
+        trimmed.pop()
+    return trimmed
+
+
+def _terminal_line_to_text(line: object) -> str:
+    if isinstance(line, str):
+        return line
+    if isinstance(line, dict):
+        cells: list[tuple[int, object]] = []
+        for key, value in line.items():
+            try:
+                cells.append((int(key), value))
+            except (TypeError, ValueError):
+                continue
+        return "".join(
+            str(getattr(cell, "data", cell) or "")
+            for _column, cell in sorted(cells, key=lambda item: item[0])
+        )
+    values = getattr(line, "values", None)
+    if callable(values):
+        value_cells = values()
+        if isinstance(value_cells, Iterable):
+            return "".join(str(getattr(cell, "data", cell) or "") for cell in value_cells)
+    return str(line)
+
+
+_DEFAULT_TERMINAL_ATTRS = ("default", "default", False, False, False, False, False)
+_ANSI_COLOR_CODES = {
+    "black": 0,
+    "red": 1,
+    "green": 2,
+    "brown": 3,
+    "yellow": 3,
+    "blue": 4,
+    "magenta": 5,
+    "cyan": 6,
+    "white": 7,
+    "brightblack": 8,
+    "brightred": 9,
+    "brightgreen": 10,
+    "brightyellow": 11,
+    "brightblue": 12,
+    "brightmagenta": 13,
+    "brightcyan": 14,
+    "brightwhite": 15,
+}
+
+
+def _terminal_line_cells(line: object) -> dict[int, object]:
+    if isinstance(line, str):
+        return {index: char for index, char in enumerate(line)}
+    if isinstance(line, dict):
+        cells: dict[int, object] = {}
+        for key, value in line.items():
+            try:
+                cells[int(key)] = value
+            except (TypeError, ValueError):
+                continue
+        return cells
+    items = getattr(line, "items", None)
+    if callable(items):
+        item_pairs = items()
+        if not isinstance(item_pairs, Iterable):
+            return {}
+        cells: dict[int, object] = {}
+        for item in item_pairs:
+            if not isinstance(item, tuple) or len(item) < 2:
+                continue
+            key, value = item[0], item[1]
+            try:
+                cells[int(key)] = value
+            except (TypeError, ValueError):
+                continue
+        return cells
+    values = getattr(line, "values", None)
+    if callable(values):
+        value_cells = values()
+        if isinstance(value_cells, Iterable):
+            return {index: cell for index, cell in enumerate(value_cells)}
+    text = str(line)
+    return {index: char for index, char in enumerate(text)}
+
+
+def _terminal_cell_data(cell: object) -> str:
+    return str(getattr(cell, "data", cell) or "")
+
+
+def _terminal_cell_attrs(cell: object) -> tuple[object, object, bool, bool, bool, bool, bool]:
+    return (
+        getattr(cell, "fg", "default") or "default",
+        getattr(cell, "bg", "default") or "default",
+        bool(getattr(cell, "bold", False)),
+        bool(getattr(cell, "italics", False) or getattr(cell, "italic", False)),
+        bool(getattr(cell, "underscore", False) or getattr(cell, "underline", False)),
+        bool(getattr(cell, "strikethrough", False)),
+        bool(getattr(cell, "reverse", False)),
+    )
+
+
+def _terminal_color_code(value: object, base: int) -> list[int]:
+    if value in (None, "", "default"):
+        return []
+    if isinstance(value, int):
+        return [base + 8, 5, max(0, min(value, 255))]
+    if isinstance(value, (tuple, list)) and len(value) >= 3:
+        try:
+            red, green, blue = [max(0, min(int(part), 255)) for part in value[:3]]
+        except (TypeError, ValueError):
+            return []
+        return [base + 8, 2, red, green, blue]
+    key = str(value).lower().replace("_", "").replace("-", "")
+    if key not in _ANSI_COLOR_CODES:
+        return []
+    code = _ANSI_COLOR_CODES[key]
+    return [base + code] if code < 8 else [base + 60 + (code - 8)]
+
+
+def _terminal_attrs_to_sgr(attrs: tuple[object, object, bool, bool, bool, bool, bool]) -> str:
+    if attrs == _DEFAULT_TERMINAL_ATTRS:
+        return "\x1b[0m"
+    fg, bg, bold, italics, underscore, strikethrough, reverse = attrs
+    codes: list[int] = []
+    if bold:
+        codes.append(1)
+    if italics:
+        codes.append(3)
+    if underscore:
+        codes.append(4)
+    if reverse:
+        codes.append(7)
+    if strikethrough:
+        codes.append(9)
+    codes.extend(_terminal_color_code(fg, 30))
+    codes.extend(_terminal_color_code(bg, 40))
+    return f"\x1b[{';'.join(str(code) for code in codes) or '0'}m"
+
+
+def _terminal_row_to_ansi(line: object, cols: int) -> str:
+    cells = _terminal_line_cells(line)
+    if not cells:
+        return ""
+    last_col = -1
+    for column, cell in cells.items():
+        if column < 0 or column >= cols:
+            continue
+        data = _terminal_cell_data(cell)
+        attrs = _terminal_cell_attrs(cell)
+        if data.strip() or attrs != _DEFAULT_TERMINAL_ATTRS:
+            last_col = max(last_col, column)
+    if last_col < 0:
+        return ""
+
+    current_attrs = _DEFAULT_TERMINAL_ATTRS
+    chunks: list[str] = []
+    for column in range(last_col + 1):
+        cell = cells.get(column, " ")
+        data = _terminal_cell_data(cell)[:1] or " "
+        attrs = _terminal_cell_attrs(cell)
+        if attrs != current_attrs:
+            chunks.append(_terminal_attrs_to_sgr(attrs))
+            current_attrs = attrs
+        chunks.append(data)
+    if current_attrs != _DEFAULT_TERMINAL_ATTRS:
+        chunks.append("\x1b[0m")
+    return "".join(chunks)
+
+
+def _bounded_ansi_snapshot(
+    scrollback_rows: Sequence[object],
+    screen_rows: Sequence[object],
+    rows: int,
+    cols: int,
+    cursor_y: int,
+    cursor_x: int,
+    max_bytes: int = _PTY_SNAPSHOT_MAX_BYTES,
+) -> tuple[str, bool]:
+    screen_lines = [_terminal_row_to_ansi(line, cols) for line in screen_rows]
+    cursor_y = max(0, min(cursor_y, max(0, rows - 1)))
+    cursor_x = max(0, min(cursor_x, max(0, cols - 1)))
+    suffix = f"\x1b[0m\x1b[{cursor_y + 1};{cursor_x + 1}H"
+
+    used = len("\x1b[0m\x1b[2J\x1b[H".encode("utf-8")) + len(suffix.encode("utf-8"))
+    screen_bytes = sum(len(line.encode("utf-8")) + len("\r\n".encode("utf-8")) for line in screen_lines)
+    budget = max(0, max_bytes - used - screen_bytes)
+    scrollback_tail: list[str] = []
+    truncated = False
+    for line in reversed(scrollback_rows):
+        ansi_line = _terminal_row_to_ansi(line, cols)
+        line_bytes = len(ansi_line.encode("utf-8")) + len("\r\n".encode("utf-8"))
+        if line_bytes > budget:
+            truncated = True
+            break
+        scrollback_tail.append(ansi_line)
+        budget -= line_bytes
+    if len(scrollback_tail) < len(scrollback_rows):
+        truncated = True
+
+    lines = list(reversed(scrollback_tail)) + screen_lines
+    snapshot = "\x1b[0m\x1b[2J\x1b[H" + "\r\n".join(lines) + suffix
+    return snapshot, truncated
+
+
+class PtyDependencyError(RuntimeError):
+    """Raised when an enabled PTY run cannot meet required dependencies."""
+
+
+class PtyTerminalCapture:
+    """Server-side terminal view used only for saved PTY history."""
+
+    def __init__(self, rows: int, cols: int, history_lines: int):
+        self.rows = rows
+        self.cols = cols
+        self.history_lines = max(0, int(history_lines or 0))
+        self._lock = threading.Lock()
+        self._screen = None
+        self._stream = None
+        self._stream_failed = False
+        self._fallback_pending = ""
+        self._fallback_cursor_col = 0
+        self._fallback_lines: deque[str] = deque(maxlen=max(1, self.history_lines + rows))
+        pyte_module = pyte
+        if pyte_module is None:
+            return
+        try:
+            self._screen = pyte_module.HistoryScreen(cols, rows, history=self.history_lines)
+            self._stream = pyte_module.Stream(self._screen)
+        except Exception:
+            log.warning("PTY_CAPTURE_INIT_FAILED", exc_info=True)
+            self._screen = None
+            self._stream = None
+
+    def feed(self, text: str) -> None:
+        if not text:
+            return
+        with self._lock:
+            if self._stream is not None and not self._stream_failed:
+                try:
+                    self._stream.feed(text)
+                    return
+                except Exception:
+                    self._stream_failed = True
+                    self._screen = None
+                    self._stream = None
+                    log.warning("PTY_CAPTURE_FEED_FAILED", exc_info=True)
+            self._feed_fallback(text)
+
+    def resize(self, rows: int, cols: int) -> None:
+        with self._lock:
+            self.rows = rows
+            self.cols = cols
+            if self._screen is None:
+                return
+            resize = getattr(self._screen, "resize", None)
+            if not callable(resize):
+                return
+            try:
+                resize(lines=rows, columns=cols)
+            except TypeError:
+                resize(rows, cols)
+            except Exception:
+                log.warning("PTY_CAPTURE_RESIZE_FAILED", exc_info=True)
+
+    def synthesize_entries(self) -> list[dict[str, str]]:
+        with self._lock:
+            scrollback = self._scrollback_lines()
+            final_frame = self._final_frame_lines()
+        entries = [{"text": line, "cls": ""} for line in scrollback]
+        if scrollback and final_frame:
+            entries.append({"text": "", "cls": "pty-marker"})
+        entries.extend({"text": line, "cls": ""} for line in final_frame)
+        if entries:
+            return entries
+        return [{"text": "[interactive PTY exited with no output]", "cls": "notice"}]
+
+    def ansi_snapshot(self) -> tuple[str, bool]:
+        with self._lock:
+            if self._screen is None:
+                return "", False
+            history = getattr(self._screen, "history", None)
+            scrollback_rows = list(getattr(history, "top", []) if history is not None else [])
+            buffer = getattr(self._screen, "buffer", None)
+            if isinstance(buffer, dict):
+                screen_rows = [buffer.get(row, "") for row in range(self.rows)]
+            else:
+                display = list(getattr(self._screen, "display", []))
+                screen_rows = display[:self.rows]
+            cursor = getattr(self._screen, "cursor", None)
+            cursor_y = _coerce_non_negative_int(getattr(cursor, "y", 0), 0)
+            cursor_x = _coerce_non_negative_int(getattr(cursor, "x", 0), 0)
+        return _bounded_ansi_snapshot(
+            scrollback_rows,
+            screen_rows,
+            self.rows,
+            self.cols,
+            cursor_y,
+            cursor_x,
+        )
+
+    def _feed_fallback(self, text: str) -> None:
+        plain = _plain_terminal_text(text)
+        if not plain:
+            return
+        i = 0
+        while i < len(plain):
+            char = plain[i]
+            if char == "\r":
+                if i + 1 < len(plain) and plain[i + 1] == "\n":
+                    self._fallback_commit_line()
+                    i += 2
+                    continue
+                self._fallback_cursor_col = 0
+            elif char == "\n":
+                self._fallback_commit_line()
+            elif char == "\b":
+                self._fallback_cursor_col = max(0, self._fallback_cursor_col - 1)
+            else:
+                self._fallback_write_char(char)
+            i += 1
+
+    def _fallback_commit_line(self) -> None:
+        self._fallback_lines.append(self._fallback_pending.rstrip())
+        self._fallback_pending = ""
+        self._fallback_cursor_col = 0
+
+    def _fallback_write_char(self, char: str) -> None:
+        cursor = self._fallback_cursor_col
+        pending = self._fallback_pending
+        if cursor < len(pending):
+            self._fallback_pending = f"{pending[:cursor]}{char}{pending[cursor + 1:]}"
+        else:
+            if cursor > len(pending):
+                self._fallback_pending += " " * (cursor - len(pending))
+            self._fallback_pending += char
+        self._fallback_cursor_col = cursor + 1
+
+    def _scrollback_lines(self) -> list[str]:
+        if self._screen is not None:
+            history = getattr(self._screen, "history", None)
+            top = getattr(history, "top", []) if history is not None else []
+            # pyte history rows are cell mappings; display rows below are already strings.
+            return [_terminal_line_to_text(line).rstrip() for line in list(top)]
+        lines = list(self._fallback_lines)
+        if self._fallback_pending:
+            lines.append(self._fallback_pending.rstrip())
+        return _trim_trailing_blank_lines(lines)
+
+    def _final_frame_lines(self) -> list[str]:
+        if self._screen is None:
+            return []
+        display = getattr(self._screen, "display", [])
+        return _trim_trailing_blank_lines([str(line).rstrip() for line in list(display)])
+
+
+@dataclass
+class PtyEvent:
+    seq: int
+    type: str
+    payload: dict[str, Any]
+
+
+@dataclass
+class PtyRun:
+    run_id: str
+    session_id: str
+    command: str
+    argv: list[str]
+    started: str
+    master_fd: int
+    proc: subprocess.Popen
+    rows: int
+    cols: int
+    allow_input: bool
+    max_runtime_seconds: int
+    brokered: bool
+    terminal_capture: PtyTerminalCapture
+    completion_callback: Callable[["PtyRun", str, int, Sequence[dict[str, str]]], dict[str, object]] | None = None
+    events: deque[PtyEvent] = field(default_factory=lambda: deque(maxlen=_PTY_BUFFER_LIMIT))
+    seq: int = 0
+    closed: bool = False
+    exit_code: int | None = None
+    control_event_id: str = "0-0"
+    capture_event_id: str = "0-0"
+    snapshot_published_event_id: str = "0-0"
+    snapshot_pending_bytes: int = 0
+    snapshot_last_published: float = 0.0
+    snapshot_truncation_logged: bool = False
+    snapshot_lock: threading.Lock = field(default_factory=threading.Lock)
+    condition: threading.Condition = field(default_factory=threading.Condition)
+
+    def append_event(self, event_type: str, payload: dict[str, Any] | None = None) -> str:
+        body = dict(payload or {})
+        if self.brokered:
+            event_id = publish_pty_event(self.run_id, event_type, body)
+            if event_type in {"exit", "error"}:
+                _store_pty_meta(self, closed=True)
+            return event_id
+        with self.condition:
+            self.seq += 1
+            self.events.append(PtyEvent(self.seq, event_type, body))
+            self.condition.notify_all()
+            return str(self.seq)
+
+
+_runs: dict[str, PtyRun] = {}
+_runs_lock = threading.Lock()
+
+# PTY lock order: acquire snapshot_lock before terminal_capture._lock when a
+# snapshot needs both. Feed/resize paths use terminal_capture._lock only, and
+# event delivery uses condition separately.
+
+
+def pty_enabled() -> bool:
+    return bool(CFG.get("interactive_pty_enabled", False))
+
+
+def pty_worker_supported() -> bool:
+    try:
+        workers = int(os.environ.get("WEB_CONCURRENCY", "1") or "1")
+    except ValueError:
+        workers = 1
+    return workers <= 1
+
+
+def pty_broker_available() -> bool:
+    return bool(redis_client) or pty_worker_supported()
+
+
+def pty_broker_unavailable_reason() -> str:
+    return "Interactive PTY mode requires Redis for multi-worker deployments or WEB_CONCURRENCY=1."
+
+
+def _active_ttl() -> int:
+    return max(1, int(CFG.get("run_broker_active_stream_ttl_seconds", 14400) or 14400))
+
+
+def _completed_ttl() -> int:
+    return max(1, int(CFG.get("run_broker_completed_stream_ttl_seconds", 3600) or 3600))
+
+
+def _stream_key(run_id: str) -> str:
+    return f"ptystream:{run_id}"
+
+
+def _control_key(run_id: str) -> str:
+    return f"ptycontrol:{run_id}"
+
+
+def _meta_key(run_id: str) -> str:
+    return f"ptymeta:{run_id}"
+
+
+def _snapshot_key(run_id: str) -> str:
+    return f"ptysnapshot:{run_id}"
+
+
+def _coerce_text(value: object) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _is_valid_stream_event_id(event_id: str | None) -> bool:
+    try:
+        left, right = str(event_id or "").split("-", 1)
+        int(left)
+        int(right)
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _normalize_event_id(event_id: str | None) -> str:
+    if not event_id or event_id in {"-", "0", "0-0"}:
+        return "0-0"
+    return str(event_id) if _is_valid_stream_event_id(str(event_id)) else "0-0"
+
+
+def _decode_payload(fields: object) -> dict[str, Any] | None:
+    if not isinstance(fields, dict):
+        return None
+    raw = fields.get("payload")
+    if raw is None:
+        raw = fields.get(b"payload")
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="replace")
+    if not isinstance(raw, str):
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _prepare_child() -> None:
+    os.setsid()
+    os.umask(RUN_SUBPROCESS_UMASK)
+
+
+def _bounded_dimension(value: object, default: int, min_value: int, max_value: int) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        number = value
+    elif isinstance(value, float):
+        number = int(value)
+    elif isinstance(value, (str, bytes, bytearray)):
+        try:
+            number = int(value)
+        except ValueError:
+            return default
+    else:
+        return default
+    return min(max(number, min_value), max_value)
+
+
+def _set_pty_size(fd: int, rows: int, cols: int) -> None:
+    try:
+        packed = struct.pack("HHHH", rows, cols, 0, 0)
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, packed)
+    except OSError:
+        pass
+
+
+def _command_env() -> dict[str, str]:
+    env = {
+        key: value
+        for key in _PTY_ENV_PASSTHROUGH_KEYS
+        if (value := os.environ.get(key))
+    }
+    env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
+    env.setdefault("HOME", tempfile.gettempdir())
+    env.setdefault("LANG", "C.UTF-8")
+    env.setdefault("LC_ALL", env.get("LANG", "C.UTF-8"))
+    env["TERM"] = "xterm-256color"
+    return env
+
+
+def _terminate_run(run: PtyRun) -> None:
+    if run.proc.poll() is not None:
+        return
+    try:
+        pgid = run.proc.pid
+        if SCANNER_PREFIX:
+            subprocess.run(
+                [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", f"-{pgid}"],
+                timeout=5,
+            )  # nosec B603
+        else:
+            os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, subprocess.TimeoutExpired, OSError):
+        pass
+
+
+def _store_pty_meta(run: PtyRun, *, closed: bool = False) -> None:
+    if not redis_client:
+        return
+    payload = {
+        "run_id": run.run_id,
+        "session_id": run.session_id,
+        "command": run.command,
+        "started": run.started,
+        "rows": run.rows,
+        "cols": run.cols,
+        "closed": bool(closed),
+    }
+    redis_client.set(
+        _meta_key(run.run_id),
+        json.dumps(payload, separators=(",", ":")),
+        ex=_completed_ttl() if closed else _active_ttl(),
+    )
+    if closed:
+        redis_client.delete(_control_key(run.run_id), _snapshot_key(run.run_id))
+
+
+def _delete_pty_meta(run_id: str) -> None:
+    if not redis_client:
+        return
+    redis_client.delete(_meta_key(run_id))
+    redis_client.delete(_control_key(run_id))
+    redis_client.delete(_snapshot_key(run_id))
+
+
+def _delete_pty_runtime_state(run_id: str, *, include_stream: bool = False) -> None:
+    if not redis_client:
+        return
+    keys = [_meta_key(run_id), _control_key(run_id), _snapshot_key(run_id)]
+    if include_stream:
+        keys.append(_stream_key(run_id))
+    redis_client.delete(*keys)
+
+
+def _load_pty_meta(run_id: str) -> dict[str, Any] | None:
+    if redis_client:
+        raw = redis_client.get(_meta_key(run_id))
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8", errors="replace")
+        if isinstance(raw, str):
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                return None
+            return data if isinstance(data, dict) else None
+    with _runs_lock:
+        run = _runs.get(run_id)
+    if not run:
+        return None
+    return {
+        "run_id": run.run_id,
+        "session_id": run.session_id,
+        "command": run.command,
+        "started": run.started,
+        "rows": run.rows,
+        "cols": run.cols,
+        "closed": run.closed,
+    }
+
+
+def _load_pty_meta_for_session(run_id: str, session_id: str) -> dict[str, Any] | None:
+    meta = _load_pty_meta(run_id)
+    if not meta or meta.get("session_id") != session_id:
+        return None
+    return meta
+
+
+def _active_pty_run_is_tracked(run_id: str, session_id: str) -> bool:
+    with _runs_lock:
+        run = _runs.get(run_id)
+    if run and run.session_id == session_id and not run.closed:
+        return True
+    try:
+        active_runs = active_runs_for_session(session_id)
+    except Exception:
+        log.warning("PTY_ACTIVE_RUN_CHECK_FAILED", exc_info=True, extra={
+            "run_id": run_id,
+            "session": session_id,
+        })
+        return True
+    return any(
+        str(item.get("run_id", "")) == run_id
+        and str(item.get("run_type", "command") or "command") == "pty"
+        for item in active_runs
+    )
+
+
+def _prune_stale_open_pty(run_id: str, session_id: str, meta: dict[str, Any] | None = None) -> bool:
+    current_meta = meta if meta is not None else _load_pty_meta_for_session(run_id, session_id)
+    if not current_meta or current_meta.get("closed"):
+        return False
+    if _active_pty_run_is_tracked(run_id, session_id):
+        return False
+    _delete_pty_runtime_state(run_id, include_stream=True)
+    log.warning("PTY_STALE_RUN_CLEANED", extra={
+        "run_id": run_id,
+        "session": session_id,
+        "cmd": str(current_meta.get("command", "")),
+    })
+    return True
+
+
+def _load_active_pty_meta_for_session(run_id: str, session_id: str) -> tuple[dict[str, Any] | None, str]:
+    meta = _load_pty_meta_for_session(run_id, session_id)
+    if not meta:
+        return None, "Run not found"
+    if meta.get("closed"):
+        return None, "Run is closed"
+    if _prune_stale_open_pty(run_id, session_id, meta):
+        return None, _PTY_STALE_MESSAGE
+    return meta, ""
+
+
+def _limited_snapshot_entries(entries: Sequence[dict[str, str]], ansi_snapshot: str) -> list[dict[str, str]]:
+    if ansi_snapshot:
+        return []
+    if len(entries) <= _PTY_SNAPSHOT_FALLBACK_ENTRY_LIMIT:
+        return [dict(entry) for entry in entries]
+    return [{
+        "text": "[earlier PTY snapshot entries omitted; terminal snapshot resumes visually]",
+        "cls": "notice",
+    }, *[dict(entry) for entry in entries[-_PTY_SNAPSHOT_FALLBACK_ENTRY_LIMIT:]]]
+
+
+def _pty_snapshot_payload_from_run(run: PtyRun, *, distributed: bool = False) -> dict[str, Any]:
+    entries = run.terminal_capture.synthesize_entries()
+    ansi_snapshot, snapshot_truncated = run.terminal_capture.ansi_snapshot()
+    # Redis snapshots omit fallback entries when ANSI is available to keep the
+    # distributed payload bounded; local snapshots keep both for direct callers.
+    payload: dict[str, Any] = {
+        "run_id": run.run_id,
+        "command": run.command,
+        "started": run.started,
+        "rows": run.rows,
+        "cols": run.cols,
+        "after_event_id": run.capture_event_id,
+        "entries": _limited_snapshot_entries(entries, ansi_snapshot) if distributed else entries,
+        "snapshot_format": "ansi" if ansi_snapshot else "plain",
+        "ansi_snapshot": ansi_snapshot,
+        "snapshot_truncated": snapshot_truncated,
+    }
+    if distributed:
+        payload["session_id"] = run.session_id
+        payload["created_at"] = time.time()
+    return payload
+
+
+def _store_pty_snapshot(run: PtyRun, *, force: bool = False) -> None:
+    if not redis_client:
+        return
+    now = time.time()
+    if not force:
+        if run.capture_event_id == run.snapshot_published_event_id:
+            return
+        if (
+            now - run.snapshot_last_published < _PTY_SNAPSHOT_MIN_PUBLISH_SECONDS
+            and run.snapshot_published_event_id != "0-0"
+        ):
+            return
+        if (
+            run.snapshot_pending_bytes < _PTY_SNAPSHOT_PUBLISH_BYTES
+            and now - run.snapshot_last_published < _PTY_SNAPSHOT_PUBLISH_SECONDS
+            and run.snapshot_published_event_id != "0-0"
+        ):
+            return
+    with run.snapshot_lock:
+        payload = _pty_snapshot_payload_from_run(run, distributed=True)
+        if payload.get("snapshot_truncated") and not run.snapshot_truncation_logged:
+            run.snapshot_truncation_logged = True
+            log.warning("PTY_SNAPSHOT_TRUNCATED", extra={
+                "run_id": run.run_id,
+                "session": run.session_id,
+                "cmd": run.command,
+            })
+        run.snapshot_pending_bytes = 0
+        run.snapshot_last_published = now
+        run.snapshot_published_event_id = run.capture_event_id
+    redis_client.set(
+        _snapshot_key(run.run_id),
+        json.dumps(payload, separators=(",", ":")),
+        ex=_active_ttl(),
+    )
+
+
+def _load_pty_snapshot(run_id: str, session_id: str) -> dict[str, Any] | None:
+    if not redis_client:
+        return None
+    raw = redis_client.get(_snapshot_key(run_id))
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="replace")
+    if not isinstance(raw, str):
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict) or payload.get("session_id") != session_id:
+        return None
+    response = dict(payload)
+    response.pop("session_id", None)
+    response.pop("created_at", None)
+    return response
+
+
+def pty_run_belongs_to_session(run_id: str, session_id: str) -> bool:
+    return _load_pty_meta_for_session(run_id, session_id) is not None
+
+
+def notify_pty_killed_event(run_id: str, session_id: str, payload: dict[str, Any] | None = None) -> bool:
+    meta, _message = _load_active_pty_meta_for_session(run_id, session_id)
+    if not meta:
+        return False
+    if redis_client:
+        publish_pty_event(run_id, "killed", payload or {})
+        return True
+    run = get_pty_run(run_id, session_id)
+    if not run:
+        return False
+    run.append_event("killed", payload or {})
+    return True
+
+
+def publish_pty_event(run_id: str, event_type: str, payload: dict[str, Any] | None = None) -> str:
+    if not redis_client:
+        raise RuntimeError("Redis is not available for PTY events")
+    data = dict(payload or {})
+    data["type"] = str(event_type)
+    data.setdefault("created_at", time.time())
+    event_id = _coerce_text(redis_client.xadd(
+        _stream_key(run_id),
+        {"payload": json.dumps(data, separators=(",", ":"))},
+        maxlen=_PTY_STREAM_MAXLEN,
+        approximate=True,
+    ))
+    redis_client.expire(_stream_key(run_id), _completed_ttl() if event_type in {"exit", "error"} else _active_ttl())
+    return event_id
+
+
+def _queue_pty_control(run_id: str, action: str, payload: dict[str, Any]) -> None:
+    if not redis_client:
+        raise RuntimeError("Redis is not available for PTY control events")
+    body = dict(payload)
+    body["action"] = action
+    redis_client.xadd(_control_key(run_id), {"payload": json.dumps(body, separators=(",", ":"))}, maxlen=1000, approximate=True)
+    redis_client.expire(_control_key(run_id), _active_ttl())
+
+
+def _read_pty_control(run: PtyRun) -> list[dict[str, Any]]:
+    if not redis_client:
+        return []
+    rows = cast(
+        list[tuple[Any, list[tuple[Any, dict[str, Any]]]]],
+        redis_client.xread({_control_key(run.run_id): run.control_event_id}, count=100, block=1),
+    )
+    controls: list[dict[str, Any]] = []
+    for _key, stream_rows in rows or []:
+        for event_id, fields in stream_rows:
+            run.control_event_id = _coerce_text(event_id)
+            payload = _decode_payload(fields)
+            if payload is not None:
+                controls.append(payload)
+    return controls
+
+
+def _apply_pty_controls(run: PtyRun) -> None:
+    for control in _read_pty_control(run):
+        action = str(control.get("action", ""))
+        if action == "input":
+            if not run.allow_input:
+                continue
+            raw = str(control.get("data", "") or "").encode("utf-8", errors="replace")
+            if raw and len(raw) <= _PTY_INPUT_MAX_BYTES:
+                try:
+                    os.write(run.master_fd, raw)
+                except OSError:
+                    pass
+        elif action == "resize":
+            run.rows = _bounded_dimension(control.get("rows"), run.rows, 10, 60)
+            run.cols = _bounded_dimension(control.get("cols"), run.cols, 40, 240)
+            _set_pty_size(run.master_fd, run.rows, run.cols)
+            run.terminal_capture.resize(run.rows, run.cols)
+            _store_pty_meta(run)
+            _store_pty_snapshot(run, force=True)
+
+
+def _reader_loop(run: PtyRun, client_ip: str) -> None:
+    started_dt = datetime.fromisoformat(run.started)
+    last_heartbeat = time.time()
+    try:
+        run.append_event("started", {
+            "run_id": run.run_id,
+            "started": run.started,
+            "interactive": True,
+        })
+        _store_pty_snapshot(run, force=True)
+        while True:
+            _apply_pty_controls(run)
+            if run.max_runtime_seconds:
+                elapsed = (datetime.now(timezone.utc) - started_dt).total_seconds()
+                if elapsed >= run.max_runtime_seconds and run.proc.poll() is None:
+                    run.append_event("notice", {
+                        "text": f"[timeout] Interactive PTY exceeded {run.max_runtime_seconds}s limit and was killed.",
+                    })
+                    _terminate_run(run)
+
+            ready, _, _ = select.select([run.master_fd], [], [], _PTY_CONTROL_POLL_SECONDS)
+            if ready:
+                try:
+                    chunk = os.read(run.master_fd, 4096)
+                except OSError:
+                    chunk = b""
+                if chunk:
+                    text = chunk.decode("utf-8", errors="replace")
+                    with run.snapshot_lock:
+                        run.terminal_capture.feed(text)
+                        run.capture_event_id = run.append_event("output", {"text": text})
+                        run.snapshot_pending_bytes += len(chunk)
+                    _store_pty_snapshot(run)
+                    continue
+            if run.proc.poll() is not None:
+                break
+            now = time.time()
+            if now - last_heartbeat >= _PTY_HEARTBEAT_SECONDS:
+                run.append_event("heartbeat", {})
+                last_heartbeat = now
+
+        exit_code = run.proc.wait(timeout=5)
+        run.exit_code = exit_code
+    except Exception as exc:
+        log.error("PTY_STREAM_ERROR", exc_info=True, extra={
+            "run_id": run.run_id,
+            "session": run.session_id,
+            "ip": client_ip,
+            "cmd": run.command,
+        })
+        run.append_event("error", {"text": str(exc)})
+        exit_code = run.proc.returncode if run.proc.returncode is not None else 1
+        run.exit_code = exit_code
+    finally:
+        run.closed = True
+        finished = datetime.now(timezone.utc)
+        elapsed = round((finished - started_dt).total_seconds(), 1)
+        code = run.exit_code if run.exit_code is not None else run.proc.returncode
+        code = int(code if code is not None else 1)
+        completion_summary: dict[str, object] = {}
+        try:
+            if run.completion_callback:
+                completion_summary = run.completion_callback(
+                    run,
+                    finished.isoformat(),
+                    code,
+                    run.terminal_capture.synthesize_entries(),
+                )
+        except Exception:
+            log.error("PTY_RUN_SAVE_ERROR", exc_info=True, extra={
+                "run_id": run.run_id,
+                "session": run.session_id,
+                "ip": client_ip,
+                "cmd": run.command,
+            })
+        exit_payload = {"code": code, "elapsed": elapsed, "interactive": True}
+        exit_payload.update(completion_summary)
+        _store_pty_snapshot(run, force=True)
+        run.append_event("exit", exit_payload)
+        try:
+            os.close(run.master_fd)
+        except OSError:
+            pass
+        with _runs_lock:
+            _runs.pop(run.run_id, None)
+        pid_pop(run.run_id)
+        active_run_remove(run.run_id)
+        if redis_client:
+            redis_client.delete(_control_key(run.run_id))
+        log.info("RUN_END", extra={
+            "run_id": run.run_id,
+            "session": run.session_id,
+            "ip": client_ip,
+            "exit_code": code,
+            "elapsed": elapsed,
+            "cmd": run.command,
+            "cmd_type": "pty",
+        })
+        with run.condition:
+            run.condition.notify_all()
+
+
+def start_pty_run(
+    *,
+    session_id: str,
+    client_ip: str,
+    command: str,
+    argv: list[str],
+    rows: object = None,
+    cols: object = None,
+    default_rows: object = 24,
+    default_cols: object = 100,
+    owner_client_id: str = "",
+    owner_tab_id: str = "",
+    allow_input: bool = True,
+    max_runtime_seconds: int = 900,
+    completion_callback: Callable[[PtyRun, str, int, Sequence[dict[str, str]]], dict[str, object]] | None = None,
+) -> PtyRun:
+    if pyte is None:
+        raise PtyDependencyError(
+            "Interactive PTY startup requires pyte for server-side terminal capture; "
+            "install pyte or disable interactive PTY mode."
+        )
+    default_rows_i = _bounded_dimension(default_rows, 24, 10, 60)
+    default_cols_i = _bounded_dimension(default_cols, 100, 40, 240)
+    rows_i = _bounded_dimension(rows, default_rows_i, 10, 60)
+    cols_i = _bounded_dimension(cols, default_cols_i, 40, 240)
+    terminal_history_lines = _terminal_history_line_limit(CFG.get("max_output_lines", 0))
+    run_id = str(uuid.uuid4())
+    started = datetime.now(timezone.utc).isoformat()
+    master_fd = -1
+    slave_fd = -1
+    proc: subprocess.Popen | None = None
+    run: PtyRun | None = None
+    meta_stored = False
+    pid_registered = False
+    active_registered = False
+    try:
+        master_fd, slave_fd = pty.openpty()
+        _set_pty_size(slave_fd, rows_i, cols_i)
+        proc = subprocess.Popen(
+            SCANNER_PREFIX + argv if SCANNER_PREFIX else argv,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            shell=False,
+            close_fds=True,
+            preexec_fn=_prepare_child,
+            env=_command_env(),
+        )  # nosec B603
+        try:
+            os.close(slave_fd)
+        except OSError:
+            pass
+        slave_fd = -1
+
+        run = PtyRun(
+            run_id=run_id,
+            session_id=session_id,
+            command=command,
+            argv=list(argv),
+            started=started,
+            master_fd=master_fd,
+            proc=proc,
+            rows=rows_i,
+            cols=cols_i,
+            allow_input=allow_input,
+            max_runtime_seconds=max_runtime_seconds,
+            brokered=bool(redis_client),
+            terminal_capture=PtyTerminalCapture(rows_i, cols_i, terminal_history_lines),
+            completion_callback=completion_callback,
+        )
+        with _runs_lock:
+            _runs[run_id] = run
+        _store_pty_meta(run)
+        meta_stored = True
+        pid_register(run_id, proc.pid)
+        pid_registered = True
+        active_run_register(
+            run_id,
+            proc.pid,
+            session_id,
+            command,
+            started,
+            owner_client_id=owner_client_id,
+            owner_tab_id=owner_tab_id,
+            run_type="pty",
+        )
+        active_registered = True
+        log.info("RUN_START", extra={
+            "run_id": run_id,
+            "session": session_id,
+            "ip": client_ip,
+            "pid": proc.pid,
+            "cmd": command,
+            "cmd_type": "pty",
+        })
+        threading.Thread(
+            target=_reader_loop,
+            args=(run, client_ip),
+            name=f"pty-run-{run_id[:8]}",
+            daemon=True,
+        ).start()
+        return run
+    except Exception:
+        if run is not None:
+            _terminate_run(run)
+        elif proc is not None and proc.poll() is None:
+            try:
+                pgid = proc.pid
+                if SCANNER_PREFIX:
+                    subprocess.run(
+                        [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", f"-{pgid}"],
+                        timeout=5,
+                    )  # nosec B603
+                else:
+                    os.killpg(pgid, signal.SIGTERM)
+            except (ProcessLookupError, subprocess.TimeoutExpired, OSError):
+                pass
+        if proc is not None:
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+        if pid_registered:
+            pid_pop(run_id)
+        if active_registered:
+            active_run_remove(run_id)
+        if meta_stored:
+            _delete_pty_meta(run_id)
+        with _runs_lock:
+            _runs.pop(run_id, None)
+        if master_fd >= 0:
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
+        raise
+    finally:
+        if slave_fd >= 0:
+            try:
+                os.close(slave_fd)
+            except OSError:
+                pass
+
+
+def get_pty_run(run_id: str, session_id: str) -> PtyRun | None:
+    with _runs_lock:
+        run = _runs.get(run_id)
+    if not run or run.session_id != session_id:
+        return None
+    return run
+
+
+def pty_run_snapshot(run_id: str, session_id: str) -> tuple[bool, str, dict[str, Any] | None]:
+    run = get_pty_run(run_id, session_id)
+    if not run:
+        meta = _load_pty_meta_for_session(run_id, session_id)
+        if meta:
+            if meta.get("closed"):
+                return False, "Run is closed", None
+            if _prune_stale_open_pty(run_id, session_id, meta):
+                return False, _PTY_STALE_MESSAGE, None
+            snapshot = _load_pty_snapshot(run_id, session_id)
+            if snapshot is not None:
+                return True, "", snapshot
+            if redis_client:
+                return False, "PTY snapshot is not available yet", None
+            return False, "PTY snapshot is not available from this worker", None
+        return False, "Run not found", None
+    with run.snapshot_lock:
+        snapshot = _pty_snapshot_payload_from_run(run)
+    _store_pty_snapshot(run, force=True)
+    return True, "", snapshot
+
+
+def write_pty_input(
+    run_id: str,
+    session_id: str,
+    data: object,
+    owner_client_id: str = "",
+    owner_tab_id: str = "",
+) -> tuple[bool, str]:
+    meta, message = _load_active_pty_meta_for_session(run_id, session_id)
+    if not meta:
+        return False, message
+    if owner_client_id and not active_run_owned_by(run_id, owner_client_id, owner_tab_id):
+        return False, "PTY input is owned by another attached tab"
+    text = str(data or "")
+    if not text:
+        return True, ""
+    raw = text.encode("utf-8", errors="replace")
+    if len(raw) > _PTY_INPUT_MAX_BYTES:
+        return False, "Input is too large for this interactive run"
+    if redis_client:
+        _queue_pty_control(run_id, "input", {"data": text})
+        return True, ""
+    run = get_pty_run(run_id, session_id)
+    if not run:
+        return False, "Run not found"
+    if not run.allow_input:
+        return False, "This interactive run does not accept input"
+    try:
+        os.write(run.master_fd, raw)
+        return True, ""
+    except OSError as exc:
+        return False, str(exc)
+
+
+def resize_pty(run_id: str, session_id: str, rows: object, cols: object) -> tuple[bool, str, int, int]:
+    meta, message = _load_active_pty_meta_for_session(run_id, session_id)
+    if not meta:
+        return False, message, 0, 0
+    rows_i = _bounded_dimension(rows, meta.get("rows", 24), 10, 60)
+    cols_i = _bounded_dimension(cols, meta.get("cols", 100), 40, 240)
+    if redis_client:
+        _queue_pty_control(run_id, "resize", {"rows": rows_i, "cols": cols_i})
+        meta["rows"] = rows_i
+        meta["cols"] = cols_i
+        redis_client.set(_meta_key(run_id), json.dumps(meta, separators=(",", ":")), ex=_active_ttl())
+        return True, "", rows_i, cols_i
+    run = get_pty_run(run_id, session_id)
+    if not run:
+        return False, "Run not found", 0, 0
+    run.rows = rows_i
+    run.cols = cols_i
+    _set_pty_size(run.master_fd, run.rows, run.cols)
+    run.terminal_capture.resize(run.rows, run.cols)
+    _store_pty_snapshot(run, force=True)
+    return True, "", run.rows, run.cols
+
+
+def _stream_local_pty_events(run: PtyRun, after: str = "0-0") -> Iterator[str]:
+    try:
+        cursor = max(0, int(after or 0))
+    except ValueError:
+        cursor = 0
+    while True:
+        with run.condition:
+            events = [event for event in run.events if event.seq > cursor]
+            if not events and run.closed:
+                return
+            if not events:
+                run.condition.wait(timeout=_PTY_HEARTBEAT_SECONDS)
+                events = [event for event in run.events if event.seq > cursor]
+            if not events:
+                yield "event: heartbeat\ndata: {}\n\n"
+                continue
+        for event in events:
+            cursor = event.seq
+            payload = dict(event.payload)
+            payload["type"] = event.type
+            payload["event_id"] = str(event.seq)
+            yield f"id: {event.seq}\ndata: {json.dumps(payload)}\n\n"
+        if run.closed and events and events[-1].type == "exit":
+            return
+
+
+def stream_pty_events(run_id: str, session_id: str, after: str = "0-0") -> Iterator[str]:
+    meta = _load_pty_meta_for_session(run_id, session_id)
+    if not meta:
+        return
+    if _prune_stale_open_pty(run_id, session_id, meta):
+        yield f"data: {json.dumps({'type': 'error', 'text': _PTY_STALE_MESSAGE})}\n\n"
+        return
+    if not redis_client:
+        run = get_pty_run(run_id, session_id)
+        if not run:
+            return
+        yield from _stream_local_pty_events(run, after=after)
+        return
+
+    current_id = _normalize_event_id(after)
+    block_ms = max(1, int(float(CFG.get("run_broker_subscriber_block_seconds", 15) or 15) * 1000))
+    while True:
+        rows = cast(
+            list[tuple[Any, list[tuple[Any, dict[str, Any]]]]],
+            redis_client.xread({_stream_key(run_id): current_id}, count=_PTY_STREAM_FETCH_COUNT, block=block_ms),
+        )
+        if not rows:
+            meta = _load_pty_meta_for_session(run_id, session_id)
+            if not meta:
+                yield f"data: {json.dumps({'type': 'error', 'text': _PTY_STALE_MESSAGE})}\n\n"
+                return
+            if meta.get("closed"):
+                return
+            if _prune_stale_open_pty(run_id, session_id, meta):
+                yield f"data: {json.dumps({'type': 'error', 'text': _PTY_STALE_MESSAGE})}\n\n"
+                return
+            yield ": heartbeat\n\n"
+            continue
+        for _key, stream_rows in rows:
+            for event_id, fields in stream_rows:
+                current_id = _coerce_text(event_id)
+                payload = _decode_payload(fields)
+                if payload is None:
+                    continue
+                body = dict(payload)
+                body["event_id"] = current_id
+                yield f"id: {current_id}\ndata: {json.dumps(body)}\n\n"
+                if body.get("type") in {"exit", "error"}:
+                    return
