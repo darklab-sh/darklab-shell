@@ -6,7 +6,7 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
-## [1.7] — Unreleased
+## [1.7] — 2026-05-05
 
 ### Added
 
@@ -36,9 +36,10 @@ Entries favor clear outcomes first, then implementation and test details when th
 - **Command Registry examples now read as stacked reference rows** — long clickable examples keep the command on its own line and place the description underneath instead of squeezing both onto one row.
 - **Workflow command actions now match the Command Registry style** — clickable workflow steps use the same compact terminal-link formatting as command examples instead of the older rounded chip treatment.
 - **The `commands` helper now describes external tools** — allowed external command rows include the same one-sentence descriptions used by the Command Registry, such as `masscan - Runs high-speed port scans across hosts or networks.`
+- **Command registry metadata is more complete and tighter** — all supported external command roots now carry descriptions, `nc -h` and `nikto -Help` are recognized help-only commands, and `nmap -O` is denied alongside other privileged OS-detection paths that do not fit the app's constrained execution model.
 - **Command findings now recognize more real scanner output** — command-scoped signal matchers catch DNS enumeration, crawled URLs, WAF detections, web scanner posture, TLS posture, ProjectDiscovery matches, and port-scanner result lines without turning every hostname-looking line into a global finding.
   - **Why:** `/tmp/findings.txt` showed several supported tools producing useful results that were invisible to the findings summary because their output is tool-specific rather than a universal table or DNS-record format.
-  - **What:** added scoped finding/summary/warning handling for `dnsx`, `fierce`, `dnsenum`, `dnsrecon`, `pd-httpx`, `katana`, `wafw00f`, `nikto`, `wpscan`, `testssl`, `sslscan`, `sslyze`, `naabu`, `rustscan`, and `nuclei`, including guardrails for ANSI-colored markers/bracketed status labels, noisy banners, progress lines, completion footers, and JavaScript URL-template artifacts.
+  - **What:** added scoped finding/summary/warning handling for `dnsx`, `fierce`, `dnsenum`, `dnsrecon`, `pd-httpx`, `katana`, `wafw00f`, `nikto`, `wpscan`, `testssl`, `sslscan`, `sslyze`, `naabu`, `rustscan`, and `nuclei`, including guardrails for ANSI-colored markers/bracketed status labels, noisy banners, progress lines, completion footers, and JavaScript URL-template artifacts. Output signals now strip ANSI formatting before matching while preserving the raw transcript.
   - **Tests:** added focused output-signal coverage using representative command-output lines from the findings review.
 - **Terminal word movement now treats punctuation as a boundary** — Alt/Option word movement, Ctrl+W, and the mobile helper row now behave more like a normal terminal around punctuation-heavy paths and domains.
   - **Why:** the previous word-jump behavior treated only spaces as delimiters, so paths and domains such as `/tmp/darklab_findings(1).txt` or `example.com` moved as one large chunk instead of stopping at useful terminal word segments.
@@ -57,13 +58,16 @@ Entries favor clear outcomes first, then implementation and test details when th
   - **Why:** the monitor already knew the polling cadence, so a frozen uptime clock made the dashboard feel less live than the rest of the surface.
   - **What:** status payloads are timestamped on receipt, the Uptime card carries a stable data hook, and the existing once-per-second monitor tick refreshes visible uptime text without making extra API calls.
   - **Tests:** added Status Monitor unit coverage for local uptime interpolation between status polls.
+- **Status Monitor HUD affordances now match the menu-first navigation** — the STATUS, LAST EXIT, and TABS HUD cells still open Status Monitor, but the old first-run wiggle, running-state glyph, and extra running-state padding were removed now that Status Monitor has a permanent rail/menu entry.
 - **Active runs that a browser explicitly keeps running now stay detached after reload** — choosing **Keep running** suppresses automatic tab restoration for that run in the same browser until the user attaches again from Status Monitor.
   - **Why:** "keep running" should mean "leave it in the background," not "bring it back as a terminal tab the next time this browser opens."
   - **What:** the browser records detached active run IDs per session token in localStorage, prunes markers once runs are no longer active, skips those runs during reload restore, and clears the marker when the user manually attaches from Status Monitor.
   - **Tests:** added runner and tab unit coverage for detach markers, reload skipping, marker pruning, and manual attach clearing.
+- **Container and test-tool pins were refreshed for v1.7** — the app reports version `1.7`, package metadata moved to `1.7.0`, Redis uses the `darklab-redis` container name, JavaScript dev dependencies were refreshed, and the Docker build now pins newer ProjectDiscovery `naabu` and `katana` versions.
 
 ### Fixed
 
+- **The Files shortcut now toggles like the other modal shortcuts** — pressing `Option+Shift+F` while Files is already open closes it instead of relaunching the Files modal.
 - **Invalid workspace flag paths now name the bad path** — unsafe declared input/output paths such as `/../../scan.txt` now return `Invalid file path: /../../scan.txt` instead of falling through to a generic command-policy denial.
 - **Autocomplete no longer shows duplicate `file list` and `file ls` rows** — the YAML-owned grammar entries keep their `<folder>` guidance, and the runtime layer no longer adds bare duplicates.
 - **Command-created workspace config folders now show up in Files instead of causing 500s** — workspace list/read operations repair scanner-created child directory/file modes before the app tries to traverse them, so tools using session-scoped `XDG_CONFIG_HOME` such as Subfinder remain visible and readable through the Files browser and `cat`.

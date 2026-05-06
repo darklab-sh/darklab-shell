@@ -107,15 +107,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 
 ## Architecture
 
-- **Full reconnectable live stream**
-  - Explore a live-output path that can fully resume active command streams after reload rather than restoring a placeholder tab and polling for completion.
-  - This is separate from the current active-run reconnect support and would likely require:
-    - a per-run live output buffer
-    - resumable stream offsets or event IDs
-    - multi-consumer fan-out instead of one transient SSE consumer
-    - explicit lifecycle cleanup once runs complete
-  - Best fit is a dedicated live-stream architecture pass rather than incremental UI polish.
-
 - **Structured output model**
   - Preserve richer line/event details consistently for all runs.
   - This would improve search, comparison, redaction, exports, and permalink fidelity.

@@ -855,6 +855,7 @@ function loadRunnerFns({
     status,
     storage,
     setTabLabel,
+    setTabStatus,
     clearTab,
     closeTab: closeTabOverride,
     cancelWelcome,
@@ -2769,7 +2770,7 @@ describe('workspace file delete confirmation', () => {
       },
     }))
     const refreshWorkspaceFileCache = vi.fn(() => Promise.resolve())
-    const { submitCommand, status } = loadRunnerFns({
+    const { submitCommand, setTabStatus, status } = loadRunnerFns({
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false, workspaceCwd: 'reports' }],
       appendLine,
       moveWorkspacePath,
@@ -2792,6 +2793,7 @@ describe('workspace file delete confirmation', () => {
       '',
       'tab-1',
     ))
+    expect(setTabStatus).toHaveBeenCalledWith('tab-1', 'running')
 
     await submitCommand('mv /archive/targets.txt moved.txt')
     await vi.waitFor(() => expect(moveWorkspacePath).toHaveBeenCalledWith('archive/targets.txt', 'reports/moved.txt'))

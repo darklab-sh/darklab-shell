@@ -5,6 +5,31 @@ export const TEST_IP = makeTestIp(68)
 
 export async function setupWelcomePage(page) {
   await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
+  await page.route('**/session/preferences', (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        preferences: {
+          pref_welcome_intro: 'animated',
+        },
+      }),
+    })
+  })
+  await page.route('**/history/commands**', (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ runs: [] }),
+    })
+  })
+  await page.route('**/history/active', (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ runs: [] }),
+    })
+  })
   await page.route('**/welcome', (route) => {
     route.fulfill({
       status: 200,

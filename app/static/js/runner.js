@@ -2769,6 +2769,8 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
     tab.command = cmd;
   }
 
+  if (tabId === activeTabId) originalSetStatus('running');
+  if (typeof setTabStatus === 'function') setTabStatus(tabId, 'running');
   appendCommandEcho(cmd, tabId);
   try {
     appendCommandEcho = () => {};
@@ -2809,6 +2811,8 @@ async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand)
     _finalizeClientSideCommandStatus(tabId, finalStatus);
     if (finalStatus !== 'fail') _recordSuccessfulLocalCommand(cmd);
     _persistClientSideRun(cmd, outputLines, finalStatus);
+  } else if (typeof setTabStatus === 'function') {
+    setTabStatus(tabId, finalStatus === 'fail' ? 'fail' : 'idle');
   }
 }
 

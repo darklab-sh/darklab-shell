@@ -359,9 +359,9 @@ test.describe('Ctrl+R reverse-history search', () => {
   test('Tab in hist-search walks entries without changing the input', async ({
     page,
   }) => {
-    const marker = `histtab-${Date.now()}`
-    await runCommand(page, `echo ${marker}-one`)
-    await runCommand(page, `echo ${marker}-two`)
+    const marker = 'commands info'
+    await runCommand(page, 'commands info ping')
+    await runCommand(page, 'commands info dig')
     // Ensure the run is committed server-side so the debounced fetch finds it
     await waitForHistoryRuns(page, 2)
     const linesBefore = await page.locator('.tab-panel.active .output .line').count()
