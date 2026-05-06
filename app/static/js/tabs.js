@@ -1498,7 +1498,12 @@ async function permalinkTab(id) {
   apiFetch('/share', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label: _shareSnapshotLabel(t), content: shareContent, apply_redaction: applyRedaction })
+    body: JSON.stringify({
+      label: _shareSnapshotLabel(t),
+      content: shareContent,
+      apply_redaction: applyRedaction,
+      run_id: String(t.historyRunId || ''),
+    })
   }).then(r => r.json()).then(data => {
     const url = `${location.origin}${data.url}`;
     shareUrl(url).catch(() => showToast('Failed to copy link', 'error'));

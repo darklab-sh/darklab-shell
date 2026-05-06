@@ -19,6 +19,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 
 - **Project workspace implementation plan**
   - **Current state:** `docs/ROADMAP.md` defines the next major direction as a project/case workspace that keeps the shell primary while organizing runs, snapshots, findings, files, targets, notes, and exportable evidence. The current app already has durable sessions, run history, snapshots, full-output artifacts, starred commands, workflows, recent domains, PTY persistence, and bounded history/search paths, but those records are still mostly session-scoped islands instead of a shared project data model.
+  - **Completed so far:** the database relationship foundation, project CRUD/link routes, session migration support, session-scoped active project API, automatic active-project linking for completed server-owned and browser-owned runs, snapshot linking for project-associated tabs, and project-aware history filtering are in place.
   - **Sequencing principle:** Build the database schema and relationship layer first. Projects, artifact capture, targets, persisted findings, labels, annotations, packages, workflow replay, and comparison should all reuse the same entity/link vocabulary instead of each feature adding its own one-off relationship model.
   - **Phase 0: schema and relationship foundation**
     - Define the canonical project entity vocabulary before adding UI:
@@ -70,12 +71,12 @@ This file tracks open work, known issues, technical debt, and product ideas for 
       - `project unlink ...`
     - Add a minimal project selector and project detail surface after the API works.
   - **Phase 2: active project context**
-    - Persist active project per session preference.
+    - Persist active project per session preference. (Backend API complete.)
     - Show active project context in desktop and mobile shell chrome without making command entry heavier.
-    - Auto-link newly completed server-owned runs to the active project with `source=active_project`.
-    - Ensure browser-owned built-ins persisted through `/run/client` use the same project-link path when appropriate.
-    - Link snapshots created from project-associated tabs.
-    - Add history filters for project-linked runs and snapshots.
+    - Auto-link newly completed server-owned runs to the active project with `source=active_project`. (Complete.)
+    - Ensure browser-owned built-ins persisted through `/run/client` use the same project-link path when appropriate. (Complete.)
+    - Link snapshots created from project-associated tabs. (Complete.)
+    - Add history filters for project-linked runs and snapshots. (Complete.)
   - **Phase 3: run-created file artifact capture**
     - Extend command registry workspace metadata for known input and output flags.
     - Record expected output artifacts when command validation rewrites workspace file flags.

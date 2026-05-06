@@ -27,6 +27,7 @@ from helpers import (
 from output_signals import classify_line, command_root as output_command_root, extract_target
 from permalinks import _format_duration, _permalink_error_page, _permalink_page
 from process import active_runs_for_session
+from project_workspace import link_snapshot_to_project_context
 from redaction import redact_line_entries
 from run_output_store import load_full_output_entries
 
@@ -174,12 +175,21 @@ def _history_base_clause(
     exit_code_filter,
     date_range,
     scope,
+    project_id,
     *,
     starred_only=False,
     force_like=False,
 ):
     sql = " FROM runs r WHERE r.session_id = ?"
     params: list[Any] = [session_id]
+    if project_id:
+        sql += (
+            " AND EXISTS (SELECT 1 FROM project_links pl "
+            "JOIN projects p ON p.id = pl.project_id "
+            "WHERE p.session_id = ? AND p.id = ? "
+            "AND pl.entity_type = 'run' AND pl.entity_id = r.id)"
+        )
+        params.extend([session_id, project_id])
     if starred_only:
         sql += (
             " AND EXISTS (SELECT 1 FROM starred_commands sc "
@@ -192,9 +202,17 @@ def _history_base_clause(
     return sql, params, fts_q
 
 
-def _history_snapshot_base_clause(session_id, query, date_range):
+def _history_snapshot_base_clause(session_id, query, date_range, project_id=""):
     sql = " FROM snapshots s WHERE s.session_id = ?"
     params: list[Any] = [session_id]
+    if project_id:
+        sql += (
+            " AND EXISTS (SELECT 1 FROM project_links pl "
+            "JOIN projects p ON p.id = pl.project_id "
+            "WHERE p.session_id = ? AND p.id = ? "
+            "AND pl.entity_type = 'snapshot' AND pl.entity_id = s.id)"
+        )
+        params.extend([session_id, project_id])
     if query:
         sql += " AND LOWER(s.label) LIKE ?"
         params.append(f"%{query.lower()}%")
@@ -890,6 +908,7 @@ def get_history():
     exit_code_filter = _normalize_history_filter_text(request.args.get("exit_code")).lower()
     date_range = _normalize_history_filter_text(request.args.get("date_range")).lower()
     type_filter = _normalize_history_filter_text(request.args.get("type")).lower() or "all"
+    project_id = _normalize_history_filter_text(request.args.get("project_id"))
     starred_only = _parse_history_bool(request.args.get("starred_only"))
     include_total = _parse_history_bool(request.args.get("include_total"))
     page = _parse_history_int(request.args.get("page"), 1)
@@ -915,6 +934,7 @@ def get_history():
                 exit_code_filter,
                 date_range,
                 scope,
+                project_id,
                 starred_only=starred_only,
                 force_like=force_like,
             )
@@ -945,7 +965,7 @@ def get_history():
             and type_filter in {"all", "snapshots"}
             and not snapshot_filters_active
         ):
-            snap_sql, snap_params = _history_snapshot_base_clause(session_id, query, date_range)
+            snap_sql, snap_params = _history_snapshot_base_clause(session_id, query, date_range, project_id)
 
         total_count = None
         if include_total:
@@ -1024,6 +1044,7 @@ def get_history():
         "exit_code_filter": exit_code_filter or None,
         "date_range": date_range or None,
         "type_filter": type_filter,
+        "project_id": project_id or None,
         "starred_only": starred_only or None,
         "page": current_page,
         "page_size": page_size,
@@ -1362,6 +1383,7 @@ def save_share():
     label   = data.get("label", "untitled")
     content = data.get("content", [])  # list of {text, cls} objects
     apply_redaction = data.get("apply_redaction", True)
+    source_run_id = str(data.get("run_id") or data.get("history_run_id") or "").strip()
     session_id = get_session_id()
     if not isinstance(label, str):
         return jsonify({"error": "Label must be a string"}), 400
@@ -1388,10 +1410,16 @@ def save_share():
             "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
             (share_id, session_id, label, created, json.dumps(content))
         )
+        linked_projects = link_snapshot_to_project_context(
+            conn,
+            session_id,
+            share_id,
+            source_run_id=source_run_id,
+        )
         conn.commit()
     log.info("SHARE_CREATED", extra={
         "ip": get_client_ip(), "session": get_log_session_id(session_id), "share_id": share_id,
-        "label": label, "redacted": apply_redaction,
+        "label": label, "redacted": apply_redaction, "project_links": len(linked_projects),
     })
     return jsonify({"id": share_id, "url": f"/share/{share_id}"})
 
@@ -1437,6 +1465,12 @@ def delete_share(share_id):
     """Delete a snapshot owned by the current session."""
     session_id = get_session_id()
     with db_connect() as conn:
+        conn.execute(
+            "DELETE FROM project_links "
+            "WHERE entity_type = 'snapshot' "
+            "AND entity_id IN (SELECT id FROM snapshots WHERE id = ? AND session_id = ?)",
+            (share_id, session_id),
+        )
         cur = conn.execute(
             "DELETE FROM snapshots WHERE id = ? AND session_id = ?",
             (share_id, session_id),

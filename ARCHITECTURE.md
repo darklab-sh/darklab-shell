@@ -217,7 +217,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 
 | Method | Endpoint | Description |
 | -------- | ---------- | ------------- |
-| `GET` | `/history` | Returns paginated current-session history items with run/snapshot filters, command/output search, starred-only filtering, and command-root summaries. |
+| `GET` | `/history` | Returns paginated current-session history items with run/snapshot filters, project filters, command/output search, starred-only filtering, and command-root summaries. |
 | `DELETE` | `/history` | Deletes all run history for the current session and removes matching full-output artifacts. |
 | `GET` | `/history/commands` | Returns newest distinct command strings for prompt history, desktop recents, and mobile recents. |
 | `GET` | `/history/stats` | Returns compact current-session counters for the Status Monitor dashboard. |
@@ -227,7 +227,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/history/compare` | Compares two current-session runs and returns metadata deltas plus bounded added/removed output lines. |
 | `GET` | `/history/<run_id>` | Serves an implicit-bearer styled run permalink, or raw JSON with `?json`; uses full-output artifacts when available unless `?preview=1` is set. |
 | `DELETE` | `/history/<run_id>` | Deletes one current-session run and its matching full-output artifact. |
-| `POST` | `/share` | Saves a tab snapshot, optionally applies share redaction, and returns a snapshot permalink URL. |
+| `POST` | `/share` | Saves a tab snapshot, optionally applies share redaction, links project-associated tab snapshots, and returns a snapshot permalink URL. |
 | `GET` | `/share/<share_id>` | Serves a styled snapshot permalink, or raw JSON with `?json`. |
 | `DELETE` | `/share/<share_id>` | Deletes one current-session snapshot permalink. |
 
@@ -261,6 +261,9 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | -------- | ---------- | ------------- |
 | `GET` | `/projects` | Returns current-session projects, excluding archived projects unless requested. |
 | `POST` | `/projects` | Creates a current-session project/case folder. |
+| `GET` | `/projects/active` | Returns the current session's active project context, or null when none is set. |
+| `POST` | `/projects/active` | Sets the active project context after validating current-session ownership. |
+| `DELETE` | `/projects/active` | Clears the active project context for the current session. |
 | `GET` | `/projects/<project_id>` | Returns one current-session project. |
 | `PUT` | `/projects/<project_id>` | Updates project display metadata, status, notes, and slug. |
 | `DELETE` | `/projects/<project_id>` | Deletes project metadata and project links without deleting linked source records. |
@@ -1142,12 +1145,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,487
+- behavior tests: 2,493
 - docs/inventory meta-tests: 30
-- `pytest`: 1255 (1225 behavior + 30 meta)
+- `pytest`: 1261 (1231 behavior + 30 meta)
 - `vitest`: 1024
 - `playwright`: 238
-- total: 2,517
+- total: 2,523
 
 ### Testing Architecture
 

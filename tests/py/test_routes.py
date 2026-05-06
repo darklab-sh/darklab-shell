@@ -228,6 +228,70 @@ class TestProjectRoutes:
         hidden = client.get(f"/projects/{first['id']}", headers={"X-Session-ID": session_b})
         assert hidden.status_code == 404
 
+    def test_sets_gets_and_clears_active_project(self):
+        client = get_client()
+        session_id = self._session_id("project-active")
+        project = self._create_project(client, session_id, "Active Case")
+
+        empty = json.loads(client.get("/projects/active", headers={"X-Session-ID": session_id}).data)
+        assert empty["project"] is None
+
+        set_resp = client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        assert set_resp.status_code == 200
+        assert json.loads(set_resp.data)["project"]["id"] == project["id"]
+
+        current = json.loads(client.get("/projects/active", headers={"X-Session-ID": session_id}).data)
+        assert current["project"]["slug"] == "active-case"
+
+        clear_resp = client.delete("/projects/active", headers={"X-Session-ID": session_id})
+        assert clear_resp.status_code == 200
+        assert json.loads(clear_resp.data)["cleared"] is True
+        cleared = json.loads(client.get("/projects/active", headers={"X-Session-ID": session_id}).data)
+        assert cleared["project"] is None
+
+    def test_active_project_rejects_cross_session_and_clears_stale_projects(self):
+        client = get_client()
+        session_id = self._session_id("project-active")
+        other_session = self._session_id("project-other")
+        project = self._create_project(client, session_id, "Current Case")
+        other_project = self._create_project(client, other_session, "Other Case")
+
+        cross_session = client.post(
+            "/projects/active",
+            json={"project_id": other_project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        assert cross_session.status_code == 404
+
+        set_resp = client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        assert set_resp.status_code == 200
+        client.put(
+            f"/projects/{project['id']}",
+            json={"status": "archived"},
+            headers={"X-Session-ID": session_id},
+        )
+        archived = json.loads(client.get("/projects/active", headers={"X-Session-ID": session_id}).data)
+        assert archived["project"] is None
+
+        revived = self._create_project(client, session_id, "Delete Me")
+        client.post(
+            "/projects/active",
+            json={"project_id": revived["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        delete_resp = client.delete(f"/projects/{revived['id']}", headers={"X-Session-ID": session_id})
+        assert delete_resp.status_code == 200
+        deleted = json.loads(client.get("/projects/active", headers={"X-Session-ID": session_id}).data)
+        assert deleted["project"] is None
+
     def test_links_run_and_unlinks_without_duplicate_rows(self):
         client = get_client()
         session_id = self._session_id("project-link")
@@ -2521,6 +2585,52 @@ class TestRunRoute:
             conn.commit()
             conn.close()
 
+    def test_client_side_run_links_to_active_project(self):
+        client = get_client()
+        session = "client-run-project-" + uuid.uuid4().hex[:8]
+        project_resp = client.post(
+            "/projects",
+            headers={"X-Session-ID": session},
+            json={"name": "Client Project"},
+        )
+        project = json.loads(project_resp.data)["project"]
+        client.post(
+            "/projects/active",
+            headers={"X-Session-ID": session},
+            json={"project_id": project["id"]},
+        )
+
+        resp = client.post(
+            "/run/client",
+            headers={"X-Session-ID": session},
+            json={
+                "command": "theme current",
+                "exit_code": 0,
+                "lines": [{"text": "Current theme: darklab", "cls": "builtin-section"}],
+            },
+        )
+        assert resp.status_code == 200
+
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            row = conn.execute(
+                "SELECT l.entity_type, l.source, r.command "
+                "FROM project_links l JOIN runs r ON r.id = l.entity_id "
+                "WHERE l.project_id = ?",
+                (project["id"],),
+            ).fetchone()
+        finally:
+            conn.execute("DELETE FROM project_links WHERE project_id = ?", (project["id"],))
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM session_preferences WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM projects WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
+        assert row is not None
+        assert row[0] == "run"
+        assert row[1] == "active_project"
+        assert row[2] == "theme current"
+
     def test_client_side_run_rejects_non_client_builtin_root(self):
         client = get_client()
         resp = client.post(
@@ -3111,6 +3221,75 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
+    def test_history_filters_runs_and_snapshots_by_project(self):
+        client = get_client()
+        session = "project-history-" + uuid.uuid4().hex[:8]
+        project_resp = client.post(
+            "/projects",
+            json={"name": "History Project"},
+            headers={"X-Session-ID": session},
+        )
+        project = json.loads(project_resp.data)["project"]
+        linked_run = f"{session}-run-linked"
+        other_run = f"{session}-run-other"
+        linked_snapshot = f"{session}-snapshot-linked"
+        other_snapshot = f"{session}-snapshot-other"
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (linked_run, session, "dig darklab.sh A", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]"),
+                    (other_run, session, "nmap darklab.sh", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]"),
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
+                [
+                    (linked_snapshot, session, "linked snapshot", "2026-01-01T00:00:05", "[]"),
+                    (other_snapshot, session, "other snapshot", "2026-01-01T00:00:06", "[]"),
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                "VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                [
+                    (f"{session}-link-run", project["id"], "run", linked_run, "manual"),
+                    (f"{session}-link-snapshot", project["id"], "snapshot", linked_snapshot, "snapshot_capture"),
+                ],
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                f"/history?project_id={project['id']}&include_total=1",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+
+            assert data["total_count"] == 2
+            assert [item["id"] for item in data["items"]] == [linked_snapshot, linked_run]
+            assert [run["id"] for run in data["runs"]] == [linked_run]
+            assert data["roots"] == ["dig"]
+
+            snapshots_resp = client.get(
+                f"/history?type=snapshots&project_id={project['id']}&include_total=1",
+                headers={"X-Session-ID": session},
+            )
+            snapshots = json.loads(snapshots_resp.data)
+            assert snapshots["total_count"] == 1
+            assert snapshots["items"][0]["id"] == linked_snapshot
+            assert snapshots["runs"] == []
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM project_links WHERE project_id = ?", (project["id"],))
+            conn.execute("DELETE FROM snapshots WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM projects WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
+
     def test_history_search_filters_by_command_text(self):
         client = get_client()
         session = "history-search-session"
@@ -3528,6 +3707,59 @@ class TestShareRoute:
         data = json.loads(resp.data)
         assert "id" in data
         assert "url" in data
+
+    def test_post_links_snapshot_to_source_run_project(self):
+        client = get_client()
+        session = "share-project-" + uuid.uuid4().hex[:8]
+        run_id = "run-" + uuid.uuid4().hex
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Snapshot Source"},
+            headers={"X-Session-ID": session},
+        )
+        project = json.loads(project_resp.data)["project"]
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                (run_id, session, "theme list"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        link_resp = client.post(
+            f"/projects/{project['id']}/links",
+            json={"entity_type": "run", "entity_id": run_id, "source": "manual"},
+            headers={"X-Session-ID": session},
+        )
+        assert link_resp.status_code == 201
+
+        resp = client.post(
+            "/share",
+            json={"label": "linked snapshot", "content": ["line1"], "run_id": run_id},
+            headers={"X-Session-ID": session},
+        )
+        assert resp.status_code == 200
+        share_id = json.loads(resp.data)["id"]
+
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            row = conn.execute(
+                "SELECT entity_type, entity_id, source FROM project_links "
+                "WHERE project_id = ? AND entity_type = 'snapshot'",
+                (project["id"],),
+            ).fetchone()
+        finally:
+            conn.execute("DELETE FROM project_links WHERE project_id = ?", (project["id"],))
+            conn.execute("DELETE FROM snapshots WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM projects WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
+        assert row is not None
+        assert row[0] == "snapshot"
+        assert row[1] == share_id
+        assert row[2] == "snapshot_capture"
 
     def test_post_rejects_non_string_label(self):
         client = get_client()

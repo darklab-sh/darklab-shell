@@ -46,6 +46,7 @@ PROJECT_LINK_SOURCES = frozenset({
     "artifact_capture",
     "finding_capture",
     "package_flow",
+    "snapshot_capture",
     "migration",
 })
 

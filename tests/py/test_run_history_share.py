@@ -909,6 +909,47 @@ class TestRunStreaming:
         cmds = [r["command"] for r in data["runs"]]
         assert "echo saved" in cmds
 
+    def test_completed_run_links_to_active_project(self):
+        client = get_client()
+        session_id = "sess-active-project-run"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Run Context"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        active_resp = client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        assert active_resp.status_code == 200
+
+        fake_proc = _FakeProc(lines=["project line\n", ""])
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[
+                 True,
+                 True,
+             ]):
+            resp = _post_run(client, json={"command": "echo project"}, headers={"X-Session-ID": session_id})
+            _ = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        with db_connect() as conn:
+            row = conn.execute(
+                "SELECT l.entity_type, l.entity_id, l.source, r.command "
+                "FROM project_links l JOIN runs r ON r.id = l.entity_id "
+                "WHERE l.project_id = ?",
+                (project["id"],),
+            ).fetchone()
+        assert row is not None
+        assert row["entity_type"] == "run"
+        assert row["source"] == "active_project"
+        assert row["command"] == "echo project"
+
     def test_run_filters_output_through_synthetic_grep(self):
         client = get_client()
         fake_proc = _FakeProc(lines=["ttl=54\n", "time=12ms\n", "ttl=55\n", ""])

@@ -63,6 +63,7 @@ from run_broker import (
 )
 from run_output_store import RunOutputCapture, load_full_output_entries
 from output_signals import OutputSignalClassifier
+from project_workspace import link_run_to_active_project
 from session_variables import SessionVariableError, expand_session_variables
 from workspace import session_workspace_dir, WorkspaceDisabled
 from pty_service import (
@@ -218,6 +219,7 @@ def _save_completed_run(run_id, session_id, command, run_started, finished_iso, 
     capture.finalize()
     try:
         preview_lines = list(capture.preview_lines)
+        active_project_link = None
         # Index full output when available so early lines of long runs are searchable.
         # Falls back to preview if the artifact can't be read.
         if capture.full_output_available and capture.artifact_rel_path:
@@ -267,7 +269,22 @@ def _save_completed_run(run_id, session_id, command, run_started, finished_iso, 
                         finished_iso,
                     )
                 )
+            try:
+                active_project_link = link_run_to_active_project(conn, session_id, run_id)
+            except Exception:
+                active_project_link = None
+                log.error("PROJECT_ACTIVE_RUN_LINK_ERROR", exc_info=True, extra={
+                    "run_id": run_id,
+                    "session": get_log_session_id(session_id),
+                    "cmd": command,
+                })
             conn.commit()
+        if active_project_link:
+            log.info("PROJECT_ACTIVE_RUN_LINKED", extra={
+                "run_id": run_id,
+                "session": get_log_session_id(session_id),
+                "project_id": active_project_link["project_id"],
+            })
     except Exception:
         log.error("RUN_SAVED_ERROR", exc_info=True, extra={
             "run_id": run_id, "session": get_log_session_id(session_id), "cmd": command,
@@ -523,6 +540,7 @@ def save_client_side_run():
     started = datetime.now(timezone.utc)
     finished = datetime.now(timezone.utc)
     output_search_text = _extract_output_search_text(lines)
+    active_project_link = None
 
     log.info("RUN_START", extra={
         "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
@@ -553,7 +571,22 @@ def save_client_side_run():
                 output_search_text,
             ),
         )
+        try:
+            active_project_link = link_run_to_active_project(conn, session_id, run_id)
+        except Exception:
+            active_project_link = None
+            log.error("PROJECT_ACTIVE_RUN_LINK_ERROR", exc_info=True, extra={
+                "run_id": run_id,
+                "session": get_log_session_id(session_id),
+                "cmd": command,
+            })
         conn.commit()
+    if active_project_link:
+        log.info("PROJECT_ACTIVE_RUN_LINKED", extra={
+            "run_id": run_id,
+            "session": get_log_session_id(session_id),
+            "project_id": active_project_link["project_id"],
+        })
 
     elapsed = round((finished - started).total_seconds(), 1)
     log.info("RUN_END", extra={

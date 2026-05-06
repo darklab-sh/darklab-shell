@@ -4551,6 +4551,7 @@ class TestDatabaseInit:
         assert database.validate_project_entity_type("workspace_file") == "workspace_file"
         assert database.validate_project_link_source("manual") == "manual"
         assert database.validate_project_link_source("active_project") == "active_project"
+        assert database.validate_project_link_source("snapshot_capture") == "snapshot_capture"
 
         with pytest.raises(ValueError):
             database.validate_project_entity_type("ticket")
