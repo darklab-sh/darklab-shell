@@ -666,6 +666,7 @@ class TestDerivedCommandRegistry:
                   max_runtime_seconds: 321
                   allow_input: false
                   requires_args: true
+                  transcript_mode: scrollback_findings
                 autocomplete:
                   flags:
                     - value: -c
@@ -751,6 +752,8 @@ class TestDerivedCommandRegistry:
             "max_runtime_seconds": 321,
             "allow_input": False,
             "requires_args": True,
+            "transcript_mode": "scrollback_findings",
+            "input_safety": "no_input",
         }
         assert interactive_pty_specs_from_registry(registry) == [{
             "root": "ping",
@@ -760,6 +763,8 @@ class TestDerivedCommandRegistry:
             "max_runtime_seconds": 321,
             "allow_input": False,
             "requires_args": True,
+            "transcript_mode": "scrollback_findings",
+            "input_safety": "no_input",
         }]
         assert ping["autocomplete"]["flags"][0] == {"value": "-c", "description": "Count"}
         assert ping["autocomplete"]["flags"][1] == {"value": "-v", "description": "Verbose"}
@@ -2811,13 +2816,30 @@ class TestInteractivePtyRegistry:
         specs = {spec["root"]: spec for spec in interactive_pty_specs_from_registry()}
         assert set(specs) == {"mtr", "ffuf", "masscan"}
         for root, expected in (
-            ("mtr", {"trigger_flag": "--interactive", "requires_args": True}),
-            ("ffuf", {"trigger_flag": "--interactive", "requires_args": True}),
-            ("masscan", {"trigger_flag": "--interactive", "requires_args": True}),
+            ("mtr", {
+                "trigger_flag": "--interactive",
+                "requires_args": True,
+                "transcript_mode": "final_frame",
+                "input_safety": "navigation_only",
+            }),
+            ("ffuf", {
+                "trigger_flag": "--interactive",
+                "requires_args": True,
+                "transcript_mode": "scrollback_findings",
+                "input_safety": "scanner_controls",
+            }),
+            ("masscan", {
+                "trigger_flag": "--interactive",
+                "requires_args": True,
+                "transcript_mode": "scrollback_findings",
+                "input_safety": "scanner_controls",
+            }),
         ):
             spec = specs[root]
             assert spec["trigger_flag"] == expected["trigger_flag"]
             assert spec["requires_args"] is expected["requires_args"]
+            assert spec["transcript_mode"] == expected["transcript_mode"]
+            assert spec["input_safety"] == expected["input_safety"]
             assert spec["allow_input"] is True
             max_runtime = spec["max_runtime_seconds"]
             assert isinstance(max_runtime, int) and max_runtime > 0
@@ -2845,7 +2867,12 @@ class TestPtyBrokerService:
             }),
         )
 
-        with mock.patch.object(pty_service, "redis_client", fake):
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(
+                 pty_service,
+                 "active_runs_for_session",
+                 return_value=[{"run_id": run_id, "run_type": "pty"}],
+             ):
             assert pty_service.write_pty_input(run_id, "session-1", "q") == (True, "")
             assert pty_service.resize_pty(run_id, "session-1", 33, 120) == (True, "", 33, 120)
             rows = fake.xread({pty_service._control_key(run_id): "0-0"}, count=10)
@@ -2876,7 +2903,12 @@ class TestPtyBrokerService:
             }),
         )
 
-        with mock.patch.object(pty_service, "redis_client", fake):
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(
+                 pty_service,
+                 "active_runs_for_session",
+                 return_value=[{"run_id": run_id, "run_type": "pty"}],
+             ):
             pty_service.publish_pty_event(run_id, "output", {"text": "live hop"})
             stream = pty_service.stream_pty_events(run_id, "session-1")
             chunk = next(stream)
@@ -2916,7 +2948,12 @@ class TestPtyBrokerService:
         )
         run.capture_event_id = "1770000000000-2"
 
-        with mock.patch.object(pty_service, "redis_client", fake):
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(
+                 pty_service,
+                 "active_runs_for_session",
+                 return_value=[{"run_id": run.run_id, "run_type": "pty"}],
+             ):
             pty_service._store_pty_meta(run)
             pty_service._store_pty_snapshot(run, force=True)
             ok, message, snapshot = pty_service.pty_run_snapshot(run.run_id, "session-1")
@@ -2928,6 +2965,108 @@ class TestPtyBrokerService:
         assert snapshot["ansi_snapshot"].endswith("redis snapshot\x1b[1;1H")
         assert snapshot["after_event_id"] == "1770000000000-2"
         assert snapshot["entries"] == []
+
+    def test_pty_snapshot_prunes_stale_redis_state_without_active_process(self):
+        fake = process._FakeRedisClient()
+        run_id = "pty-run-stale"
+        fake.set(
+            pty_service._meta_key(run_id),
+            json.dumps({
+                "run_id": run_id,
+                "session_id": "session-1",
+                "command": "mtr --interactive darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "closed": False,
+            }),
+        )
+        fake.set(pty_service._snapshot_key(run_id), json.dumps({"session_id": "session-1"}))
+        fake.xadd(pty_service._control_key(run_id), {"payload": "{}"})
+        fake.xadd(pty_service._stream_key(run_id), {"payload": "{}"})
+
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(pty_service, "active_runs_for_session", return_value=[]):
+            ok, message, snapshot = pty_service.pty_run_snapshot(run_id, "session-1")
+
+        assert ok is False
+        assert message == "PTY run is no longer active"
+        assert snapshot is None
+        assert fake.get(pty_service._meta_key(run_id)) is None
+        assert fake.get(pty_service._snapshot_key(run_id)) is None
+        assert fake.xread({pty_service._control_key(run_id): "0-0"}, count=10) == []
+        assert fake.xread({pty_service._stream_key(run_id): "0-0"}, count=10) == []
+
+    def test_pty_snapshot_publish_rate_is_capped_even_after_byte_threshold(self):
+        class FakeProc:
+            pid = 4242
+
+        class FakeCapture:
+            def synthesize_entries(self):
+                return [{"text": "plain fallback", "cls": ""}]
+
+            def ansi_snapshot(self):
+                return "\x1b[0m\x1b[2J\x1b[Hsnapshot\x1b[1;1H", False
+
+        fake = process._FakeRedisClient()
+        run = pty_service.PtyRun(
+            run_id="pty-run-snapshot-rate",
+            session_id="session-1",
+            command="ffuf --interactive -u https://darklab.sh/FUZZ -w words.txt",
+            argv=["ffuf"],
+            started="2026-01-01T00:00:00Z",
+            master_fd=-1,
+            proc=cast(subprocess.Popen, FakeProc()),
+            rows=24,
+            cols=100,
+            allow_input=True,
+            max_runtime_seconds=900,
+            brokered=True,
+            terminal_capture=cast(pty_service.PtyTerminalCapture, FakeCapture()),
+        )
+        run.capture_event_id = "1770000000000-2"
+        run.snapshot_published_event_id = "1770000000000-1"
+        run.snapshot_pending_bytes = pty_service._PTY_SNAPSHOT_PUBLISH_BYTES * 2
+        run.snapshot_last_published = 999.95
+
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(pty_service.time, "time", return_value=1000.0):
+            pty_service._store_pty_snapshot(run)
+
+        assert fake.get(pty_service._snapshot_key(run.run_id)) is None
+        assert run.snapshot_pending_bytes == pty_service._PTY_SNAPSHOT_PUBLISH_BYTES * 2
+
+        run.snapshot_last_published = 999.7
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(pty_service.time, "time", return_value=1000.0):
+            pty_service._store_pty_snapshot(run)
+            stored_snapshot = fake.get(pty_service._snapshot_key(run.run_id))
+
+        assert stored_snapshot is not None
+        assert run.snapshot_pending_bytes == 0
+
+    def test_pty_stream_reports_stale_run_before_heartbeating_forever(self):
+        fake = process._FakeRedisClient()
+        run_id = "pty-run-stale-stream"
+        fake.set(
+            pty_service._meta_key(run_id),
+            json.dumps({
+                "run_id": run_id,
+                "session_id": "session-1",
+                "command": "mtr --interactive darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+                "rows": 24,
+                "cols": 100,
+                "closed": False,
+            }),
+        )
+
+        with mock.patch.object(pty_service, "redis_client", fake), \
+             mock.patch.object(pty_service, "active_runs_for_session", return_value=[]):
+            chunk = next(pty_service.stream_pty_events(run_id, "session-1"))
+
+        assert "PTY run is no longer active" in chunk
+        assert '"type": "error"' in chunk
 
     def test_pty_start_cleans_up_if_reader_thread_fails_to_start(self):
         class FakeProc:

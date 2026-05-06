@@ -20,12 +20,12 @@ Workspace file behavior is intentionally split across all three layers: pytest o
 
 Current totals:
 
-- behavior tests: 2,460
+- behavior tests: 2,479
 - docs/inventory meta-tests: 30
-- `pytest`: 1241 (1211 behavior + 30 meta)
-- `vitest`: 1021
+- `pytest`: 1247 (1217 behavior + 30 meta)
+- `vitest`: 1024
 - `playwright`: 238
-- total: 2,500
+- total: 2,509
 
 This document is organized in two parts:
 
@@ -512,6 +512,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPtyBrokerService.test_pty_input_and_resize_queue_through_redis_without_local_run` | Verifies that PTY input and resize requests enqueue Redis control events without needing the local worker that owns the PTY file descriptor. |
 | `TestPtyBrokerService.test_pty_stream_replays_redis_output_events_for_any_worker` | Verifies that Redis-backed PTY output can be streamed by any web worker. |
 | `TestPtyBrokerService.test_pty_snapshot_loads_distributed_redis_snapshot_without_local_run` | Verifies that PTY reattach snapshots can be served from Redis by a worker that does not own the PTY file descriptor. |
+| `TestPtyBrokerService.test_pty_snapshot_prunes_stale_redis_state_without_active_process` | Verifies that stale Redis PTY metadata, snapshots, control streams, and output streams are pruned when no active process remains. |
+| `TestPtyBrokerService.test_pty_snapshot_publish_rate_is_capped_even_after_byte_threshold` | Verifies that high-throughput PTY output cannot force Redis snapshot publishes more often than the minimum publish interval. |
+| `TestPtyBrokerService.test_pty_stream_reports_stale_run_before_heartbeating_forever` | Verifies that stale PTY streams emit a terminal error instead of heartbeating forever after the process metadata disappears. |
 | `TestPtyBrokerService.test_pty_start_cleans_up_if_reader_thread_fails_to_start` | Verifies that PTY startup cleans up the process, file descriptor, and active-run metadata if the reader thread cannot start. |
 | `TestPtyBrokerService.test_pty_start_requires_pyte_for_saved_terminal_capture` | Verifies that interactive PTY startup fails before spawning when the required server-side terminal capture dependency is missing. |
 | `TestPtyBrokerService.test_pty_command_env_inherits_only_vetted_keys` | Verifies that PTY command environments preserve useful terminal variables without passing unvetted process state. |
@@ -1171,10 +1174,13 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestInteractivePtyRuns.test_start_interactive_pty_strips_trigger_before_validation` | Verifies that `mtr --interactive` validates and starts as an `mtr` PTY command without passing the trigger flag to the tool. |
 | `TestInteractivePtyRuns.test_start_interactive_pty_uses_workspace_cwd_and_validated_exec_command` | Verifies that PTY start requests pass the tab workspace CWD into validation and spawn the validated workspace-aware command argv. |
 | `TestInteractivePtyRuns.test_start_interactive_pty_uses_registry_spec` | Verifies that interactive PTY start requests use trigger, size, input, and runtime settings from the command registry. |
+| `TestInteractivePtyRuns.test_completed_pty_transcript_modes_shape_saved_output` | Verifies that completed PTY transcript modes can preserve final-frame output or scrollback findings while dropping transient status redraws. |
 | `TestInteractivePtyRuns.test_start_interactive_pty_allows_multiple_active_pty_runs_for_session` | Verifies that a session can start another interactive PTY while one is already active. |
+| `TestInteractivePtyRuns.test_start_interactive_pty_rejects_when_session_reaches_concurrency_limit` | Verifies that interactive PTY startup returns a clear limit error instead of spawning when the session already has the configured maximum active PTYs. |
 | `TestInteractivePtyRuns.test_stream_interactive_pty_touches_active_run_owner` | Verifies that active PTY streams refresh owner liveness like normal brokered run streams. |
 | `TestInteractivePtyRuns.test_snapshot_interactive_pty_returns_terminal_resume_state` | Verifies that the PTY snapshot endpoint returns terminal frame state and resume event id for active PTY reattach. |
 | `TestInteractivePtyRuns.test_snapshot_interactive_pty_reports_worker_local_limit` | Verifies that PTY snapshot requests explain when the run belongs to the session but is not available on the current worker. |
+| `TestInteractivePtyRuns.test_snapshot_interactive_pty_uses_specific_failure_statuses` | Verifies that PTY snapshot failures use specific HTTP statuses for missing, closed, stale, and not-yet-available runs. |
 | `TestInteractivePtyRuns.test_kill_routes_pty_killed_event_to_pty_stream` | Verifies that `/kill` publishes PTY kill notices through the PTY event stream instead of the normal run stream. |
 | `TestInteractivePtyRuns.test_interactive_pty_control_routes_are_rate_limited` | Verifies that PTY input and resize control routes use the shared rate limiter. |
 | `TestRunStreaming.test_brokered_synthetic_run_publishes_events_and_persists_history` | Verifies that brokered synthetic runs publish started/output/clear/exit events and persist searchable history. |
@@ -1958,6 +1964,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `refreshes the live xterm theme when the app theme changes` | Verifies that an open interactive PTY terminal applies the latest app theme palette without recreating the terminal. |
 | `keeps focus on the active PTY terminal while the PTY tab is running` | Verifies that live interactive PTY tabs retain keyboard focus on xterm instead of the hidden prompt. |
 | `scopes the PTY modal overlay to the owning tab panel` | Verifies that the live PTY modal is mounted inside the tab that owns the interactive run. |
+| `reuses the tab-scoped PTY overlay across repeated runs in one tab` | Verifies that repeated interactive PTY runs in one tab reuse a single overlay and clear stale run ownership between runs. |
+| `skips PTY fit and resize while the owning tab is hidden` | Verifies that hidden-tab PTY terminals skip xterm fitting and resize POSTs until their tab becomes active again. |
 | `uses the running-tab close confirmation from the PTY modal close button` | Verifies that the PTY modal close button opens the same Cancel, Keep running, and Kill confirmation used by running tab close. |
 | `allows multiple tab-scoped PTY modals to run concurrently` | Verifies that a failed PTY in one tab does not close or dispose another tab's live PTY modal. |
 | `lets Ctrl+C flow through xterm as native PTY input` | Verifies that Ctrl+C inside the interactive PTY modal reaches the PTY as a native interrupt instead of opening the kill confirmation. |
@@ -1967,6 +1975,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `finalizes PTY tabs like normal completed runs` | Verifies that completed interactive PTY tabs update recent commands, history refreshes, workspace cache, and last-exit state like normal runs. |
 | `appends the saved PTY final frame before the exit status line` | Verifies that modal PTY completion loads the saved final screen into the parent transcript before appending the exit status line. |
 | `marks a PTY tab detached when the stream ends without an exit event but the run is still active` | Verifies that a dropped PTY stream keeps the run marked active, preserves Kill, and starts the saved-result polling path. |
+| `marks a PTY tab failed when the stream ends and the run is not active` | Verifies that a stale PTY stream finalizes the tab as failed instead of treating an unknown exit as success. |
 
 #### `runner.test.js`
 

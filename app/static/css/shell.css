@@ -317,6 +317,12 @@ body.ln-on.ts-clock .output .shell-prompt-wrap::before {
   color: var(--fg);
 }
 
+.modal-card.pty-modal,
+.mobile-sheet-surface.pty-modal {
+  background: var(--bg);
+  color: var(--fg);
+}
+
 .tab-panel > .pty-tab-overlay {
   position: absolute;
   inset: 0;
@@ -329,9 +335,10 @@ body.ln-on.ts-clock .output .shell-prompt-wrap::before {
   display: flex;
 }
 
+.tab-panel > .pty-tab-overlay #pty-modal,
 .tab-panel > .pty-tab-overlay .pty-modal {
-  width: min(1040px, calc(100% - 32px));
-  height: min(700px, calc(100% - 32px));
+  width: min(1080px, calc(100% - 32px));
+  height: min(760px, calc(100% - 32px));
   max-height: calc(100% - 32px);
 }
 

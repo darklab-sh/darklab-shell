@@ -312,7 +312,9 @@ class TestInteractivePtyRuns:
             "default_cols": 120,
             "max_runtime_seconds": 180,
             "allow_input": False,
+            "input_safety": "no_input",
             "requires_args": False,
+            "transcript_mode": "scrollback_findings",
         }
 
         def _allow(command, session_id=None, cfg=None, workspace_cwd=""):  # noqa: ARG001
@@ -343,6 +345,30 @@ class TestInteractivePtyRuns:
         assert kwargs["default_cols"] == 120
         assert kwargs["allow_input"] is False
         assert kwargs["max_runtime_seconds"] == 180
+        fake_completed = SimpleNamespace(
+            run_id="pty-run-custom",
+            session_id="sess-pty-custom",
+            command="watcher --live",
+            started="2026-05-06T00:00:00Z",
+        )
+        with mock.patch("blueprints.run._persist_completed_pty_run", return_value={}) as persist_pty:
+            kwargs["completion_callback"](fake_completed, "2026-05-06T00:00:01Z", 0, [])
+        assert persist_pty.call_args.kwargs["transcript_mode"] == "scrollback_findings"
+
+    def test_completed_pty_transcript_modes_shape_saved_output(self):
+        entries = [
+            {"text": "scrolled finding", "cls": ""},
+            {"text": "rate:  0.00-kpps, 100.00% done, found=1", "cls": ""},
+            {"text": "", "cls": "pty-marker"},
+            {"text": "final frame", "cls": ""},
+        ]
+
+        assert run_routes._shape_completed_pty_entries(entries, "final_frame") == [
+            {"text": "final frame", "cls": ""},
+        ]
+        assert run_routes._shape_completed_pty_entries(entries, "scrollback_findings") == [
+            {"text": "scrolled finding", "cls": ""},
+        ]
 
     def test_start_interactive_pty_allows_multiple_active_pty_runs_for_session(self):
         client = get_client()
@@ -376,6 +402,42 @@ class TestInteractivePtyRuns:
         assert resp.status_code == 202
         assert resp.get_json()["run_id"] == "pty-run-second"
         start_pty.assert_called_once()
+
+    def test_start_interactive_pty_rejects_when_session_reaches_concurrency_limit(self):
+        client = get_client()
+
+        def _allow(command, session_id=None, cfg=None, workspace_cwd=""):  # noqa: ARG001
+            assert command == "mtr example.com"
+            return run_routes.CommandValidationResult(
+                True,
+                "",
+                display_command=command,
+                exec_command=command,
+            )
+
+        active_runs = [
+            {
+                "run_id": f"active-pty-{index}",
+                "command": f"mtr --interactive host-{index}.example",
+                "run_type": "pty",
+            }
+            for index in range(4)
+        ]
+        with mock.patch("blueprints.run.pty_enabled", return_value=True), \
+             mock.patch("blueprints.run.pty_broker_available", return_value=True), \
+             mock.patch("blueprints.run.active_runs_for_session", return_value=active_runs), \
+             mock.patch("blueprints.run.validate_command", side_effect=_allow), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.start_pty_run") as start_pty:
+            resp = client.post(
+                "/pty/runs",
+                json={"command": "mtr --interactive example.com"},
+                headers={"X-Session-ID": "sess-pty-active"},
+            )
+
+        assert resp.status_code == 429
+        assert "Interactive PTY limit reached" in resp.get_json()["error"]
+        start_pty.assert_not_called()
 
     def test_stream_interactive_pty_touches_active_run_owner(self):
         client = get_client()
@@ -454,8 +516,29 @@ class TestInteractivePtyRuns:
                 headers={"X-Session-ID": "sess-pty-snapshot-limit"},
             )
 
-        assert resp.status_code == 409
+        assert resp.status_code == 503
+        assert resp.headers["Retry-After"] == "1"
         assert "not available from this worker" in resp.get_json()["error"]
+
+    def test_snapshot_interactive_pty_uses_specific_failure_statuses(self):
+        client = get_client()
+
+        cases = [
+            ("Run not found", 404, False),
+            ("Run is closed", 410, False),
+            ("PTY run is no longer active", 410, False),
+            ("PTY snapshot is not available yet", 503, True),
+        ]
+        for message, expected_status, expect_retry in cases:
+            with mock.patch("blueprints.run.pty_run_snapshot", return_value=(False, message, None)):
+                resp = client.get(
+                    "/pty/runs/pty-run-status/snapshot",
+                    headers={"X-Session-ID": "sess-pty-snapshot-status"},
+                )
+
+            assert resp.status_code == expected_status
+            assert resp.get_json()["error"] == message
+            assert ("Retry-After" in resp.headers) is expect_retry
 
     def test_kill_routes_pty_killed_event_to_pty_stream(self):
         client = get_client()

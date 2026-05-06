@@ -25,7 +25,15 @@ from datetime import datetime, timezone
 from typing import Any, Iterator, cast
 
 from config import CFG, SCANNER_PREFIX
-from process import active_run_owned_by, active_run_register, active_run_remove, pid_pop, pid_register, redis_client
+from process import (
+    active_run_owned_by,
+    active_run_register,
+    active_run_remove,
+    active_runs_for_session,
+    pid_pop,
+    pid_register,
+    redis_client,
+)
 
 try:
     # importlib + Any | None lets us treat pyte as optional at runtime without
@@ -50,7 +58,9 @@ _PTY_CAPTURE_MAX_HISTORY_LINES = 10000
 _PTY_SNAPSHOT_MAX_BYTES = 128 * 1024
 _PTY_SNAPSHOT_PUBLISH_BYTES = 8192
 _PTY_SNAPSHOT_PUBLISH_SECONDS = 1.0
+_PTY_SNAPSHOT_MIN_PUBLISH_SECONDS = 0.2
 _PTY_SNAPSHOT_FALLBACK_ENTRY_LIMIT = 200
+_PTY_STALE_MESSAGE = "PTY run is no longer active"
 _PTY_ENV_PASSTHROUGH_KEYS = (
     "PATH",
     "HOME",
@@ -522,6 +532,10 @@ class PtyRun:
 _runs: dict[str, PtyRun] = {}
 _runs_lock = threading.Lock()
 
+# PTY lock order: acquire snapshot_lock before terminal_capture._lock when a
+# snapshot needs both. Feed/resize paths use terminal_capture._lock only, and
+# event delivery uses condition separately.
+
 
 def pty_enabled() -> bool:
     return bool(CFG.get("interactive_pty_enabled", False))
@@ -683,6 +697,8 @@ def _store_pty_meta(run: PtyRun, *, closed: bool = False) -> None:
         json.dumps(payload, separators=(",", ":")),
         ex=_completed_ttl() if closed else _active_ttl(),
     )
+    if closed:
+        redis_client.delete(_control_key(run.run_id), _snapshot_key(run.run_id))
 
 
 def _delete_pty_meta(run_id: str) -> None:
@@ -691,6 +707,15 @@ def _delete_pty_meta(run_id: str) -> None:
     redis_client.delete(_meta_key(run_id))
     redis_client.delete(_control_key(run_id))
     redis_client.delete(_snapshot_key(run_id))
+
+
+def _delete_pty_runtime_state(run_id: str, *, include_stream: bool = False) -> None:
+    if not redis_client:
+        return
+    keys = [_meta_key(run_id), _control_key(run_id), _snapshot_key(run_id)]
+    if include_stream:
+        keys.append(_stream_key(run_id))
+    redis_client.delete(*keys)
 
 
 def _load_pty_meta(run_id: str) -> dict[str, Any] | None:
@@ -719,6 +744,59 @@ def _load_pty_meta(run_id: str) -> dict[str, Any] | None:
     }
 
 
+def _load_pty_meta_for_session(run_id: str, session_id: str) -> dict[str, Any] | None:
+    meta = _load_pty_meta(run_id)
+    if not meta or meta.get("session_id") != session_id:
+        return None
+    return meta
+
+
+def _active_pty_run_is_tracked(run_id: str, session_id: str) -> bool:
+    with _runs_lock:
+        run = _runs.get(run_id)
+    if run and run.session_id == session_id and not run.closed:
+        return True
+    try:
+        active_runs = active_runs_for_session(session_id)
+    except Exception:
+        log.warning("PTY_ACTIVE_RUN_CHECK_FAILED", exc_info=True, extra={
+            "run_id": run_id,
+            "session": session_id,
+        })
+        return True
+    return any(
+        str(item.get("run_id", "")) == run_id
+        and str(item.get("run_type", "command") or "command") == "pty"
+        for item in active_runs
+    )
+
+
+def _prune_stale_open_pty(run_id: str, session_id: str, meta: dict[str, Any] | None = None) -> bool:
+    current_meta = meta if meta is not None else _load_pty_meta_for_session(run_id, session_id)
+    if not current_meta or current_meta.get("closed"):
+        return False
+    if _active_pty_run_is_tracked(run_id, session_id):
+        return False
+    _delete_pty_runtime_state(run_id, include_stream=True)
+    log.warning("PTY_STALE_RUN_CLEANED", extra={
+        "run_id": run_id,
+        "session": session_id,
+        "cmd": str(current_meta.get("command", "")),
+    })
+    return True
+
+
+def _load_active_pty_meta_for_session(run_id: str, session_id: str) -> tuple[dict[str, Any] | None, str]:
+    meta = _load_pty_meta_for_session(run_id, session_id)
+    if not meta:
+        return None, "Run not found"
+    if meta.get("closed"):
+        return None, "Run is closed"
+    if _prune_stale_open_pty(run_id, session_id, meta):
+        return None, _PTY_STALE_MESSAGE
+    return meta, ""
+
+
 def _limited_snapshot_entries(entries: Sequence[dict[str, str]], ansi_snapshot: str) -> list[dict[str, str]]:
     if ansi_snapshot:
         return []
@@ -733,6 +811,8 @@ def _limited_snapshot_entries(entries: Sequence[dict[str, str]], ansi_snapshot: 
 def _pty_snapshot_payload_from_run(run: PtyRun, *, distributed: bool = False) -> dict[str, Any]:
     entries = run.terminal_capture.synthesize_entries()
     ansi_snapshot, snapshot_truncated = run.terminal_capture.ansi_snapshot()
+    # Redis snapshots omit fallback entries when ANSI is available to keep the
+    # distributed payload bounded; local snapshots keep both for direct callers.
     payload: dict[str, Any] = {
         "run_id": run.run_id,
         "command": run.command,
@@ -757,6 +837,11 @@ def _store_pty_snapshot(run: PtyRun, *, force: bool = False) -> None:
     now = time.time()
     if not force:
         if run.capture_event_id == run.snapshot_published_event_id:
+            return
+        if (
+            now - run.snapshot_last_published < _PTY_SNAPSHOT_MIN_PUBLISH_SECONDS
+            and run.snapshot_published_event_id != "0-0"
+        ):
             return
         if (
             run.snapshot_pending_bytes < _PTY_SNAPSHOT_PUBLISH_BYTES
@@ -804,13 +889,12 @@ def _load_pty_snapshot(run_id: str, session_id: str) -> dict[str, Any] | None:
 
 
 def pty_run_belongs_to_session(run_id: str, session_id: str) -> bool:
-    meta = _load_pty_meta(run_id)
-    return bool(meta and meta.get("session_id") == session_id)
+    return _load_pty_meta_for_session(run_id, session_id) is not None
 
 
 def notify_pty_killed_event(run_id: str, session_id: str, payload: dict[str, Any] | None = None) -> bool:
-    meta = _load_pty_meta(run_id)
-    if not meta or meta.get("session_id") != session_id or meta.get("closed"):
+    meta, _message = _load_active_pty_meta_for_session(run_id, session_id)
+    if not meta:
         return False
     if redis_client:
         publish_pty_event(run_id, "killed", payload or {})
@@ -1142,10 +1226,12 @@ def get_pty_run(run_id: str, session_id: str) -> PtyRun | None:
 def pty_run_snapshot(run_id: str, session_id: str) -> tuple[bool, str, dict[str, Any] | None]:
     run = get_pty_run(run_id, session_id)
     if not run:
-        meta = _load_pty_meta(run_id)
-        if meta and meta.get("session_id") == session_id:
+        meta = _load_pty_meta_for_session(run_id, session_id)
+        if meta:
             if meta.get("closed"):
                 return False, "Run is closed", None
+            if _prune_stale_open_pty(run_id, session_id, meta):
+                return False, _PTY_STALE_MESSAGE, None
             snapshot = _load_pty_snapshot(run_id, session_id)
             if snapshot is not None:
                 return True, "", snapshot
@@ -1166,13 +1252,11 @@ def write_pty_input(
     owner_client_id: str = "",
     owner_tab_id: str = "",
 ) -> tuple[bool, str]:
-    meta = _load_pty_meta(run_id)
-    if not meta or meta.get("session_id") != session_id:
-        return False, "Run not found"
+    meta, message = _load_active_pty_meta_for_session(run_id, session_id)
+    if not meta:
+        return False, message
     if owner_client_id and not active_run_owned_by(run_id, owner_client_id, owner_tab_id):
         return False, "PTY input is owned by another attached tab"
-    if meta.get("closed"):
-        return False, "Run is closed"
     text = str(data or "")
     if not text:
         return True, ""
@@ -1195,11 +1279,9 @@ def write_pty_input(
 
 
 def resize_pty(run_id: str, session_id: str, rows: object, cols: object) -> tuple[bool, str, int, int]:
-    meta = _load_pty_meta(run_id)
-    if not meta or meta.get("session_id") != session_id:
-        return False, "Run not found", 0, 0
-    if meta.get("closed"):
-        return False, "Run is closed", 0, 0
+    meta, message = _load_active_pty_meta_for_session(run_id, session_id)
+    if not meta:
+        return False, message, 0, 0
     rows_i = _bounded_dimension(rows, meta.get("rows", 24), 10, 60)
     cols_i = _bounded_dimension(cols, meta.get("cols", 100), 40, 240)
     if redis_client:
@@ -1246,7 +1328,11 @@ def _stream_local_pty_events(run: PtyRun, after: str = "0-0") -> Iterator[str]:
 
 
 def stream_pty_events(run_id: str, session_id: str, after: str = "0-0") -> Iterator[str]:
-    if not pty_run_belongs_to_session(run_id, session_id):
+    meta = _load_pty_meta_for_session(run_id, session_id)
+    if not meta:
+        return
+    if _prune_stale_open_pty(run_id, session_id, meta):
+        yield f"data: {json.dumps({'type': 'error', 'text': _PTY_STALE_MESSAGE})}\n\n"
         return
     if not redis_client:
         run = get_pty_run(run_id, session_id)
@@ -1263,6 +1349,15 @@ def stream_pty_events(run_id: str, session_id: str, after: str = "0-0") -> Itera
             redis_client.xread({_stream_key(run_id): current_id}, count=_PTY_STREAM_FETCH_COUNT, block=block_ms),
         )
         if not rows:
+            meta = _load_pty_meta_for_session(run_id, session_id)
+            if not meta:
+                yield f"data: {json.dumps({'type': 'error', 'text': _PTY_STALE_MESSAGE})}\n\n"
+                return
+            if meta.get("closed"):
+                return
+            if _prune_stale_open_pty(run_id, session_id, meta):
+                yield f"data: {json.dumps({'type': 'error', 'text': _PTY_STALE_MESSAGE})}\n\n"
+                return
             yield ": heartbeat\n\n"
             continue
         for _key, stream_rows in rows:

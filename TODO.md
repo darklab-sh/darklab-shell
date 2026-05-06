@@ -17,26 +17,27 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 
 ## Open TODOs
 
-- **Potential interactive PTY improvements**
-  - **Current state:** `mtr --interactive <host>`, `ffuf --interactive ...`, and `masscan --interactive ...` have a guarded PTY path behind `interactive_pty_enabled`, use dedicated `/pty/runs` start/stream/input/resize routes, broker PTY events through Redis in multi-worker deployments, support multiple concurrent PTY runs per session with each live terminal scoped to its owning tab, render the live terminal in an xterm.js modal, and append completed PTY runs back into the normal terminal/history output path using server-side terminal capture.
-  - **Lifecycle and resilience**
-    - Add lifecycle cleanup beyond process exit and max runtime, including stale closed-run cleanup and clearer browser-disconnect behavior.
-    - Treat worker-death mid-run as a known limitation: the server-side terminal screen lives on the worker that owns `master_fd`, so a worker crash before exit drops the run from history. Periodic terminal-state snapshots into Redis would address this and are deferred until real usage shows they are needed.
-    - Revisit transport after real usage: the current pass uses Redis-brokered SSE plus narrow POST input/resize endpoints to avoid adding a WebSocket server dependency; WebSocket may still be useful if latency or throughput becomes a problem.
-  - **Security**
-    - Interactive input is a broader policy surface than normal command validation because keystrokes after process start are not re-validated. Keep the first-pass allowlist narrow and require future PTY tools to declare an explicit input-safety profile before enabling tools with shell escapes, external command prompts, file pickers, or embedded interpreters.
+- **Future interactive PTY enhancements**
+  - **Current state:** `mtr --interactive <host>`, `ffuf --interactive ...`, and `masscan --interactive ...` have a guarded PTY path behind `interactive_pty_enabled`, use dedicated `/pty/runs` start/stream/input/resize routes, broker PTY events through Redis in multi-worker deployments, support bounded concurrent PTY runs per session with each live terminal scoped to its owning tab, require registry-owned input-safety profiles, render the live terminal in an xterm.js modal, and append completed PTY runs back into the normal terminal/history output path using server-side terminal capture. Redis PTY snapshots support cross-worker reattach, use bounded publish rates, and return specific failure statuses for missing, closed, stale, or not-yet-available runs.
+  - **Future lifecycle and resilience**
+    - Consider auto-displacing prior live attaches when a new browser client attaches to the same PTY run. When `active_run_claim_owner` flips the internal ownership marker to a different `client_id`, publish a single `displaced` event on the PTY stream so the prior tab can close its modal cleanly and append one notice such as `[interactive PTY moved to another tab]`. Skip same-client reconnects so the event only fires when the live view genuinely moves to a different browser context. With this in place, the remaining per-keystroke `[interactive PTY input ignored: ...]` notices in `_ptySendInput` could become rare edge-case failures instead of common transcript noise.
+    - Revisit transport after real usage. The current pass uses Redis-brokered SSE plus narrow POST input/resize endpoints to avoid adding a WebSocket server dependency; WebSocket may still be useful if latency, throughput, or bidirectional control behavior becomes a real limitation.
+  - **Future security**
     - Defer asciinema-style raw byte replay and input auditing until real usage shows they are needed.
-  - **UX and output shaping**
-    - Completed PTY transcript rendering is currently one-size-fits-all. The parent transcript appends the final frame, which is ideal for `mtr` but can omit useful scrolled findings from `ffuf`/`masscan` or include noisy status redraws depending on the tool. Add a registry-owned transcript mode later, such as `final_frame`, `scrollback_findings`, or `all_sanitized`, once real sessions show which tools need custom output shaping.
-  - **Architecture**
-    - `pty.js` is 725 lines and growing. Split into `pty.js` (orchestration, command detection, entry point), `pty_modal.js` (modal HTML wiring, timer, status), and `pty_terminal.js` (xterm session, resize handlers).
-    - `pty_service.py` is ~840 lines mixing terminal capture, run lifecycle, Redis stream transport, control-stream draining, and meta storage. Capture and transport are natural module boundaries; splitting them keeps the lifecycle file readable.
-    - The Vitest finalize test mocks 14 globals to exercise pty.js. Introduce a small PTY host interface object that pty.js receives at init and the tests inject a fake for, so the runner.js global surface stops bleeding into PTY tests.
-    - Add browser unit coverage for PTY tab state transitions and disabled normal-terminal behaviors.
-  - **Polish and operational**
-    - `_PTY_INPUT_MAX_BYTES`, `_PTY_BUFFER_LIMIT`, `_PTY_CONTROL_POLL_SECONDS`, and similar tunables are module constants. Move to config so deploys can tune without a rebuild.
+  - **Future architecture**
+    - Split `pty.js` into smaller modules once PTY work resumes in depth. Natural boundaries are orchestration/command detection, modal wiring/timer/status, and xterm session/resize handling.
+    - Split `pty_service.py` once more PTY server behavior accumulates. Capture, run lifecycle, Redis stream transport, control-stream draining, and metadata storage are natural module boundaries.
+    - Consider dropping the base `#pty-overlay` from `index.html` and building every PTY modal through `_ptyBuildOverlay`. Tab overlays are now normalized and reused, so this is cleanup rather than a leak fix; the benefit would be removing the remaining ID/class selector duality in `_ptyModalEls`.
+    - Verify or document PTY modal positioning and mobile-sheet behavior with the overlay scoped inside `.tab-panel`. PTY startup is disabled on mobile, but the shared modal/mobile-sheet CSS still deserves a viewport sanity check if the modal layout changes again.
+    - Introduce a small PTY host interface object for browser tests. `pty.js` still reaches into many runner globals; a host object would make tests less brittle and reduce global-surface coupling.
+    - Add broader browser unit coverage for PTY tab state transitions and disabled normal-terminal behaviors as future PTY features are added.
+  - **Future polish and operational visibility**
+    - `_PTY_INPUT_MAX_BYTES`, `_PTY_BUFFER_LIMIT`, `_PTY_CONTROL_POLL_SECONDS`, `_PTY_SNAPSHOT_FALLBACK_ENTRY_LIMIT`, and similar tunables are module constants. Move to config so deploys can tune without a rebuild.
     - Add metrics covering concurrent PTY count, average and p95 duration, total input bytes, dropped input bytes, and control queue depth. Expose them through the existing `/diag` surface so operators have visibility comparable to other run paths.
     - The reader loop polls Redis every 200 ms via `xread block=1` for control events. With many concurrent PTYs this is wasted ops. Switch the control channel to Redis Pub/Sub (or a longer block window) so idle PTYs cost zero ops while output latency stays unaffected.
+    - Surface snapshot age on the reattach payload. `_load_pty_snapshot` strips `created_at` before returning, so the frontend cannot tell whether the snapshot is fresh or 20+ seconds stale. Return the age and let the frontend show `[reattached - snapshot was Ns old]` when it crosses a threshold, so users know the screen they see may not match what the PTY is currently rendering.
+    - Skip the unconditional `_store_pty_snapshot(run, force=True)` in `pty_run_snapshot` when the request hits the worker that owns the PTY. The route already returns the live in-memory payload to the caller, and the next reader-loop tick will publish to Redis naturally; the extra Redis SET costs one round-trip per attach for cross-worker freshness that is rarely consumed.
+    - Consider pausing xterm rendering for hidden-tab PTYs. xterm.js running in a `display: none` panel still processes writes and grows scrollback (capped at 1000 lines, but still wasted CPU). Either drop incoming `output` chunks into the modal only when visible (queue and replay on tab focus) or accept the cost as small enough to ignore — worth measuring under a long-running ffuf in a backgrounded tab before spending engineering on it.
 
 ## Research
 

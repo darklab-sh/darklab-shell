@@ -312,6 +312,10 @@
 # Server default if unset: 900
 # interactive_pty_max_runtime_seconds: 900
 
+# Maximum number of active interactive PTY runs allowed for one browser session.
+# Server default if unset: 4
+# interactive_pty_max_concurrent_per_session: 4
+
 # ── Welcome Animation ─────────────────────────────────────────────────────────
 
 # Base delay between each typed character in the welcome animation (milliseconds).

@@ -289,12 +289,73 @@ def _finalize_completed_run(run_id, session_id, client_ip, original_command, run
     return elapsed
 
 
-def _persist_completed_pty_run(run, execution_command: str, finished_iso: str, exit_code: int, synthesized_lines):
+_PTY_TRANSIENT_LINE_PATTERNS = (
+    re.compile(r"^rate:\s+.*\bdone\b.*\bfound=\d+\b", re.IGNORECASE),
+    re.compile(r"^::\s*Progress:\s*\[", re.IGNORECASE),
+)
+
+
+def _normalize_pty_entry(entry) -> dict[str, str]:
+    if isinstance(entry, dict):
+        return {
+            "text": str(entry.get("text", "")),
+            "cls": str(entry.get("cls", "")),
+        }
+    return {"text": str(entry), "cls": ""}
+
+
+def _is_transient_pty_line(text: str) -> bool:
+    value = text.strip()
+    if not value:
+        return False
+    return any(pattern.search(value) for pattern in _PTY_TRANSIENT_LINE_PATTERNS)
+
+
+def _split_pty_entries(entries: list[dict[str, str]]) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    marker_index = next(
+        (index for index, entry in enumerate(entries) if entry.get("cls") == "pty-marker"),
+        -1,
+    )
+    if marker_index < 0:
+        return entries, []
+    return entries[:marker_index], entries[marker_index + 1:]
+
+
+def _filter_transient_pty_entries(entries: list[dict[str, str]]) -> list[dict[str, str]]:
+    return [
+        entry for entry in entries
+        if entry.get("cls") != "pty-marker" and not _is_transient_pty_line(entry.get("text", ""))
+    ]
+
+
+def _shape_completed_pty_entries(synthesized_lines, transcript_mode: object) -> list[dict[str, str]]:
+    mode = str(transcript_mode or "final_frame").strip().lower()
+    entries = [_normalize_pty_entry(item) for item in synthesized_lines]
+    scrollback, final_frame = _split_pty_entries(entries)
+    if mode == "scrollback_findings":
+        shaped = _filter_transient_pty_entries(scrollback)
+        if shaped:
+            return shaped
+        return _filter_transient_pty_entries(final_frame or entries)
+    if mode == "all_sanitized":
+        return _filter_transient_pty_entries(entries)
+    return final_frame if final_frame else _filter_transient_pty_entries(entries)
+
+
+def _persist_completed_pty_run(
+    run,
+    execution_command: str,
+    finished_iso: str,
+    exit_code: int,
+    synthesized_lines,
+    *,
+    transcript_mode: object = "final_frame",
+):
     capture = _run_output_capture(run.run_id)
     signal_classifier = OutputSignalClassifier(execution_command, cmd_type="real")
-    for item in synthesized_lines:
-        text = str(item.get("text", "")) if isinstance(item, dict) else str(item)
-        cls = str(item.get("cls", "")) if isinstance(item, dict) else ""
+    for item in _shape_completed_pty_entries(synthesized_lines, transcript_mode):
+        text = str(item.get("text", ""))
+        cls = str(item.get("cls", ""))
         if cls == "pty-marker":
             capture.add_line(text, cls=cls)
             continue
@@ -733,6 +794,17 @@ def _coerce_positive_int(value: object, default: int) -> int:
     else:
         return default
     return number if number > 0 else default
+
+
+def _interactive_pty_concurrency_limit() -> int:
+    return _coerce_positive_int(CFG.get("interactive_pty_max_concurrent_per_session", 4), 4)
+
+
+def _active_interactive_pty_count(session_id: str) -> int:
+    return sum(
+        1 for item in active_runs_for_session(session_id)
+        if str(item.get("run_type", "command") or "command") == "pty"
+    )
 
 
 def _prepare_interactive_pty_command(
@@ -1195,6 +1267,16 @@ def start_interactive_pty_run():
     except _RunPreparationError as exc:
         return _preparation_error_response(exc)
 
+    pty_limit = _interactive_pty_concurrency_limit()
+    active_pty_count = _active_interactive_pty_count(session_id)
+    if active_pty_count >= pty_limit:
+        return jsonify({
+            "error": (
+                "Interactive PTY limit reached for this session "
+                f"({active_pty_count}/{pty_limit} active). Close or kill an active PTY before starting another."
+            ),
+        }), 429
+
     try:
         run = start_pty_run(
             session_id=session_id,
@@ -1207,7 +1289,10 @@ def start_interactive_pty_run():
             default_cols=pty_spec.get("default_cols"),
             owner_client_id=_active_run_owner_value(request.headers.get("X-Client-ID", "")),
             owner_tab_id=_active_run_owner_value(data.get("tab_id", "")),
-            allow_input=bool(pty_spec.get("allow_input", True)),
+            allow_input=(
+                bool(pty_spec.get("allow_input", True))
+                and str(pty_spec.get("input_safety") or "") != "no_input"
+            ),
             max_runtime_seconds=_coerce_positive_int(
                 pty_spec.get("max_runtime_seconds"),
                 _coerce_positive_int(CFG.get("interactive_pty_max_runtime_seconds", 900), 900),
@@ -1219,6 +1304,7 @@ def start_interactive_pty_run():
                     finished_iso,
                     exit_code,
                     synthesized_lines,
+                    transcript_mode=pty_spec.get("transcript_mode"),
                 )
             ),
         )
@@ -1266,13 +1352,27 @@ def stream_interactive_pty_run(run_id):
     )
 
 
+def _pty_snapshot_error_response(message: str):
+    text = message or "PTY snapshot is not available"
+    headers = {}
+    if text == "Run not found":
+        status = 404
+    elif text in {"Run is closed", "PTY run is no longer active"}:
+        status = 410
+    elif "snapshot is not available" in text:
+        status = 503
+        headers["Retry-After"] = "1"
+    else:
+        status = 409
+    return jsonify({"error": text}), status, headers
+
+
 @run_bp.route("/pty/runs/<run_id>/snapshot")
 def snapshot_interactive_pty_run(run_id):
     session_id = get_session_id()
     ok, message, snapshot = pty_run_snapshot(run_id, session_id)
     if not ok:
-        status = 404 if message == "Run not found" else 409
-        return jsonify({"error": message or "PTY snapshot is not available"}), status
+        return _pty_snapshot_error_response(message)
     return jsonify(snapshot)
 
 
@@ -1293,7 +1393,8 @@ def send_interactive_pty_input(run_id):
         _active_run_owner_value(data.get("tab_id", "")),
     )
     if not ok:
-        return jsonify({"error": message or "Input rejected"}), 404 if message == "Run not found" else 400
+        status = 404 if message == "Run not found" else 409 if "no longer active" in message else 400
+        return jsonify({"error": message or "Input rejected"}), status
     return jsonify({"ok": True})
 
 
@@ -1308,7 +1409,8 @@ def resize_interactive_pty_run(run_id):
         return jsonify({"error": "Request body must be a JSON object"}), 400
     ok, message, rows, cols = resize_pty(run_id, session_id, data.get("rows"), data.get("cols"))
     if not ok:
-        return jsonify({"error": message or "Resize rejected"}), 404 if message == "Run not found" else 400
+        status = 404 if message == "Run not found" else 409 if "no longer active" in message else 400
+        return jsonify({"error": message or "Resize rejected"}), status
     return jsonify({"ok": True, "rows": rows, "cols": cols})
 
 

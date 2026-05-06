@@ -289,6 +289,8 @@ class TestConfigRoute:
             "max_runtime_seconds": 180,
             "allow_input": False,
             "requires_args": False,
+            "transcript_mode": "final_frame",
+            "input_safety": "no_input",
         }]
 
     def test_workspace_menu_affordances_follow_config(self):

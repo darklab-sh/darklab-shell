@@ -201,6 +201,7 @@ All application settings live in `app/conf/config.yaml`. The values below are th
 | `run_broker_owner_stale_seconds` | `75` | How long an owner browser can go without touching a run before ownership is considered stale |
 | `interactive_pty_enabled` | `false` | Enables the guarded first-pass interactive PTY path for allowlisted screen tools such as `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`. Multi-worker deployments require Redis so PTY output, input, and resize events can be brokered across workers; without Redis this mode is limited to `WEB_CONCURRENCY=1` |
 | `interactive_pty_max_runtime_seconds` | `900` | Maximum lifetime for an interactive PTY command before the server terminates it |
+| `interactive_pty_max_concurrent_per_session` | `4` | Maximum number of active interactive PTY commands one browser session can run at the same time |
 | `welcome_char_ms` | `18` | Base delay between each typed character in the welcome animation (ms). Lower = faster typing |
 | `welcome_jitter_ms` | `12` | Random extra delay added per character (ms). `0` for perfectly even typing; higher for a more organic feel |
 | `welcome_post_cmd_ms` | `650` | Pause after a welcome command finishes typing, before the next visual step begins (ms) |

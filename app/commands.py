@@ -866,14 +866,28 @@ def _normalize_interactive_spec(raw_spec: object) -> dict:
     trigger_flag = str(raw_spec.get("trigger_flag") or "").strip()
     if mode != "pty" or not trigger_flag:
         return {}
+    transcript_mode = str(raw_spec.get("transcript_mode") or "final_frame").strip().lower()
+    if transcript_mode not in {"final_frame", "scrollback_findings", "all_sanitized"}:
+        transcript_mode = "final_frame"
+    allow_input = bool(raw_spec.get("allow_input", True))
+    input_safety = str(raw_spec.get("input_safety") or "").strip().lower()
+    allowed_input_safety = {"no_input", "navigation_only", "scanner_controls"}
+    if not input_safety and not allow_input:
+        input_safety = "no_input"
+    if input_safety not in allowed_input_safety:
+        return {}
+    if allow_input and input_safety == "no_input":
+        return {}
     return {
         "mode": "pty",
         "trigger_flag": trigger_flag,
         "default_rows": _coerce_positive_int(raw_spec.get("default_rows"), 24),
         "default_cols": _coerce_positive_int(raw_spec.get("default_cols"), 100),
         "max_runtime_seconds": _coerce_positive_int(raw_spec.get("max_runtime_seconds"), 900),
-        "allow_input": bool(raw_spec.get("allow_input", True)),
+        "allow_input": allow_input,
         "requires_args": bool(raw_spec.get("requires_args", False)),
+        "transcript_mode": transcript_mode,
+        "input_safety": input_safety,
     }
 
 
@@ -1087,6 +1101,8 @@ def interactive_pty_specs_from_registry(registry: dict | None = None) -> list[di
             "max_runtime_seconds": _coerce_positive_int(interactive.get("max_runtime_seconds"), 900),
             "allow_input": bool(interactive.get("allow_input", True)),
             "requires_args": bool(interactive.get("requires_args", False)),
+            "transcript_mode": str(interactive.get("transcript_mode") or "final_frame"),
+            "input_safety": str(interactive.get("input_safety") or "no_input"),
         })
     return specs
 

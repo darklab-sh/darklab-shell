@@ -291,6 +291,7 @@ function _createPtyTerminalSession(screen, rows = PTY_DEFAULT_ROWS, cols = PTY_D
 
 function _ptyFit(session) {
   if (!session || !session.fitAddon) return;
+  if (!_ptySessionIsVisible(session)) return;
   try {
     session.fitAddon.fit();
   } catch (_) {
@@ -309,11 +310,31 @@ function _ptySize(session) {
 
 function _ptyPostResize(session) {
   if (!session || !session.runId || typeof apiFetch !== 'function') return;
+  if (!_ptySessionIsVisible(session)) return;
   apiFetch(`/pty/runs/${encodeURIComponent(session.runId)}/resize`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(_ptySize(session)),
   }).catch(() => {});
+}
+
+function _ptySessionIsVisible(session) {
+  const screen = session && session.screen;
+  if (!screen || !screen.isConnected) return false;
+  const overlay = session.overlay || screen.closest('.pty-tab-overlay');
+  if (overlay && overlay.getAttribute('aria-hidden') === 'true') return false;
+  const panel = screen.closest('.tab-panel');
+  if (panel && !panel.classList.contains('active')) return false;
+  return true;
+}
+
+function _ptyFitVisibleSessions() {
+  _ptyModalState.sessions.forEach(session => {
+    if (!_ptySessionIsVisible(session)) return;
+    _ptyFit(session);
+    _ptyPostResize(session);
+    if (session.term && typeof session.term.focus === 'function') session.term.focus();
+  });
 }
 
 function _ptyInstallResizeHandlers(session) {
@@ -485,6 +506,7 @@ function _ptyOverlayForTab(tabId, { create = false } = {}) {
   const base = document.getElementById('pty-overlay');
   const overlay = base && base.dataset.ptyAllocated !== '1' ? base : _ptyBuildOverlay();
   if (overlay !== base) _ptyRemoveIds(overlay);
+  overlay.classList.add('pty-tab-overlay');
   overlay.dataset.ptyAllocated = '1';
   overlay.dataset.tabId = normalizedTabId;
   return overlay;
@@ -585,6 +607,7 @@ function _ptyCloseModal({ force = false } = {}, session = null) {
     overlay.classList.add('u-hidden');
     overlay.classList.remove('open');
     overlay.setAttribute('aria-hidden', 'true');
+    delete overlay.dataset.runId;
   }
   if (screen) {
     screen.dataset.ptyActive = '0';
@@ -939,12 +962,13 @@ async function _ptyHandleStreamEndedWithoutExit(tabId, session) {
     if (typeof startPollingActiveRunsAfterReload === 'function') startPollingActiveRunsAfterReload();
     return;
   }
-  await _ptyFinalize(tabId, session, { code: null });
+  await _ptyFinalize(tabId, session, { code: null, stream_ended_without_exit: true });
 }
 
 async function _ptyFinalize(tabId, session, msg = {}) {
   const code = msg && Object.prototype.hasOwnProperty.call(msg, 'code') ? msg.code : null;
   const elapsed = msg && Object.prototype.hasOwnProperty.call(msg, 'elapsed') ? msg.elapsed : null;
+  const streamEndedWithoutExit = !!(msg && msg.stream_ended_without_exit);
   const tab = typeof getTab === 'function' ? getTab(tabId) : null;
   const runId = String((session && session.runId) || (tab && (tab.historyRunId || tab.runId)) || '');
   if (tab) {
@@ -974,13 +998,16 @@ async function _ptyFinalize(tabId, session, msg = {}) {
     _ptyCloseModal({ force: true }, session);
   }
   const killed = !!(tab && tab.killed);
-  const ok = Number(code) === 0 || killed;
+  const ok = (code !== null && code !== undefined && Number(code) === 0) || killed;
   if (!(tab && tab.closing)) {
     await _ptyAppendSavedTranscript(tabId, runId);
   }
   if (typeof appendLine === 'function') {
     const suffix = typeof elapsed === 'number' ? ` in ${elapsed}s` : '';
-    appendLine(`[interactive PTY exited with code ${code ?? 'unknown'}${suffix}]`, ok ? 'exit-ok' : 'exit-fail', tabId);
+    const line = streamEndedWithoutExit
+      ? '[interactive PTY stream ended before an exit event; run is no longer active]'
+      : `[interactive PTY exited with code ${code ?? 'unknown'}${suffix}]`;
+    appendLine(line, ok ? 'exit-ok' : 'exit-fail', tabId);
   }
   if (typeof addToRecentPreview === 'function' && tab && tab.command && !tab.unknownCommand) {
     addToRecentPreview(tab.command);
@@ -1010,7 +1037,18 @@ async function _ptyFinalize(tabId, session, msg = {}) {
 
 async function _ptyReadStream(streamUrl, tabId, session) {
   const res = await apiFetch(streamUrl);
-  if (!res.ok || !res.body) throw new Error('Interactive stream failed');
+  if (!res.ok || !res.body) {
+    let message = 'Interactive stream failed';
+    try {
+      if (res && typeof res.json === 'function') {
+        const data = await res.json();
+        if (data && data.error) message = String(data.error);
+      }
+    } catch (_) {
+      // Keep the generic fallback if the response was not JSON.
+    }
+    throw new Error(message);
+  }
   const reader = res.body.getReader();
   if (session) session.reader = reader;
   const decoder = new TextDecoder();
@@ -1188,5 +1226,8 @@ _scheduleInteractivePtyAssetPreload();
 if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
   document.addEventListener('app:theme-changed', () => {
     _ptyApplyLiveTheme();
+  });
+  document.addEventListener('app:tab-activated', () => {
+    window.requestAnimationFrame(_ptyFitVisibleSessions);
   });
 }

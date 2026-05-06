@@ -240,7 +240,9 @@ commands:
       default_cols: 100
       max_runtime_seconds: 900
       allow_input: true
+      input_safety: navigation_only
       requires_args: true
+      transcript_mode: final_frame
     runtime_adaptations:
       inject_flags:
         - flags:
@@ -2236,7 +2238,9 @@ commands:
       default_cols: 120
       max_runtime_seconds: 900
       allow_input: true
+      input_safety: scanner_controls
       requires_args: true
+      transcript_mode: scrollback_findings
     workspace_flags:
       - flag: -w
         mode: read
@@ -2833,7 +2837,9 @@ commands:
       default_cols: 120
       max_runtime_seconds: 900
       allow_input: true
+      input_safety: scanner_controls
       requires_args: true
+      transcript_mode: scrollback_findings
     workspace_flags:
       - flag: -iL
         mode: read
