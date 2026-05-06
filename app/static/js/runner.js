@@ -292,8 +292,8 @@ function _activeRunReconnectNotice(run) {
 
 function _shouldAutoRestoreActiveRun(run) {
   if (!run || typeof run !== 'object') return false;
-  if (run.run_type === 'pty') return false;
   if (_isActiveRunDetachedForRestore(run.run_id)) return false;
+  if (run.run_type === 'pty' && typeof attachInteractivePtyCommand !== 'function') return false;
   if (run.owned_by_this_client) return true;
   if (run.owner_stale) return true;
   return !run.has_live_owner;
@@ -330,6 +330,13 @@ function restoreActiveRunsAfterReload(runs) {
     const tabId = canReuseBootstrapTab ? bootstrapTab.id : createTab();
     if (!tabId) return;
     if (!firstRestoredTabId) firstRestoredTabId = tabId;
+    if (run.run_type === 'pty' && typeof attachInteractivePtyCommand === 'function') {
+      attachInteractivePtyCommand(run, tabId).catch(err => {
+        appendLine(`[server error] ${err.message || 'Interactive PTY reattach failed'}`, 'exit-fail', tabId);
+        setTabStatus(tabId, 'fail');
+      });
+      return;
+    }
     clearTab(tabId);
     const t = getTab(tabId);
     if (!t) return;
@@ -410,11 +417,8 @@ function _attachActiveRunToTab(run, tabId, { mode = 'attached' } = {}) {
 function attachActiveRunFromMonitor(run) {
   if (!run || !run.run_id) return Promise.resolve(false);
   if (run.run_type === 'pty') {
-    const message = run.has_live_owner && !run.owned_by_this_client
-      ? 'Interactive PTY is still running in another browser. Return to the owning browser tab for the live terminal, or use Status Monitor to kill it.'
-      : 'Interactive PTY is still running, but this browser cannot reconstruct the terminal after reload yet. Use the owning tab while it is open, or Status Monitor to track and kill the run.';
-    if (typeof showToast === 'function') showToast(message, 'error');
-    return Promise.resolve(false);
+    if (typeof attachInteractivePtyCommand !== 'function') return Promise.resolve(false);
+    return attachInteractivePtyCommand(run);
   }
   const tabId = createTab();
   if (!tabId) return Promise.resolve(false);

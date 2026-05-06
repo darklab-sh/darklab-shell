@@ -42,6 +42,7 @@ _PROMPT_USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
 
 _RECENT_DOMAIN_LIMIT = 10
 _DOMAIN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+_IPV4_RE = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}$")
 
 
 def _session_kind(session_id):
@@ -78,10 +79,15 @@ def _normalize_recent_domain(value):
         return ""
     if "." not in text:
         return ""
-    if re.fullmatch(r"\d+(?:\.\d+){3}", text):
+    if _IPV4_RE.fullmatch(text):
+        octets = text.split(".")
+        if all(0 <= int(octet) <= 255 and str(int(octet)) == octet for octet in octets):
+            return text
         return ""
     labels = text.split(".")
     if len(labels) < 2:
+        return ""
+    if all(label.isdigit() for label in labels):
         return ""
     for label in labels:
         if len(label) < 1 or len(label) > 63 or not _DOMAIN_LABEL_RE.fullmatch(label):

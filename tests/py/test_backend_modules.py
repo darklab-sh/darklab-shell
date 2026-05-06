@@ -21,12 +21,14 @@ import random
 import re
 import shlex
 import sqlite3
+import subprocess
 import tempfile
 import textwrap
 import unittest.mock as mock
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import cast
 
 import pytest
 import yaml
@@ -2885,6 +2887,48 @@ class TestPtyBrokerService:
         assert "live hop" in chunk
         assert '"type": "output"' in chunk
 
+    def test_pty_snapshot_loads_distributed_redis_snapshot_without_local_run(self):
+        class FakeProc:
+            pid = 4242
+
+        class FakeCapture:
+            def synthesize_entries(self):
+                return [{"text": "plain fallback", "cls": ""}]
+
+            def ansi_snapshot(self):
+                return "\x1b[0m\x1b[2J\x1b[Hredis snapshot\x1b[1;1H", False
+
+        fake = process._FakeRedisClient()
+        run = pty_service.PtyRun(
+            run_id="pty-run-snapshot-redis",
+            session_id="session-1",
+            command="mtr --interactive darklab.sh",
+            argv=["mtr", "darklab.sh"],
+            started="2026-01-01T00:00:00Z",
+            master_fd=-1,
+            proc=cast(subprocess.Popen, FakeProc()),
+            rows=24,
+            cols=100,
+            allow_input=True,
+            max_runtime_seconds=900,
+            brokered=True,
+            terminal_capture=cast(pty_service.PtyTerminalCapture, FakeCapture()),
+        )
+        run.capture_event_id = "1770000000000-2"
+
+        with mock.patch.object(pty_service, "redis_client", fake):
+            pty_service._store_pty_meta(run)
+            pty_service._store_pty_snapshot(run, force=True)
+            ok, message, snapshot = pty_service.pty_run_snapshot(run.run_id, "session-1")
+
+        assert ok is True
+        assert message == ""
+        assert snapshot is not None
+        assert snapshot["snapshot_format"] == "ansi"
+        assert snapshot["ansi_snapshot"].endswith("redis snapshot\x1b[1;1H")
+        assert snapshot["after_event_id"] == "1770000000000-2"
+        assert snapshot["entries"] == []
+
     def test_pty_start_cleans_up_if_reader_thread_fails_to_start(self):
         class FakeProc:
             pid = 4242
@@ -2972,11 +3016,23 @@ class TestPtyBrokerService:
 
 class TestPtyTerminalCapture:
     @staticmethod
-    def _fake_pyte(scrollback=None, final_frame=None, *, feed_error=False, feed_calls=None):
+    def _fake_pyte(
+        scrollback=None,
+        final_frame=None,
+        *,
+        buffer=None,
+        cursor=None,
+        feed_error=False,
+        feed_calls=None,
+    ):
         class FakeHistoryScreen:
             def __init__(self, cols, rows, history):  # noqa: ARG002
                 self.history = type("FakeHistory", (), {"top": scrollback or []})()
                 self.display = final_frame or []
+                if buffer is not None:
+                    self.buffer = buffer
+                cursor_y, cursor_x = cursor or (0, 0)
+                self.cursor = type("FakeCursor", (), {"y": cursor_y, "x": cursor_x})()
                 self.resized = None
 
             def resize(self, *, lines, columns):
@@ -3016,6 +3072,37 @@ class TestPtyTerminalCapture:
             {"text": "", "cls": "pty-marker"},
             {"text": "visible line", "cls": ""},
         ]
+
+    def test_terminal_capture_builds_ansi_snapshot_with_attrs_and_cursor(self):
+        cell = type(
+            "FakeCell",
+            (),
+            {
+                "data": "R",
+                "fg": "red",
+                "bg": "default",
+                "bold": True,
+                "italics": False,
+                "underscore": False,
+                "strikethrough": False,
+                "reverse": False,
+            },
+        )()
+        fake_pyte = self._fake_pyte(
+            scrollback=["older row"],
+            buffer={0: {0: cell, 1: "!"}, 1: "plain row"},
+            cursor=(1, 2),
+        )
+        with mock.patch.object(pty_service, "pyte", fake_pyte):
+            capture = pty_service.PtyTerminalCapture(rows=2, cols=10, history_lines=20)
+            snapshot, truncated = capture.ansi_snapshot()
+
+        assert truncated is False
+        assert snapshot.startswith("\x1b[0m\x1b[2J\x1b[H")
+        assert "older row" in snapshot
+        assert "\x1b[1;31mR\x1b[0m!" in snapshot
+        assert "plain row" in snapshot
+        assert snapshot.endswith("\x1b[0m\x1b[2;3H")
 
     def test_terminal_capture_omits_marker_when_only_final_frame_exists(self):
         fake_pyte = self._fake_pyte(final_frame=["mtr final row  ", ""])

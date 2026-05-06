@@ -1,6 +1,7 @@
 import { MemoryStorage, fromDomScript, fromScript } from './helpers/extract.js'
 
 const {
+  attachInteractivePtyCommand,
   _createPtyTerminalSession,
   _failInteractivePtyTab,
   _interactivePtyEnabled,
@@ -18,9 +19,9 @@ const {
   _xtermGlobalsAvailable,
   focusActiveInteractivePty,
   isInteractivePtyCommand,
-  reopenInteractivePtyModal,
 } = fromScript(
   'app/static/js/pty.js',
+  'attachInteractivePtyCommand',
   '_createPtyTerminalSession',
   '_failInteractivePtyTab',
   '_interactivePtyEnabled',
@@ -38,7 +39,6 @@ const {
   '_xtermGlobalsAvailable',
   'focusActiveInteractivePty',
   'isInteractivePtyCommand',
-  'reopenInteractivePtyModal',
 )
 
 describe('interactive PTY terminal', () => {
@@ -68,6 +68,7 @@ describe('interactive PTY terminal', () => {
     delete globalThis.getTab
     delete globalThis.getTabPanel
     delete globalThis.confirmKill
+    delete globalThis.confirmCloseRunningTab
     delete globalThis._workspaceCwd
     delete globalThis.useMobileTerminalViewportMode
   })
@@ -242,13 +243,14 @@ describe('interactive PTY terminal', () => {
     expect(document.querySelector('.tab-panel[data-id="tab-2"] #pty-overlay')).toBeNull()
 
     expect(_ptyScopeModalToTab('tab-2')).toBe(true)
-    expect(document.getElementById('pty-overlay').parentElement.dataset.id).toBe('tab-2')
-    expect(document.querySelector('.tab-panel[data-id="tab-1"] #pty-overlay')).toBeNull()
+    expect(document.getElementById('pty-overlay').parentElement.dataset.id).toBe('tab-1')
+    expect(document.querySelector('.tab-panel[data-id="tab-2"] .pty-tab-overlay')).not.toBeNull()
   })
 
-  it('shows a running-tab indicator that can reopen the hidden live PTY modal', () => {
+  it('uses the running-tab close confirmation from the PTY modal close button', () => {
     const focus = vi.fn()
     const fit = vi.fn()
+    const confirmCloseRunningTab = vi.fn()
     class FakeTerminal {
       constructor(options) {
         this.options = options
@@ -264,6 +266,10 @@ describe('interactive PTY terminal', () => {
     }
     globalThis.Terminal = FakeTerminal
     globalThis.FitAddon = { FitAddon: FakeFitAddon }
+    globalThis.confirmCloseRunningTab = confirmCloseRunningTab
+    globalThis.bindDismissible = (overlay, options) => {
+      options.closeButtons.addEventListener('click', () => options.onClose())
+    }
     document.body.innerHTML = `
       <div id="tab-panels">
         <div class="tab-panel active" data-id="tab-1">
@@ -278,7 +284,6 @@ describe('interactive PTY terminal', () => {
           <span id="pty-modal-command"></span>
           <span id="pty-modal-status" data-tone=""><span id="pty-modal-status-label"></span></span>
           <span id="pty-modal-elapsed"></span>
-          <button id="pty-modal-hide"></button>
           <button class="pty-modal-close"></button>
           <button id="pty-modal-kill"></button>
           <section id="pty-modal-screen" class="pty-screen"></section>
@@ -287,22 +292,18 @@ describe('interactive PTY terminal', () => {
     `
     globalThis.getTabPanel = (tabId) => document.querySelector(`.tab-panel[data-id="${tabId}"]`)
 
-    const session = _ptyOpenModal('tab-1', 'mtr --interactive darklab.sh', 24, 100)
-    session.runId = 'run-1'
+    _ptyOpenModal('tab-1', 'mtr --interactive darklab.sh', 24, 100, 'run-1')
     const overlay = document.getElementById('pty-overlay')
-    document.getElementById('pty-modal-hide').disabled = false
-    document.getElementById('pty-modal-hide').click()
+    document.querySelector('.pty-modal-close').disabled = false
+    document.querySelector('.pty-modal-close').click()
 
-    expect(document.querySelector('.pty-running-indicator')?.textContent).toContain('Interactive PTY running')
-    expect(overlay.classList.contains('open')).toBe(false)
-    expect(overlay.getAttribute('aria-hidden')).toBe('true')
-    expect(reopenInteractivePtyModal('tab-1')).toBe(true)
+    expect(confirmCloseRunningTab).toHaveBeenCalledWith('tab-1')
     expect(overlay.classList.contains('open')).toBe(true)
     expect(overlay.getAttribute('aria-hidden')).toBe('false')
     expect(fit).toHaveBeenCalled()
   })
 
-  it('preserves an existing PTY modal when a second PTY start is rejected', () => {
+  it('allows multiple tab-scoped PTY modals to run concurrently', async () => {
     const disposedTerms = []
     class FakeTerminal {
       constructor(options) {
@@ -341,45 +342,42 @@ describe('interactive PTY terminal', () => {
         </div>
       </div>
     `
-    globalThis.tabs = [
-      { id: 'tab-1', st: 'running', interactivePtyActive: true, ptyTerminal: null, rawLines: [] },
-      { id: 'tab-2', st: 'idle', interactivePtyActive: false, ptyTerminal: null, rawLines: [] },
-    ]
-    globalThis.activeTabId = 'tab-2'
+    globalThis.activeTabId = 'tab-1'
     globalThis.getTab = (tabId) => globalThis.tabs.find(tab => tab.id === tabId)
     globalThis.getTabPanel = (tabId) => document.querySelector(`.tab-panel[data-id="${tabId}"]`)
-    globalThis.appendCommandEcho = vi.fn()
-    globalThis.appendLine = vi.fn()
-    globalThis.setStatus = vi.fn()
-    globalThis.setTabStatus = vi.fn()
-    globalThis._setRunButtonDisabled = vi.fn()
-    globalThis.showTabKillBtn = vi.fn()
-    globalThis.hideTabKillBtn = vi.fn()
-    globalThis.startTimer = vi.fn()
-    globalThis.stopTimer = vi.fn()
-    globalThis.refocusComposerAfterAction = vi.fn()
-    globalThis._workspaceCwd = vi.fn(() => '')
 
-    const firstSession = _ptyOpenModal('tab-1', 'mtr --interactive darklab.sh', 24, 100)
-    firstSession.runId = 'run-1'
+    globalThis.tabs = [
+      { id: 'tab-1', st: 'running', interactivePtyActive: true, ptyTerminal: null, rawLines: [] },
+      { id: 'tab-2', st: 'running', interactivePtyActive: true, ptyTerminal: null, rawLines: [] },
+    ]
+
+    const firstSession = _ptyOpenModal('tab-1', 'mtr --interactive darklab.sh', 24, 100, 'run-1')
     globalThis.tabs[0].ptyTerminal = firstSession.term
+    const secondSession = _ptyOpenModal('tab-2', 'mtr --interactive example.com', 24, 100, 'run-2')
+    globalThis.tabs[1].ptyTerminal = secondSession.term
+
+    const firstOverlay = document.getElementById('pty-overlay')
+    const secondOverlay = document.querySelector('.tab-panel[data-id="tab-2"] .pty-tab-overlay')
+    expect(secondOverlay.querySelector('.pty-modal')).not.toBeNull()
+    await _ptyFinalize('tab-1', firstSession, { code: 0, elapsed: 0.2 })
+
+    expect(firstOverlay.parentElement.dataset.id).toBe('tab-1')
+    expect(secondOverlay.parentElement.dataset.id).toBe('tab-2')
+    expect(firstOverlay.classList.contains('open')).toBe(false)
+    expect(secondOverlay.classList.contains('open')).toBe(true)
+    expect(firstSession.term.dispose).toHaveBeenCalled()
+    expect(secondSession.term.dispose).not.toHaveBeenCalled()
 
     _failInteractivePtyTab(
       'tab-2',
-      '[server error] An interactive PTY is already running in this session.',
-      null,
+      '[server error] example failure',
+      secondSession,
     )
 
-    const overlay = document.getElementById('pty-overlay')
-    expect(overlay.parentElement.dataset.id).toBe('tab-1')
-    expect(overlay.classList.contains('open')).toBe(true)
-    expect(document.getElementById('pty-modal-screen').dataset.tabId).toBe('tab-1')
-    expect(firstSession.term.dispose).not.toHaveBeenCalled()
-    expect(globalThis.appendLine).toHaveBeenCalledWith(
-      '[server error] An interactive PTY is already running in this session.',
-      'exit-fail',
-      'tab-2',
-    )
+    expect(firstOverlay.parentElement.dataset.id).toBe('tab-1')
+    expect(secondOverlay.parentElement.dataset.id).toBe('tab-2')
+    expect(secondOverlay.classList.contains('open')).toBe(false)
+    expect(secondSession.term.dispose).toHaveBeenCalled()
   })
 
   it('lets Ctrl+C flow through xterm as native PTY input', () => {
@@ -443,6 +441,145 @@ describe('interactive PTY terminal', () => {
       'notice',
       'tab-1',
     )
+  })
+
+  it('reattaches an active PTY from a snapshot and follows the live stream', async () => {
+    vi.useFakeTimers()
+    const writes = []
+    const focus = vi.fn()
+    class FakeTerminal {
+      constructor(options) {
+        this.options = options
+        this.rows = options.rows
+        this.cols = options.cols
+      }
+      loadAddon() {}
+      open() {}
+      focus() { focus() }
+      write(text) { writes.push(text) }
+      onData() {
+        return { dispose: vi.fn() }
+      }
+      onResize() {
+        return { dispose: vi.fn() }
+      }
+      attachCustomKeyEventHandler() {}
+    }
+    class FakeFitAddon {
+      fit() {}
+    }
+    globalThis.Terminal = FakeTerminal
+    globalThis.FitAddon = { FitAddon: FakeFitAddon }
+    document.body.innerHTML = `
+      <div id="tab-panels">
+        <div class="tab-panel active" data-id="tab-1">
+          <div class="terminal-body">
+            <div id="output-tab-1" class="output"></div>
+          </div>
+        </div>
+      </div>
+      <div id="pty-overlay" class="modal-overlay mobile-sheet-overlay pty-tab-overlay u-hidden" aria-hidden="true">
+        <div id="pty-modal" class="pty-modal">
+          <span id="pty-modal-command"></span>
+          <span id="pty-modal-status" data-tone=""><span id="pty-modal-status-label"></span></span>
+          <span id="pty-modal-elapsed"></span>
+          <button class="pty-modal-close"></button>
+          <button id="pty-modal-kill"></button>
+          <section id="pty-modal-screen" class="pty-screen"></section>
+        </div>
+      </div>
+    `
+    const xtermStylesheet = document.createElement('link')
+    xtermStylesheet.rel = 'stylesheet'
+    xtermStylesheet.href = '/vendor/xterm.css'
+    document.head.appendChild(xtermStylesheet)
+    globalThis.tabs = [{ id: 'tab-1', st: 'idle', rawLines: [], ptyTerminal: null }]
+    globalThis.activeTabId = 'tab-1'
+    globalThis.getTab = (tabId) => globalThis.tabs.find(tab => tab.id === tabId)
+    globalThis.getTabPanel = (tabId) => document.querySelector(`.tab-panel[data-id="${tabId}"]`)
+    globalThis.clearTab = vi.fn((tabId) => {
+      const tab = globalThis.getTab(tabId)
+      if (tab) tab.rawLines = []
+    })
+    globalThis.setTabRunningCommand = vi.fn((tabId, command) => {
+      const tab = globalThis.getTab(tabId)
+      if (tab) tab.command = command
+    })
+    globalThis.appendCommandEcho = vi.fn()
+    globalThis.appendLine = vi.fn()
+    globalThis.setStatus = vi.fn()
+    globalThis.setTabStatus = vi.fn((tabId, status) => {
+      const tab = globalThis.getTab(tabId)
+      if (tab) tab.st = status
+    })
+    globalThis._setRunButtonDisabled = vi.fn()
+    globalThis.showTabKillBtn = vi.fn()
+    globalThis.syncActiveRunTimer = vi.fn()
+    globalThis.activateTab = vi.fn()
+    globalThis.apiFetch = vi.fn(async (url) => {
+      if (url === '/pty/runs/run-pty/snapshot') {
+        return {
+          ok: true,
+          json: async () => ({
+            run_id: 'run-pty',
+            command: 'mtr --interactive darklab.sh',
+            started: '2026-05-06T00:00:00Z',
+            rows: 30,
+            cols: 120,
+            after_event_id: '1770000000000-2',
+            entries: [{ text: 'hop 1 darklab.sh', cls: '' }],
+            snapshot_format: 'ansi',
+            ansi_snapshot: '\x1b[0m\x1b[2J\x1b[H\x1b[1mhop 1 darklab.sh\x1b[0m\x1b[1;1H',
+            snapshot_truncated: false,
+          }),
+        }
+      }
+      if (url === '/pty/runs/run-pty/resize') {
+        return { ok: true, json: async () => ({ ok: true }) }
+      }
+      if (url.includes('/pty/runs/run-pty/stream?tab_id=tab-1&after=1770000000000-2')) {
+        return new Promise(() => {})
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    })
+
+    await expect(attachInteractivePtyCommand({
+      run_id: 'run-pty',
+      command: 'mtr --interactive darklab.sh',
+      started: '2026-05-06T00:00:00Z',
+    }, 'tab-1')).resolves.toBe(true)
+
+    expect(globalThis.appendLine).toHaveBeenCalledWith('[reattached to active interactive PTY]', 'notice', 'tab-1')
+    expect(writes.join('')).toContain('\x1b[1mhop 1 darklab.sh')
+    expect(writes.join('')).not.toContain('[reattached - earlier formatting lost]')
+    expect(globalThis.apiFetch).toHaveBeenCalledWith('/pty/runs/run-pty/snapshot')
+    expect(globalThis.apiFetch).toHaveBeenCalledWith('/pty/runs/run-pty/stream?tab_id=tab-1&after=1770000000000-2')
+    expect(globalThis.tabs[0].interactivePtyActive).toBe(true)
+    expect(globalThis.tabs[0].ptyTerminal).toBeTruthy()
+    expect(focus).toHaveBeenCalled()
+    vi.clearAllTimers()
+    vi.useRealTimers()
+  })
+
+  it('does not create a PTY reattach tab when the snapshot is unavailable', async () => {
+    const createTab = vi.fn(() => 'tab-new')
+    globalThis.createTab = createTab
+    globalThis.apiFetch = vi.fn(async (url) => {
+      if (url === '/pty/runs/run-pty/snapshot') {
+        return {
+          ok: false,
+          json: async () => ({ error: 'PTY snapshot is not available from this worker' }),
+        }
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    })
+
+    await expect(attachInteractivePtyCommand({
+      run_id: 'run-pty',
+      command: 'mtr --interactive darklab.sh',
+    })).rejects.toThrow('PTY snapshot is not available')
+
+    expect(createTab).not.toHaveBeenCalled()
   })
 
   it('finalizes PTY tabs like normal completed runs', async () => {
@@ -639,9 +776,13 @@ describe('interactive PTY terminal', () => {
     expect(disposed).toHaveBeenCalledTimes(1)
     expect(showTabKillBtn).toHaveBeenCalledWith('tab-1')
     expect(startPollingActiveRunsAfterReload).toHaveBeenCalledTimes(1)
-    expect(document.querySelector('.pty-running-indicator')?.textContent).toContain('Reattach unavailable')
     expect(appendLine).toHaveBeenCalledWith(
       '[interactive PTY stream detached - process is still running]',
+      'notice',
+      'tab-1',
+    )
+    expect(appendLine).toHaveBeenCalledWith(
+      '[use Status Monitor to reattach, track, or kill this run]',
       'notice',
       'tab-1',
     )

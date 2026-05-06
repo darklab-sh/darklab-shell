@@ -344,8 +344,18 @@ class TestInteractivePtyRuns:
         assert kwargs["allow_input"] is False
         assert kwargs["max_runtime_seconds"] == 180
 
-    def test_start_interactive_pty_rejects_second_active_pty_for_session(self):
+    def test_start_interactive_pty_allows_multiple_active_pty_runs_for_session(self):
         client = get_client()
+        fake_run = SimpleNamespace(run_id="pty-run-second", rows=24, cols=100)
+
+        def _allow(command, session_id=None, cfg=None, workspace_cwd=""):  # noqa: ARG001
+            assert command == "mtr example.com"
+            return run_routes.CommandValidationResult(
+                True,
+                "",
+                display_command=command,
+                exec_command=command,
+            )
 
         with mock.patch("blueprints.run.pty_enabled", return_value=True), \
              mock.patch("blueprints.run.pty_broker_available", return_value=True), \
@@ -354,22 +364,25 @@ class TestInteractivePtyRuns:
                  "command": "mtr --interactive darklab.sh",
                  "run_type": "pty",
              }]), \
-             mock.patch("blueprints.run.start_pty_run") as start_pty:
+             mock.patch("blueprints.run.validate_command", side_effect=_allow), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.start_pty_run", return_value=fake_run) as start_pty:
             resp = client.post(
                 "/pty/runs",
                 json={"command": "mtr --interactive example.com"},
                 headers={"X-Session-ID": "sess-pty-active"},
             )
 
-        assert resp.status_code == 409
-        assert resp.get_json()["run_id"] == "active-pty"
-        start_pty.assert_not_called()
+        assert resp.status_code == 202
+        assert resp.get_json()["run_id"] == "pty-run-second"
+        start_pty.assert_called_once()
 
     def test_stream_interactive_pty_touches_active_run_owner(self):
         client = get_client()
 
         with mock.patch("blueprints.run.pty_run_belongs_to_session", return_value=True), \
              mock.patch("blueprints.run.stream_pty_events", return_value=iter(['data: {"type":"heartbeat"}\n\n'])), \
+             mock.patch("blueprints.run.active_run_claim_owner") as claim_owner, \
              mock.patch("blueprints.run.active_run_touch_owner") as touch_owner:
             resp = client.get(
                 "/pty/runs/pty-run-owner/stream?tab_id=tab-1",
@@ -381,7 +394,68 @@ class TestInteractivePtyRuns:
 
         assert resp.status_code == 200
         assert b"heartbeat" in resp.data
+        claim_owner.assert_called_once_with("pty-run-owner", "client-1", "tab-1")
         touch_owner.assert_called_once_with("pty-run-owner", "client-1", "tab-1")
+
+        with mock.patch("blueprints.run.pty_run_belongs_to_session", return_value=False), \
+             mock.patch("blueprints.run.stream_pty_events", return_value=iter(['data: {"type":"error"}\n\n'])), \
+             mock.patch("blueprints.run.active_run_claim_owner") as rejected_claim_owner:
+            resp = client.get(
+                "/pty/runs/pty-run-other/stream?tab_id=tab-1",
+                headers={
+                    "X-Session-ID": "sess-pty-owner",
+                    "X-Client-ID": "client-1",
+                },
+            )
+
+        assert resp.status_code == 404
+        rejected_claim_owner.assert_not_called()
+
+    def test_snapshot_interactive_pty_returns_terminal_resume_state(self):
+        client = get_client()
+
+        with mock.patch("blueprints.run.pty_run_snapshot", return_value=(True, "", {
+            "run_id": "pty-run-snapshot",
+            "command": "mtr --interactive darklab.sh",
+            "started": "2026-05-06T00:00:00+00:00",
+            "rows": 24,
+            "cols": 100,
+            "after_event_id": "1770000000000-1",
+            "entries": [{"text": "hop 1 darklab.sh", "cls": ""}],
+            "snapshot_format": "ansi",
+            "ansi_snapshot": "\x1b[0m\x1b[2J\x1b[Hhop 1 darklab.sh\x1b[1;1H",
+            "snapshot_truncated": False,
+        })) as snapshot:
+            resp = client.get(
+                "/pty/runs/pty-run-snapshot/snapshot",
+                headers={"X-Session-ID": "sess-pty-snapshot"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["run_id"] == "pty-run-snapshot"
+        assert data["after_event_id"] == "1770000000000-1"
+        assert data["entries"] == [{"text": "hop 1 darklab.sh", "cls": ""}]
+        assert data["snapshot_format"] == "ansi"
+        assert data["ansi_snapshot"].startswith("\x1b[0m\x1b[2J\x1b[H")
+        assert data["snapshot_truncated"] is False
+        snapshot.assert_called_once_with("pty-run-snapshot", "sess-pty-snapshot")
+
+    def test_snapshot_interactive_pty_reports_worker_local_limit(self):
+        client = get_client()
+
+        with mock.patch("blueprints.run.pty_run_snapshot", return_value=(
+            False,
+            "PTY snapshot is not available from this worker",
+            None,
+        )):
+            resp = client.get(
+                "/pty/runs/pty-run-other-worker/snapshot",
+                headers={"X-Session-ID": "sess-pty-snapshot-limit"},
+            )
+
+        assert resp.status_code == 409
+        assert "not available from this worker" in resp.get_json()["error"]
 
     def test_kill_routes_pty_killed_event_to_pty_stream(self):
         client = get_client()

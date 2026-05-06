@@ -18,7 +18,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 ## Open TODOs
 
 - **Potential interactive PTY improvements**
-  - **Current state:** `mtr --interactive <host>`, `ffuf --interactive ...`, and `masscan --interactive ...` have a guarded PTY path behind `interactive_pty_enabled`, use dedicated `/pty/runs` start/stream/input/resize routes, broker PTY events through Redis in multi-worker deployments, render the live terminal in an xterm.js modal, and append completed PTY runs back into the normal terminal/history output path using server-side terminal capture.
+  - **Current state:** `mtr --interactive <host>`, `ffuf --interactive ...`, and `masscan --interactive ...` have a guarded PTY path behind `interactive_pty_enabled`, use dedicated `/pty/runs` start/stream/input/resize routes, broker PTY events through Redis in multi-worker deployments, support multiple concurrent PTY runs per session with each live terminal scoped to its owning tab, render the live terminal in an xterm.js modal, and append completed PTY runs back into the normal terminal/history output path using server-side terminal capture.
   - **Lifecycle and resilience**
     - Add lifecycle cleanup beyond process exit and max runtime, including stale closed-run cleanup and clearer browser-disconnect behavior.
     - Treat worker-death mid-run as a known limitation: the server-side terminal screen lives on the worker that owns `master_fd`, so a worker crash before exit drops the run from history. Periodic terminal-state snapshots into Redis would address this and are deferred until real usage shows they are needed.
@@ -37,32 +37,6 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - `_PTY_INPUT_MAX_BYTES`, `_PTY_BUFFER_LIMIT`, `_PTY_CONTROL_POLL_SECONDS`, and similar tunables are module constants. Move to config so deploys can tune without a rebuild.
     - Add metrics covering concurrent PTY count, average and p95 duration, total input bytes, dropped input bytes, and control queue depth. Expose them through the existing `/diag` surface so operators have visibility comparable to other run paths.
     - The reader loop polls Redis every 200 ms via `xread block=1` for control events. With many concurrent PTYs this is wasted ops. Switch the control channel to Redis Pub/Sub (or a longer block window) so idle PTYs cost zero ops while output latency stays unaffected.
-
-- **Implementation plan: reattach to active PTY runs from a new browser context**
-  - **Goal:** make the existing reload-restore and Status Monitor "Attach" flows work for PTY runs the way they already do for normal `/runs`. Today both paths explicitly reject `run_type === 'pty'` (`runner.js:295`, `runner.js:412`, and the `_isPtyRun` guards in `status_monitor.js`) because PTY output is stateful and cannot be reconstructed by replaying events from `after_id` against a blank xterm. The work below restores screen state at attach time and then follows live, in three additive tiers.
-  - **Phase 1 — Plain-text resume**
-    - Add `GET /pty/runs/<run_id>/snapshot` returning the existing `synthesize_entries()` text plus `rows`, `cols`, and the most recent `after_event_id`. The session-owner check matches the other PTY routes; reject when the run is not in `_runs` on this worker so the caller can surface the worker-death case clearly.
-    - Add `attachInteractivePtyCommand(runId)` on the frontend: open a fresh xterm modal, `term.write()` the snapshot text plus a one-line `[reattached — earlier formatting lost]` notice, then subscribe to `/pty/runs/<run_id>/stream?after=<event_id>` to follow live.
-    - Flip the rejection guards: `_shouldAutoRestoreActiveRun`, `attachActiveRunFromMonitor`, and the `_isPtyRun` action gates in `status_monitor.js`. For runs owned by the current session, route them through `attachInteractivePtyCommand` instead of refusing.
-    - Decide and codify the multi-subscriber input policy now, even though it is technically a Phase 2/3 problem. The simplest rule is "the most recent attach holds input, earlier subscribers go read-only," issued as a server-owned attach token tied to a single client id. Locking this in during Phase 1 avoids a behavior change once users rely on the feature.
-    - Document worker-death as a Phase 1 limitation: reattach only works while the worker that owns `master_fd` is alive. Phase 3 removes it.
-    - Tests: snapshot endpoint shape and session-owner enforcement; attach flow that writes the snapshot and subscribes from the supplied event id; one Playwright smoke that submits an interactive command, reloads or clicks Attach, and asserts the live PTY continues in the new context.
-  - **Phase 2 — Stateful pyte snapshot**
-    - Add a pyte → ANSI serializer that walks `screen.history.top` and `screen.display`, emitting SGR changes, cell data, scroll-region setup, alt-screen toggle when active, and a final cursor-position move. Target the subset xterm.js needs to recreate the screen, not full ECMA-48 fidelity.
-    - Switch the snapshot endpoint payload from synthesized text to the serialized ANSI byte stream and update the attach flow to `term.write()` those bytes. No other frontend logic changes; everything from Phase 1 still applies.
-    - Replace the Phase 1 `[reattached — earlier formatting lost]` notice with a subtler `[reattached]` line once snapshots restore colors, cursor, and scroll state faithfully. The audit trail is still useful even when the visual difference disappears.
-    - Cap serializer output to a hard byte ceiling so a runaway alt-screen plus deep history cannot turn one reattach into a multi-megabyte response.
-    - Tests: feed a known sequence into pyte, snapshot, feed the snapshot into a fresh pyte, assert `display` and `history` round-trip. Cover SGR, cursor position, scroll regions, and alt-screen states.
-  - **Phase 3 — Distributed snapshots**
-    - Periodically push the serialized pyte snapshot to Redis from the reader loop (every N bytes or every N seconds, whichever fires first). Cap snapshot age so stale reattaches degrade to "earlier output truncated" instead of silently lying about state.
-    - Read snapshots from Redis in the snapshot endpoint instead of relying on a worker-resident pyte instance. Lets any worker serve the reattach, removes the worker-death limitation, and removes any need for sticky sessions during reattach.
-    - Reuse `run_broker_active_stream_ttl_seconds` for the snapshot key TTL so completed-run cleanup stays unified instead of growing a parallel retention knob.
-    - Tests: simulate worker death by mocking the `_runs` lookup to return None and assert the Redis-backed snapshot path still produces a usable terminal; verify the periodic publisher does not regress live SSE latency under sustained output.
-  - **Cross-cutting decisions**
-    - **Snapshot freshness race:** the snapshot endpoint must return the `after_event_id` corresponding to the last event applied to the snapshot, so the subscribe call closes the gap deterministically. No locks needed; ordering is guaranteed by the Redis xstream id space.
-    - **Modal integration:** reattach should target the PTY modal, not the main transcript. If the modal is gone after a reload, the main tab shows a "Reopen PTY" button that opens the modal from a user gesture and runs the attach flow.
-    - **Bandwidth:** Phase 2 snapshots for a 24×100 terminal are at most ~24 KB; Phase 1 is ~2–3 KB. Not a sizing constraint, but pair the Phase 2 hard ceiling with a one-line size-warning log so unexpected blowup is visible in operator metrics.
-    - **Status Monitor parity:** once Phase 1 lands, the Attach action for PTY runs should use the same hover/focus chrome as normal runs. No PTY-specific styling; the rejection guards were the only difference.
 
 ## Research
 

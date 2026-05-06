@@ -734,6 +734,8 @@ class TestSessionRecentDomains:
                     "Alpha.Example.com.",
                     "https://ignored.example",
                     "127.0.0.1",
+                    "192.168.1",
+                    "999.0.0.1",
                     "user@example.com",
                     "with/path.example",
                     "Alpha.Example.com",
@@ -748,6 +750,7 @@ class TestSessionRecentDomains:
         assert data["saved"] == 10
         assert data["domains"] == [
             "alpha.example.com",
+            "127.0.0.1",
             "d0.example.com",
             "d1.example.com",
             "d2.example.com",
@@ -756,7 +759,6 @@ class TestSessionRecentDomains:
             "d5.example.com",
             "d6.example.com",
             "d7.example.com",
-            "d8.example.com",
         ]
         assert self._domains(session_id) == data["domains"]
 

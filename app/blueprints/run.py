@@ -45,6 +45,7 @@ from builtin_commands import (
 )
 from helpers import get_client_ip, get_log_session_id, get_session_id
 from process import (
+    active_run_claim_owner,
     active_run_register,
     active_run_remove,
     active_run_touch_owner,
@@ -70,6 +71,7 @@ from pty_service import (
     pty_broker_available,
     pty_broker_unavailable_reason,
     pty_enabled,
+    pty_run_snapshot,
     pty_run_belongs_to_session,
     resize_pty,
     start_pty_run,
@@ -1183,19 +1185,6 @@ def start_interactive_pty_run():
     session_id = get_session_id()
     client_ip = get_client_ip()
     workspace_cwd = _active_run_owner_value(data.get("workspace_cwd", ""))
-    active_pty = next(
-        (
-            run for run in active_runs_for_session(session_id)
-            if str(run.get("run_type", "")).lower() == "pty"
-        ),
-        None,
-    )
-    if active_pty:
-        return jsonify({
-            "error": "An interactive PTY is already running in this session.",
-            "run_id": active_pty.get("run_id", ""),
-            "command": active_pty.get("command", ""),
-        }), 409
     try:
         argv, execution_command, pty_spec = _prepare_interactive_pty_command(
             original_command,
@@ -1261,6 +1250,8 @@ def stream_interactive_pty_run(run_id):
     after_id = request.args.get("after", "0-0") or "0-0"
     owner_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
     owner_tab_id = _active_run_owner_value(request.args.get("tab_id", ""))
+    if owner_client_id and pty_run_belongs_to_session(run_id, session_id):
+        active_run_claim_owner(run_id, owner_client_id, owner_tab_id)
 
     def generate():
         for item in stream_pty_events(run_id, session_id, after=after_id):
@@ -1275,6 +1266,16 @@ def stream_interactive_pty_run(run_id):
     )
 
 
+@run_bp.route("/pty/runs/<run_id>/snapshot")
+def snapshot_interactive_pty_run(run_id):
+    session_id = get_session_id()
+    ok, message, snapshot = pty_run_snapshot(run_id, session_id)
+    if not ok:
+        status = 404 if message == "Run not found" else 409
+        return jsonify({"error": message or "PTY snapshot is not available"}), status
+    return jsonify(snapshot)
+
+
 @run_bp.route("/pty/runs/<run_id>/input", methods=["POST"])
 @limiter.limit(lambda: (
     f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second"
@@ -1284,7 +1285,13 @@ def send_interactive_pty_input(run_id):
     data = request.get_json() or {}
     if not isinstance(data, dict):
         return jsonify({"error": "Request body must be a JSON object"}), 400
-    ok, message = write_pty_input(run_id, session_id, data.get("data", ""))
+    ok, message = write_pty_input(
+        run_id,
+        session_id,
+        data.get("data", ""),
+        _active_run_owner_value(request.headers.get("X-Client-ID", "")),
+        _active_run_owner_value(data.get("tab_id", "")),
+    )
     if not ok:
         return jsonify({"error": message or "Input rejected"}), 404 if message == "Run not found" else 400
     return jsonify({"ok": True})

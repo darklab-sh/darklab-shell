@@ -216,8 +216,8 @@ var DarklabAutocompleteCore = (function (global) {
     const text = String(value || '').trim().toLowerCase().replace(/\.$/, '');
     if (!text || text.length > 253 || text.includes('/') || text.includes(':') || text.includes('@')) return false;
     if (!text.includes('.')) return false;
-    if (/^\d+(?:\.\d+){3}$/.test(text)) return false;
     const labels = text.split('.');
+    if (labels.every(label => /^\d+$/.test(label))) return false;
     return labels.length >= 2 && labels.every(label => (
       label.length >= 1
       && label.length <= 63
@@ -225,8 +225,18 @@ var DarklabAutocompleteCore = (function (global) {
     ));
   }
 
+  function isIPv4Address(value) {
+    const text = String(value || '').trim();
+    if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(text)) return false;
+    return text.split('.').every(part => {
+      const number = Number.parseInt(part, 10);
+      return Number.isInteger(number) && number >= 0 && number <= 255 && String(number) === part;
+    });
+  }
+
   function normalizeRecentDomain(value) {
     const text = String(value || '').trim().toLowerCase().replace(/\.$/, '');
+    if (isIPv4Address(text)) return text;
     return isDomainValue(text) ? text : '';
   }
 

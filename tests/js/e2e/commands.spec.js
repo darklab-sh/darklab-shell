@@ -60,6 +60,42 @@ test.describe('interactive PTY command execution', () => {
         const url = typeof input === 'string' ? input : input.url
         const rawBody = typeof init?.body === 'string' ? init.body : ''
 
+        if (url.endsWith('/config')) {
+          const original = await originalFetch(input, init)
+          const cfg = await original.clone().json()
+          return new Response(JSON.stringify({
+            ...cfg,
+            interactive_pty_enabled: true,
+            interactive_pty_commands: [{
+              root: 'mtr',
+              trigger_flag: '--interactive',
+              default_rows: 12,
+              default_cols: 80,
+              requires_args: true,
+              allow_input: true,
+            }],
+          }), {
+            status: original.status,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+
+        if (url.endsWith('/history/active') && window.localStorage.getItem('__ptyExposeActiveRun') === '1') {
+          return new Response(JSON.stringify({
+            runs: [{
+              run_id: 'pty-smoke-run',
+              command: 'mtr --interactive darklab.sh',
+              run_type: 'pty',
+              started: '2026-05-06T00:00:00Z',
+              has_live_owner: false,
+              owner_stale: true,
+            }],
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+
         if (url.endsWith('/pty/runs') && init?.method === 'POST') {
           return new Response(JSON.stringify({
             run_id: 'pty-smoke-run',
@@ -74,16 +110,37 @@ test.describe('interactive PTY command execution', () => {
           })
         }
 
+        if (url.endsWith('/pty/runs/pty-smoke-run/snapshot')) {
+          return new Response(JSON.stringify({
+            run_id: 'pty-smoke-run',
+            command: 'mtr --interactive darklab.sh',
+            started: '2026-05-06T00:00:00Z',
+            rows: 12,
+            cols: 80,
+            after_event_id: '1770000000000-2',
+            entries: [{ text: 'snapshot hop darklab.sh', cls: '' }],
+            snapshot_format: 'ansi',
+            ansi_snapshot: '\u001b[0m\u001b[2J\u001b[Hsnapshot hop darklab.sh\u001b[1;1H',
+            snapshot_truncated: false,
+          }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+
         if (url.includes('/pty/runs/pty-smoke-run/stream')) {
+          const isResumeStream = url.includes('after=1770000000000-2')
           const body = new ReadableStream({
             start(controller) {
               ptyController = controller
               controller.enqueue(
                 encoder.encode('data: {"type":"started","run_id":"pty-smoke-run"}\n\n'),
               )
-              controller.enqueue(
-                encoder.encode('data: {"type":"output","text":"smoke hop darklab.sh\\r\\n"}\n\n'),
-              )
+              if (!isResumeStream) {
+                controller.enqueue(
+                  encoder.encode('data: {"type":"output","text":"smoke hop darklab.sh\\r\\n"}\n\n'),
+                )
+              }
             },
           })
           return new Response(body, {
@@ -154,5 +211,21 @@ test.describe('interactive PTY command execution', () => {
     await expect.poll(() => page.evaluate(() => window.__ptyKillRequests)).toBe(1)
     await expect(page.locator('#pty-overlay')).toHaveClass(/u-hidden/)
     await expect(page.locator('.tab-panel.active .output')).toContainText('smoke hop darklab.sh')
+  })
+
+  test('reattaches an active interactive PTY after reload', async ({ page }) => {
+    await page.locator('#cmd').fill('mtr --interactive darklab.sh')
+    await page.keyboard.press('Enter')
+
+    await expect(page.locator('#pty-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#pty-modal-screen')).toContainText('smoke hop darklab.sh')
+
+    await page.evaluate(() => window.localStorage.setItem('__ptyExposeActiveRun', '1'))
+    await page.reload()
+    await page.locator('#cmd').waitFor()
+
+    await expect(page.locator('#pty-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#pty-modal-screen')).toContainText('snapshot hop darklab.sh')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('reattached to active interactive PTY')
   })
 })

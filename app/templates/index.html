@@ -651,7 +651,7 @@
 </div>
 
 <div id="pty-overlay" class="modal-overlay mobile-sheet-overlay pty-tab-overlay u-hidden" aria-hidden="true">
-  <div id="pty-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="false" aria-labelledby="pty-modal-title">
+  <div id="pty-modal" class="modal-card mobile-sheet-surface pty-modal" role="dialog" aria-modal="false" aria-labelledby="pty-modal-title">
     <div class="pty-modal-header">
       <div class="pty-modal-title-wrap">
         <span class="faq-title" id="pty-modal-title">INTERACTIVE PTY</span>
@@ -662,8 +662,7 @@
           <span id="pty-modal-status-label" class="pty-modal-status-label">waiting</span>
           <span id="pty-modal-elapsed" class="pty-modal-elapsed">00:00</span>
         </span>
-        <button id="pty-modal-hide" type="button" class="btn btn-secondary btn-compact" disabled>Hide</button>
-        <button id="pty-modal-kill" type="button" class="btn btn-destructive btn-compact" disabled>Kill</button>
+        <button id="pty-modal-kill" type="button" class="btn btn-destructive btn-compact pty-modal-kill" disabled>Kill</button>
         <button type="button" class="close-btn pty-modal-close" aria-label="Close interactive PTY" disabled>✕</button>
       </div>
     </div>

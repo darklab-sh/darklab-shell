@@ -7,10 +7,8 @@ const PTY_MIN_ROWS = 10;
 const PTY_MIN_COLS = 40;
 const PTY_INPUT_MAX_BYTES = 4096;
 const _ptyModalState = {
-  bound: false,
-  session: null,
-  startedAt: 0,
-  timer: null,
+  sessions: new Map(),
+  activeSession: null,
 };
 let _xtermAssetsPromise = null;
 let _xtermAssetPreloadScheduled = false;
@@ -212,8 +210,15 @@ function _xtermTheme() {
   };
 }
 
-function _ptyApplyLiveTheme(session = _ptyModalState.session) {
-  if (!session || !session.term) return false;
+function _ptyApplyLiveTheme(session = null) {
+  if (!session) {
+    let applied = false;
+    _ptyModalState.sessions.forEach(activeSession => {
+      applied = _ptyApplyLiveTheme(activeSession) || applied;
+    });
+    return applied;
+  }
+  if (!session.term) return false;
   const nextTheme = _xtermTheme();
   try {
     if (session.term.options && typeof session.term.options === 'object') {
@@ -367,16 +372,36 @@ function _ptySendInput(runId, data, tabId = '') {
   apiFetch(`/pty/runs/${encodeURIComponent(runId)}/input`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ data: payload.text }),
+    body: JSON.stringify({ data: payload.text, tab_id: tabId || '' }),
+  }).then(resp => {
+    if (!resp || resp.ok) return;
+    return (typeof _readRunErrorMessage === 'function' ? _readRunErrorMessage(resp) : Promise.resolve(''))
+      .then(message => {
+        if (message && typeof appendLine === 'function') {
+          appendLine(`[interactive PTY input ignored: ${message}]`, 'notice', tabId || undefined);
+        }
+      });
   }).catch(() => {});
 }
 
 function _ptyConfirmSessionKill(session) {
   if (!session || !session.runId || !session.tabId) {
-    _ptyCloseModal({ force: true });
+    _ptyCloseModal({ force: true }, session);
     return;
   }
   if (typeof confirmKill === 'function') confirmKill(session.tabId);
+}
+
+function _ptyConfirmSessionClose(session) {
+  if (!session || !session.runId || !session.tabId) {
+    _ptyCloseModal({ force: true }, session);
+    return;
+  }
+  if (typeof confirmCloseRunningTab === 'function') {
+    confirmCloseRunningTab(session.tabId);
+    return;
+  }
+  _ptyConfirmSessionKill(session);
 }
 
 function _ptyInstallKeyboardHandlers(session) {
@@ -398,19 +423,78 @@ function _ptyInstallKeyboardHandlers(session) {
   });
 }
 
-function _ptyModalEls() {
+function _ptyModalRoot(target = null) {
+  if (target && target.overlay) return target.overlay;
+  if (typeof HTMLElement !== 'undefined' && target instanceof HTMLElement) return target;
+  return document.getElementById('pty-overlay');
+}
+
+function _ptyModalEls(target = null) {
+  const overlay = _ptyModalRoot(target);
+  const find = (selector) => (overlay ? overlay.querySelector(selector) : null);
   return {
-    overlay: document.getElementById('pty-overlay'),
-    modal: document.getElementById('pty-modal'),
-    command: document.getElementById('pty-modal-command'),
-    status: document.getElementById('pty-modal-status'),
-    statusLabel: document.getElementById('pty-modal-status-label'),
-    elapsed: document.getElementById('pty-modal-elapsed'),
-    screen: document.getElementById('pty-modal-screen'),
-    closeBtn: document.querySelector('.pty-modal-close'),
-    hideBtn: document.getElementById('pty-modal-hide'),
-    killBtn: document.getElementById('pty-modal-kill'),
+    overlay,
+    modal: find('#pty-modal, .modal-card'),
+    command: find('#pty-modal-command, .pty-modal-command'),
+    status: find('#pty-modal-status, .pty-modal-status'),
+    statusLabel: find('#pty-modal-status-label, .pty-modal-status-label'),
+    elapsed: find('#pty-modal-elapsed, .pty-modal-elapsed'),
+    screen: find('#pty-modal-screen, .pty-modal-screen'),
+    closeBtn: find('.pty-modal-close'),
+    killBtn: find('#pty-modal-kill, .pty-modal-kill'),
   };
+}
+
+function _ptyRemoveIds(root) {
+  if (!root || typeof root.querySelectorAll !== 'function') return;
+  root.removeAttribute('id');
+  root.querySelectorAll('[id]').forEach(node => node.removeAttribute('id'));
+}
+
+function _ptyBuildOverlay() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay mobile-sheet-overlay pty-tab-overlay u-hidden';
+  overlay.setAttribute('aria-hidden', 'true');
+  overlay.innerHTML = `
+    <div class="modal-card mobile-sheet-surface pty-modal" role="dialog" aria-modal="false" aria-label="Interactive PTY">
+      <div class="pty-modal-header">
+        <div class="pty-modal-title-wrap">
+          <span class="faq-title">INTERACTIVE PTY</span>
+          <span class="pty-modal-command">waiting for command</span>
+        </div>
+        <div class="pty-modal-actions">
+          <span class="pty-modal-status" data-tone="">
+            <span class="pty-modal-status-label">waiting</span>
+            <span class="pty-modal-elapsed">00:00</span>
+          </span>
+          <button type="button" class="btn btn-destructive btn-compact pty-modal-kill" disabled>Kill</button>
+          <button type="button" class="close-btn pty-modal-close" aria-label="Close interactive PTY" disabled>✕</button>
+        </div>
+      </div>
+      <section class="pty-screen pty-modal-screen" role="application" aria-label="Interactive PTY terminal"></section>
+    </div>
+  `;
+  return overlay;
+}
+
+function _ptyOverlayForTab(tabId, { create = false } = {}) {
+  const normalizedTabId = String(tabId || '');
+  const existing = Array.from(document.querySelectorAll('.pty-tab-overlay'))
+    .find(overlay => overlay.dataset && overlay.dataset.tabId === normalizedTabId);
+  if (existing || !create) return existing || null;
+  const base = document.getElementById('pty-overlay');
+  const overlay = base && base.dataset.ptyAllocated !== '1' ? base : _ptyBuildOverlay();
+  if (overlay !== base) _ptyRemoveIds(overlay);
+  overlay.dataset.ptyAllocated = '1';
+  overlay.dataset.tabId = normalizedTabId;
+  return overlay;
+}
+
+function _ptySessionForOverlay(overlay) {
+  const runId = overlay && overlay.dataset ? overlay.dataset.runId : '';
+  if (runId) return _ptyModalState.sessions.get(runId) || null;
+  return Array.from(_ptyModalState.sessions.values())
+    .find(session => session && session.overlay === overlay) || null;
 }
 
 function _ptyPanelForTab(tabId) {
@@ -420,8 +504,10 @@ function _ptyPanelForTab(tabId) {
     .find(panel => panel.dataset && panel.dataset.id === String(tabId)) || null;
 }
 
-function _ptyScopeModalToTab(tabId) {
-  const { overlay } = _ptyModalEls();
+function _ptyScopeModalToTab(tabId, session = null) {
+  const overlay = session && session.overlay
+    ? session.overlay
+    : _ptyOverlayForTab(tabId, { create: true });
   const panel = _ptyPanelForTab(tabId);
   if (!overlay || !panel) return false;
   if (overlay.parentElement !== panel) panel.appendChild(overlay);
@@ -429,8 +515,8 @@ function _ptyScopeModalToTab(tabId) {
   return true;
 }
 
-function _ptySetModalStatus(text, tone = '') {
-  const { status: statusEl, statusLabel } = _ptyModalEls();
+function _ptySetModalStatus(text, tone = '', session = null) {
+  const { status: statusEl, statusLabel } = _ptyModalEls(session);
   if (!statusEl) return;
   if (statusLabel) statusLabel.textContent = text;
   else statusEl.textContent = text;
@@ -446,135 +532,55 @@ function _ptyFormatModalElapsed(totalSeconds) {
   return hours > 0 ? `${hours}:${two(minutes)}:${two(seconds)}` : `${two(minutes)}:${two(seconds)}`;
 }
 
-function _ptySetModalElapsed(totalSeconds = 0) {
-  const { elapsed } = _ptyModalEls();
+function _ptySetModalElapsed(totalSeconds = 0, session = null) {
+  const { elapsed } = _ptyModalEls(session);
   if (elapsed) elapsed.textContent = _ptyFormatModalElapsed(totalSeconds);
 }
 
-function _ptyStopModalTimer(finalElapsed = null) {
-  if (_ptyModalState.timer) {
-    window.clearInterval(_ptyModalState.timer);
-    _ptyModalState.timer = null;
+function _ptyStopModalTimer(session = null, finalElapsed = null) {
+  const target = session || _ptyModalState.activeSession;
+  if (target && target.timer) {
+    window.clearInterval(target.timer);
+    target.timer = null;
   }
-  if (typeof finalElapsed === 'number') _ptySetModalElapsed(finalElapsed);
+  if (target && typeof finalElapsed === 'number') _ptySetModalElapsed(finalElapsed, target);
 }
 
-function _ptyStartModalTimer() {
-  _ptyStopModalTimer();
-  _ptyModalState.startedAt = Date.now();
-  _ptySetModalElapsed(0);
-  _ptyModalState.timer = window.setInterval(() => {
-    if (!_ptyModalState.startedAt) return;
-    _ptySetModalElapsed((Date.now() - _ptyModalState.startedAt) / 1000);
+function _ptyStartModalTimer(session) {
+  if (!session) return;
+  _ptyStopModalTimer(session);
+  session.startedAt = Date.now();
+  _ptySetModalElapsed(0, session);
+  session.timer = window.setInterval(() => {
+    if (!session.startedAt) return;
+    _ptySetModalElapsed((Date.now() - session.startedAt) / 1000, session);
   }, 1000);
 }
 
-function _ptySetModalKillEnabled(enabled) {
-  const { killBtn } = _ptyModalEls();
+function _ptySetModalKillEnabled(enabled, session = null) {
+  const { killBtn } = _ptyModalEls(session);
   if (killBtn) killBtn.disabled = !enabled;
 }
 
-function _ptySetModalCloseEnabled(enabled) {
-  const { closeBtn } = _ptyModalEls();
+function _ptySetModalCloseEnabled(enabled, session = null) {
+  const { closeBtn } = _ptyModalEls(session);
   if (closeBtn) closeBtn.disabled = !enabled;
 }
 
-function _ptySetModalHideEnabled(enabled) {
-  const { hideBtn } = _ptyModalEls();
-  if (hideBtn) hideBtn.disabled = !enabled;
-}
-
-function _ptyIsModalOpen() {
-  const { overlay } = _ptyModalEls();
+function _ptyIsModalOpen(session = null) {
+  const { overlay } = _ptyModalEls(session);
   return !!(overlay && overlay.classList.contains('open'));
 }
 
-function _ptyIndicatorForTab(tabId) {
-  const panel = _ptyPanelForTab(tabId);
-  return panel ? panel.querySelector(':scope .pty-running-indicator') : null;
-}
-
-function _ptyRemoveRunningIndicator(tabId) {
-  _ptyIndicatorForTab(tabId)?.remove();
-}
-
 function _ptyLiveSessionForTab(tabId) {
-  const session = _ptyModalState.session;
-  return session && session.tabId === tabId && session.runId ? session : null;
+  return Array.from(_ptyModalState.sessions.values())
+    .find(session => session && session.tabId === tabId && session.runId) || null;
 }
 
-function _ptyShowModalForSession(session) {
-  if (!session || !session.tabId) return false;
-  const { overlay, screen } = _ptyModalEls();
-  if (!overlay || !screen) return false;
-  if (!_ptyScopeModalToTab(session.tabId)) return false;
-  overlay.classList.remove('u-hidden');
-  overlay.classList.add('open');
-  overlay.setAttribute('aria-hidden', 'false');
-  screen.dataset.ptyActive = '1';
-  screen.dataset.tabId = session.tabId;
-  _ptySetModalStatus('running', 'running');
-  _ptySetModalKillEnabled(true);
-  _ptySetModalCloseEnabled(true);
-  _ptySetModalHideEnabled(true);
-  _ptyFit(session);
-  window.setTimeout(() => {
-    _ptyFit(session);
-    if (session.term && typeof session.term.focus === 'function') session.term.focus();
-  }, 0);
-  return true;
-}
-
-function reopenInteractivePtyModal(tabId = '') {
-  const targetTabId = String(tabId || (typeof activeTabId !== 'undefined' ? activeTabId : '') || '');
-  const session = _ptyLiveSessionForTab(targetTabId);
-  if (session && _ptyShowModalForSession(session)) return true;
-  if (typeof showToast === 'function') {
-    showToast('Live PTY reattach is not available yet. Use the owning tab while it is open, or Status Monitor to track and kill the run.', 'error');
-  }
-  return false;
-}
-
-function _ptyUpsertRunningIndicator(tabId, options = {}) {
-  const panel = _ptyPanelForTab(tabId);
-  if (!panel) return null;
-  const terminalBody = panel.querySelector(':scope > .terminal-body');
-  if (!terminalBody) return null;
-  const existing = _ptyIndicatorForTab(tabId);
-  const indicator = existing || document.createElement('div');
-  indicator.className = 'pty-running-indicator';
-  indicator.dataset.tabId = tabId;
-  indicator.dataset.state = options.state || 'running';
-
-  const label = document.createElement('span');
-  label.className = 'pty-running-indicator-label';
-  label.textContent = options.label || 'Interactive PTY running';
-
-  const detail = document.createElement('span');
-  detail.className = 'pty-running-indicator-detail';
-  detail.textContent = options.detail || 'The live terminal is attached to this tab.';
-
-  const action = document.createElement('button');
-  action.type = 'button';
-  action.className = 'btn btn-secondary btn-compact pty-running-indicator-action';
-  action.textContent = options.actionLabel || 'Reopen terminal';
-  action.disabled = options.actionDisabled === true;
-  action.addEventListener('click', event => {
-    event.preventDefault();
-    event.stopPropagation();
-    reopenInteractivePtyModal(tabId);
-  });
-
-  indicator.replaceChildren(label, detail, action);
-  const output = panel.querySelector(':scope > .terminal-body > .output');
-  if (!existing) terminalBody.insertBefore(indicator, output ? output.nextSibling : terminalBody.firstChild);
-  return indicator;
-}
-
-function _ptyCloseModal({ force = false } = {}) {
-  const { overlay, screen } = _ptyModalEls();
-  const session = _ptyModalState.session;
-  if (!force && session && session.runId) return;
+function _ptyCloseModal({ force = false } = {}, session = null) {
+  const target = session || _ptyModalState.activeSession;
+  const { overlay, screen } = _ptyModalEls(target);
+  if (!force && target && target.runId) return;
   if (overlay) {
     overlay.classList.add('u-hidden');
     overlay.classList.remove('open');
@@ -585,47 +591,57 @@ function _ptyCloseModal({ force = false } = {}) {
     screen.dataset.tabId = '';
     screen.replaceChildren();
   }
-  _ptyStopModalTimer();
-  _ptyModalState.startedAt = 0;
-  _ptySetModalElapsed(0);
-  _ptySetModalKillEnabled(false);
-  _ptySetModalCloseEnabled(true);
-  _ptySetModalHideEnabled(false);
+  _ptyStopModalTimer(target);
+  if (target) target.startedAt = 0;
+  _ptySetModalElapsed(0, target);
+  _ptySetModalKillEnabled(false, target);
+  _ptySetModalCloseEnabled(true, target);
+  if (_ptyModalState.activeSession === target) _ptyModalState.activeSession = null;
 }
 
-function _ptyKillModalRun() {
-  _ptyConfirmSessionKill(_ptyModalState.session);
+function _ptyKillModalRun(session = null) {
+  _ptyConfirmSessionKill(session || _ptyModalState.activeSession);
 }
 
-function _ptyHideModal() {
-  const { overlay } = _ptyModalEls();
-  const session = _ptyModalState.session;
-  if (!overlay || !session || !session.runId) return false;
-  overlay.classList.add('u-hidden');
-  overlay.classList.remove('open');
-  overlay.setAttribute('aria-hidden', 'true');
-  const indicator = _ptyIndicatorForTab(session.tabId);
-  const action = indicator ? indicator.querySelector('.pty-running-indicator-action') : null;
-  if (action && typeof action.focus === 'function') action.focus({ preventScroll: true });
+function detachInteractivePtyForTab(tabId) {
+  const session = _ptyLiveSessionForTab(tabId);
+  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+  if (tab) {
+    tab.interactivePtyActive = false;
+    tab.ptyTerminal = null;
+  }
+  if (!session) return false;
+  if (session.term) session.term.options.disableStdin = true;
+  _ptyDisposeResizeHandlers(session);
+  session.detached = true;
+  if (session.reader && typeof session.reader.cancel === 'function') {
+    try {
+      const cancelled = session.reader.cancel();
+      if (cancelled && typeof cancelled.catch === 'function') cancelled.catch(() => {});
+    } catch (_) {}
+  }
+  if (session.term && typeof session.term.dispose === 'function') {
+    session.term.dispose();
+  }
+  if (session.runId) _ptyModalState.sessions.delete(session.runId);
+  if (_ptyModalState.activeSession === session) _ptyModalState.activeSession = null;
+  _ptyCloseModal({ force: true }, session);
   return true;
 }
 
-function _ptyBindModalOnce() {
-  if (_ptyModalState.bound) return;
-  const { overlay, modal, hideBtn, killBtn, closeBtn } = _ptyModalEls();
+function _ptyBindModalOnce(session) {
+  const { overlay, modal, killBtn, closeBtn } = _ptyModalEls(session);
   if (!overlay || !modal) return;
-  _ptyModalState.bound = true;
-  if (hideBtn) {
-    hideBtn.addEventListener('click', _ptyHideModal);
-  }
+  if (overlay.dataset.ptyBound === '1') return;
+  overlay.dataset.ptyBound = '1';
   if (killBtn) {
-    killBtn.addEventListener('click', _ptyKillModalRun);
+    killBtn.addEventListener('click', () => _ptyKillModalRun(_ptySessionForOverlay(overlay)));
   }
   if (typeof bindDismissible === 'function') {
     bindDismissible(overlay, {
       level: 'modal',
-      isOpen: _ptyIsModalOpen,
-      onClose: _ptyKillModalRun,
+      isOpen: () => _ptyIsModalOpen(_ptySessionForOverlay(overlay)),
+      onClose: () => _ptyConfirmSessionClose(_ptySessionForOverlay(overlay)),
       closeButtons: closeBtn,
       closeOnBackdrop: false,
     });
@@ -633,16 +649,13 @@ function _ptyBindModalOnce() {
   if (typeof bindFocusTrap === 'function') bindFocusTrap(modal);
 }
 
-function _ptyOpenModal(tabId, command, rows, cols) {
-  const { overlay, command: commandEl, screen } = _ptyModalEls();
-  if (!overlay || !screen) throw new Error('Interactive PTY modal is not available');
-  _ptyBindModalOnce();
-  if (!_ptyScopeModalToTab(tabId)) throw new Error('Interactive PTY tab panel is not available');
-  if (_ptyModalState.session) {
-    _ptyDisposeResizeHandlers(_ptyModalState.session);
-    if (_ptyModalState.session.term) _ptyModalState.session.term.dispose?.();
-  }
-  _ptyModalState.session = null;
+function _ptyOpenModal(tabId, command, rows, cols, runId = '') {
+  const overlay = _ptyOverlayForTab(tabId, { create: true });
+  if (!overlay) throw new Error('Interactive PTY modal is not available');
+  if (!_ptyScopeModalToTab(tabId, { overlay })) throw new Error('Interactive PTY tab panel is not available');
+  overlay.dataset.runId = String(runId || '');
+  const { command: commandEl, screen } = _ptyModalEls(overlay);
+  if (!screen) throw new Error('Interactive PTY modal is not available');
   screen.replaceChildren();
   screen.dataset.ptyActive = '1';
   screen.dataset.tabId = tabId;
@@ -652,20 +665,23 @@ function _ptyOpenModal(tabId, command, rows, cols) {
   overlay.classList.remove('u-hidden');
   overlay.classList.add('open');
   overlay.setAttribute('aria-hidden', 'false');
-  _ptySetModalStatus('starting', 'running');
-  _ptyStopModalTimer();
-  _ptyModalState.startedAt = 0;
-  _ptySetModalElapsed(0);
-  _ptySetModalKillEnabled(false);
-  _ptySetModalCloseEnabled(false);
-  _ptySetModalHideEnabled(false);
-  if (typeof markInteractionSurfaceReady === 'function') {
-    markInteractionSurfaceReady('pty', overlay, document.getElementById('pty-modal'));
-  }
   const session = _createPtyTerminalSession(screen, rows, cols);
   session.tabId = tabId;
-  _ptyModalState.session = session;
-  _ptyUpsertRunningIndicator(tabId);
+  session.runId = String(runId || '');
+  session.overlay = overlay;
+  session.timer = null;
+  session.startedAt = 0;
+  _ptyModalState.sessions.set(session.runId, session);
+  _ptyModalState.activeSession = session;
+  _ptyBindModalOnce(session);
+  _ptySetModalStatus('starting', 'running', session);
+  _ptyStopModalTimer(session);
+  _ptySetModalElapsed(0, session);
+  _ptySetModalKillEnabled(false, session);
+  _ptySetModalCloseEnabled(false, session);
+  if (typeof markInteractionSurfaceReady === 'function') {
+    markInteractionSurfaceReady('pty', overlay, _ptyModalEls(session).modal);
+  }
   _ptyFit(session);
   window.setTimeout(() => {
     _ptyFit(session);
@@ -678,10 +694,13 @@ function _activeInteractivePtySession(tabId = null) {
   const targetTabId = tabId || (typeof activeTabId !== 'undefined' ? activeTabId : '');
   const tab = typeof getTab === 'function' ? getTab(targetTabId) : null;
   if (!tab || tab.st !== 'running' || tab.interactivePtyActive !== true) return null;
+  const session = _ptyLiveSessionForTab(targetTabId);
+  if (session && session.screen && session.screen.dataset.ptyActive === '1') {
+    return { screen: session.screen, term: session.term || tab.ptyTerminal || null };
+  }
   const screen = Array.from(document.querySelectorAll('.pty-screen[data-pty-active="1"]'))
     .find(candidate => candidate.dataset && candidate.dataset.tabId === targetTabId);
-  if (!screen) return null;
-  return { screen, term: tab.ptyTerminal || null };
+  return screen ? { screen, term: tab.ptyTerminal || null } : null;
 }
 
 function focusActiveInteractivePty({ preventScroll = true } = {}) {
@@ -739,6 +758,16 @@ async function _ptyLoadSavedTranscript(runId) {
   return _ptyFinalFrameEntries(Array.isArray(run.output_entries) ? run.output_entries : []);
 }
 
+function _ptySnapshotEntries(entries) {
+  return (Array.isArray(entries) ? entries : [])
+    .filter(entry => !(entry && typeof entry === 'object' && String(entry.cls || '') === 'pty-marker'))
+    .map(_ptyEntryForTranscript);
+}
+
+function _ptySnapshotText(entries) {
+  return _ptySnapshotEntries(entries).map(entry => entry.text).join('\r\n');
+}
+
 async function _ptyAppendSavedTranscript(tabId, runId) {
   if (!runId) return;
   try {
@@ -756,6 +785,113 @@ async function _ptyAppendSavedTranscript(tabId, runId) {
       appendLine('[notice] Saved interactive PTY output could not be loaded.', 'notice', tabId);
     }
   }
+}
+
+async function _loadInteractivePtySnapshot(runId) {
+  if (!runId || typeof apiFetch !== 'function') throw new Error('Missing PTY run id');
+  const resp = await apiFetch(`/pty/runs/${encodeURIComponent(runId)}/snapshot`);
+  if (!resp || !resp.ok) {
+    const message = typeof _readRunErrorMessage === 'function'
+      ? await _readRunErrorMessage(resp)
+      : '';
+    throw new Error(message || 'PTY snapshot is not available');
+  }
+  return resp.json();
+}
+
+function _prepareAttachedInteractivePtyTab(run, tabId) {
+  const command = String(run && run.command || 'interactive PTY');
+  if (typeof clearActiveRunDetachedForRestore === 'function') clearActiveRunDetachedForRestore(run.run_id);
+  if (typeof clearTab === 'function') clearTab(tabId);
+  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+  if (!tab) return null;
+  if (typeof setTabRunningCommand === 'function') {
+    setTabRunningCommand(tabId, command);
+  } else {
+    if (!tab.renamed && typeof setTabLabel === 'function') setTabLabel(tabId, command);
+    tab.command = command;
+  }
+  tab.runId = run.run_id;
+  tab.historyRunId = run.run_id;
+  tab.lastEventId = '';
+  tab.attachMode = 'attached';
+  tab.reconnectedRun = true;
+  tab.killed = false;
+  tab.pendingKill = false;
+  tab.previewTruncated = false;
+  tab.fullOutputAvailable = false;
+  tab.fullOutputLoaded = false;
+  tab.runStart = Number.isNaN(Date.parse(run.started)) ? Date.now() : Date.parse(run.started);
+  tab.currentRunStartIndex = 0;
+  tab.followOutput = true;
+  tab.deferPromptMount = false;
+  tab.interactivePtyActive = true;
+  tab.ptyTerminal = null;
+  if (typeof appendCommandEcho === 'function') appendCommandEcho(command, tabId);
+  if (typeof appendLine === 'function') {
+    appendLine('[reattached to active interactive PTY]', 'notice', tabId);
+  }
+  if (typeof setTabStatus === 'function') setTabStatus(tabId, 'running');
+  if (tabId === activeTabId && typeof setStatus === 'function') setStatus('running');
+  if (typeof showTabKillBtn === 'function') showTabKillBtn(tabId);
+  if (typeof _setRunButtonDisabled === 'function') _setRunButtonDisabled(true);
+  if (typeof syncActiveRunTimer === 'function' && tabId === activeTabId) syncActiveRunTimer(tabId);
+  return tab;
+}
+
+async function attachInteractivePtyCommand(runOrRunId, tabId = '') {
+  const run = typeof runOrRunId === 'object' && runOrRunId
+    ? runOrRunId
+    : { run_id: String(runOrRunId || '') };
+  const runId = String(run.run_id || run.id || '').trim();
+  if (!runId) return false;
+  const snapshot = await _loadInteractivePtySnapshot(runId);
+  const targetTabId = tabId || (typeof createTab === 'function' ? createTab() : '');
+  if (!targetTabId) return false;
+  if (typeof activateTab === 'function') activateTab(targetTabId, { focusComposer: false });
+  const mergedRun = {
+    ...run,
+    ...snapshot,
+    run_id: runId,
+    command: snapshot.command || run.command || 'interactive PTY',
+    started: snapshot.started || run.started || '',
+  };
+  const tab = _prepareAttachedInteractivePtyTab(mergedRun, targetTabId);
+  if (!tab) return false;
+  await _ensureXtermAssets();
+  const rows = _ptyDefaultDimension(snapshot.rows, PTY_DEFAULT_ROWS, PTY_MIN_ROWS, 60);
+  const cols = _ptyDefaultDimension(snapshot.cols, PTY_DEFAULT_COLS, PTY_MIN_COLS, 240);
+  const session = _ptyOpenModal(targetTabId, mergedRun.command, rows, cols, runId);
+  tab.ptyTerminal = session.term;
+  _ptyInstallKeyboardHandlers(session);
+  session.inputDisposable = session.term.onData(dataChunk => _ptySendInput(runId, dataChunk, targetTabId));
+  _ptyInstallResizeHandlers(session);
+  _ptyStartModalTimer(session);
+  _ptySetModalStatus('running', 'running', session);
+  _ptySetModalKillEnabled(true, session);
+  _ptySetModalCloseEnabled(true, session);
+  const ansiSnapshot = snapshot.snapshot_format === 'ansi' && typeof snapshot.ansi_snapshot === 'string'
+    ? snapshot.ansi_snapshot
+    : '';
+  if (ansiSnapshot && session.term && typeof session.term.write === 'function') {
+    session.term.write(ansiSnapshot);
+    if (snapshot.snapshot_truncated && typeof appendLine === 'function') {
+      appendLine('[reattached PTY snapshot truncated to the latest terminal state]', 'notice', targetTabId);
+    }
+  } else if (session.term && typeof session.term.writeln === 'function') {
+    const snapshotText = _ptySnapshotText(snapshot.entries);
+    if (snapshotText) session.term.write(`${snapshotText}\r\n`);
+    session.term.writeln('[reattached - earlier formatting lost]');
+  }
+  _ptyPostResize(session);
+  if (session.term && typeof session.term.focus === 'function') session.term.focus();
+  const after = String(snapshot.after_event_id || '');
+  const streamUrl = `/pty/runs/${encodeURIComponent(runId)}/stream?tab_id=${encodeURIComponent(targetTabId)}`
+    + (after ? `&after=${encodeURIComponent(after)}` : '');
+  _ptyReadStream(streamUrl, targetTabId, session).catch(err => {
+    _failInteractivePtyTab(targetTabId, `[server error] ${err.message || 'Interactive PTY failed'}`, session);
+  });
+  return true;
 }
 
 async function _ptyRunStillActive(runId) {
@@ -786,21 +922,15 @@ async function _ptyHandleStreamEndedWithoutExit(tabId, session) {
     if (session && session.term && typeof session.term.dispose === 'function') {
       session.term.dispose();
     }
-    if (_ptyModalState.session === session) {
-      _ptyModalState.session = null;
-      _ptySetModalStatus('stream detached', 'fail');
-      _ptyCloseModal({ force: true });
+    if (session && session.runId) _ptyModalState.sessions.delete(session.runId);
+    if (session) {
+      if (_ptyModalState.activeSession === session) _ptyModalState.activeSession = null;
+      _ptySetModalStatus('stream detached', 'fail', session);
+      _ptyCloseModal({ force: true }, session);
     }
-    _ptyUpsertRunningIndicator(tabId, {
-      state: 'detached',
-      label: 'Interactive PTY still running',
-      detail: 'Live terminal reattach is not available yet. Status Monitor can track or kill this run.',
-      actionLabel: 'Reattach unavailable',
-      actionDisabled: true,
-    });
     if (typeof appendLine === 'function') {
       appendLine('[interactive PTY stream detached - process is still running]', 'notice', tabId);
-      appendLine('[this tab will restore the saved result automatically when the run completes]', 'notice', tabId);
+      appendLine('[use Status Monitor to reattach, track, or kill this run]', 'notice', tabId);
     }
     if (typeof setStatus === 'function' && tabId === activeTabId) setStatus('running');
     if (typeof setTabStatus === 'function') setTabStatus(tabId, 'running');
@@ -830,18 +960,18 @@ async function _ptyFinalize(tabId, session, msg = {}) {
     tab.interactivePtyActive = false;
     tab.ptyTerminal = null;
   }
-  _ptyRemoveRunningIndicator(tabId);
   if (session && session.screen && session.screen.dataset) session.screen.dataset.ptyActive = '0';
   if (session && session.term) session.term.options.disableStdin = true;
   _ptyDisposeResizeHandlers(session);
   if (session && session.term && typeof session.term.dispose === 'function') {
     session.term.dispose();
   }
-  if (_ptyModalState.session === session) {
-    _ptyModalState.session = null;
-    _ptyStopModalTimer(typeof elapsed === 'number' ? elapsed : null);
-    _ptySetModalStatus(`exited ${code ?? 'unknown'}`, Number(code) === 0 ? 'ok' : 'fail');
-    _ptyCloseModal({ force: true });
+  if (session && session.runId) _ptyModalState.sessions.delete(session.runId);
+  if (session) {
+    if (_ptyModalState.activeSession === session) _ptyModalState.activeSession = null;
+    _ptyStopModalTimer(session, typeof elapsed === 'number' ? elapsed : null);
+    _ptySetModalStatus(`exited ${code ?? 'unknown'}`, Number(code) === 0 ? 'ok' : 'fail', session);
+    _ptyCloseModal({ force: true }, session);
   }
   const killed = !!(tab && tab.killed);
   const ok = Number(code) === 0 || killed;
@@ -882,10 +1012,19 @@ async function _ptyReadStream(streamUrl, tabId, session) {
   const res = await apiFetch(streamUrl);
   if (!res.ok || !res.body) throw new Error('Interactive stream failed');
   const reader = res.body.getReader();
+  if (session) session.reader = reader;
   const decoder = new TextDecoder();
   let buf = '';
   while (true) {
-    const { done, value } = await reader.read();
+    let chunk;
+    try {
+      chunk = await reader.read();
+    } catch (err) {
+      if (session && session.detached) return;
+      throw err;
+    }
+    const { done, value } = chunk;
+    if (session && session.detached) return;
     if (done) break;
     buf += decoder.decode(value, { stream: true });
     const parts = buf.split('\n\n');
@@ -921,6 +1060,7 @@ async function _ptyReadStream(streamUrl, tabId, session) {
       }
     }
   }
+  if (session && session.detached) return;
   await _ptyHandleStreamEndedWithoutExit(tabId, session);
 }
 
@@ -957,21 +1097,23 @@ function _failInteractivePtyTab(tabId, message, session = null) {
     tab.interactivePtyActive = false;
     tab.ptyTerminal = null;
   }
-  _ptyRemoveRunningIndicator(tabId);
-  const ownsModal = !!(session && _ptyModalState.session === session);
+  const ownsModal = !!(session && _ptyModalState.activeSession === session);
   if (session && session.screen && session.screen.dataset) session.screen.dataset.ptyActive = '0';
   if (session && session.term) session.term.options.disableStdin = true;
   _ptyDisposeResizeHandlers(session);
   if (session && session.term && typeof session.term.dispose === 'function') {
     session.term.dispose();
   }
-  if (ownsModal) {
-    _ptyModalState.session = null;
-    _ptyStopModalTimer();
-    _ptyCloseModal({ force: true });
-  } else if (!session && !_ptyModalState.session) {
-    _ptyStopModalTimer();
-    _ptyCloseModal({ force: true });
+  if (session && session.runId) _ptyModalState.sessions.delete(session.runId);
+  if (session) {
+    if (ownsModal) _ptyModalState.activeSession = null;
+    _ptyStopModalTimer(session);
+    _ptyCloseModal({ force: true }, session);
+  } else if (!session) {
+    const orphanOverlay = _ptyOverlayForTab(tabId, { create: false });
+    if (orphanOverlay && !_ptySessionForOverlay(orphanOverlay)) {
+      _ptyCloseModal({ force: true }, { overlay: orphanOverlay });
+    }
   }
   if (typeof appendLine === 'function') appendLine(message, 'exit-fail', tabId);
   if (typeof setStatus === 'function') setStatus('fail');
@@ -1022,18 +1164,16 @@ async function startInteractivePtyCommand(cmd, tabId) {
     const data = await res.json();
     const runId = data.run_id;
     if (!runId) throw new Error('Interactive PTY command did not return a run id');
-    session = _ptyOpenModal(tabId, cmd, rows, cols);
+    session = _ptyOpenModal(tabId, cmd, rows, cols, runId);
     const tab = typeof getTab === 'function' ? getTab(tabId) : null;
     if (tab) tab.ptyTerminal = session.term;
-    session.runId = runId;
     _ptyInstallKeyboardHandlers(session);
     session.inputDisposable = session.term.onData(dataChunk => _ptySendInput(runId, dataChunk, tabId));
     _ptyInstallResizeHandlers(session);
-    _ptyStartModalTimer();
-    _ptySetModalStatus('running', 'running');
-    _ptySetModalKillEnabled(true);
-    _ptySetModalCloseEnabled(true);
-    _ptySetModalHideEnabled(true);
+    _ptyStartModalTimer(session);
+    _ptySetModalStatus('running', 'running', session);
+    _ptySetModalKillEnabled(true, session);
+    _ptySetModalCloseEnabled(true, session);
     if (typeof _markTabRunStarted === 'function') _markTabRunStarted(tabId, runId);
     _ptyPostResize(session);
     if (session.term && typeof session.term.focus === 'function') session.term.focus();

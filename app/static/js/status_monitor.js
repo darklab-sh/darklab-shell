@@ -808,13 +808,8 @@
 
   function _ptyAttachUnavailableMessage(run) {
     if (!_isPtyRun(run) || _tabForRun(run)) return '';
-    if (run?.has_live_owner && !run?.owned_by_this_client) {
-      return 'Interactive PTY is still running in another browser. Return to the owning browser tab for the live terminal, or use Kill here if it should stop.';
-    }
-    if (run?.owner_stale) {
-      return 'Interactive PTY is still running, but this browser cannot reconstruct the terminal after reload yet. Status Monitor can track or kill it until saved output lands.';
-    }
-    return 'Interactive PTY is still running. Live reattach from Status Monitor is not available yet; use the owning tab while it remains open.';
+    if (typeof attachInteractivePtyCommand === 'function') return '';
+    return 'Interactive PTY is still running, but this browser cannot attach to the live terminal. Use Status Monitor to track or kill it.';
   }
 
   function _tabLabelForRun(run) {
@@ -2887,10 +2882,11 @@
   }
 
   function _activeRunActionsSignature(run) {
-    const ptyUnavailable = _isPtyRun(run) && !_tabForRun(run);
+    const ptyUnavailable = _isPtyRun(run) && !_tabForRun(run) && typeof attachInteractivePtyCommand !== 'function';
     const hasAttach = (
       (typeof activateTab === 'function' && !!_tabForRun(run))
       || (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function')
+      || (_isPtyRun(run) && typeof attachInteractivePtyCommand === 'function')
     );
     const hasKill = typeof killActiveRunFromMonitor === 'function';
     return [
@@ -2908,6 +2904,9 @@
       return Promise.resolve(true);
     }
     if (_isPtyRun(run)) {
+      if (typeof attachInteractivePtyCommand === 'function') {
+        return Promise.resolve(attachInteractivePtyCommand(run));
+      }
       if (typeof showToast === 'function') showToast(_ptyAttachUnavailableMessage(run), 'error');
       return Promise.resolve(false);
     }
@@ -2922,7 +2921,8 @@
     actions.className = 'status-monitor-actions';
     actions.dataset.actionsSignature = _activeRunActionsSignature(run);
     if ((typeof activateTab === 'function' && !!_tabForRun(run))
-      || (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function')) {
+      || (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function')
+      || (_isPtyRun(run) && typeof attachInteractivePtyCommand === 'function')) {
       actions.append(_statusMonitorActionButton('Attach', 'Open or attach this run in a tab', () => {
         const latest = activeRunByRow.get(actions.closest('.status-monitor-item')) || run;
         return _openOrAttachActiveRun(latest);
@@ -2962,7 +2962,10 @@
     };
 
     const tab = _tabForRun(run);
-    if (tab || (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function') || _isPtyRun(run)) {
+    if (tab
+      || (!_isPtyRun(run) && typeof attachActiveRunFromMonitor === 'function')
+      || (_isPtyRun(run) && typeof attachInteractivePtyCommand === 'function')
+      || _isPtyRun(run)) {
       item.classList.add('status-monitor-item-clickable', 'chrome-row-clickable');
       item.setAttribute('role', 'button');
       item.setAttribute('tabindex', '0');

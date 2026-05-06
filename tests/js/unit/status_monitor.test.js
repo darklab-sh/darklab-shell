@@ -77,6 +77,7 @@ function loadStatusMonitor({
   mobile = false,
   bindMobileSheet = undefined,
   attachActiveRunFromMonitor = undefined,
+  attachInteractivePtyCommand = undefined,
   killActiveRunFromMonitor = undefined,
   openHistoryWithFilters = undefined,
   restoreHistoryRun = undefined,
@@ -161,6 +162,7 @@ function loadStatusMonitor({
         ? { resumeBackgroundRunStreamsAfterStatusMonitor }
         : {}),
       ...(attachActiveRunFromMonitor ? { attachActiveRunFromMonitor } : {}),
+      ...(attachInteractivePtyCommand ? { attachInteractivePtyCommand } : {}),
       ...(killActiveRunFromMonitor ? { killActiveRunFromMonitor } : {}),
       ...(bindMobileSheet ? { bindMobileSheet } : {}),
     },
@@ -335,9 +337,11 @@ describe('Status Monitor', () => {
     expect(document.getElementById('status-monitor')?.classList.contains('u-hidden')).toBe(false)
   })
 
-  it('explains that active PTY runs cannot be reattached from Status Monitor yet', async () => {
+  it('attaches active PTY runs from Status Monitor when PTY reattach is available', async () => {
+    const attachInteractivePtyCommand = vi.fn(() => Promise.resolve(true))
     const killActiveRunFromMonitor = vi.fn(() => Promise.resolve(true))
-    const { openStatusMonitor, showToast } = loadStatusMonitor({
+    const { openStatusMonitor } = loadStatusMonitor({
+      attachInteractivePtyCommand,
       killActiveRunFromMonitor,
       runs: [
         {
@@ -354,17 +358,14 @@ describe('Status Monitor', () => {
 
     await openStatusMonitor({ source: 'test' })
 
-    expect(document.querySelector('.status-monitor-pty-note')?.textContent).toContain(
-      'Return to the owning browser tab',
-    )
+    expect(document.querySelector('.status-monitor-pty-note')).toBeNull()
     const buttons = [...document.querySelectorAll('.status-monitor-action-btn')]
     expect(buttons.map(button => button.textContent)).toEqual(['Attach', 'Kill'])
-    expect(buttons[0].getAttribute('aria-disabled')).toBe('true')
+    expect(buttons[0].getAttribute('aria-disabled')).toBeNull()
     buttons[0].click()
     await Promise.resolve()
-    expect(showToast).toHaveBeenCalledWith(
-      expect.stringContaining('Interactive PTY is still running in another browser'),
-      'error',
+    expect(attachInteractivePtyCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ run_id: 'run-pty' }),
     )
   })
 

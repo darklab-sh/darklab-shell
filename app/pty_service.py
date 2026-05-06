@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterator, cast
 
 from config import CFG, SCANNER_PREFIX
-from process import active_run_register, active_run_remove, pid_pop, pid_register, redis_client
+from process import active_run_owned_by, active_run_register, active_run_remove, pid_pop, pid_register, redis_client
 
 try:
     # importlib + Any | None lets us treat pyte as optional at runtime without
@@ -47,6 +47,10 @@ _PTY_STREAM_FETCH_COUNT = 100
 _PTY_STREAM_MAXLEN = 5000
 _PTY_CAPTURE_MIN_HISTORY_LINES = 2000
 _PTY_CAPTURE_MAX_HISTORY_LINES = 10000
+_PTY_SNAPSHOT_MAX_BYTES = 128 * 1024
+_PTY_SNAPSHOT_PUBLISH_BYTES = 8192
+_PTY_SNAPSHOT_PUBLISH_SECONDS = 1.0
+_PTY_SNAPSHOT_FALLBACK_ENTRY_LIMIT = 200
 _PTY_ENV_PASSTHROUGH_KEYS = (
     "PATH",
     "HOME",
@@ -138,6 +142,182 @@ def _terminal_line_to_text(line: object) -> str:
     return str(line)
 
 
+_DEFAULT_TERMINAL_ATTRS = ("default", "default", False, False, False, False, False)
+_ANSI_COLOR_CODES = {
+    "black": 0,
+    "red": 1,
+    "green": 2,
+    "brown": 3,
+    "yellow": 3,
+    "blue": 4,
+    "magenta": 5,
+    "cyan": 6,
+    "white": 7,
+    "brightblack": 8,
+    "brightred": 9,
+    "brightgreen": 10,
+    "brightyellow": 11,
+    "brightblue": 12,
+    "brightmagenta": 13,
+    "brightcyan": 14,
+    "brightwhite": 15,
+}
+
+
+def _terminal_line_cells(line: object) -> dict[int, object]:
+    if isinstance(line, str):
+        return {index: char for index, char in enumerate(line)}
+    if isinstance(line, dict):
+        cells: dict[int, object] = {}
+        for key, value in line.items():
+            try:
+                cells[int(key)] = value
+            except (TypeError, ValueError):
+                continue
+        return cells
+    items = getattr(line, "items", None)
+    if callable(items):
+        item_pairs = items()
+        if not isinstance(item_pairs, Iterable):
+            return {}
+        cells: dict[int, object] = {}
+        for item in item_pairs:
+            if not isinstance(item, tuple) or len(item) < 2:
+                continue
+            key, value = item[0], item[1]
+            try:
+                cells[int(key)] = value
+            except (TypeError, ValueError):
+                continue
+        return cells
+    values = getattr(line, "values", None)
+    if callable(values):
+        value_cells = values()
+        if isinstance(value_cells, Iterable):
+            return {index: cell for index, cell in enumerate(value_cells)}
+    text = str(line)
+    return {index: char for index, char in enumerate(text)}
+
+
+def _terminal_cell_data(cell: object) -> str:
+    return str(getattr(cell, "data", cell) or "")
+
+
+def _terminal_cell_attrs(cell: object) -> tuple[object, object, bool, bool, bool, bool, bool]:
+    return (
+        getattr(cell, "fg", "default") or "default",
+        getattr(cell, "bg", "default") or "default",
+        bool(getattr(cell, "bold", False)),
+        bool(getattr(cell, "italics", False) or getattr(cell, "italic", False)),
+        bool(getattr(cell, "underscore", False) or getattr(cell, "underline", False)),
+        bool(getattr(cell, "strikethrough", False)),
+        bool(getattr(cell, "reverse", False)),
+    )
+
+
+def _terminal_color_code(value: object, base: int) -> list[int]:
+    if value in (None, "", "default"):
+        return []
+    if isinstance(value, int):
+        return [base + 8, 5, max(0, min(value, 255))]
+    if isinstance(value, (tuple, list)) and len(value) >= 3:
+        try:
+            red, green, blue = [max(0, min(int(part), 255)) for part in value[:3]]
+        except (TypeError, ValueError):
+            return []
+        return [base + 8, 2, red, green, blue]
+    key = str(value).lower().replace("_", "").replace("-", "")
+    if key not in _ANSI_COLOR_CODES:
+        return []
+    code = _ANSI_COLOR_CODES[key]
+    return [base + code] if code < 8 else [base + 60 + (code - 8)]
+
+
+def _terminal_attrs_to_sgr(attrs: tuple[object, object, bool, bool, bool, bool, bool]) -> str:
+    if attrs == _DEFAULT_TERMINAL_ATTRS:
+        return "\x1b[0m"
+    fg, bg, bold, italics, underscore, strikethrough, reverse = attrs
+    codes: list[int] = []
+    if bold:
+        codes.append(1)
+    if italics:
+        codes.append(3)
+    if underscore:
+        codes.append(4)
+    if reverse:
+        codes.append(7)
+    if strikethrough:
+        codes.append(9)
+    codes.extend(_terminal_color_code(fg, 30))
+    codes.extend(_terminal_color_code(bg, 40))
+    return f"\x1b[{';'.join(str(code) for code in codes) or '0'}m"
+
+
+def _terminal_row_to_ansi(line: object, cols: int) -> str:
+    cells = _terminal_line_cells(line)
+    if not cells:
+        return ""
+    last_col = -1
+    for column, cell in cells.items():
+        if column < 0 or column >= cols:
+            continue
+        data = _terminal_cell_data(cell)
+        attrs = _terminal_cell_attrs(cell)
+        if data.strip() or attrs != _DEFAULT_TERMINAL_ATTRS:
+            last_col = max(last_col, column)
+    if last_col < 0:
+        return ""
+
+    current_attrs = _DEFAULT_TERMINAL_ATTRS
+    chunks: list[str] = []
+    for column in range(last_col + 1):
+        cell = cells.get(column, " ")
+        data = _terminal_cell_data(cell)[:1] or " "
+        attrs = _terminal_cell_attrs(cell)
+        if attrs != current_attrs:
+            chunks.append(_terminal_attrs_to_sgr(attrs))
+            current_attrs = attrs
+        chunks.append(data)
+    if current_attrs != _DEFAULT_TERMINAL_ATTRS:
+        chunks.append("\x1b[0m")
+    return "".join(chunks)
+
+
+def _bounded_ansi_snapshot(
+    scrollback_rows: Sequence[object],
+    screen_rows: Sequence[object],
+    rows: int,
+    cols: int,
+    cursor_y: int,
+    cursor_x: int,
+    max_bytes: int = _PTY_SNAPSHOT_MAX_BYTES,
+) -> tuple[str, bool]:
+    screen_lines = [_terminal_row_to_ansi(line, cols) for line in screen_rows]
+    cursor_y = max(0, min(cursor_y, max(0, rows - 1)))
+    cursor_x = max(0, min(cursor_x, max(0, cols - 1)))
+    suffix = f"\x1b[0m\x1b[{cursor_y + 1};{cursor_x + 1}H"
+
+    used = len("\x1b[0m\x1b[2J\x1b[H".encode("utf-8")) + len(suffix.encode("utf-8"))
+    screen_bytes = sum(len(line.encode("utf-8")) + len("\r\n".encode("utf-8")) for line in screen_lines)
+    budget = max(0, max_bytes - used - screen_bytes)
+    scrollback_tail: list[str] = []
+    truncated = False
+    for line in reversed(scrollback_rows):
+        ansi_line = _terminal_row_to_ansi(line, cols)
+        line_bytes = len(ansi_line.encode("utf-8")) + len("\r\n".encode("utf-8"))
+        if line_bytes > budget:
+            truncated = True
+            break
+        scrollback_tail.append(ansi_line)
+        budget -= line_bytes
+    if len(scrollback_tail) < len(scrollback_rows):
+        truncated = True
+
+    lines = list(reversed(scrollback_tail)) + screen_lines
+    snapshot = "\x1b[0m\x1b[2J\x1b[H" + "\r\n".join(lines) + suffix
+    return snapshot, truncated
+
+
 class PtyDependencyError(RuntimeError):
     """Raised when an enabled PTY run cannot meet required dependencies."""
 
@@ -209,6 +389,30 @@ class PtyTerminalCapture:
         if entries:
             return entries
         return [{"text": "[interactive PTY exited with no output]", "cls": "notice"}]
+
+    def ansi_snapshot(self) -> tuple[str, bool]:
+        with self._lock:
+            if self._screen is None:
+                return "", False
+            history = getattr(self._screen, "history", None)
+            scrollback_rows = list(getattr(history, "top", []) if history is not None else [])
+            buffer = getattr(self._screen, "buffer", None)
+            if isinstance(buffer, dict):
+                screen_rows = [buffer.get(row, "") for row in range(self.rows)]
+            else:
+                display = list(getattr(self._screen, "display", []))
+                screen_rows = display[:self.rows]
+            cursor = getattr(self._screen, "cursor", None)
+            cursor_y = _coerce_non_negative_int(getattr(cursor, "y", 0), 0)
+            cursor_x = _coerce_non_negative_int(getattr(cursor, "x", 0), 0)
+        return _bounded_ansi_snapshot(
+            scrollback_rows,
+            screen_rows,
+            self.rows,
+            self.cols,
+            cursor_y,
+            cursor_x,
+        )
 
     def _feed_fallback(self, text: str) -> None:
         plain = _plain_terminal_text(text)
@@ -293,19 +497,26 @@ class PtyRun:
     closed: bool = False
     exit_code: int | None = None
     control_event_id: str = "0-0"
+    capture_event_id: str = "0-0"
+    snapshot_published_event_id: str = "0-0"
+    snapshot_pending_bytes: int = 0
+    snapshot_last_published: float = 0.0
+    snapshot_truncation_logged: bool = False
+    snapshot_lock: threading.Lock = field(default_factory=threading.Lock)
     condition: threading.Condition = field(default_factory=threading.Condition)
 
-    def append_event(self, event_type: str, payload: dict[str, Any] | None = None) -> None:
+    def append_event(self, event_type: str, payload: dict[str, Any] | None = None) -> str:
         body = dict(payload or {})
         if self.brokered:
-            publish_pty_event(self.run_id, event_type, body)
+            event_id = publish_pty_event(self.run_id, event_type, body)
             if event_type in {"exit", "error"}:
                 _store_pty_meta(self, closed=True)
-            return
+            return event_id
         with self.condition:
             self.seq += 1
             self.events.append(PtyEvent(self.seq, event_type, body))
             self.condition.notify_all()
+            return str(self.seq)
 
 
 _runs: dict[str, PtyRun] = {}
@@ -350,6 +561,10 @@ def _control_key(run_id: str) -> str:
 
 def _meta_key(run_id: str) -> str:
     return f"ptymeta:{run_id}"
+
+
+def _snapshot_key(run_id: str) -> str:
+    return f"ptysnapshot:{run_id}"
 
 
 def _coerce_text(value: object) -> str:
@@ -475,6 +690,7 @@ def _delete_pty_meta(run_id: str) -> None:
         return
     redis_client.delete(_meta_key(run_id))
     redis_client.delete(_control_key(run_id))
+    redis_client.delete(_snapshot_key(run_id))
 
 
 def _load_pty_meta(run_id: str) -> dict[str, Any] | None:
@@ -501,6 +717,90 @@ def _load_pty_meta(run_id: str) -> dict[str, Any] | None:
         "cols": run.cols,
         "closed": run.closed,
     }
+
+
+def _limited_snapshot_entries(entries: Sequence[dict[str, str]], ansi_snapshot: str) -> list[dict[str, str]]:
+    if ansi_snapshot:
+        return []
+    if len(entries) <= _PTY_SNAPSHOT_FALLBACK_ENTRY_LIMIT:
+        return [dict(entry) for entry in entries]
+    return [{
+        "text": "[earlier PTY snapshot entries omitted; terminal snapshot resumes visually]",
+        "cls": "notice",
+    }, *[dict(entry) for entry in entries[-_PTY_SNAPSHOT_FALLBACK_ENTRY_LIMIT:]]]
+
+
+def _pty_snapshot_payload_from_run(run: PtyRun, *, distributed: bool = False) -> dict[str, Any]:
+    entries = run.terminal_capture.synthesize_entries()
+    ansi_snapshot, snapshot_truncated = run.terminal_capture.ansi_snapshot()
+    payload: dict[str, Any] = {
+        "run_id": run.run_id,
+        "command": run.command,
+        "started": run.started,
+        "rows": run.rows,
+        "cols": run.cols,
+        "after_event_id": run.capture_event_id,
+        "entries": _limited_snapshot_entries(entries, ansi_snapshot) if distributed else entries,
+        "snapshot_format": "ansi" if ansi_snapshot else "plain",
+        "ansi_snapshot": ansi_snapshot,
+        "snapshot_truncated": snapshot_truncated,
+    }
+    if distributed:
+        payload["session_id"] = run.session_id
+        payload["created_at"] = time.time()
+    return payload
+
+
+def _store_pty_snapshot(run: PtyRun, *, force: bool = False) -> None:
+    if not redis_client:
+        return
+    now = time.time()
+    if not force:
+        if run.capture_event_id == run.snapshot_published_event_id:
+            return
+        if (
+            run.snapshot_pending_bytes < _PTY_SNAPSHOT_PUBLISH_BYTES
+            and now - run.snapshot_last_published < _PTY_SNAPSHOT_PUBLISH_SECONDS
+            and run.snapshot_published_event_id != "0-0"
+        ):
+            return
+    with run.snapshot_lock:
+        payload = _pty_snapshot_payload_from_run(run, distributed=True)
+        if payload.get("snapshot_truncated") and not run.snapshot_truncation_logged:
+            run.snapshot_truncation_logged = True
+            log.warning("PTY_SNAPSHOT_TRUNCATED", extra={
+                "run_id": run.run_id,
+                "session": run.session_id,
+                "cmd": run.command,
+            })
+        run.snapshot_pending_bytes = 0
+        run.snapshot_last_published = now
+        run.snapshot_published_event_id = run.capture_event_id
+    redis_client.set(
+        _snapshot_key(run.run_id),
+        json.dumps(payload, separators=(",", ":")),
+        ex=_active_ttl(),
+    )
+
+
+def _load_pty_snapshot(run_id: str, session_id: str) -> dict[str, Any] | None:
+    if not redis_client:
+        return None
+    raw = redis_client.get(_snapshot_key(run_id))
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="replace")
+    if not isinstance(raw, str):
+        return None
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict) or payload.get("session_id") != session_id:
+        return None
+    response = dict(payload)
+    response.pop("session_id", None)
+    response.pop("created_at", None)
+    return response
 
 
 def pty_run_belongs_to_session(run_id: str, session_id: str) -> bool:
@@ -582,6 +882,7 @@ def _apply_pty_controls(run: PtyRun) -> None:
             _set_pty_size(run.master_fd, run.rows, run.cols)
             run.terminal_capture.resize(run.rows, run.cols)
             _store_pty_meta(run)
+            _store_pty_snapshot(run, force=True)
 
 
 def _reader_loop(run: PtyRun, client_ip: str) -> None:
@@ -593,6 +894,7 @@ def _reader_loop(run: PtyRun, client_ip: str) -> None:
             "started": run.started,
             "interactive": True,
         })
+        _store_pty_snapshot(run, force=True)
         while True:
             _apply_pty_controls(run)
             if run.max_runtime_seconds:
@@ -611,8 +913,11 @@ def _reader_loop(run: PtyRun, client_ip: str) -> None:
                     chunk = b""
                 if chunk:
                     text = chunk.decode("utf-8", errors="replace")
-                    run.terminal_capture.feed(text)
-                    run.append_event("output", {"text": text})
+                    with run.snapshot_lock:
+                        run.terminal_capture.feed(text)
+                        run.capture_event_id = run.append_event("output", {"text": text})
+                        run.snapshot_pending_bytes += len(chunk)
+                    _store_pty_snapshot(run)
                     continue
             if run.proc.poll() is not None:
                 break
@@ -657,6 +962,7 @@ def _reader_loop(run: PtyRun, client_ip: str) -> None:
             })
         exit_payload = {"code": code, "elapsed": elapsed, "interactive": True}
         exit_payload.update(completion_summary)
+        _store_pty_snapshot(run, force=True)
         run.append_event("exit", exit_payload)
         try:
             os.close(run.master_fd)
@@ -833,10 +1139,38 @@ def get_pty_run(run_id: str, session_id: str) -> PtyRun | None:
     return run
 
 
-def write_pty_input(run_id: str, session_id: str, data: object) -> tuple[bool, str]:
+def pty_run_snapshot(run_id: str, session_id: str) -> tuple[bool, str, dict[str, Any] | None]:
+    run = get_pty_run(run_id, session_id)
+    if not run:
+        meta = _load_pty_meta(run_id)
+        if meta and meta.get("session_id") == session_id:
+            if meta.get("closed"):
+                return False, "Run is closed", None
+            snapshot = _load_pty_snapshot(run_id, session_id)
+            if snapshot is not None:
+                return True, "", snapshot
+            if redis_client:
+                return False, "PTY snapshot is not available yet", None
+            return False, "PTY snapshot is not available from this worker", None
+        return False, "Run not found", None
+    with run.snapshot_lock:
+        snapshot = _pty_snapshot_payload_from_run(run)
+    _store_pty_snapshot(run, force=True)
+    return True, "", snapshot
+
+
+def write_pty_input(
+    run_id: str,
+    session_id: str,
+    data: object,
+    owner_client_id: str = "",
+    owner_tab_id: str = "",
+) -> tuple[bool, str]:
     meta = _load_pty_meta(run_id)
     if not meta or meta.get("session_id") != session_id:
         return False, "Run not found"
+    if owner_client_id and not active_run_owned_by(run_id, owner_client_id, owner_tab_id):
+        return False, "PTY input is owned by another attached tab"
     if meta.get("closed"):
         return False, "Run is closed"
     text = str(data or "")
@@ -881,6 +1215,7 @@ def resize_pty(run_id: str, session_id: str, rows: object, cols: object) -> tupl
     run.cols = cols_i
     _set_pty_size(run.master_fd, run.rows, run.cols)
     run.terminal_capture.resize(run.rows, run.cols)
+    _store_pty_snapshot(run, force=True)
     return True, "", run.rows, run.cols
 
 
