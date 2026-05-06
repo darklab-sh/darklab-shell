@@ -214,10 +214,10 @@ test.describe('history drawer', () => {
 
     const output = page.locator('.tab-panel.active .output')
     await expect(output).toContainText(
-      'Run `commands` to browse built-in and allowed external commands.',
+      'Use `commands --built-in` or `commands --external` to filter that catalog.',
     )
     await expect(output).toContainText(
-      'Use `commands --built-in` or `commands --external` to filter that catalog.',
+      'Use `commands info <command>` to see examples, flags, and subcommands for a supported command.',
     )
     await expect(output).toContainText(
       'Autocomplete appears as you type; press Tab to accept or cycle suggestions.',

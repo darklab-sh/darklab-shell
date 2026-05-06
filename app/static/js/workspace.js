@@ -4,6 +4,7 @@
 
 let _workspaceFiles = [];
 let _workspaceDirs = [];
+let _workspaceLimits = {};
 let _workspaceLoaded = false;
 let _workspaceCurrentDir = '';
 let _workspaceViewedPath = '';
@@ -15,6 +16,8 @@ let _workspaceViewerRefreshSpinTimer = null;
 let _workspaceViewerRefreshInFlight = false;
 let _workspaceViewerAutoRefreshEnabled = false;
 let _workspaceViewedSize = null;
+let _workspaceDragPath = '';
+let _workspaceDragKind = '';
 const WorkspaceCore = window.DarklabWorkspaceCore;
 
 const WORKSPACE_PREVIEW_LINE_LIMIT = 10000;
@@ -83,6 +86,14 @@ function _workspaceViewerFileSize(path = '') {
   const file = _workspaceFiles.find(item => String(item?.path || '').split('/').filter(Boolean).join('/') === target);
   const size = Number(file?.size);
   return Number.isFinite(size) ? size : null;
+}
+
+function _workspaceFileReadBlockedReason(path = '') {
+  const maxFileBytes = Number(_workspaceLimits?.max_file_bytes);
+  if (!(maxFileBytes > 0)) return '';
+  const fileSize = _workspaceViewerFileSize(path);
+  if (!(Number.isFinite(fileSize) && fileSize > maxFileBytes)) return '';
+  return 'file exceeds session max file size';
 }
 
 function _workspaceAutoRefreshDisabledReason() {
@@ -811,6 +822,7 @@ function _bindWorkspaceFolderRow(row, path, label) {
   row.className = 'workspace-file-row workspace-folder-row panel-row panel-row-clickable';
   row.dataset.kind = 'folder';
   row.dataset.path = path;
+  row.dataset.workspaceDropTarget = 'folder';
   row.tabIndex = 0;
   row.setAttribute('role', 'button');
   row.setAttribute('aria-label', label);
@@ -836,6 +848,12 @@ function _workspacePathInCurrentDir(path = '') {
   if (!raw) return current ? `${current}/` : '';
   if (raw.includes('/')) return raw;
   return current ? `${current}/${raw}` : raw;
+}
+
+function _workspaceDestinationPathInCurrentDir(path = '') {
+  const raw = String(path || '').trim();
+  if (!raw || raw === '/') return '';
+  return _workspacePathInCurrentDir(raw);
 }
 
 function _workspaceDirectEntries(dir = '') {
@@ -941,8 +959,10 @@ function renderWorkspaceBrowser() {
     ));
     row.appendChild(_workspaceActionsNode([
       { action: 'open-folder', label: 'Open', tone: 'secondary' },
+      { action: 'move-folder', label: 'Move', tone: 'secondary' },
       { action: 'delete-folder', label: 'Delete', tone: 'secondary' },
     ]));
+    row.draggable = true;
     workspaceFileList.appendChild(row);
   }
 
@@ -951,6 +971,7 @@ function renderWorkspaceBrowser() {
     row.className = 'workspace-file-row panel-row';
     row.dataset.kind = 'file';
     row.dataset.path = file.path;
+    row.draggable = true;
     row.appendChild(_workspaceMetaNode(
       file.name || _workspaceFileBasename(file.path),
       `${_formatWorkspaceBytes(file.size)}${file.mtime ? ` · ${file.mtime}` : ''}`,
@@ -958,6 +979,7 @@ function renderWorkspaceBrowser() {
     row.appendChild(_workspaceActionsNode([
       { action: 'view', label: 'View', tone: 'secondary' },
       { action: 'edit', label: 'Edit', tone: 'secondary' },
+      { action: 'move', label: 'Move', tone: 'secondary' },
       { action: 'download', label: 'Download', tone: 'secondary' },
       { action: 'delete', label: 'Delete', tone: 'secondary' },
     ]));
@@ -1019,6 +1041,7 @@ function renderWorkspaceFiles(payload = {}) {
   _workspaceLoaded = true;
   _workspaceDirs = Array.isArray(payload.directories) ? payload.directories : [];
   _workspaceFiles = Array.isArray(payload.files) ? payload.files : [];
+  _workspaceLimits = payload.limits && typeof payload.limits === 'object' ? payload.limits : {};
   const currentHasEntries = !_workspaceCurrentDir || _workspaceFiles.some(file => {
     const path = String(file.path || '').split('/').filter(Boolean).join('/');
     return path === _workspaceCurrentDir || path.startsWith(`${_workspaceCurrentDir}/`);
@@ -1230,6 +1253,73 @@ async function promptWorkspaceFolderName() {
   return choice === 'create' ? created : null;
 }
 
+async function promptWorkspaceMove(sourcePath, { kind = 'file' } = {}) {
+  const source = String(sourcePath || '').trim();
+  if (!source || typeof showConfirm !== 'function') {
+    setWorkspaceMessage('Unable to open move prompt', 'error');
+    return null;
+  }
+
+  const field = document.createElement('div');
+  field.className = 'workspace-folder-form';
+  const id = `workspace-move-input-${Date.now()}`;
+  const label = document.createElement('label');
+  label.className = 'workspace-label';
+  label.setAttribute('for', id);
+  label.textContent = 'Destination';
+  const input = document.createElement('input');
+  input.id = id;
+  input.className = 'form-input form-control';
+  input.type = 'text';
+  input.placeholder = _workspaceCurrentDir ? `${_workspaceCurrentDir}/` : 'reports';
+  input.value = _workspaceCurrentDir ? `${_workspaceCurrentDir}/` : '';
+  if (typeof applyMobileTextInputDefaults === 'function') {
+    applyMobileTextInputDefaults(input);
+  }
+  const error = document.createElement('div');
+  error.className = 'workspace-folder-error u-hidden';
+  field.append(label, input, error);
+
+  const setError = (message = '') => {
+    error.textContent = message;
+    error.classList.toggle('u-hidden', !message);
+  };
+  let moved = null;
+  const moveFromInput = async () => {
+    setError('');
+    try {
+      const destination = _workspaceDestinationPathInCurrentDir(input.value);
+      moved = await moveWorkspacePath(source, destination);
+      return true;
+    } catch (err) {
+      setError(_workspaceErrorMessage(err, 'Unable to move item'));
+      input.focus();
+      return false;
+    }
+  };
+  input.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const moveBtn = document.querySelector('#confirm-host [data-confirm-action-id="move"]');
+    if (moveBtn && typeof moveBtn.click === 'function') moveBtn.click();
+  });
+
+  const labelKind = kind === 'directory' || kind === 'folder' ? 'folder' : 'file';
+  const choice = await showConfirm({
+    body: {
+      text: `Move ${labelKind} ${source}?`,
+      note: 'Choose a destination folder, or enter a full destination path to rename while moving.',
+    },
+    content: field,
+    defaultFocus: input,
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'move', label: 'Move', role: 'primary', onActivate: moveFromInput },
+    ],
+  });
+  return choice === 'move' ? moved : null;
+}
+
 async function readWorkspaceFile(path) {
   const resp = await apiFetch(`/workspace/files/read?path=${encodeURIComponent(path)}`);
   return _workspaceJson(resp);
@@ -1243,6 +1333,20 @@ async function deleteWorkspacePath(path) {
   const deleted = data.deleted || {};
   const kind = deleted.kind === 'directory' ? 'folder' : 'file';
   setWorkspaceMessage(`Deleted ${kind} ${path}`);
+  return data;
+}
+
+async function moveWorkspacePath(source, destination) {
+  const resp = await apiFetch('/workspace/files/move', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source, destination }),
+  });
+  const data = await _workspaceJson(resp);
+  renderWorkspaceFiles(data.workspace || {});
+  hideWorkspaceViewer();
+  const moved = data.moved || {};
+  setWorkspaceMessage(`Moved ${moved.source || source} to ${moved.destination || destination || 'Files'}`);
   return data;
 }
 
@@ -1297,12 +1401,18 @@ async function openWorkspaceEditorFromCommand(action = 'add', path = '') {
   hideWorkspaceViewer();
   const fileName = String(path || '').trim();
   if (String(action || '').toLowerCase() === 'edit' && fileName) {
+    const blockedReason = _workspaceFileReadBlockedReason(fileName);
+    if (blockedReason) {
+      _showWorkspaceToast(blockedReason, 'error');
+      return false;
+    }
     try {
       const data = await readWorkspaceFile(fileName);
       showWorkspaceEditor(data.path || fileName, data.text || '', { readOnlyPath: true });
     } catch (err) {
-      showWorkspaceEditor(fileName, '', { readOnlyPath: true });
-      setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to load session file'), 'error');
+      hideWorkspaceEditor();
+      _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to load session file'), 'error');
+      return false;
     }
     return true;
   }
@@ -1325,12 +1435,22 @@ async function handleWorkspaceFileAction(action, path) {
       hideWorkspaceViewer();
       renderWorkspaceBrowser();
     } else if (action === 'view') {
+      const blockedReason = _workspaceFileReadBlockedReason(path);
+      if (blockedReason) {
+        _showWorkspaceToast(blockedReason, 'error');
+        return;
+      }
       showWorkspaceViewerLoading(path);
       await _workspaceAfterPaint();
       const data = await readWorkspaceFile(path);
       if (_workspaceViewedPath !== String(path || '').trim()) return;
       showWorkspaceViewer(data.path || path, data.text || '', { size: data.size });
     } else if (action === 'edit') {
+      const blockedReason = _workspaceFileReadBlockedReason(path);
+      if (blockedReason) {
+        _showWorkspaceToast(blockedReason, 'error');
+        return;
+      }
       showWorkspaceViewerLoading(path, 'Loading file for edit...');
       await _workspaceAfterPaint();
       const data = await readWorkspaceFile(path);
@@ -1338,6 +1458,8 @@ async function handleWorkspaceFileAction(action, path) {
       showWorkspaceEditor(data.path || path, data.text || '', { readOnlyPath: true });
     } else if (action === 'download') {
       await downloadWorkspaceFile(path);
+    } else if (action === 'move') {
+      await promptWorkspaceMove(path, { kind: 'file' });
     } else if (action === 'delete') {
       const confirmed = typeof showConfirm === 'function'
         ? await showConfirm({
@@ -1366,9 +1488,59 @@ async function handleWorkspaceFileAction(action, path) {
           })
         : 'delete';
       if (confirmed === 'delete') await deleteWorkspacePath(path);
+    } else if (action === 'move-folder') {
+      await promptWorkspaceMove(path, { kind: 'folder' });
     }
   } catch (err) {
+    if (action === 'view' || action === 'edit') hideWorkspaceViewer();
     _showWorkspaceToast(_workspaceErrorMessage(err), 'error');
+  }
+}
+
+function _workspaceDragSourceFromEvent(event) {
+  const row = event.target && event.target.closest ? event.target.closest('.workspace-file-row[draggable="true"]') : null;
+  return row && workspaceFileList && workspaceFileList.contains(row) ? row : null;
+}
+
+function _workspaceDropTargetFromEvent(event) {
+  const row = event.target && event.target.closest ? event.target.closest('[data-workspace-drop-target="folder"]') : null;
+  return row && workspaceFileList && workspaceFileList.contains(row) ? row : null;
+}
+
+function _workspaceCanDropOnFolder(sourcePath, destinationPath) {
+  const source = String(sourcePath || '').trim();
+  const destination = String(destinationPath || '').trim();
+  if (!source) return false;
+  if (!destination) return true;
+  return source !== destination && !destination.startsWith(`${source}/`);
+}
+
+async function _handleWorkspaceDropMove(event) {
+  const target = _workspaceDropTargetFromEvent(event);
+  if (!target || !_workspaceCanDropOnFolder(_workspaceDragPath, target.dataset.path || '')) return;
+  event.preventDefault();
+  target.classList.remove('workspace-drop-target');
+  const destination = target.dataset.path || '';
+  const source = _workspaceDragPath;
+  const kind = _workspaceDragKind === 'folder' ? 'folder' : 'file';
+  if (!source) return;
+  const confirmed = typeof showConfirm === 'function'
+    ? await showConfirm({
+        body: {
+          text: `Move ${kind} ${source}?`,
+          note: destination ? `Destination folder: ${destination}` : 'Destination folder: Files',
+        },
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'move', label: 'Move', role: 'primary' },
+        ],
+      })
+    : 'move';
+  if (confirmed !== 'move') return;
+  try {
+    await moveWorkspacePath(source, destination);
+  } catch (err) {
+    _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to move item'), 'error');
   }
 }
 
@@ -1442,6 +1614,41 @@ workspaceFileList?.addEventListener('click', event => {
   if (!path && action !== 'open-folder') return;
   handleWorkspaceFileAction(action, path);
 });
+workspaceFileList?.addEventListener('dragstart', event => {
+  const row = _workspaceDragSourceFromEvent(event);
+  if (!row) return;
+  _workspaceDragPath = row.dataset.path || '';
+  _workspaceDragKind = row.dataset.kind || '';
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', _workspaceDragPath);
+  }
+  row.classList.add('workspace-dragging');
+});
+workspaceFileList?.addEventListener('dragend', event => {
+  const row = _workspaceDragSourceFromEvent(event);
+  if (row) row.classList.remove('workspace-dragging');
+  workspaceFileList.querySelectorAll('.workspace-drop-target').forEach(node => node.classList.remove('workspace-drop-target'));
+  _workspaceDragPath = '';
+  _workspaceDragKind = '';
+});
+workspaceFileList?.addEventListener('dragover', event => {
+  const target = _workspaceDropTargetFromEvent(event);
+  if (!target || !_workspaceCanDropOnFolder(_workspaceDragPath, target.dataset.path || '')) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  target.classList.add('workspace-drop-target');
+});
+workspaceFileList?.addEventListener('dragleave', event => {
+  const target = _workspaceDropTargetFromEvent(event);
+  if (!target) return;
+  const related = event.relatedTarget;
+  if (related && target.contains(related)) return;
+  target.classList.remove('workspace-drop-target');
+});
+workspaceFileList?.addEventListener('drop', event => {
+  void _handleWorkspaceDropMove(event);
+});
 
 if (typeof window !== 'undefined') {
   window.openWorkspace = openWorkspace;
@@ -1452,6 +1659,7 @@ if (typeof window !== 'undefined') {
   window.renderWorkspaceFiles = renderWorkspaceFiles;
   window.renderWorkspaceBrowser = renderWorkspaceBrowser;
   window.createWorkspaceDirectory = createWorkspaceDirectory;
+  window.moveWorkspacePath = moveWorkspacePath;
   window.deleteWorkspacePath = deleteWorkspacePath;
   window.downloadWorkspaceFile = downloadWorkspaceFile;
   window.openWorkspaceEditorFromCommand = openWorkspaceEditorFromCommand;

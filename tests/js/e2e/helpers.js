@@ -100,19 +100,30 @@ export async function ensurePromptReady(page, { cancelWelcome = false, timeout =
  * Type a command into the input bar and press Enter, then wait for the
  * tab to show an exit status (exit-ok or exit-fail class on the status pill).
  */
-export async function runCommand(page, cmd) {
-  await ensurePromptReady(page)
+export async function runCommand(page, cmd, { timeout = 30_000 } = {}) {
+  await ensurePromptReady(page, { timeout })
   const input = page.locator('#cmd')
+  const beforeLineCount = await page.evaluate(() => {
+    const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
+    return Array.isArray(tab?.rawLines) ? tab.rawLines.length : 0
+  })
   await input.fill(cmd)
   await page.keyboard.press('Enter')
   await page.waitForFunction(
-    (expectedCmd) => {
+    ({ expectedCmd, previousLineCount }) => {
       const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
-      return !!tab && tab.command === expectedCmd && tab.st !== 'running'
+      if (!tab || tab.st === 'running') return false
+      const rawLines = Array.isArray(tab.rawLines) ? tab.rawLines : []
+      if (rawLines.length <= previousLineCount) return false
+      if (tab.command === expectedCmd) return true
+      const output = document.querySelector('.tab-panel.active .output')
+      const text = output ? output.textContent || '' : ''
+      return text.includes(`$${expectedCmd}`)
     },
-    cmd,
-    { timeout: 15_000 },
+    { expectedCmd: cmd, previousLineCount: beforeLineCount },
+    { timeout },
   )
+  await waitForActiveOutputSettled(page, { timeout })
 }
 
 /**

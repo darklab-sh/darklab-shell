@@ -9,6 +9,8 @@ from flask import Blueprint, Response, jsonify, render_template, request
 
 import config as _config
 from commands import (
+    command_catalog_from_registry,
+    command_catalog_entry,
     load_all_faq,
     load_all_workflows,
     load_ascii_art,
@@ -218,6 +220,54 @@ def allowed_commands():
         return jsonify({"restricted": False, "commands": [], "groups": []})
     _log_content_view("/allowed-commands", restricted=True, count=len(prefixes))
     return jsonify({"restricted": True, "commands": prefixes, "groups": groups})
+
+
+@content_bp.route("/commands/catalog")
+def command_catalog_index():
+    """Return compact command reference data for browsing the registry."""
+    catalog = command_catalog_from_registry()
+    groups = []
+    group_map = {}
+    commands = []
+    for entry in catalog:
+        examples = entry.get("examples")
+        subcommands = entry.get("subcommands")
+        flags = entry.get("flags")
+        command = {
+            "root": entry.get("root"),
+            "category": entry.get("category"),
+            "description": entry.get("description"),
+            "example_count": len(examples) if isinstance(examples, list) else 0,
+            "subcommand_count": len(subcommands) if isinstance(subcommands, list) else 0,
+            "flag_count": len(flags) if isinstance(flags, list) else 0,
+        }
+        commands.append(command)
+        category = str(command.get("category") or "Allowed commands")
+        group = group_map.get(category)
+        if group is None:
+            group = {"name": category, "commands": []}
+            group_map[category] = group
+            groups.append(group)
+        group["commands"].append(command)
+
+    _log_content_view("/commands/catalog", count=len(commands), grouped=True)
+    return jsonify({
+        "restricted": bool(commands),
+        "commands": commands,
+        "groups": groups,
+    })
+
+
+@content_bp.route("/commands/catalog/<root>")
+@content_bp.route("/commands/catalog/<root>/<subcommand>")
+def command_catalog(root: str, subcommand: str | None = None):
+    """Return app-native reference details for one allowed external command."""
+    entry = command_catalog_entry(root, subcommand)
+    if not entry:
+        _log_content_view("/commands/catalog", root=root, subcommand=subcommand or "", found=False)
+        return jsonify({"error": "Command not found"}), 404
+    _log_content_view("/commands/catalog", root=root, subcommand=subcommand or "", found=True)
+    return jsonify(entry)
 
 
 @content_bp.route("/faq")

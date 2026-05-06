@@ -6,6 +6,79 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ---
 
+## [1.7] — 2026-05-05
+
+### Added
+
+- **Session files can now be moved and renamed** — the Files modal, terminal commands, and backend workspace route now share one validated move path.
+  - **Why:** users could create, edit, download, and delete session files, but reorganizing outputs still meant re-creating files by hand. That made folder-heavy workflows awkward once tools started writing more workspace output.
+  - **What:** added a row-level **move** action in Files, drag-and-drop from file rows onto folder rows, a `POST /workspace/files/move` route, `file move <source> <destination>`, and an `mv <source> <destination>` alias. Moves stay inside the active session workspace, reject traversal and symlink escapes, reject overwrites, reject moving a folder into itself, and preserve the source basename when the destination is an existing folder.
+  - **Tests:** added backend workspace-route and workspace-helper coverage, Files modal unit coverage for the row action and drag/drop flow, runner unit coverage for `file move` / `mv`, and an end-to-end Files workflow that moves a file through the modal and then moves it back from the terminal.
+- **Workspace file commands now support simple `*` patterns** — `file ls`, `file move` / `mv`, and confirmed `file delete` can operate on matching session files and folders.
+  - **Why:** common terminal workflows such as `ls darklab-*`, `mv darklab-* darklab/`, and `file delete scan-*` should feel natural without exposing raw shell glob expansion or host filesystem access.
+  - **What:** added browser-side glob expansion from the loaded workspace file/folder cache plus matching backend helpers for app-owned built-ins. A `*` matches within a single path segment only, so `reports/*.txt` is supported but the pattern does not cross `/`. Moving multiple matches requires the destination to already be a folder; deletes still use the existing confirmation flow and still require `-r` / `-rf` when any matched target is a folder.
+  - **Tests:** added runner unit coverage for glob listing, multi-file move, and confirmed multi-file delete, plus backend coverage for the one-segment matching rule.
+- **Workspace autocomplete now understands move source and destination slots** — `file move` and `mv` suggest loaded session files and folders at the right point in the command.
+  - **Why:** move commands are path-heavy, and typing paths by memory is easy to get wrong once folders are involved.
+  - **What:** added `value_type: target` workspace hints for move commands, dynamic source/destination suggestions, destination filtering that avoids suggesting the source or one of its children, and root-folder completion. The visible `file list` / `file ls` suggestions now come from `builtin_autocomplete.yaml`, while runtime autocomplete contributes only live workspace paths.
+  - **Tests:** added app/autocomplete unit coverage for workspace move hints and updated the built-in autocomplete registry expectations.
+- **Workspace autocomplete is now directory-aware** — file commands can suggest entries inside a typed folder prefix instead of only suggesting entries from the current folder.
+  - **Why:** commands such as `cat darklab/` and `cat ../darklab/` should feel like normal terminal path completion, especially now that Files supports folders and move operations.
+  - **What:** runtime autocomplete now marks workspace path argument slots as file-only, folder-only, or file-or-folder. The browser resolves typed prefixes such as `darklab/`, `../`, `../darklab/`, and `/darklab/` against the active tab workspace cwd, then suggests direct children from the cached workspace tree while preserving the path style the user typed. Folder suggestions now display and insert with a trailing `/`, and accepting one immediately refreshes autocomplete for the next path segment.
+  - **Tests:** added app/autocomplete unit coverage for typed workspace path prefixes, source/destination move slots, prefix preservation, slash-terminated folder accepts, and workspace-escape rejection.
+- **Supported commands now have an app-native catalog view** — every external command root in `commands.yaml` has a one-sentence description, and the shell can surface examples, flags, and subcommands from the registry.
+  - **Why:** the allowed-commands FAQ answered "what can I run?" but did not explain what each tool is for or which examples and flags the app understands.
+  - **What:** added shared command-catalog helpers, `commands info <root> [subcommand]`, `/commands/catalog` and `/commands/catalog/<root>` routes, a dedicated Command Registry modal/sheet in the desktop rail and mobile menu, and a reusable command-details modal. The FAQ now points users to the Command Registry instead of owning the full command list; example chips inside command details still load the prompt and trigger autocomplete.
+  - **Tests:** added backend catalog-helper, CLI, route, browser unit, and e2e coverage, plus a registry drift guard requiring descriptions for all top-level external commands.
+
+### Changed
+
+- **Command Registry examples now read as stacked reference rows** — long clickable examples keep the command on its own line and place the description underneath instead of squeezing both onto one row.
+- **Workflow command actions now match the Command Registry style** — clickable workflow steps use the same compact terminal-link formatting as command examples instead of the older rounded chip treatment.
+- **The `commands` helper now describes external tools** — allowed external command rows include the same one-sentence descriptions used by the Command Registry, such as `masscan - Runs high-speed port scans across hosts or networks.`
+- **Command registry metadata is more complete and tighter** — all supported external command roots now carry descriptions, `nc -h` and `nikto -Help` are recognized help-only commands, and `nmap -O` is denied alongside other privileged OS-detection paths that do not fit the app's constrained execution model.
+- **Command findings now recognize more real scanner output** — command-scoped signal matchers catch DNS enumeration, crawled URLs, WAF detections, web scanner posture, TLS posture, ProjectDiscovery matches, and port-scanner result lines without turning every hostname-looking line into a global finding.
+  - **Why:** `/tmp/findings.txt` showed several supported tools producing useful results that were invisible to the findings summary because their output is tool-specific rather than a universal table or DNS-record format.
+  - **What:** added scoped finding/summary/warning handling for `dnsx`, `fierce`, `dnsenum`, `dnsrecon`, `pd-httpx`, `katana`, `wafw00f`, `nikto`, `wpscan`, `testssl`, `sslscan`, `sslyze`, `naabu`, `rustscan`, and `nuclei`, including guardrails for ANSI-colored markers/bracketed status labels, noisy banners, progress lines, completion footers, and JavaScript URL-template artifacts. Output signals now strip ANSI formatting before matching while preserving the raw transcript.
+  - **Tests:** added focused output-signal coverage using representative command-output lines from the findings review.
+- **Terminal word movement now treats punctuation as a boundary** — Alt/Option word movement, Ctrl+W, and the mobile helper row now behave more like a normal terminal around punctuation-heavy paths and domains.
+  - **Why:** the previous word-jump behavior treated only spaces as delimiters, so paths and domains such as `/tmp/darklab_findings(1).txt` or `example.com` moved as one large chunk instead of stopping at useful terminal word segments.
+  - **What:** the shared word-boundary helpers now treat letters and digits as word characters and punctuation such as `(`, `)`, `.`, `,`, `/`, `\`, and `_` as delimiters.
+  - **Tests:** added Vitest coverage for punctuation-delimited Alt/Option movement and Ctrl+W behavior, and updated mobile helper expectations to match the new boundary rules.
+- **Session file docs and test inventory now reflect the v1.7 workspace command surface** — the docs count 2,439 total tests, including 1,205 pytest tests, 998 Vitest tests, and 236 Playwright tests.
+- **Autocomplete placeholder hints now have an explicit schema path and behavior** — frontend and backend autocomplete normalization accept `hint_only: true` as the author-owned display-only signal, placeholder-looking text no longer becomes display-only by regex inference, and hint-only rows now render as subtle italic guidance instead of selectable menu choices.
+  - **Why:** rows such as `<file>` and `<domain>` should teach the shape of the command without blocking Tab from accepting the one real file, folder, or domain suggestion in the menu.
+  - **What:** Tab, Enter, ArrowUp, ArrowDown, mouse, and touch interactions now skip hint-only rows while keeping them visible as guidance. Shared-prefix expansion also ignores hint rows, so concrete suggestions behave consistently even when the menu includes placeholder copy.
+  - **Tests:** added autocomplete/app unit coverage for hint-only rendering, skipped keyboard navigation, single-concrete Tab acceptance, and non-accepting mouse clicks.
+- **Workspace file flags now follow the active tab folder** — external command input/output flags resolve relative file names against the tab's current Files CWD instead of always resolving from workspace root.
+  - **Why:** from `/darklab`, a command such as `nmap -iL targets.txt -oN findings.txt` should read and write inside `/darklab` without making the user type root-relative workspace paths.
+  - **What:** `/runs` now carries the active `workspace_cwd`; backend command validation normalizes declared workspace flag values against that folder; `..` can move upward inside the workspace but cannot escape it; packaged absolute paths such as `/usr/share/wordlists/...` remain untouched. External workspace-flag autocomplete now inserts CWD-relative values and keeps folder-prefix suggestions such as `nested/targets.txt`.
+  - **Tests:** added backend validation coverage for CWD-relative read/write flags and safe parent paths, plus browser unit coverage for CWD-relative external flag autocomplete.
+- **Status Monitor uptime now ticks locally between status polls** — the Uptime card and pulse-strip summary count upward every second from the last `/status` payload instead of showing a stale value until the next poll.
+  - **Why:** the monitor already knew the polling cadence, so a frozen uptime clock made the dashboard feel less live than the rest of the surface.
+  - **What:** status payloads are timestamped on receipt, the Uptime card carries a stable data hook, and the existing once-per-second monitor tick refreshes visible uptime text without making extra API calls.
+  - **Tests:** added Status Monitor unit coverage for local uptime interpolation between status polls.
+- **Status Monitor HUD affordances now match the menu-first navigation** — the STATUS, LAST EXIT, and TABS HUD cells still open Status Monitor, but the old first-run wiggle, running-state glyph, and extra running-state padding were removed now that Status Monitor has a permanent rail/menu entry.
+- **Active runs that a browser explicitly keeps running now stay detached after reload** — choosing **Keep running** suppresses automatic tab restoration for that run in the same browser until the user attaches again from Status Monitor.
+  - **Why:** "keep running" should mean "leave it in the background," not "bring it back as a terminal tab the next time this browser opens."
+  - **What:** the browser records detached active run IDs per session token in localStorage, prunes markers once runs are no longer active, skips those runs during reload restore, and clears the marker when the user manually attaches from Status Monitor.
+  - **Tests:** added runner and tab unit coverage for detach markers, reload skipping, marker pruning, and manual attach clearing.
+- **Container and test-tool pins were refreshed for v1.7** — the app reports version `1.7`, package metadata moved to `1.7.0`, Redis uses the `darklab-redis` container name, JavaScript dev dependencies were refreshed, and the Docker build now pins newer ProjectDiscovery `naabu` and `katana` versions.
+
+### Fixed
+
+- **The Files shortcut now toggles like the other modal shortcuts** — pressing `Option+Shift+F` while Files is already open closes it instead of relaunching the Files modal.
+- **Invalid workspace flag paths now name the bad path** — unsafe declared input/output paths such as `/../../scan.txt` now return `Invalid file path: /../../scan.txt` instead of falling through to a generic command-policy denial.
+- **Autocomplete no longer shows duplicate `file list` and `file ls` rows** — the YAML-owned grammar entries keep their `<folder>` guidance, and the runtime layer no longer adds bare duplicates.
+- **Command-created workspace config folders now show up in Files instead of causing 500s** — workspace list/read operations repair scanner-created child directory/file modes before the app tries to traverse them, so tools using session-scoped `XDG_CONFIG_HOME` such as Subfinder remain visible and readable through the Files browser and `cat`.
+- **Oversized workspace files no longer leave Files stuck in loading state** — known oversized files now toast before the viewer/editor modal opens, and server-side read-limit rejections close the loading viewer instead of leaving the spinner behind.
+- **Hidden prompt input no longer leaks autocomplete while a command is running** — active tabs now block composer writes and autocomplete rendering until the run finishes, while keeping `Ctrl+C` kill handling and confirmation-modal shortcuts intact.
+  - **Why:** several flows could focus or write to the hidden desktop prompt while the active tab owned a running command, causing stray autocomplete menus to appear away from the prompt.
+  - **What:** shared composer setters, visible input handlers, FAQ command chips, visible autocomplete openers, prompt keydown handling, and global prompt-like key handling all fail closed while the active tab is running.
+  - **Tests:** added app/autocomplete unit coverage for blocked composer writes, swallowed keydown, FAQ chip no-ops, and autocomplete no-render behavior during active runs.
+
+---
+
 ## [1.6] — 2026-05-04
 
 ### Added

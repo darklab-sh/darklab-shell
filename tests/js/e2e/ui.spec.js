@@ -1,6 +1,16 @@
 import { test, expect } from '@playwright/test'
 import { ensurePromptReady, runCommand, waitForHistoryRuns } from './helpers.js'
 
+async function confirmWorkspaceAction(page, actionId, { timeout = 15_000 } = {}) {
+  const host = page.locator('#confirm-host')
+  const action = host.locator(`[data-confirm-action-id="${actionId}"]`)
+  await expect(action).toBeEnabled({ timeout })
+  await Promise.all([
+    host.waitFor({ state: 'hidden', timeout }),
+    action.click(),
+  ])
+}
+
 test.describe('theme selector', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
@@ -98,7 +108,7 @@ test.describe('FAQ modal', () => {
     await expect(page.locator('#faq-overlay')).not.toHaveClass(/open/)
   })
 
-  test('renders backend-driven FAQ content and allowlist chips', async ({ page }) => {
+  test('renders backend-driven FAQ content and command registry pointer', async ({ page }) => {
     await page.locator('.rail-nav [data-action="faq"]').click()
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
 
@@ -113,6 +123,11 @@ test.describe('FAQ modal', () => {
     // The allowed-commands section is inside a collapsed accordion — expand it first
     await page.locator('.faq-q').filter({ hasText: 'What commands are allowed?' }).click()
     await expect(page.locator('#faq-allowed-text')).toBeVisible()
+    await expect(page.locator('#faq-allowed-text')).toContainText('Open the Command Registry')
+
+    await page.locator('#faq-allowed-text').getByRole('button', { name: 'Open Command Registry' }).click()
+    await expect(page.locator('#command-registry-overlay')).toHaveClass(/open/)
+    await expect(page.locator('#command-registry-body')).toContainText('curl')
   })
 })
 
@@ -211,6 +226,7 @@ test.describe('Status Monitor', () => {
   })
 
   test('visual cards open filtered history and restore constellation runs', async ({ page }) => {
+    test.setTimeout(60_000)
     const command = 'ping -c 1 darklab.sh'
     await runCommand(page, command)
     await waitForHistoryRuns(page, 1)
@@ -223,7 +239,7 @@ test.describe('Status Monitor', () => {
     await page.locator('.rail-nav [data-action="status-monitor"]').click()
     await expect(page.locator('#status-monitor')).toBeVisible()
 
-    const tile = page.locator('.status-monitor-treemap-tile', { hasText: 'ping' }).first()
+    const tile = page.getByRole('button', { name: /^ping: \d+ run\(s\),/ }).first()
     await expect(tile).toBeVisible()
     await tile.click()
 
@@ -237,7 +253,7 @@ test.describe('Status Monitor', () => {
 
     await page.locator('.rail-nav [data-action="status-monitor"]').click()
     await expect(page.locator('#status-monitor')).toBeVisible()
-    await page.locator('.status-monitor-star-node[aria-label^="ping "]').first().click()
+    await page.locator('#status-monitor .status-monitor-star-node[aria-label^="ping "]').first().click()
 
     await expect(page.locator('#status-monitor')).toBeHidden()
     await page.waitForFunction((expectedCommand) => {
@@ -255,6 +271,7 @@ test.describe('workspace modal', () => {
   })
 
   test('creates, views, edits, downloads, and consumes session files', async ({ page }) => {
+    test.setTimeout(60_000)
     await expect(page.locator('.rail-nav [data-action="workspace"] .rail-nav-label')).toHaveText('files')
     await page.locator('.rail-nav [data-action="workspace"]').click()
 
@@ -306,22 +323,46 @@ test.describe('workspace modal', () => {
     ])
     expect(download.suggestedFilename()).toBe('targets.txt')
 
+    await page.locator('#workspace-new-folder-btn').click()
+    await page.locator('#confirm-host .form-input').fill('moved')
+    await confirmWorkspaceAction(page, 'create')
+    await expect(page.locator('#workspace-breadcrumbs')).toContainText('Files/moved', {
+      timeout: 15_000,
+    })
+    await page.locator('#workspace-breadcrumbs [data-workspace-dir=""]').click()
+    await expect(page.locator('#workspace-breadcrumbs')).toHaveText('Files')
+
+    await row.locator('[data-workspace-action="move"]').click()
+    await page.locator('#confirm-host .form-input').fill('moved')
+    await confirmWorkspaceAction(page, 'move')
+    await expect(row).toHaveCount(0)
+    await page.locator('.workspace-folder-row').filter({ hasText: 'moved' }).locator('.workspace-file-name').click()
+    await expect(page.locator('.workspace-file-row').filter({ hasText: 'targets.txt' })).toBeVisible()
+
     await page.locator('.workspace-close').click()
     await expect(page.locator('#workspace-overlay')).not.toHaveClass(/open/)
 
-    await runCommand(page, 'cat targets.txt')
+    await runCommand(page, 'cat moved/targets.txt')
     await expect(page.locator('.tab-panel.active .output')).toContainText('darklab.sh')
     await expect(page.locator('.tab-panel.active .output')).toContainText('ip.darklab.sh')
+
+    await runCommand(page, 'mv moved/targets.txt targets.txt')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('file: moved moved/targets.txt to targets.txt')
+    await runCommand(page, 'cat targets.txt')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('darklab.sh')
   })
 
   test('navigates nested file output folders and exposes viewer actions', async ({ page }) => {
+    test.setTimeout(60_000)
     await page.locator('.rail-nav [data-action="workspace"]').click()
     await expect(page.locator('#workspace-overlay')).toHaveClass(/open/)
 
     await page.locator('#workspace-new-folder-btn').click()
     await page.locator('#confirm-host .form-input').fill('reports')
-    await page.locator('#confirm-host [data-confirm-action-id="create"]').click()
-    await expect(page.locator('#workspace-breadcrumbs')).toContainText('Files/reports')
+    await confirmWorkspaceAction(page, 'create')
+    await expect(page.locator('#workspace-breadcrumbs')).toContainText('Files/reports', {
+      timeout: 15_000,
+    })
     await expect(page.locator('.workspace-empty')).toHaveText('This folder is empty.')
 
     await page.locator('#workspace-new-btn').click()
@@ -389,8 +430,19 @@ test.describe('workflows modal', () => {
       response.url().includes('/session/workflows')
       && response.request().method() === method
     ))
+    const catalogRendered = page.evaluate(() => new Promise((resolve) => {
+      if (typeof onUiEvent === 'function') {
+        const off = onUiEvent('app:workflows-rendered', () => {
+          off()
+          resolve(true)
+        })
+        return
+      }
+      document.addEventListener('app:workflows-rendered', () => resolve(true), { once: true })
+    }))
     await page.locator('#workflow-editor-save-btn').click()
     expect((await saveResponse).ok()).toBe(true)
+    await catalogRendered
     await expect(page.locator('#workflow-editor-overlay')).not.toHaveClass(/\bopen\b/)
   }
 

@@ -887,6 +887,8 @@ function detachRunningTabAndClose(id) {
   if (idx < 0) return false;
   const tab = tabs[idx];
   if (!tab || tab.st !== 'running') return false;
+  const runId = tab.runId || tab.historyRunId || '';
+  if (typeof markActiveRunDetachedForRestore === 'function') markActiveRunDetachedForRestore(runId);
   if (typeof detachRunStreamForTab === 'function') detachRunStreamForTab(id);
   tab.closing = false;
   if (tabs.length === 1) {

@@ -46,6 +46,11 @@ function builtInAutocompleteBase() {
     commands: {
       ...emptyBuiltIn('built-in: list built-in and allowed external commands'),
       flags: [hint('--built-in', 'Show only built-in shell commands'), hint('--external', 'Show only allowed external commands')],
+      expects_value: ['info'],
+      arg_hints: {
+        info: [],
+        __positional__: [hint('info', 'Show details for one supported command', 'info ')],
+      },
     },
     config: {
       ...emptyBuiltIn('built-in: show or update user options'),
@@ -123,9 +128,9 @@ function builtInAutocompleteBase() {
       },
     },
     file: {
-      ...emptyBuiltIn('built-in: list, view, create, edit, download, or remove session files'),
+      ...emptyBuiltIn('built-in: list, view, create, edit, download, move, or remove session files'),
       feature_required: 'workspace',
-      expects_value: ['show', 'add', 'add-dir', 'edit', 'download', 'rm', 'delete', 'ls'],
+      expects_value: ['show', 'add', 'add-dir', 'edit', 'download', 'move', 'rm', 'delete', 'ls'],
       arg_hints: {
         list: [],
         ls: [],
@@ -135,16 +140,18 @@ function builtInAutocompleteBase() {
         'add-dir': [hint('<folder>', 'New session folder')],
         edit: [],
         download: [],
+        move: [],
         rm: [],
         delete: [],
         __positional__: [
-          hint('list', 'List current session files'),
-          hint('ls', 'List current session files'),
+          hint('list <folder>', 'List current session files', 'list '),
+          hint('ls <folder>', 'List current session files', 'ls '),
           hint('show <file>', 'Print a session file in the terminal', 'show '),
           hint('add <file>', 'Open the Files editor for a new session file', 'add '),
           hint('add-dir <folder>', 'Create a session folder', 'add-dir '),
           hint('edit <file>', 'Open the Files editor for an existing session file', 'edit '),
           hint('download <file>', 'Download a session file through the browser', 'download '),
+          hint('move <source> <destination>', 'Move or rename a session file or folder', 'move '),
           hint('delete <file>', 'Remove a session file from this session', 'delete '),
           hint('help', 'Show file command usage'),
         ],
@@ -157,6 +164,7 @@ function builtInAutocompleteBase() {
     ll: { ...emptyBuiltIn('built-in: long-list session files'), feature_required: 'workspace', argument_limit: 1 },
     ls: { ...emptyBuiltIn('built-in: list session files'), feature_required: 'workspace', argument_limit: 1 },
     mkdir: { ...emptyBuiltIn('built-in: create a session folder'), feature_required: 'workspace', argument_limit: 1 },
+    mv: { ...emptyBuiltIn('built-in: move or rename a session file or folder'), feature_required: 'workspace', argument_limit: 2 },
     rm: {
       ...emptyBuiltIn('built-in: remove a session file after confirmation'),
       feature_required: 'workspace',
@@ -300,7 +308,7 @@ describe('app helpers', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
 
-    await loadAppFns({
+    const { getHudClockPreference } = await loadAppFns({
       apiFetch,
       cookies: { pref_timestamps: 'off', pref_line_numbers: 'off', pref_hud_clock: 'utc' },
       themeRegistry: {
@@ -328,6 +336,7 @@ describe('app helpers', () => {
     })
     await Promise.resolve()
     await Promise.resolve()
+    await Promise.resolve()
 
     expect(document.body.dataset.theme).toBe('theme_light_blue')
     expect(document.body.classList.contains('ts-clock')).toBe(true)
@@ -335,6 +344,7 @@ describe('app helpers', () => {
     expect(document.getElementById('options-welcome-select').value).toBe('disable_animation')
     expect(document.getElementById('options-share-redaction-select').value).toBe('redacted')
     expect(document.getElementById('options-hud-clock-select').value).toBe('local')
+    expect(getHudClockPreference()).toBe('local')
   })
 
   it('switches the visible prompt into confirmation mode when requested', async () => {
@@ -1062,18 +1072,23 @@ describe('app helpers', () => {
     })
 
     expect(context.commands.flags.map(item => item.value)).toEqual(['--built-in', '--external'])
+    expect(context.commands.arg_hints.__positional__.map(item => item.value)).toContain('info')
+    expect(context.commands.arg_hints.info.map(item => item.value)).toEqual(
+      expect.arrayContaining(['curl', 'nmap', 'commands', 'man']),
+    )
     expect(context.runs.flags.map(item => item.value)).toEqual(['-v', '--verbose', '--json'])
     expect(context.jobs.flags.map(item => item.value)).toEqual(['-v', '--verbose', '--json'])
     expect(context['session-token'].arg_hints.__positional__.map(item => item.value)).toContain('set <token>')
     expect(context['session-token'].arg_hints.set[0].value).toBe('<token>')
     expect(context.file.arg_hints.__positional__.map(item => item.value)).toEqual([
-      'list',
-      'ls',
+      'list <folder>',
+      'ls <folder>',
       'show <file>',
       'add <file>',
       'add-dir <folder>',
       'edit <file>',
       'download <file>',
+      'move <source> <destination>',
       'delete <file>',
       'help',
     ])
@@ -1103,9 +1118,15 @@ describe('app helpers', () => {
 
     const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
 
-    expect(context.file.arg_hints.show.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
-    expect(context.file.arg_hints.edit.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
-    expect(context.file.arg_hints.download.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
+    expect(context.file.arg_hints.show.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
+    expect(context.file.arg_hints.edit.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
+    expect(context.file.arg_hints.download.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
+    expect(context.file.arg_hints.move.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
+    expect(context.file.sequence_arg_hints['move targets.txt'].map(item => item.value)).toEqual(['reports/', '/'])
+    expect(context.file.sequence_arg_hints['move reports/'].map(item => item.value)).toEqual(['/'])
+    expect(context.mv.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
+    expect(context.mv.sequence_arg_hints['mv targets.txt'].map(item => item.value)).toEqual(['reports/', '/'])
+    expect(context.mv.sequence_arg_hints['mv reports/'].map(item => item.value)).toEqual(['/'])
     expect(context.file.arg_hints.rm.map(item => item.description)).toEqual([
       'Remove folders recursively',
       'Remove folders recursively',
@@ -1113,14 +1134,14 @@ describe('app helpers', () => {
       'session file · 2 KB',
       'session folder',
     ])
-    expect(context.cat.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
-    expect(context.cd.arg_hints.__positional__.map(item => item.value)).toEqual(['reports', '/'])
-    expect(context.ll.arg_hints.__positional__.map(item => item.value)).toEqual(['-R', 'reports', '/'])
-    expect(context.ls.arg_hints.__positional__.map(item => item.value)).toEqual(['-l', '-R', 'reports', '/'])
-    expect(context.mkdir.arg_hints.__positional__.map(item => item.value)).toEqual(['reports', '<folder>'])
-    expect(context.grep.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
-    expect(context.head.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json'])
-    expect(context.rm.arg_hints.__positional__.map(item => item.value)).toEqual(['-r', '-rf', 'targets.txt', 'ffuf.json', 'reports'])
+    expect(context.cat.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
+    expect(context.cd.arg_hints.__positional__.map(item => item.value)).toEqual(['reports/', '/'])
+    expect(context.ll.arg_hints.__positional__.map(item => item.value)).toEqual(['-R', 'reports/', '/'])
+    expect(context.ls.arg_hints.__positional__.map(item => item.value)).toEqual(['-l', '-R', 'reports/', '/'])
+    expect(context.mkdir.arg_hints.__positional__.map(item => item.value)).toEqual(['reports/', '<folder>'])
+    expect(context.grep.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
+    expect(context.head.arg_hints.__positional__.map(item => item.value)).toEqual(['targets.txt', 'ffuf.json', 'reports/'])
+    expect(context.rm.arg_hints.__positional__.map(item => item.value)).toEqual(['-r', '-rf', 'targets.txt', 'ffuf.json', 'reports/'])
   })
 
   it('serves workspace autocomplete values relative to the active workspace folder', async () => {
@@ -1143,14 +1164,64 @@ describe('app helpers', () => {
 
     const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
 
-    expect(context.cd.arg_hints.__positional__.map(item => item.value)).toEqual(['../', 'nested', '/'])
-    expect(context.ll.arg_hints.__positional__.map(item => item.value)).toEqual(['-R', '../', 'nested', '/'])
-    expect(context.ls.arg_hints.__positional__.map(item => item.value)).toEqual(['-l', '-R', '../', 'nested', '/'])
-    expect(context.cat.arg_hints.__positional__.map(item => item.value)).toEqual(['summary.txt'])
-    expect(context.grep.arg_hints.__positional__.map(item => item.value)).toEqual(['summary.txt'])
-    expect(context.file.arg_hints.show.map(item => item.value)).toEqual(['summary.txt'])
-    expect(context.file.arg_hints.list.map(item => item.value)).toEqual(['-l', '-R', 'nested', '/'])
-    expect(context.file.arg_hints.ls.map(item => item.value)).toEqual(['-l', '-R', 'nested', '/'])
+    expect(context.cd.arg_hints.__positional__.map(item => item.value)).toEqual(['../', 'nested/', '/'])
+    expect(context.ll.arg_hints.__positional__.map(item => item.value)).toEqual(['-R', '../', 'nested/', '/'])
+    expect(context.ls.arg_hints.__positional__.map(item => item.value)).toEqual(['-l', '-R', '../', 'nested/', '/'])
+    expect(context.cat.arg_hints.__positional__.map(item => item.value)).toEqual(['summary.txt', 'nested/'])
+    expect(context.grep.arg_hints.__positional__.map(item => item.value)).toEqual(['summary.txt', 'nested/'])
+    expect(context.file.arg_hints.show.map(item => item.value)).toEqual(['summary.txt', 'nested/'])
+    expect(context.file.arg_hints.list.map(item => item.value)).toEqual(['-l', '-R', 'nested/', '/'])
+    expect(context.file.arg_hints.ls.map(item => item.value)).toEqual(['-l', '-R', 'nested/', '/'])
+    expect(context.file.arg_hints.move.map(item => item.value)).toEqual(['summary.txt', 'nested/'])
+    expect(context.file.sequence_arg_hints['move summary.txt'].map(item => item.value)).toEqual(['nested/', '/'])
+    expect(context.file.sequence_arg_hints['move nested/'].map(item => item.value)).toEqual(['/'])
+    expect(context.mv.arg_hints.__positional__.map(item => item.value)).toEqual(['summary.txt', 'nested/'])
+    expect(context.mv.sequence_arg_hints['mv summary.txt'].map(item => item.value)).toEqual(['nested/', '/'])
+    expect(context.mv.sequence_arg_hints['mv nested/'].map(item => item.value)).toEqual(['/'])
+  })
+
+  it('serves directory-aware workspace autocomplete hints while preserving typed prefixes', async () => {
+    const entriesByDirectory = {
+      '': {
+        folders: [{ name: 'darklab', path: 'darklab' }, { name: 'reports', path: 'reports' }],
+        files: [{ name: 'root.txt', path: 'root.txt' }],
+      },
+      darklab: {
+        folders: [{ name: 'nested', path: 'darklab/nested' }],
+        files: [{ name: 'targets.txt', path: 'darklab/targets.txt' }],
+      },
+      'reports/darklab': {
+        folders: [{ name: 'child', path: 'reports/darklab/child' }],
+        files: [{ name: 'summary.txt', path: 'reports/darklab/summary.txt' }],
+      },
+    }
+    const { getRuntimeAutocompleteContext, getWorkspaceAutocompletePathHints } = await loadAppFns({
+      workspaceCwd: 'reports',
+      getWorkspaceAutocompleteFileHints: () => [
+        { value: 'root.txt', description: 'session file · 1 B' },
+        { value: 'darklab/targets.txt', description: 'session file · 11 B' },
+        { value: 'reports/darklab/summary.txt', description: 'session file · 42 B' },
+      ],
+      getWorkspaceAutocompleteDirectoryHints: () => [
+        { value: 'darklab', description: 'session folder' },
+        { value: 'reports', description: 'session folder' },
+        { value: 'darklab/nested', description: 'session folder' },
+        { value: 'reports/darklab/child', description: 'session folder' },
+      ],
+      getWorkspaceDirectoryEntries: path => entriesByDirectory[path] || { folders: [], files: [] },
+    })
+
+    const context = getRuntimeAutocompleteContext(builtInAutocompleteBase())
+
+    expect(context.cat.workspace_path_arg_kinds.__positional__).toEqual(['file'])
+    expect(context.ls.workspace_path_arg_kinds.__positional__).toEqual(['directory'])
+    expect(context.mv.workspace_path_arg_kinds.__positional__).toEqual(['any', 'directory'])
+    expect(context.file.workspace_path_arg_kinds.move).toEqual(['any', 'directory'])
+    expect(getWorkspaceAutocompletePathHints('file', 'darklab/').map(item => item.value)).toEqual(['darklab/summary.txt', 'darklab/child/'])
+    expect(getWorkspaceAutocompletePathHints('directory', '../').map(item => item.value)).toEqual(['../darklab/', '../reports/'])
+    expect(getWorkspaceAutocompletePathHints('file', '../darklab/').map(item => item.value)).toEqual(['../darklab/targets.txt', '../darklab/nested/'])
+    expect(getWorkspaceAutocompletePathHints('any', '../darklab/').map(item => item.value)).toEqual(['../darklab/targets.txt', '../darklab/nested/'])
+    expect(getWorkspaceAutocompletePathHints('file', '../../')).toEqual([])
   })
 
   it('hides workspace built-ins from runtime autocomplete when Files are disabled', async () => {
@@ -1167,6 +1238,7 @@ describe('app helpers', () => {
     expect(context.ll).toBeUndefined()
     expect(context.ls).toBeUndefined()
     expect(context.mkdir).toBeUndefined()
+    expect(context.mv).toBeUndefined()
     expect(context.rm).toBeUndefined()
     expect(context.man.arg_hints.__positional__.map(item => item.value)).not.toContain('file')
   })
@@ -1471,9 +1543,11 @@ describe('app helpers', () => {
     const { storage, logClientError } = await loadAppFns({ apiFetch })
     await Promise.resolve()
     await Promise.resolve()
+    await Promise.resolve()
 
     expect(apiFetch).toHaveBeenCalledWith('/config')
     expect(apiFetch).toHaveBeenCalledWith('/allowed-commands')
+    expect(apiFetch).toHaveBeenCalledWith('/commands/catalog')
     expect(apiFetch).toHaveBeenCalledWith('/autocomplete')
     expect(logClientError).toHaveBeenCalledWith('failed to load /config', expect.any(Error))
     expect(logClientError).toHaveBeenCalledWith(
@@ -2499,6 +2573,29 @@ describe('app helpers', () => {
     restoreViewport()
   })
 
+  it('blocks composer input and autocomplete while the active tab is running', async () => {
+    const acHide = vi.fn()
+    const acShow = vi.fn()
+    const { cmdInput, handleComposerInputChange, setComposerValue, getComposerValue } = await loadAppFns({
+      tabs: [{ id: 'tab-1', st: 'running' }],
+      acHide,
+      acShow,
+      acSuggestions: ['curl http://localhost:5001/health'],
+    })
+
+    expect(setComposerValue('curl', 4, 4)).toBe('')
+    expect(getComposerValue()).toBe('')
+
+    cmdInput.value = 'curl'
+    cmdInput.setSelectionRange(4, 4)
+    handleComposerInputChange(cmdInput)
+
+    expect(cmdInput.value).toBe('')
+    expect(getComposerValue()).toBe('')
+    expect(acHide).toHaveBeenCalled()
+    expect(acShow).not.toHaveBeenCalled()
+  })
+
   it('publishes mobile focus and selection changes into composer state without mirroring the hidden input', async () => {
     const { getComposerState, restoreViewport } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
@@ -2898,6 +2995,23 @@ describe('app helpers', () => {
     expect(cmdInput.value).toBe('dig darklab.sh ')
   })
 
+  it('supports ctrl+w with punctuation-delimited terminal words', async () => {
+    const { cmdInput, setComposerState } = await loadAppFns()
+
+    cmdInput.value = 'cat /tmp/darklab_findings(1).txt'
+    cmdInput.focus()
+    cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
+    setComposerState({
+      value: cmdInput.value,
+      selectionStart: cmdInput.value.length,
+      selectionEnd: cmdInput.value.length,
+      activeInput: 'desktop',
+    })
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', ctrlKey: true, bubbles: true }))
+
+    expect(cmdInput.value).toBe('cat /tmp/darklab_findings(1).')
+  })
+
   it('supports ctrl+u to delete to the beginning of the line', async () => {
     const { cmdInput, setComposerState } = await loadAppFns()
 
@@ -2978,12 +3092,38 @@ describe('app helpers', () => {
     expect(cmdInput.selectionEnd).toBe(15)
 
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', altKey: true, bubbles: true }))
-    expect(cmdInput.selectionStart).toBe(4)
-    expect(cmdInput.selectionEnd).toBe(4)
+    expect(cmdInput.selectionStart).toBe(12)
+    expect(cmdInput.selectionEnd).toBe(12)
 
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', altKey: true, bubbles: true }))
     expect(cmdInput.selectionStart).toBe(14)
     expect(cmdInput.selectionEnd).toBe(14)
+  })
+
+  it('treats punctuation as word boundaries for terminal word movement', async () => {
+    const { cmdInput, setComposerState } = await loadAppFns()
+    const value = 'cat /tmp/darklab_findings(1).txt'
+
+    cmdInput.value = value
+    cmdInput.setSelectionRange(value.length, value.length)
+    setComposerState({
+      value,
+      selectionStart: value.length,
+      selectionEnd: value.length,
+      activeInput: 'desktop',
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', altKey: true, bubbles: true }))
+    expect(cmdInput.selectionStart).toBe(29)
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', altKey: true, bubbles: true }))
+    expect(cmdInput.selectionStart).toBe(26)
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', altKey: true, bubbles: true }))
+    expect(cmdInput.selectionStart).toBe(17)
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', altKey: true, bubbles: true }))
+    expect(cmdInput.selectionStart).toBe(25)
   })
 
   it('supports macOS Option+B and Option+F word movement via physical key codes', async () => {
@@ -3057,7 +3197,7 @@ describe('app helpers', () => {
     expect(visibleInput.selectionStart).toBe(visibleInput.value.length)
 
     performMobileEditAction('delete-word')
-    expect(visibleInput.value).toBe('ping -c 4 ')
+    expect(visibleInput.value).toBe('ping -c 4 example.')
 
     performMobileEditAction('delete-line')
     expect(visibleInput.value).toBe('')
@@ -3105,6 +3245,20 @@ describe('app helpers', () => {
 
     expect(confirmKill).toHaveBeenCalledWith('tab-1')
     expect(interruptPromptLine).not.toHaveBeenCalled()
+  })
+
+  it('swallows composer keydown while the active tab is running', async () => {
+    const acHide = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      tabs: [{ id: 'tab-1', st: 'running' }],
+      acHide,
+    })
+
+    const ev = new KeyboardEvent('keydown', { key: 'a', bubbles: true, cancelable: true })
+    cmdInput.dispatchEvent(ev)
+
+    expect(ev.defaultPrevented).toBe(true)
+    expect(acHide).toHaveBeenCalled()
   })
 
   it('uses Ctrl+C to jump to a new prompt line when no command is running', async () => {
@@ -3244,8 +3398,8 @@ describe('app helpers', () => {
       preventDefault: vi.fn(),
       stopPropagation: vi.fn(),
     })
-    expect(getComposerState().selectionStart).toBe(4)
-    expect(getComposerState().selectionEnd).toBe(4)
+    expect(getComposerState().selectionStart).toBe(12)
+    expect(getComposerState().selectionEnd).toBe(12)
 
     handleComposerWordArrowShortcut({
       key: 'ArrowRight',
@@ -3415,10 +3569,14 @@ describe('app helpers', () => {
     expect(closeStatusMonitor).toHaveBeenCalledTimes(1)
   })
 
-  it('supports Alt+Shift+F to open the Files modal from the terminal prompt', async () => {
+  it('supports Alt+Shift+F to toggle the Files modal from the terminal prompt', async () => {
     const openWorkspace = vi.fn()
+    const closeWorkspace = vi.fn()
+    let workspaceOpen = false
     const { cmdInput } = await loadAppFns({
       openWorkspace,
+      closeWorkspace,
+      isWorkspaceOverlayOpen: vi.fn(() => workspaceOpen),
       tabs: [{ id: 'tab-1', st: 'idle' }],
     })
 
@@ -3433,6 +3591,19 @@ describe('app helpers', () => {
     )
 
     expect(openWorkspace).toHaveBeenCalled()
+
+    workspaceOpen = true
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'F',
+        code: 'KeyF',
+        altKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    )
+
+    expect(closeWorkspace).toHaveBeenCalled()
   })
 
   it('supports Ctrl+L to clear the active tab without dropping a running command', async () => {
@@ -3589,6 +3760,42 @@ describe('app helpers', () => {
       new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }),
     )
     expect(_getAcIndex()).toBe(0)
+  })
+
+  it('Tab accepts a single concrete autocomplete item while leaving hint-only guidance visible', async () => {
+    const realItem = { value: 'targets.txt', replaceStart: 4, replaceEnd: 6 }
+    const hintItem = { value: '<file>', hintOnly: true, description: 'Session file path' }
+    const acAccept = vi.fn()
+    const { cmdInput, acDropdown } = await loadAppFns({
+      acFiltered: [realItem, hintItem],
+      acIndex: -1,
+      acAccept,
+    })
+
+    acDropdown.style.display = 'block'
+    cmdInput.value = 'cat ta'
+    cmdInput.setSelectionRange(6, 6)
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+
+    expect(acAccept).toHaveBeenCalledWith(realItem)
+  })
+
+  it('ArrowDown skips hint-only autocomplete guidance while cycling menu items', async () => {
+    const realA = { value: 'alpha.txt' }
+    const hintItem = { value: '<file>', hintOnly: true, description: 'Session file path' }
+    const realB = { value: 'bravo.txt' }
+    const acShow = vi.fn()
+    const { cmdInput, _getAcIndex, acDropdown } = await loadAppFns({
+      acFiltered: [realA, hintItem, realB],
+      acIndex: 0,
+      acShow,
+    })
+
+    acDropdown.style.display = 'block'
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+
+    expect(_getAcIndex()).toBe(2)
+    expect(acShow).toHaveBeenCalledWith([realA, hintItem, realB])
   })
 
   it('Tab key with a modifier does not trigger autocomplete accept or selection', async () => {
@@ -4293,12 +4500,12 @@ describe('app helpers', () => {
     const questions = [...document.querySelectorAll('.faq-q')].map((el) => el.textContent)
     expect(questions).toContain('What is this?')
     expect(document.querySelector('.faq-a strong')?.textContent).toBe('HTML')
-    expect(document.getElementById('faq-allowed-text')?.textContent).toContain('Click any command')
+    expect(document.getElementById('faq-allowed-text')?.textContent).toContain('Open the Command Registry')
     expect(document.getElementById('faq-limits-text')?.innerHTML).toContain('Command timeout')
-    expect(document.querySelectorAll('.allowed-chip')).toHaveLength(2)
+    expect(document.querySelectorAll('#faq-allowed-text .allowed-chip')).toHaveLength(0)
   })
 
-  it('loads FAQ command chips into the visible mobile composer and refocuses it', async () => {
+  it('opens command catalog details from the command registry browser', async () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/config') {
         return Promise.resolve({
@@ -4326,6 +4533,39 @@ describe('app helpers', () => {
             }),
         })
       }
+      if (url === '/commands/catalog') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              restricted: true,
+              commands: [
+                {
+                  root: 'curl',
+                  category: 'Network',
+                  description: 'Transfer data from URLs.',
+                  example_count: 1,
+                  subcommand_count: 0,
+                  flag_count: 1,
+                },
+              ],
+              groups: [
+                {
+                  name: 'Network',
+                  commands: [
+                    {
+                      root: 'curl',
+                      category: 'Network',
+                      description: 'Transfer data from URLs.',
+                      example_count: 1,
+                      subcommand_count: 0,
+                      flag_count: 1,
+                    },
+                  ],
+                },
+              ],
+            }),
+        })
+      }
       if (url === '/faq') {
         return Promise.resolve({
           json: () =>
@@ -4334,25 +4574,48 @@ describe('app helpers', () => {
             }),
         })
       }
+      if (url === '/commands/catalog/curl') {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              root: 'curl',
+              category: 'Network',
+              description: 'Transfer data from URLs.',
+              examples: [{ value: 'curl https://darklab.sh', description: 'Fetch a URL' }],
+              subcommands: [],
+              flags: [{ value: '-L', description: 'Follow redirects' }],
+              workspace_flags: [],
+              runtime_notes: [],
+            }),
+        })
+      }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
 
-    const { openFaq } = await loadAppFns({ apiFetch, mobileViewport: { height: 500, offsetTop: 0 } })
+    const { openFaq, openCommandRegistry } = await loadAppFns({ apiFetch, mobileViewport: { height: 500, offsetTop: 0 } })
     await new Promise((resolve) => setImmediate(resolve))
 
     const mobileCmdInput = document.getElementById('mobile-cmd')
-    const chip = document.querySelector('.allowed-chip')
-
     openFaq()
     expect(mobileCmdInput.blur).toHaveBeenCalled()
 
-    chip.click()
+    openCommandRegistry()
+    expect(document.getElementById('command-registry-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('command-registry-body').textContent).toContain('curl')
 
-    expect(mobileCmdInput.value).toBe('curl ')
+    document.querySelector('[data-command-registry-root="curl"]').click()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(document.getElementById('command-catalog-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('command-catalog-body').textContent).toContain('Transfer data from URLs.')
+    expect(document.getElementById('command-catalog-body').textContent).not.toContain('App Handling')
+    expect(mobileCmdInput.value).toBe('')
     expect(mobileCmdInput.focus).not.toHaveBeenCalled()
   })
 
-  it('opens autocomplete after loading an FAQ command chip', async () => {
+  it('opens autocomplete after loading a command catalog example chip', async () => {
     const acShow = vi.fn()
     const apiFetch = vi.fn((url) => {
       if (url === '/config') {
@@ -4381,6 +4644,25 @@ describe('app helpers', () => {
             }),
         })
       }
+      if (url === '/commands/catalog') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              restricted: true,
+              commands: [
+                {
+                  root: 'nc',
+                  category: 'Network',
+                  description: 'Open TCP connections.',
+                  example_count: 1,
+                  subcommand_count: 0,
+                  flag_count: 1,
+                },
+              ],
+              groups: [],
+            }),
+        })
+      }
       if (url === '/faq') {
         return Promise.resolve({
           json: () =>
@@ -4389,10 +4671,26 @@ describe('app helpers', () => {
             }),
         })
       }
+      if (url === '/commands/catalog/nc') {
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              root: 'nc',
+              category: 'Network',
+              description: 'Open TCP connections.',
+              examples: [{ value: 'nc', description: 'Check port' }],
+              subcommands: [],
+              flags: [{ value: '-z', description: 'Zero-I/O mode' }],
+              workspace_flags: [],
+              runtime_notes: [],
+            }),
+        })
+      }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
 
-    await loadAppFns({
+    const { openCommandRegistry } = await loadAppFns({
       apiFetch,
       getAutocompleteMatches: (value, cursor) => (
         value === 'nc ' && cursor === 3
@@ -4403,7 +4701,14 @@ describe('app helpers', () => {
     })
     await new Promise((resolve) => setImmediate(resolve))
 
-    document.querySelector('.allowed-chip').click()
+    openCommandRegistry()
+    document.querySelector('[data-command-registry-root="nc"]').click()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(document.getElementById('command-catalog-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('command-catalog-body').textContent).toContain('Open TCP connections.')
+    document.querySelector('[data-command-example]').click()
 
     expect(document.getElementById('mobile-cmd').value).toBe('nc ')
     expect(acShow).toHaveBeenCalledWith([

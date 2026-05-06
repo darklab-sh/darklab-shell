@@ -310,6 +310,10 @@
       void global.openStatusMonitor({ source: 'rail' });
       return;
     }
+    if (action === 'command-registry' && typeof global.openCommandRegistry === 'function') {
+      global.openCommandRegistry();
+      return;
+    }
     if (action === 'options' && typeof global.openOptions === 'function') {
       global.openOptions();
       return;

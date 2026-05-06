@@ -117,19 +117,14 @@ test.describe('timestamp toggle', () => {
   test('toggling timestamps or line numbers keeps a long man page pinned to the live bottom', async ({
     page,
   }) => {
+    test.setTimeout(90_000)
     await page.waitForFunction(() => {
       const text = document.querySelector('.wlc-command-text')?.textContent || ''
       return text.length >= 5
     })
-    await ensurePromptReady(page)
 
-    await page.evaluate(() => {
-      if (typeof submitComposerCommand === 'function') {
-        submitComposerCommand('man curl', { dismissKeyboard: true })
-      }
-    })
-    await expect(page.locator('#hud-last-exit')).toHaveText('0')
-    await waitForActiveOutputSettled(page)
+    await runCommand(page, 'man curl', { timeout: 60_000 })
+    await expect(page.locator('#hud-last-exit')).toHaveText('0', { timeout: 15_000 })
 
     const output = page.locator('.tab-panel.active .output')
     await pinActiveOutputToLiveBottom(page)

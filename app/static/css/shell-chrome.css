@@ -606,66 +606,6 @@
   .hud-cell.hud-action-cell:focus-visible {
     box-shadow: inset 0 0 0 1px var(--border-bright);
   }
-  .hud-cell.hud-status-expandable {
-    padding-right: 28px;
-  }
-  .status-monitor-status-glyph {
-    position: absolute;
-    right: 11px;
-    top: 9px;
-    color: var(--muted);
-    font-size: 15px;
-    line-height: 1;
-    opacity: 0;
-    transform: rotate(-90deg);
-    pointer-events: none;
-    transition: opacity 120ms ease, color 120ms ease;
-  }
-  .hud-cell.hud-status-expandable .status-monitor-status-glyph {
-    opacity: 0.78;
-  }
-  .hud-cell.hud-status-expandable:hover .status-monitor-status-glyph,
-  .hud-cell.hud-status-expandable:focus-visible .status-monitor-status-glyph {
-    opacity: 1;
-  }
-  .hud-cell.hud-status-affordance-pulse .status-monitor-status-glyph {
-    color: var(--green);
-    animation: hud-status-affordance-pulse 1.4s ease-out 1;
-  }
-  .hud-cell.hud-status-affordance-pulse {
-    animation: hud-status-affordance-lift 0.62s ease-in-out 2;
-  }
-  @keyframes hud-status-affordance-pulse {
-    0% {
-      opacity: 0.22;
-      filter: drop-shadow(0 0 0 transparent);
-      transform: translateY(4px) rotate(-90deg);
-    }
-    38% {
-      opacity: 1;
-      filter: drop-shadow(0 0 8px color-mix(in srgb, var(--green) 78%, transparent));
-      transform: translateY(0) rotate(-90deg);
-    }
-    100% {
-      opacity: 0.72;
-      filter: drop-shadow(0 0 0 transparent);
-      transform: translateY(0) rotate(-90deg);
-    }
-  }
-  @keyframes hud-status-affordance-lift {
-    0%, 100% {
-      top: 0;
-      box-shadow: inset 0 1px 0 color-mix(in srgb, var(--green) 0%, transparent);
-    }
-    38% {
-      top: -3px;
-      box-shadow: inset 0 1px 0 color-mix(in srgb, var(--green) 72%, transparent);
-    }
-    62% {
-      top: 1px;
-      box-shadow: inset 0 1px 0 color-mix(in srgb, var(--green) 36%, transparent);
-    }
-  }
   .hud.hud-running [data-hud-chip="transport"],
   .hud.hud-running [data-hud-chip="mode"] {
     display: none;

@@ -20,6 +20,7 @@ describe('workspace UI helpers', () => {
     expect([...document.querySelectorAll('[data-workspace-action]')].map(btn => btn.textContent)).toEqual([
       'View',
       'Edit',
+      'Move',
       'Download',
       'Delete',
     ])
@@ -45,7 +46,7 @@ describe('workspace UI helpers', () => {
     expect(document.querySelector('.workspace-folder-row [data-workspace-action="open-folder"]').textContent)
       .toBe('Open')
     expect([...document.querySelectorAll('.workspace-folder-row [data-workspace-action]')].map(btn => btn.textContent))
-      .toEqual(['Open', 'Delete'])
+      .toEqual(['Open', 'Move', 'Delete'])
     expect(document.querySelector('.workspace-folder-row').dataset.pressableBound).toBe('1')
 
     document.querySelector('.workspace-folder-row .workspace-file-name').click()
@@ -153,6 +154,110 @@ describe('workspace UI helpers', () => {
     }))
     expect(apiFetch).toHaveBeenCalledWith('/workspace/files?path=reports', { method: 'DELETE' })
     expect(document.getElementById('workspace-message').textContent).toBe('Deleted folder reports')
+  })
+
+  it('moves files from the row action through the app-native prompt', async () => {
+    const apiFetch = vi.fn((url, opts) => {
+      if (String(url) === '/workspace/files/move' && opts?.method === 'POST') {
+        return Promise.resolve(responseJson({
+          moved: {
+            source: 'targets.txt',
+            destination: 'reports/targets.txt',
+            kind: 'file',
+            file_count: 1,
+          },
+          workspace: {
+            directories: [{ path: 'reports' }],
+            files: [{ path: 'reports/targets.txt', size: 11 }],
+            usage: { bytes_used: 11, file_count: 1 },
+            limits: { quota_bytes: 4096, max_files: 10 },
+          },
+        }))
+      }
+      return Promise.resolve(responseJson({}))
+    })
+    const showConfirm = vi.fn(async (opts) => {
+      const input = opts.content.querySelector('input')
+      input.value = 'reports'
+      expect(opts.defaultFocus).toBe(input)
+      expect(opts.body.text).toBe('Move file targets.txt?')
+      return (await opts.actions.find(action => action.id === 'move').onActivate()) ? 'move' : null
+    })
+    const { renderWorkspaceFiles } = setupWorkspace(apiFetch, { showConfirm })
+
+    renderWorkspaceFiles({
+      directories: [{ path: 'reports' }],
+      files: [{ path: 'targets.txt', size: 11 }],
+      usage: { bytes_used: 11, file_count: 1 },
+      limits: { quota_bytes: 4096, max_files: 10 },
+    })
+
+    document.querySelector('[data-workspace-action="move"]').click()
+    await flushWorkspacePromises()
+
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/move', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ source: 'targets.txt', destination: 'reports' }),
+    }))
+    expect(document.getElementById('workspace-message').textContent).toBe('Moved targets.txt to reports/targets.txt')
+    expect(document.querySelector('.workspace-file-name').textContent).toBe('reports')
+  })
+
+  it('moves a dragged file onto a workspace folder after confirmation', async () => {
+    const apiFetch = vi.fn((url, opts) => {
+      if (String(url) === '/workspace/files/move' && opts?.method === 'POST') {
+        return Promise.resolve(responseJson({
+          moved: {
+            source: 'targets.txt',
+            destination: 'reports/targets.txt',
+            kind: 'file',
+            file_count: 1,
+          },
+          workspace: {
+            directories: [{ path: 'reports' }],
+            files: [{ path: 'reports/targets.txt', size: 11 }],
+            usage: { bytes_used: 11, file_count: 1 },
+            limits: { quota_bytes: 4096, max_files: 10 },
+          },
+        }))
+      }
+      return Promise.resolve(responseJson({}))
+    })
+    const showConfirm = vi.fn(() => Promise.resolve('move'))
+    const { renderWorkspaceFiles } = setupWorkspace(apiFetch, { showConfirm })
+
+    renderWorkspaceFiles({
+      directories: [{ path: 'reports' }],
+      files: [{ path: 'targets.txt', size: 11 }],
+      usage: { bytes_used: 11, file_count: 1 },
+      limits: { quota_bytes: 4096, max_files: 10 },
+    })
+
+    const source = document.querySelector('.workspace-file-row[data-path="targets.txt"]')
+    const destination = document.querySelector('.workspace-folder-row[data-path="reports"]')
+    const dataTransfer = {
+      effectAllowed: '',
+      dropEffect: '',
+      setData: vi.fn(),
+      getData: vi.fn(() => 'targets.txt'),
+    }
+    for (const [node, type] of [[source, 'dragstart'], [destination, 'dragover'], [destination, 'drop']]) {
+      const event = new Event(type, { bubbles: true, cancelable: true })
+      Object.defineProperty(event, 'dataTransfer', { configurable: true, value: dataTransfer })
+      node.dispatchEvent(event)
+    }
+    await flushWorkspacePromises()
+
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: {
+        text: 'Move file targets.txt?',
+        note: 'Destination folder: reports',
+      },
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files/move', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ source: 'targets.txt', destination: 'reports' }),
+    }))
   })
 
   it('shows an empty state when the workspace has no files', () => {
@@ -392,6 +497,62 @@ describe('workspace UI helpers', () => {
     expect(document.getElementById('workspace-path-input').value).toBe('large.txt')
     expect(document.getElementById('workspace-path-input').readOnly).toBe(true)
     expect(document.getElementById('workspace-text-input').value).toBe('large file contents\n')
+  })
+
+  it('toasts and does not open the viewer for files that exceed the read limit', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve(responseJson({})))
+    const { renderWorkspaceFiles, handleWorkspaceFileAction, globals } = setupWorkspace(apiFetch)
+
+    renderWorkspaceFiles({
+      files: [{ path: 'too-large.txt', size: 2048 }],
+      usage: { bytes_used: 2048, file_count: 1 },
+      limits: { quota_bytes: 4096, max_file_bytes: 1024, max_files: 10 },
+    })
+
+    await handleWorkspaceFileAction('view', 'too-large.txt')
+    await flushWorkspacePromises()
+
+    expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/workspace/files/read'))).toBe(false)
+    expect(document.getElementById('workspace-viewer-overlay').classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('workspace-viewer').classList.contains('u-hidden')).toBe(true)
+    expect(globals.showToast).toHaveBeenCalledWith('file exceeds session max file size', 'error')
+  })
+
+  it('toasts and does not open the editor for oversized edit actions', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve(responseJson({})))
+    const { renderWorkspaceFiles, handleWorkspaceFileAction, globals } = setupWorkspace(apiFetch)
+
+    renderWorkspaceFiles({
+      files: [{ path: 'huge.log', size: 4096 }],
+      usage: { bytes_used: 4096, file_count: 1 },
+      limits: { quota_bytes: 8192, max_file_bytes: 1024, max_files: 10 },
+    })
+
+    await handleWorkspaceFileAction('edit', 'huge.log')
+    await flushWorkspacePromises()
+
+    expect(apiFetch.mock.calls.some(([url]) => String(url).startsWith('/workspace/files/read'))).toBe(false)
+    expect(document.getElementById('workspace-viewer-overlay').classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('workspace-editor-overlay').classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('workspace-editor').classList.contains('u-hidden')).toBe(true)
+    expect(globals.showToast).toHaveBeenCalledWith('file exceeds session max file size', 'error')
+  })
+
+  it('closes the loading viewer when a read is rejected after opening', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (String(url).startsWith('/workspace/files/read')) {
+        return Promise.resolve(responseJson({ error: 'file exceeds session max file size' }, 413))
+      }
+      return Promise.resolve(responseJson({}))
+    })
+    const { handleWorkspaceFileAction, globals } = setupWorkspace(apiFetch)
+
+    await handleWorkspaceFileAction('view', 'unknown-large.txt')
+    await flushWorkspacePromises()
+
+    expect(document.getElementById('workspace-viewer-overlay').classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('workspace-viewer').classList.contains('u-hidden')).toBe(true)
+    expect(globals.showToast).toHaveBeenCalledWith('file exceeds session max file size', 'error')
   })
 
   it('refreshes the currently viewed file when the files list is refreshed', async () => {

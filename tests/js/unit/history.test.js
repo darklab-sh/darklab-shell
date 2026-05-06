@@ -2202,7 +2202,7 @@ describe('Ctrl+R reverse-history search', () => {
     handleHistSearchInput('nmap')
 
     // Input should retain the typed query, not be replaced by the full match.
-    // The match is surfaced in the dropdown only; Enter or Ctrl+R accepts it.
+    // The match is surfaced in the dropdown only; Enter accepts it.
     expect(cmdInput.value).toBe('nmap')
   })
 
@@ -2263,7 +2263,7 @@ describe('Ctrl+R reverse-history search', () => {
     expect(cmdInput.value).toBe('pre')
   })
 
-  it('handleHistSearchKey Enter accepts the match, exits search, and runs the command', () => {
+  it('handleHistSearchKey Enter accepts the match into the prompt without running it', () => {
     const submitComposerCommand = vi.fn()
     const {
       hydrateCmdHistory,
@@ -2289,12 +2289,10 @@ describe('Ctrl+R reverse-history search', () => {
     expect(handled).toBe(true)
     expect(isHistSearchMode()).toBe(false)
     expect(cmdInput.value).toBe('dig darklab.sh A')
-    expect(submitComposerCommand).toHaveBeenCalledWith('dig darklab.sh A', {
-      dismissKeyboard: true,
-    })
+    expect(submitComposerCommand).not.toHaveBeenCalled()
   })
 
-  it('handleHistSearchKey Enter with no matches keeps typed query and runs it', () => {
+  it('handleHistSearchKey Enter with no matches keeps typed query without running it', () => {
     const submitComposerCommand = vi.fn()
     const {
       hydrateCmdHistory,
@@ -2319,10 +2317,10 @@ describe('Ctrl+R reverse-history search', () => {
 
     expect(isHistSearchMode()).toBe(false)
     expect(cmdInput.value).toBe('xyz')
-    expect(submitComposerCommand).toHaveBeenCalledWith('xyz', { dismissKeyboard: true })
+    expect(submitComposerCommand).not.toHaveBeenCalled()
   })
 
-  it('handleHistSearchKey Tab accepts the match without running the command', () => {
+  it('handleHistSearchKey Tab moves through matches without changing the input', () => {
     const submitComposerCommand = vi.fn()
     const {
       hydrateCmdHistory,
@@ -2331,8 +2329,9 @@ describe('Ctrl+R reverse-history search', () => {
       handleHistSearchKey,
       isHistSearchMode,
     } = loadHistSearch({ submitComposerCommand })
-    hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }, { command: 'dig darklab.sh MX' }])
     const cmdInput = document.getElementById('cmd')
+    const dropdown = document.getElementById('hist-search-dropdown')
 
     enterHistSearch()
     cmdInput.value = 'dig'
@@ -2346,12 +2345,13 @@ describe('Ctrl+R reverse-history search', () => {
     const handled = handleHistSearchKey(e)
 
     expect(handled).toBe(true)
-    expect(isHistSearchMode()).toBe(false)
-    expect(cmdInput.value).toBe('dig darklab.sh A')
+    expect(isHistSearchMode()).toBe(true)
+    expect(cmdInput.value).toBe('dig')
+    expect(dropdown.querySelector('.hist-search-item.active').textContent).toBe('dig darklab.sh MX')
     expect(submitComposerCommand).not.toHaveBeenCalled()
   })
 
-  it('handleHistSearchKey ArrowDown navigates to the next match and fills the input', () => {
+  it('handleHistSearchKey ArrowDown navigates to the next match without changing the input', () => {
     const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey } =
       loadHistSearch()
     hydrateCmdHistory([
@@ -2360,6 +2360,7 @@ describe('Ctrl+R reverse-history search', () => {
       { command: 'curl -I https://darklab.sh' },
     ])
     const cmdInput = document.getElementById('cmd')
+    const dropdown = document.getElementById('hist-search-dropdown')
 
     enterHistSearch()
     cmdInput.value = 'dig'
@@ -2377,7 +2378,8 @@ describe('Ctrl+R reverse-history search', () => {
 
     expect(handled).toBe(true)
     // ArrowDown from index 0 moves to index 1
-    expect(cmdInput.value).toBe('dig darklab.sh MX')
+    expect(cmdInput.value).toBe('dig')
+    expect(dropdown.querySelector('.hist-search-item.active').textContent).toBe('dig darklab.sh MX')
   })
 
   it('handleHistSearchKey ArrowUp navigates to the previous match', () => {
@@ -2385,6 +2387,7 @@ describe('Ctrl+R reverse-history search', () => {
       loadHistSearch()
     hydrateCmdHistory([{ command: 'dig darklab.sh A' }, { command: 'dig darklab.sh MX' }])
     const cmdInput = document.getElementById('cmd')
+    const dropdown = document.getElementById('hist-search-dropdown')
 
     enterHistSearch()
     cmdInput.value = 'dig'
@@ -2397,7 +2400,8 @@ describe('Ctrl+R reverse-history search', () => {
       altKey: false,
     })
     handleHistSearchKey(down)
-    expect(cmdInput.value).toBe('dig darklab.sh MX')
+    expect(cmdInput.value).toBe('dig')
+    expect(dropdown.querySelector('.hist-search-item.active').textContent).toBe('dig darklab.sh MX')
 
     const up = Object.assign(new Event('keydown', { cancelable: true }), {
       key: 'ArrowUp',
@@ -2408,7 +2412,8 @@ describe('Ctrl+R reverse-history search', () => {
     const handled = handleHistSearchKey(up)
 
     expect(handled).toBe(true)
-    expect(cmdInput.value).toBe('dig darklab.sh A')
+    expect(cmdInput.value).toBe('dig')
+    expect(dropdown.querySelector('.hist-search-item.active').textContent).toBe('dig darklab.sh A')
   })
 
   it('handleHistSearchKey Ctrl+R cycles to the next match', () => {
@@ -2425,7 +2430,7 @@ describe('Ctrl+R reverse-history search', () => {
     // Simulate user typing 'dig': browser sets cmdInput.value before the input event fires
     cmdInput.value = 'dig'
     handleHistSearchInput('dig')
-    // Input stays as the typed query until Ctrl+R or Enter accepts a match
+    // Input stays as the typed query until Enter accepts a match.
     expect(cmdInput.value).toBe('dig')
 
     const e = Object.assign(new Event('keydown', { cancelable: true }), {
@@ -2436,7 +2441,8 @@ describe('Ctrl+R reverse-history search', () => {
     })
     handleHistSearchKey(e)
 
-    expect(cmdInput.value).toBe('dig darklab.sh MX')
+    expect(cmdInput.value).toBe('dig')
+    expect(document.querySelector('.hist-search-item.active').textContent).toBe('dig darklab.sh MX')
   })
 
   it('handleHistSearchKey returns false for printable characters to allow input to proceed', () => {
@@ -2501,11 +2507,13 @@ describe('Ctrl+R reverse-history search', () => {
       altKey: false,
     })
     handleHistSearchKey(down)
-    expect(cmdInput.value).toBe('dig darklab.sh MX')
+    expect(cmdInput.value).toBe('dig')
+    expect(document.querySelector('.hist-search-item.active').textContent).toBe('dig darklab.sh MX')
 
     // ArrowDown at the last item wraps back to the first
     handleHistSearchKey(down)
-    expect(cmdInput.value).toBe('dig darklab.sh A')
+    expect(cmdInput.value).toBe('dig')
+    expect(document.querySelector('.hist-search-item.active').textContent).toBe('dig darklab.sh A')
   })
 
   it('handleHistSearchKey ArrowUp wraps from the first match back to the last', () => {
@@ -2527,10 +2535,11 @@ describe('Ctrl+R reverse-history search', () => {
     const handled = handleHistSearchKey(up)
 
     expect(handled).toBe(true)
-    expect(cmdInput.value).toBe('dig darklab.sh MX')
+    expect(cmdInput.value).toBe('dig')
+    expect(document.querySelector('.hist-search-item.active').textContent).toBe('dig darklab.sh MX')
   })
 
-  it('handleHistSearchKey Tab with no matches exits keeping the typed query in input', () => {
+  it('handleHistSearchKey Tab with no matches leaves search open and keeps the typed query', () => {
     const submitComposerCommand = vi.fn()
     const {
       hydrateCmdHistory,
@@ -2556,13 +2565,12 @@ describe('Ctrl+R reverse-history search', () => {
     const handled = handleHistSearchKey(e)
 
     expect(handled).toBe(true)
-    expect(isHistSearchMode()).toBe(false)
-    // keepCurrent path: typed query stays, pre-draft is NOT restored
+    expect(isHistSearchMode()).toBe(true)
     expect(cmdInput.value).toBe('xyz')
     expect(submitComposerCommand).not.toHaveBeenCalled()
   })
 
-  it('handleHistSearchKey Enter after ArrowDown runs the navigated-to match', () => {
+  it('handleHistSearchKey Enter after ArrowDown accepts the navigated-to match without running it', () => {
     const submitComposerCommand = vi.fn()
     const {
       hydrateCmdHistory,
@@ -2596,9 +2604,7 @@ describe('Ctrl+R reverse-history search', () => {
 
     expect(isHistSearchMode()).toBe(false)
     expect(cmdInput.value).toBe('dig darklab.sh MX')
-    expect(submitComposerCommand).toHaveBeenCalledWith('dig darklab.sh MX', {
-      dismissKeyboard: true,
-    })
+    expect(submitComposerCommand).not.toHaveBeenCalled()
   })
 
   it('resetCmdHistoryNav exits hist search mode if active', () => {

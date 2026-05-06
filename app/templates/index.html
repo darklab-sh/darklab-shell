@@ -195,6 +195,11 @@
           <span class="menu-item-label">status</span>
           <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
+        <button type="button" class="menu-item nav-item" data-menu-action="command-registry">
+          <span class="menu-item-icon" aria-hidden="true">⌘</span>
+          <span class="menu-item-label">commands</span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+        </button>
         <button type="button" class="menu-item nav-item" data-menu-action="workflows">
           <span class="menu-item-icon" aria-hidden="true">⚙</span>
           <span class="menu-item-label">workflows</span>
@@ -280,6 +285,7 @@
       <button class="rail-nav-item nav-item" data-action="options" type="button" title="Display and preference options (Alt+,)"><span class="rail-nav-glyph">≡</span><span class="rail-nav-label">options</span></button>
       <button class="rail-nav-item nav-item" data-action="history" type="button" title="Run history (Alt+H)"><span class="rail-nav-glyph">⧖</span><span class="rail-nav-label">history</span></button>
       <button class="rail-nav-item nav-item" data-action="status-monitor" type="button" title="Status Monitor (Alt+M)"><span class="rail-nav-glyph">◉</span><span class="rail-nav-label">status</span></button>
+      <button class="rail-nav-item nav-item" data-action="command-registry" type="button" title="Command Registry"><span class="rail-nav-glyph">⌘</span><span class="rail-nav-label">commands</span></button>
       {% if workspace_enabled %}
       <button class="rail-nav-item nav-item" data-action="workspace" type="button" title="Session files (Alt+Shift+F)"><span class="rail-nav-glyph">▣</span><span class="rail-nav-label">files</span></button>
       {% endif %}
@@ -612,6 +618,33 @@
       <button type="button" class="close-btn faq-close" aria-label="Close FAQ">✕</button>
     </div>
     <div class="faq-body nice-scroll"></div>
+  </div>
+</div>
+
+<div id="command-registry-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
+  <div id="command-registry-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="command-registry-title">
+    <div class="faq-header">
+      <div>
+        <span class="faq-title" id="command-registry-title">COMMANDS</span>
+        <div class="command-registry-subtitle" id="command-registry-subtitle">Browse supported tools, examples, flags, and subcommands.</div>
+      </div>
+      <button type="button" class="close-btn command-registry-close" aria-label="Close command registry">✕</button>
+    </div>
+    <div class="command-registry-toolbar">
+      <input id="command-registry-search" class="form-control form-control-compact" type="search" placeholder="Search commands" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="search" aria-label="Search commands">
+      <div id="command-registry-categories" class="command-registry-categories" role="list" aria-label="Command categories"></div>
+    </div>
+    <div id="command-registry-body" class="command-registry-body nice-scroll" aria-live="polite"></div>
+  </div>
+</div>
+
+<div id="command-catalog-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
+  <div id="command-catalog-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="command-catalog-title">
+    <div class="faq-header">
+      <span class="faq-title" id="command-catalog-title">COMMAND</span>
+      <button type="button" class="close-btn command-catalog-close" aria-label="Close command details">✕</button>
+    </div>
+    <div id="command-catalog-body" class="faq-body command-catalog-body nice-scroll"></div>
   </div>
 </div>
 

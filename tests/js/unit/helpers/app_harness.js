@@ -30,6 +30,8 @@ export async function loadAppFns({
   navigateCmdHistory: navigateCmdHistoryOverride = vi.fn(() => false),
   enterHistSearch: enterHistSearchOverride = vi.fn(),
   openWorkspace: openWorkspaceOverride = vi.fn(),
+  closeWorkspace: closeWorkspaceOverride = vi.fn(),
+  isWorkspaceOverlayOpen: isWorkspaceOverlayOpenOverride = vi.fn(() => false),
   openStatusMonitor: openStatusMonitorOverride = vi.fn(() => Promise.resolve(false)),
   closeStatusMonitor: closeStatusMonitorOverride = vi.fn(),
   isStatusMonitorOpen: isStatusMonitorOpenOverride = vi.fn(() => false),
@@ -40,6 +42,7 @@ export async function loadAppFns({
   getAutocompleteMatches: getAutocompleteMatchesOverride = null,
   acIndex: acIndexOverride = -1,
   acShow: acShowOverride = () => {},
+  acAccept: acAcceptOverride = () => {},
   acHide: acHideOverride = () => {},
   acExpandSharedPrefix: acExpandSharedPrefixOverride = () => false,
   getOutput: getOutputOverride = null,
@@ -75,6 +78,7 @@ export async function loadAppFns({
     <nav class="rail-nav" id="rail-nav">
       <button class="rail-nav-item" data-action="options" type="button"></button>
       <button class="rail-nav-item" data-action="history" type="button"></button>
+      <button class="rail-nav-item" data-action="command-registry" type="button"></button>
       <button class="rail-nav-item" data-action="theme" type="button"></button>
       <button class="rail-nav-item" data-action="faq" type="button"></button>
       <a class="rail-nav-item u-hidden" data-action="diag" id="rail-diag-btn" href="/diag"></a>
@@ -104,6 +108,7 @@ export async function loadAppFns({
           <button data-menu-action="clear"></button>
           <button data-menu-action="history"></button>
           <button data-menu-action="status-monitor"></button>
+          <button data-menu-action="command-registry"></button>
           <button data-menu-action="options"></button>
           <button data-menu-action="theme"></button>
           <button data-menu-action="faq"></button>
@@ -149,6 +154,23 @@ export async function loadAppFns({
     <div id="faq-overlay"></div>
     <button class="faq-close"></button>
     <div class="faq-body"></div>
+    <div id="command-registry-overlay" class="u-hidden">
+      <div id="command-registry-modal">
+        <span id="command-registry-title"></span>
+        <div id="command-registry-subtitle"></div>
+        <button class="command-registry-close"></button>
+        <input id="command-registry-search" />
+        <div id="command-registry-categories"></div>
+        <div id="command-registry-body"></div>
+      </div>
+    </div>
+    <div id="command-catalog-overlay" class="u-hidden">
+      <div id="command-catalog-modal">
+        <span id="command-catalog-title"></span>
+        <button class="command-catalog-close"></button>
+        <div id="command-catalog-body"></div>
+      </div>
+    </div>
     <div id="theme-overlay"></div>
     <button class="theme-close"></button>
     <div id="theme-modal"></div>
@@ -234,6 +256,11 @@ export async function loadAppFns({
           json: () => Promise.resolve({ restricted: false, commands: [], groups: [] }),
         })
       }
+      if (url === '/commands/catalog') {
+        return Promise.resolve({
+          json: () => Promise.resolve({ restricted: false, commands: [], groups: [] }),
+        })
+      }
       if (url === '/faq') {
         return Promise.resolve({ json: () => Promise.resolve({ items: [] }) })
       }
@@ -307,6 +334,15 @@ export async function loadAppFns({
     historyLoadOverlay: document.getElementById('history-load-overlay'),
     acDropdown,
     faqOverlay: document.getElementById('faq-overlay'),
+    commandRegistryOverlay: document.getElementById('command-registry-overlay'),
+    commandRegistryBody: document.getElementById('command-registry-body'),
+    commandRegistrySearch: document.getElementById('command-registry-search'),
+    commandRegistryCategories: document.getElementById('command-registry-categories'),
+    commandRegistrySubtitle: document.getElementById('command-registry-subtitle'),
+    commandRegistryCloseBtn: document.querySelector('.command-registry-close'),
+    commandCatalogOverlay: document.getElementById('command-catalog-overlay'),
+    commandCatalogBody: document.getElementById('command-catalog-body'),
+    commandCatalogCloseBtn: document.querySelector('.command-catalog-close'),
     optionsOverlay: document.getElementById('options-overlay'),
     workflowsOverlay: document.getElementById('workflows-overlay'),
     workflowsCloseBtn: document.querySelector('.workflows-close'),
@@ -450,7 +486,7 @@ export async function loadAppFns({
       acFiltered: acFilteredOverride,
       acIndex: acIndexOverride,
       acShow: acShowOverride,
-      acAccept: () => {},
+      acAccept: acAcceptOverride,
       acExpandSharedPrefix: acExpandSharedPrefixOverride,
       resetCmdHistoryNav: () => {},
       navigateCmdHistory: navigateCmdHistoryOverride,
@@ -478,6 +514,8 @@ export async function loadAppFns({
       cancelWelcome: cancelWelcomeOverride,
       enterHistSearch: enterHistSearchOverride,
       openWorkspace: openWorkspaceOverride,
+      closeWorkspace: closeWorkspaceOverride,
+      isWorkspaceOverlayOpen: isWorkspaceOverlayOpenOverride,
       openStatusMonitor: openStatusMonitorOverride,
       closeStatusMonitor: closeStatusMonitorOverride,
       isStatusMonitorOpen: isStatusMonitorOpenOverride,
@@ -559,10 +597,12 @@ export async function loadAppFns({
     reloadWorkflowCatalog,
     handleWorkflowTerminalCommand,
     getRuntimeAutocompleteContext,
+    getWorkspaceAutocompletePathHints,
     getRuntimeAutocompleteItems,
     openOptions,
     openThemeSelector,
     openFaq,
+    openCommandRegistry,
     getComposerState,
     setComposerState,
     setComposerPromptMode,

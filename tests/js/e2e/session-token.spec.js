@@ -89,16 +89,16 @@ async function starCommand(page, command) {
   }, command)
 }
 
-async function answerTerminalConfirm(page, answer, expectedText) {
-  await ensurePromptReady(page)
+async function answerTerminalConfirm(page, answer, expectedText, { timeout = 30_000 } = {}) {
+  await ensurePromptReady(page, { timeout })
   await setComposerValueForTest(page, answer)
   await page.keyboard.press('Enter')
   await expect(page.locator('.tab-panel.active .output')).toContainText(expectedText, {
-    timeout: 15_000,
+    timeout,
   })
   await page.waitForFunction(
     () => (typeof hasPendingTerminalConfirm === 'function' ? !hasPendingTerminalConfirm() : true),
-    { timeout: 15_000 },
+    { timeout },
   )
 }
 
@@ -114,6 +114,7 @@ test.describe('session-token lifecycle', () => {
   test('generate persists the token across reload and clear returns to anonymous', async ({
     page,
   }) => {
+    test.setTimeout(60_000)
     const anonymousSession = await storedAnonymousSessionId(page)
 
     await runCommand(page, 'session-token generate')

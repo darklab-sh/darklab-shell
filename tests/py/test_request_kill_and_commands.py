@@ -15,6 +15,7 @@ from builtin_commands import (
     _DOCUMENTED_BUILTIN_COMMANDS,
     _BUILTIN_COMMAND_DISPATCH,
     _SPECIAL_BUILTIN_COMMANDS,
+    _run_builtin_commands,
     resolve_builtin_command,
 )
 from commands import (
@@ -304,6 +305,106 @@ class TestIsCommandAllowedEdges:
         assert target_mode == 0o640
         assert db_is_dir
         assert db_mode == 0o770
+
+    def test_workspace_file_flags_resolve_relative_to_workspace_cwd(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            registry = {
+                "commands": [
+                    {
+                        "root": "nmap",
+                        "category": "Scanning",
+                        "policy": {"allow": ["nmap"], "deny": ["nmap -iL", "nmap -oN"]},
+                        "workspace_flags": [
+                            {"flag": "-iL", "mode": "read", "value": "separate"},
+                            {"flag": "-oN", "mode": "write", "value": "separate"},
+                        ],
+                    },
+                ],
+                "pipe_helpers": [],
+            }
+            with mock.patch("commands.load_commands_registry", return_value=registry):
+                from workspace import resolve_workspace_path, write_workspace_text_file
+                write_workspace_text_file("session-1", "darklab/targets.txt", "ip.darklab.sh\n", cfg)
+
+                result = validate_command(
+                    "nmap -iL targets.txt -oN findings.txt",
+                    session_id="session-1",
+                    cfg=cfg,
+                    workspace_cwd="darklab",
+                )
+                expected_read = str(resolve_workspace_path("session-1", "darklab/targets.txt", cfg))
+                expected_write = str(resolve_workspace_path("session-1", "darklab/findings.txt", cfg))
+
+            assert result.allowed, result.reason
+            assert result.workspace_reads == ["darklab/targets.txt"]
+            assert result.workspace_writes == ["darklab/findings.txt"]
+            assert expected_read in result.exec_command
+            assert expected_write in result.exec_command
+
+    def test_workspace_file_flags_allow_parent_paths_without_escaping_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {
+                "workspace_enabled": True,
+                "workspace_backend": "tmpfs",
+                "workspace_root": tmp,
+                "workspace_quota_mb": 1,
+                "workspace_max_file_mb": 1,
+                "workspace_max_files": 10,
+                "workspace_inactivity_ttl_hours": 1,
+            }
+            registry = {
+                "commands": [
+                    {
+                        "root": "nmap",
+                        "category": "Scanning",
+                        "policy": {"allow": ["nmap"], "deny": ["nmap -iL", "nmap -oN"]},
+                        "workspace_flags": [
+                            {"flag": "-iL", "mode": "read", "value": "separate"},
+                            {"flag": "-oN", "mode": "write", "value": "separate"},
+                        ],
+                    },
+                ],
+                "pipe_helpers": [],
+            }
+            with mock.patch("commands.load_commands_registry", return_value=registry):
+                from workspace import write_workspace_text_file
+                write_workspace_text_file("session-1", "targets.txt", "ip.darklab.sh\n", cfg)
+
+                result = validate_command(
+                    "nmap -iL ../targets.txt",
+                    session_id="session-1",
+                    cfg=cfg,
+                    workspace_cwd="darklab",
+                )
+                denied = validate_command(
+                    "nmap -iL ../../targets.txt",
+                    session_id="session-1",
+                    cfg=cfg,
+                    workspace_cwd="darklab",
+                )
+                absolute_denied = validate_command(
+                    "nmap -iL ../targets.txt -oN /../../scan.txt",
+                    session_id="session-1",
+                    cfg=cfg,
+                    workspace_cwd="darklab",
+                )
+
+        assert result.allowed, result.reason
+        assert result.workspace_reads == ["targets.txt"]
+        assert not denied.allowed
+        assert "escapes the session directory" in denied.reason
+        assert not absolute_denied.allowed
+        assert "Invalid file path: /../../scan.txt" in absolute_denied.reason
+        assert "Command not allowed" not in absolute_denied.reason
 
     def test_workspace_disabled_keeps_declared_file_flags_denied(self):
         registry = {
@@ -677,6 +778,86 @@ class TestBuiltinCommandResolution:
             assert resolve_builtin_command("ls") is None
             assert resolve_builtin_command("cat targets.txt") is None
             assert resolve_builtin_command("rm targets.txt") is None
+
+    def test_commands_external_catalog_uses_commands_registry(self):
+        registry = {
+            "commands": [
+                {
+                    "root": "sentinel-scan",
+                    "category": "Registry Group",
+                    "description": "Runs sentinel scans.",
+                    "policy": {"allow": ["sentinel-scan"]},
+                },
+                {
+                    "root": "sentinel-http",
+                    "category": "Registry Group",
+                    "description": "Checks sentinel HTTP targets.",
+                    "policy": {"allow": ["sentinel-http --safe"]},
+                },
+                {
+                    "root": "policyless-tool",
+                    "category": "Registry Group",
+                    "policy": {"allow": []},
+                },
+            ],
+            "pipe_helpers": [{"root": "grep"}],
+        }
+
+        with mock.patch("builtin_commands.load_commands_registry", return_value=registry) as loader:
+            lines = _run_builtin_commands("commands --external")
+
+        text = "\n".join(line.get("text", "") for line in lines)
+        assert loader.call_count == 1
+        assert "Allowed external commands:" in text
+        assert "[Registry Group]" in text
+        assert "sentinel-scan  - Runs sentinel scans." in text
+        assert "sentinel-http  - Checks sentinel HTTP targets." in text
+        assert "policyless-tool" not in text
+        assert "grep" not in text
+
+    def test_commands_info_renders_registry_catalog_entry(self):
+        registry = {
+            "commands": [
+                {
+                    "root": "sentinel-scan",
+                    "category": "Registry Group",
+                    "description": "Probe a target safely.",
+                    "policy": {"allow": ["sentinel-scan"]},
+                    "workspace_flags": [
+                        {"flag": "-i", "mode": "read", "value": "separate"},
+                    ],
+                    "runtime_adaptations": {
+                        "inject_flags": [{"flags": ["--safe"], "position": "append"}],
+                    },
+                    "autocomplete": {
+                        "examples": [
+                            {"value": "sentinel-scan example.test", "description": "Basic probe"},
+                        ],
+                        "flags": [
+                            {"value": "-i", "description": "Read targets", "takes_value": True},
+                        ],
+                    },
+                },
+            ],
+            "pipe_helpers": [],
+        }
+
+        with mock.patch("commands.load_commands_registry", return_value=registry):
+            lines = _run_builtin_commands("commands info sentinel-scan")
+
+        text = "\n".join(line.get("text", "") for line in lines)
+        assert "sentinel-scan" in text
+        assert "Probe a target safely." in text
+        assert "sentinel-scan example.test" in text
+        assert "-i <value>" in text
+        assert "App handling:" not in text
+        assert "Adds `--safe` automatically when needed." not in text
+
+    def test_commands_info_unknown_root_returns_usage_hint(self):
+        with mock.patch("commands.load_commands_registry", return_value={"commands": [], "pipe_helpers": []}):
+            lines = _run_builtin_commands("commands info nope")
+
+        assert lines[0]["text"] == "commands: no catalog entry for nope"
 
     def test_rejects_non_builtin_commands(self):
         assert resolve_builtin_command("ping darklab.sh") is None

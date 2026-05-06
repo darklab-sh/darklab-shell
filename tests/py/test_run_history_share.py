@@ -781,8 +781,18 @@ class TestRunStreaming:
 
         with mock.patch("builtin_commands.load_commands_registry", return_value={
             "commands": [
-                {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
-                {"root": "dig", "category": "Networking", "policy": {"allow": ["dig"], "deny": []}},
+                {
+                    "root": "ping",
+                    "category": "Networking",
+                    "description": "Checks host reachability.",
+                    "policy": {"allow": ["ping"], "deny": []},
+                },
+                {
+                    "root": "dig",
+                    "category": "Networking",
+                    "description": "Queries DNS records.",
+                    "policy": {"allow": ["dig"], "deny": []},
+                },
             ],
             "pipe_helpers": [],
         }):
@@ -795,8 +805,8 @@ class TestRunStreaming:
         assert "Built-in commands:\\n" in body
         assert "Allowed external commands:\\n" in body
         assert "[Networking]\\n" in body
-        assert "ping\\n" in body
-        assert "dig\\n" in body
+        assert "ping  - Checks host reachability.\\n" in body
+        assert "dig   - Queries DNS records.\\n" in body
         assert '"type": "exit"' in body
 
         hist = client.get("/history", headers={"X-Session-ID": "sess-built-in-commands"})
@@ -841,6 +851,7 @@ class TestRunStreaming:
         assert "Help and discovery:\\n" in body
         assert "Run `commands` to browse built-in and allowed external commands.\\n" in body
         assert "Use `commands --built-in` or `commands --external` to filter that catalog.\\n" in body
+        assert "Use `commands info <command>` to see examples, flags, and subcommands for a supported command.\\n" in body
         assert "Run `faq` to browse the configured FAQ entries inside the terminal.\\n" in body
         assert "Run `shortcuts` to see the current keyboard shortcuts.\\n" in body
         assert "README:" in body
@@ -852,8 +863,18 @@ class TestRunStreaming:
 
         with mock.patch("builtin_commands.load_commands_registry", return_value={
             "commands": [
-                {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
-                {"root": "dig", "category": "Networking", "policy": {"allow": ["dig +short", "dig MX"], "deny": []}},
+                {
+                    "root": "ping",
+                    "category": "Networking",
+                    "description": "Checks host reachability.",
+                    "policy": {"allow": ["ping"], "deny": []},
+                },
+                {
+                    "root": "dig",
+                    "category": "Networking",
+                    "description": "Queries DNS records.",
+                    "policy": {"allow": ["dig +short", "dig MX"], "deny": []},
+                },
             ],
             "pipe_helpers": [],
         }):
@@ -866,8 +887,8 @@ class TestRunStreaming:
         assert "help" in body and "Show guidance for README, FAQ, shortcuts, and command discovery." in body
         assert "Allowed external commands:\\n" in body
         assert "[Networking]\\n" in body
-        assert "ping\\n" in body
-        assert "dig\\n" in body
+        assert "ping  - Checks host reachability.\\n" in body
+        assert "dig   - Queries DNS records.\\n" in body
         assert "dig +short\\n" not in body
         assert '"type": "exit"' in body
 
@@ -890,8 +911,18 @@ class TestRunStreaming:
 
         with mock.patch("builtin_commands.load_commands_registry", return_value={
             "commands": [
-                {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
-                {"root": "curl", "category": "Networking", "policy": {"allow": ["curl -I"], "deny": []}},
+                {
+                    "root": "ping",
+                    "category": "Networking",
+                    "description": "Checks host reachability.",
+                    "policy": {"allow": ["ping"], "deny": []},
+                },
+                {
+                    "root": "curl",
+                    "category": "Networking",
+                    "description": "Makes HTTP requests.",
+                    "policy": {"allow": ["curl -I"], "deny": []},
+                },
             ],
             "pipe_helpers": [],
         }):
@@ -901,8 +932,8 @@ class TestRunStreaming:
         assert resp.status_code == 200
         assert "Built-in commands:\\n" not in body
         assert "Allowed external commands:\\n" in body
-        assert "ping\\n" in body
-        assert "curl\\n" in body
+        assert "ping  - Checks host reachability.\\n" in body
+        assert "curl  - Makes HTTP requests.\\n" in body
         assert "curl -I\\n" not in body
         assert '"type": "exit"' in body
 
@@ -2141,7 +2172,7 @@ class TestRunStreaming:
             headers={"X-Session-ID": session_id},
         )
 
-        def _deny_expanded(command, session_id=None, cfg=None):  # noqa: ARG001
+        def _deny_expanded(command, session_id=None, cfg=None, workspace_cwd=""):  # noqa: ARG001
             assert command == "curl https://blocked.darklab.sh"
             return run_routes.CommandValidationResult(
                 False,

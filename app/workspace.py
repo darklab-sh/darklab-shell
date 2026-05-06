@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import errno
+import fnmatch
+from functools import lru_cache
 import hashlib
 import logging
 import os
@@ -61,6 +63,10 @@ class WorkspaceBinaryFile(WorkspaceError):
     """Raised when a workspace file is not safe to display as text."""
 
 
+class WorkspacePermissionDenied(WorkspaceError):
+    """Raised when workspace permissions prevent an app-mediated operation."""
+
+
 @dataclass(frozen=True)
 class WorkspaceSettings:
     enabled: bool
@@ -80,6 +86,21 @@ class WorkspaceUsage:
 
 @dataclass(frozen=True)
 class WorkspaceDeleteResult:
+    path: str
+    kind: str
+    file_count: int
+
+
+@dataclass(frozen=True)
+class WorkspaceMoveResult:
+    source: str
+    destination: str
+    kind: str
+    file_count: int
+
+
+@dataclass(frozen=True)
+class WorkspacePathMatch:
     path: str
     kind: str
     file_count: int
@@ -261,6 +282,8 @@ def _open_workspace_file_no_follow(path: Path) -> tuple[int, os.stat_result]:
     except OSError as exc:
         if _is_final_symlink_error(exc):
             raise InvalidWorkspacePath("session file symlinks are not allowed") from exc
+        if exc.errno in {errno.EACCES, errno.EPERM}:
+            raise WorkspacePermissionDenied("session file is not readable") from exc
         raise
     try:
         file_stat = os.fstat(fd)
@@ -279,9 +302,155 @@ def open_workspace_file_for_download(
 ) -> BinaryIO:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
+    _repair_workspace_relative_path_for_access(session_id, relative_path, cfg, include_final_file=True)
     path = resolve_workspace_path(session_id, relative_path, cfg)
     fd, _ = _open_workspace_file_no_follow(path)
     return os.fdopen(fd, "rb")
+
+
+def _sudo_chmod_workspace_path(path: Path, mode: int) -> bool:
+    sudo_bin = shutil.which("sudo")
+    if not sudo_bin:
+        return False
+    try:
+        pwd.getpwnam("scanner")
+    except KeyError:
+        return False
+    try:
+        subprocess.run(
+            [sudo_bin, "-u", "scanner", "-g", "appuser", "chmod", f"{mode:o}", str(path)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )  # nosec B603
+        return True
+    except (subprocess.SubprocessError, OSError) as exc:
+        log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", path, mode, exc)
+        return False
+
+
+@lru_cache(maxsize=1)
+def _scanner_uid() -> int | None:
+    try:
+        return int(pwd.getpwnam("scanner").pw_uid)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
+
+
+def _is_scanner_owned(path_stat: os.stat_result) -> bool:
+    scanner_uid = _scanner_uid()
+    return scanner_uid is not None and path_stat.st_uid == scanner_uid
+
+
+def _workspace_child_dir_repair_mode(child_stat: os.stat_result) -> int | None:
+    if not _is_scanner_owned(child_stat):
+        return None
+    current = stat.S_IMODE(child_stat.st_mode)
+    if current == WORKSPACE_COMMAND_DIR_MODE:
+        return None
+    return WORKSPACE_COMMAND_DIR_MODE
+
+
+def _workspace_child_file_repair_mode(child_stat: os.stat_result) -> int | None:
+    if not _is_scanner_owned(child_stat):
+        return None
+    current = stat.S_IMODE(child_stat.st_mode)
+    repaired = (current | 0o040) & ~0o007
+    return None if repaired == current else repaired
+
+
+def _chmod_workspace_entry(path: Path, mode: int) -> None:
+    try:
+        os.chmod(path, mode)
+        return
+    except PermissionError as exc:
+        if _sudo_chmod_workspace_path(path, mode):
+            return
+        raise WorkspacePermissionDenied("session workspace permissions need repair") from exc
+    except OSError as exc:
+        log.warning("WORKSPACE_CHMOD_FAILED path=%s mode=%o error=%s", path, mode, exc)
+
+
+def _workspace_repair_dir_if_needed(path: Path, path_stat: os.stat_result) -> None:
+    repair_mode = _workspace_child_dir_repair_mode(path_stat)
+    if repair_mode is not None:
+        _chmod_workspace_entry(path, repair_mode)
+
+
+def _workspace_repair_file_if_needed(path: Path, path_stat: os.stat_result) -> None:
+    repair_mode = _workspace_child_file_repair_mode(path_stat)
+    if repair_mode is not None:
+        _chmod_workspace_entry(path, repair_mode)
+
+
+def _workspace_iterdir_after_permission_repair(path: Path, path_stat: os.stat_result | None = None) -> list[Path]:
+    try:
+        return list(path.iterdir())
+    except PermissionError:
+        if path_stat is None:
+            path_stat = path.lstat()
+        _workspace_repair_dir_if_needed(path, path_stat)
+        try:
+            return list(path.iterdir())
+        except PermissionError as exc:
+            raise WorkspacePermissionDenied("session folder is not readable") from exc
+
+
+def _iter_workspace_entries(root: Path):
+    root_stat = root.lstat()
+    stack = [(root, root_stat)]
+    while stack:
+        current, current_stat = stack.pop()
+        for child in _workspace_iterdir_after_permission_repair(current, current_stat):
+            try:
+                child_stat = child.lstat()
+            except FileNotFoundError:
+                continue
+            if stat.S_ISLNK(child_stat.st_mode):
+                raise InvalidWorkspacePath("session file symlinks are not allowed")
+            if stat.S_ISDIR(child_stat.st_mode):
+                _workspace_repair_dir_if_needed(child, child_stat)
+                yield child, child_stat
+                stack.append((child, child.lstat()))
+            elif stat.S_ISREG(child_stat.st_mode):
+                yield child, child_stat
+
+
+def normalize_session_workspace_permissions(
+    session_id: str,
+    cfg: dict[str, Any] | None = None,
+) -> None:
+    """Repair command-created workspace modes so appuser can list and read them."""
+    root = ensure_session_workspace(session_id, cfg).resolve(strict=True)
+    for path, path_stat in _iter_workspace_entries(root):
+        if stat.S_ISREG(path_stat.st_mode):
+            _workspace_repair_file_if_needed(path, path_stat)
+
+
+def _repair_workspace_relative_path_for_access(
+    session_id: str,
+    relative_path: str,
+    cfg: dict[str, Any] | None = None,
+    *,
+    include_final_file: bool = False,
+) -> None:
+    root = ensure_session_workspace(session_id, cfg).resolve(strict=True)
+    rel = _validate_relative_path(relative_path)
+    current = root
+    for index, part in enumerate(rel.parts):
+        current = current / part
+        try:
+            current_stat = current.lstat()
+        except FileNotFoundError:
+            return
+        if stat.S_ISLNK(current_stat.st_mode):
+            raise InvalidWorkspacePath("session file symlinks are not allowed")
+        is_final = index == len(rel.parts) - 1
+        if stat.S_ISDIR(current_stat.st_mode):
+            _workspace_repair_dir_if_needed(current, current_stat)
+        elif include_final_file and is_final and stat.S_ISREG(current_stat.st_mode):
+            _workspace_repair_file_if_needed(current, current_stat)
 
 
 def prepare_workspace_file_for_command(path: Path, *, mode: str) -> None:
@@ -358,12 +527,10 @@ def workspace_usage(session_id: str, cfg: dict[str, Any] | None = None) -> Works
     touch_session_workspace(session_id, cfg)
     bytes_used = 0
     file_count = 0
-    for path in root.rglob("*"):
-        if path.is_symlink():
-            raise InvalidWorkspacePath("session file symlinks are not allowed")
-        if path.is_file():
+    for path, path_stat in _iter_workspace_entries(root):
+        if stat.S_ISREG(path_stat.st_mode):
             file_count += 1
-            bytes_used += path.stat().st_size
+            bytes_used += path_stat.st_size
     return WorkspaceUsage(bytes_used=bytes_used, file_count=file_count)
 
 
@@ -371,16 +538,13 @@ def list_workspace_files(session_id: str, cfg: dict[str, Any] | None = None) -> 
     root = ensure_session_workspace(session_id, cfg).resolve(strict=True)
     touch_session_workspace(session_id, cfg)
     items: list[dict[str, Any]] = []
-    for path in root.rglob("*"):
-        if path.is_symlink():
-            raise InvalidWorkspacePath("session file symlinks are not allowed")
-        if not path.is_file():
+    for path, path_stat in _iter_workspace_entries(root):
+        if not stat.S_ISREG(path_stat.st_mode):
             continue
-        stat = path.stat()
         items.append({
             "path": path.relative_to(root).as_posix(),
-            "size": stat.st_size,
-            "mtime": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+            "size": path_stat.st_size,
+            "mtime": datetime.fromtimestamp(path_stat.st_mtime, timezone.utc).isoformat(),
         })
     return sorted(items, key=lambda item: str(item["path"]))
 
@@ -389,15 +553,12 @@ def list_workspace_directories(session_id: str, cfg: dict[str, Any] | None = Non
     root = ensure_session_workspace(session_id, cfg).resolve(strict=True)
     touch_session_workspace(session_id, cfg)
     items: list[dict[str, Any]] = []
-    for path in root.rglob("*"):
-        if path.is_symlink():
-            raise InvalidWorkspacePath("session file symlinks are not allowed")
-        if not path.is_dir():
+    for path, path_stat in _iter_workspace_entries(root):
+        if not stat.S_ISDIR(path_stat.st_mode):
             continue
-        stat = path.stat()
         items.append({
             "path": path.relative_to(root).as_posix(),
-            "mtime": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+            "mtime": datetime.fromtimestamp(path_stat.st_mtime, timezone.utc).isoformat(),
         })
     return sorted(items, key=lambda item: str(item["path"]))
 
@@ -409,6 +570,7 @@ def create_workspace_directory(
 ) -> dict[str, Any]:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
+    _repair_workspace_relative_path_for_access(session_id, relative_path, cfg)
     path = resolve_workspace_path(session_id, relative_path, cfg, ensure_parent=True)
     if path.exists() and not path.is_dir():
         raise InvalidWorkspacePath("session path is not a directory")
@@ -453,6 +615,7 @@ def write_workspace_text_file(
 ) -> dict[str, Any]:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
+    _repair_workspace_relative_path_for_access(session_id, relative_path, cfg)
     destination = resolve_workspace_path(session_id, relative_path, cfg, ensure_parent=True)
     encoded = str(text or "").encode("utf-8")
     _check_write_limits(session_id, destination, len(encoded), settings, cfg)
@@ -479,6 +642,7 @@ def read_workspace_text_file(
 ) -> str:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
+    _repair_workspace_relative_path_for_access(session_id, relative_path, cfg, include_final_file=True)
     path = resolve_workspace_path(session_id, relative_path, cfg)
     fd, file_stat = _open_workspace_file_no_follow(path)
     if file_stat.st_size > settings.max_file_bytes:
@@ -501,6 +665,7 @@ def delete_workspace_file(
 ) -> None:
     settings = workspace_settings(cfg)
     _require_enabled(settings)
+    _repair_workspace_relative_path_for_access(session_id, relative_path, cfg, include_final_file=True)
     path = resolve_workspace_path(session_id, relative_path, cfg)
     try:
         path_stat = path.lstat()
@@ -556,15 +721,7 @@ def _remove_workspace_directory(path: Path) -> None:
         )  # nosec B603
 
 
-def workspace_path_info(
-    session_id: str,
-    relative_path: str,
-    cfg: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    settings = workspace_settings(cfg)
-    _require_enabled(settings)
-    path = resolve_workspace_path(session_id, relative_path, cfg)
-    normalized = _validate_relative_path(relative_path).as_posix()
+def _workspace_path_kind_and_count(path: Path) -> tuple[str, int]:
     try:
         path_stat = path.lstat()
     except FileNotFoundError as exc:
@@ -572,14 +729,73 @@ def workspace_path_info(
     if stat.S_ISLNK(path_stat.st_mode):
         raise InvalidWorkspacePath("session file symlinks are not allowed")
     if stat.S_ISREG(path_stat.st_mode):
-        return {"path": normalized, "kind": "file", "file_count": 1, "size": path_stat.st_size}
+        return "file", 1
     if stat.S_ISDIR(path_stat.st_mode):
-        return {
-            "path": normalized,
-            "kind": "directory",
-            "file_count": _workspace_directory_file_count(path),
-        }
+        return "directory", _workspace_directory_file_count(path)
     raise WorkspacePathNotFound("session file or folder was not found")
+
+
+def workspace_path_has_glob(relative_path: str) -> bool:
+    return "*" in str(relative_path or "")
+
+
+def _workspace_glob_matches(pattern: PurePosixPath, path: PurePosixPath) -> bool:
+    pattern_parts = pattern.parts
+    path_parts = path.parts
+    if len(pattern_parts) != len(path_parts):
+        return False
+    return all(fnmatch.fnmatchcase(path_part, pattern_part) for pattern_part, path_part in zip(pattern_parts, path_parts))
+
+
+def expand_workspace_path_pattern(
+    session_id: str,
+    relative_pattern: str,
+    cfg: dict[str, Any] | None = None,
+    *,
+    kind: str = "any",
+) -> list[WorkspacePathMatch]:
+    root = ensure_session_workspace(session_id, cfg).resolve(strict=True)
+    touch_session_workspace(session_id, cfg)
+    pattern = _validate_relative_path(relative_pattern)
+    normalized_kind = str(kind or "any").strip().lower()
+    matches: list[WorkspacePathMatch] = []
+    for candidate, candidate_stat in sorted(
+        _iter_workspace_entries(root),
+        key=lambda item: item[0].relative_to(root).as_posix(),
+    ):
+        relative = PurePosixPath(candidate.relative_to(root).as_posix())
+        if not _workspace_glob_matches(pattern, relative):
+            continue
+        if stat.S_ISREG(candidate_stat.st_mode):
+            candidate_kind, file_count = "file", 1
+        elif stat.S_ISDIR(candidate_stat.st_mode):
+            candidate_kind, file_count = "directory", _workspace_directory_file_count(candidate)
+        else:
+            continue
+        if normalized_kind != "any" and candidate_kind != normalized_kind:
+            continue
+        matches.append(WorkspacePathMatch(
+            path=relative.as_posix(),
+            kind=candidate_kind,
+            file_count=file_count,
+        ))
+    return matches
+
+
+def workspace_path_info(
+    session_id: str,
+    relative_path: str,
+    cfg: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    settings = workspace_settings(cfg)
+    _require_enabled(settings)
+    _repair_workspace_relative_path_for_access(session_id, relative_path, cfg, include_final_file=True)
+    path = resolve_workspace_path(session_id, relative_path, cfg)
+    normalized = _validate_relative_path(relative_path).as_posix()
+    kind, file_count = _workspace_path_kind_and_count(path)
+    if kind == "file":
+        return {"path": normalized, "kind": "file", "file_count": 1, "size": path.stat().st_size}
+    return {"path": normalized, "kind": "directory", "file_count": file_count}
 
 
 def delete_workspace_path(
@@ -599,6 +815,89 @@ def delete_workspace_path(
         path=str(info["path"]),
         kind=str(info["kind"]),
         file_count=int(info["file_count"]),
+    )
+
+
+def _move_workspace_path_direct(source: Path, destination: Path) -> None:
+    try:
+        shutil.move(str(source), str(destination))
+        return
+    except PermissionError:
+        sudo_bin = shutil.which("sudo")
+        if not sudo_bin:
+            raise
+        try:
+            pwd.getpwnam("scanner")
+        except KeyError:
+            raise
+        subprocess.run(
+            [sudo_bin, "-u", "scanner", "-g", "appuser", "mv", "--", str(source), str(destination)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )  # nosec B603
+
+
+def move_workspace_path(
+    session_id: str,
+    source_relative_path: str,
+    destination_relative_path: str,
+    cfg: dict[str, Any] | None = None,
+) -> WorkspaceMoveResult:
+    settings = workspace_settings(cfg)
+    _require_enabled(settings)
+    _repair_workspace_relative_path_for_access(session_id, source_relative_path, cfg, include_final_file=True)
+    if destination_relative_path not in {"", "/"}:
+        destination_parent = PurePosixPath(destination_relative_path or "").parent
+        if destination_parent != PurePosixPath("."):
+            _repair_workspace_relative_path_for_access(session_id, destination_parent.as_posix(), cfg)
+    root = ensure_session_workspace(session_id, cfg).resolve(strict=True)
+    source_path = resolve_workspace_path(session_id, source_relative_path, cfg)
+    source_normalized = _validate_relative_path(source_relative_path).as_posix()
+    raw_destination = str(destination_relative_path or "").strip()
+    kind, file_count = _workspace_path_kind_and_count(source_path)
+    _reject_symlinks_under(source_path)
+
+    if raw_destination in {"", "/"}:
+        destination_path = root
+        destination_normalized = ""
+    else:
+        destination_normalized = _validate_relative_path(destination_relative_path).as_posix()
+        destination_path = resolve_workspace_path(session_id, destination_relative_path, cfg)
+    if destination_path.exists():
+        if not destination_path.is_dir():
+            raise InvalidWorkspacePath("destination already exists")
+        final_destination = destination_path / source_path.name
+        if destination_normalized:
+            final_destination_relative = (PurePosixPath(destination_normalized) / source_path.name).as_posix()
+        else:
+            final_destination_relative = source_path.name
+    else:
+        final_destination = destination_path
+        final_destination_relative = destination_normalized
+
+    if final_destination.exists():
+        raise InvalidWorkspacePath("destination already exists")
+    if not _is_relative_to(final_destination.resolve(strict=False), root):
+        raise InvalidWorkspacePath("file path escapes the session directory")
+    if source_path.resolve(strict=False) == final_destination.resolve(strict=False):
+        raise InvalidWorkspacePath("source and destination are the same")
+    if kind == "directory":
+        source_resolved = source_path.resolve(strict=True)
+        final_resolved = final_destination.resolve(strict=False)
+        if _is_relative_to(final_resolved, source_resolved):
+            raise InvalidWorkspacePath("cannot move a folder into itself")
+
+    final_destination.parent.mkdir(mode=WORKSPACE_DIR_MODE, parents=True, exist_ok=True)
+    _chmod_workspace_dir(final_destination.parent)
+    _move_workspace_path_direct(source_path, final_destination)
+    touch_session_workspace(session_id, cfg)
+    return WorkspaceMoveResult(
+        source=source_normalized,
+        destination=final_destination_relative,
+        kind=kind,
+        file_count=file_count,
     )
 
 

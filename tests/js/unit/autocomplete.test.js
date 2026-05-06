@@ -1,6 +1,6 @@
 import { fromDomScripts } from './helpers/extract.js'
 
-function loadAutocompleteFns() {
+function loadAutocompleteFns({ isActiveTabRunning = () => false } = {}) {
   const cmdInput = document.getElementById('cmd')
   const acDropdown = document.getElementById('ac')
   const mobileComposerHost = document.getElementById('mobile-composer-host')
@@ -20,6 +20,7 @@ function loadAutocompleteFns() {
       acFiltered: [],
       acIndex: -1,
       acSuppressInputOnce: false,
+      isActiveTabRunning,
     },
     `{
     acShow,
@@ -30,8 +31,10 @@ function loadAutocompleteFns() {
     limitAutocompleteMatchesForDisplay,
     rememberRecentDomainsFromCommand,
     _readRecentDomains,
-    _getAutocompleteSharedPrefix,
+    _getAutocompleteSharedPrefix: autocompleteCore.sharedPrefix,
     _setAcIndex: (value) => { acIndex = value; },
+    _setAcFiltered: (value) => { acFiltered = value; },
+    _getAcFiltered: () => acFiltered,
   }`,
   )
 }
@@ -134,6 +137,23 @@ describe('autocomplete helpers', () => {
     expect(item?.querySelector('.ac-item-desc')?.textContent).toBe('Service detection')
   })
 
+  it('highlights contextual suggestions with an item-specific match query', () => {
+    const { acShow } = loadAutocompleteFns()
+    document.getElementById('cmd').value = 'cat darklab/find'
+
+    acShow([{
+      value: 'darklab/darklab_findings.txt',
+      description: 'session file',
+      replaceStart: 4,
+      replaceEnd: 16,
+      matchQuery: 'find',
+    }])
+
+    const item = document.querySelector('.ac-item')
+    expect(item?.querySelector('.ac-item-main')?.textContent).toBe('darklab/darklab_findings.txt')
+    expect(item?.innerHTML).toContain('<span class="ac-match">find</span>')
+  })
+
   it('does not highlight typed text inside hint-only placeholders', () => {
     const input = document.getElementById('cmd')
     input.value = 'workflow run work'
@@ -168,6 +188,57 @@ describe('autocomplete helpers', () => {
     expect(items[0].innerHTML).toContain('<span class="ac-match">work</span>')
     expect(items[1].querySelector('.ac-item-main')?.textContent).toBe('<workflow>')
     expect(items[1].innerHTML).not.toContain('ac-match')
+    expect(items[1].classList.contains('ac-hint-only')).toBe(true)
+    expect(items[1].classList.contains('ac-hint-separated')).toBe(true)
+    expect(items[1].getAttribute('aria-disabled')).toBe('true')
+  })
+
+  it('honors explicit snake_case hint_only hints without placeholder autodetect', () => {
+    const { getAutocompleteMatches, acAccept } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => document.getElementById('cmd').value,
+        setComposerValue: (value, start, end) => {
+          const input = document.getElementById('cmd')
+          input.value = value
+          input.selectionStart = start
+          input.selectionEnd = end == null ? start : end
+        },
+        acSuggestions: [],
+        acContextRegistry: {
+          tokenctl: {
+            expects_value: ['set'],
+            arg_hints: {
+              set: [{ value: 'token value', description: 'Paste a token', hint_only: true }],
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+      acAccept,
+    }`,
+    )
+
+    const items = getAutocompleteMatches('tokenctl set ', 13)
+    expect(items).toHaveLength(1)
+    expect(items[0].value).toBe('token value')
+    expect(items[0].hintOnly).toBe(true)
+    expect(items[0].insertValue).toBe('')
+
+    const input = document.getElementById('cmd')
+    input.value = 'tokenctl set '
+    input.selectionStart = input.selectionEnd = 13
+    acAccept(items[0])
+    expect(input.value).toBe('tokenctl set ')
   })
 
   it('acAccept updates the input, hides the dropdown, and refocuses the input', () => {
@@ -210,6 +281,64 @@ describe('autocomplete helpers', () => {
     acAccept({ value: '-sV', replaceStart: 5, replaceEnd: 6 })
 
     expect(input.value).toBe('nmap -sV')
+  })
+
+  it('acAccept clears stale suggestions after accepting a single contextual match', () => {
+    const { acAccept, _getAcFiltered, _setAcFiltered } = loadAutocompleteFns()
+    const input = document.getElementById('cmd')
+    const suggestion = { value: 'naabu/', replaceStart: 3, replaceEnd: 6 }
+    input.value = 'cd naa'
+    input.setSelectionRange(6, 6)
+    _setAcFiltered([suggestion])
+
+    acAccept(suggestion)
+
+    expect(input.value).toBe('cd naabu/')
+    expect(_getAcFiltered()).toEqual([])
+  })
+
+  it('acAccept refreshes autocomplete after accepting a slash-terminated folder', () => {
+    vi.useFakeTimers()
+    try {
+      const openAutocompleteForVisibleComposer = vi.fn(() => true)
+      const { acAccept } = fromDomScripts(
+        ['app/static/js/utils.js', 'app/static/js/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+        {
+          document,
+          cmdInput: document.getElementById('cmd'),
+          acDropdown: document.getElementById('ac'),
+          mobileComposerHost: document.getElementById('mobile-composer-host'),
+          mobileCmdInput: document.getElementById('mobile-cmd'),
+          getComposerValue: () => document.getElementById('cmd').value,
+          setComposerValue: (value, start, end) => {
+            const input = document.getElementById('cmd')
+            input.value = value
+            input.selectionStart = start
+            input.selectionEnd = end == null ? start : end
+          },
+          openAutocompleteForVisibleComposer,
+          acSuggestions: [],
+          acContextRegistry: {},
+          acFiltered: [],
+          acIndex: -1,
+          acSuppressInputOnce: false,
+        },
+        `{
+        acAccept,
+      }`,
+      )
+      const input = document.getElementById('cmd')
+      input.value = 'cd naa'
+      input.setSelectionRange(6, 6)
+
+      acAccept({ value: 'naabu/', replaceStart: 3, replaceEnd: 6 })
+      vi.runOnlyPendingTimers()
+
+      expect(input.value).toBe('cd naabu/')
+      expect(openAutocompleteForVisibleComposer).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('acAccept suppresses one synthetic input cycle so the dropdown does not immediately reopen', () => {
@@ -380,7 +509,7 @@ describe('autocomplete helpers', () => {
             ],
             expects_value: ['-d'],
             arg_hints: {
-              __positional__: [{ value: '<domain>', description: 'Domain name' }],
+              __positional__: [{ value: '<domain>', hintOnly: true, description: 'Domain name' }],
             },
           },
         },
@@ -838,12 +967,12 @@ describe('autocomplete helpers', () => {
               { value: '@8.8.8.8', description: 'Resolver' },
             ],
             expects_value: [],
-            arg_hints: { __positional__: [{ value: '<domain>', value_type: 'domain', description: 'Domain name to query' }] },
+            arg_hints: { __positional__: [{ value: '<domain>', hintOnly: true, value_type: 'domain', description: 'Domain name to query' }] },
           },
           subfinder: {
             flags: [{ value: '-d', description: 'Target domain' }],
             expects_value: ['-d'],
-            arg_hints: { '-d': [{ value: '<domain>', value_type: 'domain', description: 'Target domain to enumerate' }] },
+            arg_hints: { '-d': [{ value: '<domain>', hintOnly: true, value_type: 'domain', description: 'Target domain to enumerate' }] },
           },
         },
         acFiltered: [],
@@ -933,7 +1062,7 @@ describe('autocomplete helpers', () => {
           dig: {
             flags: [],
             expects_value: [],
-            arg_hints: { __positional__: [{ value: '<domain>', value_type: 'domain', description: 'Domain name to query' }] },
+            arg_hints: { __positional__: [{ value: '<domain>', hintOnly: true, value_type: 'domain', description: 'Domain name to query' }] },
           },
         },
         acFiltered: [],
@@ -977,14 +1106,14 @@ describe('autocomplete helpers', () => {
             ],
             expects_value: ['-d', '-o'],
             arg_hints: {
-              '-d': [{ value: '<domain>', value_type: 'domain', description: 'Target domain to enumerate' }],
+              '-d': [{ value: '<domain>', hintOnly: true, value_type: 'domain', description: 'Target domain to enumerate' }],
               '-o': [{ value: 'subdomains.txt', description: 'Save results' }],
             },
           },
           dig: {
             flags: [{ value: 'MX', description: 'Mail exchanger lookup' }],
             expects_value: [],
-            arg_hints: { __positional__: [{ value: '<domain>', value_type: 'domain', description: 'Domain name to query' }] },
+            arg_hints: { __positional__: [{ value: '<domain>', hintOnly: true, value_type: 'domain', description: 'Domain name to query' }] },
           },
           ping: {
             flags: [
@@ -995,7 +1124,7 @@ describe('autocomplete helpers', () => {
             arg_hints: {
               '-c': [{ value: '4', description: 'Send four probes' }],
               '-i': [{ value: '0.5', description: 'Half-second probe interval' }],
-              __positional__: [{ value: '<host>', value_type: 'domain', description: 'Hostname or IP address to probe' }],
+              __positional__: [{ value: '<host>', hintOnly: true, value_type: 'domain', description: 'Hostname or IP address to probe' }],
             },
           },
         },
@@ -1046,12 +1175,12 @@ describe('autocomplete helpers', () => {
           legacydig: {
             flags: [],
             expects_value: [],
-            arg_hints: { __positional__: [{ value: '<domain>', description: 'Domain name to query' }] },
+            arg_hints: { __positional__: [{ value: '<domain>', hintOnly: true, description: 'Domain name to query' }] },
           },
           dig: {
             flags: [],
             expects_value: [],
-            arg_hints: { __positional__: [{ value: '<domain>', value_type: 'domain', description: 'Domain name to query' }] },
+            arg_hints: { __positional__: [{ value: '<domain>', hintOnly: true, value_type: 'domain', description: 'Domain name to query' }] },
           },
         },
         acFiltered: [],
@@ -1102,13 +1231,13 @@ describe('autocomplete helpers', () => {
             flags: [{ value: '-w', description: 'Wordlist' }],
             expects_value: ['-w'],
             arg_hints: {
-              '-w': [{ value: '<wordlist>', value_type: 'wordlist', wordlist_category: 'dns' }],
+              '-w': [{ value: '<wordlist>', hintOnly: true, value_type: 'wordlist', wordlist_category: 'dns' }],
             },
           },
           legacy: {
             flags: [{ value: '-w', description: 'Wordlist' }],
             expects_value: ['-w'],
-            arg_hints: { '-w': [{ value: '<wordlist>', description: 'Wordlist path' }] },
+            arg_hints: { '-w': [{ value: '<wordlist>', hintOnly: true, description: 'Wordlist path' }] },
           },
         },
         acFiltered: [],
@@ -1155,7 +1284,7 @@ describe('autocomplete helpers', () => {
             workspace_file_flags: ['-w'],
             expects_value: ['-w'],
             arg_hints: {
-              '-w': [{ value: '<wordlist>', value_type: 'wordlist', wordlist_category: 'web-content' }],
+              '-w': [{ value: '<wordlist>', hintOnly: true, value_type: 'wordlist', wordlist_category: 'web-content' }],
             },
           },
         },
@@ -1236,7 +1365,7 @@ describe('autocomplete helpers', () => {
         acContextRegistry: {
           curl: {
             arg_hints: {
-              __positional__: [{ value: '<url>', description: 'Target URL' }],
+              __positional__: [{ value: '<url>', hintOnly: true, description: 'Target URL' }],
             },
           },
         },
@@ -1367,7 +1496,7 @@ describe('autocomplete helpers', () => {
               ],
             },
             sequence_arg_hints: {
-              'set host': [{ value: '<value>', description: 'Value for HOST' }],
+              'set host': [{ value: '<value>', hintOnly: true, description: 'Value for HOST' }],
               'unset host': [],
             },
             close_after: { list: 0, set: 2, unset: 1 },
@@ -1476,7 +1605,7 @@ describe('autocomplete helpers', () => {
             ],
             expects_value: [],
             arg_hints: {
-              __positional__: [{ value: '<target>', description: 'Hostname, IP, or CIDR' }],
+              __positional__: [{ value: '<target>', hintOnly: true, description: 'Hostname, IP, or CIDR' }],
             },
           },
         },
@@ -1518,7 +1647,7 @@ describe('autocomplete helpers', () => {
             })),
             expects_value: [],
             arg_hints: {
-              __positional__: [{ value: '<target>', description: 'Hostname, IP, or CIDR' }],
+              __positional__: [{ value: '<target>', hintOnly: true, description: 'Hostname, IP, or CIDR' }],
             },
           },
         },
@@ -1563,7 +1692,7 @@ describe('autocomplete helpers', () => {
           'session-token': {
             expects_value: ['set'],
             arg_hints: {
-              set: [{ value: '<token>', description: 'Paste a token' }],
+              set: [{ value: '<token>', hintOnly: true, description: 'Paste a token' }],
               __positional__: [
                 { value: 'generate' },
                 { value: 'set <token>', insertValue: 'set ' },
@@ -1624,7 +1753,7 @@ describe('autocomplete helpers', () => {
           'session-token': {
             expects_value: ['set'],
             arg_hints: {
-              set: [{ value: '<token>', description: 'Paste a token' }],
+              set: [{ value: '<token>', hintOnly: true, description: 'Paste a token' }],
               __positional__: [{ value: 'set <token>', insertValue: 'set ' }],
             },
           },
@@ -1696,7 +1825,7 @@ describe('autocomplete helpers', () => {
             arg_hints: {
               '-o': [
                 { value: '/dev/null', description: 'Discard body output' },
-                { value: '<file>', description: 'Destination file path' },
+                { value: '<file>', hintOnly: true, description: 'Destination file path' },
               ],
             },
           },
@@ -1736,7 +1865,7 @@ describe('autocomplete helpers', () => {
             expects_value: ['-c', '-i'],
             arg_hints: {
               '-c': [{ value: '4', description: 'Send four probes' }],
-              __positional__: [{ value: '<host>', description: 'Hostname or IP address to probe' }],
+              __positional__: [{ value: '<host>', hintOnly: true, description: 'Hostname or IP address to probe' }],
             },
           },
         },
@@ -1775,7 +1904,7 @@ describe('autocomplete helpers', () => {
             expects_value: ['-c', '-i'],
             arg_hints: {
               '-c': [{ value: '4', description: 'Send four probes' }],
-              __positional__: [{ value: '<host>', description: 'Hostname or IP address to probe' }],
+              __positional__: [{ value: '<host>', hintOnly: true, description: 'Hostname or IP address to probe' }],
             },
           },
         },
@@ -1808,7 +1937,7 @@ describe('autocomplete helpers', () => {
             arg_hints: {
               __positional__: [
                 { value: 'https://', description: 'Start an HTTP or HTTPS URL' },
-                { value: '<url>', description: 'Target URL to request' },
+                { value: '<url>', hintOnly: true, description: 'Target URL to request' },
               ],
             },
           },
@@ -1848,7 +1977,7 @@ describe('autocomplete helpers', () => {
             arg_hints: {
               __positional__: [
                 { value: 'curl', description: 'curl manual page' },
-                { value: '<command>', description: 'Manual page for any allowed command' },
+                { value: '<command>', hintOnly: true, description: 'Manual page for any allowed command' },
               ],
             },
           },
@@ -1856,7 +1985,7 @@ describe('autocomplete helpers', () => {
             argument_limit: 1,
             flags: [{ value: '-c', description: 'Stop after count replies' }],
             arg_hints: {
-              __positional__: [{ value: '<host>', description: 'Hostname or IP address to probe' }],
+              __positional__: [{ value: '<host>', hintOnly: true, description: 'Hostname or IP address to probe' }],
             },
           },
         },
@@ -1951,6 +2080,147 @@ describe('autocomplete helpers', () => {
     expect(items[0].description).toBe('session file · 42 B')
   })
 
+  it('uses cwd-relative workspace file hints for external workspace read flags', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'nmap -iL ',
+        acSuggestions: [],
+        acContextRegistry: {
+          nmap: {
+            flags: [{ value: '-iL', description: 'Read targets from a session file' }],
+            expects_value: ['-iL'],
+            workspace_file_flags: ['-iL'],
+            arg_hints: {
+              '-iL': [{ value: 'root-targets.txt', description: 'Static registry example' }],
+            },
+          },
+        },
+        getWorkspaceAutocompleteFlagFileHints: token => (
+          String(token || '').includes('/')
+            ? [{ value: 'nested/targets.txt', description: 'session file · 24 B' }]
+            : [
+                { value: 'targets.txt', description: 'session file · 42 B' },
+                { value: 'nested/', description: 'session folder' },
+              ]
+        ),
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('nmap -iL ', 10).map(item => item.value)).toEqual(['targets.txt', 'nested/'])
+    expect(getAutocompleteMatches('nmap -iL nested/', 17).map(item => item.value)).toEqual(['nested/targets.txt'])
+  })
+
+  it('uses directory-aware workspace path hints for typed file-command prefixes', () => {
+    const pathHints = {
+      'file:darklab/': [
+        { value: 'darklab/targets.txt', description: 'session file · 11 B' },
+      ],
+      'file:../': [
+        { value: '../root.txt', description: 'session file · 1 B' },
+      ],
+      'file:../darklab/': [
+        { value: '../darklab/targets.txt', description: 'session file · 11 B' },
+        { value: '../darklab/nested/', description: 'session folder' },
+      ],
+      'file:darklab/find': [
+        { value: 'darklab/darklab_findings.txt', description: 'session file · 42 B' },
+        { value: 'darklab/targets.txt', description: 'session file · 11 B' },
+      ],
+      'directory:darklab/': [
+        { value: 'darklab/nested/', description: 'session folder' },
+      ],
+      'any:darklab/': [
+        { value: 'darklab/targets.txt', description: 'session file · 11 B' },
+        { value: 'darklab/nested/', description: 'session folder' },
+      ],
+      'directory:../': [
+        { value: '../archive/', description: 'session folder' },
+      ],
+    }
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => '',
+        acSuggestions: [],
+        acContextRegistry: {
+          cat: {
+            argument_limit: 1,
+            arg_hints: { __positional__: [{ value: 'root.txt', description: 'session file · 1 B' }] },
+            workspace_path_arg_kinds: { __positional__: ['file'] },
+          },
+          ls: {
+            argument_limit: 1,
+            arg_hints: { __positional__: [{ value: 'darklab', description: 'session folder' }] },
+            workspace_path_arg_kinds: { __positional__: ['directory'] },
+          },
+          mv: {
+            argument_limit: 2,
+            arg_hints: {
+              __positional__: [
+                { value: '<source> <destination>', hintOnly: true, value_type: 'target', description: 'Session file or folder path' },
+                { value: 'root.txt', description: 'session file · 1 B' },
+              ],
+            },
+            workspace_path_arg_kinds: { __positional__: ['any', 'directory'] },
+          },
+          file: {
+            expects_value: ['show', 'move'],
+            arg_hints: {
+              show: [{ value: 'root.txt', description: 'session file · 1 B' }],
+              move: [{ value: 'root.txt', description: 'session file · 1 B' }],
+            },
+            workspace_path_arg_kinds: {
+              show: ['file'],
+              move: ['any', 'directory'],
+            },
+          },
+        },
+        getWorkspaceAutocompletePathHints: (kind, token) => pathHints[`${kind}:${token}`] || [],
+        getWorkspaceAutocompleteFileHints: () => [
+          { value: 'deep/from-root.txt', description: 'session file · 99 B' },
+        ],
+        getWorkspaceAutocompleteDirectoryHints: () => [
+          { value: 'deep', description: 'session folder' },
+        ],
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('cat darklab/', 12).map(item => item.value)).toEqual(['darklab/targets.txt'])
+    expect(getAutocompleteMatches('cat darklab/find', 16).map(item => item.value)).toEqual(['darklab/darklab_findings.txt'])
+    expect(getAutocompleteMatches('cat ../', 7).map(item => item.value)).toEqual(['../root.txt'])
+    expect(getAutocompleteMatches('cat ../darklab/', 16).map(item => item.value)).toEqual(['../darklab/targets.txt', '../darklab/nested/'])
+    expect(getAutocompleteMatches('ls darklab/', 11).map(item => item.value)).toEqual(['darklab/nested/'])
+    expect(getAutocompleteMatches('mv ', 3).map(item => item.value)).toContain('root.txt')
+    expect(getAutocompleteMatches('mv ', 3).map(item => item.value)).not.toContain('deep/from-root.txt')
+    expect(getAutocompleteMatches('mv darklab/', 11).map(item => item.value)).toEqual(['darklab/targets.txt', 'darklab/nested/'])
+    expect(getAutocompleteMatches('mv root.txt ../', 14).map(item => item.value)).toEqual(['../archive/'])
+    expect(getAutocompleteMatches('file show darklab/', 18).map(item => item.value)).toEqual(['darklab/targets.txt'])
+    expect(getAutocompleteMatches('file move root.txt ../', 22).map(item => item.value)).toEqual(['../archive/'])
+  })
+
   it('returns pipe-stage flag hints for grep', () => {
     const { getAutocompleteMatches } = fromDomScripts(
       ['app/static/js/utils.js', 'app/static/js/autocomplete_core.js', 'app/static/js/autocomplete.js'],
@@ -1971,7 +2241,7 @@ describe('autocomplete helpers', () => {
               { value: '-E', description: 'Extended regex' },
             ],
             arg_hints: {
-              __positional__: [{ value: '<pattern>', description: 'Text or regex to match' }],
+              __positional__: [{ value: '<pattern>', hintOnly: true, description: 'Text or regex to match' }],
             },
           },
         },
@@ -2085,7 +2355,7 @@ describe('autocomplete helpers', () => {
           grep: {
             pipe_command: true,
             arg_hints: {
-              __positional__: [{ value: '<pattern>', description: 'Text or regex to match' }],
+              __positional__: [{ value: '<pattern>', hintOnly: true, description: 'Text or regex to match' }],
             },
           },
           head: {
@@ -2154,6 +2424,35 @@ describe('autocomplete helpers', () => {
     expect(input.value).toBe('whois darklab.sh')
     expect(document.getElementById('ac').style.display).toBe('none')
     expect(focusSpy).toHaveBeenCalled()
+  })
+
+  it('mousedown on a hint-only item keeps the guidance visible without accepting it', () => {
+    const { acShow } = loadAutocompleteFns()
+    const input = document.getElementById('cmd')
+    input.value = 'curl -o '
+    input.setSelectionRange(input.value.length, input.value.length)
+
+    acShow([
+      { value: '/dev/null', description: 'Discard body output' },
+      { value: '<file>', hintOnly: true, description: 'Destination file path' },
+    ])
+
+    const hint = [...document.querySelectorAll('.ac-item')].find(
+      item => item.textContent.includes('<file>'),
+    )
+    hint.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+
+    expect(input.value).toBe('curl -o ')
+    expect(document.getElementById('ac').style.display).toBe('block')
+  })
+
+  it('does not render suggestions while the active tab is running', () => {
+    const { acShow } = loadAutocompleteFns({ isActiveTabRunning: () => true })
+
+    acShow(['whois darklab.sh'])
+
+    expect(document.getElementById('ac').style.display).toBe('none')
+    expect(document.querySelector('.ac-item')).toBeNull()
   })
 
   it('positions dropdown above when space below is tight and preserves item order', () => {

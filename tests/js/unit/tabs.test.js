@@ -35,6 +35,7 @@ function loadTabsFns({
   doKill = vi.fn(),
   showConfirm = undefined,
   detachRunStreamForTab = undefined,
+  markActiveRunDetachedForRestore = undefined,
   acFiltered: acFilteredOverride = [],
   acHide: acHideOverride = () => {},
   urlImpl = {
@@ -101,6 +102,7 @@ function loadTabsFns({
       doKill,
       ...(showConfirm ? { showConfirm } : {}),
       ...(detachRunStreamForTab ? { detachRunStreamForTab } : {}),
+      ...(markActiveRunDetachedForRestore ? { markActiveRunDetachedForRestore } : {}),
       cancelWelcome: () => {},
       confirmPermalinkRedactionChoice,
       apiFetch,
@@ -512,9 +514,11 @@ describe('tabs helpers', () => {
   it('closing an attached running tab can detach it without killing the run', async () => {
     const showConfirm = vi.fn(() => Promise.resolve('detach'))
     const detachRunStreamForTab = vi.fn()
+    const markActiveRunDetachedForRestore = vi.fn()
     const { createTab, activateTab, closeTab, _getTabs, doKill } = loadTabsFns({
       showConfirm,
       detachRunStreamForTab,
+      markActiveRunDetachedForRestore,
     })
     const firstId = createTab('tab 1')
     const secondId = createTab('attached run')
@@ -530,6 +534,7 @@ describe('tabs helpers', () => {
     await flushPromises()
 
     expect(detachRunStreamForTab).toHaveBeenCalledWith(secondId)
+    expect(markActiveRunDetachedForRestore).toHaveBeenCalledWith('run-other')
     expect(doKill).not.toHaveBeenCalled()
     expect(_getTabs().map((tab) => tab.id)).toEqual([firstId])
     expect(document.querySelector(`[data-id="${secondId}"]`)).toBeNull()
@@ -539,9 +544,11 @@ describe('tabs helpers', () => {
   it('closing the only running tab can detach it and keep the tab shell ready', async () => {
     const showConfirm = vi.fn(() => Promise.resolve('detach'))
     const detachRunStreamForTab = vi.fn()
+    const markActiveRunDetachedForRestore = vi.fn()
     const { createTab, closeTab, _getTabs, doKill } = loadTabsFns({
       showConfirm,
       detachRunStreamForTab,
+      markActiveRunDetachedForRestore,
     })
     const id = createTab('tab 1')
     const runningTab = _getTabs()[0]
@@ -553,6 +560,7 @@ describe('tabs helpers', () => {
     await flushPromises()
 
     expect(detachRunStreamForTab).toHaveBeenCalledWith(id)
+    expect(markActiveRunDetachedForRestore).toHaveBeenCalledWith('run-1')
     expect(doKill).not.toHaveBeenCalled()
     expect(_getTabs()).toHaveLength(1)
     expect(_getTabs()[0].closing).toBe(false)

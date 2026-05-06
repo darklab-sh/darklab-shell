@@ -12,6 +12,7 @@ Tests for pure utility functions across the app modules:
 Run with: pytest tests/ (from the repo root)
 """
 
+import errno
 import gzip
 import importlib.util
 import os
@@ -44,14 +45,15 @@ from commands import (
     load_mobile_welcome_hints, autocomplete_context_from_commands_registry,
     load_autocomplete_context_from_commands_registry, load_command_policy, load_container_smoke_test_commands,
     load_allow_grouping_flags, load_commands_registry, load_workflows,
-    is_command_allowed, rewrite_command,
+    command_catalog_entry, command_catalog_from_registry, is_command_allowed, rewrite_command,
 )
 from permalinks import _format_retention, _expiry_note, _permalink_error_page, _normalize_permalink_lines, _prompt_echo_text
 from output_signals import OutputSignalClassifier, classify_line, command_root, extract_target
 from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
 from workspace import (
-    InvalidWorkspacePath, WorkspaceDisabled, WorkspaceQuotaExceeded,
+    InvalidWorkspacePath, WorkspaceDisabled, WorkspacePermissionDenied, WorkspaceQuotaExceeded,
     cleanup_inactive_workspaces, create_workspace_directory, delete_workspace_file, delete_workspace_path,
+    expand_workspace_path_pattern,
     ensure_session_workspace, list_workspace_directories, list_workspace_files,
     prepare_workspace_directory_for_command, prepare_workspace_file_for_command, read_workspace_text_file, resolve_workspace_path,
     session_workspace_name, workspace_usage,
@@ -334,6 +336,34 @@ class TestSessionWorkspace:
                 ["/usr/bin/sudo", "-u", "scanner", "-g", "appuser", "chmod", "3770", str(path)],
             ]
 
+    def test_list_repairs_command_created_workspace_modes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            root = ensure_session_workspace("session-1", cfg)
+            command_dir = root / "subfinder"
+            command_dir.mkdir()
+            command_file = command_dir / "provider-config.yaml"
+            command_file.write_text("sources: []\n")
+            os.chmod(command_dir, 0o2700)
+            os.chmod(command_file, 0o600)
+
+            with mock.patch("workspace._scanner_uid", return_value=command_dir.stat().st_uid):
+                assert list_workspace_files("session-1", cfg)[0]["path"] == "subfinder/provider-config.yaml"
+                assert list_workspace_directories("session-1", cfg)[0]["path"] == "subfinder"
+                assert read_workspace_text_file("session-1", "subfinder/provider-config.yaml", cfg) == "sources: []\n"
+                assert command_dir.stat().st_mode & 0o070 == 0o070
+                assert not command_dir.stat().st_mode & 0o007
+                assert (command_file.stat().st_mode & 0o777) == WORKSPACE_FILE_MODE
+
+    def test_read_workspace_permission_denied_is_not_raw_os_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            write_workspace_text_file("session-1", "provider-config.yaml", "sources: []\n", cfg)
+
+            with mock.patch("workspace.os.open", side_effect=PermissionError(errno.EACCES, "denied")):
+                with pytest.raises(WorkspacePermissionDenied):
+                    read_workspace_text_file("session-1", "provider-config.yaml", cfg)
+
     def test_delete_workspace_file_falls_back_to_scanner_owner_for_nested_command_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg = self._cfg(tmp)
@@ -388,6 +418,22 @@ class TestSessionWorkspace:
             }
             assert list_workspace_files("session-1", cfg) == []
             assert workspace_usage("session-1", cfg).file_count == 0
+
+    def test_workspace_glob_pattern_matches_one_path_segment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = self._cfg(tmp)
+            create_workspace_directory("session-1", "darklab", cfg)
+            create_workspace_directory("session-1", "reports/darklab-nested", cfg)
+            write_workspace_text_file("session-1", "darklab-a.txt", "1", cfg)
+            write_workspace_text_file("session-1", "darklab-b.txt", "2", cfg)
+            write_workspace_text_file("session-1", "reports/darklab-c.txt", "3", cfg)
+
+            matches = expand_workspace_path_pattern("session-1", "darklab-*", cfg)
+
+            assert [(item.path, item.kind) for item in matches] == [
+                ("darklab-a.txt", "file"),
+                ("darklab-b.txt", "file"),
+            ]
 
     def test_rejects_absolute_traversal_and_backslash_paths(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -707,6 +753,70 @@ class TestDerivedCommandRegistry:
         assert grep["autocomplete"]["pipe_command"] is True
         assert grep["autocomplete"]["pipe_description"] == "Filter lines"
 
+    def test_command_catalog_derives_reference_data_from_registry(self):
+        registry = {
+            "commands": [
+                {
+                    "root": "sentinel",
+                    "category": "Registry Group",
+                    "description": "Inspect a target.",
+                    "policy": {"allow": ["sentinel"], "deny": ["sentinel --unsafe"]},
+                    "workspace_flags": [
+                        {"flag": "-i", "mode": "read", "value": "separate"},
+                    ],
+                    "runtime_adaptations": {
+                        "inject_flags": [{"flags": ["--safe"], "position": "append"}],
+                    },
+                    "autocomplete": {
+                        "examples": [{"value": "sentinel darklab.sh"}],
+                        "flags": [
+                            {"value": "-i", "description": "Input file", "takes_value": True},
+                        ],
+                        "subcommands": {
+                            "scan": {
+                                "description": "Run a scan.",
+                                "examples": [{"value": "sentinel scan darklab.sh"}],
+                                "flags": [{"value": "--json", "description": "Emit JSON"}],
+                            },
+                        },
+                    },
+                },
+                {
+                    "root": "policyless",
+                    "policy": {"allow": []},
+                    "autocomplete": {},
+                },
+            ],
+            "pipe_helpers": [{"root": "grep"}],
+        }
+
+        catalog = command_catalog_from_registry(registry)
+        entry = command_catalog_entry("sentinel", registry=registry)
+        subcommand = command_catalog_entry("sentinel", "scan", registry=registry)
+
+        assert [item["root"] for item in catalog] == ["sentinel"]
+        assert entry is not None
+        assert entry["description"] == "Inspect a target."
+        entry_flags = entry.get("flags")
+        workspace_flags = entry.get("workspace_flags")
+        assert isinstance(entry_flags, list)
+        assert isinstance(entry_flags[0], dict)
+        assert entry_flags[0]["value"] == "-i"
+        assert isinstance(workspace_flags, list)
+        assert isinstance(workspace_flags[0], dict)
+        assert workspace_flags[0]["flag"] == "-i"
+        assert entry["runtime_notes"] == ["Adds `--safe` automatically when needed."]
+        assert subcommand is not None
+        assert subcommand["subcommand"] == "scan"
+        subcommand_examples = subcommand.get("examples")
+        subcommand_flags = subcommand.get("flags")
+        assert isinstance(subcommand_examples, list)
+        assert isinstance(subcommand_examples[0], dict)
+        assert subcommand_examples[0]["value"] == "sentinel scan darklab.sh"
+        assert isinstance(subcommand_flags, list)
+        assert isinstance(subcommand_flags[0], dict)
+        assert subcommand_flags[0]["value"] == "--json"
+
     def test_commands_registry_local_overlay_appends_policy_and_context(self):
         with tempfile.TemporaryDirectory() as tmp:
             base_path = Path(tmp) / "commands.yaml"
@@ -928,6 +1038,8 @@ class TestDerivedCommandRegistry:
         context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
 
         assert context["commands"]["flags"][0]["value"] == "--built-in"
+        assert context["commands"]["arg_hints"]["__positional__"][0]["value"] == "info"
+        assert "info" in context["commands"]["expects_value"]
         assert context["runs"]["flags"][-1]["value"] == "--json"
         assert context["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
         assert [item["value"] for item in context["var"]["arg_hints"]["__positional__"]] == [
@@ -951,11 +1063,23 @@ class TestDerivedCommandRegistry:
             "add-dir <folder>",
             "edit <file>",
             "download <file>",
+            "move <source> <destination>",
             "delete <file>",
             "help",
         ]
         assert "rm" in enabled["file"]["expects_value"]
         assert "rm" in enabled["file"]["arg_hints"]
+
+    def test_real_registry_commands_have_root_descriptions(self):
+        registry = load_commands_registry()
+
+        missing = [
+            str(item.get("root") or "<unknown>").strip()
+            for item in registry.get("commands", [])
+            if not str(item.get("description") or "").strip()
+        ]
+
+        assert missing == []
 
     def test_real_registry_workspace_file_flags_cover_supported_file_io_tools(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2849,6 +2973,173 @@ class TestOutputSignals:
         assert classify_line("darklab.sh", command="assetfinder -subs-only darklab.sh") == ["findings"]
         assert classify_line("104.21.4.35", command="cat ips.txt") == []
         assert classify_line("fw-vx1.darklab.sh", command="cat hosts.txt") == []
+
+    def test_classifies_dns_enumeration_findings_by_command(self):
+        assert classify_line("ip.darklab.sh", command="dnsx -d darklab.sh -w dns.txt") == ["findings"]
+        assert classify_line("www.darklab.sh", command="dnsx -d darklab.sh -w dns.txt") == ["findings"]
+        assert classify_line("[INF] Current dnsx version 1.2.3 (latest)", command="dnsx -d darklab.sh") == []
+        assert classify_line("Found: ip.darklab.sh. (107.178.109.44)", command="fierce --domain darklab.sh") == ["findings"]
+        assert classify_line(
+            "SOA: frank.ns.cloudflare.com. (173.245.59.166)",
+            command="fierce --domain darklab.sh",
+        ) == ["findings"]
+        assert classify_line("104.21.4.0/24", command="dnsenum --noreverse darklab.sh") == ["findings"]
+        assert classify_line("[*] DNSSEC is configured for darklab.sh", command="dnsrecon -d darklab.sh -t std") == ["findings"]
+        assert classify_line("ip.darklab.sh", command="cat hosts.txt") == []
+
+    def test_classifies_web_enumeration_findings_by_command(self):
+        assert classify_line(
+            "https://ip.darklab.sh [200] [Nginx]",
+            command="pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
+        ) == ["findings"]
+        assert classify_line(
+            "https://p.darklab.sh/js/privatebin.js?2.0.4",
+            command="katana -u https://p.darklab.sh",
+        ) == [
+            "findings",
+        ]
+        assert classify_line("https://p.darklab.sh/js/'+t+'", command="katana -u https://p.darklab.sh") == []
+        assert classify_line(
+            "[+] The site https://darklab.sh is behind Cloudflare (Cloudflare Inc.) WAF.",
+            command="wafw00f https://darklab.sh",
+        ) == ["findings"]
+        assert classify_line("[~] Number of requests: 2", command="wafw00f https://darklab.sh") == ["summaries"]
+
+    def test_classifies_web_scanner_findings_by_command(self):
+        assert classify_line("+ Target IP:          107.178.109.44", command="nikto -h ip.darklab.sh -p 443 -ssl") == [
+            "findings",
+        ]
+        assert classify_line("+ Server: nginx", command="nikto -h ip.darklab.sh -p 443 -ssl") == ["findings"]
+        assert classify_line("+ Start Time:         2026-05-05 20:24:44 (GMT0)", command="nikto -h ip.darklab.sh") == []
+        assert classify_line(
+            "[+] XML-RPC seems to be enabled: https://churchint.org/xmlrpc.php",
+            command="wpscan --url https://churchint.org",
+        ) == [
+            "findings",
+        ]
+        assert classify_line("[+] Finished: Tue May  5 20:26:53 2026", command="wpscan --url https://churchint.org") == []
+        assert classify_line(
+            "[!] No WPScan API Token given, as a result vulnerability data has not been output.",
+            command="wpscan --url https://churchint.org",
+        ) == [
+            "warnings",
+        ]
+
+    def test_classifies_tls_scanner_findings_by_command(self):
+        assert classify_line("TLS 1.3    offered (OK): final", command="testssl --fast https://ip.darklab.sh") == [
+            "findings",
+        ]
+        assert classify_line("Overall Grade                A+", command="testssl --fast https://ip.darklab.sh") == [
+            "findings",
+        ]
+        assert classify_line("TLSv1.3   enabled", command="sslscan ip.darklab.sh") == ["findings"]
+        assert classify_line("Subject:  ip.darklab.sh", command="sslscan ip.darklab.sh") == ["findings"]
+        assert classify_line("Common Name:                       ip.darklab.sh", command="sslyze ip.darklab.sh") == [
+            "findings",
+        ]
+        assert classify_line("TLS_FALLBACK_SCSV:                 OK - Supported", command="sslyze ip.darklab.sh") == [
+            "findings",
+        ]
+        assert classify_line("ip.darklab.sh:443: FAILED - Not compliant.", command="sslyze ip.darklab.sh") == [
+            "errors",
+        ]
+
+    def test_classifies_projectdiscovery_and_port_scanner_findings(self):
+        assert classify_line("ip.darklab.sh:443", command="naabu -host ip.darklab.sh -p 80,443") == ["findings"]
+        assert classify_line(
+            "[INF] Found 2 ports on host ip.darklab.sh (107.178.109.44)",
+            command="naabu -host ip.darklab.sh",
+        ) == [
+            "summaries",
+        ]
+        assert classify_line("Open 107.178.109.44:443", command="rustscan -a ip.darklab.sh -p 80,443") == [
+            "findings",
+        ]
+        assert classify_line(
+            "[waf-detect:nginxgeneric] [http] [info] https://ip.darklab.sh",
+            command="nuclei -u https://ip.darklab.sh",
+        ) == [
+            "findings",
+        ]
+        assert classify_line(
+            "[tls-version] [ssl] [info] ip.darklab.sh:443 [\"tls12\"]",
+            command="nuclei -u https://ip.darklab.sh",
+        ) == [
+            "findings",
+        ]
+        assert classify_line("[INF] Scan completed in 4m. 21 matches found.", command="nuclei -u https://ip.darklab.sh") == [
+            "summaries",
+        ]
+
+    def test_signal_matching_uses_ansi_normalized_text(self):
+        examples = [
+            (
+                "https://ip.darklab.sh [200] [Nginx]",
+                "pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
+                ["findings"],
+            ),
+            (
+                "[+] The site https://darklab.sh is behind Cloudflare (Cloudflare Inc.) WAF.",
+                "wafw00f https://darklab.sh",
+                ["findings"],
+            ),
+            (
+                "[+] Headers",
+                "wpscan --url https://churchint.org",
+                ["findings"],
+            ),
+            (
+                "[waf-detect:nginxgeneric] [http] [info] https://ip.darklab.sh",
+                "nuclei -u https://ip.darklab.sh",
+                ["findings"],
+            ),
+            (
+                "[tls-version] [ssl] [info] ip.darklab.sh:443 [\"tls13\"]",
+                "nuclei -u https://ip.darklab.sh",
+                ["findings"],
+            ),
+            (
+                "[INF] Scan completed in 4m. 21 matches found.",
+                "nuclei -u https://ip.darklab.sh",
+                ["summaries"],
+            ),
+        ]
+
+        for plain_text, command, expected in examples:
+            assert classify_line(plain_text, command=command) == expected
+            assert classify_line(f"\x1b[32m{plain_text}\x1b[0m", command=command) == expected
+            assert classify_line(
+                plain_text.replace("[", "[\x1b[36m").replace("]", "\x1b[0m]"),
+                command=command,
+            ) == expected
+
+    def test_classifies_nuclei_findings_by_command(self):
+        nuclei_findings = [
+            "[waf-detect:nginxgeneric] [http] [info] https://ip.darklab.sh",
+            "[tls-version] [ssl] [info] ip.darklab.sh:443 [\"tls12\"]",
+            "[tls-version] [ssl] [info] ip.darklab.sh:443 [\"tls13\"]",
+            "[tech-detect:nginx] [http] [info] https://ip.darklab.sh",
+            "[cpanel-backup-exclude-exposure] [http] [info] https://ip.darklab.sh/cpbackup-exclude.conf",
+            "[http-missing-security-headers:referrer-policy] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:clear-site-data] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:cross-origin-resource-policy] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:missing-content-type] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:x-frame-options] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:x-content-type-options] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:x-permitted-cross-domain-policies] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:cross-origin-embedder-policy] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:cross-origin-opener-policy] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:strict-transport-security] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:content-security-policy] [http] [info] https://ip.darklab.sh",
+            "[http-missing-security-headers:permissions-policy] [http] [info] https://ip.darklab.sh",
+            "[caa-fingerprint] [dns] [info] ip.darklab.sh",
+            "[dns-saas-service-detection] [dns] [info] ip.darklab.sh [\"fw-vx2-vp1.darklab.sh\"]",
+            "[ssl-issuer] [ssl] [info] ip.darklab.sh:443 [\"Let's Encrypt\"]",
+            "[ssl-dns-names] [ssl] [info] ip.darklab.sh:443 [\"ip.darklab.sh\"]",
+        ]
+
+        for line in nuclei_findings:
+            assert classify_line(line, command="nuclei -u https://ip.darklab.sh") == ["findings"]
 
     def test_classifies_warning_error_and_summary_lines(self):
         assert classify_line("warning: retrying request", cls="notice", command="curl https://darklab.sh") == ["warnings"]

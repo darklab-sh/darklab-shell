@@ -13,6 +13,7 @@ import os
 import re
 import shlex
 import shutil
+from typing import cast
 import yaml
 from urllib.parse import urlparse
 
@@ -87,7 +88,10 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
         },
         {
             "question": "What commands are allowed?",
-            "answer": "Use the grouped allowlist shown in the FAQ modal or run commands --external in the web shell.",
+            "answer": (
+                "Open the Command Registry from the menu, or run commands, commands --external, "
+                "or commands info <command> in the web shell."
+            ),
             "ui_kind": "allowed_commands",
         },
         {
@@ -96,13 +100,13 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
             "answer": (
                 "Files are app-managed, session-scoped text files for commands that need small inputs "
                 "or outputs. Use the Files panel or run file help to create, view, edit, "
-                "download, or delete files."
+                "download, move, or delete files."
             ),
             "answer_html": (
                 "Files are app-managed, session-scoped text files for commands that need small "
                 "inputs or outputs. Use the <strong>Files</strong> panel or run "
                 "<span class=\"allowed-chip faq-chip\" data-faq-command=\"file help\">file help</span> "
-                "to create, view, edit, download, or delete files.<br><br>"
+                "to create, view, edit, download, move, or delete files.<br><br>"
                 "Commands can only read or write files through command flags explicitly enabled "
                 "in the command registry. Shell navigation and redirection are still blocked. "
                 "Files stay scoped to the current browser session or named session token."
@@ -1021,6 +1025,196 @@ def load_commands_registry():
     return _merge_commands_registry(base, local)
 
 
+def _catalog_suggestions(items: object) -> list[dict[str, object]]:
+    suggestions: list[dict[str, object]] = []
+    seen = set()
+    if not isinstance(items, list):
+        return suggestions
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        value = str(item.get("value") or "").strip()
+        if not value:
+            continue
+        key = value.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        suggestion: dict[str, object] = {
+            "value": value,
+            "description": str(item.get("description") or "").strip(),
+        }
+        if item.get("takes_value"):
+            suggestion["takes_value"] = True
+        suggestions.append(suggestion)
+    return suggestions
+
+
+def _catalog_autocomplete_spec(spec: object) -> dict[str, object]:
+    autocomplete = cast(dict[str, object], spec) if isinstance(spec, dict) else {}
+    raw_expects_value = autocomplete.get("expects_value")
+    expects_value = {
+        str(item)
+        for item in raw_expects_value
+        if str(item)
+    } if isinstance(raw_expects_value, (list, tuple, set)) else set()
+    raw_arg_hints = autocomplete.get("arg_hints")
+    arg_hints = cast(dict[str, object], raw_arg_hints) if isinstance(raw_arg_hints, dict) else {}
+    flags: list[dict[str, object]] = []
+    for item in _catalog_suggestions(autocomplete.get("flags")):
+        flag = dict(item)
+        value = str(flag.get("value") or "")
+        if value in expects_value or item.get("takes_value"):
+            flag["takes_value"] = True
+            hints = _catalog_suggestions(arg_hints.get(value))
+            if hints:
+                flag["value_hints"] = hints
+        flags.append(flag)
+
+    positional_hints = _catalog_suggestions(arg_hints.get("__positional__"))
+    examples = _catalog_suggestions(autocomplete.get("examples"))
+    subcommands: list[dict[str, object]] = []
+    raw_subcommands = autocomplete.get("subcommands")
+    if isinstance(raw_subcommands, dict):
+        for name, sub_spec in raw_subcommands.items():
+            sub_name = str(name or "").strip()
+            if not sub_name:
+                continue
+            sub_catalog = _catalog_autocomplete_spec(sub_spec)
+            if isinstance(sub_spec, dict):
+                description = str(sub_spec.get("description") or "").strip()
+                if description:
+                    sub_catalog["description"] = description
+            sub_catalog["name"] = sub_name
+            subcommands.append(sub_catalog)
+
+    return {
+        "flags": flags,
+        "arguments": positional_hints,
+        "examples": examples,
+        "subcommands": subcommands,
+    }
+
+
+def _catalog_workspace_flags(items: object) -> list[dict[str, object]]:
+    flags: list[dict[str, object]] = []
+    if not isinstance(items, list):
+        return flags
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        flag = str(item.get("flag") or "").strip()
+        if not flag:
+            continue
+        entry: dict[str, object] = {
+            "flag": flag,
+            "mode": str(item.get("mode") or "").strip(),
+            "value": str(item.get("value") or "").strip(),
+        }
+        kind = str(item.get("kind") or "").strip()
+        if kind:
+            entry["kind"] = kind
+        subcommands = [
+            str(subcommand).strip()
+            for subcommand in item.get("subcommands", []) or []
+            if str(subcommand).strip()
+        ]
+        if subcommands:
+            entry["subcommands"] = subcommands
+        flags.append(entry)
+    return flags
+
+
+def _catalog_runtime_notes(runtime_adaptations: object) -> list[str]:
+    runtime = runtime_adaptations if isinstance(runtime_adaptations, dict) else {}
+    notes: list[str] = []
+    for inject in runtime.get("inject_flags", []) or []:
+        if not isinstance(inject, dict):
+            continue
+        flags = " ".join(str(flag) for flag in inject.get("flags", []) or [] if str(flag).strip())
+        if flags:
+            notes.append(f"Adds `{flags}` automatically when needed.")
+    managed = runtime.get("managed_workspace_directory")
+    if isinstance(managed, dict) and managed.get("directory"):
+        notes.append(
+            f"Uses a managed `{managed['directory']}` directory in the session workspace."
+        )
+    environment = runtime.get("environment")
+    if isinstance(environment, list) and environment:
+        notes.append("Uses session-scoped runtime state for tool configuration.")
+    return _dedupe_preserve_order(notes)
+
+
+def command_catalog_from_registry(registry: dict | None = None) -> list[dict[str, object]]:
+    """Return user-facing command reference data from the external command registry."""
+    active_registry = registry or load_commands_registry()
+    catalog = []
+    for entry in active_registry.get("commands", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        root = str(entry.get("root") or "").strip().lower()
+        if not root:
+            continue
+        raw_policy_value = entry.get("policy")
+        policy = raw_policy_value if isinstance(raw_policy_value, dict) else {}
+        allowed = [
+            str(item).strip()
+            for item in policy.get("allow", []) or []
+            if str(item).strip()
+        ]
+        if not allowed:
+            continue
+        autocomplete = _catalog_autocomplete_spec(entry.get("autocomplete"))
+        catalog.append({
+            "root": root,
+            "category": str(entry.get("category") or "Allowed commands").strip(),
+            "description": str(entry.get("description") or "").strip(),
+            "allow": allowed,
+            "deny": [
+                str(item).strip()
+                for item in policy.get("deny", []) or []
+                if str(item).strip()
+            ],
+            "examples": autocomplete["examples"],
+            "flags": autocomplete["flags"],
+            "arguments": autocomplete["arguments"],
+            "subcommands": autocomplete["subcommands"],
+            "workspace_flags": _catalog_workspace_flags(entry.get("workspace_flags")),
+            "runtime_notes": _catalog_runtime_notes(entry.get("runtime_adaptations")),
+        })
+    return catalog
+
+
+def command_catalog_entry(root: str, subcommand: str | None = None, registry: dict | None = None) -> dict[str, object] | None:
+    """Return catalog details for one command root, optionally scoped to a subcommand."""
+    wanted_root = str(root or "").strip().lower()
+    wanted_subcommand = str(subcommand or "").strip().lower()
+    if not wanted_root:
+        return None
+    for entry in command_catalog_from_registry(registry):
+        if str(entry.get("root") or "").lower() != wanted_root:
+            continue
+        if not wanted_subcommand:
+            return entry
+        raw_subcommands = entry.get("subcommands")
+        subcommands = raw_subcommands if isinstance(raw_subcommands, list) else []
+        for sub in subcommands:
+            if not isinstance(sub, dict):
+                continue
+            if str(sub.get("name") or "").strip().lower() != wanted_subcommand:
+                continue
+            scoped = dict(entry)
+            scoped["subcommand"] = wanted_subcommand
+            scoped["description"] = str(sub.get("description") or scoped.get("description") or "")
+            scoped["examples"] = sub.get("examples") or entry.get("examples") or []
+            scoped["flags"] = sub.get("flags") or []
+            scoped["arguments"] = sub.get("arguments") or []
+            scoped["subcommands"] = []
+            return scoped
+        return None
+    return None
+
+
 def load_builtin_autocomplete_registry():
     """Read app-owned built-in autocomplete grammar.
 
@@ -1764,8 +1958,9 @@ def _normalize_context_suggestion(item):
         label = str(raw_label).strip()
         if label:
             result["label"] = label
-    if "hintOnly" in item:
-        result["hintOnly"] = bool(item.get("hintOnly"))
+    if "hintOnly" in item or "hint_only" in item:
+        raw_hint_only = item.get("hintOnly") if "hintOnly" in item else item.get("hint_only")
+        result["hintOnly"] = bool(raw_hint_only)
     value_type = str(item.get("value_type") or item.get("value_kind") or item.get("type") or "").strip().lower()
     if value_type:
         result["value_type"] = value_type
@@ -2698,6 +2893,53 @@ def _workspace_flag_value(tokens: list[str], index: int, spec: dict[str, object]
     return None, None, None
 
 
+def _normalize_workspace_command_path(value: str, cwd: str = "") -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        raise InvalidWorkspacePath("file name is required")
+    if "\x00" in raw or "\\" in raw:
+        raise InvalidWorkspacePath("file name contains unsupported characters")
+    if os.path.isabs(raw):
+        return raw
+
+    base_parts = [part for part in str(cwd or "").split("/") if part]
+    for raw_part in raw.split("/"):
+        part = raw_part.strip()
+        if not part or part == ".":
+            continue
+        if part == "..":
+            if not base_parts:
+                raise InvalidWorkspacePath("file path escapes the session directory")
+            base_parts.pop()
+            continue
+        base_parts.append(part)
+    normalized = "/".join(base_parts)
+    if not normalized:
+        raise InvalidWorkspacePath("file name is required")
+    return normalized
+
+
+def _invalid_workspace_file_path_reason(value: str, detail: str = "") -> str:
+    display_value = str(value or "").strip() or "<empty>"
+    detail = str(detail or "").strip()
+    if detail:
+        return f"Invalid file path: {display_value} ({detail})"
+    return f"Invalid file path: {display_value}"
+
+
+def _absolute_workspace_flag_path_error(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "file name is required"
+    if "\x00" in raw or "\\" in raw:
+        return "file name contains unsupported characters"
+    if os.path.isabs(raw):
+        parts = [part for part in raw.split("/") if part]
+        if any(part == ".." for part in parts):
+            return "file path escapes the session directory"
+    return ""
+
+
 def _restricted_command_networks(cfg: dict | None = None) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
     active_cfg = cfg or app_config.CFG
     raw_values = active_cfg.get("restricted_command_input_cidrs") or []
@@ -2913,6 +3155,8 @@ def _workspace_read_file_restriction_reason(
     command: str,
     session_id: str,
     cfg: dict | None = None,
+    *,
+    workspace_cwd: str = "",
 ) -> str:
     networks = _restricted_command_networks(cfg)
     if not networks or not session_id:
@@ -2946,16 +3190,18 @@ def _workspace_read_file_restriction_reason(
             and _value_type_is_restrictable(value_type)
         ):
             try:
-                text = read_workspace_text_file(session_id, user_value, cfg)
+                normalized_value = _normalize_workspace_command_path(user_value, workspace_cwd)
+                text = read_workspace_text_file(session_id, normalized_value, cfg)
             except (InvalidWorkspacePath, WorkspaceDisabled, WorkspaceFileNotFound, OSError):
-                text = ""
+                index = (value_index + 1) if value_index is not None else index + 1
+                continue
             for raw_line in text.splitlines():
                 line = raw_line.strip()
                 if not line or line.startswith("#"):
                     continue
                 blocked = _restricted_value_match(line, networks)
                 if blocked:
-                    return f"Session file {user_value} contains restricted IP/CIDR value: {blocked}"
+                    return f"Session file {normalized_value} contains restricted IP/CIDR value: {blocked}"
         index = (value_index + 1) if value_index is not None else index + 1
     return ""
 
@@ -2964,6 +3210,8 @@ def _rewrite_workspace_file_flags(
     command: str,
     session_id: str,
     cfg: dict | None = None,
+    *,
+    workspace_cwd: str = "",
 ) -> tuple[str, set[str], list[str], list[str], list[str], str]:
     cfg = cfg or app_config.CFG
     tokens = split_command_argv(command)
@@ -3059,13 +3307,26 @@ def _rewrite_workspace_file_flags(
         mode = str(matched_spec.get("mode") or "")
         kind = str(matched_spec.get("kind") or "file")
         if os.path.isabs(user_value):
+            path_error = _absolute_workspace_flag_path_error(user_value)
+            if path_error:
+                return command, set(), [], [], [], _invalid_workspace_file_path_reason(user_value, path_error)
             index = value_index + 1
             continue
+        workspace_value = user_value
+        if not (
+            managed_dir_applies
+            and flag == managed_dir_flag
+            and user_value.rstrip(os.sep) == managed_dir_name
+        ):
+            try:
+                workspace_value = _normalize_workspace_command_path(user_value, workspace_cwd)
+            except InvalidWorkspacePath as exc:
+                return command, set(), [], [], [], _invalid_workspace_file_path_reason(user_value, str(exc))
 
         try:
             resolved = resolve_workspace_path(
                 session_id,
-                user_value,
+                workspace_value,
                 cfg,
                 ensure_parent=mode in {"write", "read_write"} or kind == "directory",
             )
@@ -3073,9 +3334,11 @@ def _rewrite_workspace_file_flags(
                 prepare_workspace_directory_for_command(resolved, mode=mode)
             else:
                 if mode in {"read", "read_write"} and not resolved.is_file():
-                    raise WorkspaceFileNotFound(f"session file not found: {user_value}")
+                    raise WorkspaceFileNotFound(f"session file not found: {workspace_value}")
                 prepare_workspace_file_for_command(resolved, mode=mode)
-        except (InvalidWorkspacePath, WorkspaceDisabled, WorkspaceFileNotFound) as exc:
+        except InvalidWorkspacePath as exc:
+            return command, set(), [], [], [], _invalid_workspace_file_path_reason(user_value, str(exc))
+        except (WorkspaceDisabled, WorkspaceFileNotFound) as exc:
             return command, set(), [], [], [], str(exc)
 
         resolved_value = str(resolved)
@@ -3087,9 +3350,9 @@ def _rewrite_workspace_file_flags(
         exempt_flags.add(flag)
         exec_paths.append(resolved_value)
         if kind != "directory" and mode in {"read", "read_write"}:
-            reads.append(user_value)
+            reads.append(workspace_value)
         if mode in {"write", "read_write"}:
-            writes.append(user_value)
+            writes.append(workspace_value)
         index = value_index + 1
 
     return shlex.join(rewritten_tokens), exempt_flags, reads, writes, exec_paths, ""
@@ -3195,6 +3458,7 @@ def validate_command(
     *,
     session_id: str = "",
     cfg: dict | None = None,
+    workspace_cwd: str = "",
 ) -> CommandValidationResult:
     """Validate a command and return the display command plus execution command.
 
@@ -3260,6 +3524,7 @@ def validate_command(
         command_to_validate,
         session_id,
         cfg,
+        workspace_cwd=workspace_cwd,
     )
     if workspace_error:
         return CommandValidationResult(
@@ -3269,7 +3534,12 @@ def validate_command(
             exec_command=command_to_validate,
         )
 
-    restricted_file_reason = _workspace_read_file_restriction_reason(command_to_validate, session_id, cfg)
+    restricted_file_reason = _workspace_read_file_restriction_reason(
+        command_to_validate,
+        session_id,
+        cfg,
+        workspace_cwd=workspace_cwd,
+    )
     if restricted_file_reason:
         return CommandValidationResult(
             False,

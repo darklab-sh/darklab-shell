@@ -16,14 +16,16 @@ The suites are layered on purpose:
 2. Vitest checks client-side helper logic and browser-module failure paths in jsdom
 3. Playwright checks the full UI, network behavior, and cross-module interactions in a real browser
 
+Workspace file behavior is intentionally split across all three layers: pytest owns route/path-safety checks, Vitest owns browser command parsing and Files modal interactions, and Playwright covers the user-facing workflow in a live app.
+
 Current totals:
 
-- behavior tests: 2,356
+- behavior tests: 2,409
 - docs/inventory meta-tests: 30
-- `pytest`: 1182 (1152 behavior + 30 meta)
-- `vitest`: 970
+- `pytest`: 1205 (1175 behavior + 30 meta)
+- `vitest`: 998
 - `playwright`: 236
-- total: 2,388
+- total: 2,439
 
 This document is organized in two parts:
 
@@ -389,9 +391,12 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_write_read_list_delete_text_file` | Verifies the backend workspace text-file lifecycle for write, read, list, usage, and delete operations. |
 | `TestSessionWorkspace.test_prepare_workspace_file_for_command_uses_limited_write_mode` | Verifies that command output targets get limited group-write permissions without becoming world-readable. |
 | `TestSessionWorkspace.test_prepare_workspace_directory_for_command_does_not_temporarily_widen_mode` | Verifies that command-managed workspace directories go straight to the scanner-safe directory mode without a temporary world-readable chmod. |
+| `TestSessionWorkspace.test_list_repairs_command_created_workspace_modes` | Verifies that workspace listing repairs command-created folder/file modes so app-mediated reads can see tool config output. |
+| `TestSessionWorkspace.test_read_workspace_permission_denied_is_not_raw_os_error` | Verifies that unreadable workspace files raise an app-level permission error instead of a raw OS error. |
 | `TestSessionWorkspace.test_delete_workspace_file_falls_back_to_scanner_owner_for_nested_command_files` | Verifies that deleting scanner-owned nested workspace files falls back through the validated scanner sudo path when sticky directory permissions block direct unlink. |
 | `TestSessionWorkspace.test_workspace_path_info_and_delete_remove_folders_recursively` | Verifies that workspace path info counts files under folders and recursive folder delete removes nested files and directories. |
 | `TestSessionWorkspace.test_create_and_list_empty_directories_without_file_usage` | Verifies that explicit empty session folders can be created and listed without counting against file usage. |
+| `TestSessionWorkspace.test_workspace_glob_pattern_matches_one_path_segment` | Verifies that workspace glob expansion matches `*` within one path segment without crossing into nested folders. |
 | `TestSessionWorkspace.test_rejects_absolute_traversal_and_backslash_paths` | Verifies that unsafe workspace paths are rejected before touching the filesystem. |
 | `TestSessionWorkspace.test_allows_hidden_files_that_are_listed_by_workspace` | Verifies that hidden session file paths can be resolved so listed tool artifacts remain accessible. |
 | `TestSessionWorkspace.test_rejects_symlink_escape` | Verifies that symlinked workspace paths cannot escape the session directory. |
@@ -403,6 +408,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionWorkspace.test_cleanup_can_skip_current_session_directory` | Verifies that workspace cleanup can preserve the request session while sweeping other expired session directories. |
 | `TestEntrypointWorkspaceRepair.test_workspace_repair_targets_children_inside_session_directories` | Verifies that entrypoint workspace permission repair explicitly targets files and folders inside hashed session directories. |
 | `TestDerivedCommandRegistry.test_commands_registry_loader_normalizes_policy_and_autocomplete` | Verifies that the `commands.yaml` loader normalizes policy entries and autocomplete metadata, including pipe-helper entries. |
+| `TestDerivedCommandRegistry.test_command_catalog_derives_reference_data_from_registry` | Verifies that the command catalog helper derives descriptions, examples, flags, workspace file handling, runtime notes, and subcommand-scoped details from the command registry. |
 | `TestDerivedCommandRegistry.test_commands_registry_local_overlay_appends_policy_and_context` | Verifies that `commands.local.yaml` appends policy entries, adds new roots, overrides categories, and merges autocomplete hints without replacing the base registry. |
 | `TestDerivedCommandRegistry.test_real_registry_amass_uses_subcommand_scoped_autocomplete` | Verifies that Amass autocomplete exposes root subcommands and keeps subcommand-specific flags and examples scoped to the matching subcommand. |
 | `TestDerivedCommandRegistry.test_real_registry_openssl_uses_subcommand_scoped_autocomplete` | Verifies that OpenSSL autocomplete exposes allowlisted subcommands and keeps `s_client` and `ciphers` flags scoped to the matching subcommand. |
@@ -412,6 +418,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDerivedCommandRegistry.test_autocomplete_context_can_be_derived_from_commands_registry` | Verifies that browser autocomplete context can be derived from command and pipe-helper registry entries. |
 | `TestDerivedCommandRegistry.test_builtin_autocomplete_registry_uses_app_owned_yaml` | Verifies that built-in autocomplete grammar is loaded from the app-owned YAML registry and normalized into the browser context shape. |
 | `TestDerivedCommandRegistry.test_builtin_autocomplete_workspace_roots_follow_feature_flag` | Verifies that Files-only built-in autocomplete roots are hidden unless workspace support is enabled. |
+| `TestDerivedCommandRegistry.test_real_registry_commands_have_root_descriptions` | Verifies that every supported external command root in `commands.yaml` declares a one-sentence description. |
 | `TestDerivedCommandRegistry.test_real_registry_workspace_file_flags_cover_supported_file_io_tools` | Verifies that supported file input/output flags in the real command registry are rewritten through session workspace paths. |
 | `TestDerivedCommandRegistry.test_workspace_rewrites_quote_shell_sensitive_paths` | Verifies that workspace file rewrites quote absolute paths containing shell-sensitive characters. |
 | `TestDerivedCommandRegistry.test_amass_runtime_environment_quotes_rewritten_workspace_paths` | Verifies that the Amass managed-directory runtime environment wrapper quotes rewritten workspace paths safely. |
@@ -527,6 +534,13 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWelcomeAssetLoading.test_mobile_hints_overlay_appends_entries` | Checks that mobile hints overlay appends entries. |
 | `TestOutputSignals.test_command_root_and_target_extraction` | Verifies that backend output-signal classification extracts command roots and useful targets from common surfaced commands. |
 | `TestOutputSignals.test_classifies_common_findings` | Verifies that backend output-signal classification marks common scanner, DNS, and service rows as findings. |
+| `TestOutputSignals.test_classifies_dns_enumeration_findings_by_command` | Verifies that DNS and subdomain enumeration tools classify command-scoped host, record, and network-range findings without making hostnames global findings. |
+| `TestOutputSignals.test_classifies_web_enumeration_findings_by_command` | Verifies that web probing, crawling, and WAF scanner outputs classify command-scoped URL, status, and WAF findings. |
+| `TestOutputSignals.test_classifies_web_scanner_findings_by_command` | Verifies that Nikto and WPScan classify useful scanner findings while skipping progress and footer lines. |
+| `TestOutputSignals.test_classifies_tls_scanner_findings_by_command` | Verifies that TLS scanner posture, certificate, cipher, and compliance lines classify into findings or errors. |
+| `TestOutputSignals.test_classifies_projectdiscovery_and_port_scanner_findings` | Verifies that ProjectDiscovery and port scanner outputs classify command-scoped findings and summaries. |
+| `TestOutputSignals.test_signal_matching_uses_ansi_normalized_text` | Verifies that backend signal matching strips ANSI formatting before classifying output while preserving the original line elsewhere. |
+| `TestOutputSignals.test_classifies_nuclei_findings_by_command` | Verifies that common Nuclei template result lines classify as command-scoped findings. |
 | `TestOutputSignals.test_classifies_warning_error_and_summary_lines` | Verifies that backend output-signal classification separates warning, error, and summary-style lines. |
 | `TestOutputSignals.test_workspace_notices_are_not_output_signals` | Verifies that app-owned workspace read/write notices do not count as findings, warnings, errors, or summaries. |
 | `TestOutputSignals.test_nmap_input_file_sections_update_signal_target` | Verifies that nmap input-file scans update output metadata targets as each `Nmap scan report for ...` section starts. |
@@ -846,6 +860,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestIsCommandAllowedEdges.test_tmp_url_path_is_allowed` | Checks that /tmp URL path is allowed. |
 | `TestIsCommandAllowedEdges.test_local_tmp_path_is_blocked` | Checks that local /tmp path is blocked. |
 | `TestIsCommandAllowedEdges.test_workspace_enabled_exempts_declared_file_flags_and_rewrites_paths` | Verifies that declared workspace file flags can bypass deny entries only when workspace storage is enabled and the file names rewrite into the session workspace. |
+| `TestIsCommandAllowedEdges.test_workspace_file_flags_resolve_relative_to_workspace_cwd` | Verifies that declared workspace file flags resolve relative file names against the active tab workspace folder before rewriting them for execution. |
+| `TestIsCommandAllowedEdges.test_workspace_file_flags_allow_parent_paths_without_escaping_workspace` | Verifies that `..` path segments can move upward within the workspace but cannot escape the session workspace. |
 | `TestIsCommandAllowedEdges.test_workspace_disabled_keeps_declared_file_flags_denied` | Verifies that declared workspace file flags remain denied while workspace storage is disabled. |
 | `TestIsCommandAllowedEdges.test_workspace_read_flags_rewrite_relative_files_but_keep_packaged_wordlists` | Verifies that workspace-aware read flags rewrite relative session file names while preserving allowed packaged absolute wordlists. |
 | `TestIsCommandAllowedEdges.test_workspace_write_flags_keep_dev_null_exception` | Verifies that workspace-aware write flags do not break the existing `/dev/null` output exception. |
@@ -856,6 +872,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestBuiltinCommandResolution.test_documented_builtin_commands_are_backed_by_runtime_dispatch` | Checks that every entry in `_DOCUMENTED_BUILTIN_COMMANDS` has a corresponding runtime dispatch handler. |
 | `TestBuiltinCommandResolution.test_resolves_supported_builtin_commands` | Checks that resolves supported built-in commands. |
 | `TestBuiltinCommandResolution.test_workspace_builtin_commands_are_hidden_when_disabled` | Verifies that file built-ins and aliases stop resolving when Files are disabled. |
+| `TestBuiltinCommandResolution.test_commands_external_catalog_uses_commands_registry` | Verifies that `commands --external` renders allowed external roots from `commands.yaml` rather than a duplicated list. |
+| `TestBuiltinCommandResolution.test_commands_info_renders_registry_catalog_entry` | Verifies that `commands info <root>` renders command descriptions, examples, and value-taking flags from the registry catalog without exposing internal app-handling notes. |
+| `TestBuiltinCommandResolution.test_commands_info_unknown_root_returns_usage_hint` | Verifies that `commands info` returns a clear no-entry message for unknown roots. |
 | `TestBuiltinCommandResolution.test_rejects_non_builtin_commands` | Checks that rejects non built-in commands. |
 
 #### `test_routes.py`
@@ -968,6 +987,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestAllowedCommandsRoute.test_restricted_when_file_present` | Checks that restricted when file present. |
 | `TestAllowedCommandsRoute.test_returns_grouped_commands_when_restricted` | Returns grouped commands when restricted. |
 | `TestAllowedCommandsRoute.test_returns_root_commands_for_prefixed_policy_entries` | Verifies that the FAQ-facing allowed-command payload collapses prefixed allow policy entries to unique command roots. |
+| `TestCommandCatalogRoute.test_returns_catalog_entry_for_allowed_command` | Verifies that `/commands/catalog/<root>` returns the shared registry-derived command reference payload. |
+| `TestCommandCatalogRoute.test_returns_404_for_unknown_command` | Verifies that unknown command catalog roots return HTTP 404 with a JSON error. |
 | `TestAutocompleteWorkspaceRoute.test_workspace_roots_follow_workspace_config` | Verifies that file built-in roots are included in autocomplete only when Files are enabled. |
 | `TestAutocompleteWorkspaceRoute.test_workspace_autocomplete_examples_follow_workspace_config` | Verifies that workspace-only command examples and file flags are hidden from `/autocomplete` until Files are enabled. |
 | `TestFaqRoute.test_returns_200` | Checks returns 200 handling. |
@@ -1000,6 +1021,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestWorkspaceRoutes.test_workspace_files_are_session_isolated` | Verifies that a file created under one session cannot be read from another session workspace. |
 | `TestWorkspaceRoutes.test_create_directory_lists_empty_folder` | Verifies that the Files API can create and list explicit empty session folders. |
 | `TestWorkspaceRoutes.test_info_and_delete_folder_recursively` | Verifies that the Files API reports folder file counts and deletes nested folder contents through the same validated delete endpoint. |
+| `TestWorkspaceRoutes.test_move_file_and_folder_paths` | Verifies that the Files API can move files into folders, rename folders while moving, and move files back to the workspace root. |
+| `TestWorkspaceRoutes.test_move_rejects_invalid_paths_and_recursive_folder_moves` | Verifies that workspace moves reject path escapes, existing file destinations, and moving a folder into itself. |
 | `TestWorkspaceRoutes.test_rejects_unsafe_paths` | Verifies that route writes reject traversal, absolute, and backslash paths. |
 | `TestWorkspaceRoutes.test_rejects_unsafe_paths_on_read_delete_and_download` | Verifies that workspace read, delete, and download routes reject traversal, absolute, and backslash file names before touching disk. |
 | `TestWorkspaceRoutes.test_allows_hidden_workspace_paths_when_listed` | Verifies that listed hidden session files can be written, listed, and read through the Files API. |
@@ -1421,6 +1444,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `serves runtime autocomplete context for built-in command lookup helpers` | Verifies that runtime built-in context covers `session-token`, simple built-ins, and dynamic `man` / `which` / `type` lookup suggestions. |
 | `serves loaded workspace files as file command autocomplete values` | Verifies that loaded session files are offered as autocomplete values for `file show`, `file edit`, `file download`, `file rm`, and `cat`. |
 | `serves workspace autocomplete values relative to the active workspace folder` | Verifies that workspace autocomplete offers current-folder file and folder names instead of root-relative paths. |
+| `serves directory-aware workspace autocomplete hints while preserving typed prefixes` | Verifies that typed workspace path prefixes such as `darklab/`, `../`, and `../darklab/` resolve against the active tab cwd while preserving the user's typed prefix. |
 | `hides workspace built-ins from runtime autocomplete when Files are disabled` | Verifies that file commands and aliases are removed from runtime autocomplete when the operator disables Files. |
 | `keeps code-owned built-ins out of commands.yaml` | Verifies that app-owned built-ins are not duplicated in the operator-facing command registry. |
 | `groups theme cards into labeled sections in the preview modal` | Verifies that groups theme cards into labeled sections in the preview modal. |
@@ -1463,6 +1487,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `reads the visible mobile composer value through the shared accessor` | Verifies that reads the visible mobile composer value through the shared accessor. |
 | `syncs mobile composer input through the shared input handler` | Verifies that syncs mobile composer input through the shared input handler. |
 | `exposes the shared composer input handler for visible mobile input changes` | Verifies that exposes the shared composer input handler for visible mobile input changes. |
+| `blocks composer input and autocomplete while the active tab is running` | Verifies that hidden prompt input and autocomplete stay inactive while the active tab owns a running command. |
 | `publishes mobile focus and selection changes into composer state without mirroring the hidden input` | Verifies that publishes mobile focus and selection changes into composer state without mirroring the hidden input. |
 | `does not enter mobile mode on a narrow desktop viewport without touch support` | Verifies that does not enter mobile mode on a narrow desktop viewport without touch support. |
 | `sets the document title from the server config` | Verifies that sets the document title from the server config. |
@@ -1481,15 +1506,18 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `renders cursor and selection state from composer state` | Verifies that renders cursor and selection state from composer state. |
 | `refreshes prompt rendering from the focused input before drawing the caret` | Verifies that the visible prompt caret returns to the empty focused state when the DOM input has been cleared but shared composer state is stale. |
 | `supports ctrl+w to delete one word to the left` | Verifies that supports ctrl+w to delete one word to the left. |
+| `supports ctrl+w with punctuation-delimited terminal words` | Verifies that Ctrl+W uses terminal-style word boundaries around punctuation such as dots, slashes, underscores, and parentheses. |
 | `supports ctrl+u to delete to the beginning of the line` | Verifies that supports ctrl+u to delete to the beginning of the line. |
 | `supports ctrl+a to move to the beginning of the line` | Verifies that supports ctrl+a to move to the beginning of the line. |
 | `supports ctrl+k to delete to the end of the line` | Verifies that supports ctrl+k to delete to the end of the line. |
 | `supports ctrl+e to move to the end of the line` | Verifies that supports ctrl+e to move to the end of the line. |
 | `supports Alt+B and Alt+F to move by word` | Verifies that supports Alt+B and Alt+F to move by word. |
+| `treats punctuation as word boundaries for terminal word movement` | Verifies that Alt/Option word movement stops at punctuation-delimited terminal word segments. |
 | `supports macOS Option+B and Option+F word movement via physical key codes` | Verifies that supports macOS Option+B and Option+F word movement via physical key codes. |
 | `supports the mobile keyboard helper edit actions` | Verifies character moves, word-left / word-right jumps, Home / End, and delete-word actions in the mobile helper row. |
 | `keeps the mobile composer scrolled to the caret when helper navigation moves through long input` | Verifies that keeps the mobile composer scrolled to the caret when helper navigation moves through long input. |
 | `uses Ctrl+C to open kill confirm when active tab is running` | Verifies that uses Ctrl+C to open kill confirm when active tab is running. |
+| `swallows composer keydown while the active tab is running` | Verifies that prompt keydown input is ignored while the active tab owns a running command. |
 | `uses Ctrl+C to jump to a new prompt line when no command is running` | Verifies that uses Ctrl+C to jump to a new prompt line when no command is running. |
 | `uses Ctrl+C to cancel a pending terminal confirmation before opening a fresh prompt` | Verifies that a pending transcript-owned yes/no confirm consumes `Ctrl+C` as a cancel action before the normal fresh-prompt interrupt path runs. |
 | `supports Alt+T to create a new tab from the terminal prompt` | Verifies that supports Alt+T to create a new tab from the terminal prompt. |
@@ -1505,13 +1533,15 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `supports Alt+Shift+C to copy output for the active tab` | Verifies that supports Alt+Shift+C to copy output for the active tab. |
 | `supports macOS Option+Shift+C to copy output via physical key code` | Verifies that supports macOS Option+Shift+C to copy output via physical key code. |
 | `supports Alt+M to toggle the status monitor from the terminal prompt` | Verifies that Alt+M opens the Status Monitor when closed and closes it when already open. |
-| `supports Alt+Shift+F to open the Files modal from the terminal prompt` | Verifies that Alt+Shift+F opens Files while preserving Alt+F for word-forward. |
+| `supports Alt+Shift+F to toggle the Files modal from the terminal prompt` | Verifies that Alt+Shift+F opens and closes Files while preserving Alt+F for word-forward. |
 | `supports Ctrl+L to clear the active tab without dropping a running command` | Verifies that supports Ctrl+L to clear the active tab without dropping a running command. |
 | `does not apply Alt-based tab shortcuts while typing in non-terminal inputs` | Verifies that does not apply Alt-based tab shortcuts while typing in non-terminal inputs. |
 | `does not apply action shortcuts while typing in non-terminal inputs` | Verifies that does not apply action shortcuts while typing in non-terminal inputs. |
 | `ArrowDown/Up wrap around and navigate the same direction regardless of whether the list is above or below the prompt` | ArrowDown/Up wrap around and navigate the same direction regardless of whether the list is above or below the prompt. |
 | `Tab expands the typed value to the longest shared autocomplete prefix before cycling` | Verifies that Tab expands the typed value to the longest shared autocomplete prefix before cycling. |
 | `Tab cycles autocomplete suggestions once the shared prefix is exhausted` | Verifies that Tab cycles autocomplete suggestions once the shared prefix is exhausted. |
+| `Tab accepts a single concrete autocomplete item while leaving hint-only guidance visible` | Verifies that display-only autocomplete hints do not prevent Tab from accepting the one real menu option. |
+| `ArrowDown skips hint-only autocomplete guidance while cycling menu items` | Verifies that arrow-key autocomplete navigation skips display-only hint rows. |
 | `Tab key with a modifier does not trigger autocomplete accept or selection` | Tab key with a modifier does not trigger autocomplete accept or selection. |
 | `routes hist-clear-all through confirmHistAction` | Verifies that the "Clear history" toolbar button opens the shared `showConfirm` prompt via `confirmHistAction` rather than binding its own modal. |
 | `uses the persistent share redaction default before showing the modal prompt` | Verifies that a persistent raw/redacted preference short-circuits `showConfirm` so the share-redaction prompt is never opened. |
@@ -1533,8 +1563,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `clears the session token only after confirming the destructive action` | Verifies that the active session token is only removed after the destructive clear action is explicitly confirmed. |
 | `persists options changes through cookies and syncs quick-toggle state` | Verifies that option changes update cookies, quick-toggle UI, and the persisted `/session/preferences` snapshot together. |
 | `renders backend-driven FAQ items with HTML answers and dynamic sections` | Verifies that renders backend-driven FAQ items with HTML answers and dynamic sections. |
-| `loads FAQ command chips into the visible mobile composer and refocuses it` | Verifies that loads FAQ command chips into the visible mobile composer and refocuses it. |
-| `opens autocomplete after loading an FAQ command chip` | Verifies that FAQ command chips trigger the normal composer autocomplete flow after loading the command into the prompt. |
+| `opens command catalog details from the command registry browser` | Verifies that the Command Registry opens command details without loading the prompt directly. |
+| `opens autocomplete after loading a command catalog example chip` | Verifies that command catalog example chips load the prompt and trigger the normal composer autocomplete flow. |
 | `loads custom FAQ chips into the prompt with the same command-chip behavior` | Verifies that loads custom FAQ chips into the prompt with the same command-chip behavior. |
 | `returns off when no cookie is set` | Verifies that returns off when no cookie is set. |
 | `returns on when cookie is set to on` | Verifies that returns on when cookie is set to on. |
@@ -1556,10 +1586,14 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `renders suggestions from the shared composer value accessor when present` | Verifies that renders suggestions from the shared composer value accessor when present. |
 | `applies the active class to the indexed suggestion` | Verifies that applies the active class to the indexed suggestion. |
 | `renders contextual suggestions with descriptions` | Verifies that contextual suggestions can render a separate description alongside the inserted value. |
+| `highlights contextual suggestions with an item-specific match query` | Verifies that scoped path suggestions can highlight the final typed segment even when the displayed value includes a folder prefix. |
 | `does not highlight typed text inside hint-only placeholders` | Verifies that visible placeholder guidance remains unhighlighted even when the typed token appears inside the placeholder text. |
+| `honors explicit snake_case hint_only hints without placeholder autodetect` | Verifies that YAML-style `hint_only` autocomplete hints stay display-only even when their value is not shaped like a placeholder. |
 | `acAccept updates the input, hides the dropdown, and refocuses the input` | Verifies that acAccept updates the input, hides the dropdown, and refocuses the input. |
 | `acAccept keeps focus on the visible mobile composer when mobile mode is active` | Verifies that acAccept keeps focus on the visible mobile composer when mobile mode is active. |
 | `acAccept replaces only the current token for contextual suggestions` | Verifies that accepting a contextual suggestion replaces only the active token instead of rewriting the full command. |
+| `acAccept clears stale suggestions after accepting a single contextual match` | Verifies that accepting the only contextual suggestion clears the hidden suggestion list so a second Tab cannot reapply stale replacement bounds. |
+| `acAccept refreshes autocomplete after accepting a slash-terminated folder` | Verifies that accepting a folder-like completion reopens autocomplete so the next path segment can be completed immediately. |
 | `acAccept suppresses one synthetic input cycle so the dropdown does not immediately reopen` | Verifies that accepting a suggestion hides the dropdown and suppresses the one programmatic input update caused by the accept path, so the menu does not immediately reopen. |
 | `computes the shared prefix across multiple suggestions` | Verifies that computes the shared prefix across multiple suggestions. |
 | `expands the composer value to the longest shared prefix when one exists` | Verifies that expands the composer value to the longest shared prefix when one exists. |
@@ -1602,12 +1636,16 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `stops suggesting more positional arguments after reaching argument_limit, but still allows flags` | Verifies that `argument_limit` suppresses further positional guidance once the configured number of positional arguments is filled, while still allowing flag suggestions in a later flag slot. |
 | `suggests built-in pipe commands after a supported command pipe` | Verifies that typing a piped command can switch autocomplete into the narrow built-in pipe stage. |
 | `uses live workspace file hints for workspace read flags instead of static examples` | Verifies that workspace-aware input flags prefer current session file names over baked registry examples. |
+| `uses cwd-relative workspace file hints for external workspace read flags` | Verifies that workspace-aware external command input flags use CWD-relative suggestions and scoped folder-prefix completions. |
+| `uses directory-aware workspace path hints for typed file-command prefixes` | Verifies that workspace-aware file commands use scoped suggestions for typed prefixes such as `darklab/`, `../`, and `../darklab/`. |
 | `returns pipe-stage flag hints for grep` | Verifies that the built-in pipe stage can expose contextual `grep` flags such as `-i`, `-v`, and `-E`. |
 | `returns pipe-stage count hints after head -n and wc flag hints after wc space` | Verifies that pipe-stage value hints work for `head -n` and that `wc ` narrows correctly to `-l`. |
 | `suggests additional pipe helpers after an earlier helper stage` | Checks that suggests additional pipe helpers after an earlier helper stage. |
 | `returns chained pipe-stage flag and value hints from the last helper stage` | Verifies that chained helper pipelines still expose flag and value hints from the last helper stage rather than the earlier stages. |
 | `does not offer chained pipe autocomplete after an invalid earlier stage` | Verifies that multi-pipe autocomplete fails closed when an earlier stage is not an allowlisted helper. |
 | `mousedown on a suggestion accepts it without blurring the input` | Verifies that mousedown on a suggestion accepts it without blurring the input. |
+| `mousedown on a hint-only item keeps the guidance visible without accepting it` | Verifies that display-only autocomplete hints stay visible and do not modify the prompt when clicked. |
+| `does not render suggestions while the active tab is running` | Verifies that autocomplete closes instead of rendering stale hidden-prompt suggestions while the active tab owns a running command. |
 | `positions dropdown above when space below is tight and preserves item order` | Verifies that positions dropdown above when space below is tight and preserves item order. |
 | `keeps the above-mode dropdown pinned to the prompt as the item count shrinks` | Verifies that a desktop autocomplete dropdown opened above the prompt keeps the same bottom offset as its item count shrinks, instead of drifting farther away from the prompt. |
 | `clamps the below-mode dropdown height so it does not extend past the viewport edge` | Verifies that clamps the below-mode dropdown height so it does not extend past the viewport edge. |
@@ -1755,18 +1793,18 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `exitHistSearch(true) accepts the currently selected match` | Verifies that exitHistSearch(true) accepts the currently selected match. |
 | `exitHistSearch(false) cancels and restores the pre-draft` | Verifies that exitHistSearch(false) cancels and restores the pre-draft. |
 | `handleHistSearchKey Escape cancels search and returns true` | Verifies that handleHistSearchKey Escape cancels search and returns true. |
-| `handleHistSearchKey Enter accepts the match, exits search, and runs the command` | Verifies that handleHistSearchKey Enter accepts the match, exits search, and runs the command. |
-| `handleHistSearchKey Enter with no matches keeps typed query and runs it` | Verifies that handleHistSearchKey Enter with no matches keeps typed query and runs it. |
-| `handleHistSearchKey Tab accepts the match without running the command` | Verifies that handleHistSearchKey Tab accepts the match without running the command. |
-| `handleHistSearchKey ArrowDown navigates to the next match and fills the input` | Verifies that handleHistSearchKey ArrowDown navigates to the next match and fills the input. |
+| `handleHistSearchKey Enter accepts the match into the prompt without running it` | Verifies that handleHistSearchKey Enter accepts the match into the prompt without running it. |
+| `handleHistSearchKey Enter with no matches keeps typed query without running it` | Verifies that handleHistSearchKey Enter with no matches keeps typed query without running it. |
+| `handleHistSearchKey Tab moves through matches without changing the input` | Verifies that handleHistSearchKey Tab moves through matches without changing the input. |
+| `handleHistSearchKey ArrowDown navigates to the next match without changing the input` | Verifies that handleHistSearchKey ArrowDown navigates to the next match without changing the input. |
 | `handleHistSearchKey ArrowUp navigates to the previous match` | Verifies that handleHistSearchKey ArrowUp navigates to the previous match. |
 | `handleHistSearchKey Ctrl+R cycles to the next match` | Verifies that handleHistSearchKey Ctrl+R cycles to the next match. |
 | `handleHistSearchKey returns false for printable characters to allow input to proceed` | Verifies that handleHistSearchKey returns false for printable characters to allow input to proceed. |
 | `handleHistSearchKey Ctrl+C exits search keeping the typed query in input (not restoring pre-draft)` | Verifies that handleHistSearchKey Ctrl+C exits search keeping the typed query in input (not restoring pre-draft). |
 | `handleHistSearchKey ArrowDown wraps from the last match back to the first` | Verifies that handleHistSearchKey ArrowDown wraps from the last match back to the first. |
 | `handleHistSearchKey ArrowUp wraps from the first match back to the last` | Verifies that handleHistSearchKey ArrowUp wraps from the first match back to the last. |
-| `handleHistSearchKey Tab with no matches exits keeping the typed query in input` | Verifies that handleHistSearchKey Tab with no matches exits keeping the typed query in input. |
-| `handleHistSearchKey Enter after ArrowDown runs the navigated-to match` | Verifies that handleHistSearchKey Enter after ArrowDown runs the navigated-to match. |
+| `handleHistSearchKey Tab with no matches leaves search open and keeps the typed query` | Verifies that handleHistSearchKey Tab with no matches leaves search open and keeps the typed query. |
+| `handleHistSearchKey Enter after ArrowDown accepts the navigated-to match without running it` | Verifies that handleHistSearchKey Enter after ArrowDown accepts the navigated-to match without running it. |
 | `resetCmdHistoryNav exits hist search mode if active` | Verifies that resetCmdHistoryNav exits hist search mode if active. |
 | `dropdown keeps cmdHistory matches when server fetch returns empty` | Regression: typing a character used to show in-memory recents briefly, then the server response overwrote `_histSearchRuns = []` and the dropdown cleared. Client-side matches must not be dropped by an empty server response. |
 | `dropdown merges cmdHistory matches with unique server-only matches` | Verifies that server-surfaced older runs beyond the in-memory recents cap extend the dropdown list (deduped) rather than replacing the cmdHistory matches. |
@@ -1907,6 +1945,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `doKill keeps an attached run active when the server denies the kill request` | Verifies that a denied kill request keeps an attached tab running with kill controls still visible. |
 | `restoreActiveRunsAfterReload subscribes restored tabs to brokered live output` | Verifies that reload continuity restores running tabs with preserved run IDs and subscribes them back to replay plus live output. |
 | `restoreActiveRunsAfterReload skips runs owned by another live client` | Verifies that reload continuity does not auto-create terminal tabs for active runs owned by another live browser. |
+| `restoreActiveRunsAfterReload skips runs explicitly detached by this browser` | Verifies that Keep running suppresses automatic reload reattachment for that active run in the same browser. |
+| `attachActiveRunFromMonitor clears explicit detach suppression for the run` | Verifies that manually attaching from Status Monitor opts a detached run back into normal reload continuity. |
 | `restoreActiveRunsAfterReload restores stale-owner runs` | Verifies that reload continuity can recover active runs once the previous owner is stale. |
 | `pauses background run streams for Status Monitor API calls and resumes from the last event id` | Verifies that Status Monitor connection relief pauses only background live streams and resubscribes them from the last broker event id. |
 | `restoreActiveRunsAfterReload does not overwrite a restored non-running tab` | Verifies that active-run reconnect creates a separate tab instead of clobbering an already-restored idle tab. |
@@ -1971,9 +2011,13 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `does not double-prefix a root-relative autocomplete path from a workspace folder` | Verifies that stale root-relative folder suggestions do not get prefixed with the current folder twice. |
 | `lists the current workspace folder non-recursively on one short line` | Verifies that `ls` shows only direct current-folder entries in compact terminal-style output. |
 | `lists workspace folders recursively only when -R is present with flags in any order` | Verifies that recursive workspace listings require `-R` and support combined list flags in any order. |
+| `lists workspace files and folders matched by a glob pattern` | Verifies that `file ls <pattern>` expands `*` against direct workspace entries before rendering compact output. |
 | `lists workspace folders in long format with ll` | Verifies that `ll` shows the long workspace listing with aligned metadata columns. |
 | `pipes short ls output to grep as one workspace entry per line` | Verifies that compact `ls` display output feeds pipe helpers as one logical workspace entry per line. |
 | `creates workspace directories with mkdir and file add-dir` | Verifies that `mkdir` and `file add-dir` create folders through the workspace directory route. |
+| `moves workspace files and folders from file move and mv commands` | Verifies that `file move` and `mv` resolve tab-relative workspace paths and move entries through the Files route. |
+| `moves every workspace file matched by a glob pattern into an existing folder` | Verifies that `mv <pattern> <folder>` expands matching workspace entries and moves each one into an existing destination folder. |
+| `shows usage for incomplete workspace move commands` | Verifies that incomplete `file move` and `mv` commands show usage and do not call the Files move route. |
 | `runs standalone pipe helpers against workspace files` | Verifies that `grep`, `wc -l`, `sort`, and `uniq` can run directly against workspace files. |
 | `does not intercept workspace delete aliases when Files are disabled` | Verifies that the browser does not run the client-side workspace delete confirmation path when Files are disabled. |
 | `shows usage for bare rm and file delete commands` | Verifies that bare delete aliases are handled locally and return usage text instead of falling through as disallowed commands. |
@@ -1983,6 +2027,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `does not prompt before deleting a missing workspace file or folder` | Verifies that `file rm <path>` checks that the session file or folder exists before opening the confirmation prompt. |
 | `deletes the workspace file only after answering yes` | Verifies that `rm <file>` deletes through the workspace route only after an explicit `yes` answer. |
 | `deletes the workspace folder only after answering yes` | Verifies that `file rm <folder>` deletes through the workspace route only after an explicit `yes` answer. |
+| `deletes every workspace file matched by a glob pattern after confirmation` | Verifies that `file delete <pattern>` expands matching workspace files, asks once, and deletes each match after confirmation. |
 | `leaves the workspace file untouched when the user answers no` | Verifies that answering `no` cancels the workspace delete confirmation without calling the delete route. |
 | `opens the Files editor from file add and file edit commands` | Verifies that `file add`, `file add <file>`, and `file edit <file>` open the Files editor with blank or prefilled file names as appropriate. |
 | `keeps file edit usage strict when no filename is provided` | Verifies that `file edit` still requires a filename while `file add` can open a blank editor. |
@@ -2121,6 +2166,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `uses CPU hysteresis and recent samples for the pulse strip` | Verifies that the Status Monitor pulse strip preserves raw CPU readouts while damping small pulse-signature changes and keeping a recent CPU sample window. |
 | `shows active-run loading state on open instead of stale cached rows` | Verifies that opening the Status Monitor shows an active-run loading row until fresh active-run data arrives instead of flashing stale cached rows. |
 | `opens as a status dashboard when there are no active runs` | Verifies that the desktop Status Monitor opens to a dashboard with a `0 active runs` runs section when no commands are running. |
+| `ticks uptime locally between status polls` | Verifies that the Status Monitor summary and Uptime card count upward between `/status` polls without fetching a fresh status payload. |
 | `opens history from command territory tiles` | Verifies that Command Territory tiles open History with the clicked command root filter applied. |
 | `keeps dashboard fallbacks visible when status data routes fail` | Verifies that the Status Monitor keeps rendering dashboard fallback copy when status, workspace, stats, or insights requests fail. |
 | `shows fallback toasts when optional history helpers are unavailable` | Verifies that missing optional history filter and run restore helpers show user-visible fallback toasts instead of throwing. |
@@ -2132,7 +2178,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `keeps an ambient constellation visible before real run history exists` | Verifies that the Status Monitor keeps the ambient constellation visible and uses calm sparse-state copy when no real runs are plotted. |
 | `uses mobile sheet chrome and shared sheet binding on mobile` | Verifies that the mobile Status Monitor opens with sheet chrome and shared mobile-sheet dismissal behavior. |
 | `calculates CPU from cumulative samples, keeps the last value, and caps display at 100%` | Verifies that the Status Monitor derives CPU percentage from adjacent cumulative CPU samples, preserves the last value when a later poll lacks CPU data, and display-caps at 100%. |
-| `adds the running status affordance and pulses it once per session` | Verifies that the STATUS HUD cell gets the Status Monitor expansion affordance while running and only pulses once per browser session. |
+| `keeps HUD status monitor triggers clickable without running-state affordances` | Verifies that STATUS, LAST EXIT, and TABS still open Status Monitor without adding the old running-state glyph or pulse. |
 
 #### `tabs.test.js`
 
@@ -2468,6 +2514,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders nested workspace paths as navigable folders with breadcrumbs` | Verifies that nested workspace paths render as folders, support entering/leaving folders, and update breadcrumbs. |
 | `renders explicit empty directories from the workspace payload` | Verifies that explicit empty folders render and remain navigable even when they contain no files. |
 | `confirms folder deletion with file counts before deleting from the browser` | Verifies that folder delete actions show count-aware confirmation copy before recursively deleting through the workspace route. |
+| `moves files from the row action through the app-native prompt` | Verifies that the file-row Move action uses the app-native prompt and posts the selected destination to the workspace move route. |
+| `moves a dragged file onto a workspace folder after confirmation` | Verifies that dragging a file onto a folder asks for confirmation and then moves the file through the workspace move route. |
 | `shows an empty state when the workspace has no files` | Verifies that the workspace modal explains the empty state before any files exist. |
 | `saves new files relative to the currently selected folder` | Verifies that New File keeps the name field clean while saving relative to the active folder. |
 | `keeps the editor hidden until the user starts or closes an edit` | Verifies that the workspace editor stays collapsed until New File or edit mode opens it, and closes cleanly afterward. |
@@ -2475,6 +2523,9 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `shows file contents in a read-only viewer and keeps edit mode separate` | Verifies that View opens a read-only file display at the top of the file without exposing the larger edit form. |
 | `opens the viewer with a loading preview while a file read is pending` | Verifies that clicking View opens the viewer immediately with loading feedback before the file read and preview rendering finish. |
 | `shows loading feedback before opening the editor for large files` | Verifies that Edit opens with loading feedback before large file contents are loaded into the editor modal. |
+| `toasts and does not open the viewer for files that exceed the read limit` | Verifies that known oversized files show a toast without opening the loading viewer or requesting file contents. |
+| `toasts and does not open the editor for oversized edit actions` | Verifies that known oversized files show a toast without opening the edit modal or requesting file contents. |
+| `closes the loading viewer when a read is rejected after opening` | Verifies that server-side read-limit rejections close the loading viewer and surface the error as a toast. |
 | `refreshes the currently viewed file when the files list is refreshed` | Verifies that Refresh updates both the file browser and the currently open read-only viewer. |
 | `refreshes the viewer directly and keeps following when scrolled to the bottom` | Verifies that the viewer Refresh button reloads the active file, keeps bottom-following scroll behavior, and shows the refresh spinner. |
 | `keeps auto-refresh off by default and refreshes only after opt-in` | Verifies that open viewer files do not poll by default, and that the Auto control starts the five-second poll only after the user enables it. |
@@ -2738,9 +2789,9 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `paste routes to the prompt after copying selected transcript text` | Verifies that paste after selecting transcript text clears the page selection, focuses the command prompt, and inserts clipboard text into the composer. |
 | `Ctrl+R opens the hist-search dropdown after a command has been run` | Ctrl+R opens the hist-search dropdown after a command has been run. |
 | `typing while hist-search is open filters matches in the dropdown` | Verifies that typing while hist-search is open filters matches in the dropdown. |
-| `Enter in hist-search accepts the match and runs the command` | Enter in hist-search accepts the match and runs the command. |
-| `Tab in hist-search accepts the match into the input without running the command` | Tab in hist-search accepts the match into the input without running the command. |
-| `ArrowDown in hist-search navigates to the next match and fills the input` | ArrowDown in hist-search navigates to the next match and fills the input. |
+| `Enter in hist-search accepts the match into the input without running the command` | Enter in hist-search accepts the match into the input without running the command. |
+| `Tab in hist-search walks entries without changing the input` | Tab in hist-search walks entries without changing the input. |
+| `ArrowDown in hist-search navigates without changing the input` | ArrowDown in hist-search navigates without changing the input. |
 | `Escape in hist-search closes the dropdown and restores the pre-search draft` | Escape in hist-search closes the dropdown and restores the pre-search draft. |
 | `Ctrl+C in hist-search closes the dropdown and keeps the typed query in the input` | Ctrl+C in hist-search closes the dropdown and keeps the typed query in the input. |
 | `? opens the overlay when no input is focused` | Pressing `?` outside any input opens the transparent keyboard-shortcuts overlay. |
@@ -2755,7 +2806,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `Alt+G opens the workflows overlay from the composer` | Pressing Alt+G with the composer focused opens the guided workflows overlay without leaking `©`. |
 | `Alt+S toggles the transcript search bar from the composer` | Alt+S is the canonical search chord — works from the prompt because `S` has no readline conflict (unlike `F`, which the composer owns as word-forward). |
 | `Alt+M toggles the Status Monitor from the composer` | Alt+M opens and closes the status monitor without leaking `µ` into the prompt. |
-| `Alt+Shift+F opens the Files modal from the composer` | Alt+Shift+F opens Files without stealing the terminal's Alt+F word-forward chord. |
+| `Alt+Shift+F toggles the Files modal from the composer` | Alt+Shift+F opens and closes Files without stealing the terminal's Alt+F word-forward chord. |
 | `Alt+\ toggles the rail collapsed state from the composer` | Pressing Alt+\ with the composer focused toggles the desktop left rail between collapsed and expanded without leaking `«`. |
 | `Alt+/ toggles the FAQ overlay from the composer` | Alt+/ opens the FAQ overlay from the prompt and closes it on a second press without leaking `÷`. |
 
@@ -2826,7 +2877,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | `FAQ button opens the overlay` | FAQ button opens the overlay. |
 | `close button inside the FAQ modal closes it` | Verifies that close button inside the FAQ modal closes it. |
 | `clicking the overlay backdrop closes the FAQ modal` | Verifies that clicking the overlay backdrop closes the FAQ modal. |
-| `renders backend-driven FAQ content and allowlist chips` | Verifies that renders backend-driven FAQ content and allowlist chips. |
+| `renders backend-driven FAQ content and command registry pointer` | Verifies that FAQ content points users to the Command Registry instead of rendering the full command list. |
 | `desktop rail opens the idle Status Monitor modal` | Verifies that the desktop rail opens Status Monitor as a centered modal when no commands are active. |
 | `desktop Status Monitor loads dashboard endpoints together without route stubs` | Verifies that the Status Monitor opens against real dashboard endpoints for status, workspace files, history stats, and history insights. |
 | `active rows sit under the pulse strip with wide telemetry` | Verifies that active Status Monitor rows render directly under the pulse strip with wide telemetry and meter rails. |

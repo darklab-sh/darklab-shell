@@ -166,6 +166,7 @@ const _confirmHostHomeParent = _confirmHostEl ? _confirmHostEl.parentElement : n
 const _workflowsOverlayHomeParent = typeof workflowsOverlay !== 'undefined' && workflowsOverlay ? workflowsOverlay.parentElement : null;
 const _workspaceOverlayHomeParent = typeof workspaceOverlay !== 'undefined' && workspaceOverlay ? workspaceOverlay.parentElement : null;
 const _faqOverlayHomeParent = typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay.parentElement : null;
+const _commandRegistryOverlayHomeParent = typeof commandRegistryOverlay !== 'undefined' && commandRegistryOverlay ? commandRegistryOverlay.parentElement : null;
 const _themeOverlayHomeParent = typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay.parentElement : null;
 const _optionsOverlayHomeParent = typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay.parentElement : null;
 const _statusHomeParent = typeof status !== 'undefined' && status ? status.parentElement : null;
@@ -244,6 +245,7 @@ const _uiOverlayRefs = {
   workspaceViewerOverlay: typeof workspaceViewerOverlay !== 'undefined' && workspaceViewerOverlay ? workspaceViewerOverlay : null,
   workspaceEditorOverlay: typeof workspaceEditorOverlay !== 'undefined' && workspaceEditorOverlay ? workspaceEditorOverlay : null,
   faqOverlay: typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay : null,
+  commandRegistryOverlay: typeof commandRegistryOverlay !== 'undefined' && commandRegistryOverlay ? commandRegistryOverlay : null,
   themeOverlay: typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay : null,
   optionsOverlay: typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay : null,
   historyPanel: typeof historyPanel !== 'undefined' && historyPanel ? historyPanel : null,
@@ -266,7 +268,8 @@ const _mobileShellOverlayNodes = [
   { node: historyPanel, homeParent: _historyPanelHomeParent, desktopAnchor: permalinkToast || null },
   { node: permalinkToast, homeParent: _permalinkToastHomeParent, desktopAnchor: _confirmHostEl || faqOverlay || null },
   { node: _confirmHostEl, homeParent: _confirmHostHomeParent, desktopAnchor: faqOverlay || null },
-  { node: faqOverlay, homeParent: _faqOverlayHomeParent, desktopAnchor: themeOverlay || null },
+  { node: faqOverlay, homeParent: _faqOverlayHomeParent, desktopAnchor: commandRegistryOverlay || themeOverlay || null },
+  { node: commandRegistryOverlay, homeParent: _commandRegistryOverlayHomeParent, desktopAnchor: themeOverlay || null },
   { node: themeOverlay, homeParent: _themeOverlayHomeParent, desktopAnchor: optionsOverlay || null },
   { node: optionsOverlay, homeParent: _optionsOverlayHomeParent, desktopAnchor: _workspaceOverlayEl || workflowsOverlay || null },
   { node: _workspaceOverlayEl, homeParent: _workspaceOverlayHomeParent, desktopAnchor: workflowsOverlay || null },
@@ -642,6 +645,8 @@ function applyHudClockPreference(mode, persist = true) {
   if (persist) {
     _primePreferenceValue('pref_hud_clock', nextMode);
     try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist HUD clock preference', err); }
+  } else {
+    _primePreferenceValue('pref_hud_clock', nextMode);
   }
   syncOptionsControls();
   if (typeof globalThis.renderHudClock === 'function') globalThis.renderHudClock();
@@ -732,6 +737,12 @@ function applyPromptUsernamePreference(username, persist = true) {
 }
 
 function _closeMajorOverlays() {
+  if (typeof isCommandCatalogOverlayOpen === 'function' && isCommandCatalogOverlayOpen()) {
+    hideCommandCatalogOverlay();
+  }
+  if (typeof isCommandRegistryOverlayOpen === 'function' && isCommandRegistryOverlayOpen()) {
+    hideCommandRegistryOverlay();
+  }
   if (isHistoryPanelOpen()) hideHistoryPanel();
   if (isWorkflowsOverlayOpen()) {
     if (typeof closeWorkflows === 'function') closeWorkflows();
@@ -1193,7 +1204,12 @@ function handleChromeShortcut(e) {
     return true;
   }
   if (e.shiftKey && eventMatchesLetter(e, 'f')) {
-    if (typeof openWorkspace === 'function') openWorkspace();
+    if (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen()) {
+      if (typeof closeWorkspace === 'function') closeWorkspace();
+      else if (typeof hideWorkspaceOverlay === 'function') hideWorkspaceOverlay();
+    } else if (typeof openWorkspace === 'function') {
+      openWorkspace();
+    }
     e.preventDefault();
     return true;
   }
@@ -1595,17 +1611,21 @@ function bindMobileComposerSubmitAndInputListeners(mobileInput) {
   });
 }
 
+function isTerminalWordChar(char) {
+  return /[A-Za-z0-9]/.test(char || '');
+}
+
 function findWordBoundaryLeft(value, index) {
   let next = Math.max(0, index);
-  while (next > 0 && /\s/.test(value[next - 1])) next--;
-  while (next > 0 && !/\s/.test(value[next - 1])) next--;
+  while (next > 0 && !isTerminalWordChar(value[next - 1])) next--;
+  while (next > 0 && isTerminalWordChar(value[next - 1])) next--;
   return next;
 }
 
 function findWordBoundaryRight(value, index) {
   let next = Math.min(value.length, index);
-  while (next < value.length && /\s/.test(value[next])) next++;
-  while (next < value.length && !/\s/.test(value[next])) next++;
+  while (next < value.length && !isTerminalWordChar(value[next])) next++;
+  while (next < value.length && isTerminalWordChar(value[next])) next++;
   return next;
 }
 
@@ -2229,11 +2249,16 @@ async function handleConfigCommand(cmd, tabId = null) {
   return true;
 }
 
-function _runtimeHint(value, description = '', insertValue = null, label = null) {
+function _runtimeHint(value, description = '', insertValue = null, label = null, hintOnly = null) {
   const item = { value, description };
   if (insertValue != null) item.insertValue = insertValue;
   if (label != null) item.label = label;
+  if (hintOnly != null) item.hintOnly = !!hintOnly;
   return item;
+}
+
+function _runtimePlaceholderHint(value, description = '') {
+  return _runtimeHint(value, description, null, null, true);
 }
 
 function _runtimeContextSpec({
@@ -2241,6 +2266,7 @@ function _runtimeContextSpec({
   expectsValue = [],
   argHints = {},
   sequenceArgHints = {},
+  workspacePathArgKinds = {},
   argumentLimit = null,
   pipeCommand = false,
   pipeInsertValue = '',
@@ -2254,6 +2280,7 @@ function _runtimeContextSpec({
     expects_value: expectsValue,
     arg_hints: argHints,
     sequence_arg_hints: sequenceArgHints,
+    workspace_path_arg_kinds: workspacePathArgKinds,
     argument_limit: argumentLimit,
     pipe_command: pipeCommand,
     pipe_insert_value: pipeInsertValue,
@@ -2339,6 +2366,11 @@ function _runtimeMergeContextSpec(baseSpec = {}, overlaySpec = {}) {
   appendItems('examples');
   merged.arg_hints = _runtimeMergeHints(merged.arg_hints, overlaySpec.arg_hints);
   merged.sequence_arg_hints = _runtimeMergeHints(merged.sequence_arg_hints, overlaySpec.sequence_arg_hints);
+  merged.workspace_path_arg_kinds = Object.assign(
+    {},
+    merged.workspace_path_arg_kinds || {},
+    overlaySpec.workspace_path_arg_kinds || {},
+  );
   merged.close_after = Object.assign({}, merged.close_after || {}, overlaySpec.close_after || {});
   if (Number.isInteger(overlaySpec.argument_limit) && overlaySpec.argument_limit > 0) {
     merged.argument_limit = overlaySpec.argument_limit;
@@ -2393,7 +2425,7 @@ function _runtimeCommandLookupHints(baseRegistry = {}, descriptionForExternal = 
   [...builtinNames].sort().forEach(root => {
     items.push(_runtimeHint(root, _runtimeBuiltinDescription(root, baseRegistry)));
   });
-  items.push(_runtimeHint('<command>', 'Any built-in or allowed command'));
+  items.push(_runtimePlaceholderHint('<command>', 'Any built-in or allowed command'));
   return items;
 }
 
@@ -2403,6 +2435,18 @@ function _runtimeWorkspaceFileHints() {
 
 function _runtimeWorkspaceDirectoryHints() {
   return _runtimeWorkspaceEntryHints('directory');
+}
+
+function _runtimeWorkspaceDirectoryNavigationHints() {
+  return _runtimeWorkspaceDirectoryHints().map((hint) => {
+    const value = String(hint && hint.value || '').trim();
+    if (!value || value === '/' || value.endsWith('/')) return hint;
+    return _runtimeHint(`${value}/`, hint.description || 'session folder');
+  });
+}
+
+function _runtimeWorkspaceFilePathHints() {
+  return _runtimeWorkspaceFileHints().concat(_runtimeWorkspaceDirectoryNavigationHints());
 }
 
 function _runtimeWorkspaceCwd() {
@@ -2423,10 +2467,98 @@ function _runtimeWorkspaceRelativeValue(path = '', cwd = '') {
   return normalizedPath.slice(normalizedCwd.length + 1);
 }
 
-function _runtimeWorkspaceDirectHintFromPath(item, cwd = '') {
+function _runtimeWorkspaceDirectHintFromPath(item, cwd = '', kind = 'file') {
   const relative = _runtimeWorkspaceRelativeValue(item && item.value, cwd);
   if (!relative || relative.includes('/')) return null;
-  return _runtimeHint(relative, item && item.description || '');
+  const value = kind === 'directory' && relative !== '/' && !relative.endsWith('/')
+    ? `${relative}/`
+    : relative;
+  return _runtimeHint(value, item && item.description || '');
+}
+
+function _runtimeNormalizeWorkspaceCommandPath(path = '', cwd = '') {
+  if (typeof normalizeWorkspaceCommandPath === 'function') {
+    return String(normalizeWorkspaceCommandPath(path, cwd) || '').split('/').filter(Boolean).join('/');
+  }
+  const raw = String(path ?? '').trim();
+  const baseParts = raw.startsWith('/') ? [] : String(cwd || '').split('/').filter(Boolean);
+  raw.split('/').forEach((part) => {
+    const trimmed = String(part || '').trim();
+    if (!trimmed || trimmed === '.') return;
+    if (trimmed === '..') {
+      if (!baseParts.length) throw new Error('path escapes the session workspace');
+      baseParts.pop();
+      return;
+    }
+    if (trimmed.includes('\\') || trimmed.includes('\x00')) {
+      throw new Error('file name contains unsupported characters');
+    }
+    baseParts.push(trimmed);
+  });
+  return baseParts.join('/');
+}
+
+function _runtimeWorkspaceCompletionParts(token = '') {
+  const rawToken = String(token || '');
+  const slashIndex = rawToken.lastIndexOf('/');
+  if (slashIndex < 0) return null;
+  const typedPrefix = rawToken.slice(0, slashIndex + 1);
+  try {
+    return {
+      typedPrefix,
+      resolvedDirectory: _runtimeNormalizeWorkspaceCommandPath(typedPrefix || '.', _runtimeWorkspaceCwd()),
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+function _runtimeWorkspaceAllHints(kind = 'file') {
+  return kind === 'directory'
+    ? (typeof getWorkspaceAutocompleteDirectoryHints === 'function' ? getWorkspaceAutocompleteDirectoryHints() : [])
+    : (typeof getWorkspaceAutocompleteFileHints === 'function' ? getWorkspaceAutocompleteFileHints() : []);
+}
+
+function _runtimeWorkspaceHintDescription(path = '', kind = 'file') {
+  const normalized = String(path || '').split('/').filter(Boolean).join('/');
+  const allHints = _runtimeWorkspaceAllHints(kind);
+  const existing = (Array.isArray(allHints) ? allHints : [])
+    .find(item => String(item && item.value || '').split('/').filter(Boolean).join('/') === normalized);
+  return existing && existing.description
+    ? existing.description
+    : (kind === 'directory' ? 'session folder' : 'session file');
+}
+
+function _runtimeWorkspaceCompletionKinds(kind = 'file') {
+  const normalized = String(kind || 'file').toLowerCase();
+  if (normalized === 'any') return ['file', 'directory'];
+  if (normalized === 'directory') return ['directory'];
+  return ['file', 'directory'];
+}
+
+function _runtimeWorkspaceEntryValue(parts, name, wantedKind) {
+  const value = `${parts.typedPrefix}${name}`;
+  return wantedKind === 'directory' ? `${value}/` : value;
+}
+
+function _runtimeWorkspaceScopedHints(kind = 'file', token = '') {
+  const parts = _runtimeWorkspaceCompletionParts(token);
+  if (!parts || typeof getWorkspaceDirectoryEntries !== 'function') return [];
+  const entries = getWorkspaceDirectoryEntries(parts.resolvedDirectory) || {};
+  const hints = [];
+  _runtimeWorkspaceCompletionKinds(kind).forEach((wantedKind) => {
+    const source = wantedKind === 'directory' ? entries.folders : entries.files;
+    (Array.isArray(source) ? source : []).forEach((entry) => {
+      const name = String(entry && entry.name || '').trim();
+      const path = String(entry && entry.path || '').split('/').filter(Boolean).join('/');
+      if (!name) return;
+      hints.push(_runtimeHint(
+        _runtimeWorkspaceEntryValue(parts, name, wantedKind),
+        _runtimeWorkspaceHintDescription(path, wantedKind),
+      ));
+    });
+  });
+  return hints;
 }
 
 function _runtimeWorkspaceEntryHints(kind = 'file') {
@@ -2439,7 +2571,10 @@ function _runtimeWorkspaceEntryHints(kind = 'file') {
       : (typeof getWorkspaceAutocompleteFileHints === 'function' ? getWorkspaceAutocompleteFileHints() : []);
     return (Array.isArray(source) ? source : []).map((entry) => {
       const path = String(entry && entry.path || '').split('/').filter(Boolean).join('/');
-      const value = String(entry && entry.name || _runtimeWorkspaceRelativeValue(path, cwd)).trim();
+      const name = String(entry && entry.name || _runtimeWorkspaceRelativeValue(path, cwd)).trim();
+      const value = kind === 'directory' && name && name !== '/' && !name.endsWith('/')
+        ? `${name}/`
+        : name;
       const existing = allHints.find(item => String(item && item.value || '') === path);
       return value ? _runtimeHint(value, existing && existing.description || (kind === 'directory' ? 'session folder' : 'session file')) : null;
     }).filter(Boolean);
@@ -2447,7 +2582,7 @@ function _runtimeWorkspaceEntryHints(kind = 'file') {
   if (kind === 'directory') {
     if (typeof getWorkspaceAutocompleteDirectoryHints !== 'function') return [];
     return getWorkspaceAutocompleteDirectoryHints()
-      .map(item => _runtimeWorkspaceDirectHintFromPath(item, cwd))
+      .map(item => _runtimeWorkspaceDirectHintFromPath(item, cwd, 'directory'))
       .filter(Boolean);
   }
   if (typeof getWorkspaceAutocompleteFileHints !== 'function') return [];
@@ -2456,34 +2591,87 @@ function _runtimeWorkspaceEntryHints(kind = 'file') {
     .filter(Boolean);
 }
 
+function _runtimeWorkspaceMoveSourceHints() {
+  return _runtimeWorkspaceFileHints().concat(_runtimeWorkspaceDirectoryHints());
+}
+
+function _runtimeWorkspaceMoveDestinationHints() {
+  return _runtimeWorkspaceDirectoryHints().concat([_runtimeHint('/', 'Session workspace root')]);
+}
+
+function _runtimeWorkspaceMoveDestinationHintsForSource(source, destinationHints) {
+  const sourcePath = String(source || '').trim();
+  const normalizedSource = sourcePath.split('/').filter(Boolean).join('/');
+  return (Array.isArray(destinationHints) ? destinationHints : []).filter((hint) => {
+    const value = String(hint && hint.value || '').trim();
+    const normalizedValue = value.split('/').filter(Boolean).join('/');
+    return value === '/'
+      || (normalizedValue && normalizedValue !== normalizedSource && !normalizedValue.startsWith(`${normalizedSource}/`));
+  });
+}
+
+function _runtimeWorkspaceMoveSequenceHints(prefix, sourceHints, destinationHints) {
+  const sequenceHints = {};
+  (Array.isArray(sourceHints) ? sourceHints : []).forEach((hint) => {
+    const value = String(hint && hint.value || '').trim().toLowerCase();
+    if (!value) return;
+    sequenceHints[`${prefix} ${value}`] = _runtimeWorkspaceMoveDestinationHintsForSource(value, destinationHints);
+  });
+  return sequenceHints;
+}
+
+function getWorkspaceAutocompletePathHints(kind = 'file', token = '') {
+  return _runtimeWorkspaceScopedHints(kind, token);
+}
+
+function getWorkspaceAutocompleteFlagFileHints(token = '') {
+  return String(token || '').includes('/')
+    ? _runtimeWorkspaceScopedHints('file', token)
+    : _runtimeWorkspaceFilePathHints();
+}
+
 function _runtimeWorkspaceContext() {
   const fileHints = _runtimeWorkspaceFileHints();
+  const filePathHints = _runtimeWorkspaceFilePathHints();
   const directoryHints = _runtimeWorkspaceDirectoryHints();
   const deleteHints = fileHints.concat(directoryHints);
+  const moveSourceHints = _runtimeWorkspaceMoveSourceHints();
+  const moveDestinationHints = _runtimeWorkspaceMoveDestinationHints();
   return _runtimeContextSpec({
-    expectsValue: ['show', 'add', 'add-dir', 'edit', 'download', 'rm', 'delete', 'ls'],
+    expectsValue: ['show', 'add', 'add-dir', 'edit', 'download', 'move', 'rm', 'delete', 'ls'],
     argHints: {
       list: [_runtimeHint('-l', 'Long listing'), _runtimeHint('-R', 'Recursive listing')].concat(directoryHints, [_runtimeHint('/', 'Session workspace root')]),
       ls: [_runtimeHint('-l', 'Long listing'), _runtimeHint('-R', 'Recursive listing')].concat(directoryHints, [_runtimeHint('/', 'Session workspace root')]),
       help: [],
-      show: fileHints,
-      add: [_runtimeHint('<file>', 'New session file name')],
-      'add-dir': directoryHints.concat([_runtimeHint('<folder>', 'New session folder')]),
-      edit: fileHints,
-      download: fileHints,
+      show: filePathHints,
+      add: [_runtimePlaceholderHint('<file>', 'New session file name')],
+      'add-dir': directoryHints.concat([_runtimePlaceholderHint('<folder>', 'New session folder')]),
+      edit: filePathHints,
+      download: filePathHints,
+      move: moveSourceHints,
       rm: [_runtimeHint('-r', 'Remove folders recursively'), _runtimeHint('-rf', 'Remove folders recursively')].concat(deleteHints),
       delete: [_runtimeHint('-r', 'Remove folders recursively'), _runtimeHint('-rf', 'Remove folders recursively')].concat(deleteHints),
       __positional__: [
-        _runtimeHint('list', 'List current session files'),
-        _runtimeHint('ls', 'List current session files'),
         _runtimeHint('show <file>', 'Print a session file in the terminal', 'show '),
         _runtimeHint('add <file>', 'Open the Files editor for a new session file', 'add '),
         _runtimeHint('add-dir <folder>', 'Create a session folder', 'add-dir '),
         _runtimeHint('edit <file>', 'Open the Files editor for an existing session file', 'edit '),
         _runtimeHint('download <file>', 'Download a session file through the browser', 'download '),
+        _runtimeHint('move <source> <destination>', 'Move or rename a session file or folder', 'move '),
         _runtimeHint('delete <file>', 'Remove a session file from this session', 'delete '),
         _runtimeHint('help', 'Show file command usage'),
       ],
+    },
+    sequenceArgHints: _runtimeWorkspaceMoveSequenceHints('move', moveSourceHints, moveDestinationHints),
+    workspacePathArgKinds: {
+      list: ['directory'],
+      ls: ['directory'],
+      show: ['file'],
+      edit: ['file'],
+      download: ['file'],
+      move: ['any', 'directory'],
+      rm: ['any'],
+      delete: ['any'],
     },
   });
 }
@@ -2529,7 +2717,7 @@ function _runtimeConfigContext() {
   entries.forEach((entry) => {
     sequenceArgHints[`set ${entry.key}`] = Array.isArray(entry.values)
       ? entry.values.map(value => _runtimeHint(value, entry.description))
-      : [_runtimeHint(entry.valueHelp || '<value>', entry.description)];
+      : [_runtimePlaceholderHint(entry.valueHelp || '<value>', entry.description)];
     sequenceArgHints[`get ${entry.key}`] = [];
     if (Array.isArray(entry.values)) entry.values.forEach(value => { argHints[value] = []; });
   });
@@ -2556,7 +2744,7 @@ function _runtimeVarContext() {
   variableHints.concat(starterNames.map(name => _runtimeHint(name))).forEach(item => {
     const name = String(item && item.value || '').trim();
     if (name) {
-      sequenceArgHints[`set ${name.toLowerCase()}`] = [_runtimeHint('<value>', `Value for ${name}`)];
+      sequenceArgHints[`set ${name.toLowerCase()}`] = [_runtimePlaceholderHint('<value>', `Value for ${name}`)];
       sequenceArgHints[`unset ${name.toLowerCase()}`] = [];
     }
   });
@@ -2626,27 +2814,32 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
   }
   if (isWorkspaceFeatureEnabled() && baseRegistry.cat) {
     context.cat = _runtimeMergeContextSpec(baseRegistry.cat, _runtimeContextSpec({
-      argHints: { __positional__: _runtimeWorkspaceFileHints() },
+      argHints: { __positional__: _runtimeWorkspaceFilePathHints() },
+      workspacePathArgKinds: { __positional__: ['file'] },
     }));
   }
   if (isWorkspaceFeatureEnabled() && baseRegistry.cd) {
     context.cd = _runtimeMergeContextSpec(baseRegistry.cd, _runtimeContextSpec({
       argHints: { __positional__: _runtimeWorkspaceNavigableDirectoryHints() },
+      workspacePathArgKinds: { __positional__: ['directory'] },
     }));
   }
   if (isWorkspaceFeatureEnabled() && baseRegistry.ls) {
     context.ls = _runtimeMergeContextSpec(baseRegistry.ls, _runtimeContextSpec({
       argHints: { __positional__: [_runtimeHint('-l', 'Long listing'), _runtimeHint('-R', 'Recursive listing')].concat(_runtimeWorkspaceNavigableDirectoryHints()) },
+      workspacePathArgKinds: { __positional__: ['directory'] },
     }));
   }
   if (isWorkspaceFeatureEnabled() && baseRegistry.ll) {
     context.ll = _runtimeMergeContextSpec(baseRegistry.ll, _runtimeContextSpec({
       argHints: { __positional__: [_runtimeHint('-R', 'Recursive listing')].concat(_runtimeWorkspaceNavigableDirectoryHints()) },
+      workspacePathArgKinds: { __positional__: ['directory'] },
     }));
   }
   if (isWorkspaceFeatureEnabled() && baseRegistry.mkdir) {
     context.mkdir = _runtimeMergeContextSpec(baseRegistry.mkdir, _runtimeContextSpec({
-      argHints: { __positional__: _runtimeWorkspaceDirectoryHints().concat([_runtimeHint('<folder>', 'New session folder')]) },
+      argHints: { __positional__: _runtimeWorkspaceDirectoryHints().concat([_runtimePlaceholderHint('<folder>', 'New session folder')]) },
+      workspacePathArgKinds: { __positional__: ['directory'] },
     }));
   }
   if (isWorkspaceFeatureEnabled() && baseRegistry.rm) {
@@ -2655,23 +2848,42 @@ function getRuntimeAutocompleteContext(baseRegistry = {}) {
       argHints: {
         __positional__: [_runtimeHint('-r', 'Remove folders recursively'), _runtimeHint('-rf', 'Remove folders recursively')].concat(deleteHints),
       },
+      workspacePathArgKinds: { __positional__: ['any'] },
+    }));
+  }
+  if (isWorkspaceFeatureEnabled() && baseRegistry.mv) {
+    const moveSourceHints = _runtimeWorkspaceMoveSourceHints();
+    context.mv = _runtimeMergeContextSpec(baseRegistry.mv, _runtimeContextSpec({
+      argHints: { __positional__: moveSourceHints },
+      sequenceArgHints: _runtimeWorkspaceMoveSequenceHints(
+        'mv',
+        moveSourceHints,
+        _runtimeWorkspaceMoveDestinationHints(),
+      ),
+      workspacePathArgKinds: { __positional__: ['any', 'directory'] },
     }));
   }
   ['grep', 'head', 'tail', 'sort', 'uniq'].forEach((root) => {
     if (isWorkspaceFeatureEnabled() && baseRegistry[root]) {
       context[root] = _runtimeMergeContextSpec(baseRegistry[root], _runtimeContextSpec({
-        argHints: { __positional__: _runtimeWorkspaceFileHints() },
+        argHints: { __positional__: _runtimeWorkspaceFilePathHints() },
+        workspacePathArgKinds: { __positional__: ['file'] },
       }));
     }
   });
   if (isWorkspaceFeatureEnabled() && baseRegistry.wc) {
     context.wc = _runtimeMergeContextSpec(baseRegistry.wc, _runtimeContextSpec({
-      argHints: { '-l': _runtimeWorkspaceFileHints() },
-      sequenceArgHints: { '-l': _runtimeWorkspaceFileHints() },
+      argHints: { '-l': _runtimeWorkspaceFilePathHints() },
+      sequenceArgHints: { '-l': _runtimeWorkspaceFilePathHints() },
+      workspacePathArgKinds: { __positional__: ['file'], '-l': ['file'] },
     }));
   }
   context.man = _runtimeMergeContextSpec(baseRegistry.man, _runtimeContextSpec({
     argHints: { __positional__: lookupHints },
+  }));
+  context.commands = _runtimeMergeContextSpec(baseRegistry.commands, _runtimeContextSpec({
+    expectsValue: ['info'],
+    argHints: { info: _runtimeCommandLookupHints(baseRegistry, 'command details') },
   }));
   context.which = _runtimeMergeContextSpec(baseRegistry.which, _runtimeContextSpec({
     argHints: { __positional__: _runtimeCommandLookupHints(baseRegistry, 'command path') },
@@ -2710,7 +2922,7 @@ function getRuntimeAutocompleteItems(ctx, buildItem, filterItems) {
 async function loadSessionVariables() {
   try {
     const resp = await apiFetch('/session/variables');
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    if (resp && resp.ok === false) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     sessionVariables = Array.isArray(data.variables) ? data.variables : [];
   } catch (err) {
@@ -2721,6 +2933,9 @@ async function loadSessionVariables() {
 }
 
 let allowedCommandsFaqData = null;
+let commandRegistryData = null;
+let commandRegistryCategory = 'All';
+let commandRegistryQuery = '';
 
 function _buildFaqLimitsContent(cfg) {
   if (!cfg) return '';
@@ -2783,7 +2998,196 @@ function renderFaqLimits(cfg) {
   limitsEl.replaceChildren(_buildFaqLimitsContent(cfg));
 }
 
+function showCommandRegistryOverlay() {
+  if (!commandRegistryOverlay) return;
+  commandRegistryOverlay.classList.remove('u-hidden');
+  commandRegistryOverlay.classList.add('open');
+  commandRegistryOverlay.setAttribute('aria-hidden', 'false');
+}
+
+function hideCommandRegistryOverlay() {
+  if (!commandRegistryOverlay) return;
+  commandRegistryOverlay.classList.add('u-hidden');
+  commandRegistryOverlay.classList.remove('open');
+  commandRegistryOverlay.setAttribute('aria-hidden', 'true');
+}
+
+function isCommandRegistryOverlayOpen() {
+  return !!(commandRegistryOverlay && commandRegistryOverlay.classList.contains('open'));
+}
+
+function closeCommandRegistry() {
+  hideCommandRegistryOverlay();
+  refocusComposerAfterAction({ defer: true });
+}
+
+function _commandRegistryCommands() {
+  if (!commandRegistryData || !Array.isArray(commandRegistryData.commands)) return [];
+  return commandRegistryData.commands.filter(item => item && item.root);
+}
+
+function _commandRegistryCategories() {
+  const categories = new Set();
+  _commandRegistryCommands().forEach(item => {
+    const category = commandCatalogText(item.category, 'Allowed commands');
+    if (category) categories.add(category);
+  });
+  return ['All', ...Array.from(categories)];
+}
+
+function _commandRegistryMatches(command, query) {
+  if (!query) return true;
+  const haystack = [
+    command.root,
+    command.category,
+    command.description,
+  ].map(value => String(value || '').toLowerCase()).join(' ');
+  return haystack.includes(query);
+}
+
+function _commandRegistryFilteredCommands() {
+  const query = commandRegistryQuery.trim().toLowerCase();
+  return _commandRegistryCommands().filter(command => {
+    const category = commandCatalogText(command.category, 'Allowed commands');
+    if (commandRegistryCategory !== 'All' && category !== commandRegistryCategory) return false;
+    return _commandRegistryMatches(command, query);
+  });
+}
+
+function _commandRegistrySummaryText(command) {
+  const bits = [];
+  const examples = Number(command.example_count || 0);
+  const subcommands = Number(command.subcommand_count || 0);
+  const flags = Number(command.flag_count || 0);
+  if (examples > 0) bits.push(`${examples} example${examples === 1 ? '' : 's'}`);
+  if (subcommands > 0) bits.push(`${subcommands} subcommand${subcommands === 1 ? '' : 's'}`);
+  if (flags > 0) bits.push(`${flags} flag${flags === 1 ? '' : 's'}`);
+  return bits.join(' · ');
+}
+
+function renderCommandRegistryCategories() {
+  if (!commandRegistryCategories) return;
+  commandRegistryCategories.replaceChildren();
+  _commandRegistryCategories().forEach(category => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'command-registry-category chip chip-action';
+    button.dataset.commandRegistryCategory = category;
+    button.textContent = category;
+    button.setAttribute('aria-pressed', category === commandRegistryCategory ? 'true' : 'false');
+    if (category === commandRegistryCategory) button.classList.add('active');
+    button.addEventListener('click', () => {
+      commandRegistryCategory = category;
+      renderCommandRegistry();
+    });
+    commandRegistryCategories.appendChild(button);
+  });
+}
+
+function makeCommandRegistryRow(command) {
+  const root = commandCatalogText(command.root);
+  if (!root) return null;
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'command-registry-row';
+  row.dataset.commandRegistryRoot = root;
+  row.title = `View ${root} details`;
+
+  const rootEl = document.createElement('span');
+  rootEl.className = 'command-registry-root';
+  rootEl.textContent = root;
+
+  const text = document.createElement('span');
+  text.className = 'command-registry-text';
+  const desc = document.createElement('span');
+  desc.className = 'command-registry-description';
+  desc.textContent = commandCatalogText(command.description, 'No description is available yet.');
+  const meta = document.createElement('span');
+  meta.className = 'command-registry-meta';
+  const summary = _commandRegistrySummaryText(command);
+  meta.textContent = [
+    commandCatalogText(command.category, 'Allowed commands'),
+    summary,
+  ].filter(Boolean).join(' · ');
+  text.append(desc, meta);
+
+  const chev = document.createElement('span');
+  chev.className = 'command-registry-chev';
+  chev.setAttribute('aria-hidden', 'true');
+  chev.textContent = '›';
+
+  row.append(rootEl, text, chev);
+  row.addEventListener('click', () => openCommandCatalogModal(root));
+  return row;
+}
+
+function renderCommandRegistry() {
+  if (!commandRegistryBody) return;
+  renderCommandRegistryCategories();
+  const total = _commandRegistryCommands().length;
+  if (commandRegistrySubtitle) {
+    commandRegistrySubtitle.textContent = total
+      ? `${total} supported command${total === 1 ? '' : 's'} from the command registry.`
+      : 'Browse supported tools, examples, flags, and subcommands.';
+  }
+  commandRegistryBody.replaceChildren();
+  if (!commandRegistryData) {
+    const loading = document.createElement('div');
+    loading.className = 'command-registry-empty';
+    loading.textContent = 'Loading command registry...';
+    commandRegistryBody.appendChild(loading);
+    return;
+  }
+  const commands = _commandRegistryFilteredCommands();
+  if (!commands.length) {
+    const empty = document.createElement('div');
+    empty.className = 'command-registry-empty';
+    empty.textContent = total
+      ? 'No commands match that search.'
+      : 'No command registry entries are available right now.';
+    commandRegistryBody.appendChild(empty);
+    return;
+  }
+  commands.forEach(command => {
+    const row = makeCommandRegistryRow(command);
+    if (row) commandRegistryBody.appendChild(row);
+  });
+}
+
+function openCommandRegistry() {
+  if (!commandRegistryOverlay || !commandRegistryBody) return;
+  _closeMajorOverlays();
+  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+  renderCommandRegistry();
+  showCommandRegistryOverlay();
+  if (typeof markInteractionSurfaceReady === 'function') {
+    markInteractionSurfaceReady('command-registry', commandRegistryOverlay, document.getElementById('command-registry-modal'));
+  }
+  const mobileMode = document.body && document.body.classList.contains('mobile-terminal-mode');
+  if (!mobileMode && commandRegistrySearch) {
+    window.setTimeout(() => commandRegistrySearch.focus(), 0);
+  }
+}
+
+function wireCommandRegistryOpenButtons(root = document) {
+  if (!root) return;
+  root.querySelectorAll('[data-command-registry-open]').forEach(btn => {
+    if (btn.dataset.commandRegistryOpenWired === '1') return;
+    btn.dataset.commandRegistryOpenWired = '1';
+    btn.addEventListener('click', () => openCommandRegistry());
+  });
+}
+
+commandRegistrySearch?.addEventListener('input', () => {
+  commandRegistryQuery = commandRegistrySearch.value || '';
+  renderCommandRegistry();
+});
+
 function openAutocompleteForVisibleComposer() {
+  if (typeof isActiveTabRunning === 'function' && isActiveTabRunning()) {
+    if (typeof acHide === 'function') acHide();
+    return false;
+  }
   const input = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
   if (!input || typeof input.value !== 'string') return false;
   const value = input.value;
@@ -2804,6 +3208,10 @@ function openAutocompleteForVisibleComposer() {
 
 function activateFaqCommandChip(cmd) {
   if (!cmd) return;
+  if (typeof isActiveTabRunning === 'function' && isActiveTabRunning()) {
+    if (typeof acHide === 'function') acHide();
+    return;
+  }
   const next = `${cmd} `;
   setComposerValue(next, next.length, next.length, { dispatch: false });
   _closeMajorOverlays();
@@ -2811,6 +3219,146 @@ function activateFaqCommandChip(cmd) {
   setTimeout(() => {
     openAutocompleteForVisibleComposer();
   }, 0);
+}
+
+function showCommandCatalogOverlay() {
+  if (!commandCatalogOverlay) return;
+  commandCatalogOverlay.classList.remove('u-hidden');
+  commandCatalogOverlay.classList.add('open');
+  commandCatalogOverlay.setAttribute('aria-hidden', 'false');
+}
+
+function hideCommandCatalogOverlay() {
+  if (!commandCatalogOverlay) return;
+  commandCatalogOverlay.classList.add('u-hidden');
+  commandCatalogOverlay.classList.remove('open');
+  commandCatalogOverlay.setAttribute('aria-hidden', 'true');
+}
+
+function isCommandCatalogOverlayOpen() {
+  return !!(commandCatalogOverlay && commandCatalogOverlay.classList.contains('open'));
+}
+
+function closeCommandCatalogModal() {
+  hideCommandCatalogOverlay();
+  refocusComposerAfterAction({ defer: true });
+}
+
+function commandCatalogText(value, fallback = '') {
+  return String(value || fallback || '').trim();
+}
+
+function appendCommandCatalogSection(body, title, items, rowBuilder) {
+  if (!body || !Array.isArray(items) || !items.length) return;
+  const section = document.createElement('section');
+  section.className = 'command-catalog-section';
+  const heading = document.createElement('div');
+  heading.className = 'command-catalog-section-title';
+  heading.textContent = title;
+  section.appendChild(heading);
+  const list = document.createElement('div');
+  list.className = 'command-catalog-list';
+  items.forEach(item => {
+    const row = rowBuilder(item);
+    if (row) list.appendChild(row);
+  });
+  if (!list.childElementCount) return;
+  section.appendChild(list);
+  body.appendChild(section);
+}
+
+function makeCommandCatalogRow(value, description = '') {
+  const token = commandCatalogText(value);
+  if (!token) return null;
+  const row = document.createElement('div');
+  row.className = 'command-catalog-row';
+  const left = document.createElement('span');
+  left.className = 'command-catalog-token';
+  left.textContent = token;
+  const right = document.createElement('span');
+  right.className = 'command-catalog-note';
+  right.textContent = commandCatalogText(description);
+  row.append(left, right);
+  return row;
+}
+
+function makeCommandCatalogExampleRow(item) {
+  const value = commandCatalogText(item?.value);
+  if (!value) return null;
+  const row = document.createElement('div');
+  row.className = 'command-catalog-row command-catalog-example-row';
+  const chip = document.createElement('span');
+  chip.className = 'allowed-chip faq-chip chip chip-action';
+  chip.tabIndex = 0;
+  chip.setAttribute('role', 'button');
+  chip.title = 'Load this example into the prompt';
+  chip.textContent = value;
+  chip.dataset.commandExample = value;
+  const description = document.createElement('span');
+  description.className = 'command-catalog-note';
+  description.textContent = commandCatalogText(item?.description);
+  row.append(chip, description);
+  return row;
+}
+
+function wireCommandCatalogExamples(root = commandCatalogBody) {
+  if (!root) return;
+  root.querySelectorAll('[data-command-example]').forEach(chip => {
+    if (chip.dataset.commandExampleWired === '1') return;
+    chip.dataset.commandExampleWired = '1';
+    const activate = () => activateFaqCommandChip(chip.dataset.commandExample || '');
+    chip.addEventListener('click', activate);
+    chip.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      activate();
+    });
+  });
+}
+
+function renderCommandCatalogModal(data) {
+  if (!commandCatalogBody) return;
+  commandCatalogBody.replaceChildren();
+  const summary = document.createElement('section');
+  summary.className = 'command-catalog-summary';
+  const root = document.createElement('div');
+  root.className = 'command-catalog-root';
+  root.textContent = commandCatalogText(data?.root, 'command');
+  const description = document.createElement('div');
+  description.className = 'command-catalog-description';
+  description.textContent = commandCatalogText(data?.description, 'No description is available yet.');
+  const meta = document.createElement('div');
+  meta.className = 'command-catalog-meta';
+  meta.textContent = commandCatalogText(data?.category, 'Allowed command');
+  summary.append(root, description, meta);
+  commandCatalogBody.appendChild(summary);
+
+  appendCommandCatalogSection(commandCatalogBody, 'Examples', data?.examples || [], makeCommandCatalogExampleRow);
+  appendCommandCatalogSection(commandCatalogBody, 'Subcommands', data?.subcommands || [], item => (
+    makeCommandCatalogRow(item?.name, item?.description)
+  ));
+  appendCommandCatalogSection(commandCatalogBody, 'Flags', data?.flags || [], item => {
+    const suffix = item?.takes_value ? ' <value>' : '';
+    return makeCommandCatalogRow(`${commandCatalogText(item?.value)}${suffix}`, item?.description);
+  });
+  wireCommandCatalogExamples(commandCatalogBody);
+}
+
+async function openCommandCatalogModal(cmd) {
+  const root = commandCatalogText(cmd).toLowerCase();
+  if (!root || !commandCatalogOverlay || !commandCatalogBody) return;
+  const title = document.getElementById('command-catalog-title');
+  if (title) title.textContent = root.toUpperCase();
+  commandCatalogBody.textContent = 'Loading...';
+  showCommandCatalogOverlay();
+  try {
+    const resp = await apiFetch(`/commands/catalog/${encodeURIComponent(root)}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    renderCommandCatalogModal(await resp.json());
+  } catch (err) {
+    logClientError('failed to load command catalog details', err);
+    commandCatalogBody.textContent = 'Command details are unavailable right now.';
+  }
 }
 
 function wireFaqCommandChips(root = faqBody) {
@@ -2829,53 +3377,31 @@ function wireFaqCommandChips(root = faqBody) {
   });
 }
 
-function makeAllowedCommandChip(cmd) {
-  const chip = document.createElement('span');
-  chip.className = 'allowed-chip faq-chip chip chip-action';
-  chip.textContent = cmd;
-  chip.title = 'Click to load into prompt';
-  chip.dataset.faqCommand = cmd;
-  return chip;
-}
-
 function renderAllowedCommandsFaq(data) {
   const el = document.getElementById('faq-allowed-text');
   if (!el || !data) return;
-  if (!data.restricted) {
-    el.textContent = 'No restrictions are configured — all commands are permitted.';
-    return;
-  }
-
   el.replaceChildren();
   const intro = document.createElement('div');
   intro.className = 'allowed-intro';
-  intro.textContent = 'Click any command to load it into the prompt:';
+  const count = Array.isArray(data.commands) ? data.commands.length : 0;
+  intro.textContent = count
+    ? `Open the Command Registry to browse ${count} supported command${count === 1 ? '' : 's'}, examples, flags, and subcommands.`
+    : 'Open the Command Registry to browse supported commands, examples, flags, and subcommands.';
   el.appendChild(intro);
-  if (data.groups && data.groups.length > 0) {
-    data.groups.forEach(group => {
-      const groupEl = document.createElement('div');
-      groupEl.className = 'allowed-group';
-      if (group.name) {
-        const header = document.createElement('div');
-        header.className = 'allowed-group-header';
-        header.textContent = group.name;
-        groupEl.appendChild(header);
-      }
-      const list = document.createElement('div');
-      list.className = 'allowed-list';
-      group.commands.forEach(cmd => list.appendChild(makeAllowedCommandChip(cmd)));
-      groupEl.appendChild(list);
-      el.appendChild(groupEl);
-    });
-    wireFaqCommandChips(el);
-    return;
-  }
-
-  const list = document.createElement('div');
-  list.className = 'allowed-list';
-  data.commands.forEach(cmd => list.appendChild(makeAllowedCommandChip(cmd)));
-  el.appendChild(list);
-  wireFaqCommandChips(el);
+  const actions = document.createElement('div');
+  actions.className = 'allowed-actions';
+  const openBtn = document.createElement('button');
+  openBtn.type = 'button';
+  openBtn.className = 'btn btn-secondary btn-compact';
+  openBtn.textContent = 'Open Command Registry';
+  openBtn.dataset.commandRegistryOpen = '1';
+  actions.appendChild(openBtn);
+  const cliHint = document.createElement('span');
+  cliHint.className = 'allowed-cli-hint';
+  cliHint.textContent = 'Terminal helpers: commands, commands --external, commands info <command>';
+  actions.appendChild(cliHint);
+  el.appendChild(actions);
+  wireCommandRegistryOpenButtons(el);
 }
 
 function renderFaqItems(items) {
@@ -3962,10 +4488,9 @@ function _workflowRuntimeHintFor(workflow) {
 }
 
 function _workflowInputHint(input) {
-  const item = _runtimeHint(
+  const item = _runtimePlaceholderHint(
     `<${input.id}>`,
     input.label || input.id,
-    null,
   );
   if (input.type === 'domain') item.value_type = 'domain';
   return item;

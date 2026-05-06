@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { ensurePromptReady } from './helpers.js'
 
 // Assertions for the shared interaction contract exercised against real
 // mounted UI rather than helper fixtures. Each helper has its own unit
@@ -27,7 +28,7 @@ async function openOverlay(page, openFn, overlayId = null) {
 test.describe('UI interaction contract — scrim overlays', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
   })
 
   for (const overlay of OVERLAYS) {
@@ -59,7 +60,7 @@ test.describe('UI interaction contract — scrim overlays', () => {
 test.describe('UI interaction contract — disclosures', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
   })
 
   test('FAQ question disclosure keeps aria-expanded in sync with the .faq-open class', async ({ page }) => {
@@ -116,7 +117,7 @@ test.describe('UI interaction contract — modal focus trap', () => {
 
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
   })
 
   test('each app-level modal card carries data-focus-trap-bound after startup wiring', async ({ page }) => {
@@ -193,7 +194,7 @@ test.describe('UI interaction contract — confirmation dialog', () => {
   // the real closeTopmostDismissible, the real matchMedia) is also pinned.
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
   })
 
   test('showConfirm focuses the role:cancel action by default so Enter defaults to cancel', async ({ page }) => {
@@ -320,7 +321,7 @@ test.describe('UI interaction contract — confirmation dialog', () => {
 test.describe('UI interaction contract — ambient outside-click', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
-    await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
     // HUD save-menu lives on the active tab panel; make sure a tab is ready.
     await expect(page.locator('.tab-panel.active')).toBeVisible()
   })

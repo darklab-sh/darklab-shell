@@ -15,11 +15,13 @@ from workspace import (
     WorkspaceBinaryFile,
     WorkspaceFileNotFound,
     WorkspacePathNotFound,
+    WorkspacePermissionDenied,
     WorkspaceQuotaExceeded,
     create_workspace_directory,
     delete_workspace_path,
     list_workspace_directories,
     list_workspace_files,
+    move_workspace_path,
     open_workspace_file_for_download,
     read_workspace_text_file,
     workspace_path_info,
@@ -67,6 +69,8 @@ def _workspace_error_response(exc: Exception) -> tuple[Response, int]:
         return jsonify({"error": str(exc)}), 413
     if isinstance(exc, (WorkspaceFileNotFound, WorkspacePathNotFound)):
         return jsonify({"error": str(exc)}), 404
+    if isinstance(exc, WorkspacePermissionDenied):
+        return jsonify({"error": str(exc)}), 403
     if isinstance(exc, WorkspaceBinaryFile):
         return jsonify({"error": str(exc)}), 415
     if isinstance(exc, InvalidWorkspacePath):
@@ -182,6 +186,40 @@ def workspace_files_delete():
                 "path": deleted.path,
                 "kind": deleted.kind,
                 "file_count": deleted.file_count,
+            },
+            "workspace": _workspace_payload(str(session_id)),
+        })
+    except Exception as exc:
+        return _workspace_error_response(exc)
+
+
+@workspace_bp.route("/workspace/files/move", methods=["POST"])
+def workspace_files_move():
+    session_id, error = _session_or_error()
+    if error:
+        return error
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    source = str(data.get("source") or "").strip()
+    destination = str(data.get("destination") or "").strip()
+    try:
+        moved = move_workspace_path(str(session_id), source, destination)
+        log.info("WORKSPACE_FILE_MOVE", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "source": moved.source,
+            "destination": moved.destination,
+            "kind": moved.kind,
+            "file_count": moved.file_count,
+        })
+        return jsonify({
+            "ok": True,
+            "moved": {
+                "source": moved.source,
+                "destination": moved.destination,
+                "kind": moved.kind,
+                "file_count": moved.file_count,
             },
             "workspace": _workspace_payload(str(session_id)),
         })

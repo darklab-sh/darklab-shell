@@ -71,7 +71,7 @@ def _active_run_owner_value(value: object) -> str:
     return str(value or "").strip()[:128]
 
 
-def _validate_command_for_run(command: str, session_id: str) -> CommandValidationResult:
+def _validate_command_for_run(command: str, session_id: str, workspace_cwd: str = "") -> CommandValidationResult:
     # Several route tests monkeypatch this module's legacy is_command_allowed
     # symbol to keep subprocess behavior focused. Honor that seam while the
     # runtime path uses the richer validator for workspace rewrites.
@@ -83,7 +83,7 @@ def _validate_command_for_run(command: str, session_id: str) -> CommandValidatio
             display_command=command,
             exec_command=command,
         )
-    return validate_command(command, session_id=session_id, cfg=CFG)
+    return validate_command(command, session_id=session_id, cfg=CFG, workspace_cwd=workspace_cwd)
 
 
 def _workspace_notice_lines(validation: CommandValidationResult) -> list[str]:
@@ -744,8 +744,9 @@ def _prepare_real_command(
     execution_command: str,
     session_id: str,
     client_ip: str,
+    workspace_cwd: str = "",
 ) -> _PreparedRealCommand:
-    validation = _validate_command_for_run(execution_command, session_id)
+    validation = _validate_command_for_run(execution_command, session_id, workspace_cwd)
     if not validation.allowed:
         log.warning("CMD_DENIED", extra={
             "ip": client_ip, "session": get_log_session_id(session_id),
@@ -1079,6 +1080,7 @@ def start_brokered_run():
     client_ip = get_client_ip()
     owner_client_id = _active_run_owner_value(request.headers.get("X-Client-ID", ""))
     owner_tab_id = _active_run_owner_value(data.get("tab_id", ""))
+    workspace_cwd = _active_run_owner_value(data.get("workspace_cwd", ""))
     if not isinstance(original_command, str):
         return jsonify({"error": "Command must be a string"}), 400
     original_command = original_command.strip()
@@ -1111,6 +1113,7 @@ def start_brokered_run():
             prepared_input.execution_command,
             session_id,
             client_ip,
+            workspace_cwd,
         )
     except _RunPreparationError as exc:
         return _preparation_error_response(exc)

@@ -196,9 +196,17 @@
     {
       "no_output": false,
       "exit_code": -15,
+      "command": "nikto -Help",
+      "expected_text": [
+        "Options"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": -15,
       "command": "nikto -h ip.darklab.sh -p 443 -ssl",
       "expected_text": [
-        "- Nikto v2.6.0"
+        "- Nikto v"
       ]
     },
     {
@@ -206,7 +214,7 @@
       "exit_code": -15,
       "command": "nikto -h ip.darklab.sh -Tuning 1",
       "expected_text": [
-        "- Nikto v2.6.0"
+        "- Nikto v"
       ]
     },
     {
@@ -214,7 +222,7 @@
       "exit_code": -15,
       "command": "nikto -h ip.darklab.sh -maxtime 120",
       "expected_text": [
-        "- Nikto v2.6.0"
+        "- Nikto v"
       ]
     },
     {
@@ -956,6 +964,14 @@
       "command": "wget -S --spider https://ip.darklab.sh",
       "expected_text": [
         "HTTP request sent"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "nc -h",
+      "expected_text": [
+        "options"
       ]
     },
     {

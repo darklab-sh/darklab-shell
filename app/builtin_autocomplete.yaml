@@ -32,6 +32,11 @@ commands:
           description: "Show only built-in shell commands"
         - value: --external
           description: "Show only allowed external commands"
+      subcommands:
+        - value: info
+          description: "Show details for one supported command"
+          takes_value: true
+          insert: "info "
   - root: config
     description: "built-in: show or update user options"
     autocomplete:
@@ -71,7 +76,8 @@ commands:
       arguments: []
   - root: file
     description: >-
-      built-in: list, view, create, edit, download, or remove session files
+      built-in: list, view, create, edit, download, move, or remove
+      session files
     feature_required: workspace
     autocomplete:
       subcommands:
@@ -81,6 +87,7 @@ commands:
           insert: "list "
           value_hint:
             value: "<folder>"
+            hint_only: true
             description: "Session folder"
         - value: ls
           description: "List current session files"
@@ -88,6 +95,7 @@ commands:
           insert: "ls "
           value_hint:
             value: "<folder>"
+            hint_only: true
             description: "Session folder"
         - value: show
           description: "Print a session file in the terminal"
@@ -95,6 +103,7 @@ commands:
           insert: "show "
           value_hint:
             value: "<file>"
+            hint_only: true
             description: "Session file"
         - value: add
           description: "Open the Files editor for a new session file"
@@ -102,6 +111,7 @@ commands:
           insert: "add "
           value_hint:
             value: "<file>"
+            hint_only: true
             description: "New session file name"
         - value: add-dir
           description: "Create a session folder"
@@ -109,6 +119,7 @@ commands:
           insert: "add-dir "
           value_hint:
             value: "<folder>"
+            hint_only: true
             description: "New session folder"
         - value: edit
           description: "Open the Files editor for an existing session file"
@@ -116,6 +127,7 @@ commands:
           insert: "edit "
           value_hint:
             value: "<file>"
+            hint_only: true
             description: "Session file"
         - value: download
           description: "Download a session file through the browser"
@@ -123,7 +135,17 @@ commands:
           insert: "download "
           value_hint:
             value: "<file>"
+            hint_only: true
             description: "Session file"
+        - value: move
+          description: "Move or rename a session file or folder"
+          takes_value: true
+          insert: "move "
+          value_hint:
+            value: "<source> <destination>"
+            hint_only: true
+            value_type: target
+            description: "Session file or folder path"
         - value: rm
           description: "Remove a session file from this session"
           takes_value: true
@@ -131,6 +153,7 @@ commands:
           insert: "rm "
           value_hint:
             value: "<file>"
+            hint_only: true
             description: "Session file"
         - value: delete
           description: "Remove a session file from this session"
@@ -138,6 +161,7 @@ commands:
           insert: "delete "
           value_hint:
             value: "<file>"
+            hint_only: true
             description: "Session file"
         - value: help
           description: "Show file command usage"
@@ -251,6 +275,16 @@ commands:
     autocomplete:
       argument_limit: 1
       arguments: []
+  - root: mv
+    description: "built-in: move or rename a session file or folder"
+    feature_required: workspace
+    autocomplete:
+      argument_limit: 2
+      arguments:
+        - value: "<source> <destination>"
+          hint_only: true
+          value_type: target
+          description: "Session file or folder path"
   - root: man
     description: "built-in: show a real or built-in manual page"
     autocomplete:
@@ -318,6 +352,7 @@ commands:
           insert: "set "
           value_hint:
             value: "<token>"
+            hint_only: true
             description: "Paste a tok_... token or UUID from another device"
         - value: copy
           description: "Copy the active session token to the clipboard"
@@ -337,6 +372,7 @@ commands:
           insert: "revoke "
           value_hint:
             value: "<token>"
+            hint_only: true
             description: "tok_ token to permanently invalidate on the server"
   - root: shortcuts
     description: "built-in: show current keyboard shortcuts"
@@ -460,6 +496,7 @@ commands:
           insert: "list "
           value_hint:
             value: "<category>"
+            hint_only: true
             description: "Wordlist category"
         - value: search
           description: "Search curated wordlists"
@@ -467,6 +504,7 @@ commands:
           insert: "search "
           value_hint:
             value: "<term>"
+            hint_only: true
             description: "Search term"
         - value: path
           description: "Print one wordlist path"
@@ -474,6 +512,7 @@ commands:
           insert: "path "
           value_hint:
             value: "<name>"
+            hint_only: true
             description: "Wordlist name or relative path"
       flags:
         - value: --all
@@ -491,6 +530,7 @@ commands:
           insert: "show "
           value_hint:
             value: "<workflow>"
+            hint_only: true
             description: "Workflow name"
         - value: run
           description: "Run a workflow"
@@ -498,6 +538,7 @@ commands:
           insert: "run "
           value_hint:
             value: "<workflow>"
+            hint_only: true
             description: "Workflow name"
   - root: who
     description: "built-in: show the current shell user and session"
@@ -517,4 +558,5 @@ commands:
           takes_value: true
           value_hint:
             value: "<file>"
+            hint_only: true
             description: "Session file"

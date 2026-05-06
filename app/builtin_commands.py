@@ -13,9 +13,10 @@ import random
 import re
 import subprocess  # nosec B404
 import sys
-from typing import Callable, TypedDict, cast
+from typing import Callable, Sequence, TypedDict, cast
 
 from commands import (
+    command_catalog_entry,
     command_root,
     load_ascii_art,
     load_all_faq,
@@ -43,12 +44,17 @@ from workspace import (
     WorkspaceBinaryFile,
     WorkspaceDisabled,
     WorkspaceFileNotFound,
+    WorkspacePathNotFound,
+    WorkspacePermissionDenied,
     WorkspaceQuotaExceeded,
+    expand_workspace_path_pattern,
     list_workspace_directories,
     list_workspace_files,
+    move_workspace_path,
     read_workspace_text_file,
     workspace_settings,
     workspace_usage,
+    workspace_path_has_glob,
 )
 from wordlists import filter_wordlists, find_wordlist, load_wordlist_catalog
 
@@ -220,6 +226,7 @@ _DOCUMENTED_BUILTIN_COMMANDS = [
     {"name": "pwd", "description": "Show the session files path.", "root": "pwd"},
     {"name": "quit", "description": "Alias for `exit`.", "root": "quit"},
     {"name": "retention", "description": "Show retention and persisted-output settings.", "root": "retention"},
+    {"name": "mv <source> <destination>", "description": "Move or rename a session file or folder.", "root": "mv"},
     {"name": "rm <file>", "description": "Remove a session file after confirmation.", "root": "rm"},
     {"name": "route", "description": "Show the shell routing table summary.", "root": "route"},
     {"name": "runs [-v|--json]", "description": "Show app-native active run metadata for this session.", "root": "runs"},
@@ -237,7 +244,7 @@ _DOCUMENTED_BUILTIN_COMMANDS = [
     {"name": "uniq [-c] <file>", "description": "Collapse adjacent duplicate lines in a session file.", "root": "uniq"},
     {"name": "var", "description": "Set, list, or unset session command variables.", "root": "var"},
     {"name": "version", "description": "Show shell, app, Flask, and Python version details.", "root": "version"},
-    {"name": "file", "description": "List, view, create, edit, download, or remove session files.", "root": "file"},
+    {"name": "file", "description": "List, view, create, edit, download, move, or remove session files.", "root": "file"},
     {"name": "which <cmd>", "description": "Locate a built-in command or allowed runtime command.", "root": "which"},
     {"name": "who", "description": "Show the current shell user and session.", "root": "who"},
     {"name": "whoami", "description": "Describe this shell and link to the project README.", "root": "whoami"},
@@ -248,7 +255,7 @@ _DOCUMENTED_BUILTIN_COMMANDS = [
 _BUILTIN_COMMAND_HELP = [(entry["name"], entry["description"]) for entry in _DOCUMENTED_BUILTIN_COMMANDS]
 _DOCUMENTED_BUILTIN_COMMAND_ROOTS = {entry["root"] for entry in _DOCUMENTED_BUILTIN_COMMANDS if "root" in entry}
 _BUILTIN_COMMANDS = _DOCUMENTED_BUILTIN_COMMAND_ROOTS | {"reboot", "sudo"}
-_WORKSPACE_ALIAS_ROOTS = {"cat", "cd", "grep", "head", "ll", "ls", "mkdir", "rm", "sort", "tail", "uniq", "wc"}
+_WORKSPACE_ALIAS_ROOTS = {"cat", "cd", "grep", "head", "ll", "ls", "mkdir", "mv", "rm", "sort", "tail", "uniq", "wc"}
 _WORKSPACE_BUILTIN_ROOTS = _WORKSPACE_ALIAS_ROOTS | {"file"}
 _SYNTHETIC_MAN_EXCLUDED_ROOTS = {"cat", "ll", "ls", "rm"}
 
@@ -307,6 +314,8 @@ def _resolve_workspace_alias_command(parts: list[str]) -> str | None:
         return root if not target or _safe_workspace_alias_path(target) else None
     if root in {"cat", "rm"}:
         return root if len(parts) == 2 and _safe_workspace_alias_path(parts[1]) else None
+    if root == "mv":
+        return root if len(parts) == 3 and all(_safe_workspace_alias_path(part) for part in parts[1:]) else None
     return None
 
 
@@ -377,6 +386,7 @@ _BUILTIN_COMMAND_DISPATCH = {
     "ll":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
     "ls":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
     "mkdir":     lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
+    "mv":        lambda cmd, sid: _run_builtin_workspace_alias(cmd, sid),
     "man":       lambda cmd, sid: _run_builtin_man(cmd),
     "ps":        lambda cmd, sid: _run_builtin_ps(sid, cmd),
     "pwd":       lambda cmd, sid: _run_builtin_pwd(),
@@ -680,6 +690,10 @@ def _run_builtin_help() -> list[dict[str, str]]:
         _output_line("Run `shortcuts` to see the current keyboard shortcuts.", "builtin-plain"),
         _output_line("Run `commands` to browse built-in and allowed external commands.", "builtin-plain"),
         _output_line("Use `commands --built-in` or `commands --external` to filter that catalog.", "builtin-plain"),
+        _output_line(
+            "Use `commands info <command>` to see examples, flags, and subcommands for a supported command.",
+            "builtin-plain",
+        ),
         _output_line("Autocomplete appears as you type; press Tab to accept or cycle suggestions.", "builtin-plain"),
     ]
     return lines
@@ -693,14 +707,14 @@ def _documented_builtin_rows() -> list[tuple[str, str]]:
     return sorted(rows, key=lambda item: item[0].lower())
 
 
-def _allowed_external_command_groups() -> list[tuple[str, list[str]]] | None:
+def _allowed_external_command_groups() -> list[tuple[str, list[tuple[str, str]]]] | None:
     registry = load_commands_registry()
     commands = registry.get("commands", [])
     if not commands:
         return None
 
-    rows: list[tuple[str, list[str]]] = []
-    group_map: dict[str, list[str]] = {}
+    rows: list[tuple[str, list[tuple[str, str]]]] = []
+    group_map: dict[str, list[tuple[str, str]]] = {}
     seen_roots: set[str] = set()
     for entry in commands:
         root = str(entry.get("root") or "").strip().lower()
@@ -716,17 +730,86 @@ def _allowed_external_command_groups() -> list[tuple[str, list[str]]] | None:
             roots = []
             group_map[category] = roots
             rows.append((category, roots))
-        roots.append(root)
+        description = str(entry.get("description") or "").strip()
+        roots.append((root, description))
     return rows or None
+
+
+def _run_builtin_commands_info(parts: list[str]) -> list[dict[str, str]]:
+    if len(parts) not in {3, 4}:
+        return [_output_line("Usage: commands info <command> [subcommand]")]
+    root = parts[2].lower()
+    subcommand = parts[3].lower() if len(parts) == 4 else None
+    entry = command_catalog_entry(root, subcommand)
+    if not entry:
+        target = f"{root} {subcommand}" if subcommand else root
+        return [_output_line(f"commands: no catalog entry for {target}")]
+
+    lines: list[dict[str, str]] = [
+        _output_line(str(entry.get("root") or root), "builtin-section"),
+    ]
+    if entry.get("subcommand"):
+        lines.append(_output_line(f"Subcommand: {entry['subcommand']}", "builtin-plain"))
+    description = str(entry.get("description") or "").strip()
+    if description:
+        lines.append(_output_line(description, "builtin-plain"))
+    category = str(entry.get("category") or "").strip()
+    if category:
+        lines.append(_output_line(f"Category: {category}", "builtin-note"))
+
+    examples = cast(list[dict[str, object]], entry.get("examples")) if isinstance(entry.get("examples"), list) else []
+    if examples:
+        lines.append(_output_line("", "builtin-spacer"))
+        lines.append(_output_line("Examples:", "builtin-section"))
+        for example in examples[:8]:
+            if not isinstance(example, dict):
+                continue
+            value = str(example.get("value") or "").strip()
+            description = str(example.get("description") or "").strip()
+            suffix = f"  {description}" if description else ""
+            if value:
+                lines.append(_output_line(f"  {value}{suffix}", "builtin-catalog-item"))
+
+    subcommands = cast(list[dict[str, object]], entry.get("subcommands")) if isinstance(entry.get("subcommands"), list) else []
+    if subcommands:
+        lines.append(_output_line("", "builtin-spacer"))
+        lines.append(_output_line("Subcommands:", "builtin-section"))
+        for sub in subcommands:
+            if not isinstance(sub, dict):
+                continue
+            name = str(sub.get("name") or "").strip()
+            description = str(sub.get("description") or "").strip()
+            suffix = f"  {description}" if description else ""
+            if name:
+                lines.append(_output_line(f"  {name}{suffix}", "builtin-catalog-item"))
+
+    flags = cast(list[dict[str, object]], entry.get("flags")) if isinstance(entry.get("flags"), list) else []
+    if flags:
+        lines.append(_output_line("", "builtin-spacer"))
+        lines.append(_output_line("Flags:", "builtin-section"))
+        for flag in flags:
+            if not isinstance(flag, dict):
+                continue
+            value = str(flag.get("value") or "").strip()
+            description = str(flag.get("description") or "").strip()
+            marker = " <value>" if flag.get("takes_value") else ""
+            suffix = f"  {description}" if description else ""
+            if value:
+                lines.append(_output_line(f"  {value}{marker}{suffix}", "builtin-catalog-item"))
+
+    return lines
 
 
 def _run_builtin_commands(command: str) -> list[dict[str, str]]:
     parts = _split_command(command)
+    if len(parts) > 1 and parts[1].lower() == "info":
+        return _run_builtin_commands_info(parts)
+
     filters = {part.lower() for part in parts[1:]}
     valid_filters = {"--built-in", "--external"}
     invalid_filters = sorted(filters - valid_filters)
     if invalid_filters:
-        return [_output_line("Usage: commands [--built-in] [--external]")]
+        return [_output_line("Usage: commands [--built-in] [--external] | commands info <command> [subcommand]")]
 
     show_builtins = True
     show_external = True
@@ -761,7 +844,10 @@ def _run_builtin_commands(command: str) -> list[dict[str, str]]:
             for name, commands in external_groups:
                 if name:
                     lines.append(_output_line(f"[{name}]", "builtin-section"))
-                lines.extend(_output_line(f"  {cmd}", "builtin-catalog-item") for cmd in commands)
+                width = max((len(root) for root, _description in commands), default=0)
+                for cmd, description in commands:
+                    suffix = f"  - {description}" if description else ""
+                    lines.append(_output_line(f"  {cmd:<{width}}{suffix}", "builtin-catalog-item"))
                 lines.append(_output_line("", "builtin-spacer"))
             if lines and lines[-1].get("text", "") == "":
                 lines.pop()
@@ -1671,6 +1757,10 @@ def _workspace_command_error(exc: Exception) -> list[dict[str, str]]:
         return [_output_line("file: session file storage is disabled on this instance")]
     if isinstance(exc, WorkspaceFileNotFound):
         return [_output_line("file: file was not found")]
+    if isinstance(exc, WorkspacePathNotFound):
+        return [_output_line("file: session file or folder was not found")]
+    if isinstance(exc, WorkspacePermissionDenied):
+        return [_output_line(f"file: {exc}")]
     if isinstance(exc, WorkspaceBinaryFile):
         return [_output_line(f"file: {exc}")]
     if isinstance(exc, (InvalidWorkspacePath, WorkspaceQuotaExceeded)):
@@ -1771,6 +1861,24 @@ def _workspace_list_rows(
     return rows
 
 
+def _workspace_glob_list_rows(
+    matches: Sequence[object],
+    files: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    files_by_path = {str(item["path"]): item for item in files}
+    rows: list[dict[str, object]] = []
+    for match in matches:
+        path = str(getattr(match, "path", ""))
+        kind = str(getattr(match, "kind", ""))
+        if not path:
+            continue
+        if kind == "directory":
+            rows.append({"kind": "directory", "path": path, "display": f"{path}/"})
+        elif kind == "file":
+            rows.append({"kind": "file", "path": path, "item": files_by_path.get(path, {"path": path, "size": 0})})
+    return sorted(rows, key=lambda candidate: str(candidate.get("display") or candidate["path"]))
+
+
 def _parse_workspace_list_command(parts: list[str]) -> tuple[bool, bool, str, str | None]:
     root = parts[0].lower() if parts else ""
     if root == "file":
@@ -1831,12 +1939,14 @@ def _run_builtin_workspace(command: str, session_id: str) -> list[dict[str, str]
             _output_line("  file add [file]", "builtin-help-row"),
             _output_line("  file edit <file>", "builtin-help-row"),
             _output_line("  file download <file>", "builtin-help-row"),
+            _output_line("  file move <source> <destination>", "builtin-help-row"),
             _output_line("  file rm <file-or-folder>", "builtin-help-row"),
             _output_line("", "builtin-spacer"),
             _output_line("Aliases:", "builtin-section"),
             _output_line("  ls [-lR]    -> file list [-lR]", "builtin-help-row"),
             _output_line("  ll [-R]     -> file list -l [-R]", "builtin-help-row"),
             _output_line("  cat <file>  -> file show <file>", "builtin-help-row"),
+            _output_line("  mv <source> <destination>  -> file move <source> <destination>", "builtin-help-row"),
             _output_line("  rm <file-or-folder>   -> file rm <file-or-folder>", "builtin-help-row"),
             _output_line("", "builtin-spacer"),
             _output_line("Example flow:", "builtin-section"),
@@ -1871,9 +1981,21 @@ def _run_builtin_workspace(command: str, session_id: str) -> list[dict[str, str]
             ),
             _output_line(_format_native_record("remaining", _format_bytes(remaining_bytes), 11), "builtin-kv"),
         ]
-        rows = _workspace_list_rows(files, directories, recursive=recursive, target=target)
+        if target and workspace_path_has_glob(target):
+            try:
+                rows = _workspace_glob_list_rows(
+                    expand_workspace_path_pattern(session_id, target, CFG),
+                    files,
+                )
+            except Exception as exc:
+                return _workspace_command_error(exc)
+        else:
+            rows = _workspace_list_rows(files, directories, recursive=recursive, target=target)
         if not rows:
-            lines.append(_output_line("  No session files yet.", "builtin-note"))
+            lines.append(_output_line(
+                "  No matching session files." if target else "  No session files yet.",
+                "builtin-note",
+            ))
             return lines
 
         if not long:
@@ -1933,11 +2055,35 @@ def _run_builtin_workspace(command: str, session_id: str) -> list[dict[str, str]
             return [_output_line("Usage: file rm <file-or-folder>")]
         return [_output_line("file rm requires browser confirmation — reload the page and try again.")]
 
+    if subcommand in {"move", "mv"}:
+        if len(parts) != 4:
+            return [_output_line("Usage: file move <source> <destination>")]
+        try:
+            if workspace_path_has_glob(parts[2]):
+                matches = expand_workspace_path_pattern(session_id, parts[2], CFG)
+                if not matches:
+                    return [_output_line(f"file: no matches: {parts[2]}")]
+                destination_is_directory = parts[3] == "/" or any(
+                    directory["path"] == parts[3].strip("/")
+                    for directory in list_workspace_directories(session_id, CFG)
+                )
+                if len(matches) > 1 and not destination_is_directory:
+                    return [_output_line("file: destination must be an existing folder when moving multiple matches")]
+                lines = []
+                for match in matches:
+                    moved = move_workspace_path(session_id, match.path, parts[3], CFG)
+                    lines.append(_output_line(f"file: moved {moved.source} to {moved.destination}", "builtin-success"))
+                return lines
+            moved = move_workspace_path(session_id, parts[2], parts[3], CFG)
+        except Exception as exc:
+            return _workspace_command_error(exc)
+        return [_output_line(f"file: moved {moved.source} to {moved.destination}", "builtin-success")]
+
     return [
         _output_line(f"file: unknown subcommand '{subcommand}'"),
         _output_line(
             "Usage: file [list | show <file> | add <file> | edit <file> | "
-            "download <file> | rm <file-or-folder> | help]"
+            "download <file> | move <source> <destination> | rm <file-or-folder> | help]"
         ),
     ]
 
@@ -1957,11 +2103,15 @@ def _run_builtin_workspace_alias(command: str, session_id: str) -> list[dict[str
         if len(parts) != 2:
             return [_output_line("Usage: rm <file-or-folder>")]
         return _run_builtin_workspace(f"file rm {parts[1]}", session_id)
+    if root == "mv":
+        if len(parts) != 3:
+            return [_output_line("Usage: mv <source> <destination>")]
+        return _run_builtin_workspace(f"file move {parts[1]} {parts[2]}", session_id)
     if root in {"cd", "grep", "head", "mkdir", "sort", "tail", "uniq", "wc"}:
         return [_output_line(f"{root}: handled in the browser workspace terminal")]
     return [_output_line(
         "Usage: file [list | show <file> | add <file> | edit <file> | "
-        "download <file> | rm <file-or-folder> | help]"
+        "download <file> | move <source> <destination> | rm <file-or-folder> | help]"
     )]
 
 

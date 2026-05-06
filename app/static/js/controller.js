@@ -47,6 +47,10 @@ function closeFaq() {
   refocusComposerAfterAction({ defer: true });
 }
 
+function closeCommandRegistryPanel() {
+  if (typeof closeCommandRegistry === 'function') closeCommandRegistry();
+}
+
 function openShortcuts() {
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
@@ -123,6 +127,7 @@ function setupMobileSheetDragClose() {
   bindMobileSheet(workspaceModal,     { onClose: () => { if (typeof closeWorkspace === 'function') closeWorkspace(); } });
   bindMobileSheet(workflowEditor,     { onClose: () => { if (typeof closeWorkflowEditor === 'function') closeWorkflowEditor(); } });
   bindMobileSheet(faqModal,           { onClose: () => closeFaq() });
+  bindMobileSheet(document.getElementById('command-registry-modal'), { onClose: () => closeCommandRegistryPanel() });
   bindMobileSheet(optionsModal,       { onClose: () => closeOptions() });
 }
 
@@ -183,6 +188,18 @@ function setupDismissibleOverlays() {
     onClose: closeFaq,
     closeButtons: faqCloseBtn,
   });
+  bindDismissible(_uiOverlayRefs.commandRegistryOverlay, {
+    level: 'panel',
+    isOpen: () => typeof isCommandRegistryOverlayOpen === 'function' && isCommandRegistryOverlayOpen(),
+    onClose: closeCommandRegistryPanel,
+    closeButtons: typeof commandRegistryCloseBtn !== 'undefined' ? commandRegistryCloseBtn : null,
+  });
+  bindDismissible(commandCatalogOverlay, {
+    level: 'modal',
+    isOpen: () => typeof isCommandCatalogOverlayOpen === 'function' && isCommandCatalogOverlayOpen(),
+    onClose: () => { if (typeof closeCommandCatalogModal === 'function') closeCommandCatalogModal(); },
+    closeButtons: commandCatalogCloseBtn,
+  });
   bindDismissible(_uiOverlayRefs.themeOverlay, {
     level: 'panel',
     isOpen: isThemeOverlayOpen,
@@ -226,7 +243,15 @@ function setupModalFocusTraps() {
   // hidden (display: none on the overlay wrapper), so the listener is only
   // reachable while the modal is open.
   if (typeof bindFocusTrap !== 'function') return;
-  const ids = ['options-modal', 'theme-modal', 'faq-modal', 'workspace-modal', 'workflows-modal', 'workflow-editor-form'];
+  const ids = [
+    'options-modal',
+    'theme-modal',
+    'faq-modal',
+    'command-registry-modal',
+    'workspace-modal',
+    'workflows-modal',
+    'workflow-editor-form',
+  ];
   ids.forEach((id) => {
     const card = document.getElementById(id);
     if (card) bindFocusTrap(card);
@@ -341,6 +366,7 @@ function dispatchMobileMenuAction(action, btn = null) {
   if (action === 'status-monitor' && typeof openStatusMonitor === 'function') {
     void openStatusMonitor({ source: 'mobile-menu' });
   }
+  if (action === 'command-registry' && typeof openCommandRegistry === 'function') openCommandRegistry();
   if (action === 'theme') openThemeSelector();
   if (action === 'workflows') openWorkflows();
   if (action === 'workspace' && typeof openWorkspace === 'function') openWorkspace();
@@ -858,6 +884,16 @@ apiFetch('/allowed-commands').then(r => r.json()).then(data => {
   logClientError('failed to load /allowed-commands', err);
 });
 
+apiFetch('/commands/catalog').then(r => r.json()).then(data => {
+  commandRegistryData = data;
+  if (typeof isCommandRegistryOverlayOpen === 'function' && isCommandRegistryOverlayOpen()) {
+    renderCommandRegistry();
+  }
+}).catch(err => {
+  logClientError('failed to load /commands/catalog', err);
+  commandRegistryData = { restricted: false, commands: [], groups: [] };
+});
+
 apiFetch('/faq').then(r => r.json()).then(data => {
   renderFaqItems(data.items || []);
 }).catch(err => {
@@ -1149,6 +1185,20 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (
+    typeof isActiveTabRunning === 'function'
+    && isActiveTabRunning()
+    && !(typeof isConfirmOpen === 'function' && isConfirmOpen())
+    && !isEditableTarget(e.target)
+    && !e.metaKey
+    && !e.ctrlKey
+    && !e.altKey
+    && (e.key.length === 1 || e.key === 'Enter' || e.key === 'Tab' || e.key === 'Backspace' || e.key === 'Delete')
+  ) {
+    if (typeof acHide === 'function') acHide();
+    e.preventDefault();
+    return;
+  }
+  if (
     _welcomeActive && welcomeOwnsTab(activeTabId)
     && cmdInput
     && !e.metaKey && !e.ctrlKey && !e.altKey
@@ -1204,6 +1254,37 @@ document.addEventListener('keydown', e => {
   }
 });
 
+function acAutocompleteIsHintOnly(item) {
+  if (typeof acIsHintOnly === 'function') return acIsHintOnly(item);
+  return !!(item && typeof item === 'object' && item.hintOnly);
+}
+
+function acAutocompleteSelectableItems(items) {
+  if (typeof acSelectableItems === 'function') return acSelectableItems(items);
+  return (Array.isArray(items) ? items : []).filter(item => !acAutocompleteIsHintOnly(item));
+}
+
+function acAutocompleteSelectableIndexes(items) {
+  if (typeof acSelectableIndexes === 'function') return acSelectableIndexes(items);
+  return (Array.isArray(items) ? items : [])
+    .map((item, index) => (acAutocompleteIsHintOnly(item) ? -1 : index))
+    .filter(index => index >= 0);
+}
+
+function acAutocompleteNextSelectableIndex(items, currentIndex, direction = 1) {
+  if (typeof acNextSelectableIndex === 'function') {
+    return acNextSelectableIndex(items, currentIndex, direction);
+  }
+  const indexes = acAutocompleteSelectableIndexes(items);
+  if (!indexes.length) return -1;
+  const currentPos = indexes.indexOf(currentIndex);
+  if (currentPos < 0) return direction < 0 ? indexes[indexes.length - 1] : indexes[0];
+  const nextPos = direction < 0
+    ? (currentPos <= 0 ? indexes.length - 1 : currentPos - 1)
+    : ((currentPos + 1) % indexes.length);
+  return indexes[nextPos];
+}
+
 function _replayPromptShortcutAfterSelection(e) {
   // If the user has selected terminal output text, re-dispatch prompt-oriented
   // shortcuts so shell navigation still works after copy/select interactions.
@@ -1229,8 +1310,8 @@ function _replayPromptShortcutAfterSelection(e) {
       if (typeof acHide === 'function') acHide();
       return true;
     }
-    if (isAcDropdownOpen() && acFiltered.length) {
-      acIndex = (acIndex + 1) % acFiltered.length;
+    if (isAcDropdownOpen() && acAutocompleteSelectableItems(acFiltered).length) {
+      acIndex = acAutocompleteNextSelectableIndex(acFiltered, acIndex, 1);
       if (typeof acShow === 'function') acShow(acFiltered);
     } else if (typeof navigateCmdHistory === 'function' && navigateCmdHistory(-1)) {
       if (typeof acHide === 'function') acHide();
@@ -1242,8 +1323,8 @@ function _replayPromptShortcutAfterSelection(e) {
       if (typeof acHide === 'function') acHide();
       return true;
     }
-    if (isAcDropdownOpen() && acFiltered.length) {
-      acIndex = acIndex <= 0 ? acFiltered.length - 1 : acIndex - 1;
+    if (isAcDropdownOpen() && acAutocompleteSelectableItems(acFiltered).length) {
+      acIndex = acAutocompleteNextSelectableIndex(acFiltered, acIndex, -1);
       if (typeof acShow === 'function') acShow(acFiltered);
     } else if (typeof navigateCmdHistory === 'function' && navigateCmdHistory(1)) {
       if (typeof acHide === 'function') acHide();
@@ -1251,7 +1332,7 @@ function _replayPromptShortcutAfterSelection(e) {
     return true;
   }
   if (e.key === 'Enter') {
-    if (acIndex >= 0 && acFiltered[acIndex]) {
+    if (acIndex >= 0 && acFiltered[acIndex] && !acAutocompleteIsHintOnly(acFiltered[acIndex])) {
       if (typeof acAccept === 'function') acAccept(acFiltered[acIndex]);
     } else {
       if (typeof acHide === 'function') acHide();
@@ -1523,6 +1604,17 @@ cmdInput.addEventListener('keydown', e => {
     if (typeof handleHistSearchKey === 'function' && handleHistSearchKey(e)) return;
   }
 
+  if (typeof isActiveTabRunning === 'function' && isActiveTabRunning()) {
+    if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
+      e.preventDefault();
+      confirmKill(activeTabId);
+      return;
+    }
+    if (typeof acHide === 'function') acHide();
+    e.preventDefault();
+    return;
+  }
+
   const isWordArrowLeft = e.key === 'ArrowLeft' || eventMatchesCode(e, 'ArrowLeft');
   const isWordArrowRight = e.key === 'ArrowRight' || eventMatchesCode(e, 'ArrowRight');
   if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (isWordArrowLeft || isWordArrowRight)) {
@@ -1664,7 +1756,12 @@ cmdInput.addEventListener('keydown', e => {
       refocusComposerAfterAction({ defer: true });
       return;
     }
-    if (!hasActiveTerminalConfirm() && acIndex >= 0 && acFiltered[acIndex]) {
+    if (
+      !hasActiveTerminalConfirm()
+      && acIndex >= 0
+      && acFiltered[acIndex]
+      && !acAutocompleteIsHintOnly(acFiltered[acIndex])
+    ) {
       e.preventDefault();
       acAccept(acFiltered[acIndex]);
     } else {
@@ -1684,15 +1781,16 @@ cmdInput.addEventListener('keydown', e => {
       acHide();
       return;
     }
-    if (acFiltered.length === 1) { acAccept(acFiltered[0]); }
-    else if (acFiltered.length > 0) {
-      if (typeof acExpandSharedPrefix === 'function' && acExpandSharedPrefix(acFiltered)) return;
+    const selectableItems = acAutocompleteSelectableItems(acFiltered);
+    if (selectableItems.length === 1) { acAccept(selectableItems[0]); }
+    else if (selectableItems.length > 0) {
+      if (typeof acExpandSharedPrefix === 'function' && acExpandSharedPrefix(selectableItems)) return;
       if (acIndex < 0 || !isAcDropdownOpen()) {
-        acIndex = 0;
+        acIndex = acAutocompleteNextSelectableIndex(acFiltered, -1, 1);
       } else if (e.shiftKey) {
-        acIndex = acIndex <= 0 ? acFiltered.length - 1 : acIndex - 1;
+        acIndex = acAutocompleteNextSelectableIndex(acFiltered, acIndex, -1);
       } else {
-        acIndex = (acIndex + 1) % acFiltered.length;
+        acIndex = acAutocompleteNextSelectableIndex(acFiltered, acIndex, 1);
       }
       acShow(acFiltered);
     }
@@ -1705,8 +1803,8 @@ cmdInput.addEventListener('keydown', e => {
       return;
     }
     const acOpen = isAcDropdownOpen();
-    if (acOpen && acFiltered.length) {
-      acIndex = (acIndex + 1) % acFiltered.length;
+    if (acOpen && acAutocompleteSelectableItems(acFiltered).length) {
+      acIndex = acAutocompleteNextSelectableIndex(acFiltered, acIndex, 1);
       acShow(acFiltered);
       return;
     }
@@ -1720,8 +1818,8 @@ cmdInput.addEventListener('keydown', e => {
       return;
     }
     const acOpen = isAcDropdownOpen();
-    if (acOpen && acFiltered.length) {
-      acIndex = acIndex <= 0 ? acFiltered.length - 1 : acIndex - 1;
+    if (acOpen && acAutocompleteSelectableItems(acFiltered).length) {
+      acIndex = acAutocompleteNextSelectableIndex(acFiltered, acIndex, -1);
       acShow(acFiltered);
       return;
     }
