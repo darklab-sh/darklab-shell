@@ -246,10 +246,20 @@ function focusActiveInteractivePty({ preventScroll = true } = {}) {
   return true;
 }
 
-function _ptyFinalize(tabId, session, code, elapsed) {
+function _ptyFinalize(tabId, session, msg = {}) {
+  const code = msg && Object.prototype.hasOwnProperty.call(msg, 'code') ? msg.code : null;
+  const elapsed = msg && Object.prototype.hasOwnProperty.call(msg, 'elapsed') ? msg.elapsed : null;
   const tab = typeof getTab === 'function' ? getTab(tabId) : null;
   if (tab) {
+    tab.exitCode = code;
     tab.runId = null;
+    tab.reconnectedRun = false;
+    tab.lastEventId = '';
+    tab.attachMode = '';
+    tab.deferPromptMount = true;
+    tab.previewTruncated = !!(msg && msg.preview_truncated);
+    tab.fullOutputAvailable = !!(msg && msg.full_output_available);
+    tab.fullOutputLoaded = !(msg && msg.preview_truncated);
     tab.interactivePtyActive = false;
     tab.ptyTerminal = null;
   }
@@ -260,13 +270,36 @@ function _ptyFinalize(tabId, session, code, elapsed) {
   const ok = Number(code) === 0 || killed;
   if (typeof appendLine === 'function') {
     const suffix = typeof elapsed === 'number' ? ` in ${elapsed}s` : '';
+    if (msg && msg.preview_truncated && typeof _previewTruncationNotice === 'function') {
+      appendLine(
+        _previewTruncationNotice(msg.output_line_count, msg.full_output_available),
+        'notice',
+        tabId,
+      );
+    }
     appendLine(`[interactive PTY exited with code ${code ?? 'unknown'}${suffix}]`, ok ? 'exit-ok' : 'exit-fail', tabId);
   }
+  if (typeof addToRecentPreview === 'function' && tab && tab.command && !tab.unknownCommand) {
+    addToRecentPreview(tab.command);
+  }
+  if (typeof emitUiEvent === 'function') emitUiEvent('app:last-exit-changed', { value: code });
   if (typeof setStatus === 'function') setStatus(ok ? 'ok' : 'fail');
   if (typeof setTabStatus === 'function') setTabStatus(tabId, ok ? 'idle' : 'fail');
   if (typeof stopTimer === 'function') stopTimer();
   if (typeof _setRunButtonDisabled === 'function') _setRunButtonDisabled(false);
   if (typeof hideTabKillBtn === 'function') hideTabKillBtn(tabId);
+  if (tab && tab.closing && typeof finalizeClosingTab === 'function') {
+    finalizeClosingTab(tabId);
+    if (typeof isHistoryPanelOpen === 'function' && isHistoryPanelOpen() && typeof refreshHistoryPanel === 'function') {
+      refreshHistoryPanel();
+    }
+    return;
+  }
+  if (typeof isHistoryPanelOpen === 'function' && isHistoryPanelOpen() && typeof refreshHistoryPanel === 'function') {
+    refreshHistoryPanel();
+  }
+  if (typeof refreshWorkspaceFileCache === 'function') refreshWorkspaceFileCache();
+  if (typeof _maybeMountDeferredPrompt === 'function') _maybeMountDeferredPrompt(tabId);
   if (tabId === activeTabId && typeof refocusComposerAfterAction === 'function') {
     refocusComposerAfterAction({ preventScroll: true });
   }
@@ -296,7 +329,7 @@ async function _ptyReadStream(streamUrl, tabId, session) {
       } else if (msg.type === 'notice' || msg.type === 'error') {
         if (typeof appendLine === 'function') appendLine(msg.text || '[interactive PTY notice]', 'notice', tabId);
       } else if (msg.type === 'exit') {
-        _ptyFinalize(tabId, session, msg.code, msg.elapsed);
+        _ptyFinalize(tabId, session, msg);
         return;
       }
     }

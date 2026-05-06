@@ -20,12 +20,12 @@ Workspace file behavior is intentionally split across all three layers: pytest o
 
 Current totals:
 
-- behavior tests: 2,428
+- behavior tests: 2,435
 - docs/inventory meta-tests: 30
-- `pytest`: 1220 (1190 behavior + 30 meta)
-- `vitest`: 1002
+- `pytest`: 1226 (1196 behavior + 30 meta)
+- `vitest`: 1003
 - `playwright`: 236
-- total: 2,458
+- total: 2,465
 
 This document is organized in two parts:
 
@@ -511,6 +511,12 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestPtyBrokerService.test_pty_broker_is_available_with_redis_even_when_workers_are_not_sticky` | Verifies that Redis-backed PTY brokering works without requiring sticky Gunicorn workers. |
 | `TestPtyBrokerService.test_pty_input_and_resize_queue_through_redis_without_local_run` | Verifies that PTY input and resize requests enqueue Redis control events without needing the local worker that owns the PTY file descriptor. |
 | `TestPtyBrokerService.test_pty_stream_replays_redis_output_events_for_any_worker` | Verifies that Redis-backed PTY output can be streamed by any web worker. |
+| `TestPtyTerminalCapture.test_terminal_capture_synthesizes_scrollback_and_final_frame` | Verifies that PTY capture persists scrollback and final visible frame with a marker between them. |
+| `TestPtyTerminalCapture.test_terminal_capture_omits_marker_when_only_final_frame_exists` | Verifies that final-frame-only PTY output is saved without an empty separator marker. |
+| `TestPtyTerminalCapture.test_terminal_capture_omits_marker_when_only_scrollback_exists` | Verifies that scrollback-only PTY output is saved without an empty separator marker. |
+| `TestPtyTerminalCapture.test_terminal_capture_persists_notice_when_output_is_empty` | Verifies that empty PTY output saves a coherent notice line. |
+| `TestPtyTerminalCapture.test_terminal_capture_falls_back_after_first_feed_error` | Verifies that PTY capture logs one pyte feed failure and falls back to plain-text capture for later chunks. |
+| `TestPtyTerminalCapture.test_terminal_history_line_limit_is_bounded` | Verifies that PTY capture history uses a sensible default, floor, and ceiling around `max_output_lines`. |
 | `TestFormatRetention.test_zero_returns_unlimited` | Checks zero returns unlimited handling. |
 | `TestFormatRetention.test_365_returns_one_year` | Checks that 365 returns one year. |
 | `TestFormatRetention.test_730_returns_two_years` | Checks that 730 returns two years. |
@@ -1928,6 +1934,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `reports missing xterm globals before mounting a PTY terminal` | Verifies that the PTY path reports missing xterm assets before trying to mount a terminal. |
 | `creates an xterm terminal with the fit addon and opens it in the screen` | Verifies that the PTY browser surface mounts xterm with the fit addon and requested dimensions. |
 | `keeps focus on the active PTY terminal while the PTY tab is running` | Verifies that live interactive PTY tabs retain keyboard focus on xterm instead of the hidden prompt. |
+| `finalizes PTY tabs like normal completed runs` | Verifies that completed interactive PTY tabs update recent commands, history refreshes, workspace cache, and last-exit state like normal runs. |
 
 #### `runner.test.js`
 

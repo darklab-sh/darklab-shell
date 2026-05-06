@@ -2883,6 +2883,94 @@ class TestPtyBrokerService:
         assert '"type": "output"' in chunk
 
 
+class TestPtyTerminalCapture:
+    @staticmethod
+    def _fake_pyte(scrollback=None, final_frame=None, *, feed_error=False, feed_calls=None):
+        class FakeHistoryScreen:
+            def __init__(self, cols, rows, history):  # noqa: ARG002
+                self.history = type("FakeHistory", (), {"top": scrollback or []})()
+                self.display = final_frame or []
+                self.resized = None
+
+            def resize(self, *, lines, columns):
+                self.resized = (lines, columns)
+
+        class FakeStream:
+            def __init__(self, screen):
+                self.screen = screen
+
+            def feed(self, text):
+                if feed_calls is not None:
+                    feed_calls.append(text)
+                if feed_error:
+                    raise ValueError("bad escape")
+
+        return type("FakePyte", (), {"HistoryScreen": FakeHistoryScreen, "Stream": FakeStream})()
+
+    def test_terminal_capture_synthesizes_scrollback_and_final_frame(self):
+        feed_calls = []
+        fake_pyte = self._fake_pyte(
+            scrollback=["scrolled line   "],
+            final_frame=["visible line   ", "   "],
+            feed_calls=feed_calls,
+        )
+        with mock.patch.object(pty_service, "pyte", fake_pyte):
+            capture = pty_service.PtyTerminalCapture(rows=24, cols=100, history_lines=20)
+            capture.feed("\x1b[1mbold\x1b[0m")
+            capture.resize(30, 120)
+            entries = capture.synthesize_entries()
+
+        assert any("bold" in call for call in feed_calls)
+        assert entries == [
+            {"text": "scrolled line", "cls": ""},
+            {"text": "", "cls": "pty-marker"},
+            {"text": "visible line", "cls": ""},
+        ]
+
+    def test_terminal_capture_omits_marker_when_only_final_frame_exists(self):
+        fake_pyte = self._fake_pyte(final_frame=["mtr final row  ", ""])
+        with mock.patch.object(pty_service, "pyte", fake_pyte):
+            capture = pty_service.PtyTerminalCapture(rows=24, cols=100, history_lines=20)
+
+        assert capture.synthesize_entries() == [{"text": "mtr final row", "cls": ""}]
+
+    def test_terminal_capture_omits_marker_when_only_scrollback_exists(self):
+        fake_pyte = self._fake_pyte(scrollback=["match one  "])
+        with mock.patch.object(pty_service, "pyte", fake_pyte):
+            capture = pty_service.PtyTerminalCapture(rows=24, cols=100, history_lines=20)
+
+        assert capture.synthesize_entries() == [{"text": "match one", "cls": ""}]
+
+    def test_terminal_capture_persists_notice_when_output_is_empty(self):
+        fake_pyte = self._fake_pyte()
+        with mock.patch.object(pty_service, "pyte", fake_pyte):
+            capture = pty_service.PtyTerminalCapture(rows=24, cols=100, history_lines=20)
+
+        assert capture.synthesize_entries() == [{
+            "text": "[interactive PTY exited with no output]",
+            "cls": "notice",
+        }]
+
+    def test_terminal_capture_falls_back_after_first_feed_error(self):
+        fake_pyte = self._fake_pyte(feed_error=True)
+        with mock.patch.object(pty_service, "pyte", fake_pyte), \
+             mock.patch.object(pty_service.log, "warning") as warning:
+            capture = pty_service.PtyTerminalCapture(rows=24, cols=100, history_lines=20)
+            capture.feed("\x1b[31mfirst\x1b[0m\n")
+            capture.feed("second\n")
+
+        assert warning.call_count == 1
+        assert capture.synthesize_entries() == [
+            {"text": "first", "cls": ""},
+            {"text": "second", "cls": ""},
+        ]
+
+    def test_terminal_history_line_limit_is_bounded(self):
+        assert pty_service._terminal_history_line_limit(0) == 10000
+        assert pty_service._terminal_history_line_limit(10) == 2000
+        assert pty_service._terminal_history_line_limit(100000) == 10000
+
+
 # ── _format_retention ─────────────────────────────────────────────────────────
 
 class TestFormatRetention:

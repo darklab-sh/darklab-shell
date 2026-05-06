@@ -3,10 +3,12 @@ from __future__ import annotations
 """Constrained PTY lifecycle for first-pass interactive runs."""
 
 import fcntl
+import importlib
 import json
 import logging
 import os
 import pty
+import re
 import select
 import signal
 import struct
@@ -16,12 +18,18 @@ import threading
 import time
 import uuid
 from collections import deque
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Iterator, cast
 
 from config import CFG, SCANNER_PREFIX
 from process import active_run_register, active_run_remove, pid_pop, pid_register, redis_client
+
+try:
+    pyte: Any | None = importlib.import_module("pyte")
+except ImportError:  # pragma: no cover - exercised in deploys after requirements install
+    pyte = None
 
 log = logging.getLogger("shell")
 
@@ -34,6 +42,164 @@ _PTY_HEARTBEAT_SECONDS = 15.0
 _PTY_CONTROL_POLL_SECONDS = 0.2
 _PTY_STREAM_FETCH_COUNT = 100
 _PTY_STREAM_MAXLEN = 5000
+_PTY_CAPTURE_MIN_HISTORY_LINES = 2000
+_PTY_CAPTURE_MAX_HISTORY_LINES = 10000
+_ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
+
+def _plain_terminal_text(value: str) -> str:
+    return _ANSI_ESCAPE_RE.sub("", value.replace("\r\n", "\n").replace("\r", "\n"))
+
+
+def _coerce_non_negative_int(value: object, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        number = value
+    elif isinstance(value, float):
+        number = int(value)
+    elif isinstance(value, (str, bytes, bytearray)):
+        try:
+            number = int(value)
+        except ValueError:
+            return default
+    else:
+        return default
+    return number if number >= 0 else default
+
+
+def _terminal_history_line_limit(value: object) -> int:
+    max_output_lines = _coerce_non_negative_int(value, 0)
+    if max_output_lines <= 0:
+        return _PTY_CAPTURE_MAX_HISTORY_LINES
+    return max(
+        _PTY_CAPTURE_MIN_HISTORY_LINES,
+        min(max_output_lines * 2, _PTY_CAPTURE_MAX_HISTORY_LINES),
+    )
+
+
+def _trim_trailing_blank_lines(lines: list[str]) -> list[str]:
+    trimmed = list(lines)
+    while trimmed and not trimmed[-1].strip():
+        trimmed.pop()
+    return trimmed
+
+
+def _terminal_line_to_text(line: object) -> str:
+    if isinstance(line, str):
+        return line
+    if isinstance(line, dict):
+        cells: list[tuple[int, object]] = []
+        for key, value in line.items():
+            try:
+                cells.append((int(key), value))
+            except (TypeError, ValueError):
+                continue
+        return "".join(
+            str(getattr(cell, "data", cell) or "")
+            for _column, cell in sorted(cells, key=lambda item: item[0])
+        )
+    values = getattr(line, "values", None)
+    if callable(values):
+        value_cells = values()
+        if isinstance(value_cells, Iterable):
+            return "".join(str(getattr(cell, "data", cell) or "") for cell in value_cells)
+    return str(line)
+
+
+class PtyTerminalCapture:
+    """Server-side terminal view used only for saved PTY history."""
+
+    def __init__(self, rows: int, cols: int, history_lines: int):
+        self.rows = rows
+        self.cols = cols
+        self.history_lines = max(0, int(history_lines or 0))
+        self._lock = threading.Lock()
+        self._screen = None
+        self._stream = None
+        self._stream_failed = False
+        self._fallback_pending = ""
+        self._fallback_lines: deque[str] = deque(maxlen=max(1, self.history_lines + rows))
+        pyte_module = pyte
+        if pyte_module is None:
+            return
+        try:
+            self._screen = pyte_module.HistoryScreen(cols, rows, history=self.history_lines)
+            self._stream = pyte_module.Stream(self._screen)
+        except Exception:
+            log.warning("PTY_CAPTURE_INIT_FAILED", exc_info=True)
+            self._screen = None
+            self._stream = None
+
+    def feed(self, text: str) -> None:
+        if not text:
+            return
+        with self._lock:
+            if self._stream is not None and not self._stream_failed:
+                try:
+                    self._stream.feed(text)
+                    return
+                except Exception:
+                    self._stream_failed = True
+                    self._screen = None
+                    self._stream = None
+                    log.warning("PTY_CAPTURE_FEED_FAILED", exc_info=True)
+            self._feed_fallback(text)
+
+    def resize(self, rows: int, cols: int) -> None:
+        with self._lock:
+            self.rows = rows
+            self.cols = cols
+            if self._screen is None:
+                return
+            resize = getattr(self._screen, "resize", None)
+            if not callable(resize):
+                return
+            try:
+                resize(lines=rows, columns=cols)
+            except TypeError:
+                resize(rows, cols)
+            except Exception:
+                log.warning("PTY_CAPTURE_RESIZE_FAILED", exc_info=True)
+
+    def synthesize_entries(self) -> list[dict[str, str]]:
+        with self._lock:
+            scrollback = self._scrollback_lines()
+            final_frame = self._final_frame_lines()
+        entries = [{"text": line, "cls": ""} for line in scrollback]
+        if scrollback and final_frame:
+            entries.append({"text": "", "cls": "pty-marker"})
+        entries.extend({"text": line, "cls": ""} for line in final_frame)
+        if entries:
+            return entries
+        return [{"text": "[interactive PTY exited with no output]", "cls": "notice"}]
+
+    def _feed_fallback(self, text: str) -> None:
+        plain = _plain_terminal_text(text)
+        if not plain:
+            return
+        self._fallback_pending += plain
+        parts = self._fallback_pending.split("\n")
+        self._fallback_pending = parts.pop() if parts else ""
+        for line in parts:
+            self._fallback_lines.append(line.rstrip())
+
+    def _scrollback_lines(self) -> list[str]:
+        if self._screen is not None:
+            history = getattr(self._screen, "history", None)
+            top = getattr(history, "top", []) if history is not None else []
+            # pyte history rows are cell mappings; display rows below are already strings.
+            return [_terminal_line_to_text(line).rstrip() for line in list(top)]
+        lines = list(self._fallback_lines)
+        if self._fallback_pending:
+            lines.append(self._fallback_pending.rstrip())
+        return _trim_trailing_blank_lines(lines)
+
+    def _final_frame_lines(self) -> list[str]:
+        if self._screen is None:
+            return []
+        display = getattr(self._screen, "display", [])
+        return _trim_trailing_blank_lines([str(line).rstrip() for line in list(display)])
 
 
 @dataclass
@@ -57,13 +223,14 @@ class PtyRun:
     allow_input: bool
     max_runtime_seconds: int
     brokered: bool
+    terminal_capture: PtyTerminalCapture
+    completion_callback: Callable[["PtyRun", str, int, Sequence[dict[str, str]]], dict[str, object]] | None = None
     events: deque[PtyEvent] = field(default_factory=lambda: deque(maxlen=_PTY_BUFFER_LIMIT))
     seq: int = 0
     closed: bool = False
     exit_code: int | None = None
     control_event_id: str = "0-0"
     condition: threading.Condition = field(default_factory=threading.Condition)
-    capture: list[str] = field(default_factory=list)
 
     def append_event(self, event_type: str, payload: dict[str, Any] | None = None) -> None:
         body = dict(payload or {})
@@ -324,6 +491,7 @@ def _apply_pty_controls(run: PtyRun) -> None:
             run.rows = _bounded_dimension(control.get("rows"), run.rows, 10, 60)
             run.cols = _bounded_dimension(control.get("cols"), run.cols, 40, 240)
             _set_pty_size(run.master_fd, run.rows, run.cols)
+            run.terminal_capture.resize(run.rows, run.cols)
             _store_pty_meta(run)
 
 
@@ -354,7 +522,7 @@ def _reader_loop(run: PtyRun, client_ip: str) -> None:
                     chunk = b""
                 if chunk:
                     text = chunk.decode("utf-8", errors="replace")
-                    run.capture.append(text)
+                    run.terminal_capture.feed(text)
                     run.append_event("output", {"text": text})
                     continue
             if run.proc.poll() is not None:
@@ -381,11 +549,32 @@ def _reader_loop(run: PtyRun, client_ip: str) -> None:
         finished = datetime.now(timezone.utc)
         elapsed = round((finished - started_dt).total_seconds(), 1)
         code = run.exit_code if run.exit_code is not None else run.proc.returncode
-        run.append_event("exit", {"code": code, "elapsed": elapsed, "interactive": True})
+        code = int(code if code is not None else 1)
+        completion_summary: dict[str, object] = {}
+        try:
+            if run.completion_callback:
+                completion_summary = run.completion_callback(
+                    run,
+                    finished.isoformat(),
+                    code,
+                    run.terminal_capture.synthesize_entries(),
+                )
+        except Exception:
+            log.error("PTY_RUN_SAVE_ERROR", exc_info=True, extra={
+                "run_id": run.run_id,
+                "session": run.session_id,
+                "ip": client_ip,
+                "cmd": run.command,
+            })
+        exit_payload = {"code": code, "elapsed": elapsed, "interactive": True}
+        exit_payload.update(completion_summary)
+        run.append_event("exit", exit_payload)
         try:
             os.close(run.master_fd)
         except OSError:
             pass
+        with _runs_lock:
+            _runs.pop(run.run_id, None)
         pid_pop(run.run_id)
         active_run_remove(run.run_id)
         if redis_client:
@@ -417,11 +606,13 @@ def start_pty_run(
     owner_tab_id: str = "",
     allow_input: bool = True,
     max_runtime_seconds: int = 900,
+    completion_callback: Callable[[PtyRun, str, int, Sequence[dict[str, str]]], dict[str, object]] | None = None,
 ) -> PtyRun:
     default_rows_i = _bounded_dimension(default_rows, 24, 10, 60)
     default_cols_i = _bounded_dimension(default_cols, 100, 40, 240)
     rows_i = _bounded_dimension(rows, default_rows_i, 10, 60)
     cols_i = _bounded_dimension(cols, default_cols_i, 40, 240)
+    terminal_history_lines = _terminal_history_line_limit(CFG.get("max_output_lines", 0))
     run_id = str(uuid.uuid4())
     started = datetime.now(timezone.utc).isoformat()
     master_fd, slave_fd = pty.openpty()
@@ -462,6 +653,8 @@ def start_pty_run(
         allow_input=allow_input,
         max_runtime_seconds=max_runtime_seconds,
         brokered=bool(redis_client),
+        terminal_capture=PtyTerminalCapture(rows_i, cols_i, terminal_history_lines),
+        completion_callback=completion_callback,
     )
     with _runs_lock:
         _runs[run_id] = run
@@ -549,6 +742,7 @@ def resize_pty(run_id: str, session_id: str, rows: object, cols: object) -> tupl
     run.rows = rows_i
     run.cols = cols_i
     _set_pty_size(run.master_fd, run.rows, run.cols)
+    run.terminal_capture.resize(run.rows, run.cols)
     return True, "", run.rows, run.cols
 
 

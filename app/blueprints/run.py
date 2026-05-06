@@ -284,6 +284,32 @@ def _finalize_completed_run(run_id, session_id, client_ip, original_command, run
     return elapsed
 
 
+def _persist_completed_pty_run(run, execution_command: str, finished_iso: str, exit_code: int, synthesized_lines):
+    capture = _run_output_capture(run.run_id)
+    signal_classifier = OutputSignalClassifier(execution_command, cmd_type="real")
+    for item in synthesized_lines:
+        text = str(item.get("text", "")) if isinstance(item, dict) else str(item)
+        cls = str(item.get("cls", "")) if isinstance(item, dict) else ""
+        if cls == "pty-marker":
+            capture.add_line(text, cls=cls)
+            continue
+        _capture_add_line_with_signals(capture, signal_classifier, text, cls=cls)
+    _save_completed_run(
+        run.run_id,
+        run.session_id,
+        run.command,
+        run.started,
+        finished_iso,
+        exit_code,
+        capture,
+    )
+    return {
+        "preview_truncated": capture.preview_truncated,
+        "output_line_count": capture.output_line_count,
+        "full_output_available": capture.full_output_available,
+    }
+
+
 def _timeout_notice(command_timeout):
     return f"[timeout] Command exceeded {command_timeout}s limit and was killed."
 
@@ -1176,6 +1202,15 @@ def start_interactive_pty_run():
             max_runtime_seconds=_coerce_positive_int(
                 pty_spec.get("max_runtime_seconds"),
                 _coerce_positive_int(CFG.get("interactive_pty_max_runtime_seconds", 900), 900),
+            ),
+            completion_callback=lambda completed_run, finished_iso, exit_code, synthesized_lines: (
+                _persist_completed_pty_run(
+                    completed_run,
+                    execution_command,
+                    finished_iso,
+                    exit_code,
+                    synthesized_lines,
+                )
             ),
         )
     except Exception as exc:

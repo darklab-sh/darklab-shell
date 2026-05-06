@@ -190,7 +190,15 @@ class TestInteractivePtyRuns:
 
     def test_start_interactive_pty_strips_trigger_before_validation(self):
         client = get_client()
-        fake_run = SimpleNamespace(run_id="pty-run-1", rows=24, cols=100)
+        started = datetime.now(timezone.utc).isoformat()
+        fake_run = SimpleNamespace(
+            run_id="pty-run-1",
+            rows=24,
+            cols=100,
+            session_id="sess-pty-start",
+            command="mtr --interactive darklab.sh",
+            started=started,
+        )
 
         def _allow(command, session_id=None, cfg=None, workspace_cwd=""):  # noqa: ARG001
             assert command == "mtr darklab.sh"
@@ -223,6 +231,21 @@ class TestInteractivePtyRuns:
         assert kwargs["command"] == "mtr --interactive darklab.sh"
         assert kwargs["argv"] == ["mtr", "darklab.sh"]
         assert kwargs["owner_client_id"] == "client-1"
+        summary = kwargs["completion_callback"](
+            fake_run,
+            datetime.now(timezone.utc).isoformat(),
+            0,
+            [{"text": "hop 1 ip.darklab.sh", "cls": ""}],
+        )
+        assert summary["output_line_count"] == 1
+        with db_connect() as conn:
+            row = conn.execute(
+                "SELECT command, exit_code, output_search_text FROM runs WHERE id = ?",
+                ("pty-run-1",),
+            ).fetchone()
+        assert row["command"] == "mtr --interactive darklab.sh"
+        assert row["exit_code"] == 0
+        assert "hop 1 ip.darklab.sh" in row["output_search_text"]
 
     def test_start_interactive_pty_uses_registry_spec(self):
         client = get_client()
