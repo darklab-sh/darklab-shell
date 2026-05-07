@@ -2277,6 +2277,21 @@ body.mobile-terminal-mode .output-follow-btn {
   align-content: start;
 }
 
+.project-workspace-section-label {
+  margin-top: 4px;
+  padding: 8px 2px 2px;
+  border-top: 1px solid var(--theme-panel-border);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.project-workspace-section-label:first-child {
+  margin-top: 0;
+  border-top: 0;
+}
+
 .project-workspace-row {
   display: block;
   width: 100%;

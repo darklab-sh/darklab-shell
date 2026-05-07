@@ -514,6 +514,9 @@ describe('history panel actions', () => {
         <option value="7d">7d</option>
         <option value="30d">30d</option>
       </select>
+      <select id="history-project-filter">
+        <option value="all">all</option>
+      </select>
       <input id="history-starred-toggle" type="checkbox" />
       <button id="history-clear-filters"></button>
       <div id="history-active-filters" class="u-hidden"></div>
@@ -566,6 +569,12 @@ describe('history panel actions', () => {
               }),
           })
         }
+        if (url === '/projects?include_archived=1') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ projects: [] }),
+          })
+        }
         if (url === '/history/run-1?json&preview=1') {
           return Promise.resolve({
             json: () =>
@@ -610,6 +619,7 @@ describe('history panel actions', () => {
     const historyRootDropdown = document.getElementById('history-root-dropdown')
     const historyExitFilter = document.getElementById('history-exit-filter')
     const historyDateFilter = document.getElementById('history-date-filter')
+    const historyProjectFilter = document.getElementById('history-project-filter')
     const historyStarredToggle = document.getElementById('history-starred-toggle')
     const historyClearFiltersBtn = document.getElementById('history-clear-filters')
     const historyActiveFilters = document.getElementById('history-active-filters')
@@ -641,6 +651,7 @@ describe('history panel actions', () => {
           historyRootDropdown,
           historyExitFilter,
           historyDateFilter,
+          historyProjectFilter,
           historyStarredToggle,
           historyClearFiltersBtn,
           historyActiveFilters,
@@ -1498,6 +1509,43 @@ describe('history panel actions', () => {
     expect(typeof refreshHistoryPanel).toBe('function')
   })
 
+  it('includes the selected project in history requests and active filter chips', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            projects: [{ id: 'project-1', name: 'darklab.sh', status: 'active' }],
+          }),
+        })
+      }
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          json: () => Promise.resolve({ roots: [], items: [], runs: [], total_count: 0 }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { refreshHistoryPanel, _setHistoryFilter, _buildHistoryRequestUrl } = loadHistoryPanel({
+      apiFetchImpl: apiFetch,
+    })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+    document.getElementById('history-project-filter').value = 'project-1'
+    _setHistoryFilter('projectId', 'project-1')
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(_buildHistoryRequestUrl()).toBe(
+      '/history?page=1&page_size=8&include_total=1&project_id=project-1',
+    )
+    expect(document.getElementById('history-active-filters').textContent).toContain('project: darklab.sh')
+    expect(apiFetch).toHaveBeenLastCalledWith(
+      '/history?page=1&page_size=8&include_total=1&project_id=project-1',
+    )
+  })
+
   it('refreshHistoryPanel renders pagination controls and advances to the next page', async () => {
     const apiFetch = vi.fn((url) => {
       if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
@@ -1620,36 +1668,35 @@ describe('history panel actions', () => {
   })
 
   it('keeps root suggestions stable when a refresh returns no roots while typing', async () => {
-    const apiFetch = vi.fn(() =>
-      Promise.resolve({
+    let historyCall = 0
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects: [] }),
+        })
+      }
+      historyCall += 1
+      return Promise.resolve({
         json: () =>
-          Promise.resolve({
-            roots: [],
-            runs: [],
-          }),
-      }),
-    )
-      .mockResolvedValueOnce({
-        json: () =>
-          Promise.resolve({
-            roots: ['curl', 'dig', 'ping'],
-            runs: [
-              {
-                id: 'run-1',
-                command: 'dig darklab.sh A',
-                started: '2026-01-01T00:00:00Z',
-                exit_code: 0,
-              },
-            ],
-          }),
+          Promise.resolve(historyCall === 1
+            ? {
+                roots: ['curl', 'dig', 'ping'],
+                runs: [
+                  {
+                    id: 'run-1',
+                    command: 'dig darklab.sh A',
+                    started: '2026-01-01T00:00:00Z',
+                    exit_code: 0,
+                  },
+                ],
+              }
+            : {
+                roots: [],
+                runs: [],
+              }),
       })
-      .mockResolvedValueOnce({
-        json: () =>
-          Promise.resolve({
-            roots: [],
-            runs: [],
-          }),
-      })
+    })
     const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
 
     refreshHistoryPanel()
@@ -1948,6 +1995,7 @@ describe('history panel actions', () => {
     expect(document.getElementById('history-search-input').value).toBe('')
     expect(document.getElementById('history-root-input').value).toBe('')
     expect(document.getElementById('history-exit-filter').value).toBe('all')
+    expect(document.getElementById('history-project-filter').value).toBe('all')
     expect(document.getElementById('history-date-filter').value).toBe('all')
     expect(document.getElementById('history-starred-toggle').checked).toBe(false)
   })

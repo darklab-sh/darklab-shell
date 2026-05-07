@@ -431,6 +431,19 @@
     }
   });
 
+  function _openProjectsFromHud(event) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    if (typeof global.openProjectWorkspace === 'function') {
+      void global.openProjectWorkspace();
+    }
+  }
+
+  hudProjectCell?.addEventListener('click', _openProjectsFromHud);
+  hudProjectCell?.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') _openProjectsFromHud(event);
+  });
+
   // ── HUD action buttons ──────────────────────────────────────────
   // Desktop-only mirror of the per-tab `.terminal-actions` footer. Each
   // button resolves the active tab at click time so no per-tab wiring is
@@ -1845,9 +1858,13 @@
     return btn;
   }
 
-  function _orderedProjectRows(activeId) {
+  function _projectIsArchived(project) {
+    return String(project && project.status || '') === 'archived';
+  }
+
+  function _orderedProjectRows(activeId, rows = projectWorkspaceRows) {
     const normalizedActiveId = String(activeId || '');
-    return projectWorkspaceRows.slice().sort((left, right) => {
+    return (Array.isArray(rows) ? rows : []).slice().sort((left, right) => {
       const leftId = String(left && left.id || '');
       const rightId = String(right && right.id || '');
       if (leftId === normalizedActiveId && rightId !== normalizedActiveId) return -1;
@@ -1858,6 +1875,54 @@
         { sensitivity: 'base', numeric: true },
       );
     });
+  }
+
+  function _projectListSection(label) {
+    const heading = document.createElement('div');
+    heading.className = 'project-workspace-section-label';
+    heading.textContent = label;
+    return heading;
+  }
+
+  function _renderProjectListRow(project, activeId) {
+    const projectId = String(project.id || '');
+    const summary = _projectSummary(projectId);
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'project-workspace-row'
+      + (projectId === activeId ? ' is-active' : '')
+      + (projectId === projectWorkspaceSelectedId ? ' is-selected' : '');
+    row.dataset.projectId = projectId;
+    row.dataset.projectAction = 'select';
+
+    const main = document.createElement('div');
+    main.className = 'project-workspace-main';
+    const title = document.createElement('div');
+    title.className = 'project-workspace-title-row';
+    const name = document.createElement('span');
+    name.className = 'project-workspace-name';
+    name.textContent = String(project.name || project.slug || projectId);
+    title.appendChild(name);
+    const statusText = projectId === activeId
+      ? 'active'
+      : (_projectIsArchived(project) ? 'archived' : '');
+    if (statusText) {
+      const status = document.createElement('span');
+      status.className = 'project-workspace-status' + (projectId === activeId ? ' is-active' : '');
+      status.textContent = statusText;
+      title.appendChild(status);
+    }
+    const countsWrap = document.createElement('div');
+    countsWrap.className = 'project-workspace-counts';
+    _projectCountEntries(summary).slice(0, 4).forEach(item => {
+      const chip = document.createElement('span');
+      chip.className = 'project-workspace-count';
+      chip.textContent = `${item.value} ${item.label}`;
+      countsWrap.appendChild(chip);
+    });
+    main.append(title, countsWrap);
+    row.appendChild(main);
+    return row;
   }
 
   function _renderProjectList() {
@@ -1872,46 +1937,19 @@
       return;
     }
     const activeId = activeProject && activeProject.id ? String(activeProject.id) : '';
-    _orderedProjectRows(activeId).forEach(project => {
-      const projectId = String(project.id || '');
-      const summary = _projectSummary(projectId);
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'project-workspace-row'
-        + (projectId === activeId ? ' is-active' : '')
-        + (projectId === projectWorkspaceSelectedId ? ' is-selected' : '');
-      row.dataset.projectId = projectId;
-      row.dataset.projectAction = 'select';
-
-      const main = document.createElement('div');
-      main.className = 'project-workspace-main';
-      const title = document.createElement('div');
-      title.className = 'project-workspace-title-row';
-      const name = document.createElement('span');
-      name.className = 'project-workspace-name';
-      name.textContent = String(project.name || project.slug || projectId);
-      title.appendChild(name);
-      const statusText = projectId === activeId
-        ? 'active'
-        : (String(project.status || '') === 'archived' ? 'archived' : '');
-      if (statusText) {
-        const status = document.createElement('span');
-        status.className = 'project-workspace-status' + (projectId === activeId ? ' is-active' : '');
-        status.textContent = statusText;
-        title.appendChild(status);
-      }
-      const countsWrap = document.createElement('div');
-      countsWrap.className = 'project-workspace-counts';
-      _projectCountEntries(summary).slice(0, 4).forEach(item => {
-        const chip = document.createElement('span');
-        chip.className = 'project-workspace-count';
-        chip.textContent = `${item.value} ${item.label}`;
-        countsWrap.appendChild(chip);
-      });
-      main.append(title, countsWrap);
-      row.appendChild(main);
-      projectWorkspaceBody.appendChild(row);
+    const currentProjects = projectWorkspaceRows.filter(project => !_projectIsArchived(project));
+    const archivedProjects = projectWorkspaceRows.filter(project => _projectIsArchived(project));
+    const hasArchived = archivedProjects.length > 0;
+    if (hasArchived && currentProjects.length) projectWorkspaceBody.appendChild(_projectListSection('Current'));
+    _orderedProjectRows(activeId, currentProjects).forEach(project => {
+      projectWorkspaceBody.appendChild(_renderProjectListRow(project, activeId));
     });
+    if (hasArchived) {
+      projectWorkspaceBody.appendChild(_projectListSection('Archived'));
+      _orderedProjectRows('', archivedProjects).forEach(project => {
+        projectWorkspaceBody.appendChild(_renderProjectListRow(project, activeId));
+      });
+    }
   }
 
   function _renderProjectHeader(project, summary) {

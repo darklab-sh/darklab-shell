@@ -93,6 +93,7 @@ const historyRootInput = document.getElementById('history-root-input');
 const historyRootDropdown = document.getElementById('history-root-dropdown');
 const historyExitFilter = document.getElementById('history-exit-filter');
 const historyDateFilter = document.getElementById('history-date-filter');
+const historyProjectFilter = document.getElementById('history-project-filter');
 const historyStarredToggle = document.getElementById('history-starred-toggle');
 const historyClearFiltersBtn = document.getElementById('history-clear-filters');
 const historyActiveFilters = document.getElementById('history-active-filters');

@@ -48,6 +48,9 @@ function loadShellChrome({
       <span id="hud-tabs"></span>
       <span id="hud-latency"></span>
       <span id="hud-session"></span>
+      <button id="hud-project-cell" type="button">
+        <span id="hud-project"></span>
+      </button>
       <span id="hud-uptime"></span>
       <span id="hud-clock"></span>
       <span id="hud-db"></span>
@@ -393,6 +396,95 @@ describe('shell chrome project workspace', () => {
     expect(rowText('project-1')).not.toContain('active')
     expect(rowText('project-2')).toContain('active')
     expect(orderedProjectIds()).toEqual(['project-2', 'project-4', 'project-1', 'project-3'])
+  })
+
+  it('opens projects from the active project HUD chip', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project: { id: 'project-1', name: 'darklab.sh', status: 'active' } }),
+        })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'darklab.sh', status: 'active' }] }),
+        })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project: { id: 'project-1', name: 'darklab.sh', status: 'active' },
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, annotations: 0 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    loadShellChrome({ apiFetch })
+
+    await tick()
+    document.getElementById('hud-project-cell').click()
+    await tick()
+    await tick()
+
+    expect(document.getElementById('project-workspace-overlay').classList.contains('open')).toBe(true)
+    expect(apiFetch).toHaveBeenCalledWith('/projects?include_archived=1', { cache: 'no-store' })
+  })
+
+  it('separates current and archived projects when archived projects exist', async () => {
+    const projects = [
+      { id: 'project-1', name: 'darklab.sh', status: 'active' },
+      { id: 'project-2', name: 'old.darklab.sh', status: 'archived' },
+      { id: 'project-3', name: 'api.darklab.sh', status: 'active' },
+    ]
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project: projects[0] }),
+        })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects }),
+        })
+      }
+      if (url.endsWith('/summary')) {
+        const projectId = url.split('/')[2]
+        const project = projects.find(item => item.id === projectId) || null
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project,
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, annotations: 0 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const shell = loadShellChrome({ apiFetch })
+
+    await shell.openProjectWorkspace()
+    await tick()
+
+    const labels = [...document.querySelectorAll('.project-workspace-section-label')]
+      .map(node => node.textContent)
+    const orderedProjectIds = [...document.querySelectorAll('[data-project-action="select"]')]
+      .map(row => row.dataset.projectId)
+    expect(labels).toEqual(['Current', 'Archived'])
+    expect(orderedProjectIds).toEqual(['project-1', 'project-3', 'project-2'])
   })
 
   it('toggles the active project external run capture preference', async () => {

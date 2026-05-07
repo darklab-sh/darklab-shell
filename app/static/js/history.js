@@ -61,9 +61,13 @@ let _historyFilters = {
   commandRoot: '',
   exitCode: 'all',
   dateRange: 'all',
+  projectId: 'all',
   starredOnly: false,
 };
 let _historyMobileAdvancedOpen = false;
+let _historyProjectOptions = [];
+let _historyProjectOptionsLoaded = false;
+let _historyProjectOptionsLoading = null;
 let _historyRootSuggestions = [];
 let _historyRootFiltered = [];
 let _historyRootIndex = -1;
@@ -158,6 +162,7 @@ function _syncHistoryFilterControls() {
   if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.value = _historyFilters.commandRoot;
   if (typeof historyExitFilter !== 'undefined' && historyExitFilter) historyExitFilter.value = _historyFilters.exitCode;
   if (typeof historyDateFilter !== 'undefined' && historyDateFilter) historyDateFilter.value = _historyFilters.dateRange;
+  _syncHistoryProjectFilterOptions();
   if (typeof historyStarredToggle !== 'undefined' && historyStarredToggle) historyStarredToggle.checked = !!_historyFilters.starredOnly;
   const runOnlyEnabled = _historyFilters.type !== 'snapshots';
   if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.disabled = !runOnlyEnabled;
@@ -167,6 +172,7 @@ function _syncHistoryFilterControls() {
     if (typeof historyTypeFilter !== 'undefined') syncAppSelect(historyTypeFilter);
     if (typeof historyExitFilter !== 'undefined') syncAppSelect(historyExitFilter);
     if (typeof historyDateFilter !== 'undefined') syncAppSelect(historyDateFilter);
+    if (typeof historyProjectFilter !== 'undefined') syncAppSelect(historyProjectFilter);
   }
   if (typeof histClearAllBtn !== 'undefined' && histClearAllBtn) {
     histClearAllBtn.classList.toggle('u-hidden', _historyFilters.type === 'snapshots');
@@ -317,7 +323,10 @@ function _historyRefreshRootDropdown() {
 }
 
 function _historyActiveFilterItems() {
-  return _historyCore.activeFilterItems(_historyFilters);
+  return _historyCore.activeFilterItems({
+    ..._historyFilters,
+    projectLabel: _historyProjectLabelForId(_historyFilters.projectId),
+  });
 }
 
 function _historySetPage(nextPage, { refresh = true } = {}) {
@@ -481,6 +490,7 @@ function openHistoryWithFilters(filters = {}) {
     commandRoot: _normalizeHistoryFilterValue(nextFilters.commandRoot),
     exitCode: _normalizeHistoryFilterValue(nextFilters.exitCode) || 'all',
     dateRange: _normalizeHistoryFilterValue(nextFilters.dateRange) || 'all',
+    projectId: _normalizeHistoryFilterValue(nextFilters.projectId) || 'all',
     starredOnly: !!nextFilters.starredOnly,
   };
   _historyPaging.page = 1;
@@ -503,6 +513,7 @@ function clearHistoryFilters() {
     commandRoot: '',
     exitCode: 'all',
     dateRange: 'all',
+    projectId: 'all',
     starredOnly: false,
   };
   _historyPaging.page = 1;
@@ -819,6 +830,69 @@ function _historyElapsedLabel(run) {
 function _historyProjectDisplayName(project) {
   if (!project || typeof project !== 'object') return '';
   return String(project.name || project.slug || project.id || '').trim();
+}
+
+function _historyProjectLabelForId(projectId) {
+  const normalized = _normalizeHistoryFilterValue(projectId);
+  if (!normalized || normalized === 'all') return '';
+  const project = _historyProjectOptions.find(item => String(item && item.id || '') === normalized);
+  return _historyProjectDisplayName(project) || normalized;
+}
+
+function _syncHistoryProjectFilterOptions() {
+  if (typeof historyProjectFilter === 'undefined' || !historyProjectFilter) return;
+  const selected = _normalizeHistoryFilterValue(_historyFilters.projectId) || 'all';
+  historyProjectFilter.replaceChildren();
+  const allOption = document.createElement('option');
+  allOption.value = 'all';
+  allOption.textContent = 'project: all';
+  historyProjectFilter.appendChild(allOption);
+  _historyProjectOptions.forEach((project) => {
+    const projectId = String(project && project.id || '');
+    if (!projectId) return;
+    const option = document.createElement('option');
+    option.value = projectId;
+    option.textContent = `project: ${_historyProjectDisplayName(project) || projectId}`;
+    historyProjectFilter.appendChild(option);
+  });
+  if (selected !== 'all' && !_historyProjectOptions.some(project => String(project && project.id || '') === selected)) {
+    const stale = document.createElement('option');
+    stale.value = selected;
+    stale.textContent = `project: ${selected}`;
+    historyProjectFilter.appendChild(stale);
+  }
+  historyProjectFilter.value = selected;
+  if (typeof syncAppSelect === 'function') syncAppSelect(historyProjectFilter);
+}
+
+function _ensureHistoryProjectFilterOptions() {
+  if (_historyProjectOptionsLoaded) return Promise.resolve(_historyProjectOptions);
+  if (_historyProjectOptionsLoading) return _historyProjectOptionsLoading;
+  _historyProjectOptionsLoading = apiFetch('/projects?include_archived=1', { cache: 'no-store' })
+    .then((resp) => {
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return resp.json();
+    })
+    .then((data) => {
+      _historyProjectOptions = (Array.isArray(data.projects) ? data.projects : [])
+        .filter(project => project && project.id)
+        .sort((a, b) => _historyProjectDisplayName(a).localeCompare(
+          _historyProjectDisplayName(b),
+          undefined,
+          { sensitivity: 'base', numeric: true },
+        ));
+      _historyProjectOptionsLoaded = true;
+      _syncHistoryProjectFilterOptions();
+      return _historyProjectOptions;
+    })
+    .catch((err) => {
+      if (typeof logClientError === 'function') logClientError('failed to load /projects for history filter', err);
+      return _historyProjectOptions;
+    })
+    .finally(() => {
+      _historyProjectOptionsLoading = null;
+    });
+  return _historyProjectOptionsLoading;
 }
 
 async function _historyLoadActiveProject() {
@@ -1998,6 +2072,7 @@ window.restoreHistoryRun = restoreHistoryRun;
 function refreshHistoryPanel() {
   // The panel is populated on demand so we always fetch the latest persisted
   // history instead of assuming the in-memory tab state is authoritative.
+  _ensureHistoryProjectFilterOptions().catch(() => {});
   _syncHistoryFilterControls();
   _renderHistoryActiveFilters();
   apiFetch(_buildHistoryRequestUrl()).then(r => r.json()).then(data => {
@@ -2278,6 +2353,15 @@ if (typeof historyExitFilter !== 'undefined' && historyExitFilter) {
 if (typeof historyDateFilter !== 'undefined' && historyDateFilter) {
   historyDateFilter.addEventListener('change', e => {
     _setHistoryFilter('dateRange', e.target.value);
+  });
+}
+
+if (typeof historyProjectFilter !== 'undefined' && historyProjectFilter) {
+  historyProjectFilter.addEventListener('focus', () => {
+    _ensureHistoryProjectFilterOptions().catch(() => {});
+  });
+  historyProjectFilter.addEventListener('change', e => {
+    _setHistoryFilter('projectId', e.target.value);
   });
 }
 

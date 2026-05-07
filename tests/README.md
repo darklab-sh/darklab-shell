@@ -20,12 +20,12 @@ Workspace file behavior is intentionally split across all three layers: pytest o
 
 Current totals:
 
-- behavior tests: 2,521
+- behavior tests: 2,525
 - docs/inventory meta-tests: 30
 - `pytest`: 1273 (1243 behavior + 30 meta)
-- `vitest`: 1038
+- `vitest`: 1042
 - `playwright`: 240
-- total: 2,551
+- total: 2,555
 
 This document is organized in two parts:
 
@@ -1843,6 +1843,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `_historyRelativeTime buckets recent diffs as just now / m / h / d and falls back to a short date` | Verifies the relative-time helper used by the mobile recents sheet returns stable bucket strings and a short date for older runs. |
 | `desktop history rows keep absolute clock time and no tooltip on the time span` | Regression: the desktop history drawer keeps exact clock time and does not set a title tooltip on the time span, so only the mobile sheet switches to relative copy. |
 | `refreshHistoryPanel sends the active server-side filters to /history` | Verifies that the history drawer sends the current search and filter state to `/history`. |
+| `includes the selected project in history requests and active filter chips` | Verifies that the history drawer can filter by project and renders the selected project as a removable active-filter chip. |
 | `refreshHistoryPanel renders pagination controls and advances to the next page` | Verifies that the history drawer shows a paginated window and advances with the control buttons. |
 | `populates command root suggestions from loaded history runs` | Verifies that the history drawer populates command-root suggestions from the server-provided root list. |
 | `keeps root suggestions stable when a refresh returns no roots while typing` | Verifies that auto-refresh responses cannot erase the command-root suggestion list while the user is typing in the focused command-name filter. |
@@ -2239,6 +2240,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `marks Redis offline when the status poll cannot reach the server` | Verifies that a failed HUD status poll clears a previously online Redis pill instead of leaving stale state visible. |
 | `keeps Redis as N/A on a failed poll when Redis was not configured` | Verifies that an unreachable server does not turn an already unconfigured Redis pill into a false configured-offline state. |
 | `labels only the current active project in the project list` | Verifies that the active project is pinned first and that only the current active project receives the active marker. |
+| `opens projects from the active project HUD chip` | Verifies that clicking the active project HUD chip opens the Projects modal. |
+| `separates current and archived projects when archived projects exist` | Verifies that the Projects modal groups current and archived projects only when archived projects are present. |
 | `toggles the active project external run capture preference` | Verifies that the Projects modal can disable automatic active-project capture for external command runs. |
 | `keeps the target editor dropdown value in sync with the last saved target type` | Verifies that the project target editor initializes and submits the same target type that the custom dropdown displays. |
 | `validates project target values before saving` | Verifies that project target values are validated client-side before the modal saves a new or edited target. |
@@ -2486,6 +2489,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `blurs the focused element and returns true` | Verifies blurActiveElement blurs the currently-focused element. |
 | `keeps the native select as state while rendering a themed trigger` | Verifies app-native select enhancement keeps the original select as the state owner. |
 | `dispatches normal change events when choosing an app-native option` | Verifies app-native select option clicks emit regular select change events. |
+| `refreshes custom menu options when native select options change` | Verifies app-native select menus rebuild when async code updates the native select option list. |
 
 #### `ui_focus_trap.test.js`
 

@@ -406,7 +406,8 @@
           <span class="hud-label">session</span>
           <span id="hud-session" class="hud-value hud-muted" title="Active session identity">ANON</span>
         </div>
-        <div class="hud-cell hud-project-context u-hidden" id="hud-project-cell">
+        <div class="hud-cell hud-project-context hud-cell-clickable hud-action-cell u-hidden" id="hud-project-cell"
+             role="button" tabindex="0" aria-haspopup="dialog" aria-label="Open projects from active project">
           <span class="hud-label">project</span>
           <span id="hud-project" class="hud-value hud-muted">—</span>
         </div>
@@ -468,6 +469,9 @@
           <option value="24h">date: 24h</option>
           <option value="7d">date: 7d</option>
           <option value="30d">date: 30d</option>
+        </select>
+        <select id="history-project-filter" aria-label="Filter by project">
+          <option value="all">project: all</option>
         </select>
         <label class="history-filter-toggle control-row form-control-compact">
           <input id="history-starred-toggle" type="checkbox">
