@@ -2562,6 +2562,34 @@ body.mobile-terminal-mode .output-follow-btn {
   border-bottom-color: var(--surface);
 }
 
+.project-explorer-filter-panel {
+  display: grid;
+  gap: 8px;
+  padding: 10px 0 2px;
+}
+
+.project-explorer-filter-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.project-explorer-filter-chips {
+  flex: 0 1 auto;
+}
+
+.project-explorer-filter-empty,
+.project-target-filter-empty {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.project-target-filter-empty {
+  padding: 6px 8px;
+}
+
 .project-explorer-tab-panel {
   display: grid;
   gap: 14px;
@@ -2828,6 +2856,21 @@ body.mobile-terminal-mode .output-follow-btn {
   border-color: var(--green-dim);
   color: var(--green);
   background: var(--green-glow);
+}
+
+.project-run-row-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 260px;
+}
+
+.project-run-count-chip[disabled] {
+  cursor: default;
+  opacity: 0.56;
 }
 
 .project-explorer-group-link {

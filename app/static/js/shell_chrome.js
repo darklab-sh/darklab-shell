@@ -152,6 +152,7 @@
   let projectWorkspaceEditingTargetId = '';
   let projectWorkspaceLastTargetType = 'domain';
   let projectWorkspaceTargetFilters = new Map();
+  let projectWorkspaceRunFilters = new Map();
   let projectWorkspaceFindingStatusFilters = new Map();
   let projectWorkspaceCollapsedFindingGroups = new Set();
   let projectNotesSaveTimer = null;
@@ -844,6 +845,44 @@
     return _projectTargetFilterIds(projectId, summary).length > 0;
   }
 
+  function _projectRunFilterSet(projectId = projectWorkspaceSelectedId) {
+    const normalized = String(projectId || '');
+    if (!normalized) return new Set();
+    let filters = projectWorkspaceRunFilters.get(normalized);
+    if (!filters) {
+      filters = new Set();
+      projectWorkspaceRunFilters.set(normalized, filters);
+    }
+    return filters;
+  }
+
+  function _projectRunFilterIds(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
+    const available = new Set(_projectRunItems(summary).map(run => String(run && run.id || '')).filter(Boolean));
+    const filters = _projectRunFilterSet(projectId);
+    [...filters].forEach((runId) => {
+      if (!available.has(runId)) filters.delete(runId);
+    });
+    return [...filters];
+  }
+
+  function _projectRunFilterActive(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
+    return _projectRunFilterIds(projectId, summary).length > 0;
+  }
+
+  function _projectRunFilterLabel(run) {
+    if (!run) return 'run';
+    const command = String(run.command || '').trim();
+    const shortId = _shortProjectRunId(run.id);
+    return `${command || 'Run'}${shortId ? ` (${shortId})` : ''}`;
+  }
+
+  function _projectRunFilterChipLabel(run) {
+    if (!run) return 'run';
+    const command = String(run.command || '').trim() || 'Run';
+    if (command.length <= 16) return command;
+    return `${command.slice(0, 14).trimEnd()} ...`;
+  }
+
   function _projectFindingStatusFilterSet(projectId = projectWorkspaceSelectedId) {
     const normalized = String(projectId || '');
     if (!normalized) return new Set();
@@ -1250,6 +1289,41 @@
     return btn;
   }
 
+  function _projectRunFindingCount(projectId, runId) {
+    const normalizedRunId = String(runId || '');
+    if (!normalizedRunId || !_projectFindingsLoaded(projectId)) return 0;
+    return _projectFindingItems(projectId).filter(finding => String(finding && finding.run_id || '') === normalizedRunId).length;
+  }
+
+  function _projectRunArtifactCount(summary, runId) {
+    const normalizedRunId = String(runId || '');
+    if (!normalizedRunId) return 0;
+    return _projectArtifactItems(summary).filter(artifact => String(artifact && artifact.run_id || '') === normalizedRunId).length;
+  }
+
+  function _projectRunControls(projectId, run, summary) {
+    const runId = String(run && run.id || '');
+    const wrap = document.createElement('div');
+    wrap.className = 'project-run-row-actions';
+    [
+      ['finding', _projectRunFindingCount(projectId, runId), 'filter-run-findings'],
+      ['artifact', _projectRunArtifactCount(summary, runId), 'filter-run-artifacts'],
+    ].forEach(([label, count, action]) => {
+      const chip = _makeProjectButton(`${count} ${label}${count === 1 ? '' : 's'}`, action, projectId, count ? 'secondary' : 'ghost');
+      chip.classList.add('project-run-count-chip');
+      chip.disabled = !count;
+      chip.dataset.runId = runId;
+      chip.dataset.runCommand = String(run.command || '');
+      wrap.appendChild(chip);
+    });
+    const restore = _makeProjectButton('Restore', 'open-run', projectId);
+    restore.dataset.runId = runId;
+    restore.dataset.runCommand = String(run.command || '');
+    wrap.appendChild(restore);
+    wrap.appendChild(_projectRunRemoveControl(projectId, run));
+    return wrap;
+  }
+
   function _renderProjectTargets(projectId, targets) {
     if (!targets.length) return _emptyProjectPanel('No targets yet.');
     const list = document.createElement('div');
@@ -1389,6 +1463,146 @@
     container.appendChild(wrap);
   }
 
+  function _projectFilterDropdown(label, count, optionNodes) {
+    const dropdown = document.createElement('details');
+    dropdown.className = 'project-target-filter-menu project-shared-filter-menu';
+    const summaryEl = document.createElement('summary');
+    summaryEl.className = 'btn btn-secondary btn-compact project-target-filter-trigger';
+    summaryEl.textContent = count ? `${label} (${count})` : label;
+    dropdown.appendChild(summaryEl);
+
+    const menu = document.createElement('div');
+    menu.className = 'project-target-filter-options';
+    if (optionNodes.length) {
+      optionNodes.forEach(node => menu.appendChild(node));
+    } else {
+      const empty = document.createElement('div');
+      empty.className = 'project-target-filter-empty';
+      empty.textContent = 'No options available';
+      menu.appendChild(empty);
+    }
+    dropdown.appendChild(menu);
+    return dropdown;
+  }
+
+  function _projectFilterOption({ labelText, value, checked, dataset }) {
+    const label = document.createElement('label');
+    label.className = 'project-target-filter-option';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = value;
+    input.checked = checked;
+    Object.entries(dataset || {}).forEach(([key, dataValue]) => {
+      input.dataset[key] = dataValue;
+    });
+    const mark = document.createElement('span');
+    mark.className = 'project-target-filter-check';
+    mark.setAttribute('aria-hidden', 'true');
+    mark.textContent = '✓';
+    const text = document.createElement('span');
+    text.className = 'project-target-filter-option-label';
+    text.textContent = labelText;
+    label.append(input, mark, text);
+    return label;
+  }
+
+  function _projectFilterChip({ projectId, label, value, clearAttr }) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'project-target-filter-chip';
+    chip.dataset.projectId = projectId;
+    chip.dataset[clearAttr] = value;
+    chip.textContent = `${label} ×`;
+    return chip;
+  }
+
+  function _renderProjectFilterBar(projectId, summary) {
+    const wrap = document.createElement('div');
+    wrap.className = 'project-explorer-filter-panel';
+
+    const controls = document.createElement('div');
+    controls.className = 'project-explorer-filter-controls';
+
+    const selectedTargets = new Set(_projectTargetFilterIds(projectId, summary));
+    const targetOptions = _projectTargetItems(summary).map(target => {
+      const targetId = String(target && target.id || '');
+      return _projectFilterOption({
+        labelText: _projectTargetFilterLabel(target),
+        value: targetId,
+        checked: selectedTargets.has(targetId),
+        dataset: { projectTargetFilterOption: '1', projectId },
+      });
+    });
+    controls.appendChild(_projectFilterDropdown('Filter by target', selectedTargets.size, targetOptions));
+
+    const selectedRuns = new Set(_projectRunFilterIds(projectId, summary));
+    const runOptions = _projectRunItems(summary).map(run => {
+      const runId = String(run && run.id || '');
+      return _projectFilterOption({
+        labelText: _projectRunFilterLabel(run),
+        value: runId,
+        checked: selectedRuns.has(runId),
+        dataset: { projectRunFilterOption: '1', projectId },
+      });
+    });
+    controls.appendChild(_projectFilterDropdown('Filter by run', selectedRuns.size, runOptions));
+
+    const selectedStatuses = new Set(_projectFindingStatusFilterValues(projectId));
+    const statusOptions = FINDING_REVIEW_STATES.map(({ value, label: labelText }) => _projectFilterOption({
+      labelText,
+      value,
+      checked: selectedStatuses.has(value),
+      dataset: { projectFindingStatusFilterOption: '1', projectId },
+    }));
+    controls.appendChild(_projectFilterDropdown('Filter by status', selectedStatuses.size, statusOptions));
+    wrap.appendChild(controls);
+
+    const chips = document.createElement('div');
+    chips.className = 'project-target-filter-chips project-explorer-filter-chips';
+    selectedTargets.forEach((targetId) => {
+      const target = _projectTargetById(summary, targetId);
+      chips.appendChild(_projectFilterChip({
+        projectId,
+        label: `target: ${_projectTargetFilterLabel(target)}`,
+        value: targetId,
+        clearAttr: 'projectTargetFilterClear',
+      }));
+    });
+    selectedRuns.forEach((runId) => {
+      chips.appendChild(_projectFilterChip({
+        projectId,
+        label: `run: ${_projectRunFilterChipLabel(_projectRunById(summary, runId))}`,
+        value: runId,
+        clearAttr: 'projectRunFilterClear',
+      }));
+    });
+    selectedStatuses.forEach((status) => {
+      chips.appendChild(_projectFilterChip({
+        projectId,
+        label: `status: ${_findingReviewStateLabel(status)}`,
+        value: status,
+        clearAttr: 'projectFindingStatusFilterClear',
+      }));
+    });
+    const hasFilters = selectedTargets.size || selectedRuns.size || selectedStatuses.size;
+    if (hasFilters) {
+      const clearAll = document.createElement('button');
+      clearAll.type = 'button';
+      clearAll.className = 'project-target-filter-clear';
+      clearAll.dataset.projectFilterClearAll = '1';
+      clearAll.dataset.projectId = projectId;
+      clearAll.textContent = 'Clear filters';
+      chips.appendChild(clearAll);
+    } else {
+      const empty = document.createElement('span');
+      empty.className = 'project-explorer-filter-empty';
+      empty.textContent = 'No filters applied';
+      chips.appendChild(empty);
+    }
+    wrap.appendChild(chips);
+    return wrap;
+  }
+
   function _projectRunDirectTargetIds(run) {
     const ids = new Set();
     const add = value => {
@@ -1438,7 +1652,11 @@
   }
 
   function _filteredProjectRuns(projectId, summary) {
-    const runs = _projectRunItems(summary);
+    let runs = _projectRunItems(summary);
+    const runIds = new Set(_projectRunFilterIds(projectId, summary));
+    if (runIds.size) {
+      runs = runs.filter(run => runIds.has(String(run && run.id || '')));
+    }
     const filterIds = _projectTargetFilterIds(projectId, summary);
     if (!filterIds.length) return runs;
     const matchingRunIds = _projectRunIdsMatchingTargets(projectId, filterIds);
@@ -1451,6 +1669,10 @@
     if (filterIds.size) {
       findings = findings.filter(finding => [..._projectFindingTargetIds(finding)].some(targetId => filterIds.has(targetId)));
     }
+    const runFilters = new Set(_projectRunFilterIds(projectId, summary));
+    if (runFilters.size) {
+      findings = findings.filter(finding => runFilters.has(String(finding && finding.run_id || '')));
+    }
     const statusFilters = new Set(_projectFindingStatusFilterValues(projectId));
     if (statusFilters.size) {
       findings = findings.filter(finding => statusFilters.has(String(finding && finding.review_state || 'new')));
@@ -1459,7 +1681,11 @@
   }
 
   function _filteredProjectArtifacts(projectId, summary) {
-    const artifacts = _projectArtifactItems(summary);
+    let artifacts = _projectArtifactItems(summary);
+    const runFilters = new Set(_projectRunFilterIds(projectId, summary));
+    if (runFilters.size) {
+      artifacts = artifacts.filter(artifact => runFilters.has(String(artifact && artifact.run_id || '')));
+    }
     const filterIds = _projectTargetFilterIds(projectId, summary);
     if (!filterIds.length) return artifacts;
     const matchingRunIds = _projectRunIdsMatchingTargets(projectId, filterIds);
@@ -1786,7 +2012,7 @@
       return;
     }
     if (!runs.length) {
-      container.appendChild(_emptyProjectPanel('No linked runs match the selected targets.'));
+      container.appendChild(_emptyProjectPanel('No linked runs match the selected filters.'));
       return;
     }
     runs.forEach((run) => {
@@ -1796,10 +2022,11 @@
         meta: _formatProjectDate(run.started),
         detail: `${exit} · ${Number(run.output_line_count || 0)} output lines · linked ${_formatProjectDate(run.created)}`,
         badge: run.id ? '' : exit,
-        accessory: run.id ? _projectRunRemoveControl(projectId, run) : null,
+        accessory: run.id ? _projectRunControls(projectId, run, summary) : null,
         action: run.id ? {
-          action: 'open-run',
+          action: 'filter-run',
           dataset: {
+            projectId,
             runId: String(run.id || ''),
             runCommand: String(run.command || ''),
           },
@@ -1957,12 +2184,11 @@
       return;
     }
     _syncProjectForms(project);
-    _renderProjectHeader(project, summary).forEach(node => projectExplorerBody.appendChild(node));
+    const projectId = String(project.id || '');
+    const [header, tabs] = _renderProjectHeader(project, summary);
+    projectExplorerBody.append(header, _renderProjectFilterBar(projectId, summary), tabs);
     const content = document.createElement('div');
     content.className = 'project-explorer-tab-panel';
-    const projectId = String(project.id || '');
-    _renderProjectTargetFilterControls(content, projectId, summary);
-    _renderProjectFindingStatusFilterControls(content, projectId);
     if (projectWorkspaceTab === 'details') _renderProjectDetails(content, project, summary);
     else if (projectWorkspaceTab === 'runs') _renderProjectRuns(content, projectId, summary);
     else if (projectWorkspaceTab === 'findings') _renderProjectFindings(content, projectId, summary);
@@ -1974,7 +2200,8 @@
     }
     if (
       projectWorkspaceTab === 'findings'
-      || (['runs', 'artifacts'].includes(projectWorkspaceTab) && _projectTargetFilterActive(projectId, summary))
+      || ['runs', 'artifacts'].includes(projectWorkspaceTab)
+      || _projectTargetFilterActive(projectId, summary)
     ) {
       _loadProjectFindings(projectId).catch(() => {});
     }
@@ -2239,6 +2466,18 @@
       _renderProjectExplorer();
       return;
     }
+    const runFilterControl = event.target.closest?.('[data-project-run-filter-option]');
+    if (runFilterControl) {
+      event.stopPropagation();
+      const projectId = String(runFilterControl.dataset.projectId || projectWorkspaceSelectedId || '');
+      const runId = String(runFilterControl.value || '');
+      if (!projectId || !runId) return;
+      const filters = _projectRunFilterSet(projectId);
+      if (runFilterControl.checked) filters.add(runId);
+      else filters.delete(runId);
+      _renderProjectExplorer();
+      return;
+    }
     const statusFilterControl = event.target.closest?.('[data-project-finding-status-filter-option]');
     if (statusFilterControl) {
       event.stopPropagation();
@@ -2303,6 +2542,18 @@
       _renderProjectExplorer();
       return;
     }
+    const runFilterClear = event.target.closest?.('[data-project-run-filter-clear]');
+    if (runFilterClear) {
+      event.preventDefault();
+      event.stopPropagation();
+      const projectId = String(runFilterClear.dataset.projectId || projectWorkspaceSelectedId || '');
+      const runId = String(runFilterClear.dataset.projectRunFilterClear || '');
+      const filters = _projectRunFilterSet(projectId);
+      if (runId === 'all') filters.clear();
+      else if (runId) filters.delete(runId);
+      _renderProjectExplorer();
+      return;
+    }
     const statusFilterClear = event.target.closest?.('[data-project-finding-status-filter-clear]');
     if (statusFilterClear) {
       event.preventDefault();
@@ -2312,6 +2563,17 @@
       const filters = _projectFindingStatusFilterSet(projectId);
       if (status === 'all') filters.clear();
       else if (status) filters.delete(status);
+      _renderProjectExplorer();
+      return;
+    }
+    const allFilterClear = event.target.closest?.('[data-project-filter-clear-all]');
+    if (allFilterClear) {
+      event.preventDefault();
+      event.stopPropagation();
+      const projectId = String(allFilterClear.dataset.projectId || projectWorkspaceSelectedId || '');
+      _projectTargetFilterSet(projectId).clear();
+      _projectRunFilterSet(projectId).clear();
+      _projectFindingStatusFilterSet(projectId).clear();
       _renderProjectExplorer();
       return;
     }
@@ -2382,6 +2644,16 @@
           loadProjectAutocompleteTargets().catch(() => {});
         }
         _setProjectWorkspaceMessage('Target removed.');
+        return;
+      } else if (action === 'filter-run' || action === 'filter-run-findings' || action === 'filter-run-artifacts') {
+        const runId = String(btn.dataset.runId || '').trim();
+        if (!projectId || !runId) throw new Error('Run is missing its identifier.');
+        const filters = _projectRunFilterSet(projectId);
+        filters.clear();
+        filters.add(runId);
+        if (action === 'filter-run-findings') projectWorkspaceTab = 'findings';
+        if (action === 'filter-run-artifacts') projectWorkspaceTab = 'artifacts';
+        _renderProjectExplorer();
         return;
       } else if (action === 'open-run') {
         const runId = String(btn.dataset.runId || '').trim();
