@@ -555,6 +555,15 @@ body.mobile-terminal-mode {
     font-size: 11px;
     opacity: 0.8;
   }
+  .menu-sheet .menu-project-context {
+    cursor: default;
+  }
+  .menu-sheet .menu-project-context .menu-item-hint {
+    max-width: 56%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   /* Surface-specific chev color: drill-chev (drill-in rows) and
      disclosure-chev (timestamps expander) both render in --border-bright
      so they recede against the menu text. The primitives in components.css

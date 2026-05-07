@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 
 import {
   createShareSnapshot,
+  clickHistoryRunMenuAction,
   openHistory,
   openHistoryWithEntries,
   runCommand,
@@ -505,8 +506,11 @@ const scenes = [
       await page
         .locator('#history-list .history-entry:not(.history-entry-snapshot)')
         .first()
-        .locator('[data-action="permalink"]')
-        .click()
+        .evaluate(node => node.dataset.captureHistoryEntry = 'permalink-source')
+      await clickHistoryRunMenuAction(
+        page.locator('[data-capture-history-entry="permalink-source"]'),
+        'permalink',
+      )
       const copied = await page.evaluate(() => window.__clipboardText || '')
       await page.goto(copied, { waitUntil: 'domcontentloaded' })
       await expect(page.locator('body.permalink-page')).toBeVisible()

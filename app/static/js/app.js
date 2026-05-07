@@ -10,6 +10,44 @@ const _defaultMobilePromptLabel = (() => {
   return String(mobileComposerRow.querySelector('.mobile-prompt-label')?.textContent || '$');
 })();
 let _composerPromptMode = null;
+let promptUsernameSavedDelayTimer = null;
+let promptUsernameSavedHideTimer = null;
+const FIELD_SAVED_INDICATOR_DELAY_MS = 200;
+const FIELD_SAVED_INDICATOR_VISIBLE_MS = 1600;
+
+function _setFieldSavedIndicator(el, visible) {
+  if (!el) return;
+  el.classList.toggle('u-hidden', !visible);
+}
+
+function _clearPromptUsernameSavedTimers() {
+  if (promptUsernameSavedDelayTimer) {
+    clearTimeout(promptUsernameSavedDelayTimer);
+    promptUsernameSavedDelayTimer = null;
+  }
+  if (promptUsernameSavedHideTimer) {
+    clearTimeout(promptUsernameSavedHideTimer);
+    promptUsernameSavedHideTimer = null;
+  }
+}
+
+function hidePromptUsernameSavedIndicator() {
+  _clearPromptUsernameSavedTimers();
+  _setFieldSavedIndicator(optionsPromptUsernameSaved, false);
+}
+
+function showPromptUsernameSavedIndicator() {
+  _clearPromptUsernameSavedTimers();
+  _setFieldSavedIndicator(optionsPromptUsernameSaved, false);
+  promptUsernameSavedDelayTimer = setTimeout(() => {
+    promptUsernameSavedDelayTimer = null;
+    _setFieldSavedIndicator(optionsPromptUsernameSaved, true);
+    promptUsernameSavedHideTimer = setTimeout(() => {
+      promptUsernameSavedHideTimer = null;
+      _setFieldSavedIndicator(optionsPromptUsernameSaved, false);
+    }, FIELD_SAVED_INDICATOR_VISIBLE_MS);
+  }, FIELD_SAVED_INDICATOR_DELAY_MS);
+}
 
 function _compactMobileComposerPath(path = '/') {
   const displayPath = String(path || '/').trim() || '/';
@@ -503,16 +541,23 @@ function _buildCurrentSessionPreferenceSnapshot() {
   const currentThemeName = (document.body && document.body.dataset && document.body.dataset.theme)
     || _savedThemeName()
     || defaultTheme;
-  return _normalizeSessionPreferences({
+  const rawPrefs = {
     pref_theme_name: currentThemeName,
     pref_timestamps: typeof tsMode === 'string' ? tsMode : 'off',
     pref_line_numbers: typeof lnMode === 'string' ? lnMode : 'off',
     pref_welcome_intro: getWelcomeIntroPreference(),
     pref_share_redaction_default: getShareRedactionDefaultPreference(),
+    pref_project_auto_link_external_runs: getProjectAutoLinkExternalRunsPreference(),
     pref_run_notify: getRunNotifyPreference(),
     pref_hud_clock: getHudClockPreference(),
     pref_prompt_username: getPromptUsernamePreference(),
-  });
+  };
+  const activeProject = typeof globalThis.getActiveProjectContext === 'function'
+    ? globalThis.getActiveProjectContext()
+    : null;
+  const activeProjectId = activeProject && activeProject.id ? String(activeProject.id) : getPreference('pref_active_project_id');
+  if (/^prj_[0-9a-f]{16}$/.test(activeProjectId)) rawPrefs.pref_active_project_id = activeProjectId;
+  return _normalizeSessionPreferences(rawPrefs);
 }
 
 async function _persistCurrentSessionPreferences() {
@@ -591,6 +636,10 @@ function getShareRedactionDefaultPreference() {
   return PreferenceCore.coerceShareRedactionDefaultMode(getPreference('pref_share_redaction_default'));
 }
 
+function getProjectAutoLinkExternalRunsPreference() {
+  return getPreference('pref_project_auto_link_external_runs') === 'off' ? 'off' : 'on';
+}
+
 function getRunNotifyPreference() {
   return PreferenceCore.coerceRunNotifyMode(getPreference('pref_run_notify'));
 }
@@ -660,6 +709,9 @@ function syncOptionsControls() {
   if (optionsWelcomeSelect) optionsWelcomeSelect.value = getWelcomeIntroPreference();
   if (optionsShareRedactionSelect) optionsShareRedactionSelect.value = getShareRedactionDefaultPreference();
   if (optionsNotifyToggle) optionsNotifyToggle.checked = getRunNotifyPreference() === 'on';
+  if (optionsProjectAutoLinkExternalRunsToggle) {
+    optionsProjectAutoLinkExternalRunsToggle.checked = getProjectAutoLinkExternalRunsPreference() !== 'off';
+  }
   if (optionsHudClockSelect) optionsHudClockSelect.value = getHudClockPreference();
   if (optionsPromptUsernameInput) {
     optionsPromptUsernameInput.value = getPromptUsernamePreference();
@@ -717,16 +769,38 @@ function applyShareRedactionDefaultPreference(mode, persist = true) {
   syncOptionsControls();
 }
 
+function applyProjectAutoLinkExternalRunsPreference(mode, persist = true) {
+  const nextMode = mode === 'off' ? 'off' : 'on';
+  if (persist) {
+    _primePreferenceValue('pref_project_auto_link_external_runs', nextMode);
+    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist project auto-link preference', err); }
+  } else {
+    _primePreferenceValue('pref_project_auto_link_external_runs', nextMode);
+  }
+  syncOptionsControls();
+}
+
 function applyPromptUsernamePreference(username, persist = true) {
   const rawUsername = String(username || '').trim();
   const nextUsername = PreferenceCore.normalizePromptUsername(rawUsername);
   if (rawUsername && !nextUsername) {
+    hidePromptUsernameSavedIndicator();
     syncPromptUsernameValidation();
     return false;
   }
   if (persist) {
     _primePreferenceValue('pref_prompt_username', nextUsername);
-    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist prompt username preference', err); }
+    try {
+      void _persistCurrentSessionPreferences()
+        .then(() => showPromptUsernameSavedIndicator())
+        .catch((err) => {
+          hidePromptUsernameSavedIndicator();
+          logClientError('failed to persist prompt username preference', err);
+        });
+    } catch (err) {
+      hidePromptUsernameSavedIndicator();
+      logClientError('failed to persist prompt username preference', err);
+    }
   } else {
     _primePreferenceValue('pref_prompt_username', nextUsername);
   }
@@ -742,6 +816,9 @@ function _closeMajorOverlays() {
   }
   if (typeof isCommandRegistryOverlayOpen === 'function' && isCommandRegistryOverlayOpen()) {
     hideCommandRegistryOverlay();
+  }
+  if (globalThis.isProjectWorkspaceOpen && globalThis.isProjectWorkspaceOpen()) {
+    globalThis.closeProjectWorkspace({ refocus: false });
   }
   if (isHistoryPanelOpen()) hideHistoryPanel();
   if (isWorkflowsOverlayOpen()) {
@@ -759,6 +836,8 @@ function _closeMajorOverlays() {
     if (typeof hideShortcutsOverlay === 'function') hideShortcutsOverlay();
   }
 }
+
+globalThis._closeMajorOverlays = _closeMajorOverlays;
 
 function openOptions() {
   // Opening one major overlay should implicitly close the others so mobile and
@@ -1155,7 +1234,7 @@ function handleTabShortcut(e) {
 
 function handleActionShortcut(e) {
   if (shouldIgnoreGlobalShortcutTarget(e.target)) return false;
-  if (e.altKey && !e.ctrlKey && !e.metaKey && eventMatchesLetter(e, 'p')) {
+  if (e.altKey && !e.ctrlKey && !e.metaKey && e.shiftKey && eventMatchesLetter(e, 'p')) {
     permalinkActiveShortcutTab();
     e.preventDefault();
     return true;
@@ -1179,7 +1258,7 @@ function handleActionShortcut(e) {
 }
 
 // Desktop chrome shortcuts (rail, search, history, options, theme, workflows,
-      // Files, and Status Monitor).
+// Files, projects, command registry, and Status Monitor).
 // The composer is allowed to pass through so prompt-focused users can still
 // trigger chrome toggles — each branch calls preventDefault so Option-glyphs
 // (`«`, `˙`, `µ`, `©`, `≤`, `ˇ`, `ß`) never leak into the prompt on macOS.
@@ -1218,6 +1297,26 @@ function handleChromeShortcut(e) {
   if (eventMatchesLetter(e, 'm')) {
     if (isStatusMonitorShortcutOpen() && typeof closeStatusMonitor === 'function') closeStatusMonitor();
     else if (typeof openStatusMonitor === 'function') void openStatusMonitor({ source: 'shortcut' });
+    e.preventDefault();
+    return true;
+  }
+  if (eventMatchesLetter(e, 'c')) {
+    if (
+      typeof isCommandRegistryOverlayOpen === 'function'
+      && isCommandRegistryOverlayOpen()
+      && typeof closeCommandRegistry === 'function'
+    ) closeCommandRegistry();
+    else if (typeof openCommandRegistry === 'function') openCommandRegistry();
+    e.preventDefault();
+    return true;
+  }
+  if (eventMatchesLetter(e, 'p')) {
+    if (
+      typeof isProjectWorkspaceOpen === 'function'
+      && isProjectWorkspaceOpen()
+      && typeof closeProjectWorkspace === 'function'
+    ) closeProjectWorkspace();
+    else if (typeof openProjectWorkspace === 'function') void openProjectWorkspace();
     e.preventDefault();
     return true;
   }

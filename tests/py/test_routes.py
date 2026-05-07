@@ -5,6 +5,7 @@ Run with: pytest tests/ (from the repo root)
 """
 
 import errno
+import io
 import json
 import logging
 import os
@@ -13,6 +14,7 @@ import sqlite3
 import tempfile
 import time
 import uuid
+import zipfile
 
 import pytest
 from datetime import datetime, timedelta, timezone
@@ -22,7 +24,9 @@ import unittest.mock as mock
 
 import app as shell_app
 import blueprints.assets as shell_assets
+import blueprints.projects as project_routes
 import config
+from builtin_commands import execute_builtin_command
 from database import DB_PATH
 from workspace import resolve_workspace_path
 
@@ -76,13 +80,17 @@ class TestIndexRoute:
 
     def test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button(self):
         client = get_client()
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["203.0.113.0/24"]}):
             body = client.get("/").get_data(as_text=True)
         assert 'id="rail-diag-btn"' in body
         assert 'href="/diag"' in body
         assert 'target="_blank"' in body
         assert 'rel="noopener noreferrer"' in body
         assert 'data-menu-action="diag"' in body
+        rail_match = re.search(r'<a class="([^"]*)" data-action="diag" id="rail-diag-btn"', body)
+        mobile_match = re.search(r'<button type="button" class="([^"]*)" data-menu-action="diag"', body)
+        assert rail_match and "u-hidden" not in rail_match.group(1)
+        assert mobile_match and "u-hidden" not in mobile_match.group(1)
 
     def test_bootstrapped_app_config_matches_config_route(self):
         client = get_client(use_forwarded_for=False)
@@ -174,6 +182,32 @@ class TestProjectRoutes:
         assert resp.status_code == 201
         return json.loads(resp.data)["project"]
 
+    def test_project_write_routes_are_rate_limited(self):
+        for view in (
+            project_routes.projects_create,
+            project_routes.projects_active_set,
+            project_routes.projects_active_clear,
+            project_routes.projects_update,
+            project_routes.projects_delete,
+            project_routes.projects_links_create,
+            project_routes.projects_links_delete,
+            project_routes.projects_targets_create,
+            project_routes.projects_targets_quick_add,
+            project_routes.projects_targets_update,
+            project_routes.projects_targets_delete,
+            project_routes.projects_packages_create,
+            project_routes.projects_packages_delete,
+            project_routes.projects_workflows_promote,
+            project_routes.findings_review_update,
+            project_routes.entity_labels_create,
+            project_routes.entity_labels_delete,
+            project_routes.entity_annotations_create,
+            project_routes.entity_annotations_update,
+            project_routes.entity_annotations_delete,
+        ):
+            assert "__wrapper-limiter-instance" in view.__dict__
+        assert "__wrapper-limiter-instance" in project_routes.projects_packages_download.__dict__
+
     def test_create_list_get_update_archive_and_delete_project(self):
         client = get_client()
         session_id = self._session_id()
@@ -188,6 +222,58 @@ class TestProjectRoutes:
 
         get_resp = client.get(f"/projects/{project['id']}", headers={"X-Session-ID": session_id})
         assert json.loads(get_resp.data)["project"]["description"] == "Quarterly case folder"
+
+        target_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "domain", "value": "darklab.sh", "label": "Primary domain"},
+            headers={"X-Session-ID": session_id},
+        )
+        duplicate_target_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "domain", "value": "darklab.sh", "label": "Primary domain"},
+            headers={"X-Session-ID": session_id},
+        )
+        invalid_target_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "unsupported", "value": "darklab.sh"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert target_resp.status_code == 201
+        assert duplicate_target_resp.status_code == 201
+        assert invalid_target_resp.status_code == 400
+        target = json.loads(target_resp.data)["target"]
+        assert json.loads(duplicate_target_resp.data)["target"]["id"] == target["id"]
+        assert target["value"] == "darklab.sh"
+        assert target["confidence"] == 1.0
+
+        updated_target = json.loads(client.put(
+            f"/projects/{project['id']}/targets/{target['id']}",
+            json={"label": "Primary web domain", "notes": "Scope approved", "confidence": 0.8},
+            headers={"X-Session-ID": session_id},
+        ).data)["target"]
+        assert updated_target["label"] == "Primary web domain"
+        assert updated_target["notes"] == "Scope approved"
+        assert updated_target["confidence"] == 0.8
+        targets = json.loads(client.get(
+            f"/projects/{project['id']}/targets",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert [item["id"] for item in targets["targets"]] == [target["id"]]
+        hidden_targets = client.get(
+            f"/projects/{project['id']}/targets",
+            headers={"X-Session-ID": "other-session"},
+        )
+        assert hidden_targets.status_code == 404
+        delete_target_resp = client.delete(
+            f"/projects/{project['id']}/targets/{target['id']}",
+            headers={"X-Session-ID": session_id},
+        )
+        assert delete_target_resp.status_code == 200
+        targets_after_delete = json.loads(client.get(
+            f"/projects/{project['id']}/targets",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert targets_after_delete["targets"] == []
 
         update_resp = client.put(
             f"/projects/{project['id']}",
@@ -253,6 +339,42 @@ class TestProjectRoutes:
         cleared = json.loads(client.get("/projects/active", headers={"X-Session-ID": session_id}).data)
         assert cleared["project"] is None
 
+        cli_session = self._session_id("project-cli")
+        create_lines, create_code = execute_builtin_command("project create CLI Case", cli_session)
+        assert create_code == 0
+        assert "created CLI Case" in "\n".join(line["text"] for line in create_lines)
+
+        current_lines, _ = execute_builtin_command("project current", cli_session)
+        current_text = "\n".join(line["text"] for line in current_lines)
+        assert "Active project:" in current_text
+        assert "CLI Case" in current_text
+
+        list_lines, _ = execute_builtin_command("project list", cli_session)
+        assert "cli-case" in "\n".join(line["text"] for line in list_lines)
+
+        clear_lines, _ = execute_builtin_command("project clear", cli_session)
+        assert clear_lines[0]["text"] == "project: active project cleared"
+
+        use_lines, _ = execute_builtin_command("project use cli-case", cli_session)
+        assert "active project is CLI Case" in use_lines[0]["text"]
+
+        target_lines, _ = execute_builtin_command("project target add domain darklab.sh", cli_session)
+        assert target_lines[0]["text"] == "project: target added domain darklab.sh"
+        quick_target_lines, _ = execute_builtin_command("project target quick-add https://ip.darklab.sh/admin", cli_session)
+        assert quick_target_lines[0]["text"] == "project: target added url https://ip.darklab.sh/admin"
+        target_list_lines, _ = execute_builtin_command("project target list", cli_session)
+        target_list_text = "\n".join(line["text"] for line in target_list_lines)
+        assert "darklab.sh" in target_list_text
+        assert "https://ip.darklab.sh/admin" in target_list_text
+        remove_target_lines, _ = execute_builtin_command("project target remove darklab.sh", cli_session)
+        assert remove_target_lines[0]["text"] == "project: target removed darklab.sh"
+
+        archive_lines, _ = execute_builtin_command("project archive cli-case", cli_session)
+        assert "archived CLI Case" in archive_lines[0]["text"]
+
+        archived_current, _ = execute_builtin_command("project current", cli_session)
+        assert archived_current[0]["text"].startswith("No active project.")
+
     def test_active_project_rejects_cross_session_and_clears_stale_projects(self):
         client = get_client()
         session_id = self._session_id("project-active")
@@ -297,10 +419,15 @@ class TestProjectRoutes:
         session_id = self._session_id("project-link")
         project = self._create_project(client, session_id)
         run_id = "run-" + uuid.uuid4().hex
+        baseline_run_id = "run-" + uuid.uuid4().hex
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
                 (run_id, session_id, "nmap darklab.sh"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                (baseline_run_id, session_id, "nmap darklab.sh"),
             )
             conn.commit()
 
@@ -320,11 +447,272 @@ class TestProjectRoutes:
         first_link = json.loads(link_resp.data)["link"]
         duplicate_link = json.loads(duplicate_resp.data)["link"]
         assert first_link["id"] == duplicate_link["id"]
+        baseline_link_resp = client.post(
+            f"/projects/{project['id']}/links",
+            json={"entity_type": "run", "entity_id": baseline_run_id, "source": "manual"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert baseline_link_resp.status_code == 201
 
         links = json.loads(
             client.get(f"/projects/{project['id']}/links", headers={"X-Session-ID": session_id}).data
         )
-        assert links["links"] == [first_link]
+        assert {item["entity_id"] for item in links["links"]} == {run_id, baseline_run_id}
+
+        label_resp = client.post(
+            f"/entities/run/{run_id}/labels",
+            json={"label": "baseline"},
+            headers={"X-Session-ID": session_id},
+        )
+        duplicate_label = client.post(
+            f"/entities/run/{run_id}/labels",
+            json={"label": "baseline"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert label_resp.status_code == 201
+        assert duplicate_label.status_code == 201
+        label = json.loads(label_resp.data)["label"]
+        assert json.loads(duplicate_label.data)["label"]["id"] == label["id"]
+        labels = json.loads(client.get(
+            f"/entities/run/{run_id}/labels",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert [item["label"] for item in labels["labels"]] == ["baseline"]
+
+        annotation_resp = client.post(
+            f"/entities/run/{run_id}/annotations",
+            json={"body": "Confirm service owner", "author_label": "nona"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert annotation_resp.status_code == 201
+        annotation = json.loads(annotation_resp.data)["annotation"]
+        assert annotation["body"] == "Confirm service owner"
+        assert annotation["entity_id"] == run_id
+        updated_annotation = json.loads(client.put(
+            f"/annotations/{annotation['id']}",
+            json={"body": "Confirmed service owner"},
+            headers={"X-Session-ID": session_id},
+        ).data)["annotation"]
+        assert updated_annotation["body"] == "Confirmed service owner"
+        annotations = json.loads(client.get(
+            f"/entities/run/{run_id}/annotations",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert [item["id"] for item in annotations["annotations"]] == [annotation["id"]]
+
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "VALUES (?, ?, ?, 'reports/run.txt', 'run.txt', 'output', 10, 'workspace_flag', datetime('now'))",
+                (f"rfa_{run_id}", session_id, run_id),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "VALUES (?, ?, ?, 'finding', 'open port 443', '443/tcp open https', 0, ?, datetime('now'))",
+                (f"fnd_{run_id}", session_id, run_id, f"fp-{run_id}"),
+            )
+            conn.execute(
+                "INSERT INTO entity_labels "
+                "(id, session_id, entity_type, entity_id, label, created) "
+                "VALUES (?, ?, 'finding', ?, 'important', datetime('now'))",
+                (f"lbl_fnd_{run_id}", session_id, f"fnd_{run_id}"),
+            )
+            conn.execute(
+                "INSERT INTO annotations "
+                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES (?, ?, 'finding', ?, 'needs retest', datetime('now'), datetime('now'))",
+                (f"ann_fnd_{run_id}", session_id, f"fnd_{run_id}"),
+            )
+            conn.execute(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "VALUES (?, ?, ?, 'reports/old.txt', 'old.txt', 'output', 8, 'workspace_flag', datetime('now'))",
+                (f"rfa_{baseline_run_id}", session_id, baseline_run_id),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "VALUES (?, ?, ?, 'finding', 'open port 80', '80/tcp open http', 0, ?, datetime('now'))",
+                (f"fnd_{baseline_run_id}", session_id, baseline_run_id, f"fp-{baseline_run_id}"),
+            )
+            conn.commit()
+        summary = json.loads(client.get(
+            f"/projects/{project['id']}/summary",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert summary["project"]["id"] == project["id"]
+        assert summary["counts"] == {
+            "runs": 2,
+            "snapshots": 0,
+            "workspace_files": 0,
+            "targets": 0,
+            "artifacts": 2,
+            "findings": 2,
+            "labels": 2,
+            "annotations": 2,
+            "packages": 0,
+        }
+        assert {item["workspace_path"] for item in summary["artifacts"]} == {
+            "reports/old.txt",
+            "reports/run.txt",
+        }
+        assert {item["id"] for item in summary["runs"]} == {run_id, baseline_run_id}
+        project_findings = json.loads(client.get(
+            f"/projects/{project['id']}/findings?review_state=new&command_root=nmap&run_id={run_id}"
+            "&label=important&annotation_state=annotated",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert [item["run_id"] for item in project_findings["findings"]] == [run_id]
+        assert project_findings["findings"][0]["command_root"] == "nmap"
+        unannotated_findings = json.loads(client.get(
+            f"/projects/{project['id']}/findings?annotation_state=unannotated",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert [item["run_id"] for item in unannotated_findings["findings"]] == [baseline_run_id]
+        comparison = json.loads(client.get(
+            f"/projects/{project['id']}/compare?left_run_id={run_id}&right_run_id={baseline_run_id}",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert [item["raw_line"] for item in comparison["findings"]["added"]] == ["443/tcp open https"]
+        assert [item["raw_line"] for item in comparison["findings"]["removed"]] == ["80/tcp open http"]
+        assert [item["workspace_path"] for item in comparison["artifacts"]["added"]] == ["reports/run.txt"]
+        assert [item["workspace_path"] for item in comparison["artifacts"]["removed"]] == ["reports/old.txt"]
+        baseline_label = client.post(
+            f"/entities/run/{baseline_run_id}/labels",
+            json={"label": "baseline"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert baseline_label.status_code == 201
+        baseline_comparison = json.loads(client.get(
+            f"/projects/{project['id']}/compare?left_run_id={run_id}&baseline_label=baseline",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert baseline_comparison["right_run_id"] == baseline_run_id
+        assert baseline_comparison["baseline_label"] == "baseline"
+        invalid_project_findings = client.get(
+            f"/projects/{project['id']}/findings?review_state=maybe",
+            headers={"X-Session-ID": session_id},
+        )
+        assert invalid_project_findings.status_code == 400
+
+        package_resp = client.post(
+            f"/projects/{project['id']}/packages",
+            json={
+                "name": "Draft Evidence",
+                "description": "Initial package manifest",
+                "redaction_mode": "redacted",
+                "include_artifacts": True,
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        assert package_resp.status_code == 201
+        package = json.loads(package_resp.data)["package"]
+        assert package["project_id"] == project["id"]
+        assert package["include_artifacts"] is True
+        assert package["redaction_mode"] == "raw"
+        assert package["manifest"]["counts"]["runs"] == 2
+        assert package["manifest"]["counts"]["findings"] == 2
+        assert package["manifest"]["redaction_mode"] == "raw"
+
+        packages = json.loads(client.get(
+            f"/projects/{project['id']}/packages",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert [item["id"] for item in packages["packages"]] == [package["id"]]
+        package_get = json.loads(client.get(
+            f"/projects/{project['id']}/packages/{package['id']}",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert package_get["package"]["name"] == "Draft Evidence"
+        package_download = client.get(
+            f"/projects/{project['id']}/packages/{package['id']}/download",
+            headers={"X-Session-ID": session_id},
+        )
+        assert package_download.status_code == 200
+        assert "attachment" in package_download.headers["Content-Disposition"]
+        with zipfile.ZipFile(io.BytesIO(package_download.data)) as archive:
+            names = set(archive.namelist())
+            assert "manifest.json" in names
+            assert "skipped-artifacts.json" in names
+            downloaded_manifest = json.loads(archive.read("manifest.json"))
+        assert downloaded_manifest["package"]["id"] == package["id"]
+        assert downloaded_manifest["manifest"]["counts"]["runs"] == 2
+        summary_after_package = json.loads(client.get(
+            f"/projects/{project['id']}/summary",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert summary_after_package["counts"]["packages"] == 1
+        assert [item["id"] for item in summary_after_package["packages"]] == [package["id"]]
+
+        workflow_target = json.loads(client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "domain", "value": "darklab.sh"},
+            headers={"X-Session-ID": session_id},
+        ).data)["target"]
+        quick_domain = client.post(
+            f"/projects/{project['id']}/targets/quick-add",
+            json={"text": "Investigate https://api.darklab.sh/admin", "source_run_id": run_id},
+            headers={"X-Session-ID": session_id},
+        )
+        assert quick_domain.status_code == 201
+        quick_domain_data = json.loads(quick_domain.data)["target"]
+        assert quick_domain_data["type"] == "url"
+        assert quick_domain_data["value"] == "https://api.darklab.sh/admin"
+        assert quick_domain_data["source_run_id"] == run_id
+        quick_ip = client.post(
+            f"/projects/{project['id']}/targets/quick-add",
+            json={"value": "192.168.1.5"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert quick_ip.status_code == 201
+        quick_ip_data = json.loads(quick_ip.data)["target"]
+        assert quick_ip_data["type"] == "ip"
+        assert quick_ip_data["value"] == "192.168.1.5"
+        invalid_quick_target = client.post(
+            f"/projects/{project['id']}/targets/quick-add",
+            json={"text": "no target here"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert invalid_quick_target.status_code == 400
+        promote_resp = client.post(
+            f"/projects/{project['id']}/workflows/promote",
+            json={"title": "Promoted checks", "run_ids": [run_id]},
+            headers={"X-Session-ID": session_id},
+        )
+        assert promote_resp.status_code == 201
+        workflow = json.loads(promote_resp.data)["workflow"]
+        promotion = json.loads(promote_resp.data)["promotion"]
+        assert workflow["title"] == "Promoted checks"
+        assert workflow["inputs"][0]["id"] == "target"
+        assert workflow["inputs"][0]["default"] == workflow_target["value"]
+        assert workflow["steps"][0]["cmd"] == "nmap {{target}}"
+        assert promotion["available_run_count"] == 2
+        assert promotion["requested_run_count"] == 1
+        assert promotion["promoted_run_count"] == 1
+        assert promotion["truncated_runs"] == 0
+        assert promotion["target"]["id"] == workflow_target["id"]
+
+        hidden_label = client.get(f"/entities/run/{run_id}/labels", headers={"X-Session-ID": "other-session"})
+        assert hidden_label.status_code == 404
+
+        delete_annotation = client.delete(
+            f"/annotations/{annotation['id']}",
+            headers={"X-Session-ID": session_id},
+        )
+        assert delete_annotation.status_code == 200
+        delete_label = client.delete(
+            f"/entities/run/{run_id}/labels",
+            json={"label": "baseline"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert delete_label.status_code == 200
+        delete_package = client.delete(
+            f"/projects/{project['id']}/packages/{package['id']}",
+            headers={"X-Session-ID": session_id},
+        )
+        assert delete_package.status_code == 200
 
         unlink_resp = client.delete(
             f"/projects/{project['id']}/links",
@@ -332,10 +720,295 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         )
         assert unlink_resp.status_code == 200
+        client.delete(
+            f"/projects/{project['id']}/links",
+            json={"entity_type": "run", "entity_id": baseline_run_id},
+            headers={"X-Session-ID": session_id},
+        )
         empty_links = json.loads(
             client.get(f"/projects/{project['id']}/links", headers={"X-Session-ID": session_id}).data
         )
         assert empty_links["links"] == []
+
+        execute_builtin_command(f"project use {project['slug']}", session_id)
+        link_last_lines, _ = execute_builtin_command("project link last", session_id)
+        assert f"linked run {run_id}" in link_last_lines[0]["text"]
+
+        unlink_file_lines, _ = execute_builtin_command("project unlink file reports/notes.txt", session_id)
+        assert unlink_file_lines[0]["text"] == "project: no link found for workspace_file reports/notes.txt"
+
+    def test_project_workspace_write_quotas_return_conflict(self):
+        client = get_client()
+        session_id = self._session_id("project-quota")
+        with mock.patch.dict(shell_app.CFG, {
+            "max_projects_per_session": 5,
+            "max_project_links_per_project": 1,
+            "max_project_targets_per_project": 1,
+            "max_evidence_packages_per_project": 1,
+            "max_entity_labels_per_session": 5,
+            "max_entity_labels_per_entity": 1,
+            "max_entity_annotations_per_session": 5,
+            "max_entity_annotations_per_entity": 1,
+        }, clear=False):
+            project = self._create_project(client, session_id)
+            first_run_id = "run-" + uuid.uuid4().hex
+            second_run_id = "run-" + uuid.uuid4().hex
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, 'dig darklab.sh', datetime('now'))",
+                    (first_run_id, session_id),
+                )
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, 'whois darklab.sh', datetime('now'))",
+                    (second_run_id, session_id),
+                )
+                conn.commit()
+
+            first_link = client.post(
+                f"/projects/{project['id']}/links",
+                json={"entity_type": "run", "entity_id": first_run_id},
+                headers={"X-Session-ID": session_id},
+            )
+            duplicate_link = client.post(
+                f"/projects/{project['id']}/links",
+                json={"entity_type": "run", "entity_id": first_run_id},
+                headers={"X-Session-ID": session_id},
+            )
+            second_link = client.post(
+                f"/projects/{project['id']}/links",
+                json={"entity_type": "run", "entity_id": second_run_id},
+                headers={"X-Session-ID": session_id},
+            )
+            assert first_link.status_code == 201
+            assert duplicate_link.status_code == 201
+            assert second_link.status_code == 409
+
+            first_target = client.post(
+                f"/projects/{project['id']}/targets",
+                json={"type": "domain", "value": "darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            )
+            second_target = client.post(
+                f"/projects/{project['id']}/targets",
+                json={"type": "domain", "value": "example.com"},
+                headers={"X-Session-ID": session_id},
+            )
+            assert first_target.status_code == 201
+            assert second_target.status_code == 409
+
+            first_package = client.post(
+                f"/projects/{project['id']}/packages",
+                json={"name": "First package"},
+                headers={"X-Session-ID": session_id},
+            )
+            second_package = client.post(
+                f"/projects/{project['id']}/packages",
+                json={"name": "Second package"},
+                headers={"X-Session-ID": session_id},
+            )
+            assert first_package.status_code == 201
+            assert second_package.status_code == 409
+
+            first_label = client.post(
+                f"/entities/run/{first_run_id}/labels",
+                json={"label": "baseline"},
+                headers={"X-Session-ID": session_id},
+            )
+            duplicate_label = client.post(
+                f"/entities/run/{first_run_id}/labels",
+                json={"label": "baseline"},
+                headers={"X-Session-ID": session_id},
+            )
+            second_label = client.post(
+                f"/entities/run/{first_run_id}/labels",
+                json={"label": "important"},
+                headers={"X-Session-ID": session_id},
+            )
+            assert first_label.status_code == 201
+            assert duplicate_label.status_code == 201
+            assert second_label.status_code == 409
+
+            first_annotation = client.post(
+                f"/entities/run/{first_run_id}/annotations",
+                json={"body": "first note"},
+                headers={"X-Session-ID": session_id},
+            )
+            second_annotation = client.post(
+                f"/entities/run/{first_run_id}/annotations",
+                json={"body": "second note"},
+                headers={"X-Session-ID": session_id},
+            )
+            assert first_annotation.status_code == 201
+            assert second_annotation.status_code == 409
+
+    def test_evidence_package_download_enforces_size_limit(self, tmp_path):
+        client = get_client()
+        session_id = self._session_id("project-package-size")
+        project = self._create_project(client, session_id)
+        run_id = "run-" + uuid.uuid4().hex
+        with mock.patch.dict(shell_app.CFG, {
+            "workspace_enabled": True,
+            "workspace_root": str(tmp_path / "workspaces"),
+            "evidence_package_max_mb": 1,
+        }, clear=False):
+            artifact_path = resolve_workspace_path(session_id, "reports/big.txt", shell_app.CFG, ensure_parent=True)
+            artifact_path.write_bytes(b"x" * (1024 * 1024 + 1))
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, 'cat reports/big.txt', datetime('now'))",
+                    (run_id, session_id),
+                )
+                conn.execute(
+                    "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                    "VALUES (?, ?, 'run', ?, 'manual', datetime('now'))",
+                    ("pln_" + uuid.uuid4().hex[:16], project["id"], run_id),
+                )
+                conn.execute(
+                    "INSERT INTO run_file_artifacts "
+                    "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                    "VALUES (?, ?, ?, 'reports/big.txt', 'big.txt', 'output', ?, 'workspace_flag', datetime('now'))",
+                    ("rfa_" + uuid.uuid4().hex[:16], session_id, run_id, artifact_path.stat().st_size),
+                )
+                conn.commit()
+            package = json.loads(client.post(
+                f"/projects/{project['id']}/packages",
+                json={"name": "Oversize", "include_artifacts": True},
+                headers={"X-Session-ID": session_id},
+            ).data)["package"]
+            resp = client.get(
+                f"/projects/{project['id']}/packages/{package['id']}/download",
+                headers={"X-Session-ID": session_id},
+            )
+        assert resp.status_code == 413
+        assert "size limit" in json.loads(resp.data)["error"]
+
+    def test_project_workflow_promotion_replaces_exact_target_tokens_only(self):
+        client = get_client()
+        session_id = self._session_id("project-workflow")
+        project = self._create_project(client, session_id)
+        run_id = "run-" + uuid.uuid4().hex
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                (
+                    run_id,
+                    session_id,
+                    "nmap api.darklab.sh darklab.sh https://darklab.sh/admin darklab.sh.evil",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                "VALUES (?, ?, 'run', ?, 'manual', datetime('now'))",
+                ("pln_" + uuid.uuid4().hex[:16], project["id"], run_id),
+            )
+            conn.commit()
+        target_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "domain", "value": "darklab.sh"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert target_resp.status_code == 201
+        promote_resp = client.post(
+            f"/projects/{project['id']}/workflows/promote",
+            json={"title": "Exact target", "run_ids": [run_id]},
+            headers={"X-Session-ID": session_id},
+        )
+        assert promote_resp.status_code == 201
+        workflow = json.loads(promote_resp.data)["workflow"]
+        assert workflow["steps"][0]["cmd"] == (
+            "nmap api.darklab.sh {{target}} https://{{target}}/admin darklab.sh.evil"
+        )
+
+    def test_project_workflow_promotion_reports_truncation_metadata(self):
+        client = get_client()
+        session_id = self._session_id("project-workflow-trunc")
+        project = self._create_project(client, session_id)
+        run_ids = [f"run-{uuid.uuid4().hex}" for _ in range(42)]
+        with sqlite3.connect(DB_PATH) as conn:
+            for index, run_id in enumerate(run_ids):
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started) "
+                    "VALUES (?, ?, ?, datetime('now', ? || ' seconds'))",
+                    (run_id, session_id, f"echo run-{index}", str(index)),
+                )
+                conn.execute(
+                    "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                    "VALUES (?, ?, 'run', ?, 'manual', datetime('now', ? || ' seconds'))",
+                    ("pln_" + uuid.uuid4().hex[:16], project["id"], run_id, str(index)),
+                )
+            conn.commit()
+
+        promote_resp = client.post(
+            f"/projects/{project['id']}/workflows/promote",
+            json={"title": "Too many runs"},
+            headers={"X-Session-ID": session_id},
+        )
+        data = json.loads(promote_resp.data)
+        assert promote_resp.status_code == 201
+        assert len(data["workflow"]["steps"]) == 40
+        assert data["workflow"]["steps"][0]["cmd"] == "echo run-0"
+        assert data["workflow"]["steps"][-1]["cmd"] == "echo run-39"
+        assert data["promotion"]["available_run_count"] == 42
+        assert data["promotion"]["requested_run_count"] == 42
+        assert data["promotion"]["promoted_run_count"] == 40
+        assert data["promotion"]["step_limit"] == 40
+        assert data["promotion"]["truncated_runs"] == 2
+        assert data["promotion"]["selected_run_ids"] == run_ids[:40]
+
+        explicit_over_limit = client.post(
+            f"/projects/{project['id']}/workflows/promote",
+            json={"title": "Explicit too many", "run_ids": run_ids},
+            headers={"X-Session-ID": session_id},
+        )
+        assert explicit_over_limit.status_code == 400
+        assert "at most 40 runs" in json.loads(explicit_over_limit.data)["error"]
+
+    def test_project_workflow_promotion_requires_explicit_target_when_multiple_match(self):
+        client = get_client()
+        session_id = self._session_id("project-workflow-target")
+        project = self._create_project(client, session_id)
+        run_id = "run-" + uuid.uuid4().hex
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                (run_id, session_id, "curl api.darklab.sh darklab.sh"),
+            )
+            conn.execute(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                "VALUES (?, ?, 'run', ?, 'manual', datetime('now'))",
+                ("pln_" + uuid.uuid4().hex[:16], project["id"], run_id),
+            )
+            conn.commit()
+        api_target = json.loads(client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "host", "value": "api.darklab.sh"},
+            headers={"X-Session-ID": session_id},
+        ).data)["target"]
+        client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "domain", "value": "darklab.sh"},
+            headers={"X-Session-ID": session_id},
+        )
+
+        ambiguous = client.post(
+            f"/projects/{project['id']}/workflows/promote",
+            json={"title": "Ambiguous target", "run_ids": [run_id]},
+            headers={"X-Session-ID": session_id},
+        )
+        assert ambiguous.status_code == 400
+        assert "provide target_id" in json.loads(ambiguous.data)["error"]
+
+        promoted = client.post(
+            f"/projects/{project['id']}/workflows/promote",
+            json={"title": "Explicit target", "run_ids": [run_id], "target_id": api_target["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        data = json.loads(promoted.data)
+        assert promoted.status_code == 201
+        assert data["workflow"]["inputs"][0]["default"] == "api.darklab.sh"
+        assert data["workflow"]["steps"][0]["cmd"] == "curl {{target}} darklab.sh"
+        assert data["promotion"]["target"]["id"] == api_target["id"]
+        assert len(data["promotion"]["matching_targets"]) == 2
 
     def test_rejects_cross_session_or_unsupported_project_links(self):
         client = get_client()
@@ -343,6 +1016,20 @@ class TestProjectRoutes:
         other_session = self._session_id("project-other")
         project = self._create_project(client, session_id)
         other_run_id = "run-" + uuid.uuid4().hex
+        request_index = 0
+
+        def project_link_post(payload):
+            nonlocal request_index
+            request_index += 1
+            return client.post(
+                f"/projects/{project['id']}/links",
+                json=payload,
+                headers={
+                    "X-Session-ID": session_id,
+                    "X-Forwarded-For": f"198.51.100.{request_index}",
+                },
+            )
+
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
@@ -350,21 +1037,16 @@ class TestProjectRoutes:
             )
             conn.commit()
 
-        cross_session = client.post(
-            f"/projects/{project['id']}/links",
-            json={"entity_type": "run", "entity_id": other_run_id},
-            headers={"X-Session-ID": session_id},
-        )
-        unsupported = client.post(
-            f"/projects/{project['id']}/links",
-            json={"entity_type": "annotation", "entity_id": "ann_1"},
-            headers={"X-Session-ID": session_id},
-        )
+        cross_session = project_link_post({"entity_type": "run", "entity_id": other_run_id})
+        unsupported = project_link_post({"entity_type": "annotation", "entity_id": "ann_1"})
+        run_scoped = project_link_post({"entity_type": "run_file_artifact", "entity_id": "rfa_1"})
 
         assert cross_session.status_code == 400
         assert "not found" in json.loads(cross_session.data)["error"]
         assert unsupported.status_code == 400
-        assert "do not support" in json.loads(unsupported.data)["error"]
+        assert "Unsupported project entity type" in json.loads(unsupported.data)["error"]
+        assert run_scoped.status_code == 400
+        assert "do not support" in json.loads(run_scoped.data)["error"]
 
 
 # ── /log ──────────────────────────────────────────────────────────────────────
@@ -886,6 +1568,9 @@ class TestDiagRoute:
         assert data["db"]["ok"] is True
         assert isinstance(data["db"]["runs"], int)
         assert isinstance(data["db"]["snapshots"], int)
+        project_workspace = data["db"]["project_workspace"]
+        for key in ("projects", "artifacts", "findings", "annotations", "packages"):
+            assert isinstance(project_workspace[key], int)
 
     def test_db_section_error_on_db_failure(self):
         client = self._allowed_client()
@@ -1427,13 +2112,14 @@ class TestDiagRoute:
         assert len(long_command) > 48, "fixture must exceed the old truncate length"
         from database import db_connect
         run_id = f"diag-long-cmd-{uuid.uuid4().hex}"
-        started = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        started = "2000-01-01 00:00:00"
+        finished = "2099-01-01 00:00:00"
         try:
             with db_connect() as conn:
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, command, started, exit_code) "
-                    "VALUES (?, ?, ?, ?, ?)",
-                    (run_id, "diag-test", long_command, started, 0),
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (run_id, "diag-test", long_command, started, finished, 0),
                 )
                 conn.commit()
             client = self._allowed_client()
@@ -1820,6 +2506,9 @@ class TestShortcutsRoute:
         data = json.loads(client.get("/shortcuts").data)
         keys = [item["key"] for section in data["sections"] for item in section["items"]]
         assert "Alt+T" in keys
+        assert "Alt+C" in keys
+        assert "Alt+P" in keys
+        assert "Alt+Shift+P" in keys
         assert "Alt+Shift+C" in keys
         assert not any(key.startswith("Option+") for key in keys)
 
@@ -1832,6 +2521,9 @@ class TestShortcutsRoute:
         data = json.loads(client.get("/shortcuts").data)
         keys = [item["key"] for section in data["sections"] for item in section["items"]]
         assert "Option+T" in keys
+        assert "Option+C" in keys
+        assert "Option+P" in keys
+        assert "Option+Shift+P" in keys
         assert "Option+Shift+C" in keys
         assert not any(key.startswith("Alt+") for key in keys)
 
@@ -2258,6 +2950,48 @@ class TestWorkspaceRoutes:
         assert "attachment" in resp.headers["Content-Disposition"]
         assert "targets.txt" in resp.headers["Content-Disposition"]
 
+    def test_file_list_includes_project_artifact_metadata(self):
+        client = get_client()
+        session = "workspace-artifacts-" + uuid.uuid4().hex[:8]
+        run_id = "run-" + uuid.uuid4().hex[:8]
+        project_id = "prj_" + uuid.uuid4().hex[:16]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": "reports/targets.txt", "text": "darklab.sh\n"},
+            )
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, 'cat reports/targets.txt', ?)",
+                    (run_id, session, datetime.now(timezone.utc).isoformat()),
+                )
+                conn.execute(
+                    "INSERT INTO projects "
+                    "(id, session_id, name, slug, description, status, color, notes, created, updated) "
+                    "VALUES (?, ?, 'Artifact Case', ?, '', 'active', '', '', datetime('now'), datetime('now'))",
+                    (project_id, session, f"artifact-case-{uuid.uuid4().hex[:8]}"),
+                )
+                conn.execute(
+                    "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                    "VALUES (?, ?, 'run', ?, 'manual', datetime('now'))",
+                    ("pln_" + uuid.uuid4().hex[:16], project_id, run_id),
+                )
+                conn.execute(
+                    "INSERT INTO run_file_artifacts "
+                    "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                    "VALUES (?, ?, ?, 'reports/targets.txt', 'targets.txt', 'output', 11, 'workspace_flag', "
+                    "datetime('now'))",
+                    ("rfa_" + uuid.uuid4().hex[:16], session, run_id),
+                )
+                conn.commit()
+            resp = client.get("/workspace/files", headers={"X-Session-ID": session})
+        data = json.loads(resp.data)
+        file_row = next(item for item in data["files"] if item["path"] == "reports/targets.txt")
+        assert file_row["artifact_count"] == 1
+        assert file_row["artifact_run_count"] == 1
+        assert file_row["project_names"] == ["Artifact Case"]
+
     def test_periodic_cleanup_runs_before_requests_when_workspace_enabled(self):
         client = get_client()
         previous_cleanup = shell_app._last_workspace_cleanup_monotonic
@@ -2585,7 +3319,7 @@ class TestRunRoute:
             conn.commit()
             conn.close()
 
-    def test_client_side_run_links_to_active_project(self):
+    def test_client_side_run_does_not_link_to_active_project(self):
         client = get_client()
         session = "client-run-project-" + uuid.uuid4().hex[:8]
         project_resp = client.post(
@@ -2626,10 +3360,7 @@ class TestRunRoute:
             conn.execute("DELETE FROM projects WHERE session_id = ?", (session,))
             conn.commit()
             conn.close()
-        assert row is not None
-        assert row[0] == "run"
-        assert row[1] == "active_project"
-        assert row[2] == "theme current"
+        assert row is None
 
     def test_client_side_run_rejects_non_client_builtin_root(self):
         client = get_client()
@@ -3302,6 +4033,46 @@ class TestHistoryRoute:
                 (run_ids[0], session, "dig darklab.sh A", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]"),
             )
             conn.execute(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "artifact-search-run-1",
+                    session,
+                    run_ids[0],
+                    "darklab/findings.txt",
+                    "findings.txt",
+                    "output",
+                    42,
+                    "workspace_flag",
+                    "2026-01-01T00:00:02",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "VALUES (?, ?, ?, 'finding', 'answer found', 'darklab.sh has address 104.21.4.35', 0, ?, ?)",
+                ("finding-search-run-1", session, run_ids[0], "fp-search-run-1", "2026-01-01T00:00:02"),
+            )
+            conn.execute(
+                "INSERT INTO entity_labels "
+                "(id, session_id, entity_type, entity_id, label, created) "
+                "VALUES (?, ?, 'run', ?, 'baseline', ?)",
+                ("label-search-run-1", session, run_ids[0], "2026-01-01T00:00:02"),
+            )
+            conn.execute(
+                "INSERT INTO annotations "
+                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES (?, ?, 'run', ?, 'review note', ?, ?)",
+                (
+                    "annotation-search-run-1",
+                    session,
+                    run_ids[0],
+                    "2026-01-01T00:00:02",
+                    "2026-01-01T00:00:02",
+                ),
+            )
+            conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (run_ids[1], session, "ping darklab.sh", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]"),
@@ -3312,8 +4083,21 @@ class TestHistoryRoute:
             resp = client.get("/history?q=dig", headers={"X-Session-ID": session})
             data = json.loads(resp.data)
             assert [r["command"] for r in data["runs"]] == ["dig darklab.sh A"]
+            assert data["runs"][0]["artifact_count"] == 1
+            assert data["runs"][0]["artifacts"][0]["workspace_path"] == "darklab/findings.txt"
+            assert data["runs"][0]["finding_count"] == 1
+            assert data["runs"][0]["label_count"] == 1
+            assert data["runs"][0]["annotation_count"] == 1
+            assert data["items"][0]["artifact_count"] == 1
+            assert data["items"][0]["finding_count"] == 1
+            assert data["items"][0]["label_count"] == 1
+            assert data["items"][0]["annotation_count"] == 1
         finally:
             conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM run_file_artifacts WHERE run_id = ?", (run_ids[0],))
+            conn.execute("DELETE FROM findings WHERE run_id = ?", (run_ids[0],))
+            conn.execute("DELETE FROM entity_labels WHERE entity_id = ?", (run_ids[0],))
+            conn.execute("DELETE FROM annotations WHERE entity_id = ?", (run_ids[0],))
             conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
             conn.commit()
             conn.close()
@@ -4268,6 +5052,7 @@ class TestRunPermalinkRoute:
         full_output_available=0,
         full_output_truncated=0,
         full_output_lines=None,
+        artifacts=None,
     ):
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
@@ -4296,6 +5081,21 @@ class TestRunPermalinkRoute:
                     full_output_truncated,
                 ),
             )
+        for artifact in artifacts or []:
+            conn.execute(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "VALUES (?, 'test-session', ?, ?, ?, ?, ?, ?, datetime('now'))",
+                (
+                    artifact["id"],
+                    run_id,
+                    artifact["workspace_path"],
+                    artifact.get("display_name", ""),
+                    artifact.get("kind", "unknown"),
+                    artifact.get("byte_size", 0),
+                    artifact.get("detected_by", "manual"),
+                ),
+            )
         conn.commit()
         conn.close()
         if full_output_available and full_output_lines is not None:
@@ -4309,6 +5109,10 @@ class TestRunPermalinkRoute:
     def _delete_run(self, run_id):
         from run_output_store import RUN_OUTPUT_DIR
         conn = sqlite3.connect(DB_PATH)
+        conn.execute("DELETE FROM findings WHERE run_id=?", (run_id,))
+        conn.execute("DELETE FROM entity_labels WHERE entity_id=?", (run_id,))
+        conn.execute("DELETE FROM annotations WHERE entity_id=?", (run_id,))
+        conn.execute("DELETE FROM run_file_artifacts WHERE run_id=?", (run_id,))
         conn.execute("DELETE FROM run_output_artifacts WHERE run_id=?", (run_id,))
         conn.execute("DELETE FROM runs WHERE id=?", (run_id,))
         conn.commit()
@@ -4330,16 +5134,61 @@ class TestRunPermalinkRoute:
 
     def test_html_view_contains_command(self):
         run_id = "permalink-cmd-test-run"
-        self._insert_run(run_id, "nmap -sV 10.0.0.1")
+        self._insert_run(
+            run_id,
+            "nmap -sV 10.0.0.1",
+            artifacts=[{
+                "id": "permalink-html-artifact",
+                "workspace_path": "reports/nmap.txt",
+                "display_name": "nmap.txt",
+                "kind": "output",
+                "byte_size": 64,
+                "detected_by": "workspace_flag",
+            }],
+        )
         try:
             resp = get_client().get(f"/history/{run_id}", headers={"X-Session-ID": "test-session"})
             assert b"nmap -sV 10.0.0.1" in resp.data
+            assert b"1 artifact" in resp.data
         finally:
             self._delete_run(run_id)
 
     def test_json_view_returns_command(self):
         run_id = "permalink-json-test-run"
-        self._insert_run(run_id, "dig google.com", ["answer section"])
+        self._insert_run(
+            run_id,
+            "dig google.com",
+            ["answer section"],
+            artifacts=[{
+                "id": "permalink-json-artifact",
+                "workspace_path": "reports/dig.txt",
+                "display_name": "dig.txt",
+                "kind": "output",
+                "byte_size": 128,
+                "detected_by": "workspace_flag",
+            }],
+        )
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO findings "
+            "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+            "VALUES (?, 'test-session', ?, 'finding', 'answer found', 'answer section', 0, ?, datetime('now'))",
+            ("permalink-json-finding", run_id, "fp-permalink-json"),
+        )
+        conn.execute(
+            "INSERT INTO entity_labels "
+            "(id, session_id, entity_type, entity_id, label, created) "
+            "VALUES (?, 'test-session', 'run', ?, 'baseline', datetime('now'))",
+            ("permalink-json-label", run_id),
+        )
+        conn.execute(
+            "INSERT INTO annotations "
+            "(id, session_id, entity_type, entity_id, body, created, updated) "
+            "VALUES (?, 'test-session', 'run', ?, 'review note', datetime('now'), datetime('now'))",
+            ("permalink-json-annotation", run_id),
+        )
+        conn.commit()
+        conn.close()
         try:
             data = json.loads(
                 get_client().get(
@@ -4349,6 +5198,11 @@ class TestRunPermalinkRoute:
             )
             assert data["command"] == "dig google.com"
             assert "answer section" in data["output"]
+            assert data["artifact_count"] == 1
+            assert data["artifacts"][0]["workspace_path"] == "reports/dig.txt"
+            assert data["finding_count"] == 1
+            assert data["label_count"] == 1
+            assert data["annotation_count"] == 1
         finally:
             self._delete_run(run_id)
 

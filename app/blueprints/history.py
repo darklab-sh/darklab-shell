@@ -584,6 +584,153 @@ def _preview_notice(run):
     )
 
 
+def _run_file_artifacts_by_run(conn, run_ids):
+    ids = [str(run_id) for run_id in run_ids if run_id]
+    if not ids:
+        return {}
+    if not _history_table_exists(conn, "run_file_artifacts"):
+        return {run_id: [] for run_id in ids}
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+        "detected_by, content_type, preview_type, created "
+        f"FROM run_file_artifacts WHERE run_id IN ({placeholders}) "  # nosec B608
+        "ORDER BY created ASC, workspace_path ASC",
+        ids,
+    ).fetchall()
+    grouped = {run_id: [] for run_id in ids}
+    for row in rows:
+        grouped.setdefault(str(row["run_id"]), []).append({
+            "id": row["id"],
+            "run_id": row["run_id"],
+            "workspace_path": row["workspace_path"],
+            "display_name": row["display_name"],
+            "kind": row["kind"],
+            "byte_size": int(row["byte_size"] or 0),
+            "detected_by": row["detected_by"],
+            "content_type": row["content_type"],
+            "preview_type": row["preview_type"],
+            "created": row["created"],
+        })
+    return grouped
+
+
+def _run_metadata_counts_by_run(conn, run_ids):
+    ids = [str(run_id) for run_id in run_ids if run_id]
+    counts = {
+        run_id: {"finding_count": 0, "label_count": 0, "annotation_count": 0}
+        for run_id in ids
+    }
+    if not ids:
+        return counts
+    placeholders = ",".join("?" for _ in ids)
+    if _history_table_exists(conn, "findings"):
+        for row in conn.execute(
+            f"SELECT run_id, COUNT(*) AS count FROM findings WHERE run_id IN ({placeholders}) GROUP BY run_id",  # nosec B608
+            ids,
+        ).fetchall():
+            counts.setdefault(str(row["run_id"]), {"finding_count": 0, "label_count": 0, "annotation_count": 0})
+            counts[str(row["run_id"])]["finding_count"] = int(row["count"] or 0)
+    if _history_table_exists(conn, "entity_labels"):
+        for row in conn.execute(
+            "SELECT entity_id, COUNT(*) AS count FROM entity_labels WHERE entity_type = 'run' "
+            f"AND entity_id IN ({placeholders}) GROUP BY entity_id",  # nosec B608
+            ids,
+        ).fetchall():
+            counts.setdefault(str(row["entity_id"]), {"finding_count": 0, "label_count": 0, "annotation_count": 0})
+            counts[str(row["entity_id"])]["label_count"] = int(row["count"] or 0)
+    if _history_table_exists(conn, "annotations"):
+        for row in conn.execute(
+            "SELECT entity_id, COUNT(*) AS count FROM annotations WHERE entity_type = 'run' "
+            f"AND entity_id IN ({placeholders}) GROUP BY entity_id",  # nosec B608
+            ids,
+        ).fetchall():
+            counts.setdefault(str(row["entity_id"]), {"finding_count": 0, "label_count": 0, "annotation_count": 0})
+            counts[str(row["entity_id"])]["annotation_count"] = int(row["count"] or 0)
+    return counts
+
+
+def _run_findings_by_run(conn, run_ids):
+    ids = [str(run_id) for run_id in run_ids if run_id]
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT id, session_id, run_id, target_id, scope, title, raw_line, line_number, "
+        "severity, fingerprint, review_state, created "
+        f"FROM findings WHERE run_id IN ({placeholders}) "  # nosec B608
+        "ORDER BY line_number ASC, created ASC, id ASC",
+        ids,
+    ).fetchall()
+    grouped = {run_id: [] for run_id in ids}
+    for row in rows:
+        grouped.setdefault(str(row["run_id"]), []).append({
+            "id": row["id"],
+            "run_id": row["run_id"],
+            "target_id": row["target_id"] or "",
+            "scope": row["scope"],
+            "title": row["title"],
+            "raw_line": row["raw_line"],
+            "line_number": int(row["line_number"] or 0),
+            "severity": row["severity"] or "",
+            "fingerprint": row["fingerprint"],
+            "review_state": row["review_state"],
+            "created": row["created"],
+        })
+    return grouped
+
+
+def _run_labels_by_run(conn, run_ids):
+    ids = [str(run_id) for run_id in run_ids if run_id]
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT id, entity_id, label, created FROM entity_labels "
+        "WHERE entity_type = 'run' "
+        f"AND entity_id IN ({placeholders}) "  # nosec B608
+        "ORDER BY label COLLATE NOCASE ASC, created ASC",
+        ids,
+    ).fetchall()
+    grouped = {run_id: [] for run_id in ids}
+    for row in rows:
+        grouped.setdefault(str(row["entity_id"]), []).append({
+            "id": row["id"],
+            "entity_type": "run",
+            "entity_id": row["entity_id"],
+            "label": row["label"],
+            "created": row["created"],
+        })
+    return grouped
+
+
+def _run_annotations_by_run(conn, run_ids):
+    ids = [str(run_id) for run_id in run_ids if run_id]
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT id, entity_id, body, visibility, author_label, created, updated FROM annotations "
+        "WHERE entity_type = 'run' "
+        f"AND entity_id IN ({placeholders}) "  # nosec B608
+        "ORDER BY created ASC, id ASC",
+        ids,
+    ).fetchall()
+    grouped = {run_id: [] for run_id in ids}
+    for row in rows:
+        grouped.setdefault(str(row["entity_id"]), []).append({
+            "id": row["id"],
+            "entity_type": "run",
+            "entity_id": row["entity_id"],
+            "body": row["body"],
+            "visibility": row["visibility"],
+            "author_label": row["author_label"] or "",
+            "created": row["created"],
+            "updated": row["updated"],
+        })
+    return grouped
+
+
 # ── Run comparison helpers ────────────────────────────────────────────────────
 
 def _normalize_compare_command(command):
@@ -1015,6 +1162,16 @@ def get_history():
                 item["full_output_truncated"] = bool(item.get("full_output_truncated"))
             paged_items.append(item)
         paged_runs = [item for item in paged_items if item.get("type") == "run"]
+        artifacts_by_run = _run_file_artifacts_by_run(conn, [item["id"] for item in paged_runs])
+        metadata_counts_by_run = _run_metadata_counts_by_run(conn, [item["id"] for item in paged_runs])
+        for item in paged_runs:
+            item["artifacts"] = artifacts_by_run.get(str(item["id"]), [])
+            item["artifact_count"] = len(item["artifacts"])
+            item.update(metadata_counts_by_run.get(str(item["id"]), {
+                "finding_count": 0,
+                "label_count": 0,
+                "annotation_count": 0,
+            }))
         return paged_items, paged_runs, roots_rows, total_count, page_count, current_page, fts_q
 
     with db_connect() as conn:
@@ -1282,6 +1439,23 @@ def get_run(run_id):
     else:
         run["output_entries"] = _preview_output_entries_from_run(run)
         run["output"] = _preview_output_from_run(run)
+    with db_connect() as conn:
+        artifacts_by_run = _run_file_artifacts_by_run(conn, [run_id])
+        metadata_counts_by_run = _run_metadata_counts_by_run(conn, [run_id])
+        include_private_metadata = str(run.get("session_id") or "") == str(session_id or "")
+        findings_by_run = _run_findings_by_run(conn, [run_id]) if include_private_metadata else {}
+        labels_by_run = _run_labels_by_run(conn, [run_id]) if include_private_metadata else {}
+        annotations_by_run = _run_annotations_by_run(conn, [run_id]) if include_private_metadata else {}
+    run["artifacts"] = artifacts_by_run.get(str(run_id), [])
+    run["artifact_count"] = len(run["artifacts"])
+    run["findings"] = findings_by_run.get(str(run_id), [])
+    run["labels"] = labels_by_run.get(str(run_id), [])
+    run["annotations"] = annotations_by_run.get(str(run_id), [])
+    run.update(metadata_counts_by_run.get(str(run_id), {
+        "finding_count": 0,
+        "label_count": 0,
+        "annotation_count": 0,
+    }))
     run["preview_notice"] = _preview_notice(run) if not is_full_view else None
     log.info("RUN_VIEWED", extra={
         "ip": get_client_ip(), "run_id": run_id,
@@ -1313,6 +1487,10 @@ def get_run(run_id):
         "exit_code": run.get("exit_code"),
         "duration": _format_duration(run["started"], run["finished"]) if run.get("finished") else None,
         "lines": lines_label,
+        "artifact_count": run["artifact_count"],
+        "finding_count": run["finding_count"],
+        "label_count": run["label_count"],
+        "annotation_count": run["annotation_count"],
         "version": APP_VERSION,
     }
 

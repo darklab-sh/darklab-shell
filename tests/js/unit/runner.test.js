@@ -649,6 +649,9 @@ function loadRunnerFns({
   getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride = undefined,
   normalizeWorkspaceCommandPath: normalizeWorkspaceCommandPathOverride = undefined,
   workspaceDisplayPath: workspaceDisplayPathOverride = undefined,
+  refreshActiveProjectContext: refreshActiveProjectContextOverride = undefined,
+  refreshProjectWorkspace: refreshProjectWorkspaceOverride = undefined,
+  isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride = undefined,
   runnerInitCode = '',
 } = {}) {
   const normalizedTabs = tabs.map((tab) => ({
@@ -814,6 +817,9 @@ function loadRunnerFns({
       ...(getWorkspaceAutocompleteFileHintsOverride ? { getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride } : {}),
       ...(normalizeWorkspaceCommandPathOverride ? { normalizeWorkspaceCommandPath: normalizeWorkspaceCommandPathOverride } : {}),
       ...(workspaceDisplayPathOverride ? { workspaceDisplayPath: workspaceDisplayPathOverride } : {}),
+      ...(refreshActiveProjectContextOverride ? { refreshActiveProjectContext: refreshActiveProjectContextOverride } : {}),
+      ...(refreshProjectWorkspaceOverride ? { refreshProjectWorkspace: refreshProjectWorkspaceOverride } : {}),
+      ...(isProjectWorkspaceOpenOverride ? { isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride } : {}),
       ...(NotificationOverride !== undefined ? { Notification: NotificationOverride } : {}),
     },
     `{
@@ -1864,6 +1870,33 @@ describe('runner helpers', () => {
       'tab-1',
     )
     expect(loaded.tabs[0].historyRunId).toBe('run-man')
+  })
+
+  it('runCommand refreshes and broadcasts project context after successful project built-ins', async () => {
+    const refreshActiveProjectContext = vi.fn(() => Promise.resolve())
+    const apiFetch = brokerApiFetch(
+      [
+        'data: {"type":"started","run_id":"run-project"}',
+        'data: {"type":"output","text":"project: target added domain new-target.example.com"}',
+        'data: {"type":"exit","code":0,"elapsed":0.1}',
+      ].join('\n\n') + '\n\n',
+      { runId: 'run-project' },
+    )
+    const loaded = loadRunnerFns({
+      cmdValue: 'project target add domain new-target.example.com',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      refreshActiveProjectContext,
+    })
+
+    loaded.runCommand()
+    await flushPromises()
+
+    expect(refreshActiveProjectContext).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(loaded.storage.getItem('darklab_project_workspace_changed'))).toEqual(expect.objectContaining({
+      session_id: 'session-old',
+      command: 'project target add domain new-target.example.com',
+    }))
   })
 
   it('runCommand preserves output classes from streamed events', async () => {

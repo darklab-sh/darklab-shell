@@ -4,26 +4,51 @@ Session-scoped project workspace helpers.
 
 from __future__ import annotations
 
+import hashlib
+import io
+import ipaddress
 import json
 import re
 import secrets
+import shlex
+import sqlite3
+import zipfile
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
+from urllib.parse import urlparse
 
 from database import (
     db_connect,
     validate_project_entity_type,
     validate_project_link_source,
 )
+from workspace import WorkspaceError, resolve_workspace_path
 
 MAX_PROJECT_NAME_LEN = 120
 MAX_PROJECT_DESCRIPTION_LEN = 1000
 MAX_PROJECT_COLOR_LEN = 32
 MAX_PROJECT_NOTES_LEN = 20000
 MAX_ENTITY_ID_LEN = 512
+MAX_LABEL_LEN = 80
+MAX_ANNOTATION_BODY_LEN = 20000
+MAX_AUTHOR_LABEL_LEN = 120
+MAX_TARGET_VALUE_LEN = 512
+MAX_TARGET_LABEL_LEN = 160
+MAX_TARGET_NOTES_LEN = 2000
+MAX_FINDING_TITLE_LEN = 240
+MAX_PACKAGE_NAME_LEN = 120
+MAX_PACKAGE_DESCRIPTION_LEN = 1000
+MAX_PROJECT_WORKFLOW_STEPS = 40
 ACTIVE_PROJECT_PREF_KEY = "pref_active_project_id"
+PROJECT_AUTO_LINK_EXTERNAL_RUNS_PREF_KEY = "pref_project_auto_link_external_runs"
 
 PROJECT_STATUSES = frozenset({"active", "archived"})
 PROJECT_LINK_ENTITY_TYPES = frozenset({
+    "run",
+    "snapshot",
+    "workspace_file",
+})
+ENTITY_METADATA_TYPES = frozenset({
     "project",
     "run",
     "snapshot",
@@ -31,11 +56,54 @@ PROJECT_LINK_ENTITY_TYPES = frozenset({
     "run_file_artifact",
     "finding",
     "target",
+    "package",
 })
+ANNOTATION_VISIBILITIES = frozenset({"private"})
+PROJECT_TARGET_TYPES = frozenset({"domain", "url", "host", "ip", "cidr", "port_set"})
+FINDING_REVIEW_STATES = frozenset({"new", "reviewed", "important", "false_positive", "needs_followup"})
+EVIDENCE_PACKAGE_STATUSES = frozenset({"draft"})
+
+_URL_RE = re.compile(r"https?://[^\s<>'\"`]+", re.I)
+_DOMAIN_RE = re.compile(
+    r"\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}\b",
+    re.I,
+)
 
 
 class ProjectWorkspaceError(ValueError):
     """Raised when project workspace input is invalid."""
+
+
+class ProjectWorkspaceQuotaExceeded(ProjectWorkspaceError):
+    """Raised when a project workspace quota would be exceeded."""
+
+
+class EvidencePackageTooLarge(ProjectWorkspaceQuotaExceeded):
+    """Raised when an evidence package archive would exceed configured limits."""
+
+
+def _cfg_int(key, default, *, cfg=None):
+    if cfg is None:
+        from config import CFG
+        cfg = CFG
+    try:
+        value = int(cfg.get(key, default))
+    except (AttributeError, TypeError, ValueError):
+        value = default
+    return max(0, value)
+
+
+def _cfg_mb_bytes(key, default_mb, *, cfg=None):
+    return _cfg_int(key, default_mb, cfg=cfg) * 1024 * 1024
+
+
+def _quota_exceeded(count, key, default):
+    limit = _cfg_int(key, default)
+    return limit > 0 and count >= limit
+
+
+def _raise_quota(message):
+    raise ProjectWorkspaceQuotaExceeded(message)
 
 
 def _now() -> str:
@@ -48,6 +116,30 @@ def _new_project_id() -> str:
 
 def _new_project_link_id() -> str:
     return "pln_" + secrets.token_hex(8)
+
+
+def _new_run_file_artifact_id() -> str:
+    return "rfa_" + secrets.token_hex(8)
+
+
+def _new_entity_label_id() -> str:
+    return "lbl_" + secrets.token_hex(8)
+
+
+def _new_annotation_id() -> str:
+    return "ann_" + secrets.token_hex(8)
+
+
+def _new_project_target_id() -> str:
+    return "tgt_" + secrets.token_hex(8)
+
+
+def _new_finding_id() -> str:
+    return "fnd_" + secrets.token_hex(8)
+
+
+def _new_evidence_package_id() -> str:
+    return "pkg_" + secrets.token_hex(8)
 
 
 def _trim_text(value, limit):
@@ -73,6 +165,21 @@ def _row_to_project(row):
         "notes": row["notes"] or "",
         "created": row["created"],
         "updated": row["updated"],
+    }
+
+
+def _row_to_project_run(row):
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "command": row["command"],
+        "started": row["started"],
+        "finished": row["finished"],
+        "exit_code": row["exit_code"],
+        "output_line_count": row["output_line_count"],
+        "created": row["created"],
+        "link_source": row["link_source"],
     }
 
 
@@ -109,6 +216,43 @@ def _clear_active_project_preference(conn, session_id, *, project_id=None):
     return True
 
 
+def _project_auto_link_external_runs_enabled(conn, session_id):
+    preferences = _load_session_preferences(conn, session_id)
+    value = str(preferences.get(PROJECT_AUTO_LINK_EXTERNAL_RUNS_PREF_KEY) or "on").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _project_is_active_for_session(conn, session_id, project_id):
+    project_id = str(project_id or "")
+    if not project_id:
+        return False
+    row = conn.execute(
+        "SELECT 1 FROM projects WHERE session_id = ? AND id = ? AND status != 'archived'",
+        (session_id, project_id),
+    ).fetchone()
+    return row is not None
+
+
+def _migrate_active_project_preference(conn, from_session_id, to_session_id):
+    source_preferences = _load_session_preferences(conn, from_session_id)
+    source_project_id = str(source_preferences.get(ACTIVE_PROJECT_PREF_KEY) or "")
+    if not source_project_id:
+        return 0
+    if not _project_is_active_for_session(conn, to_session_id, source_project_id):
+        return 0
+
+    destination_preferences = _load_session_preferences(conn, to_session_id)
+    current_project_id = str(destination_preferences.get(ACTIVE_PROJECT_PREF_KEY) or "")
+    if current_project_id == source_project_id:
+        return 1
+    if _project_is_active_for_session(conn, to_session_id, current_project_id):
+        return 0
+
+    destination_preferences[ACTIVE_PROJECT_PREF_KEY] = source_project_id
+    _save_session_preferences(conn, to_session_id, destination_preferences)
+    return 1
+
+
 def _row_to_link(row):
     if not row:
         return None
@@ -119,6 +263,143 @@ def _row_to_link(row):
         "entity_id": row["entity_id"],
         "source": row["source"],
         "created": row["created"],
+    }
+
+
+def _row_to_label(row):
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "session_id": row["session_id"],
+        "entity_type": row["entity_type"],
+        "entity_id": row["entity_id"],
+        "label": row["label"],
+        "source": row["source"],
+        "created": row["created"],
+    }
+
+
+def _row_to_annotation(row):
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "session_id": row["session_id"],
+        "entity_type": row["entity_type"],
+        "entity_id": row["entity_id"],
+        "body": row["body"],
+        "visibility": row["visibility"],
+        "author_label": row["author_label"],
+        "created": row["created"],
+        "updated": row["updated"],
+    }
+
+
+def _row_to_target(row):
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "project_id": row["project_id"],
+        "type": row["type"],
+        "value": row["value"],
+        "label": row["label"],
+        "notes": row["notes"],
+        "source_run_id": row["source_run_id"],
+        "confidence": row["confidence"],
+        "created": row["created"],
+        "updated": row["updated"],
+    }
+
+
+def _row_to_run_file_artifact(row):
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "session_id": row["session_id"],
+        "run_id": row["run_id"],
+        "workspace_path": row["workspace_path"],
+        "display_name": row["display_name"],
+        "kind": row["kind"],
+        "byte_size": row["byte_size"],
+        "detected_by": row["detected_by"],
+        "content_type": row["content_type"],
+        "preview_type": row["preview_type"],
+        "created": row["created"],
+    }
+
+
+def _row_to_finding(row):
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "session_id": row["session_id"],
+        "run_id": row["run_id"],
+        "target_id": row["target_id"],
+        "scope": row["scope"],
+        "title": row["title"],
+        "raw_line": row["raw_line"],
+        "line_number": row["line_number"],
+        "severity": row["severity"],
+        "fingerprint": row["fingerprint"],
+        "review_state": row["review_state"],
+        "created": row["created"],
+    }
+
+
+def _command_root(value):
+    try:
+        parts = shlex.split(str(value or ""))
+    except ValueError:
+        parts = str(value or "").split()
+    return parts[0] if parts else ""
+
+
+def _finding_target_ids_from_row(row, target_rows=None):
+    target_ids = []
+    primary = str(row["target_id"] or "") if row and "target_id" in row.keys() else ""
+    if primary:
+        target_ids.append(primary)
+    for target in target_rows or []:
+        if _target_value_matches_text(target, row["raw_line"] if row and "raw_line" in row.keys() else ""):
+            target_id = _target_row_id(target)
+            if target_id and target_id not in target_ids:
+                target_ids.append(target_id)
+    return target_ids
+
+
+def _row_to_project_finding(row, target_rows=None):
+    finding = _row_to_finding(row)
+    if not finding:
+        return None
+    finding["target_ids"] = _finding_target_ids_from_row(row, target_rows)
+    finding["run_command"] = row["run_command"] or ""
+    finding["command_root"] = _command_root(row["run_command"])
+    return finding
+
+
+def _row_to_evidence_package(row):
+    if not row:
+        return None
+    try:
+        manifest = json.loads(row["manifest"] or "{}")
+    except (TypeError, ValueError):
+        manifest = {}
+    return {
+        "id": row["id"],
+        "session_id": row["session_id"],
+        "project_id": row["project_id"],
+        "name": row["name"],
+        "description": row["description"] or "",
+        "redaction_mode": row["redaction_mode"],
+        "include_artifacts": bool(row["include_artifacts"]),
+        "manifest": manifest if isinstance(manifest, dict) else {},
+        "status": row["status"],
+        "created": row["created"],
+        "updated": row["updated"],
     }
 
 
@@ -143,6 +424,78 @@ def _normalize_project_payload(data, *, partial=False):
             raise ProjectWorkspaceError("project status must be active or archived")
         clean["status"] = status
     return clean
+
+
+def _normalize_evidence_package_payload(data):
+    if not isinstance(data, dict):
+        raise ProjectWorkspaceError("package payload must be an object")
+    name = _trim_text(data.get("name"), MAX_PACKAGE_NAME_LEN)
+    if not name:
+        raise ProjectWorkspaceError("package name is required")
+    return {
+        "name": name,
+        "description": _trim_text(data.get("description"), MAX_PACKAGE_DESCRIPTION_LEN),
+        "redaction_mode": "raw",
+        "include_artifacts": bool(data.get("include_artifacts")),
+    }
+
+
+def _evidence_manifest_from_summary(summary, payload):
+    return {
+        "format": 1,
+        "project": {
+            "id": summary["project"]["id"],
+            "name": summary["project"]["name"],
+            "slug": summary["project"]["slug"],
+            "description": summary["project"].get("description", ""),
+            "notes": summary["project"].get("notes", ""),
+        },
+        "counts": summary["counts"],
+        "links": summary["links"],
+        "targets": summary["targets"],
+        "artifacts": summary.get("artifacts", []),
+        "redaction_mode": payload["redaction_mode"],
+        "include_artifacts": payload["include_artifacts"],
+    }
+
+
+def _package_archive_name(package):
+    raw = str(package.get("name") or "evidence-package").strip().lower()
+    safe = re.sub(r"[^a-z0-9._-]+", "-", raw).strip(".-")
+    return f"{safe or 'evidence-package'}.zip"
+
+
+def _package_zip_artifact_path(workspace_path, used_paths):
+    parts = [
+        part for part in PurePosixPath(str(workspace_path or "").replace("\\", "/")).parts
+        if part not in {"", ".", ".."}
+    ]
+    relative = "/".join(parts) or "artifact"
+    candidate = f"artifacts/{relative}"
+    if candidate not in used_paths:
+        used_paths.add(candidate)
+        return candidate
+    stem = PurePosixPath(relative).stem or "artifact"
+    suffix = PurePosixPath(relative).suffix
+    parent = str(PurePosixPath(relative).parent)
+    prefix = "" if parent in {"", "."} else f"{parent}/"
+    for index in range(2, 1000):
+        candidate = f"artifacts/{prefix}{stem}-{index}{suffix}"
+        if candidate not in used_paths:
+            used_paths.add(candidate)
+            return candidate
+    raise ProjectWorkspaceError("could not allocate artifact package path")
+
+
+def _replace_target_token(command, target_value):
+    token = str(target_value or "").strip()
+    if not token:
+        return str(command or ""), 0
+    # Keep replacements scoped to standalone target values. This avoids turning
+    # api.example.com into api.{{target}} when the project target is example.com.
+    boundary = r"A-Za-z0-9_.-"
+    pattern = re.compile(rf"(?<![{boundary}]){re.escape(token)}(?![{boundary}])")
+    return pattern.subn("{{target}}", str(command or ""))
 
 
 def _allocate_slug(conn, session_id, name, *, project_id=None):
@@ -189,12 +542,23 @@ def migrate_project_workspace_session(conn, from_session_id, to_session_id):
         "UPDATE annotations SET session_id = ? WHERE session_id = ?",
         (to_session_id, from_session_id),
     )
+    package_result = conn.execute(
+        "UPDATE evidence_packages SET session_id = ? WHERE session_id = ?",
+        (to_session_id, from_session_id),
+    )
+    migrated_active_project_preference = _migrate_active_project_preference(
+        conn,
+        from_session_id,
+        to_session_id,
+    )
     return {
         "migrated_projects": migrated_projects,
         "migrated_run_file_artifacts": artifact_result.rowcount,
         "migrated_findings": finding_result.rowcount,
         "migrated_entity_labels": label_result.rowcount,
         "migrated_annotations": annotation_result.rowcount,
+        "migrated_evidence_packages": package_result.rowcount,
+        "migrated_active_project_preference": migrated_active_project_preference,
     }
 
 
@@ -228,10 +592,134 @@ def get_project(session_id, project_id):
     return _row_to_project(row)
 
 
+def _count_rows_for_ids(conn, table, column, ids):
+    values = [str(value) for value in ids if value]
+    if not values:
+        return 0
+    placeholders = ",".join("?" for _ in values)
+    row = conn.execute(
+        f"SELECT COUNT(*) AS count FROM {table} WHERE {column} IN ({placeholders})",  # nosec B608
+        values,
+    ).fetchone()
+    return int(row["count"] or 0) if row else 0
+
+
+def _count_entity_metadata_for_ids(conn, table, entity_type, entity_ids):
+    values = [str(value) for value in entity_ids if value]
+    if not values:
+        return 0
+    placeholders = ",".join("?" for _ in values)
+    row = conn.execute(
+        f"SELECT COUNT(*) AS count FROM {table} WHERE entity_type = ? AND entity_id IN ({placeholders})",  # nosec B608
+        [entity_type, *values],
+    ).fetchone()
+    return int(row["count"] or 0) if row else 0
+
+
+def get_project_summary(session_id, project_id):
+    with db_connect() as conn:
+        project_row = conn.execute(
+            "SELECT id, session_id, name, slug, description, status, color, notes, created, updated "
+            "FROM projects WHERE session_id = ? AND id = ?",
+            (session_id, project_id),
+        ).fetchone()
+        if not project_row:
+            return None
+        link_rows = conn.execute(
+            "SELECT id, project_id, entity_type, entity_id, source, created "
+            "FROM project_links WHERE project_id = ? ORDER BY created DESC",
+            (project_id,),
+        ).fetchall()
+        target_rows = conn.execute(
+            "SELECT id, project_id, type, value, label, notes, source_run_id, confidence, created, updated "
+            "FROM project_targets WHERE project_id = ? ORDER BY type ASC, value COLLATE NOCASE ASC",
+            (project_id,),
+        ).fetchall()
+        package_row = conn.execute(
+            "SELECT COUNT(*) AS count FROM evidence_packages WHERE session_id = ? AND project_id = ?",
+            (session_id, project_id),
+        ).fetchone()
+        run_ids = [row["entity_id"] for row in link_rows if row["entity_type"] == "run"]
+        snapshot_ids = [row["entity_id"] for row in link_rows if row["entity_type"] == "snapshot"]
+        workspace_file_ids = [row["entity_id"] for row in link_rows if row["entity_type"] == "workspace_file"]
+        artifact_rows = []
+        finding_rows = []
+        run_rows = []
+        if run_ids:
+            placeholders = ",".join("?" for _ in run_ids)
+            run_rows = conn.execute(
+                "SELECT r.id, r.command, r.started, r.finished, r.exit_code, r.output_line_count, "
+                "l.created, l.source AS link_source "
+                "FROM project_links l JOIN runs r ON r.id = l.entity_id "
+                "WHERE l.project_id = ? AND l.entity_type = 'run' AND r.session_id = ? "
+                "ORDER BY r.started DESC, l.created DESC",
+                (project_id, session_id),
+            ).fetchall()
+            artifact_rows = conn.execute(
+                "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+                "detected_by, content_type, preview_type, created "
+                f"FROM run_file_artifacts WHERE run_id IN ({placeholders}) "  # nosec B608
+                "ORDER BY created DESC, id DESC",
+                run_ids,
+            ).fetchall()
+            finding_rows = conn.execute(
+                f"SELECT id FROM findings WHERE run_id IN ({placeholders})",  # nosec B608
+                run_ids,
+            ).fetchall()
+        artifact_ids = [row["id"] for row in artifact_rows]
+        finding_ids = [row["id"] for row in finding_rows]
+        label_count = (
+            _count_entity_metadata_for_ids(conn, "entity_labels", "project", [project_id])
+            + _count_entity_metadata_for_ids(conn, "entity_labels", "run", run_ids)
+            + _count_entity_metadata_for_ids(conn, "entity_labels", "snapshot", snapshot_ids)
+            + _count_entity_metadata_for_ids(conn, "entity_labels", "workspace_file", workspace_file_ids)
+            + _count_entity_metadata_for_ids(conn, "entity_labels", "run_file_artifact", artifact_ids)
+            + _count_entity_metadata_for_ids(conn, "entity_labels", "finding", finding_ids)
+        )
+        annotation_count = (
+            _count_entity_metadata_for_ids(conn, "annotations", "project", [project_id])
+            + _count_entity_metadata_for_ids(conn, "annotations", "run", run_ids)
+            + _count_entity_metadata_for_ids(conn, "annotations", "snapshot", snapshot_ids)
+            + _count_entity_metadata_for_ids(conn, "annotations", "workspace_file", workspace_file_ids)
+            + _count_entity_metadata_for_ids(conn, "annotations", "run_file_artifact", artifact_ids)
+            + _count_entity_metadata_for_ids(conn, "annotations", "finding", finding_ids)
+        )
+    links = [_row_to_link(row) for row in link_rows]
+    targets = [_row_to_target(row) for row in target_rows]
+    runs = [item for item in (_row_to_project_run(row) for row in run_rows) if item]
+    artifacts = [item for item in (_row_to_run_file_artifact(row) for row in artifact_rows) if item]
+    packages = list_evidence_packages(session_id, project_id) or []
+    return {
+        "project": _row_to_project(project_row),
+        "links": links,
+        "targets": targets,
+        "runs": runs,
+        "artifacts": artifacts,
+        "packages": packages,
+        "counts": {
+            "runs": len(run_ids),
+            "snapshots": len(snapshot_ids),
+            "workspace_files": len(workspace_file_ids),
+            "targets": len(targets),
+            "artifacts": len(artifacts),
+            "findings": len(finding_ids),
+            "labels": label_count,
+            "annotations": annotation_count,
+            "packages": int(package_row["count"] or 0) if package_row else 0,
+        },
+    }
+
+
 def create_project(session_id, data):
     payload = _normalize_project_payload(data)
     created = _now()
     with db_connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS count FROM projects WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if _quota_exceeded(int(row["count"] or 0) if row else 0, "max_projects_per_session", 100):
+            _raise_quota("project quota exceeded for this session")
         for _ in range(10):
             project_id = _new_project_id()
             slug = _allocate_slug(conn, session_id, payload["name"])
@@ -304,8 +792,29 @@ def delete_project(session_id, project_id):
         ).fetchone()
         if not project:
             return False
+        package_rows = conn.execute(
+            "SELECT id FROM evidence_packages WHERE session_id = ? AND project_id = ?",
+            (session_id, project_id),
+        ).fetchall()
+        package_ids = [row["id"] for row in package_rows if row["id"]]
+        if package_ids:
+            placeholders = ",".join("?" for _ in package_ids)
+            conn.execute(
+                "DELETE FROM entity_labels WHERE entity_type = 'package' "
+                f"AND entity_id IN ({placeholders})",  # nosec B608
+                package_ids,
+            )
+            conn.execute(
+                "DELETE FROM annotations WHERE entity_type = 'package' "
+                f"AND entity_id IN ({placeholders})",  # nosec B608
+                package_ids,
+            )
         conn.execute("DELETE FROM project_links WHERE project_id = ?", (project_id,))
         conn.execute("DELETE FROM project_targets WHERE project_id = ?", (project_id,))
+        conn.execute(
+            "DELETE FROM evidence_packages WHERE session_id = ? AND project_id = ?",
+            (session_id, project_id),
+        )
         _clear_active_project_preference(conn, session_id, project_id=project_id)
         conn.execute(
             "DELETE FROM projects WHERE session_id = ? AND id = ?",
@@ -313,6 +822,555 @@ def delete_project(session_id, project_id):
         )
         conn.commit()
     return True
+
+
+def list_evidence_packages(session_id, project_id):
+    with db_connect() as conn:
+        project = conn.execute(
+            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
+            (session_id, project_id),
+        ).fetchone()
+        if not project:
+            return None
+        rows = conn.execute(
+            "SELECT id, session_id, project_id, name, description, redaction_mode, "
+            "include_artifacts, manifest, status, created, updated "
+            "FROM evidence_packages WHERE session_id = ? AND project_id = ? "
+            "ORDER BY updated DESC, created DESC",
+            (session_id, project_id),
+        ).fetchall()
+    return [_row_to_evidence_package(row) for row in rows]
+
+
+def get_evidence_package(session_id, project_id, package_id):
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT id, session_id, project_id, name, description, redaction_mode, "
+            "include_artifacts, manifest, status, created, updated "
+            "FROM evidence_packages WHERE session_id = ? AND project_id = ? AND id = ?",
+            (session_id, project_id, package_id),
+        ).fetchone()
+    return _row_to_evidence_package(row)
+
+
+def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=None):
+    package = get_evidence_package(session_id, project_id, package_id)
+    if package is None:
+        return None
+    generated_at = _now()
+    manifest = dict(package.get("manifest") or {})
+    export_manifest = {
+        "format": 1,
+        "generated_at": generated_at,
+        "package": {
+            "id": package["id"],
+            "name": package["name"],
+            "description": package["description"],
+            "redaction_mode": package["redaction_mode"],
+            "include_artifacts": package["include_artifacts"],
+            "status": package["status"],
+            "created": package["created"],
+            "updated": package["updated"],
+        },
+        "manifest": manifest,
+    }
+    manifest_bytes = json.dumps(export_manifest, indent=2, sort_keys=True).encode("utf-8") + b"\n"
+    max_archive_bytes = _cfg_mb_bytes("evidence_package_max_mb", 25, cfg=cfg)
+    if max_archive_bytes and len(manifest_bytes) > max_archive_bytes:
+        raise EvidencePackageTooLarge("evidence package manifest exceeds configured size limit")
+    skipped_artifacts = []
+    buffer = io.BytesIO()
+    used_paths = set()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("manifest.json", manifest_bytes)
+        if package["include_artifacts"]:
+            artifacts = manifest.get("artifacts")
+            artifact_items = artifacts if isinstance(artifacts, list) else []
+            max_artifacts = _cfg_int("evidence_package_max_artifacts", 100, cfg=cfg)
+            if max_artifacts and len(artifact_items) > max_artifacts:
+                raise EvidencePackageTooLarge("evidence package artifact count exceeds configured limit")
+            projected_bytes = len(manifest_bytes)
+            for artifact in artifact_items:
+                if not isinstance(artifact, dict):
+                    continue
+                workspace_path = _trim_text(artifact.get("workspace_path"), MAX_ENTITY_ID_LEN)
+                if not workspace_path:
+                    continue
+                try:
+                    declared_size = max(0, int(artifact.get("byte_size") or 0))
+                except (TypeError, ValueError):
+                    declared_size = 0
+                if max_archive_bytes and declared_size and projected_bytes + declared_size > max_archive_bytes:
+                    raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
+                try:
+                    resolved = resolve_workspace_path(session_id, workspace_path, cfg)
+                    if not resolved.is_file():
+                        raise ProjectWorkspaceError("artifact file is not available")
+                    projected_bytes += resolved.stat().st_size
+                    if max_archive_bytes and projected_bytes > max_archive_bytes:
+                        raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
+                    zip_path = _package_zip_artifact_path(workspace_path, used_paths)
+                    archive.write(resolved, arcname=zip_path)
+                except (OSError, ProjectWorkspaceError, WorkspaceError) as exc:
+                    skipped_artifacts.append({
+                        "id": artifact.get("id") or "",
+                        "workspace_path": workspace_path,
+                        "reason": str(exc),
+                    })
+        if skipped_artifacts:
+            archive.writestr(
+                "skipped-artifacts.json",
+                json.dumps({"artifacts": skipped_artifacts}, indent=2, sort_keys=True) + "\n",
+            )
+    return {
+        "filename": _package_archive_name(package),
+        "mimetype": "application/zip",
+        "bytes": buffer.getvalue(),
+        "skipped_artifacts": skipped_artifacts,
+    }
+
+
+def create_evidence_package(session_id, project_id, data):
+    payload = _normalize_evidence_package_payload(data)
+    summary = get_project_summary(session_id, project_id)
+    if summary is None:
+        return None
+    manifest = _evidence_manifest_from_summary(summary, payload)
+    created = _now()
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS count FROM evidence_packages WHERE session_id = ? AND project_id = ?",
+            (session_id, project_id),
+        ).fetchone()
+        if _quota_exceeded(
+            int(row["count"] or 0) if row else 0,
+            "max_evidence_packages_per_project",
+            25,
+        ):
+            _raise_quota("evidence package quota exceeded for this project")
+        for _ in range(10):
+            package_id = _new_evidence_package_id()
+            result = conn.execute(
+                "INSERT OR IGNORE INTO evidence_packages "
+                "(id, session_id, project_id, name, description, redaction_mode, "
+                "include_artifacts, manifest, status, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)",
+                (
+                    package_id,
+                    session_id,
+                    project_id,
+                    payload["name"],
+                    payload["description"],
+                    payload["redaction_mode"],
+                    1 if payload["include_artifacts"] else 0,
+                    json.dumps(manifest, sort_keys=True),
+                    created,
+                    created,
+                ),
+            )
+            if result.rowcount:
+                conn.commit()
+                return get_evidence_package(session_id, project_id, package_id)
+        raise ProjectWorkspaceError("could not allocate a package id")
+
+
+def delete_evidence_package(session_id, project_id, package_id):
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM evidence_packages WHERE session_id = ? AND project_id = ? AND id = ?",
+            (session_id, project_id, package_id),
+        ).fetchone()
+        if not row:
+            return False
+        conn.execute(
+            "DELETE FROM entity_labels WHERE entity_type = 'package' AND entity_id = ?",
+            (package_id,),
+        )
+        conn.execute(
+            "DELETE FROM annotations WHERE entity_type = 'package' AND entity_id = ?",
+            (package_id,),
+        )
+        result = conn.execute(
+            "DELETE FROM evidence_packages WHERE session_id = ? AND project_id = ? AND id = ?",
+            (session_id, project_id, package_id),
+        )
+        conn.commit()
+    return result.rowcount > 0
+
+
+def _workflow_input_type_for_target(target_type, target_value):
+    if target_type == "url":
+        return "url"
+    if target_type == "port_set":
+        return "port" if str(target_value or "").isdigit() else ""
+    return "host"
+
+
+def _workflow_target_ref(data):
+    if not isinstance(data, dict):
+        return "", ""
+    target_id = _trim_text(data.get("target_id"), MAX_ENTITY_ID_LEN)
+    target_value = _trim_text(data.get("target_value") or data.get("target"), MAX_TARGET_VALUE_LEN)
+    return target_id, target_value
+
+
+def _workflow_target_candidates(target_rows, steps):
+    candidates = []
+    for target in target_rows:
+        target_id = str(target["id"] or "")
+        target_value = str(target["value"] or "").strip()
+        target_type = str(target["type"] or "").strip().lower()
+        input_type = _workflow_input_type_for_target(target_type, target_value)
+        if not target_value or not input_type:
+            continue
+        transformed_steps = []
+        replacement_count = 0
+        for step in steps:
+            replaced_cmd, replacements = _replace_target_token(step["cmd"], target_value)
+            transformed_steps.append({**step, "cmd": replaced_cmd})
+            replacement_count += replacements
+        if replacement_count:
+            candidates.append({
+                "id": target_id,
+                "type": target_type,
+                "value": target_value,
+                "input_type": input_type,
+                "replacement_count": replacement_count,
+                "steps": transformed_steps,
+            })
+    return candidates
+
+
+def _select_workflow_target_candidate(data, candidates, target_rows):
+    target_id, target_value = _workflow_target_ref(data)
+    if target_id or target_value:
+        selected_target = None
+        for target in target_rows:
+            if target_id and str(target["id"] or "") == target_id:
+                selected_target = target
+                break
+            if target_value and str(target["value"] or "") == target_value:
+                selected_target = target
+                break
+        if not selected_target:
+            raise ProjectWorkspaceError("selected target is not linked to this project")
+        selected_id = str(selected_target["id"] or "")
+        selected_value = str(selected_target["value"] or "")
+        for candidate in candidates:
+            if candidate["id"] == selected_id or candidate["value"] == selected_value:
+                return candidate
+        raise ProjectWorkspaceError("selected target does not appear in the promoted run commands")
+    if len(candidates) > 1:
+        raise ProjectWorkspaceError("multiple project targets match promoted runs; provide target_id")
+    return candidates[0] if candidates else None
+
+
+def _workflow_target_metadata(candidate):
+    if not candidate:
+        return None
+    return {
+        "id": candidate["id"],
+        "type": candidate["type"],
+        "value": candidate["value"],
+        "input_type": candidate["input_type"],
+        "replacement_count": candidate["replacement_count"],
+    }
+
+
+def build_project_workflow_payload(session_id, project_id, data):
+    if not isinstance(data, dict):
+        raise ProjectWorkspaceError("workflow promotion payload must be an object")
+    with db_connect() as conn:
+        project = conn.execute(
+            "SELECT id, name FROM projects WHERE session_id = ? AND id = ?",
+            (session_id, project_id),
+        ).fetchone()
+        if not project:
+            return None
+        rows = conn.execute(
+            "SELECT l.entity_id AS run_id, r.command, l.created "
+            "FROM project_links l JOIN runs r ON r.id = l.entity_id "
+            "WHERE l.project_id = ? AND l.entity_type = 'run' AND r.session_id = ? "
+            "ORDER BY l.created ASC",
+            (project_id, session_id),
+        ).fetchall()
+        target_rows = conn.execute(
+            "SELECT id, type, value FROM project_targets "
+            "WHERE project_id = ? ORDER BY created ASC",
+            (project_id,),
+        ).fetchall()
+
+    available_run_count = len(rows)
+    selected_ids = data.get("run_ids")
+    if selected_ids is not None:
+        if not isinstance(selected_ids, list):
+            raise ProjectWorkspaceError("run_ids must be a list")
+        selected_ids = [_trim_text(item, MAX_ENTITY_ID_LEN) for item in selected_ids if _trim_text(item, MAX_ENTITY_ID_LEN)]
+        if len(selected_ids) > MAX_PROJECT_WORKFLOW_STEPS:
+            raise ProjectWorkspaceError(f"workflow promotion can include at most {MAX_PROJECT_WORKFLOW_STEPS} runs")
+        by_id = {row["run_id"]: row for row in rows}
+        missing = [run_id for run_id in selected_ids if run_id not in by_id]
+        if missing:
+            raise ProjectWorkspaceError("selected run is not linked to this project")
+        rows = [by_id[run_id] for run_id in selected_ids]
+    if not rows:
+        raise ProjectWorkspaceError("project needs at least one linked run to promote a workflow")
+    requested_run_count = len(rows)
+    truncated_runs = max(0, len(rows) - MAX_PROJECT_WORKFLOW_STEPS)
+    if truncated_runs:
+        rows = rows[:MAX_PROJECT_WORKFLOW_STEPS]
+
+    steps = [{"cmd": str(row["command"] or ""), "note": "Promoted from project history"} for row in rows]
+    candidates = _workflow_target_candidates(target_rows, steps)
+    selected_target = _select_workflow_target_candidate(data, candidates, target_rows)
+    inputs = []
+    if selected_target:
+        steps = selected_target["steps"]
+        inputs.append({
+            "id": "target",
+            "label": "Target",
+            "type": selected_target["input_type"],
+            "required": True,
+            "placeholder": selected_target["value"],
+            "default": selected_target["value"],
+            "help": "Project target used when this workflow was promoted.",
+        })
+
+    title = _trim_text(data.get("title"), MAX_PACKAGE_NAME_LEN) or f"{project['name']} workflow"
+    description = _trim_text(
+        data.get("description") or f"Promoted from {len(steps)} project run{'s' if len(steps) != 1 else ''}.",
+        MAX_PACKAGE_DESCRIPTION_LEN,
+    )
+    return {
+        "workflow": {
+            "title": title,
+            "description": description,
+            "inputs": inputs,
+            "steps": steps,
+        },
+        "promotion": {
+            "project_id": project_id,
+            "available_run_count": available_run_count,
+            "requested_run_count": requested_run_count,
+            "promoted_run_count": len(steps),
+            "step_limit": MAX_PROJECT_WORKFLOW_STEPS,
+            "truncated_runs": truncated_runs,
+            "selected_run_ids": [str(row["run_id"] or "") for row in rows],
+            "target": _workflow_target_metadata(selected_target),
+            "matching_targets": [_workflow_target_metadata(candidate) for candidate in candidates],
+        },
+    }
+
+
+def list_project_findings(session_id, project_id, filters=None):
+    filters = filters if isinstance(filters, dict) else {}
+    with db_connect() as conn:
+        project = conn.execute(
+            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
+            (session_id, project_id),
+        ).fetchone()
+        if not project:
+            return None
+        params = [project_id, session_id]
+        clauses = [
+            "l.project_id = ?",
+            "l.entity_type = 'run'",
+            "r.session_id = ?",
+        ]
+        run_id = _trim_text(filters.get("run_id"), MAX_ENTITY_ID_LEN)
+        if run_id:
+            clauses.append("f.run_id = ?")
+            params.append(run_id)
+        target_id = _trim_text(filters.get("target_id"), MAX_ENTITY_ID_LEN)
+        review_state = _trim_text(filters.get("review_state"), 32).lower()
+        if review_state:
+            if review_state not in FINDING_REVIEW_STATES:
+                raise ProjectWorkspaceError(
+                    "finding review_state must be new, reviewed, important, false_positive, or needs_followup"
+                )
+            clauses.append("f.review_state = ?")
+            params.append(review_state)
+        scope = _trim_text(filters.get("scope"), 64)
+        if scope:
+            clauses.append("f.scope = ?")
+            params.append(scope)
+        severity = _trim_text(filters.get("severity"), 64).lower()
+        if severity:
+            clauses.append("LOWER(f.severity) = ?")
+            params.append(severity)
+        label = _trim_text(filters.get("label"), MAX_LABEL_LEN)
+        if label:
+            clauses.append(
+                "EXISTS ("
+                "SELECT 1 FROM entity_labels el "
+                "WHERE el.session_id = ? AND el.entity_type = 'finding' "
+                "AND el.entity_id = f.id AND el.label = ?"
+                ")"
+            )
+            params.extend([session_id, label])
+        annotation_state = _trim_text(filters.get("annotation_state"), 32).lower()
+        if annotation_state:
+            if annotation_state not in {"annotated", "unannotated"}:
+                raise ProjectWorkspaceError("annotation_state must be annotated or unannotated")
+            operator = "EXISTS" if annotation_state == "annotated" else "NOT EXISTS"
+            clauses.append(
+                f"{operator} ("  # nosec B608
+                "SELECT 1 FROM annotations ann "
+                "WHERE ann.session_id = ? AND ann.entity_type = 'finding' "
+                "AND ann.entity_id = f.id"
+                ")"
+            )
+            params.append(session_id)
+        rows = conn.execute(
+            "SELECT f.id, f.session_id, f.run_id, f.target_id, f.scope, f.title, f.raw_line, "
+            "f.line_number, f.severity, f.fingerprint, f.review_state, f.created, "
+            "r.command AS run_command "
+            "FROM project_links l "
+            "JOIN runs r ON r.id = l.entity_id "
+            "JOIN findings f ON f.run_id = r.id AND f.session_id = r.session_id "
+            f"WHERE {' AND '.join(clauses)} "  # nosec B608
+            "ORDER BY f.created DESC, f.id DESC",
+            params,
+        ).fetchall()
+        target_rows = conn.execute(
+            "SELECT id, type, value FROM project_targets WHERE project_id = ?",
+            (project_id,),
+        ).fetchall()
+
+    findings = [item for item in (_row_to_project_finding(row, target_rows) for row in rows) if item]
+    if target_id:
+        findings = [
+            item for item in findings
+            if target_id == item.get("target_id") or target_id in (item.get("target_ids") or [])
+        ]
+    command_root = _trim_text(filters.get("command_root"), 128)
+    if command_root:
+        findings = [item for item in findings if item["command_root"] == command_root]
+    return findings
+
+
+def _project_linked_run_ids(conn, session_id, project_id):
+    rows = conn.execute(
+        "SELECT l.entity_id AS run_id "
+        "FROM project_links l JOIN runs r ON r.id = l.entity_id "
+        "WHERE l.project_id = ? AND l.entity_type = 'run' AND r.session_id = ? "
+        "ORDER BY l.created DESC",
+        (project_id, session_id),
+    ).fetchall()
+    return [row["run_id"] for row in rows]
+
+
+def _project_labeled_run_id(conn, session_id, project_id, label, excluded_run_ids=None):
+    excluded = [str(run_id) for run_id in (excluded_run_ids or []) if run_id]
+    params = [project_id, session_id, label]
+    excluded_sql = ""
+    if excluded:
+        placeholders = ",".join("?" for _ in excluded)
+        excluded_sql = f"AND r.id NOT IN ({placeholders}) "  # nosec B608
+        params.extend(excluded)
+    row = conn.execute(
+        "SELECT r.id "
+        "FROM project_links l "
+        "JOIN runs r ON r.id = l.entity_id "
+        "JOIN entity_labels el ON el.entity_type = 'run' AND el.entity_id = r.id "
+        "WHERE l.project_id = ? AND l.entity_type = 'run' AND r.session_id = ? "
+        "AND el.session_id = r.session_id AND el.label = ? "
+        f"{excluded_sql}"  # nosec B608
+        "ORDER BY r.started DESC, l.created DESC LIMIT 1",
+        params,
+    ).fetchone()
+    return row["id"] if row else ""
+
+
+def _run_finding_compare_items(conn, session_id, run_id):
+    rows = conn.execute(
+        "SELECT id, raw_line, title, severity, fingerprint, review_state, created "
+        "FROM findings WHERE session_id = ? AND run_id = ? ORDER BY created ASC, id ASC",
+        (session_id, run_id),
+    ).fetchall()
+    items = []
+    for row in rows:
+        key = row["fingerprint"] or row["raw_line"]
+        items.append({
+            "key": key,
+            "id": row["id"],
+            "title": row["title"],
+            "raw_line": row["raw_line"],
+            "severity": row["severity"],
+            "review_state": row["review_state"],
+        })
+    return items
+
+
+def _run_artifact_compare_items(conn, session_id, run_id):
+    rows = conn.execute(
+        "SELECT id, workspace_path, kind, byte_size, detected_by, created "
+        "FROM run_file_artifacts WHERE session_id = ? AND run_id = ? ORDER BY created ASC, id ASC",
+        (session_id, run_id),
+    ).fetchall()
+    return [{
+        "key": row["workspace_path"],
+        "id": row["id"],
+        "workspace_path": row["workspace_path"],
+        "kind": row["kind"],
+        "byte_size": row["byte_size"],
+        "detected_by": row["detected_by"],
+    } for row in rows]
+
+
+def _compare_items(left_items, right_items):
+    left_by_key = {item["key"]: item for item in left_items if item.get("key")}
+    right_by_key = {item["key"]: item for item in right_items if item.get("key")}
+    left_keys = set(left_by_key)
+    right_keys = set(right_by_key)
+    return {
+        "added": [left_by_key[key] for key in sorted(left_keys - right_keys)],
+        "removed": [right_by_key[key] for key in sorted(right_keys - left_keys)],
+        "unchanged_count": len(left_keys & right_keys),
+    }
+
+
+def compare_project_runs(session_id, project_id, filters=None):
+    filters = filters if isinstance(filters, dict) else {}
+    with db_connect() as conn:
+        project = conn.execute(
+            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
+            (session_id, project_id),
+        ).fetchone()
+        if not project:
+            return None
+        linked_run_ids = _project_linked_run_ids(conn, session_id, project_id)
+        left_run_id = _trim_text(filters.get("left_run_id"), MAX_ENTITY_ID_LEN)
+        right_run_id = _trim_text(filters.get("right_run_id"), MAX_ENTITY_ID_LEN)
+        baseline_label = _trim_text(filters.get("baseline_label"), MAX_LABEL_LEN)
+        if not left_run_id and len(linked_run_ids) >= 1:
+            left_run_id = linked_run_ids[0]
+        if not right_run_id and baseline_label:
+            right_run_id = _project_labeled_run_id(
+                conn,
+                session_id,
+                project_id,
+                baseline_label,
+                excluded_run_ids=[left_run_id],
+            )
+        if not right_run_id and len(linked_run_ids) >= 2:
+            right_run_id = linked_run_ids[1]
+        if not left_run_id or not right_run_id:
+            raise ProjectWorkspaceError("project comparison needs two linked runs")
+        linked = set(linked_run_ids)
+        if left_run_id not in linked or right_run_id not in linked:
+            raise ProjectWorkspaceError("comparison runs must both be linked to this project")
+        left_findings = _run_finding_compare_items(conn, session_id, left_run_id)
+        right_findings = _run_finding_compare_items(conn, session_id, right_run_id)
+        left_artifacts = _run_artifact_compare_items(conn, session_id, left_run_id)
+        right_artifacts = _run_artifact_compare_items(conn, session_id, right_run_id)
+    return {
+        "left_run_id": left_run_id,
+        "right_run_id": right_run_id,
+        "baseline_label": baseline_label,
+        "findings": _compare_items(left_findings, right_findings),
+        "artifacts": _compare_items(left_artifacts, right_artifacts),
+    }
 
 
 def get_active_project(session_id):
@@ -360,6 +1418,8 @@ def clear_active_project(session_id):
 
 
 def link_run_to_active_project(conn, session_id, run_id):
+    if not _project_auto_link_external_runs_enabled(conn, session_id):
+        return None
     preferences = _load_session_preferences(conn, session_id)
     project_id = str(preferences.get(ACTIVE_PROJECT_PREF_KEY) or "")
     if not project_id:
@@ -463,10 +1523,373 @@ def link_snapshot_to_project_context(conn, session_id, snapshot_id, *, source_ru
     return links
 
 
+def record_run_file_artifacts(conn, session_id, run_id, artifacts):
+    run_id = _trim_text(run_id, MAX_ENTITY_ID_LEN)
+    run = conn.execute(
+        "SELECT 1 FROM runs WHERE session_id = ? AND id = ?",
+        (session_id, run_id),
+    ).fetchone()
+    if not run:
+        return []
+
+    created = _now()
+    recorded = []
+    seen_paths = set()
+    artifact_items = artifacts if isinstance(artifacts, list) else []
+    for item in artifact_items:
+        if not isinstance(item, dict):
+            continue
+        workspace_path = _trim_text(item.get("workspace_path"), MAX_ENTITY_ID_LEN)
+        if not workspace_path or workspace_path in seen_paths:
+            continue
+        seen_paths.add(workspace_path)
+        display_name = _trim_text(item.get("display_name"), 255) or workspace_path.rsplit("/", 1)[-1]
+        kind = _trim_text(item.get("kind") or "unknown", 64) or "unknown"
+        detected_by = _trim_text(item.get("detected_by") or "workspace_flag", 64) or "workspace_flag"
+        content_type = _trim_text(item.get("content_type"), 128)
+        preview_type = _trim_text(item.get("preview_type"), 64)
+        try:
+            byte_size = max(0, int(item.get("byte_size") or 0))
+        except (TypeError, ValueError):
+            byte_size = 0
+
+        artifact_id = ""
+        for _ in range(10):
+            candidate_id = _new_run_file_artifact_id()
+            conn.execute(
+                "INSERT OR IGNORE INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+                "detected_by, content_type, preview_type, created) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    candidate_id,
+                    session_id,
+                    run_id,
+                    workspace_path,
+                    display_name,
+                    kind,
+                    byte_size,
+                    detected_by,
+                    content_type,
+                    preview_type,
+                    created,
+                ),
+            )
+            row = conn.execute(
+                "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+                "detected_by, content_type, preview_type, created "
+                "FROM run_file_artifacts WHERE id = ?",
+                (candidate_id,),
+            ).fetchone()
+            if row:
+                artifact_id = row["id"]
+                recorded.append({
+                    "id": row["id"],
+                    "session_id": row["session_id"],
+                    "run_id": row["run_id"],
+                    "workspace_path": row["workspace_path"],
+                    "display_name": row["display_name"],
+                    "kind": row["kind"],
+                    "byte_size": row["byte_size"],
+                    "detected_by": row["detected_by"],
+                    "content_type": row["content_type"],
+                    "preview_type": row["preview_type"],
+                    "created": row["created"],
+                })
+                break
+        if not artifact_id:
+            raise ProjectWorkspaceError("could not allocate a run file artifact id")
+    return recorded
+
+
+def _finding_severity_from_text(text):
+    match = re.search(r"\[(info|low|medium|high|critical)\]", str(text or ""), re.I)
+    return match.group(1).lower() if match else ""
+
+
+def _finding_fingerprint(run_id, line_index, text):
+    raw = f"{run_id}\x1f{line_index}\x1f{text}".encode("utf-8", errors="replace")
+    return hashlib.sha256(raw).hexdigest()
+
+
+_NMAP_TARGET_WITH_IP_RE = re.compile(r"^(.+?)\s+\(([^)]+)\)$")
+_TARGET_BOUNDARY_CHARS = r"A-Za-z0-9._:-"
+_PORT_TOKEN_RE = re.compile(r"^\s*(\d{1,5})(?:\s*-\s*(\d{1,5}))?\s*$")
+_PORT_TEXT_PATTERNS = [
+    re.compile(r"\b(\d{1,5})/(?:tcp|udp)\b", re.I),
+    re.compile(r"\bopen\s+port\s+(\d{1,5})\b", re.I),
+    re.compile(r"(?<!:):(\d{1,5})(?!\d)"),
+]
+
+
+def _clean_target_candidate(value):
+    return str(value or "").strip().strip("[](){}<>'\"`,;")
+
+
+def _target_candidate_aliases(value):
+    raw = _clean_target_candidate(value)
+    if not raw:
+        return set()
+    candidates = [raw]
+    report_match = _NMAP_TARGET_WITH_IP_RE.match(raw)
+    if report_match:
+        candidates.extend([
+            _clean_target_candidate(report_match.group(1)),
+            _clean_target_candidate(report_match.group(2)),
+        ])
+
+    aliases = set()
+    for candidate in candidates:
+        candidate = _clean_target_candidate(candidate)
+        if not candidate:
+            continue
+        aliases.add(candidate.lower().rstrip("."))
+        parsed = urlparse(candidate)
+        if parsed.scheme and parsed.hostname:
+            aliases.add(parsed.hostname.lower().rstrip("."))
+            continue
+        no_path = candidate.split("/", 1)[0].strip()
+        if no_path.startswith("[") and "]" in no_path:
+            host = no_path[1:no_path.index("]")]
+        elif no_path.count(":") == 1 and no_path.rsplit(":", 1)[1].isdigit():
+            host = no_path.rsplit(":", 1)[0]
+        else:
+            host = no_path
+        host = _clean_target_candidate(host).lower().rstrip(".")
+        if host:
+            aliases.add(host)
+    return aliases
+
+
+def _target_candidate_ip_addresses(value):
+    addresses = []
+    for alias in _target_candidate_aliases(value):
+        try:
+            addresses.append(ipaddress.ip_address(alias))
+        except ValueError:
+            continue
+    return addresses
+
+
+def _target_row_value(target):
+    try:
+        return str(target["value"] or "").strip()
+    except (KeyError, TypeError):
+        return ""
+
+
+def _target_row_type(target):
+    try:
+        return str(target["type"] or "").strip().lower()
+    except (KeyError, TypeError):
+        return ""
+
+
+def _target_row_id(target):
+    try:
+        return str(target["id"] or "")
+    except (KeyError, TypeError):
+        return ""
+
+
+def _target_row_matches_cidr(target, candidate):
+    target_type = _target_row_type(target)
+    target_value = _target_row_value(target)
+    if target_type != "cidr" and "/" not in target_value:
+        return False
+    try:
+        network = ipaddress.ip_network(target_value, strict=False)
+    except ValueError:
+        return False
+    return any(address.version == network.version and address in network for address in _target_candidate_ip_addresses(candidate))
+
+
+def _normalize_port(value):
+    try:
+        port = int(str(value or "").strip())
+    except (TypeError, ValueError):
+        return None
+    return port if 1 <= port <= 65535 else None
+
+
+def _target_port_ranges(value):
+    ranges = []
+    for part in re.split(r"[\s,]+", str(value or "").strip()):
+        if not part:
+            continue
+        match = _PORT_TOKEN_RE.match(part)
+        if not match:
+            continue
+        start = _normalize_port(match.group(1))
+        end = _normalize_port(match.group(2) or match.group(1))
+        if start is None or end is None:
+            continue
+        ranges.append((min(start, end), max(start, end)))
+    return ranges
+
+
+def _ports_from_text(text):
+    ports = []
+    seen = set()
+    for pattern in _PORT_TEXT_PATTERNS:
+        for match in pattern.finditer(str(text or "")):
+            port = _normalize_port(match.group(1))
+            if port is None or port in seen:
+                continue
+            seen.add(port)
+            ports.append(port)
+    return ports
+
+
+def _target_row_matches_port_set(target, text):
+    if _target_row_type(target) != "port_set":
+        return False
+    ranges = _target_port_ranges(_target_row_value(target))
+    if not ranges:
+        return False
+    return any(
+        start <= port <= end
+        for port in _ports_from_text(text)
+        for start, end in ranges
+    )
+
+
+def _target_id_from_candidate(target_rows, candidate):
+    candidate_aliases = _target_candidate_aliases(candidate)
+    if not candidate_aliases:
+        return ""
+    for target in target_rows:
+        if _target_row_type(target) == "cidr":
+            continue
+        target_aliases = _target_candidate_aliases(_target_row_value(target))
+        if candidate_aliases.intersection(target_aliases):
+            return _target_row_id(target)
+    for target in target_rows:
+        if _target_row_matches_cidr(target, candidate):
+            return _target_row_id(target)
+    return ""
+
+
+def _target_value_matches_text(target, text):
+    target_type = _target_row_type(target)
+    if target_type == "port_set":
+        return _target_row_matches_port_set(target, text)
+    if target_type == "cidr":
+        return False
+    raw_text = str(text or "")
+    for alias in sorted(_target_candidate_aliases(_target_row_value(target)), key=len, reverse=True):
+        if len(alias) < 3:
+            continue
+        pattern = rf"(?<![{_TARGET_BOUNDARY_CHARS}]){re.escape(alias)}(?![{_TARGET_BOUNDARY_CHARS}])"
+        if re.search(pattern, raw_text, re.I):
+            return True
+    return False
+
+
+def _target_ids_for_finding(target_rows, entry, raw_line):
+    target_ids = []
+
+    def add(target_id):
+        normalized = str(target_id or "")
+        if normalized and normalized not in target_ids:
+            target_ids.append(normalized)
+
+    if isinstance(entry, dict):
+        target_id = _target_id_from_candidate(target_rows, entry.get("target"))
+        if target_id:
+            add(target_id)
+    for target in target_rows:
+        if _target_value_matches_text(target, raw_line):
+            add(_target_row_id(target))
+    return target_ids
+
+
+def _target_id_for_finding(target_rows, entry, raw_line):
+    target_ids = _target_ids_for_finding(target_rows, entry, raw_line)
+    return target_ids[0] if target_ids else ""
+
+
+def record_run_findings(conn, session_id, run_id, entries):
+    run_id = _trim_text(run_id, MAX_ENTITY_ID_LEN)
+    run = conn.execute(
+        "SELECT 1 FROM runs WHERE session_id = ? AND id = ?",
+        (session_id, run_id),
+    ).fetchone()
+    if not run:
+        return []
+
+    target_rows = conn.execute(
+        "SELECT t.id, t.type, t.value "
+        "FROM project_targets t "
+        "JOIN project_links l ON l.project_id = t.project_id "
+        "WHERE l.entity_type = 'run' AND l.entity_id = ? "
+        "ORDER BY LENGTH(t.value) DESC, t.confidence DESC",
+        (run_id,),
+    ).fetchall()
+    created = _now()
+    recorded = []
+    seen_fingerprints = set()
+    entry_items = entries if isinstance(entries, list) else []
+    for fallback_index, entry in enumerate(entry_items):
+        if not isinstance(entry, dict):
+            continue
+        signals = entry.get("signals")
+        signal_values = {str(signal) for signal in signals} if isinstance(signals, list) else set()
+        if "findings" not in signal_values:
+            continue
+        raw_line = str(entry.get("text") or "").strip()
+        if not raw_line:
+            continue
+        line_index = entry.get("line_index")
+        if not isinstance(line_index, int):
+            line_index = fallback_index
+        fingerprint = _finding_fingerprint(run_id, line_index, raw_line)
+        if fingerprint in seen_fingerprints:
+            continue
+        seen_fingerprints.add(fingerprint)
+        title = _trim_text(raw_line, MAX_FINDING_TITLE_LEN)
+        severity = _finding_severity_from_text(raw_line)
+        target_id = _target_id_for_finding(target_rows, entry, raw_line)
+        for _ in range(10):
+            finding_id = _new_finding_id()
+            conn.execute(
+                "INSERT OR IGNORE INTO findings "
+                "(id, session_id, run_id, target_id, scope, title, raw_line, line_number, "
+                "severity, fingerprint, review_state, created) "
+                "VALUES (?, ?, ?, ?, 'finding', ?, ?, ?, ?, ?, 'new', ?)",
+                (
+                    finding_id,
+                    session_id,
+                    run_id,
+                    target_id,
+                    title,
+                    raw_line,
+                    line_index,
+                    severity,
+                    fingerprint,
+                    created,
+                ),
+            )
+            row = conn.execute(
+                "SELECT id, session_id, run_id, target_id, scope, title, raw_line, line_number, "
+                "severity, fingerprint, review_state, created FROM findings WHERE id = ?",
+                (finding_id,),
+            ).fetchone()
+            if row:
+                recorded.append(_row_to_finding(row))
+                break
+        else:
+            raise ProjectWorkspaceError("could not allocate a finding id")
+    return recorded
+
+
 def _normalize_link_payload(data):
     if not isinstance(data, dict):
         raise ProjectWorkspaceError("project link payload must be an object")
-    entity_type = validate_project_entity_type(_trim_text(data.get("entity_type"), 64))
+    try:
+        entity_type = validate_project_entity_type(_trim_text(data.get("entity_type"), 64))
+    except ValueError as exc:
+        raise ProjectWorkspaceError(str(exc)) from None
     if entity_type not in PROJECT_LINK_ENTITY_TYPES:
         raise ProjectWorkspaceError(f"project links do not support {entity_type}")
     entity_id = _trim_text(data.get("entity_id"), MAX_ENTITY_ID_LEN)
@@ -474,6 +1897,151 @@ def _normalize_link_payload(data):
         raise ProjectWorkspaceError("entity_id is required")
     source = validate_project_link_source(_trim_text(data.get("source") or "manual", 64))
     return entity_type, entity_id, source
+
+
+def _normalize_metadata_target(entity_type, entity_id):
+    try:
+        entity_type = validate_project_entity_type(_trim_text(entity_type, 64))
+    except ValueError as exc:
+        raise ProjectWorkspaceError(str(exc)) from None
+    if entity_type not in ENTITY_METADATA_TYPES:
+        raise ProjectWorkspaceError(f"entity metadata does not support {entity_type}")
+    entity_id = _trim_text(entity_id, MAX_ENTITY_ID_LEN)
+    if not entity_id:
+        raise ProjectWorkspaceError("entity_id is required")
+    return entity_type, entity_id
+
+
+def _normalize_label_payload(data):
+    if not isinstance(data, dict):
+        raise ProjectWorkspaceError("label payload must be an object")
+    label = _trim_text(data.get("label"), MAX_LABEL_LEN)
+    if not label:
+        raise ProjectWorkspaceError("label is required")
+    return label
+
+
+def _normalize_annotation_payload(data, *, partial=False):
+    if not isinstance(data, dict):
+        raise ProjectWorkspaceError("annotation payload must be an object")
+    clean = {}
+    if "body" in data or not partial:
+        body = _trim_text(data.get("body"), MAX_ANNOTATION_BODY_LEN)
+        if not body:
+            raise ProjectWorkspaceError("annotation body is required")
+        clean["body"] = body
+    if "visibility" in data or not partial:
+        visibility = _trim_text(data.get("visibility") or "private", 32).lower()
+        if visibility not in ANNOTATION_VISIBILITIES:
+            raise ProjectWorkspaceError("annotation visibility must be private")
+        clean["visibility"] = visibility
+    if "author_label" in data or not partial:
+        clean["author_label"] = _trim_text(data.get("author_label"), MAX_AUTHOR_LABEL_LEN)
+    return clean
+
+
+def _normalize_target_payload(data, *, partial=False):
+    if not isinstance(data, dict):
+        raise ProjectWorkspaceError("target payload must be an object")
+    clean = {}
+    if "type" in data or not partial:
+        target_type = _trim_text(data.get("type"), 32).lower()
+        if target_type not in PROJECT_TARGET_TYPES:
+            raise ProjectWorkspaceError("target type must be domain, url, host, ip, cidr, or port_set")
+        clean["type"] = target_type
+    if "value" in data or not partial:
+        value = _trim_text(data.get("value"), MAX_TARGET_VALUE_LEN)
+        if not value:
+            raise ProjectWorkspaceError("target value is required")
+        clean["value"] = value
+    if "label" in data or not partial:
+        clean["label"] = _trim_text(data.get("label"), MAX_TARGET_LABEL_LEN)
+    if "notes" in data or not partial:
+        clean["notes"] = _trim_text(data.get("notes"), MAX_TARGET_NOTES_LEN)
+    if "source_run_id" in data or not partial:
+        clean["source_run_id"] = _trim_text(data.get("source_run_id"), MAX_ENTITY_ID_LEN)
+    if "confidence" in data or not partial:
+        try:
+            confidence = float(data.get("confidence", 1.0))
+        except (TypeError, ValueError):
+            raise ProjectWorkspaceError("target confidence must be a number") from None
+        clean["confidence"] = min(1.0, max(0.0, confidence))
+    return clean
+
+
+def _strip_target_token(value):
+    return str(value or "").strip().strip("[](){}<>\"'`,;")
+
+
+def _target_payload_from_candidate(value):
+    candidate = _strip_target_token(value)
+    if not candidate:
+        return None
+    parsed = urlparse(candidate)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        return {"type": "url", "value": candidate}
+    try:
+        network = ipaddress.ip_network(candidate, strict=False)
+    except ValueError:
+        network = None
+    if network is not None and "/" in candidate:
+        return {"type": "cidr", "value": str(network)}
+    try:
+        address = ipaddress.ip_address(candidate)
+    except ValueError:
+        address = None
+    if address is not None:
+        return {"type": "ip", "value": str(address)}
+    if _DOMAIN_RE.fullmatch(candidate):
+        return {"type": "domain", "value": candidate.lower()}
+    return None
+
+
+def infer_project_target_payload(data):
+    if not isinstance(data, dict):
+        raise ProjectWorkspaceError("target payload must be an object")
+    explicit = _target_payload_from_candidate(data.get("value"))
+    if explicit:
+        return {
+            **explicit,
+            "label": _trim_text(data.get("label"), MAX_TARGET_LABEL_LEN),
+            "notes": _trim_text(data.get("notes"), MAX_TARGET_NOTES_LEN),
+            "source_run_id": _trim_text(data.get("source_run_id"), MAX_ENTITY_ID_LEN),
+            "confidence": 1.0,
+        }
+    text = str(data.get("text") or "")
+    for match in _URL_RE.finditer(text):
+        inferred = _target_payload_from_candidate(match.group(0))
+        if inferred:
+            return {
+                **inferred,
+                "label": _trim_text(data.get("label"), MAX_TARGET_LABEL_LEN),
+                "notes": _trim_text(data.get("notes"), MAX_TARGET_NOTES_LEN),
+                "source_run_id": _trim_text(data.get("source_run_id"), MAX_ENTITY_ID_LEN),
+                "confidence": 0.9,
+            }
+    for token in re.split(r"\s+", text):
+        inferred = _target_payload_from_candidate(token)
+        if inferred:
+            return {
+                **inferred,
+                "label": _trim_text(data.get("label"), MAX_TARGET_LABEL_LEN),
+                "notes": _trim_text(data.get("notes"), MAX_TARGET_NOTES_LEN),
+                "source_run_id": _trim_text(data.get("source_run_id"), MAX_ENTITY_ID_LEN),
+                "confidence": 0.8,
+            }
+    raise ProjectWorkspaceError("could not infer a project target from the supplied text")
+
+
+def _normalize_finding_review_payload(data):
+    if not isinstance(data, dict):
+        raise ProjectWorkspaceError("finding review payload must be an object")
+    review_state = _trim_text(data.get("review_state"), 32).lower()
+    if review_state not in FINDING_REVIEW_STATES:
+        raise ProjectWorkspaceError(
+            "finding review_state must be new, reviewed, important, false_positive, or needs_followup"
+        )
+    return review_state
 
 
 def _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
@@ -511,6 +2079,11 @@ def _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
             "WHERE p.session_id = ? AND t.id = ?",
             (session_id, entity_id),
         ).fetchone()
+    elif entity_type == "package":
+        row = conn.execute(
+            "SELECT 1 FROM evidence_packages WHERE session_id = ? AND id = ?",
+            (session_id, entity_id),
+        ).fetchone()
     else:
         return False
     return row is not None
@@ -544,6 +2117,23 @@ def link_project_entity(session_id, project_id, data):
             return None
         if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
             raise ProjectWorkspaceError(f"{entity_type} not found for this session")
+        row = conn.execute(
+            "SELECT id, project_id, entity_type, entity_id, source, created "
+            "FROM project_links WHERE project_id = ? AND entity_type = ? AND entity_id = ?",
+            (project_id, entity_type, entity_id),
+        ).fetchone()
+        if row:
+            return _row_to_link(row)
+        count_row = conn.execute(
+            "SELECT COUNT(*) AS count FROM project_links WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()
+        if _quota_exceeded(
+            int(count_row["count"] or 0) if count_row else 0,
+            "max_project_links_per_project",
+            1000,
+        ):
+            _raise_quota("project link quota exceeded for this project")
         for _ in range(10):
             link_id = _new_project_link_id()
             conn.execute(
@@ -576,6 +2166,377 @@ def unlink_project_entity(session_id, project_id, data):
         result = conn.execute(
             "DELETE FROM project_links WHERE project_id = ? AND entity_type = ? AND entity_id = ?",
             (project_id, entity_type, entity_id),
+        )
+        conn.commit()
+    return result.rowcount > 0
+
+
+def list_project_targets(session_id, project_id):
+    with db_connect() as conn:
+        project = conn.execute(
+            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
+            (session_id, project_id),
+        ).fetchone()
+        if not project:
+            return None
+        rows = conn.execute(
+            "SELECT id, project_id, type, value, label, notes, source_run_id, confidence, created, updated "
+            "FROM project_targets WHERE project_id = ? ORDER BY type ASC, value COLLATE NOCASE ASC",
+            (project_id,),
+        ).fetchall()
+    return [_row_to_target(row) for row in rows]
+
+
+def add_project_target(session_id, project_id, data):
+    payload = _normalize_target_payload(data)
+    created = _now()
+    updated = created
+    with db_connect() as conn:
+        project = conn.execute(
+            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
+            (session_id, project_id),
+        ).fetchone()
+        if not project:
+            return None
+        if payload["source_run_id"] and not _entity_belongs_to_session(conn, session_id, "run", payload["source_run_id"]):
+            raise ProjectWorkspaceError("source_run_id not found for this session")
+        row = conn.execute(
+            "SELECT id, project_id, type, value, label, notes, source_run_id, confidence, created, updated "
+            "FROM project_targets WHERE project_id = ? AND type = ? AND value = ?",
+            (project_id, payload["type"], payload["value"]),
+        ).fetchone()
+        if row:
+            return _row_to_target(row)
+        count_row = conn.execute(
+            "SELECT COUNT(*) AS count FROM project_targets WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()
+        if _quota_exceeded(
+            int(count_row["count"] or 0) if count_row else 0,
+            "max_project_targets_per_project",
+            200,
+        ):
+            _raise_quota("project target quota exceeded for this project")
+        for _ in range(10):
+            target_id = _new_project_target_id()
+            conn.execute(
+                "INSERT OR IGNORE INTO project_targets "
+                "(id, project_id, type, value, label, notes, source_run_id, confidence, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    target_id,
+                    project_id,
+                    payload["type"],
+                    payload["value"],
+                    payload["label"],
+                    payload["notes"],
+                    payload["source_run_id"],
+                    payload["confidence"],
+                    created,
+                    updated,
+                ),
+            )
+            row = conn.execute(
+                "SELECT id, project_id, type, value, label, notes, source_run_id, confidence, created, updated "
+                "FROM project_targets WHERE project_id = ? AND type = ? AND value = ?",
+                (project_id, payload["type"], payload["value"]),
+            ).fetchone()
+            if row:
+                conn.commit()
+                return _row_to_target(row)
+        raise ProjectWorkspaceError("could not allocate a project target id")
+
+
+def update_project_target(session_id, project_id, target_id, data):
+    target_id = _trim_text(target_id, MAX_ENTITY_ID_LEN)
+    payload = _normalize_target_payload(data, partial=True)
+    if not payload:
+        raise ProjectWorkspaceError("target update payload is empty")
+    with db_connect() as conn:
+        current = conn.execute(
+            "SELECT t.id, t.project_id, t.type, t.value, t.label, t.notes, t.source_run_id, t.confidence "
+            "FROM project_targets t JOIN projects p ON p.id = t.project_id "
+            "WHERE p.session_id = ? AND t.project_id = ? AND t.id = ?",
+            (session_id, project_id, target_id),
+        ).fetchone()
+        if not current:
+            return None
+        target_type = payload.get("type", current["type"])
+        value = payload.get("value", current["value"])
+        label = payload.get("label", current["label"])
+        notes = payload.get("notes", current["notes"])
+        source_run_id = payload.get("source_run_id", current["source_run_id"])
+        confidence = payload.get("confidence", current["confidence"])
+        if source_run_id and not _entity_belongs_to_session(conn, session_id, "run", source_run_id):
+            raise ProjectWorkspaceError("source_run_id not found for this session")
+        updated = _now()
+        try:
+            conn.execute(
+                "UPDATE project_targets SET type = ?, value = ?, label = ?, notes = ?, "
+                "source_run_id = ?, confidence = ?, updated = ? "
+                "WHERE project_id = ? AND id = ?",
+                (target_type, value, label, notes, source_run_id, confidence, updated, project_id, target_id),
+            )
+        except sqlite3.IntegrityError:
+            raise ProjectWorkspaceError("target already exists for this project") from None
+        row = conn.execute(
+            "SELECT id, project_id, type, value, label, notes, source_run_id, confidence, created, updated "
+            "FROM project_targets WHERE project_id = ? AND id = ?",
+            (project_id, target_id),
+        ).fetchone()
+        conn.commit()
+    return _row_to_target(row)
+
+
+def delete_project_target(session_id, project_id, target_id):
+    target_id = _trim_text(target_id, MAX_ENTITY_ID_LEN)
+    if not target_id:
+        raise ProjectWorkspaceError("target id is required")
+    with db_connect() as conn:
+        project = conn.execute(
+            "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
+            (session_id, project_id),
+        ).fetchone()
+        if not project:
+            return None
+        result = conn.execute(
+            "DELETE FROM project_targets WHERE project_id = ? AND id = ?",
+            (project_id, target_id),
+        )
+        conn.commit()
+    return result.rowcount > 0
+
+
+def list_run_findings(session_id, run_id):
+    run_id = _trim_text(run_id, MAX_ENTITY_ID_LEN)
+    with db_connect() as conn:
+        if not _entity_belongs_to_session(conn, session_id, "run", run_id):
+            return None
+        rows = conn.execute(
+            "SELECT id, session_id, run_id, target_id, scope, title, raw_line, line_number, "
+            "severity, fingerprint, review_state, created "
+            "FROM findings WHERE session_id = ? AND run_id = ? ORDER BY line_number ASC, created ASC",
+            (session_id, run_id),
+        ).fetchall()
+    return [_row_to_finding(row) for row in rows]
+
+
+def update_finding_review_state(session_id, finding_id, data):
+    finding_id = _trim_text(finding_id, MAX_ENTITY_ID_LEN)
+    if not finding_id:
+        raise ProjectWorkspaceError("finding id is required")
+    review_state = _normalize_finding_review_payload(data)
+    with db_connect() as conn:
+        result = conn.execute(
+            "UPDATE findings SET review_state = ? WHERE session_id = ? AND id = ?",
+            (review_state, session_id, finding_id),
+        )
+        if result.rowcount <= 0:
+            return None
+        row = conn.execute(
+            "SELECT id, session_id, run_id, target_id, scope, title, raw_line, line_number, "
+            "severity, fingerprint, review_state, created FROM findings WHERE session_id = ? AND id = ?",
+            (session_id, finding_id),
+        ).fetchone()
+        conn.commit()
+    return _row_to_finding(row)
+
+
+def list_entity_labels(session_id, entity_type, entity_id):
+    entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
+    with db_connect() as conn:
+        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
+            return None
+        rows = conn.execute(
+            "SELECT id, session_id, entity_type, entity_id, label, source, created "
+            "FROM entity_labels WHERE session_id = ? AND entity_type = ? AND entity_id = ? "
+            "ORDER BY label COLLATE NOCASE ASC, created ASC",
+            (session_id, entity_type, entity_id),
+        ).fetchall()
+    return [_row_to_label(row) for row in rows]
+
+
+def add_entity_label(session_id, entity_type, entity_id, data):
+    entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
+    label = _normalize_label_payload(data)
+    created = _now()
+    with db_connect() as conn:
+        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
+            return None
+        row = conn.execute(
+            "SELECT id, session_id, entity_type, entity_id, label, source, created "
+            "FROM entity_labels WHERE session_id = ? AND entity_type = ? "
+            "AND entity_id = ? AND label = ?",
+            (session_id, entity_type, entity_id, label),
+        ).fetchone()
+        if row:
+            return _row_to_label(row)
+        session_count = conn.execute(
+            "SELECT COUNT(*) AS count FROM entity_labels WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if _quota_exceeded(
+            int(session_count["count"] or 0) if session_count else 0,
+            "max_entity_labels_per_session",
+            5000,
+        ):
+            _raise_quota("label quota exceeded for this session")
+        entity_count = conn.execute(
+            "SELECT COUNT(*) AS count FROM entity_labels "
+            "WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
+            (session_id, entity_type, entity_id),
+        ).fetchone()
+        if _quota_exceeded(
+            int(entity_count["count"] or 0) if entity_count else 0,
+            "max_entity_labels_per_entity",
+            20,
+        ):
+            _raise_quota("label quota exceeded for this entity")
+        for _ in range(10):
+            label_id = _new_entity_label_id()
+            conn.execute(
+                "INSERT OR IGNORE INTO entity_labels "
+                "(id, session_id, entity_type, entity_id, label, source, created) "
+                "VALUES (?, ?, ?, ?, ?, 'manual', ?)",
+                (label_id, session_id, entity_type, entity_id, label, created),
+            )
+            row = conn.execute(
+                "SELECT id, session_id, entity_type, entity_id, label, source, created "
+                "FROM entity_labels WHERE session_id = ? AND entity_type = ? "
+                "AND entity_id = ? AND label = ?",
+                (session_id, entity_type, entity_id, label),
+            ).fetchone()
+            if row:
+                conn.commit()
+                return _row_to_label(row)
+        raise ProjectWorkspaceError("could not allocate an entity label id")
+
+
+def delete_entity_label(session_id, entity_type, entity_id, data):
+    entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
+    label = _normalize_label_payload(data)
+    with db_connect() as conn:
+        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
+            return None
+        result = conn.execute(
+            "DELETE FROM entity_labels WHERE session_id = ? AND entity_type = ? "
+            "AND entity_id = ? AND label = ?",
+            (session_id, entity_type, entity_id, label),
+        )
+        conn.commit()
+    return result.rowcount > 0
+
+
+def list_entity_annotations(session_id, entity_type, entity_id):
+    entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
+    with db_connect() as conn:
+        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
+            return None
+        rows = conn.execute(
+            "SELECT id, session_id, entity_type, entity_id, body, visibility, author_label, created, updated "
+            "FROM annotations WHERE session_id = ? AND entity_type = ? AND entity_id = ? "
+            "ORDER BY created ASC, id ASC",
+            (session_id, entity_type, entity_id),
+        ).fetchall()
+    return [_row_to_annotation(row) for row in rows]
+
+
+def add_entity_annotation(session_id, entity_type, entity_id, data):
+    entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
+    payload = _normalize_annotation_payload(data)
+    created = _now()
+    with db_connect() as conn:
+        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
+            return None
+        session_count = conn.execute(
+            "SELECT COUNT(*) AS count FROM annotations WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if _quota_exceeded(
+            int(session_count["count"] or 0) if session_count else 0,
+            "max_entity_annotations_per_session",
+            2000,
+        ):
+            _raise_quota("annotation quota exceeded for this session")
+        entity_count = conn.execute(
+            "SELECT COUNT(*) AS count FROM annotations "
+            "WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
+            (session_id, entity_type, entity_id),
+        ).fetchone()
+        if _quota_exceeded(
+            int(entity_count["count"] or 0) if entity_count else 0,
+            "max_entity_annotations_per_entity",
+            50,
+        ):
+            _raise_quota("annotation quota exceeded for this entity")
+        for _ in range(10):
+            annotation_id = _new_annotation_id()
+            conn.execute(
+                "INSERT OR IGNORE INTO annotations "
+                "(id, session_id, entity_type, entity_id, body, visibility, author_label, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    annotation_id,
+                    session_id,
+                    entity_type,
+                    entity_id,
+                    payload["body"],
+                    payload["visibility"],
+                    payload["author_label"],
+                    created,
+                    created,
+                ),
+            )
+            row = conn.execute(
+                "SELECT id, session_id, entity_type, entity_id, body, visibility, author_label, created, updated "
+                "FROM annotations WHERE id = ? AND session_id = ?",
+                (annotation_id, session_id),
+            ).fetchone()
+            if row:
+                conn.commit()
+                return _row_to_annotation(row)
+        raise ProjectWorkspaceError("could not allocate an annotation id")
+
+
+def update_entity_annotation(session_id, annotation_id, data):
+    annotation_id = _trim_text(annotation_id, MAX_ENTITY_ID_LEN)
+    payload = _normalize_annotation_payload(data, partial=True)
+    if not payload:
+        raise ProjectWorkspaceError("annotation update is empty")
+    assignments = []
+    values = []
+    for key in ("body", "visibility", "author_label"):
+        if key in payload:
+            assignments.append(f"{key} = ?")
+            values.append(payload[key])
+    updated = _now()
+    assignments.append("updated = ?")
+    values.append(updated)
+    values.extend([session_id, annotation_id])
+    with db_connect() as conn:
+        result = conn.execute(
+            f"UPDATE annotations SET {', '.join(assignments)} WHERE session_id = ? AND id = ?",  # nosec B608
+            values,
+        )
+        if result.rowcount <= 0:
+            return None
+        row = conn.execute(
+            "SELECT id, session_id, entity_type, entity_id, body, visibility, author_label, created, updated "
+            "FROM annotations WHERE session_id = ? AND id = ?",
+            (session_id, annotation_id),
+        ).fetchone()
+        conn.commit()
+    return _row_to_annotation(row)
+
+
+def delete_entity_annotation(session_id, annotation_id):
+    annotation_id = _trim_text(annotation_id, MAX_ENTITY_ID_LEN)
+    if not annotation_id:
+        raise ProjectWorkspaceError("annotation id is required")
+    with db_connect() as conn:
+        result = conn.execute(
+            "DELETE FROM annotations WHERE session_id = ? AND id = ?",
+            (session_id, annotation_id),
         )
         conn.commit()
     return result.rowcount > 0

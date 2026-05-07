@@ -216,11 +216,13 @@ describe('app helpers', () => {
   beforeEach(() => {
     ;[
       'pref_theme',
+      'pref_active_project_id',
       'pref_theme_name',
       'pref_timestamps',
       'pref_line_numbers',
       'pref_welcome_intro',
       'pref_share_redaction_default',
+      'pref_project_auto_link_external_runs',
       'pref_prompt_username',
     ].forEach((name) => {
       document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
@@ -250,7 +252,7 @@ describe('app helpers', () => {
   })
 
   it('applies saved timestamp, line number, and HUD clock preferences from cookies at startup', async () => {
-    const { getHudClockPreference } = await loadAppFns({
+    const { getHudClockPreference, getProjectAutoLinkExternalRunsPreference } = await loadAppFns({
       cookies: { pref_timestamps: 'clock', pref_line_numbers: 'on', pref_hud_clock: 'local' },
     })
 
@@ -259,7 +261,9 @@ describe('app helpers', () => {
     expect(document.getElementById('ts-btn').textContent).toBe('timestamps: clock')
     expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
     expect(document.getElementById('options-hud-clock-select').value).toBe('local')
+    expect(document.getElementById('options-project-auto-link-external-runs-toggle').checked).toBe(true)
     expect(getHudClockPreference()).toBe('local')
+    expect(getProjectAutoLinkExternalRunsPreference()).toBe('on')
   })
 
   it('applies saved session preferences on startup over stale local cookies', async () => {
@@ -274,6 +278,7 @@ describe('app helpers', () => {
               pref_line_numbers: 'on',
               pref_welcome_intro: 'disable_animation',
               pref_share_redaction_default: 'redacted',
+              pref_project_auto_link_external_runs: 'off',
               pref_run_notify: 'off',
               pref_hud_clock: 'local',
             },
@@ -308,7 +313,7 @@ describe('app helpers', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
 
-    const { getHudClockPreference } = await loadAppFns({
+    const { getHudClockPreference, getProjectAutoLinkExternalRunsPreference } = await loadAppFns({
       apiFetch,
       cookies: { pref_timestamps: 'off', pref_line_numbers: 'off', pref_hud_clock: 'utc' },
       themeRegistry: {
@@ -344,7 +349,9 @@ describe('app helpers', () => {
     expect(document.getElementById('options-welcome-select').value).toBe('disable_animation')
     expect(document.getElementById('options-share-redaction-select').value).toBe('redacted')
     expect(document.getElementById('options-hud-clock-select').value).toBe('local')
+    expect(document.getElementById('options-project-auto-link-external-runs-toggle').checked).toBe(false)
     expect(getHudClockPreference()).toBe('local')
+    expect(getProjectAutoLinkExternalRunsPreference()).toBe('off')
   })
 
   it('switches the visible prompt into confirmation mode when requested', async () => {
@@ -374,17 +381,25 @@ describe('app helpers', () => {
   })
 
   it('applies the saved prompt username preference to the live prompt', async () => {
-    const { applyPromptUsernamePreference } = await loadAppFns({
+    await loadAppFns({
       cookies: { pref_prompt_username: 'nona' },
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout,
     })
     const promptPrefix = document.querySelector('#shell-prompt-wrap .prompt-prefix')
+    const input = document.getElementById('options-prompt-username-input')
+    const saved = document.getElementById('options-prompt-username-saved')
     expect(promptPrefix.textContent).toBe('nona@darklab.sh:/ $')
-    expect(document.getElementById('options-prompt-username-input').value).toBe('nona')
+    expect(input.value).toBe('nona')
+    expect(saved.classList.contains('u-hidden')).toBe(true)
 
-    applyPromptUsernamePreference('ops-user')
+    input.value = 'ops-user'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(resolve => setTimeout(resolve, 550))
 
-    expect(promptPrefix.textContent).toBe('ops-user@darklab.sh:/ $')
+    expect(promptPrefix.textContent).toContain('ops-user@darklab.sh:')
     expect(document.cookie).toContain('pref_prompt_username=ops-user')
+    expect(saved.classList.contains('u-hidden')).toBe(false)
   })
 
   it('shows live validation for invalid prompt username input without saving it', async () => {
@@ -3501,19 +3516,19 @@ describe('app helpers', () => {
     expect(activateTab).toHaveBeenCalledWith('tab-3')
   })
 
-  it('supports Alt+P to create a permalink for the active tab', async () => {
+  it('supports Alt+Shift+P to create a permalink for the active tab', async () => {
     const permalinkTab = vi.fn()
     const { cmdInput } = await loadAppFns({
       permalinkTab,
       tabs: [{ id: 'tab-1', st: 'idle' }],
     })
 
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', altKey: true, bubbles: true }))
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'P', altKey: true, shiftKey: true, bubbles: true }))
 
     expect(permalinkTab).toHaveBeenCalledWith('tab-1')
   })
 
-  it('supports macOS Option+P to create a permalink via physical key code', async () => {
+  it('supports macOS Option+Shift+P to create a permalink via physical key code', async () => {
     const permalinkTab = vi.fn()
     const { cmdInput } = await loadAppFns({
       permalinkTab,
@@ -3525,11 +3540,43 @@ describe('app helpers', () => {
         key: 'π',
         code: 'KeyP',
         altKey: true,
+        shiftKey: true,
         bubbles: true,
       }),
     )
 
     expect(permalinkTab).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('supports Alt+P to toggle the projects modal from the terminal prompt', async () => {
+    const openProjectWorkspace = vi.fn(() => Promise.resolve(true))
+    const closeProjectWorkspace = vi.fn()
+    let projectWorkspaceOpen = false
+    const { cmdInput } = await loadAppFns({
+      openProjectWorkspace,
+      closeProjectWorkspace,
+      isProjectWorkspaceOpen: () => projectWorkspaceOpen,
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', altKey: true, bubbles: true }))
+    projectWorkspaceOpen = true
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', altKey: true, bubbles: true }))
+
+    expect(openProjectWorkspace).toHaveBeenCalledTimes(1)
+    expect(closeProjectWorkspace).toHaveBeenCalledTimes(1)
+  })
+
+  it('supports Alt+C to toggle the command registry from the terminal prompt', async () => {
+    const { cmdInput } = await loadAppFns({
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+    const overlay = document.getElementById('command-registry-overlay')
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', altKey: true, bubbles: true }))
+    expect(overlay.classList.contains('open')).toBe(true)
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', altKey: true, bubbles: true }))
+    expect(overlay.classList.contains('open')).toBe(false)
   })
 
   it('supports Alt+Shift+C to copy output for the active tab', async () => {
@@ -3686,7 +3733,7 @@ describe('app helpers', () => {
     const searchInput = document.getElementById('search-input')
 
     searchInput.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'p', altKey: true, bubbles: true }),
+      new KeyboardEvent('keydown', { key: 'P', altKey: true, shiftKey: true, bubbles: true }),
     )
     searchInput.dispatchEvent(
       new KeyboardEvent('keydown', {
@@ -4387,7 +4434,12 @@ describe('app helpers', () => {
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
-    const { getWelcomeIntroPreference, getShareRedactionDefaultPreference, getHudClockPreference } = await loadAppFns({
+    const {
+      getWelcomeIntroPreference,
+      getShareRedactionDefaultPreference,
+      getProjectAutoLinkExternalRunsPreference,
+      getHudClockPreference,
+    } = await loadAppFns({
       apiFetch,
       themeRegistry: {
         current: {
@@ -4442,6 +4494,10 @@ describe('app helpers', () => {
     document
       .getElementById('options-hud-clock-select')
       .dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('options-project-auto-link-external-runs-toggle').checked = false
+    document
+      .getElementById('options-project-auto-link-external-runs-toggle')
+      .dispatchEvent(new Event('change', { bubbles: true }))
 
     expect(document.body.classList.contains('ts-elapsed')).toBe(true)
     expect(document.body.classList.contains('ln-on')).toBe(true)
@@ -4452,9 +4508,11 @@ describe('app helpers', () => {
     expect(document.cookie).toContain('pref_line_numbers=on')
     expect(document.cookie).toContain('pref_welcome_intro=disable_animation')
     expect(document.cookie).toContain('pref_share_redaction_default=redacted')
+    expect(document.cookie).toContain('pref_project_auto_link_external_runs=off')
     expect(document.cookie).toContain('pref_hud_clock=local')
     expect(getWelcomeIntroPreference()).toBe('disable_animation')
     expect(getShareRedactionDefaultPreference()).toBe('redacted')
+    expect(getProjectAutoLinkExternalRunsPreference()).toBe('off')
     expect(getHudClockPreference()).toBe('local')
     const postCalls = apiFetch.mock.calls.filter(([url, opts]) => url === '/session/preferences' && opts?.method === 'POST')
     expect(postCalls.length).toBeGreaterThan(0)
@@ -4465,6 +4523,7 @@ describe('app helpers', () => {
       pref_line_numbers: 'on',
       pref_welcome_intro: 'disable_animation',
       pref_share_redaction_default: 'redacted',
+      pref_project_auto_link_external_runs: 'off',
       pref_hud_clock: 'local',
     })
   })

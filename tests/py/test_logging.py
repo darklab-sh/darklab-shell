@@ -890,11 +890,25 @@ class TestDbPrunedEvent:
 
     def test_db_pruned_extra_has_run_count(self):
         old_run_id = "log-prune-test-run-002"
+        project_id = "log-prune-project-002"
+        link_id = "log-prune-project-link-002"
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
             "INSERT INTO runs (id, session_id, command, started) "
             "VALUES (?, 'test', 'ping prune-test', datetime('now', '-10 days'))",
             (old_run_id,)
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO projects "
+            "(id, session_id, name, slug, created, updated) "
+            "VALUES (?, 'test', 'Prune Project', 'prune-project', datetime('now'), datetime('now'))",
+            (project_id,),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO project_links "
+            "(id, project_id, entity_type, entity_id, source, created) "
+            "VALUES (?, ?, 'run', ?, 'manual', datetime('now'))",
+            (link_id, project_id, old_run_id),
         )
         conn.commit()
         conn.close()
@@ -902,15 +916,21 @@ class TestDbPrunedEvent:
         try:
             patched_cfg = {**shell_app.CFG, "permalink_retention_days": 5}
             with mock.patch("database.CFG", patched_cfg):
-                with mock.patch.object(db_module.log, "info") as mock_info:
+                with mock.patch.object(db_module.log, "info") as mock_info, \
+                     mock.patch.object(db_module.log, "warning") as mock_warning:
                     db_init()
 
             call = next(c for c in mock_info.call_args_list if c[0][0] == "DB_PRUNED")
             assert call.kwargs["extra"]["runs"] >= 1
             assert call.kwargs["extra"]["retention_days"] == 5
+            warning = next(c for c in mock_warning.call_args_list if c[0][0] == "PROJECT_RETENTION_WARNING")
+            assert warning.kwargs["extra"]["linked_runs"] >= 1
+            assert warning.kwargs["extra"]["projects"] >= 1
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.execute("DELETE FROM runs WHERE id=?", (old_run_id,))
+            conn.execute("DELETE FROM project_links WHERE id=?", (link_id,))
+            conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
             conn.commit()
             conn.close()
 

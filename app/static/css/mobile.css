@@ -588,6 +588,8 @@
      scrolling enables inertia scroll on iOS Safari. */
   body.mobile-terminal-mode .faq-body,
   body.mobile-terminal-mode .command-registry-body,
+  body.mobile-terminal-mode .project-workspace-body,
+  body.mobile-terminal-mode .project-explorer-body,
   body.mobile-terminal-mode .workflows-body,
   body.mobile-terminal-mode .workflow-editor-body {
     flex: 1 1 auto;
@@ -607,6 +609,42 @@
   }
   body.mobile-terminal-mode .command-registry-body {
     padding: 12px 14px calc(16px + env(safe-area-inset-bottom, 0));
+  }
+  body.mobile-terminal-mode .project-workspace-create,
+  body.mobile-terminal-mode .project-notes-form {
+    grid-template-columns: 1fr;
+    padding: 12px 14px;
+  }
+  body.mobile-terminal-mode .project-workspace-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(160px, 34svh) minmax(0, 1fr);
+  }
+  body.mobile-terminal-mode .project-workspace-sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--theme-panel-border);
+  }
+  body.mobile-terminal-mode .project-workspace-body {
+    padding: 0 14px 12px;
+  }
+  body.mobile-terminal-mode .project-workspace-row {
+    grid-template-columns: 1fr;
+  }
+  body.mobile-terminal-mode .project-workspace-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+  body.mobile-terminal-mode .project-explorer-body {
+    padding: 12px 14px calc(16px + env(safe-area-inset-bottom, 0));
+  }
+  body.mobile-terminal-mode .project-explorer-header,
+  body.mobile-terminal-mode .project-explorer-item {
+    flex-direction: column;
+  }
+  body.mobile-terminal-mode .project-explorer-actions {
+    justify-content: flex-start;
+  }
+  body.mobile-terminal-mode .project-explorer-meta-grid {
+    grid-template-columns: 1fr;
   }
   body.mobile-terminal-mode .command-registry-row {
     grid-template-columns: 1fr auto;

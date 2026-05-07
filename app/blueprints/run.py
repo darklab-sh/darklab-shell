@@ -63,9 +63,9 @@ from run_broker import (
 )
 from run_output_store import RunOutputCapture, load_full_output_entries
 from output_signals import OutputSignalClassifier
-from project_workspace import link_run_to_active_project
+from project_workspace import link_run_to_active_project, record_run_file_artifacts, record_run_findings
 from session_variables import SessionVariableError, expand_session_variables
-from workspace import session_workspace_dir, WorkspaceDisabled
+from workspace import InvalidWorkspacePath, resolve_workspace_path, session_workspace_dir, WorkspaceDisabled
 from pty_service import (
     PtyDependencyError,
     notify_pty_killed_event,
@@ -213,19 +213,80 @@ def _extract_output_search_text(preview_lines):
     )
 
 
-def _save_completed_run(run_id, session_id, command, run_started, finished_iso, exit_code, capture):
+def _workspace_artifact_size(session_id: str, workspace_path: str) -> int:
+    try:
+        path = resolve_workspace_path(session_id, workspace_path, CFG)
+        if path.is_file():
+            return max(0, int(path.stat().st_size))
+    except (InvalidWorkspacePath, OSError, WorkspaceDisabled):
+        return 0
+    return 0
+
+
+def _workspace_artifacts_from_validation(validation: CommandValidationResult, session_id: str) -> list[dict]:
+    reads = list(dict.fromkeys(validation.workspace_reads))
+    writes = list(dict.fromkeys(validation.workspace_writes))
+    read_set = set(reads)
+    write_set = set(writes)
+    ordered_paths = reads + [path for path in writes if path not in read_set]
+    artifacts = []
+    for workspace_path in ordered_paths:
+        if workspace_path in read_set and workspace_path in write_set:
+            kind = "read_write"
+        elif workspace_path in write_set:
+            kind = "output"
+        else:
+            kind = "input"
+        artifacts.append({
+            "workspace_path": workspace_path,
+            "display_name": workspace_path.rsplit("/", 1)[-1],
+            "kind": kind,
+            "detected_by": "workspace_flag",
+        })
+    return artifacts
+
+
+def _workspace_artifacts_with_sizes(session_id: str, artifacts) -> list[dict]:
+    sized = []
+    artifact_items = artifacts if isinstance(artifacts, list) else []
+    for item in artifact_items:
+        if not isinstance(item, dict):
+            continue
+        artifact = dict(item)
+        workspace_path = str(artifact.get("workspace_path") or "")
+        artifact["byte_size"] = _workspace_artifact_size(session_id, workspace_path)
+        sized.append(artifact)
+    return sized
+
+
+def _save_completed_run(
+    run_id,
+    session_id,
+    command,
+    run_started,
+    finished_iso,
+    exit_code,
+    capture,
+    *,
+    workspace_artifacts=None,
+    link_active_project=True,
+):
     # Persist preview text and artifact metadata together so history/permalink
     # readers never observe half-written run state.
     capture.finalize()
     try:
         preview_lines = list(capture.preview_lines)
         active_project_link = None
+        recorded_artifacts = []
+        recorded_findings = []
+        persisted_entries = preview_lines
         # Index full output when available so early lines of long runs are searchable.
         # Falls back to preview if the artifact can't be read.
         if capture.full_output_available and capture.artifact_rel_path:
             try:
                 full_entries = load_full_output_entries(capture.artifact_rel_path)
                 search_text = _extract_output_search_text(full_entries)
+                persisted_entries = full_entries
             except Exception:
                 search_text = _extract_output_search_text(preview_lines)
         else:
@@ -269,11 +330,36 @@ def _save_completed_run(run_id, session_id, command, run_started, finished_iso, 
                         finished_iso,
                     )
                 )
+            if link_active_project:
+                try:
+                    active_project_link = link_run_to_active_project(conn, session_id, run_id)
+                except Exception:
+                    active_project_link = None
+                    log.error("PROJECT_ACTIVE_RUN_LINK_ERROR", exc_info=True, extra={
+                        "run_id": run_id,
+                        "session": get_log_session_id(session_id),
+                        "cmd": command,
+                    })
+            if workspace_artifacts:
+                try:
+                    recorded_artifacts = record_run_file_artifacts(
+                        conn,
+                        session_id,
+                        run_id,
+                        _workspace_artifacts_with_sizes(session_id, workspace_artifacts),
+                    )
+                except Exception:
+                    recorded_artifacts = []
+                    log.error("PROJECT_RUN_ARTIFACT_CAPTURE_ERROR", exc_info=True, extra={
+                        "run_id": run_id,
+                        "session": get_log_session_id(session_id),
+                        "cmd": command,
+                    })
             try:
-                active_project_link = link_run_to_active_project(conn, session_id, run_id)
+                recorded_findings = record_run_findings(conn, session_id, run_id, persisted_entries)
             except Exception:
-                active_project_link = None
-                log.error("PROJECT_ACTIVE_RUN_LINK_ERROR", exc_info=True, extra={
+                recorded_findings = []
+                log.error("PROJECT_RUN_FINDING_CAPTURE_ERROR", exc_info=True, extra={
                     "run_id": run_id,
                     "session": get_log_session_id(session_id),
                     "cmd": command,
@@ -285,13 +371,36 @@ def _save_completed_run(run_id, session_id, command, run_started, finished_iso, 
                 "session": get_log_session_id(session_id),
                 "project_id": active_project_link["project_id"],
             })
+        if recorded_artifacts:
+            log.info("PROJECT_RUN_ARTIFACTS_CAPTURED", extra={
+                "run_id": run_id,
+                "session": get_log_session_id(session_id),
+                "count": len(recorded_artifacts),
+            })
+        if recorded_findings:
+            log.info("PROJECT_RUN_FINDINGS_CAPTURED", extra={
+                "run_id": run_id,
+                "session": get_log_session_id(session_id),
+                "count": len(recorded_findings),
+            })
     except Exception:
         log.error("RUN_SAVED_ERROR", exc_info=True, extra={
             "run_id": run_id, "session": get_log_session_id(session_id), "cmd": command,
         })
 
 
-def _finalize_completed_run(run_id, session_id, client_ip, original_command, run_started, exit_code, capture, *, cmd_type="real"):
+def _finalize_completed_run(
+    run_id,
+    session_id,
+    client_ip,
+    original_command,
+    run_started,
+    exit_code,
+    capture,
+    *,
+    cmd_type="real",
+    workspace_artifacts=None,
+):
     finished = datetime.now(timezone.utc)
     elapsed = round((finished - datetime.fromisoformat(run_started)).total_seconds(), 1)
     log.info("RUN_END", extra={
@@ -302,6 +411,8 @@ def _finalize_completed_run(run_id, session_id, client_ip, original_command, run
     _save_completed_run(
         run_id, session_id, original_command, run_started,
         finished.isoformat(), exit_code, capture,
+        workspace_artifacts=workspace_artifacts,
+        link_active_project=cmd_type == "real",
     )
     return elapsed
 
@@ -540,7 +651,6 @@ def save_client_side_run():
     started = datetime.now(timezone.utc)
     finished = datetime.now(timezone.utc)
     output_search_text = _extract_output_search_text(lines)
-    active_project_link = None
 
     log.info("RUN_START", extra={
         "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
@@ -571,22 +681,7 @@ def save_client_side_run():
                 output_search_text,
             ),
         )
-        try:
-            active_project_link = link_run_to_active_project(conn, session_id, run_id)
-        except Exception:
-            active_project_link = None
-            log.error("PROJECT_ACTIVE_RUN_LINK_ERROR", exc_info=True, extra={
-                "run_id": run_id,
-                "session": get_log_session_id(session_id),
-                "cmd": command,
-            })
         conn.commit()
-    if active_project_link:
-        log.info("PROJECT_ACTIVE_RUN_LINKED", extra={
-            "run_id": run_id,
-            "session": get_log_session_id(session_id),
-            "project_id": active_project_link["project_id"],
-        })
 
     elapsed = round((finished - started).total_seconds(), 1)
     log.info("RUN_END", extra={
@@ -1105,6 +1200,7 @@ def _brokered_synthetic_run(original_command, session_id, client_ip, events, exi
         _save_completed_run(
             run_id, session_id, original_command, run_started,
             finished.isoformat(), exit_code, capture,
+            link_active_project=cmd_type == "real",
         )
     except Exception as exc:
         log.error("RUN_BROKER_SYNTHETIC_ERROR", exc_info=True, extra={
@@ -1130,6 +1226,7 @@ def _brokered_real_run_worker(
     variable_notice,
     rewrite_notice,
     workspace_notices,
+    workspace_artifacts,
 ):
     command_timeout = CFG["command_timeout_seconds"] or None
     heartbeat_interval = CFG.get("run_broker_heartbeat_seconds") or CFG["heartbeat_interval_seconds"]
@@ -1224,7 +1321,14 @@ def _brokered_real_run_worker(
             )
         exit_code = _wait_for_proc_exit_code(proc)
         elapsed = _finalize_completed_run(
-            run_id, session_id, client_ip, original_command, run_started, exit_code, capture,
+            run_id,
+            session_id,
+            client_ip,
+            original_command,
+            run_started,
+            exit_code,
+            capture,
+            workspace_artifacts=workspace_artifacts,
         )
         publish_run_event(run_id, "exit", {
             "code": exit_code,
@@ -1534,6 +1638,10 @@ def start_brokered_run():
             "variable_notice": prepared_input.variable_notice,
             "rewrite_notice": prepared_real.rewrite_notice,
             "workspace_notices": _workspace_notice_lines(prepared_real.validation),
+            "workspace_artifacts": _workspace_artifacts_from_validation(
+                prepared_real.validation,
+                session_id,
+            ),
         },
         name=f"run-broker-{started.run_id[:8]}",
         daemon=True,

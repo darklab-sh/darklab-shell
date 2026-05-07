@@ -30,6 +30,7 @@ session_bp = Blueprint("session", __name__)
 
 _SESSION_PREFERENCE_KEYS = {
     "pref_active_project_id",
+    "pref_project_auto_link_external_runs",
     "pref_theme_name",
     "pref_timestamps",
     "pref_line_numbers",
@@ -69,6 +70,8 @@ def _normalize_session_preferences(raw):
             continue
         if key == "pref_active_project_id" and not re.fullmatch(r"prj_[0-9a-f]{16}", value):
             continue
+        if key == "pref_project_auto_link_external_runs":
+            value = "off" if value.lower() in {"0", "false", "no", "off"} else "on"
         if key == "pref_prompt_username" and not _PROMPT_USERNAME_RE.fullmatch(value):
             continue
         prefs[key] = value

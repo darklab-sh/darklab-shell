@@ -628,6 +628,18 @@
     gap: 6px;
   }
 
+  .hud-project-context {
+    max-width: 200px;
+  }
+
+  .hud-project-context .hud-value {
+    display: block;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .hud-value-green {
     color: var(--green);
     text-shadow: 0 0 8px color-mix(in srgb, var(--green) 22%, transparent);

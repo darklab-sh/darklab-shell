@@ -211,6 +211,12 @@ export async function openHistoryWithEntries(page) {
     .waitFor({ state: 'visible', timeout: 10_000 })
 }
 
+export async function clickHistoryRunMenuAction(entry, action) {
+  const menu = entry.locator('.history-action-menu-wrap')
+  await menu.locator('[data-action="history-menu"]').click()
+  await menu.locator(`[data-action="${action}"]`).click()
+}
+
 export async function waitForHistoryRuns(page, minRuns) {
   await page.waitForFunction(
     async (min) => {

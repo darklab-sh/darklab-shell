@@ -302,6 +302,167 @@ commands:
     description: "built-in: show the session files path"
     autocomplete:
       arguments: []
+  - root: project
+    description: "built-in: create, select, link, and annotate project workspaces"
+    autocomplete:
+      subcommands:
+        list:
+          description: "List current-session projects"
+          flags:
+            - value: --all
+              description: "Include archived projects"
+            - value: -a
+              description: "Include archived projects"
+        create:
+          description: "Create and activate a project"
+          arguments:
+            - value: "<name>"
+              hint_only: true
+              description: "Project name"
+        use:
+          description: "Activate an existing project"
+          arguments:
+            - value: "<name-or-id>"
+              hint_only: true
+              description: "Project name, slug, or id"
+        current:
+          description: "Show the active project"
+          closes: true
+        clear:
+          description: "Clear the active project"
+          closes: true
+        archive:
+          description: "Archive a project"
+          arguments:
+            - value: "<name-or-id>"
+              hint_only: true
+              description: "Project name, slug, or id"
+        link:
+          description: "Link a source record to the active project"
+          subcommands:
+            last:
+              description: "Link the latest run"
+              close_after:
+                last: 0
+            run:
+              description: "Link a run"
+              arguments:
+                - value: "<run-id>"
+                  hint_only: true
+                  description: "Run id"
+              close_after:
+                run: 1
+            snapshot:
+              description: "Link a snapshot"
+              arguments:
+                - value: "<snapshot-id>"
+                  hint_only: true
+                  description: "Snapshot id"
+              close_after:
+                snapshot: 1
+            file:
+              description: "Link a workspace file"
+              arguments:
+                - value: "<workspace-path>"
+                  hint_only: true
+                  value_type: target
+                  description: "Workspace file path"
+              close_after:
+                file: 1
+        unlink:
+          description: "Unlink a source record from the active project"
+          subcommands:
+            run:
+              description: "Unlink a run"
+              arguments:
+                - value: "<run-id>"
+                  hint_only: true
+                  description: "Run id"
+              close_after:
+                run: 1
+            snapshot:
+              description: "Unlink a snapshot"
+              arguments:
+                - value: "<snapshot-id>"
+                  hint_only: true
+                  description: "Snapshot id"
+              close_after:
+                snapshot: 1
+            file:
+              description: "Unlink a workspace file"
+              arguments:
+                - value: "<workspace-path>"
+                  hint_only: true
+                  value_type: target
+                  description: "Workspace file path"
+              close_after:
+                file: 1
+        target:
+          description: "Manage active-project targets"
+          subcommands:
+            list:
+              description: "List project targets"
+              closes: true
+            add:
+              description: "Add a typed target"
+              subcommands:
+                domain:
+                  description: "Add a domain target"
+                  arguments:
+                    - value: "<domain>"
+                      hint_only: true
+                      value_type: domain
+                      description: "Domain value"
+                  close_after:
+                    domain: 1
+                url:
+                  description: "Add a URL target"
+                  arguments:
+                    - value: "<url>"
+                      hint_only: true
+                      value_type: url
+                      description: "URL value"
+                  close_after:
+                    url: 1
+                host:
+                  description: "Add a host target"
+                  arguments:
+                    - value: "<host>"
+                      hint_only: true
+                      value_type: host
+                      description: "Host value"
+                  close_after:
+                    host: 1
+                ip:
+                  description: "Add an IP target"
+                  arguments:
+                    - value: "<ip>"
+                      hint_only: true
+                      value_type: ip
+                      description: "IP address"
+                  close_after:
+                    ip: 1
+                cidr:
+                  description: "Add a CIDR target"
+                  arguments:
+                    - value: "<cidr>"
+                      hint_only: true
+                      value_type: cidr
+                      description: "CIDR range"
+                  close_after:
+                    cidr: 1
+            quick-add:
+              description: "Infer and add a target from text"
+              arguments:
+                - value: "<text-or-value>"
+                  hint_only: true
+                  description: "Text containing a URL, CIDR, IP, or domain"
+            remove:
+              description: "Remove a target"
+              arguments:
+                - value: "<id-or-value>"
+                  hint_only: true
+                  description: "Target id or value"
   - root: quit
     description: "built-in: close the current tab"
     autocomplete:

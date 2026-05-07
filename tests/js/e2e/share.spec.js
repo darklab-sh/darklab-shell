@@ -5,6 +5,7 @@ import {
   makeTestIp,
   createShareSnapshot,
   ensurePromptReady,
+  clickHistoryRunMenuAction,
 } from './helpers.js'
 
 const CMD = 'hostname'
@@ -132,7 +133,7 @@ test.describe('permalink / share', () => {
     await runCommand(page, CMD)
 
     await openHistoryWithEntries(page)
-    await page.locator('.history-entry').first().locator('[data-action="permalink"]').click()
+    await clickHistoryRunMenuAction(page.locator('.history-entry').first(), 'permalink')
 
     const copied = await page.evaluate(() => window.__clipboardText)
     expect(copied).toMatch(/\/history\/[0-9a-f-]+$/)
@@ -151,7 +152,7 @@ test.describe('permalink / share', () => {
     await runCommand(page, CMD)
 
     await openHistoryWithEntries(page)
-    await page.locator('.history-entry').first().locator('[data-action="permalink"]').click()
+    await clickHistoryRunMenuAction(page.locator('.history-entry').first(), 'permalink')
     const copied = await page.evaluate(() => window.__clipboardText)
 
     await page.goto(copied)

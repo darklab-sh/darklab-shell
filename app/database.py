@@ -35,16 +35,12 @@ PROJECT_ENTITY_TYPES = frozenset({
     "run_file_artifact",
     "finding",
     "target",
-    "annotation",
     "package",
 })
 
 PROJECT_LINK_SOURCES = frozenset({
     "manual",
     "active_project",
-    "target_match",
-    "artifact_capture",
-    "finding_capture",
     "package_flow",
     "snapshot_capture",
     "migration",
@@ -275,6 +271,21 @@ def _create_project_workspace_schema(conn):
             updated      TEXT NOT NULL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS evidence_packages (
+            id                TEXT PRIMARY KEY,
+            session_id        TEXT NOT NULL,
+            project_id        TEXT NOT NULL,
+            name              TEXT NOT NULL,
+            description       TEXT NOT NULL DEFAULT '',
+            redaction_mode    TEXT NOT NULL DEFAULT 'redacted',
+            include_artifacts INTEGER NOT NULL DEFAULT 0,
+            manifest          TEXT NOT NULL DEFAULT '{}',
+            status            TEXT NOT NULL DEFAULT 'draft',
+            created           TEXT NOT NULL,
+            updated           TEXT NOT NULL
+        )
+    """)
 
 
 def _create_indexes(conn):
@@ -340,6 +351,14 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_annotations_entity_created "
         "ON annotations (entity_type, entity_id, created)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evidence_packages_project_updated "
+        "ON evidence_packages (project_id, updated DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evidence_packages_session_project "
+        "ON evidence_packages (session_id, project_id)"
     )
 
 
@@ -563,6 +582,63 @@ def delete_run_artifacts(conn, run_ids):
         f"SELECT rel_path FROM run_output_artifacts WHERE run_id IN ({placeholders})",  # nosec B608
         ids,
     ).fetchall()
+    file_artifact_rows = conn.execute(
+        f"SELECT id FROM run_file_artifacts WHERE run_id IN ({placeholders})",  # nosec B608
+        ids,
+    ).fetchall()
+    finding_rows = conn.execute(
+        f"SELECT id FROM findings WHERE run_id IN ({placeholders})",  # nosec B608
+        ids,
+    ).fetchall()
+    file_artifact_ids = [row["id"] for row in file_artifact_rows if row["id"]]
+    finding_ids = [row["id"] for row in finding_rows if row["id"]]
+    conn.execute(
+        "DELETE FROM project_links WHERE entity_type = 'run' "
+        f"AND entity_id IN ({placeholders})",  # nosec B608
+        ids,
+    )
+    conn.execute(
+        "DELETE FROM entity_labels WHERE entity_type = 'run' "
+        f"AND entity_id IN ({placeholders})",  # nosec B608
+        ids,
+    )
+    conn.execute(
+        "DELETE FROM annotations WHERE entity_type = 'run' "
+        f"AND entity_id IN ({placeholders})",  # nosec B608
+        ids,
+    )
+    if file_artifact_ids:
+        artifact_placeholders = ",".join("?" for _ in file_artifact_ids)
+        conn.execute(
+            "DELETE FROM entity_labels WHERE entity_type = 'run_file_artifact' "
+            f"AND entity_id IN ({artifact_placeholders})",  # nosec B608
+            file_artifact_ids,
+        )
+        conn.execute(
+            "DELETE FROM annotations WHERE entity_type = 'run_file_artifact' "
+            f"AND entity_id IN ({artifact_placeholders})",  # nosec B608
+            file_artifact_ids,
+        )
+    if finding_ids:
+        finding_placeholders = ",".join("?" for _ in finding_ids)
+        conn.execute(
+            "DELETE FROM entity_labels WHERE entity_type = 'finding' "
+            f"AND entity_id IN ({finding_placeholders})",  # nosec B608
+            finding_ids,
+        )
+        conn.execute(
+            "DELETE FROM annotations WHERE entity_type = 'finding' "
+            f"AND entity_id IN ({finding_placeholders})",  # nosec B608
+            finding_ids,
+        )
+        conn.execute(
+            f"DELETE FROM findings WHERE id IN ({finding_placeholders})",  # nosec B608
+            finding_ids,
+        )
+    conn.execute(
+        f"DELETE FROM run_file_artifacts WHERE run_id IN ({placeholders})",  # nosec B608
+        ids,
+    )
     conn.execute(
         f"DELETE FROM run_output_artifacts WHERE run_id IN ({placeholders})",  # nosec B608
         ids,
@@ -575,6 +651,20 @@ def _prune_retention(conn):
     """Delete runs and snapshots older than permalink_retention_days."""
     days = CFG.get("permalink_retention_days", 0)
     if days and days > 0:
+        linked_run_row = conn.execute(
+            "SELECT COUNT(DISTINCT r.id), COUNT(DISTINCT l.project_id) "
+            "FROM runs r JOIN project_links l ON l.entity_type = 'run' AND l.entity_id = r.id "
+            "WHERE r.started < datetime('now', ?)",
+            (f"-{days} days",),
+        ).fetchone()
+        linked_run_count = int(linked_run_row[0] or 0) if linked_run_row else 0
+        linked_project_count = int(linked_run_row[1] or 0) if linked_run_row else 0
+        if linked_run_count:
+            log.warning("PROJECT_RETENTION_WARNING", extra={
+                "linked_runs": linked_run_count,
+                "projects": linked_project_count,
+                "retention_days": days,
+            })
         old_run_ids = [
             row["id"]
             for row in conn.execute(

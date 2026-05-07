@@ -481,7 +481,14 @@ describe('command history hydration', () => {
 })
 
 describe('history panel actions', () => {
-  function loadHistoryPanel({ clipboardImpl, apiFetchImpl, mobileMode = false, appConfig = {} } = {}) {
+  function loadHistoryPanel({
+    clipboardImpl,
+    apiFetchImpl,
+    mobileMode = false,
+    appConfig = {},
+    activeProject = null,
+    showConfirmImpl = vi.fn(() => Promise.resolve(null)),
+  } = {}) {
     document.body.innerHTML = `
       <div id="history-panel"></div>
       <input id="history-search-input" />
@@ -641,7 +648,11 @@ describe('history panel actions', () => {
           historyPaginationSummary,
           historyPaginationControls,
           histRow: document.createElement('div'),
-          showConfirm: vi.fn(() => Promise.resolve(null)),
+          showConfirm: showConfirmImpl,
+          getActiveProjectContext: () => activeProject,
+          refreshActiveProjectContext: () => Promise.resolve(activeProject),
+          refreshProjectWorkspace: vi.fn(() => Promise.resolve()),
+          enhanceAppSelects: vi.fn(),
           cmdInput,
           tabs,
           getTab: id => tabs.find(t => t.id === id),
@@ -698,6 +709,7 @@ describe('history panel actions', () => {
       tabs,
       bindDismissible,
       refocusComposerAfterAction,
+      showConfirm: showConfirmImpl,
     }
   }
 
@@ -810,6 +822,97 @@ describe('history panel actions', () => {
 
     const btn = document.querySelector('#history-list .history-entry [data-action="permalink"]')
     expect(btn.textContent).toBe('permalink')
+  })
+
+  it('keeps restore and delete visible and moves secondary run actions into an ordered menu', async () => {
+    const { refreshHistoryPanel } = loadHistoryPanel()
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const entry = document.querySelector('#history-list .history-entry')
+    const visibleActions = [...entry.querySelector('.history-actions').children].map(el => el.textContent)
+    expect(visibleActions).toEqual(['restore', 'delete', 'morepermalinkcompareadd to active projectadd to projectcopy run id'])
+    const menuActions = [...entry.querySelectorAll('.history-action-menu [data-action]')].map(el => el.dataset.action)
+    expect(menuActions).toEqual([
+      'permalink',
+      'compare',
+      'add-active-project',
+      'add-project',
+      'copy-run-id',
+    ])
+  })
+
+  it('copies the run id and links runs to active or selected projects from the history menu', async () => {
+    const showConfirm = vi.fn(() => Promise.resolve('add'))
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              roots: ['ping'],
+              items: [{
+                id: 'run-1',
+                type: 'run',
+                command: 'ping darklab.sh',
+                label: 'ping darklab.sh',
+                started: '2026-01-01T00:00:00Z',
+                created: '2026-01-01T00:00:00Z',
+                exit_code: 0,
+              }],
+              runs: [],
+            }),
+        })
+      }
+      if (url === '/projects') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            projects: [
+              { id: 'project-2', name: 'zulu.test', status: 'active' },
+              { id: 'project-1', name: 'alpha.test', status: 'active' },
+            ],
+          }),
+        })
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ok: true }),
+      })
+    })
+    const clipboard = { writeText: vi.fn(() => Promise.resolve()) }
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: apiFetch,
+      clipboardImpl: clipboard,
+      activeProject: { id: 'project-active', name: 'Active scope' },
+      showConfirmImpl: showConfirm,
+    })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+    const entry = document.querySelector('#history-list .history-entry')
+
+    entry.querySelector('[data-action="copy-run-id"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    expect(clipboard.writeText).toHaveBeenCalledWith('run-1')
+
+    entry.querySelector('[data-action="add-active-project"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-active/links', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ entity_type: 'run', entity_id: 'run-1', source: 'manual' }),
+    }))
+
+    entry.querySelector('[data-action="add-project"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(showConfirm).toHaveBeenCalled()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/links', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ entity_type: 'run', entity_id: 'run-1', source: 'manual' }),
+    }))
   })
 
   it('renders SIGTERM-terminated runs as neutral history rows instead of failures', async () => {

@@ -8,6 +8,7 @@ from typing import Any
 
 from flask import Blueprint, Response, jsonify, request, send_file
 
+from database import db_connect
 from helpers import get_client_ip, get_log_session_id, get_session_id
 from workspace import (
     InvalidWorkspacePath,
@@ -45,11 +46,15 @@ def _session_or_error() -> tuple[str | None, tuple[Response, int] | None]:
 def _workspace_payload(session_id: str) -> dict[str, Any]:
     settings = workspace_settings()
     usage = workspace_usage(session_id)
+    files = list_workspace_files(session_id)
+    metadata_by_path = _workspace_file_metadata_by_path(session_id, [item.get("path") for item in files])
+    for item in files:
+        item.update(metadata_by_path.get(str(item.get("path") or ""), {}))
     return {
         "enabled": True,
         "backend": settings.backend,
         "directories": list_workspace_directories(session_id),
-        "files": list_workspace_files(session_id),
+        "files": files,
         "usage": {
             "bytes_used": usage.bytes_used,
             "file_count": usage.file_count,
@@ -60,6 +65,40 @@ def _workspace_payload(session_id: str) -> dict[str, Any]:
             "max_files": settings.max_files,
         },
     }
+
+
+def _workspace_file_metadata_by_path(session_id: str, paths: list[Any]) -> dict[str, dict[str, Any]]:
+    clean_paths = [str(path) for path in paths if path]
+    if not clean_paths:
+        return {}
+    placeholders = ",".join("?" for _ in clean_paths)
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT rfa.workspace_path, COUNT(DISTINCT rfa.id) AS artifact_count, "
+            "COUNT(DISTINCT rfa.run_id) AS run_count, MAX(r.started) AS last_seen, "
+            "GROUP_CONCAT(DISTINCT p.name) AS project_names "
+            "FROM run_file_artifacts rfa "
+            "LEFT JOIN runs r ON r.id = rfa.run_id AND r.session_id = rfa.session_id "
+            "LEFT JOIN project_links pl ON pl.entity_type = 'run' AND pl.entity_id = rfa.run_id "
+            "LEFT JOIN projects p ON p.id = pl.project_id AND p.session_id = rfa.session_id "
+            "WHERE rfa.session_id = ? "
+            f"AND rfa.workspace_path IN ({placeholders}) "  # nosec B608
+            "GROUP BY rfa.workspace_path",
+            [session_id, *clean_paths],
+        ).fetchall()
+    metadata = {}
+    for row in rows:
+        project_names = [
+            name for name in str(row["project_names"] or "").split(",")
+            if name
+        ]
+        metadata[str(row["workspace_path"])] = {
+            "artifact_count": int(row["artifact_count"] or 0),
+            "artifact_run_count": int(row["run_count"] or 0),
+            "artifact_last_seen": row["last_seen"] or "",
+            "project_names": project_names,
+        }
+    return metadata
 
 
 def _workspace_error_response(exc: Exception) -> tuple[Response, int]:

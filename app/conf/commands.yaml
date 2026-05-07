@@ -3094,6 +3094,7 @@ commands:
         - value: -p
           description: Ports to scan
           takes_value: true
+          value_type: port_set
           suggest:
             - placeholder: <ports>
               hint_only: true
@@ -3171,7 +3172,7 @@ commands:
       arguments:
         - placeholder: <target>
           hint_only: true
-          value_type: domain
+          value_type: target
           description: Hostname, IP, or CIDR
   - root: testssl
     description: Tests TLS services for protocol support, cipher choices, certificate issues, and known weaknesses.

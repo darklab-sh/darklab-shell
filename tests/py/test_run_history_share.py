@@ -654,6 +654,7 @@ class TestRunStreaming:
                 variable_notice="[var] HOST=darklab.sh",
                 rewrite_notice="rewritten for safety",
                 workspace_notices=["[workspace] writing scan.txt"],
+                workspace_artifacts=[],
             )
         capture.finalize()
 
@@ -702,6 +703,7 @@ class TestRunStreaming:
                 variable_notice="",
                 rewrite_notice="",
                 workspace_notices=[],
+                workspace_artifacts=[],
             )
         capture.finalize()
 
@@ -740,6 +742,7 @@ class TestRunStreaming:
                 variable_notice="",
                 rewrite_notice="",
                 workspace_notices=[],
+                workspace_artifacts=[],
             )
 
         assert published == [("run-broker-error", "error", {"text": "Process stdout pipe was not created"})]
@@ -801,6 +804,24 @@ class TestRunStreaming:
 
     def test_history_restore_json_preserves_signal_metadata(self):
         client = get_client()
+        session_id = "sess-signal-history"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Signal Case"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        target_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "domain", "value": "darklab.sh"},
+            headers={"X-Session-ID": session_id},
+        )
+        target = json.loads(target_resp.data)["target"]
+        client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
         fake_proc = _FakeProc(lines=["darklab.sh has address 104.21.4.35\n", ""])
 
         with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
@@ -815,23 +836,225 @@ class TestRunStreaming:
             resp = _post_run(
                 client,
                 json={"command": "host darklab.sh"},
-                headers={"X-Session-ID": "sess-signal-history"},
+                headers={"X-Session-ID": session_id},
             )
             resp.get_data(as_text=True)
 
         assert resp.status_code == 200
 
-        hist = client.get("/history", headers={"X-Session-ID": "sess-signal-history"})
+        hist = client.get("/history", headers={"X-Session-ID": session_id})
         run_id = json.loads(hist.data)["runs"][0]["id"]
-        restored = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": "sess-signal-history"})
+        with db_connect() as conn:
+            finding = conn.execute(
+                "SELECT id, run_id, target_id, scope, title, raw_line, line_number, review_state "
+                "FROM findings WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        restored = client.get(f"/history/{run_id}?json&preview=1", headers={"X-Session-ID": session_id})
         data = json.loads(restored.data)
         entry = data["output_entries"][0]
 
+        assert finding is not None
+        assert finding["run_id"] == run_id
+        assert finding["target_id"] == target["id"]
+        assert finding["scope"] == "finding"
+        assert finding["title"] == "darklab.sh has address 104.21.4.35"
+        assert finding["raw_line"] == "darklab.sh has address 104.21.4.35"
+        assert finding["line_number"] == 0
+        assert finding["review_state"] == "new"
+        findings_resp = client.get(
+            f"/entities/run/{run_id}/findings",
+            headers={"X-Session-ID": session_id},
+        )
+        findings_data = json.loads(findings_resp.data)
+        assert findings_resp.status_code == 200
+        assert [item["id"] for item in findings_data["findings"]] == [finding["id"]]
+        review_resp = client.put(
+            f"/findings/{finding['id']}/review",
+            json={"review_state": "reviewed"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert review_resp.status_code == 200
+        assert json.loads(review_resp.data)["finding"]["review_state"] == "reviewed"
+        hidden_review = client.put(
+            f"/findings/{finding['id']}/review",
+            json={"review_state": "important"},
+            headers={"X-Session-ID": "other-session"},
+        )
+        assert hidden_review.status_code == 404
+        assert data["findings"][0]["id"] == finding["id"]
+        assert data["findings"][0]["target_id"] == target["id"]
+        assert data["labels"] == []
+        assert data["annotations"] == []
         assert entry["text"] == "darklab.sh has address 104.21.4.35"
         assert entry["signals"] == ["findings"]
         assert entry["line_index"] == 0
         assert entry["command_root"] == "host"
         assert entry["target"] == "darklab.sh"
+
+    def test_project_findings_prefer_classifier_target_metadata(self):
+        client = get_client()
+        session_id = "sess-project-finding-target-metadata"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Nmap File Targets"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        target_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "domain", "value": "darklab.sh"},
+            headers={"X-Session-ID": session_id},
+        )
+        target = json.loads(target_resp.data)["target"]
+        client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        fake_proc = _FakeProc(lines=[
+            "Nmap scan report for darklab.sh\n",
+            "80/tcp open http\n",
+            "",
+        ])
+
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "nmap -iL targets.txt"},
+                headers={"X-Session-ID": session_id},
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        output_events = [event for event in _sse_events(body) if event.get("type") == "output"]
+        open_port_event = next(event for event in output_events if str(event.get("text") or "").strip() == "80/tcp open http")
+        assert open_port_event["target"] == "darklab.sh"
+        with db_connect() as conn:
+            finding = conn.execute(
+                "SELECT target_id, raw_line FROM findings WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        assert finding is not None
+        assert finding["raw_line"] == "80/tcp open http"
+        assert finding["target_id"] == target["id"]
+
+    def test_project_findings_match_classifier_ip_to_project_cidr_target(self):
+        client = get_client()
+        session_id = "sess-project-finding-cidr-target"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "CIDR Targets"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        target_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "cidr", "value": "10.0.0.0/24"},
+            headers={"X-Session-ID": session_id},
+        )
+        target = json.loads(target_resp.data)["target"]
+        client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        fake_proc = _FakeProc(lines=[
+            "Nmap scan report for 10.0.0.5\n",
+            "443/tcp open https\n",
+            "",
+        ])
+
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "nmap -iL targets.txt"},
+                headers={"X-Session-ID": session_id},
+            )
+            resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        with db_connect() as conn:
+            finding = conn.execute(
+                "SELECT target_id, raw_line FROM findings WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+        assert finding is not None
+        assert finding["raw_line"] == "443/tcp open https"
+        assert finding["target_id"] == target["id"]
+
+    def test_project_findings_filter_by_matching_port_set_target(self):
+        client = get_client()
+        session_id = "sess-project-finding-port-set-target"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Port Set Targets"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        domain_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "domain", "value": "darklab.sh"},
+            headers={"X-Session-ID": session_id},
+        )
+        domain_target = json.loads(domain_resp.data)["target"]
+        ports_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "port_set", "value": "80,443,6788"},
+            headers={"X-Session-ID": session_id},
+        )
+        port_target = json.loads(ports_resp.data)["target"]
+        client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        fake_proc = _FakeProc(lines=[
+            "Nmap scan report for darklab.sh\n",
+            "80/tcp open http\n",
+            "443/tcp open https\n",
+            "6788/tcp open unknown\n",
+            "22/tcp open ssh\n",
+            "",
+        ])
+
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True, True, True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "nmap -p 80,443,6788 darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            )
+            resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        filtered = client.get(
+            f"/projects/{project['id']}/findings?target_id={port_target['id']}",
+            headers={"X-Session-ID": session_id},
+        )
+        data = json.loads(filtered.data)
+        assert {item["raw_line"] for item in data["findings"]} == {
+            "80/tcp open http",
+            "443/tcp open https",
+            "6788/tcp open unknown",
+        }
+        assert "22/tcp open ssh" not in {item["raw_line"] for item in data["findings"]}
+        assert all(item["target_id"] == domain_target["id"] for item in data["findings"])
+        assert all(port_target["id"] in item["target_ids"] for item in data["findings"])
 
     def test_nonblocking_stream_reader_preserves_partial_lines_until_finalize(self):
         read_fd, write_fd = os.pipe()
@@ -949,6 +1172,48 @@ class TestRunStreaming:
         assert row["entity_type"] == "run"
         assert row["source"] == "active_project"
         assert row["command"] == "echo project"
+
+    def test_completed_run_skips_active_project_when_auto_link_disabled(self):
+        client = get_client()
+        session_id = "sess-active-project-auto-link-off"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Manual Run Context"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        client.post(
+            "/session/preferences",
+            json={
+                "preferences": {
+                    "pref_active_project_id": project["id"],
+                    "pref_project_auto_link_external_runs": "off",
+                }
+            },
+            headers={"X-Session-ID": session_id},
+        )
+
+        fake_proc = _FakeProc(lines=["project line\n", ""])
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[
+                 True,
+                 True,
+             ]):
+            resp = _post_run(client, json={"command": "echo project"}, headers={"X-Session-ID": session_id})
+            _ = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        with db_connect() as conn:
+            row = conn.execute(
+                "SELECT l.entity_type, l.entity_id, l.source, r.command "
+                "FROM project_links l JOIN runs r ON r.id = l.entity_id "
+                "WHERE l.project_id = ?",
+                (project["id"],),
+            ).fetchone()
+        assert row is None
 
     def test_run_filters_output_through_synthetic_grep(self):
         client = get_client()
@@ -1655,6 +1920,9 @@ class TestRunStreaming:
         assert "UI:\\n" in body
         # Default (non-Mac) User-Agent renders Alt-prefixed chords.
         assert "Alt+T" in body
+        assert "Alt+C" in body
+        assert "Alt+P" in body
+        assert "Alt+Shift+P" in body
         assert "Alt+Shift+C" in body
         assert "Ctrl+D" in body
         assert "Ctrl+U" in body
@@ -1673,6 +1941,9 @@ class TestRunStreaming:
 
         assert resp.status_code == 200
         assert "Option+T" in body
+        assert "Option+C" in body
+        assert "Option+P" in body
+        assert "Option+Shift+P" in body
         assert "Option+Shift+C" in body
         assert "Ctrl+D" in body
         assert "Ctrl+U" in body
@@ -2484,6 +2755,17 @@ class TestRunStreaming:
         from workspace import session_workspace_name, write_workspace_text_file
         write_workspace_text_file(session_id, "targets.txt", "ip.darklab.sh\n", cfg)
         workspace_dir = tmp_path / session_workspace_name(session_id)
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Workspace Artifacts"},
+            headers={"X-Session-ID": session_id},
+        )
+        project_id = json.loads(project_resp.data)["project"]["id"]
+        client.post(
+            "/projects/active",
+            json={"project_id": project_id},
+            headers={"X-Session-ID": session_id},
+        )
 
         with mock.patch("config.CFG", {**shell_app.CFG, **cfg}), \
              mock.patch("blueprints.run.CFG", {**shell_app.CFG, **cfg}), \
@@ -2513,7 +2795,34 @@ class TestRunStreaming:
         assert "scan complete\\n" in body
         hist = client.get("/history", headers={"X-Session-ID": session_id})
         data = json.loads(hist.data)
+        run_id = data["runs"][0]["id"]
         assert data["runs"][0]["command"] == "nmap -iL targets.txt -oN scan.txt"
+        with db_connect() as conn:
+            artifact_rows = conn.execute(
+                "SELECT workspace_path, display_name, kind, byte_size, detected_by "
+                "FROM run_file_artifacts WHERE run_id = ? ORDER BY workspace_path",
+                (run_id,),
+            ).fetchall()
+        assert [row["workspace_path"] for row in artifact_rows] == ["scan.txt", "targets.txt"]
+        assert {row["display_name"] for row in artifact_rows} == {"scan.txt", "targets.txt"}
+        assert {row["workspace_path"]: row["kind"] for row in artifact_rows} == {
+            "scan.txt": "output",
+            "targets.txt": "input",
+        }
+        assert {row["workspace_path"]: row["detected_by"] for row in artifact_rows} == {
+            "scan.txt": "workspace_flag",
+            "targets.txt": "workspace_flag",
+        }
+        assert {row["workspace_path"]: row["byte_size"] for row in artifact_rows}["targets.txt"] > 0
+        with db_connect() as conn:
+            project_links = conn.execute(
+                "SELECT entity_type, entity_id, source FROM project_links "
+                "WHERE project_id = ? ORDER BY entity_type, entity_id",
+                (project_id,),
+            ).fetchall()
+        assert [(row["entity_type"], row["entity_id"], row["source"]) for row in project_links] == [
+            ("run", run_id, "active_project"),
+        ]
 
     def test_run_injects_projectdiscovery_workspace_state_and_surfaces_paths(self, tmp_path):
         client = get_client()
@@ -2669,6 +2978,44 @@ class TestRunOutputArtifacts:
                 "VALUES (?, ?, 'gzip', 14, 2, 0, datetime('now'))",
                 (run_id, f"{run_id}.txt.gz"),
             )
+            project_id = f"prj_{uuid.uuid4().hex[:16]}"
+            file_artifact_id = f"rfa_{uuid.uuid4().hex[:16]}"
+            finding_id = f"fnd_{run_id}"
+            conn.execute(
+                "INSERT INTO projects "
+                "(id, session_id, name, slug, description, status, color, notes, created, updated) "
+                "VALUES (?, ?, 'Artifacts', ?, '', 'active', '', '', datetime('now'), datetime('now'))",
+                (project_id, session_id, f"artifacts-{run_id}"),
+            )
+            conn.execute(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "VALUES (?, ?, ?, 'reports/output.txt', 'output.txt', 'output', 14, 'workspace_flag', datetime('now'))",
+                (file_artifact_id, session_id, run_id),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "VALUES (?, ?, ?, 'finding', 'open port 443', '443/tcp open https', 0, ?, datetime('now'))",
+                (finding_id, session_id, run_id, f"fp-{run_id}"),
+            )
+            conn.execute(
+                "INSERT INTO entity_labels "
+                "(id, session_id, entity_type, entity_id, label, created) "
+                "VALUES (?, ?, 'finding', ?, 'important', datetime('now'))",
+                (f"lbl_{run_id}", session_id, finding_id),
+            )
+            conn.execute(
+                "INSERT INTO annotations "
+                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES (?, ?, 'run_file_artifact', ?, 'review evidence', datetime('now'), datetime('now'))",
+                (f"ann_{run_id}", session_id, file_artifact_id),
+            )
+            conn.execute(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                "VALUES (?, ?, 'run', ?, 'active_project', datetime('now'))",
+                (f"pln_{uuid.uuid4().hex[:16]}", project_id, run_id),
+            )
             conn.commit()
         return artifact_path
 
@@ -2689,6 +3036,26 @@ class TestRunOutputArtifacts:
                 ).fetchone()
                 is None
             )
+            assert (
+                conn.execute(
+                    "SELECT 1 FROM run_file_artifacts WHERE run_id = ?",
+                    ("artifact-delete-run",),
+                ).fetchone()
+                is None
+            )
+            assert conn.execute(
+                "SELECT COUNT(*) FROM findings WHERE id = ?",
+                ("fnd_artifact-delete-run",),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM entity_labels WHERE id = ?",
+                ("lbl_artifact-delete-run",),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM annotations WHERE id = ?",
+                ("ann_artifact-delete-run",),
+            ).fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM project_links").fetchone()[0] == 0
 
     def test_clear_history_removes_output_artifacts_for_session(self):
         client = get_client()
@@ -2704,6 +3071,20 @@ class TestRunOutputArtifacts:
         assert not os.path.exists(artifact_b)
         with db_connect() as conn:
             assert conn.execute("SELECT COUNT(*) FROM run_output_artifacts").fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM run_file_artifacts").fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM findings WHERE id IN (?, ?)",
+                ("fnd_artifact-clear-a", "fnd_artifact-clear-b"),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM entity_labels WHERE id IN (?, ?)",
+                ("lbl_artifact-clear-a", "lbl_artifact-clear-b"),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM annotations WHERE id IN (?, ?)",
+                ("ann_artifact-clear-a", "ann_artifact-clear-b"),
+            ).fetchone()[0] == 0
+            assert conn.execute("SELECT COUNT(*) FROM project_links").fetchone()[0] == 0
 
 
 # ── /history isolation ────────────────────────────────────────────────────────

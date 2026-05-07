@@ -10,13 +10,22 @@ describe('workspace UI helpers', () => {
     const { renderWorkspaceFiles } = setupWorkspace()
 
     renderWorkspaceFiles({
-      files: [{ path: 'targets.txt', size: 11, mtime: '2026-01-01T00:00:00Z' }],
+      files: [{
+        path: 'targets.txt',
+        size: 11,
+        mtime: '2026-01-01T00:00:00Z',
+        artifact_count: 1,
+        artifact_run_count: 1,
+        project_names: ['Signal Case'],
+      }],
       usage: { bytes_used: 11, file_count: 1 },
       limits: { quota_bytes: 1024, max_files: 10 },
     })
 
     expect(document.getElementById('workspace-summary').textContent).toBe('1 / 10 files · 11 B / 1 KB')
     expect(document.querySelector('.workspace-file-name').textContent).toBe('targets.txt')
+    expect(document.querySelector('.workspace-file-details').textContent)
+      .toContain('1 artifact · 1 run · Signal Case')
     expect([...document.querySelectorAll('[data-workspace-action]')].map(btn => btn.textContent)).toEqual([
       'View',
       'Edit',

@@ -3,11 +3,13 @@
 // supported values and snapshot normalization live here.
 (function (global) {
   const SESSION_PREFERENCE_KEYS = Object.freeze([
+    'pref_active_project_id',
     'pref_theme_name',
     'pref_timestamps',
     'pref_line_numbers',
     'pref_welcome_intro',
     'pref_share_redaction_default',
+    'pref_project_auto_link_external_runs',
     'pref_run_notify',
     'pref_hud_clock',
     'pref_prompt_username',
@@ -52,10 +54,12 @@
   function defaultSessionPreferences(defaultTheme = 'darklab_obsidian.yaml') {
     return {
       pref_theme_name: defaultTheme || 'darklab_obsidian.yaml',
+      pref_active_project_id: '',
       pref_timestamps: 'off',
       pref_line_numbers: 'off',
       pref_welcome_intro: 'animated',
       pref_share_redaction_default: 'unset',
+      pref_project_auto_link_external_runs: 'on',
       pref_run_notify: 'off',
       pref_hud_clock: 'utc',
       pref_prompt_username: '',
@@ -68,10 +72,14 @@
     if (typeof source.pref_theme_name === 'string' && source.pref_theme_name.trim()) {
       prefs.pref_theme_name = source.pref_theme_name.trim();
     }
+    if (typeof source.pref_active_project_id === 'string' && /^prj_[0-9a-f]{16}$/.test(source.pref_active_project_id)) {
+      prefs.pref_active_project_id = source.pref_active_project_id;
+    }
     prefs.pref_timestamps = coerceTimestampMode(source.pref_timestamps, timestampModes);
     prefs.pref_line_numbers = coerceLineNumberMode(source.pref_line_numbers);
     prefs.pref_welcome_intro = coerceWelcomeIntroMode(source.pref_welcome_intro);
     prefs.pref_share_redaction_default = coerceShareRedactionDefaultMode(source.pref_share_redaction_default);
+    prefs.pref_project_auto_link_external_runs = source.pref_project_auto_link_external_runs === 'off' ? 'off' : 'on';
     prefs.pref_run_notify = coerceRunNotifyMode(source.pref_run_notify);
     prefs.pref_hud_clock = coerceHudClockMode(source.pref_hud_clock);
     prefs.pref_prompt_username = normalizePromptUsername(source.pref_prompt_username);

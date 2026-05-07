@@ -770,6 +770,7 @@
     root.querySelectorAll('select.form-select, .history-panel-filters select').forEach(_enhanceAppSelect);
   }
   global.syncAppSelect = (select) => _syncAppSelect(select);
+  global.enhanceAppSelects = enhanceAppSelects;
   enhanceAppSelects();
   if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
     document.addEventListener('click', (event) => {

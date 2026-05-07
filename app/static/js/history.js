@@ -79,6 +79,52 @@ let _historyPaging = {
   hasPrev: false,
   hasNext: false,
 };
+
+function _closeHistoryActionMenus(except = null) {
+  document.querySelectorAll('.history-action-menu-wrap.open').forEach((wrap) => {
+    if (except && wrap === except) return;
+    wrap.classList.remove('open');
+    wrap.querySelector('[data-action="history-menu"]')?.setAttribute('aria-expanded', 'false');
+    _resetHistoryActionMenuPosition(wrap);
+  });
+}
+
+function _resetHistoryActionMenuPosition(wrap) {
+  const menu = wrap?.querySelector?.('.history-action-menu');
+  if (!menu) return;
+  menu.style.position = '';
+  menu.style.left = '';
+  menu.style.top = '';
+  menu.style.right = '';
+  menu.style.bottom = '';
+}
+
+function _positionHistoryActionMenu(wrap) {
+  const trigger = wrap?.querySelector?.('[data-action="history-menu"]');
+  const menu = wrap?.querySelector?.('.history-action-menu');
+  if (!trigger || !menu || typeof trigger.getBoundingClientRect !== 'function') return;
+  const triggerRect = trigger.getBoundingClientRect();
+  const menuWidth = Math.max(180, menu.offsetWidth || 180);
+  const menuHeight = Math.max(1, menu.offsetHeight || 1);
+  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : document.documentElement.clientWidth;
+  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : document.documentElement.clientHeight;
+  const gutter = 8;
+  const preferredLeft = triggerRect.left;
+  const left = Math.min(
+    Math.max(gutter, preferredLeft),
+    Math.max(gutter, viewportWidth - menuWidth - gutter),
+  );
+  const belowTop = triggerRect.bottom + 4;
+  const aboveTop = triggerRect.top - menuHeight - 4;
+  const top = belowTop + menuHeight <= viewportHeight - gutter
+    ? belowTop
+    : Math.max(gutter, aboveTop);
+  menu.style.position = 'fixed';
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+  menu.style.right = 'auto';
+  menu.style.bottom = 'auto';
+}
 let _historyCompareState = {
   source: null,
   candidates: [],
@@ -182,6 +228,7 @@ function _historyOutputLineMetadata(entry) {
   const metadata = {};
   if (Array.isArray(entry.signals) && entry.signals.length) metadata.signals = entry.signals;
   if (Number.isInteger(entry.line_index)) metadata.line_index = entry.line_index;
+  if (Number.isInteger(entry.line_number)) metadata.line_number = entry.line_number;
   if (typeof entry.command_root === 'string' && entry.command_root) metadata.command_root = entry.command_root;
   if (typeof entry.target === 'string' && entry.target) metadata.target = entry.target;
   return Object.keys(metadata).length ? metadata : null;
@@ -769,6 +816,160 @@ function _historyElapsedLabel(run) {
   return _historyCore.elapsedLabel(run);
 }
 
+function _historyProjectDisplayName(project) {
+  if (!project || typeof project !== 'object') return '';
+  return String(project.name || project.slug || project.id || '').trim();
+}
+
+async function _historyLoadActiveProject() {
+  if (typeof getActiveProjectContext === 'function') {
+    const current = getActiveProjectContext();
+    if (current && current.id) return current;
+  }
+  if (typeof refreshActiveProjectContext === 'function') {
+    try {
+      const refreshed = await refreshActiveProjectContext();
+      if (refreshed && refreshed.id) return refreshed;
+    } catch (_) {}
+  }
+  try {
+    const resp = await apiFetch('/projects/active', { cache: 'no-store' });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data && data.project && data.project.id ? data.project : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function _historyLoadProjects() {
+  const resp = await apiFetch('/projects', { cache: 'no-store' });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  return (Array.isArray(data.projects) ? data.projects : [])
+    .filter(project => project && project.id && project.status !== 'archived')
+    .sort((a, b) => _historyProjectDisplayName(a).localeCompare(_historyProjectDisplayName(b)));
+}
+
+async function _historyLinkRunToProject(run, project) {
+  if (!run || !run.id) throw new Error('Run is missing its identifier.');
+  if (!project || !project.id) throw new Error('Project is missing its identifier.');
+  const resp = await apiFetch(`/projects/${encodeURIComponent(project.id)}/links`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entity_type: 'run', entity_id: run.id, source: 'manual' }),
+  });
+  if (!resp.ok) {
+    let detail = '';
+    try {
+      const data = await resp.json();
+      detail = data && data.error ? data.error : '';
+    } catch (_) {}
+    throw new Error(detail || `HTTP ${resp.status}`);
+  }
+  if (typeof refreshProjectWorkspace === 'function') {
+    try { await refreshProjectWorkspace(); } catch (_) {}
+  }
+  const name = _historyProjectDisplayName(project) || 'project';
+  showToast(`Run added to ${name}`);
+}
+
+async function _historyAddRunToActiveProject(run) {
+  const project = await _historyLoadActiveProject();
+  if (!project || !project.id) {
+    showToast('No active project selected', 'error');
+    return;
+  }
+  await _historyLinkRunToProject(run, project);
+}
+
+function _historyProjectPickerContent(projects) {
+  const wrap = document.createElement('div');
+  wrap.className = 'history-project-picker';
+  const select = document.createElement('select');
+  select.className = 'form-select form-control-compact';
+  select.setAttribute('aria-label', 'Project');
+  projects.forEach((project) => {
+    const option = document.createElement('option');
+    option.value = String(project.id || '');
+    option.textContent = _historyProjectDisplayName(project) || String(project.id || '');
+    select.appendChild(option);
+  });
+  wrap.appendChild(select);
+  const help = document.createElement('div');
+  help.className = 'history-project-picker-help';
+  help.textContent = 'Choose a project to link this run.';
+  wrap.appendChild(help);
+  return { wrap, select };
+}
+
+async function _historyAddRunToProject(run) {
+  let projects;
+  try {
+    projects = await _historyLoadProjects();
+  } catch (_) {
+    showToast('Failed to load projects', 'error');
+    return;
+  }
+  if (!projects.length) {
+    showToast('No projects available', 'error');
+    return;
+  }
+  const { wrap, select } = _historyProjectPickerContent(projects);
+  const choicePromise = showConfirm({
+    body: 'Add this run to a project',
+    content: wrap,
+    tone: null,
+    defaultFocus: select,
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'add', label: 'Add to project', role: 'primary' },
+    ],
+  });
+  if (typeof enhanceAppSelects === 'function') {
+    enhanceAppSelects(wrap);
+  }
+  const choice = await choicePromise;
+  if (choice !== 'add') return;
+  const project = projects.find(item => String(item.id || '') === select.value);
+  try {
+    await _historyLinkRunToProject(run, project);
+  } catch (_) {
+    showToast('Failed to add run to project', 'error');
+  }
+}
+
+function _createHistoryActionMenu(run) {
+  const wrap = document.createElement('div');
+  wrap.className = 'history-action-menu-wrap save-menu-wrap save-menu-down';
+  const trigger = document.createElement('button');
+  trigger.className = 'history-action-btn btn btn-secondary btn-compact';
+  trigger.type = 'button';
+  trigger.dataset.action = 'history-menu';
+  trigger.textContent = 'more';
+  trigger.setAttribute('aria-label', 'More history actions');
+  trigger.setAttribute('aria-expanded', 'false');
+  const menu = document.createElement('div');
+  menu.className = 'history-action-menu save-menu dropdown-surface';
+  [
+    ['permalink', 'permalink'],
+    ['compare', 'compare'],
+    ['add-active-project', 'add to active project'],
+    ['add-project', 'add to project'],
+    ['copy-run-id', 'copy run id'],
+  ].forEach(([action, label]) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'dropdown-item dropdown-item-compact';
+    item.dataset.action = action;
+    item.dataset.runId = String(run.id || '');
+    item.textContent = label;
+    menu.appendChild(item);
+  });
+  wrap.append(trigger, menu);
+  return wrap;
+}
+
 function _createHistoryEntry(run, isStarred) {
   const entry = document.createElement('div');
   entry.className = 'history-entry chrome-row chrome-row-clickable' + (isStarred ? ' starred row-accent-amber' : '');
@@ -823,6 +1024,13 @@ function _createHistoryEntry(run, isStarred) {
     elapsedEl.textContent = elapsedLabel;
     meta.appendChild(elapsedEl);
   }
+  const artifactCount = Number(run.artifact_count || (Array.isArray(run.artifacts) ? run.artifacts.length : 0));
+  if (Number.isFinite(artifactCount) && artifactCount > 0) {
+    const artifactEl = document.createElement('span');
+    artifactEl.className = 'history-entry-artifacts';
+    artifactEl.textContent = artifactCount === 1 ? '1 artifact' : `${artifactCount} artifacts`;
+    meta.appendChild(artifactEl);
+  }
   const exitEl = document.createElement('span');
   exitEl.className = exitCls;
   exitEl.textContent = _historyExitLabel(run.exit_code);
@@ -839,26 +1047,14 @@ function _createHistoryEntry(run, isStarred) {
   restoreBtn.textContent = 'restore';
   actions.appendChild(restoreBtn);
 
-  const permalinkBtn = document.createElement('button');
-  permalinkBtn.className = 'history-action-btn btn btn-secondary btn-compact';
-  permalinkBtn.type = 'button';
-  permalinkBtn.dataset.action = 'permalink';
-  permalinkBtn.textContent = 'permalink';
-  actions.appendChild(permalinkBtn);
-
-  const compareBtn = document.createElement('button');
-  compareBtn.className = 'history-action-btn btn btn-secondary btn-compact';
-  compareBtn.type = 'button';
-  compareBtn.dataset.action = 'compare';
-  compareBtn.textContent = 'compare';
-  actions.appendChild(compareBtn);
-
   const deleteBtn = document.createElement('button');
   deleteBtn.className = 'history-action-btn btn btn-secondary btn-compact';
   deleteBtn.type = 'button';
   deleteBtn.dataset.action = 'delete';
   deleteBtn.textContent = 'delete';
   actions.appendChild(deleteBtn);
+
+  actions.appendChild(_createHistoryActionMenu(run));
 
   entry.appendChild(actions);
   return entry;
@@ -1706,7 +1902,37 @@ function _tabForHistoryRun(run) {
   )) || null;
 }
 
-function restoreHistoryRunIntoTab(run, { targetTabId = null, hidePanelOnSuccess = true } = {}) {
+function _highlightRestoredHistoryLine(tabId, { lineNumber = null, lineIndex = null } = {}) {
+  const out = typeof getOutput === 'function' ? getOutput(tabId) : null;
+  if (!out) return;
+  const cssEscape = value => (
+    typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function'
+      ? CSS.escape(String(value))
+      : String(value).replace(/"/g, '\\"')
+  );
+  const normalizedLineNumber = Number(lineNumber || 0);
+  const normalizedLineIndex = Number(lineIndex);
+  const selector = normalizedLineNumber > 0
+    ? `.line[data-line-number="${cssEscape(normalizedLineNumber)}"]`
+    : (Number.isInteger(normalizedLineIndex) ? `.line[data-line-index="${cssEscape(normalizedLineIndex)}"]` : '');
+  if (!selector) return;
+  const line = out.querySelector(selector);
+  if (!line) return;
+  out.querySelectorAll('.line.history-source-highlight').forEach(node => {
+    node.classList.remove('history-source-highlight');
+  });
+  line.classList.add('history-source-highlight');
+  if (typeof line.scrollIntoView === 'function') {
+    line.scrollIntoView({ block: 'center' });
+  }
+}
+
+function restoreHistoryRunIntoTab(run, {
+  targetTabId = null,
+  hidePanelOnSuccess = true,
+  highlightLineNumber = null,
+  highlightLineIndex = null,
+} = {}) {
   if (!run || !run.id) return Promise.reject(new Error('missing run id'));
   const existing = targetTabId ? getTab(targetTabId) : _tabForHistoryRun(run);
   const canUpgradeExisting = !!(existing && run.full_output_available && existing.previewTruncated);
@@ -1746,6 +1972,12 @@ function restoreHistoryRunIntoTab(run, { targetTabId = null, hidePanelOnSuccess 
       }
       if (typeof hideTabKillBtn === 'function') hideTabKillBtn(tabId);
       if (hidePanelOnSuccess) hideHistoryPanel();
+      if (highlightLineNumber || Number.isInteger(highlightLineIndex)) {
+        window.setTimeout(() => _highlightRestoredHistoryLine(tabId, {
+          lineNumber: highlightLineNumber,
+          lineIndex: highlightLineIndex,
+        }), 0);
+      }
       return tabId;
     });
 }
@@ -1881,8 +2113,24 @@ function refreshHistoryPanel() {
         },
       });
 
+      bindPressable(entry.querySelector('[data-action="history-menu"]'), {
+        refocusComposer: false,
+        onActivate: (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const wrap = entry.querySelector('.history-action-menu-wrap');
+          if (!wrap) return;
+          const open = !wrap.classList.contains('open');
+          _closeHistoryActionMenus(open ? wrap : null);
+          wrap.classList.toggle('open', open);
+          entry.querySelector('[data-action="history-menu"]')?.setAttribute('aria-expanded', open ? 'true' : 'false');
+          if (open) _positionHistoryActionMenu(wrap);
+          else _resetHistoryActionMenuPosition(wrap);
+        },
+      });
       bindPressable(entry.querySelector('[data-action="permalink"]'), {
         onActivate: () => {
+          _closeHistoryActionMenus();
           const url = `${location.origin}/history/${run.id}`;
           shareUrl(url).catch(() => showToast('Failed to copy link', 'error'));
           if (!_historyActionKeepsPanelOpen('permalink')) hideHistoryPanel();
@@ -1891,12 +2139,35 @@ function refreshHistoryPanel() {
       bindPressable(entry.querySelector('[data-action="compare"]'), {
         refocusComposer: false,
         onActivate: () => {
+          _closeHistoryActionMenus();
           openHistoryCompareLauncher(run);
           if (!_historyActionKeepsPanelOpen('compare')) hideHistoryPanel();
         },
       });
+      bindPressable(entry.querySelector('[data-action="add-active-project"]'), {
+        onActivate: () => {
+          _closeHistoryActionMenus();
+          _historyAddRunToActiveProject(run).catch(() => showToast('Failed to add run to active project', 'error'));
+        },
+      });
+      bindPressable(entry.querySelector('[data-action="add-project"]'), {
+        refocusComposer: false,
+        onActivate: () => {
+          _closeHistoryActionMenus();
+          _historyAddRunToProject(run).catch(() => showToast('Failed to add run to project', 'error'));
+        },
+      });
+      bindPressable(entry.querySelector('[data-action="copy-run-id"]'), {
+        onActivate: () => {
+          _closeHistoryActionMenus();
+          copyTextToClipboard(run.id)
+            .then(() => showToast('Run ID copied'))
+            .catch(() => showToast('Failed to copy run ID', 'error'));
+        },
+      });
       bindPressable(entry.querySelector('[data-action="delete"]'), {
         onActivate: () => {
+          _closeHistoryActionMenus();
           confirmHistAction('delete', run.id, run.command);
         },
       });
@@ -1914,6 +2185,20 @@ function refreshHistoryPanel() {
       });
     }
   });
+}
+
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  document.addEventListener('click', (event) => {
+    if (event.target && event.target.closest && event.target.closest('.history-action-menu-wrap')) return;
+    _closeHistoryActionMenus();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') _closeHistoryActionMenus();
+  });
+}
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('resize', () => _closeHistoryActionMenus());
+  window.addEventListener('scroll', () => _closeHistoryActionMenus(), true);
 }
 
 if (typeof historySearchInput !== 'undefined' && historySearchInput) {

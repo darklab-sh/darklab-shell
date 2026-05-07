@@ -10,7 +10,19 @@ function tick() {
   return new Promise(resolve => setTimeout(resolve, 0))
 }
 
-function loadShellChrome({ fetch, preferences = {}, openStatusMonitor = vi.fn(() => Promise.resolve(true)) } = {}) {
+function loadShellChrome({
+  fetch,
+  apiFetch,
+  preferences = {},
+  openStatusMonitor = vi.fn(() => Promise.resolve(true)),
+  restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-restored')),
+  showConfirm = vi.fn(() => Promise.resolve('remove')),
+  bindDismissible = null,
+  enhanceAppSelects = vi.fn(),
+  syncAppSelect = vi.fn(),
+  getProjectAutoLinkExternalRunsPreference = () => preferences.pref_project_auto_link_external_runs || 'on',
+  applyProjectAutoLinkExternalRunsPreference = (mode) => { preferences.pref_project_auto_link_external_runs = mode },
+} = {}) {
   document.body.innerHTML = `
     <aside id="rail">
       <button id="rail-collapse-btn"></button>
@@ -42,6 +54,45 @@ function loadShellChrome({ fetch, preferences = {}, openStatusMonitor = vi.fn(()
       <span id="hud-redis"></span>
       <div id="hud-actions"></div>
     </footer>
+    <div id="project-workspace-overlay" class="u-hidden" aria-hidden="true">
+      <div id="project-workspace-modal">
+        <button class="project-workspace-close" type="button"></button>
+        <p id="project-workspace-subtitle"></p>
+        <div id="project-workspace-message" class="u-hidden"></div>
+        <form id="project-workspace-create-form">
+          <input id="project-workspace-name">
+        </form>
+        <form id="project-notes-form">
+          <textarea id="project-notes-input"></textarea>
+          <div id="project-notes-save-status" class="u-hidden">saved</div>
+        </form>
+        <div id="project-workspace-body"></div>
+        <div id="project-explorer-body"></div>
+      </div>
+      <div id="project-target-editor-overlay" class="u-hidden" aria-hidden="true">
+        <div id="project-target-editor-modal">
+          <span id="project-target-editor-title"></span>
+          <button class="project-target-editor-close" type="button"></button>
+          <form id="project-target-create-form">
+            <select id="project-target-type">
+              <option value="domain">domain</option>
+              <option value="host">host</option>
+              <option value="ip">ip</option>
+              <option value="cidr">cidr</option>
+              <option value="url">url</option>
+              <option value="port_set">port set</option>
+            </select>
+            <input id="project-target-value">
+            <small id="project-target-value-help"></small>
+            <div id="project-target-value-error" class="u-hidden"></div>
+            <input id="project-target-label">
+            <textarea id="project-target-notes"></textarea>
+            <button class="project-target-editor-cancel" type="button"></button>
+            <button id="project-target-submit" type="submit"></button>
+          </form>
+        </div>
+      </div>
+    </div>
   `
 
   const intervalCallbacks = []
@@ -58,6 +109,11 @@ function loadShellChrome({ fetch, preferences = {}, openStatusMonitor = vi.fn(()
     renderHudClock: null,
     toggleRailCollapsed: null,
     openStatusMonitor,
+    restoreHistoryRunIntoTab,
+    showConfirm,
+    bindDismissible,
+    enhanceAppSelects,
+    syncAppSelect,
   }
 
   new Function(
@@ -66,6 +122,7 @@ function loadShellChrome({ fetch, preferences = {}, openStatusMonitor = vi.fn(()
     'window',
     'performance',
     'fetch',
+    'apiFetch',
     'localStorage',
     'setInterval',
     'clearInterval',
@@ -91,6 +148,9 @@ function loadShellChrome({ fetch, preferences = {}, openStatusMonitor = vi.fn(()
     'openWorkflows',
     'showWorkflowsOverlay',
     'openStatusMonitor',
+    'showConfirm',
+    'getProjectAutoLinkExternalRunsPreference',
+    'applyProjectAutoLinkExternalRunsPreference',
     `
       const globalThis = global;
       ${SHELL_CHROME_SRC}
@@ -103,6 +163,10 @@ function loadShellChrome({ fetch, preferences = {}, openStatusMonitor = vi.fn(()
     fetch || vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ uptime: 1, db: 'ok', redis: 'ok' }),
+    }),
+    apiFetch || vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ project: null, projects: [], counts: {} }),
     }),
     window.localStorage,
     (fn) => {
@@ -138,7 +202,11 @@ function loadShellChrome({ fetch, preferences = {}, openStatusMonitor = vi.fn(()
     () => {},
     () => {},
     () => {},
+    () => {},
     openStatusMonitor,
+    showConfirm,
+    getProjectAutoLinkExternalRunsPreference,
+    applyProjectAutoLinkExternalRunsPreference,
   )
 
   return {
@@ -151,6 +219,13 @@ function loadShellChrome({ fetch, preferences = {}, openStatusMonitor = vi.fn(()
     railSectionWorkflows: document.getElementById('rail-section-workflows'),
     preferences,
     openStatusMonitor,
+    restoreHistoryRunIntoTab,
+    showConfirm,
+    bindDismissible,
+    openProjectWorkspace: global.openProjectWorkspace,
+    refreshProjectWorkspace: global.refreshProjectWorkspace,
+    enhanceAppSelects,
+    syncAppSelect,
   }
 }
 
@@ -244,5 +319,794 @@ describe('shell chrome HUD status', () => {
 
     expect(hud.db.textContent).toBe('OFFLINE')
     expect(hud.redis.textContent).toBe('N/A')
+  })
+})
+
+describe('shell chrome project workspace', () => {
+  it('labels only the current active project in the project list', async () => {
+    let activeProjectId = 'project-1'
+    const projects = [
+      { id: 'project-3', name: 'zulu.test', status: 'active' },
+      { id: 'project-2', name: 'example.net', status: 'active' },
+      { id: 'project-1', name: 'darklab.sh', status: 'active' },
+      { id: 'project-4', name: 'alpha.test', status: 'active' },
+    ]
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/projects/active' && options.method === 'POST') {
+        activeProjectId = JSON.parse(options.body).project_id
+        const project = projects.find(item => item.id === activeProjectId) || null
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, project }),
+        })
+      }
+      if (url === '/projects/active') {
+        const project = projects.find(item => item.id === activeProjectId) || null
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project }),
+        })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects }),
+        })
+      }
+      if (url.endsWith('/summary')) {
+        const projectId = url.split('/')[2]
+        const project = projects.find(item => item.id === projectId) || null
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project,
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, annotations: 0 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({}),
+      })
+    })
+    const shell = loadShellChrome({ apiFetch })
+
+    await shell.openProjectWorkspace()
+    await tick()
+    const rowText = projectId => document.querySelector(`[data-project-action="select"][data-project-id="${projectId}"]`)?.textContent || ''
+    const orderedProjectIds = () => [...document.querySelectorAll('[data-project-action="select"]')]
+      .map(row => row.dataset.projectId)
+    expect(rowText('project-1')).toContain('active')
+    expect(rowText('project-2')).not.toContain('active')
+    expect(orderedProjectIds()).toEqual(['project-1', 'project-4', 'project-2', 'project-3'])
+
+    document.querySelector('[data-project-action="select"][data-project-id="project-2"]').click()
+    await tick()
+    document.querySelector('[data-project-action="use"][data-project-id="project-2"]').click()
+    await tick()
+    await tick()
+
+    expect(rowText('project-1')).not.toContain('active')
+    expect(rowText('project-2')).toContain('active')
+    expect(orderedProjectIds()).toEqual(['project-2', 'project-4', 'project-1', 'project-3'])
+  })
+
+  it('toggles the active project external run capture preference', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project: { id: 'project-1', name: 'darklab.sh' } }),
+        })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'darklab.sh', status: 'active' }] }),
+        })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, annotations: 0 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const shell = loadShellChrome({ apiFetch })
+
+    await shell.openProjectWorkspace()
+    await tick()
+
+    expect(document.querySelector('[data-project-auto-link-external-runs]')).toBeNull()
+    expect(document.getElementById('project-explorer-body').textContent)
+      .not.toContain('Add external command runs to the active project')
+  })
+
+  it('keeps the target editor dropdown value in sync with the last saved target type', async () => {
+    const targets = []
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project: { id: 'project-1', name: 'darklab.sh' } }),
+        })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'darklab.sh', status: 'active' }] }),
+        })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: targets.length, annotations: 0 },
+            runs: [],
+            targets,
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      if (url === '/projects/project-1/targets' && options.method === 'POST') {
+        const payload = JSON.parse(options.body)
+        const target = { id: `target-${targets.length + 1}`, ...payload }
+        targets.push(target)
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ target }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const syncAppSelect = vi.fn()
+    const shell = loadShellChrome({ apiFetch, syncAppSelect })
+
+    await shell.openProjectWorkspace()
+    await tick()
+
+    document.querySelector('[data-project-action="new-target"]').click()
+    await tick()
+    const typeSelect = document.getElementById('project-target-type')
+    const valueInput = document.getElementById('project-target-value')
+    const valueHelp = document.getElementById('project-target-value-help')
+    expect(valueInput.placeholder).toBe('target.example.com')
+    expect(valueHelp.textContent).toContain('darklab.sh')
+    typeSelect.value = 'host'
+    typeSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(valueInput.placeholder).toBe('host.example.com')
+    expect(valueHelp.textContent).toContain('Hostname or IP address')
+    valueInput.value = 'api.darklab.sh'
+    document.getElementById('project-target-create-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    await tick()
+    await tick()
+
+    document.querySelector('[data-project-action="new-target"]').click()
+    await tick()
+
+    expect(typeSelect.value).toBe('host')
+    expect(syncAppSelect).toHaveBeenCalledWith(typeSelect)
+    expect(valueInput.placeholder).toBe('host.example.com')
+    expect(valueHelp.textContent).toContain('192.0.2.10')
+    typeSelect.value = 'port_set'
+    typeSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(valueInput.placeholder).toBe('80,443,8000-8080')
+    expect(valueHelp.textContent).toContain('8000-8080')
+    typeSelect.value = 'host'
+    typeSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    valueInput.value = 'www.darklab.sh'
+    document.getElementById('project-target-create-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        type: 'host',
+        value: 'www.darklab.sh',
+        label: '',
+        notes: '',
+      }),
+    }))
+  })
+
+  it('validates project target values before saving', async () => {
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project: { id: 'project-1', name: 'darklab.sh' } }),
+        })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'darklab.sh', status: 'active' }] }),
+        })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, annotations: 0 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      if (url === '/projects/project-1/targets' && options.method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ target: { id: 'target-1', ...JSON.parse(options.body) } }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const shell = loadShellChrome({ apiFetch })
+
+    await shell.openProjectWorkspace()
+    await tick()
+    document.querySelector('[data-project-action="new-target"]').click()
+    await tick()
+
+    const typeSelect = document.getElementById('project-target-type')
+    const valueInput = document.getElementById('project-target-value')
+    const valueError = document.getElementById('project-target-value-error')
+    const form = document.getElementById('project-target-create-form')
+
+    valueInput.value = 'https://darklab.sh'
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    expect(valueInput.getAttribute('aria-invalid')).toBe('true')
+    expect(valueError.classList.contains('u-hidden')).toBe(false)
+    expect(valueError.textContent).toContain('Use a domain name')
+    expect(apiFetch.mock.calls.some(([url, options]) => url === '/projects/project-1/targets' && options?.method === 'POST')).toBe(false)
+
+    valueInput.value = 'darklab.sh'
+    valueInput.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(valueInput.getAttribute('aria-invalid')).toBe('false')
+    expect(valueError.classList.contains('u-hidden')).toBe(true)
+
+    typeSelect.value = 'port_set'
+    typeSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    valueInput.value = '80,70000'
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    expect(valueError.textContent).toContain('Use ports or ranges')
+    expect(apiFetch.mock.calls.some(([url, options]) => url === '/projects/project-1/targets' && options?.method === 'POST')).toBe(false)
+
+    valueInput.value = '80,443,8000-8080'
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        type: 'port_set',
+        value: '80,443,8000-8080',
+        label: '',
+        notes: '',
+      }),
+    }))
+  })
+
+  it('reloads project findings after linked runs change', async () => {
+    let projectRuns = [
+      { id: 'old-run', command: 'nuclei https://old.darklab.sh', started: '2026-05-07T00:00:00Z', exit_code: 0, output_line_count: 3, created: '2026-05-07T00:00:10Z' },
+    ]
+    let projectFindings = [
+      {
+        id: 'old-finding',
+        run_id: 'old-run',
+        run_command: 'nuclei https://old.darklab.sh',
+        scope: 'http',
+        title: 'old finding should not persist',
+        raw_line: '[old] https://old.darklab.sh',
+        line_number: 1,
+        review_state: 'new',
+      },
+    ]
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project: { id: 'project-1', name: 'darklab.sh' } }),
+        })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'darklab.sh', status: 'active' }] }),
+        })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            counts: { runs: projectRuns.length, findings: projectFindings.length, artifacts: 0, packages: 0, targets: 0, annotations: 0 },
+            runs: projectRuns,
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      if (url === '/projects/project-1/findings') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ findings: projectFindings }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const shell = loadShellChrome({ apiFetch })
+
+    await shell.openProjectWorkspace()
+    document.querySelector('[data-project-tab="findings"]').click()
+    await tick()
+    await tick()
+    expect(document.getElementById('project-explorer-body').textContent).toContain('old finding should not persist')
+
+    projectRuns = [
+      { id: 'new-run', command: 'nmap new.darklab.sh', started: '2026-05-07T00:01:00Z', exit_code: 0, output_line_count: 4, created: '2026-05-07T00:01:10Z' },
+    ]
+    projectFindings = [
+      {
+        id: 'new-finding',
+        run_id: 'new-run',
+        run_command: 'nmap new.darklab.sh',
+        scope: 'port',
+        title: 'new finding after relink',
+        raw_line: '80/tcp open http',
+        line_number: 2,
+        review_state: 'new',
+      },
+    ]
+
+    await shell.refreshProjectWorkspace()
+    await tick()
+    await tick()
+
+    expect(document.getElementById('project-explorer-body').textContent).toContain('new finding after relink')
+    expect(document.getElementById('project-explorer-body').textContent).not.toContain('old finding should not persist')
+  })
+
+  it('autosaves project notes while editing', async () => {
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project: { id: 'project-1', name: 'darklab.sh', notes: 'Initial notes' } }),
+        })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'darklab.sh', status: 'active', notes: 'Initial notes' }] }),
+        })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, annotations: 0 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      if (url === '/projects/project-1' && options.method === 'PUT') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project: { id: 'project-1', name: 'darklab.sh', status: 'active', notes: JSON.parse(options.body).notes },
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const shell = loadShellChrome({ apiFetch })
+
+    await shell.openProjectWorkspace()
+    const input = document.getElementById('project-notes-input')
+    const saved = document.getElementById('project-notes-save-status')
+    expect(input.value).toBe('Initial notes')
+    expect(saved.classList.contains('u-hidden')).toBe(true)
+
+    vi.useFakeTimers()
+    try {
+      input.value = 'Updated notes'
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      await vi.advanceTimersByTimeAsync(450)
+      expect(saved.classList.contains('u-hidden')).toBe(true)
+      await vi.advanceTimersByTimeAsync(200)
+      expect(saved.classList.contains('u-hidden')).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ notes: 'Updated notes' }),
+    }))
+  })
+
+  it('opens a finding source run at the recorded line', async () => {
+    const restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-restored'))
+    const showConfirm = vi.fn(() => Promise.resolve('remove'))
+    const dismissibles = []
+    const bindDismissible = vi.fn((el, options) => {
+      dismissibles.push({ el, options })
+      return { dispose: vi.fn() }
+    })
+    let targetStates = [
+      {
+        id: 'target-1',
+        type: 'domain',
+        value: 'darklab.sh',
+        label: 'Primary domain',
+        notes: 'Scope approved',
+      },
+      {
+        id: 'target-2',
+        type: 'host',
+        value: 'api.darklab.sh',
+        label: 'API host',
+        notes: 'Secondary scope',
+      },
+      {
+        id: 'target-3',
+        type: 'port_set',
+        value: '80,443',
+        label: 'Web ports',
+        notes: 'Common web exposure',
+      },
+    ]
+    let projectRuns = [
+      { id: 'run-1', command: 'nuclei https://darklab.sh', started: '2026-05-07T00:00:00Z', exit_code: 0, output_line_count: 42, created: '2026-05-07T00:00:10Z' },
+      { id: 'run-2', command: 'httpx https://darklab.sh', started: '2026-05-07T00:01:00Z', exit_code: 0, output_line_count: 12, created: '2026-05-07T00:01:10Z' },
+    ]
+    const projectArtifacts = [
+      {
+        id: 'artifact-1',
+        run_id: 'run-1',
+        workspace_path: 'reports/nuclei.json',
+        display_name: 'nuclei.json',
+        kind: 'output_file',
+        byte_size: 2048,
+        content_type: 'application/json',
+        created: '2026-05-07T00:00:12Z',
+      },
+      {
+        id: 'artifact-2',
+        run_id: 'run-2',
+        workspace_path: 'reports/httpx.json',
+        display_name: 'httpx.json',
+        kind: 'output_file',
+        byte_size: 1024,
+        content_type: 'application/json',
+        created: '2026-05-07T00:01:12Z',
+      },
+    ]
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project: { id: 'project-1', name: 'darklab.sh' } }),
+        })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'darklab.sh', status: 'active' }] }),
+        })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            counts: { runs: projectRuns.length, findings: 3, artifacts: projectArtifacts.length, packages: 0, targets: targetStates.length, annotations: 0 },
+            runs: projectRuns,
+            targets: targetStates,
+            artifacts: projectArtifacts,
+            packages: [],
+          }),
+        })
+      }
+      if (url === '/projects/project-1/targets/target-1' && options.method === 'PUT') {
+        targetStates = targetStates.map(target => (
+          target.id === 'target-1' ? { ...target, ...JSON.parse(options.body) } : target
+        ))
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ target: targetStates.find(target => target.id === 'target-1') }),
+        })
+      }
+      if (url === '/projects/project-1/targets/target-1' && options.method === 'DELETE') {
+        targetStates = targetStates.filter(target => target.id !== 'target-1')
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true }),
+        })
+      }
+      if (url === '/projects/project-1/links' && options.method === 'DELETE') {
+        const payload = JSON.parse(options.body)
+        projectRuns = projectRuns.filter(run => run.id !== payload.entity_id)
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true }),
+        })
+      }
+      if (url === '/projects/project-1/findings') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            findings: [
+              {
+                id: 'finding-1',
+                run_id: 'run-1',
+                run_command: 'nuclei https://darklab.sh',
+                scope: 'http',
+                title: 'missing security header',
+                raw_line: '[http-missing-security-headers] https://darklab.sh',
+                line_number: 42,
+                target_id: 'target-1',
+                review_state: 'new',
+              },
+              {
+                id: 'finding-2',
+                run_id: 'run-2',
+                run_command: 'httpx https://darklab.sh',
+                scope: 'http',
+                title: 'api host responded',
+                raw_line: 'https://api.darklab.sh [200]',
+                line_number: 7,
+                target_id: 'target-2',
+                target_ids: ['target-2'],
+                review_state: 'reviewed',
+              },
+              {
+                id: 'finding-3',
+                run_id: 'run-1',
+                run_command: 'nuclei https://darklab.sh',
+                scope: 'finding',
+                title: 'web port responded',
+                raw_line: '443/tcp open https',
+                line_number: 13,
+                target_id: 'target-1',
+                target_ids: ['target-1', 'target-3'],
+                review_state: 'important',
+              },
+            ],
+          }),
+        })
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({}),
+      })
+    })
+    const shell = loadShellChrome({ apiFetch, restoreHistoryRunIntoTab, showConfirm, bindDismissible })
+
+    await shell.openProjectWorkspace()
+    expect(document.querySelector('.project-target-row')?.textContent).toContain('Primary domain')
+    expect(document.querySelector('.project-explorer-section-heading')?.textContent).toContain('New')
+    expect(bindDismissible).toHaveBeenCalledWith(
+      document.getElementById('project-target-editor-overlay'),
+      expect.objectContaining({ level: 'modal' }),
+    )
+
+    document.querySelector('[data-project-action="edit-target"]').click()
+    await tick()
+    expect(document.getElementById('project-target-editor-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('project-target-editor-title').textContent).toBe('EDIT TARGET')
+    document.getElementById('project-target-value').value = 'darklab.io'
+    document.getElementById('project-target-label').value = 'Updated target'
+    document.getElementById('project-target-notes').value = 'Retest scope'
+    document.getElementById('project-target-create-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    await tick()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets/target-1', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({
+        type: 'domain',
+        value: 'darklab.io',
+        label: 'Updated target',
+        notes: 'Retest scope',
+      }),
+    }))
+    expect(document.querySelector('.project-target-row')?.textContent).toContain('darklab.io')
+
+    document.querySelector('[data-project-tab="findings"]').click()
+    await tick()
+    await tick()
+    const importantFilter = document.querySelector('[data-project-finding-status-filter-option][value="important"]')
+    expect(importantFilter).not.toBeNull()
+    importantFilter.checked = true
+    importantFilter.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(document.querySelector('.project-finding-status-filter-bar .project-target-filter-chip')?.textContent).toContain('Important')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('web port responded')
+    expect(document.getElementById('project-explorer-body').textContent).not.toContain('missing security header')
+    expect(document.getElementById('project-explorer-body').textContent).not.toContain('api host responded')
+
+    const groupToggle = document.querySelector('[data-project-finding-group-toggle]')
+    expect(groupToggle).not.toBeNull()
+    expect(groupToggle.getAttribute('aria-expanded')).toBe('true')
+    expect(groupToggle.textContent).toContain('1 finding')
+    groupToggle.click()
+    await tick()
+    expect(document.querySelector('[data-project-finding-group-toggle]').getAttribute('aria-expanded')).toBe('false')
+    expect(document.querySelector('.project-explorer-group-body').hidden).toBe(true)
+    document.querySelector('[data-project-finding-group-toggle]').click()
+    await tick()
+    expect(document.querySelector('[data-project-finding-group-toggle]').getAttribute('aria-expanded')).toBe('true')
+    expect(document.querySelector('.project-explorer-group-body').hidden).toBe(false)
+    expect(document.getElementById('project-explorer-body').textContent).toContain('web port responded')
+
+    document.querySelector('[data-project-finding-status-filter-clear="all"]').click()
+    await tick()
+    const apiTargetFilter = document.querySelector('[data-project-target-filter-option][value="target-2"]')
+    expect(apiTargetFilter).not.toBeNull()
+    apiTargetFilter.checked = true
+    apiTargetFilter.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(document.querySelector('.project-target-filter-chip')?.textContent).toContain('host: api.darklab.sh')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('api host responded')
+    expect(document.getElementById('project-explorer-body').textContent).not.toContain('missing security header')
+
+    document.querySelector('[data-project-target-filter-clear="all"]').click()
+    await tick()
+    const portTargetFilter = document.querySelector('[data-project-target-filter-option][value="target-3"]')
+    expect(portTargetFilter).not.toBeNull()
+    portTargetFilter.checked = true
+    portTargetFilter.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(document.querySelector('.project-target-filter-chip')?.textContent).toContain('port_set: 80,443')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('web port responded')
+    expect(document.getElementById('project-explorer-body').textContent).not.toContain('api host responded')
+
+    document.querySelector('[data-project-tab="artifacts"]').click()
+    await tick()
+    expect(document.getElementById('project-explorer-body').textContent).toContain('nuclei.json')
+    expect(document.getElementById('project-explorer-body').textContent).not.toContain('httpx.json')
+
+    document.querySelector('[data-project-tab="runs"]').click()
+    await tick()
+    expect(document.querySelector('[data-project-action="open-run"][data-run-id="run-1"]')).not.toBeNull()
+    expect(document.querySelector('[data-project-action="open-run"][data-run-id="run-2"]')).toBeNull()
+
+    document.querySelector('[data-project-target-filter-clear="all"]').click()
+    await tick()
+    expect(document.querySelector('[data-project-action="open-run"][data-run-id="run-1"]')).not.toBeNull()
+
+    document.querySelector('[data-project-tab="runs"]').click()
+    await tick()
+    document.querySelector('[data-project-action="open-run"][data-run-id="run-1"]').click()
+    await tick()
+    expect(restoreHistoryRunIntoTab).toHaveBeenCalledWith(
+      {
+        id: 'run-1',
+        command: 'nuclei https://darklab.sh',
+        full_output_available: true,
+      },
+      {
+        hidePanelOnSuccess: false,
+      },
+    )
+    expect(document.getElementById('project-workspace-overlay').classList.contains('open')).toBe(false)
+    restoreHistoryRunIntoTab.mockClear()
+
+    await shell.openProjectWorkspace()
+    document.querySelector('[data-project-tab="runs"]').click()
+    await tick()
+    const unlinkRun = document.querySelector('[data-project-action="unlink-run"][data-run-id="run-2"]')
+    expect(unlinkRun?.dataset.projectId).toBe('project-1')
+    unlinkRun.click()
+    await tick()
+    await tick()
+    await tick()
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: 'Remove run from project: httpx https://darklab.sh?',
+      tone: 'danger',
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/links', expect.objectContaining({
+      method: 'DELETE',
+      body: JSON.stringify({ entity_type: 'run', entity_id: 'run-2' }),
+    }))
+    expect(document.querySelector('[data-project-action="open-run"][data-run-id="run-2"]')).toBeNull()
+
+    restoreHistoryRunIntoTab.mockClear()
+    document.querySelector('[data-project-tab="artifacts"]').click()
+    await tick()
+    const artifactRunLink = document.querySelector('.project-explorer-group-link[data-run-id="run-1"]')
+    expect(artifactRunLink?.textContent).toBe('nuclei https://darklab.sh (run-1)')
+    expect(document.querySelector('.project-explorer-item')?.textContent).toContain('nuclei.json')
+    artifactRunLink.click()
+    await tick()
+    expect(restoreHistoryRunIntoTab).toHaveBeenCalledWith(
+      {
+        id: 'run-1',
+        command: 'nuclei https://darklab.sh',
+        full_output_available: true,
+      },
+      {
+        hidePanelOnSuccess: false,
+      },
+    )
+    expect(document.getElementById('project-workspace-overlay').classList.contains('open')).toBe(false)
+    restoreHistoryRunIntoTab.mockClear()
+
+    await shell.openProjectWorkspace()
+    document.querySelector('[data-project-tab="findings"]').click()
+    await tick()
+    await tick()
+    expect(document.querySelector('.project-explorer-item-meta')?.textContent)
+      .toBe('http · target domain: darklab.io · line 42')
+
+    const reviewControl = document.querySelector('.project-finding-review')
+    expect(reviewControl.classList.contains('form-select')).toBe(true)
+    expect(reviewControl.classList.contains('form-control-compact')).toBe(true)
+    expect(shell.enhanceAppSelects).toHaveBeenCalledWith(reviewControl.closest('.project-explorer-tab-panel'))
+    expect(reviewControl.value).toBe('new')
+    reviewControl.value = 'important'
+    reviewControl.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/findings/finding-1/review', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ review_state: 'important' }),
+    }))
+    expect(restoreHistoryRunIntoTab).not.toHaveBeenCalled()
+    expect(document.querySelector('.project-finding-review')?.value).toBe('important')
+
+    document.querySelector('[data-project-action="open-finding"]').click()
+    await tick()
+
+    expect(restoreHistoryRunIntoTab).toHaveBeenCalledWith(
+      {
+        id: 'run-1',
+        command: 'nuclei https://darklab.sh',
+        full_output_available: true,
+      },
+      {
+        hidePanelOnSuccess: false,
+        highlightLineIndex: 42,
+      },
+    )
+    expect(document.getElementById('project-workspace-overlay').classList.contains('open')).toBe(false)
+
+    await shell.openProjectWorkspace()
+    document.querySelector('[data-project-tab="details"]').click()
+    await tick()
+    document.querySelector('[data-project-action="delete-target"]').click()
+    await tick()
+    await tick()
+    await tick()
+
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: 'Remove target darklab.io?',
+      tone: 'danger',
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets/target-1', expect.objectContaining({
+      method: 'DELETE',
+    }))
+    expect(document.querySelector('[data-project-action="edit-target"][data-target-id="target-1"]')).toBeNull()
+    expect(document.querySelector('.project-target-row')?.textContent).toContain('api.darklab.sh')
   })
 })

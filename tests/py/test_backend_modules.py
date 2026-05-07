@@ -1081,6 +1081,35 @@ class TestDerivedCommandRegistry:
         assert "info" in context["commands"]["expects_value"]
         assert context["runs"]["flags"][-1]["value"] == "--json"
         assert context["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
+        assert [item["value"] for item in context["project"]["arg_hints"]["__positional__"][:4]] == [
+            "list",
+            "create",
+            "use",
+            "current",
+        ]
+        project_context = context["project"]
+        target_context = project_context["subcommands"]["target"]
+        target_add_context = target_context["subcommands"]["add"]
+        domain_add_context = target_add_context["subcommands"]["domain"]
+        assert [item["value"] for item in target_context["arg_hints"]["__positional__"]] == [
+            "list",
+            "add",
+            "quick-add",
+            "remove",
+        ]
+        assert [item["value"] for item in target_add_context["arg_hints"]["__positional__"]] == [
+            "domain",
+            "url",
+            "host",
+            "ip",
+            "cidr",
+        ]
+        assert domain_add_context["arg_hints"]["__positional__"][0]["value"] == "<domain>"
+        assert domain_add_context["arg_hints"]["__positional__"][0]["value_type"] == "domain"
+        assert project_context["subcommands"]["link"]["arg_hints"]["__positional__"][1]["value"] == "run"
+        assert project_context["subcommands"]["link"]["subcommands"]["run"]["arg_hints"]["__positional__"][0][
+            "value"
+        ] == "<run-id>"
         assert [item["value"] for item in context["var"]["arg_hints"]["__positional__"]] == [
             "list",
             "set",
@@ -4544,6 +4573,7 @@ class TestDatabaseInit:
             "findings",
             "entity_labels",
             "annotations",
+            "evidence_packages",
         }.issubset(tables)
 
     def test_project_workspace_entity_and_link_source_constants_are_validated(self):
@@ -4553,6 +4583,8 @@ class TestDatabaseInit:
         assert database.validate_project_link_source("active_project") == "active_project"
         assert database.validate_project_link_source("snapshot_capture") == "snapshot_capture"
 
+        with pytest.raises(ValueError):
+            database.validate_project_entity_type("annotation")
         with pytest.raises(ValueError):
             database.validate_project_entity_type("ticket")
         with pytest.raises(ValueError):
@@ -4594,6 +4626,7 @@ class TestDatabaseInit:
             finding_indexes = {row[1] for row in conn.execute("PRAGMA index_list('findings')").fetchall()}
             label_indexes = {row[1] for row in conn.execute("PRAGMA index_list('entity_labels')").fetchall()}
             annotation_indexes = {row[1] for row in conn.execute("PRAGMA index_list('annotations')").fetchall()}
+            package_indexes = {row[1] for row in conn.execute("PRAGMA index_list('evidence_packages')").fetchall()}
             conn.close()
 
         assert "idx_projects_session_status_updated" in project_indexes
@@ -4605,6 +4638,8 @@ class TestDatabaseInit:
         assert "idx_findings_target_created" in finding_indexes
         assert "idx_entity_labels_entity_created" in label_indexes
         assert "idx_annotations_entity_created" in annotation_indexes
+        assert "idx_evidence_packages_project_updated" in package_indexes
+        assert "idx_evidence_packages_session_project" in package_indexes
 
     def test_init_is_idempotent(self):
         # Calling db_init() twice on the same DB must not raise

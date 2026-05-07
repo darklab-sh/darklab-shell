@@ -972,9 +972,10 @@ function renderWorkspaceBrowser() {
     row.dataset.kind = 'file';
     row.dataset.path = file.path;
     row.draggable = true;
+    const artifactDetails = _workspaceArtifactDetails(file);
     row.appendChild(_workspaceMetaNode(
       file.name || _workspaceFileBasename(file.path),
-      `${_formatWorkspaceBytes(file.size)}${file.mtime ? ` · ${file.mtime}` : ''}`,
+      `${_formatWorkspaceBytes(file.size)}${file.mtime ? ` · ${file.mtime}` : ''}${artifactDetails}`,
     ));
     row.appendChild(_workspaceActionsNode([
       { action: 'view', label: 'View', tone: 'secondary' },
@@ -997,6 +998,19 @@ function renderWorkspaceBrowser() {
     empty.textContent = 'This folder is empty.';
     workspaceFileList.appendChild(empty);
   }
+}
+
+function _workspaceArtifactDetails(file) {
+  const artifactCount = Number(file && file.artifact_count ? file.artifact_count : 0);
+  if (!artifactCount) return '';
+  const runCount = Number(file && file.artifact_run_count ? file.artifact_run_count : 0);
+  const projects = Array.isArray(file.project_names) ? file.project_names.filter(Boolean) : [];
+  const parts = [
+    artifactCount === 1 ? '1 artifact' : `${artifactCount} artifacts`,
+  ];
+  if (runCount) parts.push(runCount === 1 ? '1 run' : `${runCount} runs`);
+  if (projects.length) parts.push(projects.slice(0, 2).join(', '));
+  return ` · ${parts.join(' · ')}`;
 }
 
 function _workspaceMetaNode(nameText, detailsText, iconClass = '', iconText = '') {

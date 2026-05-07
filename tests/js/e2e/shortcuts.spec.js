@@ -74,15 +74,16 @@ test.describe('keyboard shortcuts', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
-  test('macOS Option+P creates a permalink without inserting a symbol into the prompt', async ({
+  test('macOS Option+Shift+P creates a permalink without inserting a symbol into the prompt', async ({
     page,
   }) => {
     await runCommand(page, CMD)
 
     await dispatchMacOptionKey(page, '#cmd', {
-      key: 'π',
+      key: '∏',
       code: 'KeyP',
       altKey: true,
+      shiftKey: true,
     })
 
     await expect(page.locator('#confirm-host')).toBeVisible()
@@ -582,6 +583,26 @@ test.describe('desktop chrome keyboard shortcuts', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
     await dispatchMacOptionKey(page, '#cmd', { key: 'ß', code: 'KeyS', altKey: true })
     await expect(page.locator('#search-bar')).not.toBeVisible()
+  })
+
+  test('Alt+C toggles the Commands modal from the composer', async ({ page }) => {
+    const commands = page.locator('#command-registry-overlay')
+    await expect(commands).not.toHaveClass(/\bopen\b/)
+    await dispatchMacOptionKey(page, '#cmd', { key: 'ç', code: 'KeyC', altKey: true })
+    await expect(commands).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await dispatchMacOptionKey(page, '#cmd', { key: 'ç', code: 'KeyC', altKey: true })
+    await expect(commands).not.toHaveClass(/\bopen\b/)
+  })
+
+  test('Alt+P toggles the Projects modal from the composer', async ({ page }) => {
+    const projects = page.locator('#project-workspace-overlay')
+    await expect(projects).not.toHaveClass(/\bopen\b/)
+    await dispatchMacOptionKey(page, '#cmd', { key: 'π', code: 'KeyP', altKey: true })
+    await expect(projects).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await dispatchMacOptionKey(page, '#cmd', { key: 'π', code: 'KeyP', altKey: true })
+    await expect(projects).not.toHaveClass(/\bopen\b/)
   })
 
   test('Alt+M toggles the Status Monitor from the composer', async ({ page }) => {

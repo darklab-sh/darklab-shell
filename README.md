@@ -189,6 +189,18 @@ All application settings live in `app/conf/config.yaml`. The values below are th
 | `workspace_max_file_mb` | `5 MB` | Server-side only. Maximum single app-managed text file size |
 | `workspace_max_files` | `100` | Server-side only. Maximum file count per session workspace |
 | `workspace_inactivity_ttl_hours` | `1` | Server-side only. Inactive session workspace cleanup threshold in hours; `0` disables age-based cleanup. Workspace activity touches the hashed session directory, and periodic cleanup removes expired `sess_*` directories rather than aging out individual files |
+| `max_projects_per_session` | `100` | Server-side only. Maximum project workspace records one session can create |
+| `max_project_links_per_project` | `1000` | Server-side only. Maximum linked source records per project |
+| `max_project_targets_per_project` | `200` | Server-side only. Maximum targets per project |
+| `max_evidence_packages_per_project` | `25` | Server-side only. Maximum draft evidence package manifests per project |
+| `max_entity_labels_per_session` | `5000` | Server-side only. Maximum entity labels one session can create |
+| `max_entity_labels_per_entity` | `20` | Server-side only. Maximum labels attached to a single supported entity |
+| `max_entity_annotations_per_session` | `2000` | Server-side only. Maximum entity annotations one session can create |
+| `max_entity_annotations_per_entity` | `50` | Server-side only. Maximum annotations attached to a single supported entity |
+| `evidence_package_max_mb` | `25 MB` | Server-side only. Maximum uncompressed evidence package archive size before download is rejected |
+| `evidence_package_max_artifacts` | `100` | Server-side only. Maximum workspace artifacts included in one evidence package archive |
+| `evidence_package_download_rate_limit_per_minute` | `10` | Server-side only. Per-session evidence package download limit per minute |
+| `evidence_package_download_rate_limit_per_second` | `2` | Server-side only. Per-session evidence package download burst limit per second |
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` = disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
 | `run_broker_enabled` | `true` | Enables the brokered run model for command start, output replay, and live reattachment |

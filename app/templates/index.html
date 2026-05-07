@@ -184,6 +184,16 @@
           <span class="menu-item-label">options</span>
           <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
+        <button type="button" class="menu-item nav-item" data-menu-action="projects">
+          <span class="menu-item-icon" aria-hidden="true">◇</span>
+          <span class="menu-item-label">projects</span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+        </button>
+        <div class="menu-item menu-project-context u-hidden" id="mobile-menu-project-row" aria-live="polite">
+          <span class="menu-item-icon" aria-hidden="true">◇</span>
+          <span class="menu-item-label">project</span>
+          <span class="menu-item-hint" id="mobile-menu-project-name"></span>
+        </div>
         <button type="button" class="menu-item nav-item" data-menu-action="history">
           <span class="menu-item-icon" aria-hidden="true">⧖</span>
           <span class="menu-item-label">history</span>
@@ -224,7 +234,7 @@
           <span class="menu-item-label">FAQ</span>
           <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
-        <button type="button" class="menu-item nav-item u-hidden" data-menu-action="diag">
+        <button type="button" class="menu-item nav-item{% if not frontend_config.diag_enabled %} u-hidden{% endif %}" data-menu-action="diag">
           <span class="menu-item-icon" aria-hidden="true">◇</span>
           <span class="menu-item-label">diag</span>
           <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
@@ -283,6 +293,7 @@
 
     <nav class="rail-nav" id="rail-nav">
       <button class="rail-nav-item nav-item" data-action="options" type="button" title="Display and preference options (Alt+,)"><span class="rail-nav-glyph">≡</span><span class="rail-nav-label">options</span></button>
+      <button class="rail-nav-item nav-item" data-action="projects" type="button" title="Project workspaces"><span class="rail-nav-glyph">◇</span><span class="rail-nav-label">projects</span></button>
       <button class="rail-nav-item nav-item" data-action="history" type="button" title="Run history (Alt+H)"><span class="rail-nav-glyph">⧖</span><span class="rail-nav-label">history</span></button>
       <button class="rail-nav-item nav-item" data-action="status-monitor" type="button" title="Status Monitor (Alt+M)"><span class="rail-nav-glyph">◉</span><span class="rail-nav-label">status</span></button>
       <button class="rail-nav-item nav-item" data-action="command-registry" type="button" title="Command Registry"><span class="rail-nav-glyph">⌘</span><span class="rail-nav-label">commands</span></button>
@@ -291,7 +302,7 @@
       {% endif %}
       <button class="rail-nav-item nav-item" data-action="theme" type="button" title="Theme selector (Alt+Shift+T)"><span class="rail-nav-glyph">◑</span><span class="rail-nav-label">theme</span></button>
       <button class="rail-nav-item nav-item" data-action="faq" type="button" title="FAQ (Alt+/)"><span class="rail-nav-glyph">?</span><span class="rail-nav-label">FAQ</span></button>
-      <a class="rail-nav-item nav-item u-hidden" data-action="diag" id="rail-diag-btn" href="/diag" target="_blank" rel="noopener noreferrer" title="Operator diagnostics"><span class="rail-nav-glyph">⊕</span><span class="rail-nav-label">diag</span></a>
+      <a class="rail-nav-item nav-item{% if not frontend_config.diag_enabled %} u-hidden{% endif %}" data-action="diag" id="rail-diag-btn" href="/diag" target="_blank" rel="noopener noreferrer" title="Operator diagnostics"><span class="rail-nav-glyph">⊕</span><span class="rail-nav-label">diag</span></a>
       <a class="rail-nav-version" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
     </nav>
 
@@ -394,6 +405,10 @@
         <div class="hud-cell">
           <span class="hud-label">session</span>
           <span id="hud-session" class="hud-value hud-muted" title="Active session identity">ANON</span>
+        </div>
+        <div class="hud-cell hud-project-context u-hidden" id="hud-project-cell">
+          <span class="hud-label">project</span>
+          <span id="hud-project" class="hud-value hud-muted">—</span>
         </div>
         <div class="hud-cell">
           <span class="hud-label">uptime</span>
@@ -640,6 +655,74 @@
   </div>
 </div>
 
+<div id="project-workspace-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
+  <div id="project-workspace-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="project-workspace-title">
+    <div class="faq-header">
+      <div>
+        <span class="faq-title" id="project-workspace-title">PROJECTS</span>
+        <div class="project-workspace-subtitle" id="project-workspace-subtitle">Select a project to review its targets, runs, findings, artifacts, and packages.</div>
+      </div>
+      <button type="button" class="close-btn project-workspace-close" aria-label="Close projects">✕</button>
+    </div>
+    <div id="project-workspace-message" class="project-workspace-message u-hidden" role="status"></div>
+    <div class="project-workspace-layout">
+      <aside class="project-workspace-sidebar" aria-label="Project list">
+        <form id="project-workspace-create-form" class="project-workspace-create">
+          <input id="project-workspace-name" class="form-control form-control-compact" type="text" maxlength="120" placeholder="New project name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="New project name">
+          <button type="submit" class="btn btn-secondary btn-compact">Create</button>
+        </form>
+        <div id="project-workspace-body" class="project-workspace-body nice-scroll" aria-live="polite"></div>
+      </aside>
+      <section class="project-explorer" aria-label="Selected project">
+        <div id="project-explorer-body" class="project-explorer-body nice-scroll" aria-live="polite"></div>
+      </section>
+    </div>
+    <form id="project-notes-form" class="project-notes-form u-hidden">
+      <textarea id="project-notes-input" class="form-control form-control-compact project-notes-input" maxlength="20000" rows="3" placeholder="Notes for selected project" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Selected project notes"></textarea>
+      <div id="project-notes-save-status" class="field-save-status u-hidden" role="status" aria-live="polite">saved</div>
+    </form>
+  </div>
+  <div id="project-target-editor-overlay" class="modal-overlay project-target-editor-overlay u-hidden" aria-hidden="true">
+    <div id="project-target-editor-modal" class="modal-card modal-card-compact project-target-editor-modal" role="dialog" aria-modal="true" aria-labelledby="project-target-editor-title">
+      <div class="faq-header">
+        <span class="faq-title" id="project-target-editor-title">NEW TARGET</span>
+        <button type="button" class="close-btn project-target-editor-close" aria-label="Close target editor">✕</button>
+      </div>
+      <form id="project-target-create-form" class="project-target-editor-form">
+        <label class="project-target-edit-field">
+          <span>Type</span>
+          <select id="project-target-type" class="form-select form-control-compact" aria-label="Project target type">
+            <option value="domain">domain</option>
+            <option value="url">url</option>
+            <option value="host">host</option>
+            <option value="ip">ip</option>
+            <option value="cidr">cidr</option>
+            <option value="port_set">port set</option>
+          </select>
+        </label>
+        <label class="project-target-edit-field">
+          <span>Value</span>
+          <input id="project-target-value" class="form-control form-control-compact" type="text" maxlength="512" placeholder="target.example.com" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Project target value" aria-describedby="project-target-value-help project-target-value-error">
+          <small id="project-target-value-help" class="project-target-value-help">Domain name only. Examples: darklab.sh, api.darklab.sh</small>
+          <div id="project-target-value-error" class="form-error project-target-value-error u-hidden" role="alert"></div>
+        </label>
+        <label class="project-target-edit-field">
+          <span>Label</span>
+          <input id="project-target-label" class="form-control form-control-compact" type="text" maxlength="160" placeholder="Optional display label" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Project target label">
+        </label>
+        <label class="project-target-edit-field">
+          <span>Notes</span>
+          <textarea id="project-target-notes" class="form-control form-control-compact" maxlength="4000" rows="3" placeholder="Optional notes" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Project target notes"></textarea>
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary btn-compact project-target-editor-cancel">Cancel</button>
+          <button type="submit" id="project-target-submit" class="btn btn-primary btn-compact">Add Target</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <div id="command-catalog-overlay" class="modal-overlay mobile-sheet-overlay u-hidden" aria-hidden="true">
   <div id="command-catalog-modal" class="modal-card mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="command-catalog-title">
     <div class="faq-header">
@@ -752,6 +835,16 @@
           </label>
         </div>
       </div>
+      <div class="faq-item">
+        <div class="faq-q">Project Run Capture</div>
+        <div class="faq-a form-fieldset">
+          <label class="form-check">
+            <input type="checkbox" id="options-project-auto-link-external-runs-toggle">
+            <span>Add external command runs to the active project</span>
+          </label>
+          <div class="options-session-token-desc">Built-in administrative commands are never added as project runs.</div>
+        </div>
+      </div>
       <div class="faq-item options-desktop-only">
         <div class="faq-q">HUD Clock</div>
         <div class="faq-a">
@@ -762,7 +855,10 @@
         </div>
       </div>
       <div class="faq-item">
-        <div class="faq-q">Prompt Username</div>
+        <div class="faq-q options-field-heading">
+          <span>Prompt Username</span>
+          <span id="options-prompt-username-saved" class="field-save-status u-hidden" role="status" aria-live="polite">saved</span>
+        </div>
         <div class="faq-a form-fieldset">
           <input id="options-prompt-username-input" class="form-control" type="text" maxlength="32" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Prompt username" placeholder="Use server default">
           <div class="options-session-token-desc">Letters, numbers, dots, underscores, and dashes. Leave blank to use the server default.</div>
