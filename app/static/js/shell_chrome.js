@@ -946,6 +946,115 @@
     return summary && Array.isArray(summary.artifacts) ? summary.artifacts : [];
   }
 
+  function _projectArtifactStatus(artifact) {
+    const status = String(artifact && artifact.file_status || '').trim();
+    if (status === 'available' || status === 'missing' || status === 'changed') return status;
+    return artifact && artifact.file_available === false ? 'missing' : 'available';
+  }
+
+  function _projectArtifactStatusLabel(artifact) {
+    const status = _projectArtifactStatus(artifact);
+    if (status === 'changed') return 'changed';
+    if (status === 'missing') return 'missing';
+    return 'available';
+  }
+
+  function _projectArtifactAccessory(projectId, artifact) {
+    const wrap = document.createElement('div');
+    wrap.className = 'project-artifact-badges';
+    const size = document.createElement('span');
+    size.className = 'project-explorer-item-badge';
+    size.textContent = _formatProjectBytes(artifact.byte_size);
+    const status = document.createElement('span');
+    status.className = `project-artifact-status is-${_projectArtifactStatus(artifact)}`;
+    status.textContent = _projectArtifactStatusLabel(artifact);
+    wrap.append(size, status);
+    const actions = document.createElement('div');
+    actions.className = 'project-artifact-actions';
+    const available = _projectArtifactStatus(artifact) !== 'missing';
+    [
+      ['preview', 'Preview'],
+      ['download', 'Download'],
+    ].forEach(([actionName, label]) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-secondary btn-compact project-artifact-action';
+      btn.dataset.projectAction = `artifact-${actionName}`;
+      btn.dataset.projectId = String(projectId || '');
+      btn.dataset.artifactId = String(artifact.id || '');
+      btn.dataset.artifactPath = String(artifact.workspace_path || '');
+      btn.disabled = !available;
+      btn.title = available ? label : 'Workspace file is missing';
+      btn.textContent = label;
+      actions.appendChild(btn);
+    });
+    wrap.appendChild(actions);
+    return wrap;
+  }
+
+  function _projectArtifactDetail(artifact) {
+    const parts = [
+      artifact.kind || 'file',
+      artifact.content_type || 'unknown type',
+      _formatProjectDate(artifact.created),
+    ];
+    const status = _projectArtifactStatus(artifact);
+    const statusDetail = String(artifact.file_status_detail || '').trim();
+    if (status === 'changed') {
+      parts.push(`current ${_formatProjectBytes(artifact.current_byte_size)}`);
+    } else if (status === 'missing') {
+      parts.push(statusDetail || 'workspace file is missing');
+    }
+    return parts.filter(Boolean).join(' · ');
+  }
+
+  function _projectArtifactDownloadName(artifactPath = '', fallback = 'artifact') {
+    const name = String(artifactPath || '').split('/').filter(Boolean).pop();
+    return name || fallback;
+  }
+
+  async function _previewProjectArtifact(projectId, artifactId) {
+    const resp = await apiFetch(
+      `/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/preview`,
+      { cache: 'no-store' },
+    );
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error || 'Unable to preview artifact.');
+    const artifact = data.artifact || {};
+    const showViewer = global && typeof global.showWorkspaceViewer === 'function'
+      ? global.showWorkspaceViewer
+      : (typeof window !== 'undefined' && typeof window.showWorkspaceViewer === 'function'
+          ? window.showWorkspaceViewer
+          : null);
+    if (!showViewer) throw new Error('File preview is not available.');
+    showViewer(
+      artifact.workspace_path || 'artifact',
+      data.text || '',
+      { size: artifact.current_byte_size ?? artifact.byte_size ?? null },
+    );
+  }
+
+  async function _downloadProjectArtifact(projectId, artifactId, artifactPath = '') {
+    const resp = await apiFetch(
+      `/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/download`,
+      { cache: 'no-store' },
+    );
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.error || 'Unable to download artifact.');
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = _projectArtifactDownloadName(artifactPath, artifactId || 'artifact');
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    _setProjectWorkspaceMessage('Artifact download started.');
+  }
+
   function _projectPackageItems(summary) {
     return summary && Array.isArray(summary.packages) ? summary.packages : [];
   }
@@ -2182,8 +2291,8 @@
         group.appendChild(_projectItemRow({
           title: artifact.display_name || artifact.workspace_path,
           meta: artifact.workspace_path,
-          detail: `${artifact.kind || 'file'} · ${artifact.content_type || 'unknown type'} · ${_formatProjectDate(artifact.created)}`,
-          badge: _formatProjectBytes(artifact.byte_size),
+          detail: _projectArtifactDetail(artifact),
+          accessory: _projectArtifactAccessory(projectId, artifact),
         }));
       });
       container.appendChild(group);
@@ -2739,6 +2848,16 @@
           highlightLineIndex: Number.isInteger(lineIndex) ? lineIndex : null,
         });
         closeProjectWorkspace({ refocus: false });
+        return;
+      } else if (action === 'artifact-preview') {
+        const artifactId = String(btn.dataset.artifactId || '').trim();
+        if (!projectId || !artifactId) throw new Error('Artifact is missing its identifier.');
+        await _previewProjectArtifact(projectId, artifactId);
+        return;
+      } else if (action === 'artifact-download') {
+        const artifactId = String(btn.dataset.artifactId || '').trim();
+        if (!projectId || !artifactId) throw new Error('Artifact is missing its identifier.');
+        await _downloadProjectArtifact(projectId, artifactId, btn.dataset.artifactPath || '');
         return;
       }
       await refreshProjectWorkspace();

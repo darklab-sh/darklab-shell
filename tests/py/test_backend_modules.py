@@ -4563,6 +4563,9 @@ class TestDatabaseInit:
                     "SELECT name FROM sqlite_master WHERE type='table'"
                 ).fetchall()
             }
+            artifact_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('run_file_artifacts')").fetchall()
+            }
             conn.close()
 
         assert {
@@ -4575,6 +4578,7 @@ class TestDatabaseInit:
             "annotations",
             "evidence_packages",
         }.issubset(tables)
+        assert "content_sha256" in artifact_columns
 
     def test_project_workspace_entity_and_link_source_constants_are_validated(self):
         assert database.validate_project_entity_type("run") == "run"

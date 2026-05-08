@@ -2981,6 +2981,58 @@ button.project-explorer-item:focus-visible,
   background: var(--surface);
 }
 
+.project-artifact-badges {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.project-artifact-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-artifact-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.project-artifact-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.1;
+}
+
+.project-artifact-status.is-available {
+  border-color: var(--green-dim);
+  color: var(--green);
+  background: var(--green-glow);
+}
+
+.project-artifact-status.is-changed {
+  border-color: color-mix(in srgb, var(--amber) 64%, var(--border));
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 8%, var(--surface));
+}
+
+.project-artifact-status.is-missing {
+  border-color: color-mix(in srgb, var(--red) 62%, var(--border));
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 8%, var(--surface));
+}
+
 .project-finding-review {
   flex: 0 0 auto;
   width: 156px;

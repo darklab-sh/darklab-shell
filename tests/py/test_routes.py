@@ -5,6 +5,7 @@ Run with: pytest tests/ (from the repo root)
 """
 
 import errno
+import hashlib
 import io
 import json
 import logging
@@ -488,6 +489,10 @@ class TestProjectRoutes:
         annotation = json.loads(annotation_resp.data)["annotation"]
         assert annotation["body"] == "Confirm service owner"
         assert annotation["entity_id"] == run_id
+        artifact_path = resolve_workspace_path(session_id, "reports/run.txt", shell_app.CFG, ensure_parent=True)
+        artifact_bytes = b"0123456789"
+        artifact_path.write_bytes(artifact_bytes)
+        artifact_hash = hashlib.sha256(artifact_bytes).hexdigest()
         updated_annotation = json.loads(client.put(
             f"/annotations/{annotation['id']}",
             json={"body": "Confirmed service owner"},
@@ -503,9 +508,11 @@ class TestProjectRoutes:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT INTO run_file_artifacts "
-                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
-                "VALUES (?, ?, ?, 'reports/run.txt', 'run.txt', 'output', 10, 'workspace_flag', datetime('now'))",
-                (f"rfa_{run_id}", session_id, run_id),
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+                "detected_by, content_sha256, created) "
+                "VALUES (?, ?, ?, 'reports/run.txt', 'run.txt', 'output', 10, "
+                "'workspace_flag', ?, datetime('now'))",
+                (f"rfa_{run_id}", session_id, run_id, artifact_hash),
             )
             conn.execute(
                 "INSERT INTO findings "
@@ -558,6 +565,44 @@ class TestProjectRoutes:
             "reports/old.txt",
             "reports/run.txt",
         }
+        artifact_statuses = {item["workspace_path"]: item for item in summary["artifacts"]}
+        assert artifact_statuses["reports/run.txt"]["file_status"] == "available"
+        assert artifact_statuses["reports/run.txt"]["file_available"] is True
+        assert artifact_statuses["reports/run.txt"]["current_byte_size"] == 10
+        assert artifact_statuses["reports/run.txt"]["content_sha256"] == artifact_hash
+        assert artifact_statuses["reports/old.txt"]["file_status"] == "missing"
+        assert artifact_statuses["reports/old.txt"]["file_available"] is False
+        assert artifact_statuses["reports/old.txt"]["current_byte_size"] is None
+        preview_resp = client.get(
+            f"/projects/{project['id']}/artifacts/rfa_{run_id}/preview",
+            headers={"X-Session-ID": session_id},
+        )
+        assert preview_resp.status_code == 200
+        preview_payload = json.loads(preview_resp.data)
+        assert preview_payload["artifact"]["workspace_path"] == "reports/run.txt"
+        assert preview_payload["text"] == "0123456789"
+        download_resp = client.get(
+            f"/projects/{project['id']}/artifacts/rfa_{run_id}/download",
+            headers={"X-Session-ID": session_id},
+        )
+        assert download_resp.status_code == 200
+        assert download_resp.data == b"0123456789"
+        assert "attachment" in download_resp.headers["Content-Disposition"]
+        missing_preview = client.get(
+            f"/projects/{project['id']}/artifacts/rfa_{baseline_run_id}/preview",
+            headers={"X-Session-ID": session_id},
+        )
+        assert missing_preview.status_code == 404
+        artifact_path.write_bytes(b"abcdefghij")
+        changed_summary = json.loads(client.get(
+            f"/projects/{project['id']}/summary",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        changed_artifact = {
+            item["workspace_path"]: item for item in changed_summary["artifacts"]
+        }["reports/run.txt"]
+        assert changed_artifact["file_status"] == "changed"
+        assert "checksum differs" in changed_artifact["file_status_detail"]
         assert {item["id"] for item in summary["runs"]} == {run_id, baseline_run_id}
         project_findings = json.loads(client.get(
             f"/projects/{project['id']}/findings?review_state=new&command_root=nmap&run_id={run_id}"

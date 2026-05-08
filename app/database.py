@@ -212,6 +212,7 @@ def _create_project_workspace_schema(conn):
             detected_by    TEXT NOT NULL DEFAULT 'manual',
             content_type   TEXT NOT NULL DEFAULT '',
             preview_type   TEXT NOT NULL DEFAULT '',
+            content_sha256 TEXT NOT NULL DEFAULT '',
             created        TEXT NOT NULL
         )
     """)
@@ -555,6 +556,10 @@ def _migrate_schema(conn):
 
     try:
         _create_project_workspace_schema(conn)
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE run_file_artifacts ADD COLUMN content_sha256 TEXT NOT NULL DEFAULT ''")
     except sqlite3.OperationalError:
         pass
 

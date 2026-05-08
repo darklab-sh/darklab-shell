@@ -22,7 +22,7 @@ from database import (
     validate_project_entity_type,
     validate_project_link_source,
 )
-from workspace import WorkspaceError, resolve_workspace_path
+from workspace import WorkspaceError, open_workspace_file_for_download, resolve_workspace_path
 
 MAX_PROJECT_NAME_LEN = 120
 MAX_PROJECT_DESCRIPTION_LEN = 1000
@@ -327,7 +327,74 @@ def _row_to_run_file_artifact(row):
         "detected_by": row["detected_by"],
         "content_type": row["content_type"],
         "preview_type": row["preview_type"],
+        "content_sha256": row["content_sha256"],
         "created": row["created"],
+    }
+
+
+def _normalize_sha256(value):
+    candidate = _trim_text(value, 128).lower()
+    return candidate if re.fullmatch(r"[0-9a-f]{64}", candidate) else ""
+
+
+def _workspace_file_sha256(session_id, workspace_path):
+    try:
+        with open_workspace_file_for_download(session_id, workspace_path) as handle:
+            digest = hashlib.sha256()
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+            return digest.hexdigest()
+    except (OSError, WorkspaceError):
+        return ""
+
+
+def _artifact_availability(session_id, artifact):
+    workspace_path = _trim_text((artifact or {}).get("workspace_path"), MAX_ENTITY_ID_LEN)
+    result = {
+        "file_status": "missing",
+        "file_available": False,
+        "current_byte_size": None,
+        "file_status_detail": "workspace file is not available",
+    }
+    if not workspace_path:
+        result["file_status_detail"] = "workspace path is missing"
+        return result
+    try:
+        resolved = resolve_workspace_path(session_id, workspace_path)
+        if not resolved.is_file():
+            return result
+        current_size = max(0, int(resolved.stat().st_size))
+    except (OSError, WorkspaceError):
+        return result
+    try:
+        recorded_size = max(0, int((artifact or {}).get("byte_size") or 0))
+    except (TypeError, ValueError):
+        recorded_size = 0
+    if current_size != recorded_size:
+        return {
+            "file_status": "changed",
+            "file_available": True,
+            "current_byte_size": current_size,
+            "file_status_detail": "workspace file size differs from the recorded artifact",
+        }
+    recorded_hash = _normalize_sha256((artifact or {}).get("content_sha256"))
+    if recorded_hash:
+        current_hash = _workspace_file_sha256(session_id, workspace_path)
+        if current_hash and current_hash != recorded_hash:
+            return {
+                "file_status": "changed",
+                "file_available": True,
+                "current_byte_size": current_size,
+                "file_status_detail": "workspace file checksum differs from the recorded artifact",
+            }
+    return {
+        "file_status": "available",
+        "file_available": True,
+        "current_byte_size": current_size,
+        "file_status_detail": "",
     }
 
 
@@ -657,7 +724,7 @@ def get_project_summary(session_id, project_id):
             ).fetchall()
             artifact_rows = conn.execute(
                 "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
-                "detected_by, content_type, preview_type, created "
+                "detected_by, content_type, preview_type, content_sha256, created "
                 f"FROM run_file_artifacts WHERE run_id IN ({placeholders}) "  # nosec B608
                 "ORDER BY created DESC, id DESC",
                 run_ids,
@@ -687,7 +754,14 @@ def get_project_summary(session_id, project_id):
     links = [_row_to_link(row) for row in link_rows]
     targets = [_row_to_target(row) for row in target_rows]
     runs = [item for item in (_row_to_project_run(row) for row in run_rows) if item]
-    artifacts = [item for item in (_row_to_run_file_artifact(row) for row in artifact_rows) if item]
+    artifacts = []
+    for item in (_row_to_run_file_artifact(row) for row in artifact_rows):
+        if not item:
+            continue
+        artifacts.append({
+            **item,
+            **_artifact_availability(session_id, item),
+        })
     packages = list_evidence_packages(session_id, project_id) or []
     return {
         "project": _row_to_project(project_row),
@@ -707,6 +781,31 @@ def get_project_summary(session_id, project_id):
             "annotations": annotation_count,
             "packages": int(package_row["count"] or 0) if package_row else 0,
         },
+    }
+
+
+def get_project_run_file_artifact(session_id, project_id, artifact_id):
+    artifact_id = _trim_text(artifact_id, MAX_ENTITY_ID_LEN)
+    if not artifact_id:
+        return None
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT a.id, a.session_id, a.run_id, a.workspace_path, a.display_name, a.kind, "
+            "a.byte_size, a.detected_by, a.content_type, a.preview_type, a.content_sha256, a.created "
+            "FROM run_file_artifacts a "
+            "JOIN project_links l ON l.entity_type = 'run' AND l.entity_id = a.run_id "
+            "JOIN projects p ON p.id = l.project_id "
+            "JOIN runs r ON r.id = a.run_id "
+            "WHERE p.session_id = ? AND p.id = ? AND a.session_id = ? AND a.id = ? "
+            "AND r.session_id = ?",
+            (session_id, project_id, session_id, artifact_id, session_id),
+        ).fetchone()
+    artifact = _row_to_run_file_artifact(row)
+    if not artifact:
+        return None
+    return {
+        **artifact,
+        **_artifact_availability(session_id, artifact),
     }
 
 
@@ -1548,6 +1647,10 @@ def record_run_file_artifacts(conn, session_id, run_id, artifacts):
         detected_by = _trim_text(item.get("detected_by") or "workspace_flag", 64) or "workspace_flag"
         content_type = _trim_text(item.get("content_type"), 128)
         preview_type = _trim_text(item.get("preview_type"), 64)
+        content_sha256 = (
+            _normalize_sha256(item.get("content_sha256"))
+            or _workspace_file_sha256(session_id, workspace_path)
+        )
         try:
             byte_size = max(0, int(item.get("byte_size") or 0))
         except (TypeError, ValueError):
@@ -1559,8 +1662,8 @@ def record_run_file_artifacts(conn, session_id, run_id, artifacts):
             conn.execute(
                 "INSERT OR IGNORE INTO run_file_artifacts "
                 "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
-                "detected_by, content_type, preview_type, created) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "detected_by, content_type, preview_type, content_sha256, created) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     candidate_id,
                     session_id,
@@ -1572,12 +1675,13 @@ def record_run_file_artifacts(conn, session_id, run_id, artifacts):
                     detected_by,
                     content_type,
                     preview_type,
+                    content_sha256,
                     created,
                 ),
             )
             row = conn.execute(
                 "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
-                "detected_by, content_type, preview_type, created "
+                "detected_by, content_type, preview_type, content_sha256, created "
                 "FROM run_file_artifacts WHERE id = ?",
                 (candidate_id,),
             ).fetchone()
@@ -1594,6 +1698,7 @@ def record_run_file_artifacts(conn, session_id, run_id, artifacts):
                     "detected_by": row["detected_by"],
                     "content_type": row["content_type"],
                     "preview_type": row["preview_type"],
+                    "content_sha256": row["content_sha256"],
                     "created": row["created"],
                 })
                 break

@@ -1676,6 +1676,7 @@ if (typeof window !== 'undefined') {
   window.moveWorkspacePath = moveWorkspacePath;
   window.deleteWorkspacePath = deleteWorkspacePath;
   window.downloadWorkspaceFile = downloadWorkspaceFile;
+  window.showWorkspaceViewer = showWorkspaceViewer;
   window.openWorkspaceEditorFromCommand = openWorkspaceEditorFromCommand;
   if (isWorkspaceEnabled()) setTimeout(() => { refreshWorkspaceFileCache(); }, 0);
 }

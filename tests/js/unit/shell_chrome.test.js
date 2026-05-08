@@ -16,6 +16,7 @@ function loadShellChrome({
   preferences = {},
   openStatusMonitor = vi.fn(() => Promise.resolve(true)),
   restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-restored')),
+  showWorkspaceViewer = vi.fn(),
   showConfirm = vi.fn(() => Promise.resolve('remove')),
   bindDismissible = null,
   enhanceAppSelects = vi.fn(),
@@ -113,6 +114,7 @@ function loadShellChrome({
     toggleRailCollapsed: null,
     openStatusMonitor,
     restoreHistoryRunIntoTab,
+    showWorkspaceViewer,
     showConfirm,
     bindDismissible,
     enhanceAppSelects,
@@ -223,6 +225,7 @@ function loadShellChrome({
     preferences,
     openStatusMonitor,
     restoreHistoryRunIntoTab,
+    showWorkspaceViewer,
     showConfirm,
     bindDismissible,
     openProjectWorkspace: global.openProjectWorkspace,
@@ -882,6 +885,9 @@ describe('shell chrome project workspace', () => {
         kind: 'output_file',
         byte_size: 2048,
         content_type: 'application/json',
+        file_status: 'available',
+        file_available: true,
+        current_byte_size: 2048,
         created: '2026-05-07T00:00:12Z',
       },
       {
@@ -892,6 +898,10 @@ describe('shell chrome project workspace', () => {
         kind: 'output_file',
         byte_size: 1024,
         content_type: 'application/json',
+        file_status: 'missing',
+        file_available: false,
+        current_byte_size: null,
+        file_status_detail: 'workspace file is not available',
         created: '2026-05-07T00:01:12Z',
       },
     ]
@@ -988,12 +998,37 @@ describe('shell chrome project workspace', () => {
           }),
         })
       }
+      if (url === '/projects/project-1/artifacts/artifact-1/preview') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            artifact: projectArtifacts[0],
+            text: '{"template":"ok"}\n',
+          }),
+        })
+      }
+      if (url === '/projects/project-1/artifacts/artifact-1/download') {
+        return Promise.resolve({
+          ok: true,
+          blob: () => Promise.resolve(new Blob(['{"template":"ok"}\n'], { type: 'application/json' })),
+        })
+      }
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({}),
       })
     })
-    const shell = loadShellChrome({ apiFetch, restoreHistoryRunIntoTab, showConfirm, bindDismissible })
+    const showWorkspaceViewer = vi.fn()
+    globalThis.URL.createObjectURL = vi.fn(() => 'blob:project-artifact')
+    globalThis.URL.revokeObjectURL = vi.fn()
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const shell = loadShellChrome({
+      apiFetch,
+      restoreHistoryRunIntoTab,
+      showWorkspaceViewer,
+      showConfirm,
+      bindDismissible,
+    })
 
     await shell.openProjectWorkspace()
     expect(document.querySelector('.project-target-row')?.textContent).toContain('Primary domain')
@@ -1086,6 +1121,35 @@ describe('shell chrome project workspace', () => {
 
     document.querySelector('[data-project-target-filter-clear="target-3"]').click()
     await tick()
+    document.querySelector('[data-project-tab="artifacts"]').click()
+    await tick()
+    expect(document.querySelector('.project-artifact-status.is-available')?.textContent).toBe('available')
+    expect(document.querySelector('.project-artifact-status.is-missing')?.textContent).toBe('missing')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('workspace file is not available')
+    document.querySelector('[data-project-action="artifact-preview"][data-artifact-id="artifact-1"]').click()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/projects/project-1/artifacts/artifact-1/preview',
+      { cache: 'no-store' },
+    )
+    expect(showWorkspaceViewer).toHaveBeenCalledWith(
+      'reports/nuclei.json',
+      '{"template":"ok"}\n',
+      { size: 2048 },
+    )
+    document.querySelector('[data-project-action="artifact-download"][data-artifact-id="artifact-1"]').click()
+    await tick()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/projects/project-1/artifacts/artifact-1/download',
+      { cache: 'no-store' },
+    )
+    expect(globalThis.URL.createObjectURL).toHaveBeenCalled()
+    expect(document.querySelector('[data-project-action="artifact-preview"][data-artifact-id="artifact-2"]').disabled)
+      .toBe(true)
+
+    document.querySelector('[data-project-tab="runs"]').click()
+    await tick()
     expect(document.querySelector('[data-project-action="filter-run"][data-run-id="run-1"]')).not.toBeNull()
     expect(document.querySelector('[data-project-action="filter-run-findings"][data-run-id="run-1"]')?.textContent).toBe('2 findings')
     expect(document.querySelector('[data-project-action="filter-run-artifacts"][data-run-id="run-1"]')?.textContent).toBe('1 artifact')
@@ -1161,6 +1225,7 @@ describe('shell chrome project workspace', () => {
     const artifactRunLink = document.querySelector('.project-explorer-group-link[data-run-id="run-1"]')
     expect(artifactRunLink?.textContent).toBe('nuclei https://darklab.sh (run-1)')
     expect(document.querySelector('.project-explorer-item')?.textContent).toContain('nuclei.json')
+    expect(document.querySelector('.project-artifact-status.is-available')?.textContent).toBe('available')
     artifactRunLink.click()
     await tick()
     expect(restoreHistoryRunIntoTab).toHaveBeenCalledWith(

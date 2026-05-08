@@ -281,6 +281,8 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/projects/<project_id>/packages/<package_id>` | Returns one draft evidence package manifest. |
 | `GET` | `/projects/<project_id>/packages/<package_id>/download` | Downloads one draft evidence package archive. |
 | `DELETE` | `/projects/<project_id>/packages/<package_id>` | Deletes one draft evidence package manifest. |
+| `GET` | `/projects/<project_id>/artifacts/<artifact_id>/preview` | Returns text preview content for one project-linked run artifact. |
+| `GET` | `/projects/<project_id>/artifacts/<artifact_id>/download` | Downloads one available project-linked run artifact from the workspace. |
 | `POST` | `/projects/<project_id>/workflows/promote` | Creates a user workflow from selected project-linked run commands. |
 | `GET` | `/projects/<project_id>/findings` | Lists findings reached through project-linked runs, with first-pass filters. |
 | `GET` | `/projects/<project_id>/compare` | Compares findings and workspace artifacts between two project-linked runs, optionally selecting a baseline by run label. |
@@ -948,7 +950,7 @@ erDiagram
 - `recent_domains` — one row per recently used domain per session `(session_id, domain, last_used, use_count)`. Backs domain autocomplete across browsers that share the same named session token and follows the session-token migration path.
 - `projects` — one row per project/case folder. Stores session ownership, display metadata, status, notes, timestamps, and a session-scoped slug.
 - `project_links` — generic project membership rows `(project_id, entity_type, entity_id)`. The app owns the valid entity vocabulary and link sources so projects can link top-level records such as runs, snapshots, and manually selected workspace files without copying source data. Run-owned records such as file artifacts and findings are intentionally reached through linked runs instead of direct project links.
-- `run_file_artifacts` — durable file manifest rows for workspace files produced or consumed by a run. This is separate from `run_output_artifacts`, which stores the terminal transcript artifact behind a run permalink.
+- `run_file_artifacts` — durable file manifest rows for workspace files produced or consumed by a run, including recorded size and optional SHA-256 content checksum so project views can flag missing or changed workspace files. This is separate from `run_output_artifacts`, which stores the terminal transcript artifact behind a run permalink.
 - `project_targets` — project-scoped domains, URLs, hosts, IPs, CIDRs, and port sets. Targets can be manually entered or associated with source runs later.
 - `findings` — persisted output-signal rows linked to the source run and optionally to a project target. These records are intentionally lightweight so findings can power filtering, review state, annotations, and evidence packages without turning the app into a vulnerability-management system.
 - `entity_labels` — short user-controlled labels/bookmarks for supported entities. This is the broader relationship model that can eventually absorb run labels while preserving the existing star affordance.

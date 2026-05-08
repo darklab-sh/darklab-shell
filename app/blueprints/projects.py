@@ -31,6 +31,7 @@ from project_workspace import (
     get_active_project,
     get_evidence_package,
     get_project,
+    get_project_run_file_artifact,
     get_project_summary,
     infer_project_target_payload,
     link_project_entity,
@@ -50,6 +51,18 @@ from project_workspace import (
     update_project_target,
 )
 from user_workflows import UserWorkflowError, create_user_workflow
+from workspace import (
+    InvalidWorkspacePath,
+    WorkspaceBinaryFile,
+    WorkspaceDisabled,
+    WorkspaceError,
+    WorkspaceFileNotFound,
+    WorkspacePathNotFound,
+    WorkspacePermissionDenied,
+    WorkspaceQuotaExceeded,
+    open_workspace_file_for_download,
+    read_workspace_text_file,
+)
 
 log = logging.getLogger("shell")
 
@@ -70,6 +83,22 @@ def _evidence_package_download_limit():
 def _project_error_response(exc):
     status = 409 if isinstance(exc, ProjectWorkspaceQuotaExceeded) else 400
     return jsonify({"error": str(exc)}), status
+
+
+def _workspace_project_artifact_error_response(exc):
+    if isinstance(exc, WorkspaceDisabled):
+        return jsonify({"error": "Files are disabled on this instance"}), 403
+    if isinstance(exc, WorkspaceQuotaExceeded):
+        return jsonify({"error": str(exc)}), 413
+    if isinstance(exc, (WorkspaceFileNotFound, WorkspacePathNotFound)):
+        return jsonify({"error": str(exc)}), 404
+    if isinstance(exc, WorkspacePermissionDenied):
+        return jsonify({"error": str(exc)}), 403
+    if isinstance(exc, WorkspaceBinaryFile):
+        return jsonify({"error": str(exc)}), 415
+    if isinstance(exc, InvalidWorkspacePath):
+        return jsonify({"error": str(exc)}), 400
+    raise exc
 
 
 @projects_bp.route("/projects")
@@ -417,6 +446,48 @@ def projects_packages_delete(project_id, package_id):
         "package_id": package_id,
     })
     return jsonify({"ok": True})
+
+
+@projects_bp.route("/projects/<project_id>/artifacts/<artifact_id>/preview")
+def projects_artifacts_preview(project_id, artifact_id):
+    session_id = get_session_id()
+    artifact = get_project_run_file_artifact(session_id, project_id, artifact_id)
+    if artifact is None:
+        return jsonify({"error": "artifact not found"}), 404
+    if not artifact.get("file_available"):
+        return jsonify({
+            "error": artifact.get("file_status_detail") or "artifact file is not available",
+            "artifact": artifact,
+        }), 404
+    try:
+        text = read_workspace_text_file(session_id, artifact["workspace_path"], CFG)
+    except WorkspaceError as exc:
+        return _workspace_project_artifact_error_response(exc)
+    return jsonify({"artifact": artifact, "text": text})
+
+
+@projects_bp.route("/projects/<project_id>/artifacts/<artifact_id>/download")
+def projects_artifacts_download(project_id, artifact_id):
+    session_id = get_session_id()
+    artifact = get_project_run_file_artifact(session_id, project_id, artifact_id)
+    if artifact is None:
+        return jsonify({"error": "artifact not found"}), 404
+    if not artifact.get("file_available"):
+        return jsonify({
+            "error": artifact.get("file_status_detail") or "artifact file is not available",
+            "artifact": artifact,
+        }), 404
+    try:
+        handle = open_workspace_file_for_download(session_id, artifact["workspace_path"], CFG)
+    except WorkspaceError as exc:
+        return _workspace_project_artifact_error_response(exc)
+    download_name = artifact.get("display_name") or artifact["workspace_path"].split("/")[-1] or "artifact"
+    return send_file(
+        handle,
+        as_attachment=True,
+        download_name=download_name,
+        mimetype=artifact.get("content_type") or "application/octet-stream",
+    )
 
 
 @projects_bp.route("/projects/<project_id>/workflows/promote", methods=["POST"])
