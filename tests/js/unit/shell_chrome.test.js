@@ -497,6 +497,61 @@ describe('shell chrome project workspace', () => {
     expect(orderedProjectIds).toEqual(['project-1', 'project-3', 'project-2'])
   })
 
+  it('deletes a project from the project explorer after confirmation', async () => {
+    let projects = [{ id: 'project-1', name: 'darklab.sh', status: 'active' }]
+    let activeProject = projects[0]
+    const showConfirm = vi.fn(() => Promise.resolve('delete'))
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project: activeProject }),
+        })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects }),
+        })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project: projects[0] || null,
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, annotations: 0 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      if (url === '/projects/project-1' && options.method === 'DELETE') {
+        projects = []
+        activeProject = null
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const shell = loadShellChrome({ apiFetch, showConfirm })
+
+    await shell.openProjectWorkspace()
+    await tick()
+    document.querySelector('[data-project-action="delete"][data-project-id="project-1"]').click()
+    await tick()
+    await tick()
+
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: expect.objectContaining({ text: 'Delete project: darklab.sh?' }),
+      tone: 'danger',
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1', expect.objectContaining({ method: 'DELETE' }))
+    expect(document.getElementById('project-workspace-body').textContent)
+      .toContain('No projects yet')
+    expect(document.getElementById('project-workspace-message').textContent).toContain('Project deleted.')
+  })
+
   it('toggles the active project external run capture preference', async () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/projects/active') {
@@ -934,9 +989,13 @@ describe('shell chrome project workspace', () => {
             index_html: true,
             transcripts_html: true,
           },
+          estimated_archive: {
+            estimated_uncompressed_bytes: 32768,
+          },
           counts: { runs: 2, findings: 3, artifacts: 2 },
           selected_entity_ids: {
-            run_ids: ['run-1'],
+            run_ids: ['run-1', 'run-missing'],
+            transcript_run_ids: ['run-1', 'run-missing'],
             finding_ids: ['finding-1'],
             artifact_ids: ['artifact-1'],
             target_ids: ['target-1'],
@@ -1097,6 +1156,10 @@ describe('shell chrome project workspace', () => {
               targets: payload.selection.target_ids.length,
             },
             selected_entity_ids: payload.selection,
+            redaction_mode: payload.redaction_mode,
+            estimated_archive: {
+              estimated_uncompressed_bytes: 24576,
+            },
           },
         }]
         return Promise.resolve({
@@ -1242,7 +1305,8 @@ describe('shell chrome project workspace', () => {
     document.querySelector('[data-project-tab="packages"]').click()
     await tick()
     expect(document.getElementById('project-explorer-body').textContent).toContain('Darklab evidence')
-    expect(document.getElementById('project-explorer-body').textContent).toContain('includes artifacts')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('evidence · raw · ~32 KB')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('2 runs · 3 findings · 2 artifacts')
     expect(document.querySelector('[data-project-action="package-manifest"][data-package-id="pkg-1"]')).not.toBeNull()
     document.querySelector('[data-project-action="package-manifest"][data-package-id="pkg-1"]').click()
     await tick()
@@ -1275,6 +1339,9 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Include')
     expect(document.querySelector('[data-project-package-selection="run"][value="run-1"]').checked).toBe(true)
     expect(document.querySelector('[data-project-package-selection="run"][value="run-2"]').checked).toBe(false)
+    expect(document.querySelector('[data-project-package-selection="transcript"][value="run-1"]').checked).toBe(true)
+    expect(document.querySelector('[data-project-package-selection="transcript"][value="run-2"]').disabled).toBe(true)
+    expect(document.getElementById('project-explorer-body').textContent).toContain('run-missing is no longer linked')
     expect(document.querySelector('[data-project-package-selection="artifact"][value="artifact-1"]').checked).toBe(true)
     expect(document.querySelector('[data-project-package-selection="artifact"][value="artifact-2"]').checked).toBe(false)
     document.querySelector('[data-project-action="package-wizard-next"]').click()
@@ -1319,6 +1386,9 @@ describe('shell chrome project workspace', () => {
     await tick()
     expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Preview')
     expect(document.querySelector('.project-package-preview-json')?.textContent).toContain('"artifacts": 1')
+    expect(document.querySelector('.project-package-preview-json')?.textContent).toContain('"estimated_archive"')
+    expect(document.querySelector('.project-package-preview-json')?.textContent).toContain('"transcript_run_ids"')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('Estimated package size before compression')
     document.querySelector('[data-project-action="package-wizard-next"]').click()
     await tick()
     await tick()
@@ -1333,6 +1403,7 @@ describe('shell chrome project workspace', () => {
     expect(packagePayload.include_artifacts).toBe(true)
     expect(packagePayload.options.index_html).toBe(true)
     expect(packagePayload.options.transcripts_html).toBe(true)
+    expect(packagePayload.selection.transcript_run_ids).toEqual(['run-1', 'run-2'])
     expect(packagePayload.selection.artifact_ids).toEqual(['artifact-1'])
     expect(document.getElementById('project-explorer-body').textContent).toContain('Scoped evidence')
 

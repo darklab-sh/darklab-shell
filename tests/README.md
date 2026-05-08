@@ -20,12 +20,12 @@ Workspace file behavior is intentionally split across all three layers: pytest o
 
 Current totals:
 
-- behavior tests: 2,526
+- behavior tests: 2,527
 - docs/inventory meta-tests: 30
 - `pytest`: 1274 (1244 behavior + 30 meta)
-- `vitest`: 1042
+- `vitest`: 1043
 - `playwright`: 240
-- total: 2,556
+- total: 2,557
 
 This document is organized in two parts:
 
@@ -2243,6 +2243,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `labels only the current active project in the project list` | Verifies that the active project is pinned first and that only the current active project receives the active marker. |
 | `opens projects from the active project HUD chip` | Verifies that clicking the active project HUD chip opens the Projects modal. |
 | `separates current and archived projects when archived projects exist` | Verifies that the Projects modal groups current and archived projects only when archived projects are present. |
+| `deletes a project from the project explorer after confirmation` | Verifies that the Projects modal confirms destructive project deletion and refreshes the list afterward. |
 | `toggles the active project external run capture preference` | Verifies that the Projects modal can disable automatic active-project capture for external command runs. |
 | `keeps the target editor dropdown value in sync with the last saved target type` | Verifies that the project target editor initializes and submits the same target type that the custom dropdown displays. |
 | `validates project target values before saving` | Verifies that project target values are validated client-side before the modal saves a new or edited target. |

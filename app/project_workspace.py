@@ -26,7 +26,7 @@ from database import (
     validate_project_entity_type,
     validate_project_link_source,
 )
-from permalinks import _format_duration, _normalize_permalink_lines
+from permalinks import _font_face_css, _format_duration, _permalink_context
 from redaction import apply_redaction_rules, redact_line_entries
 from run_output_store import load_full_output_entries
 from workspace import WorkspaceError, open_workspace_file_for_download, resolve_workspace_path
@@ -358,6 +358,20 @@ def _workspace_file_sha256(session_id, workspace_path):
         return ""
 
 
+def _path_sha256(path):
+    try:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return ""
+
+
 def _artifact_availability(session_id, artifact):
     workspace_path = _trim_text((artifact or {}).get("workspace_path"), MAX_ENTITY_ID_LEN)
     result = {
@@ -403,6 +417,25 @@ def _artifact_availability(session_id, artifact):
         "current_byte_size": current_size,
         "file_status_detail": "",
     }
+
+
+def _artifact_snapshot_mismatch_reason(artifact, resolved):
+    try:
+        current_size = max(0, int(resolved.stat().st_size))
+    except OSError:
+        return "artifact file is not available"
+    try:
+        recorded_size = max(0, int((artifact or {}).get("byte_size") or 0))
+    except (TypeError, ValueError):
+        recorded_size = 0
+    if current_size != recorded_size:
+        return "artifact changed since package creation: workspace file size differs from the recorded artifact"
+    recorded_hash = _normalize_sha256((artifact or {}).get("content_sha256"))
+    if recorded_hash:
+        current_hash = _path_sha256(resolved)
+        if current_hash and current_hash != recorded_hash:
+            return "artifact changed since package creation: workspace file checksum differs from the recorded artifact"
+    return ""
 
 
 def _row_to_finding(row):
@@ -558,6 +591,84 @@ def _filter_package_items(items, selected_ids):
     return [item for item in items if str(item.get("id") or "") in selected]
 
 
+def _estimate_package_run_line_count(run):
+    try:
+        return max(0, int((run or {}).get("output_line_count") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _estimate_evidence_package_archive(selected_runs, selected_findings, selected_artifacts, selected_targets, payload):
+    max_lines = _cfg_int("max_output_lines", 5000) or 5000
+    max_archive_bytes = _cfg_mb_bytes("evidence_package_max_mb", 25)
+    raw_artifacts_enabled = bool(payload.get("include_artifacts"))
+    raw_artifact_bytes = 0
+    skipped_artifact_count_estimate = 0
+    if raw_artifacts_enabled:
+        for artifact in selected_artifacts:
+            status = str((artifact or {}).get("file_status") or "available")
+            if status != "available":
+                skipped_artifact_count_estimate += 1
+                continue
+            try:
+                raw_artifact_bytes += max(0, int((artifact or {}).get("byte_size") or 0))
+            except (TypeError, ValueError):
+                skipped_artifact_count_estimate += 1
+
+    transcript_html_bytes = 0
+    transcript_text_companion_bytes = 0
+    selection = payload.get("selection")
+    transcript_run_ids = set()
+    if isinstance(selection, dict) and isinstance(selection.get("transcript_run_ids"), list):
+        transcript_run_ids = {str(run_id) for run_id in selection["transcript_run_ids"] if str(run_id)}
+    else:
+        transcript_run_ids = {str((run or {}).get("id") or "") for run in selected_runs if (run or {}).get("id")}
+    transcript_runs = [
+        run for run in selected_runs
+        if str((run or {}).get("id") or "") in transcript_run_ids
+    ]
+    for run in transcript_runs:
+        line_count = _estimate_package_run_line_count(run)
+        transcript_html_bytes += 4096 + min(line_count, max_lines) * 120
+        if line_count > max_lines:
+            transcript_text_companion_bytes += line_count * 96
+
+    metadata_seed = {
+        "runs": selected_runs,
+        "findings": selected_findings,
+        "targets": selected_targets,
+        "artifacts": selected_artifacts,
+        "options": payload.get("options") or {},
+        "preset": payload.get("preset"),
+        "redaction_mode": payload.get("redaction_mode"),
+    }
+    try:
+        metadata_bytes = len(json.dumps(metadata_seed, sort_keys=True).encode("utf-8"))
+    except (TypeError, ValueError):
+        metadata_bytes = 0
+    metadata_bytes += 16 * 1024
+    estimated_uncompressed_bytes = (
+        raw_artifact_bytes
+        + transcript_html_bytes
+        + transcript_text_companion_bytes
+        + metadata_bytes
+    )
+    return {
+        "estimated_uncompressed_bytes": estimated_uncompressed_bytes,
+        "estimated_archive_bytes": estimated_uncompressed_bytes,
+        "raw_artifact_bytes": raw_artifact_bytes,
+        "transcript_html_bytes": transcript_html_bytes,
+        "transcript_text_companion_bytes": transcript_text_companion_bytes,
+        "metadata_bytes": metadata_bytes,
+        "selected_run_count": len(selected_runs),
+        "selected_transcript_count": len(transcript_runs),
+        "selected_artifact_count": len(selected_artifacts),
+        "skipped_artifact_count_estimate": skipped_artifact_count_estimate,
+        "max_archive_bytes": max_archive_bytes,
+        "note": "Pre-build estimate before ZIP compression; final download enforces archive caps and drift checks.",
+    }
+
+
 def _evidence_manifest_from_summary(summary, payload, findings=None):
     findings = findings if isinstance(findings, list) else []
     selection = payload.get("selection")
@@ -566,6 +677,11 @@ def _evidence_manifest_from_summary(summary, payload, findings=None):
         "run_ids",
         [item.get("id") for item in summary.get("runs", [])],
     )
+    transcript_run_ids = _normalized_package_selection_ids(
+        selection,
+        "transcript_run_ids",
+        run_ids,
+    ) if isinstance(selection, dict) and "transcript_run_ids" in selection else list(run_ids)
     finding_ids = _normalized_package_selection_ids(
         selection,
         "finding_ids",
@@ -588,7 +704,7 @@ def _evidence_manifest_from_summary(summary, payload, findings=None):
     output_options = {
         "manifest_json": True,
         "index_html": True,
-        "transcripts_html": True,
+        "transcripts_html": bool(transcript_run_ids),
         "raw_artifacts": bool(payload["include_artifacts"]),
     }
     return {
@@ -610,12 +726,20 @@ def _evidence_manifest_from_summary(summary, payload, findings=None):
         "project_counts": summary["counts"],
         "selected_entity_ids": {
             "run_ids": run_ids,
+            "transcript_run_ids": transcript_run_ids,
             "finding_ids": finding_ids,
             "artifact_ids": artifact_ids,
             "target_ids": target_ids,
         },
         "preset": payload["preset"],
         "options": output_options,
+        "estimated_archive": _estimate_evidence_package_archive(
+            selected_runs,
+            selected_findings,
+            selected_artifacts,
+            selected_targets,
+            {**payload, "options": output_options},
+        ),
         "include_private_annotations": payload["include_private_annotations"],
         "links": summary["links"],
         "runs": selected_runs,
@@ -712,7 +836,7 @@ def _redact_package_run(run, rules):
     return redacted if isinstance(redacted, dict) else {}
 
 
-def _package_output_entry(item):
+def _package_output_entry(item) -> dict[str, object]:
     if isinstance(item, dict) and isinstance(item.get("text"), str):
         entry = {
             "text": item["text"],
@@ -732,7 +856,7 @@ def _package_output_entry(item):
     return {"text": str(item or ""), "cls": "", "tsC": "", "tsE": ""}
 
 
-def _package_preview_output_entries(run):
+def _package_preview_output_entries(run) -> list[dict[str, object]]:
     raw = run.get("output_preview")
     if raw is None:
         raw = run.get("output")
@@ -762,7 +886,7 @@ def _package_run_rows(conn, session_id, run_ids):
     return [by_id[run_id] for run_id in ids if run_id in by_id]
 
 
-def _package_run_output_entries(run, *, cfg=None):
+def _package_run_output_entries(run, *, cfg=None, include_companion=False):
     if run.get("full_output_available") and run.get("rel_path"):
         try:
             entries = load_full_output_entries(str(run["rel_path"]))
@@ -788,18 +912,40 @@ def _package_run_output_entries(run, *, cfg=None):
     max_lines = _cfg_int("max_output_lines", 5000, cfg=cfg) or 5000
     if len(entries) > max_lines:
         hidden = len(entries) - max_lines
-        entries = entries[:max_lines]
-        entries.append({
+        companion_entries = list(entries)
+        capped_entries: list[dict[str, object]] = list(entries[:max_lines])
+        cap_notice: dict[str, object] = {
             "text": f"[package transcript capped at {max_lines} lines; {hidden} additional lines omitted]",
             "cls": "warn",
             "tsC": "",
             "tsE": "",
-        })
+        }
+        capped_entries.append(cap_notice)
+        if include_companion:
+            return capped_entries, companion_entries, cap_notice
+        return capped_entries
+    if include_companion:
+        return entries, [], None
     return entries
 
 
+def _package_run_text_bytes(entries, redaction_rules=None):
+    entries = redact_line_entries(entries, redaction_rules) if redaction_rules else entries
+    lines = []
+    for entry in entries:
+        if isinstance(entry, dict):
+            lines.append(str(entry.get("text") or ""))
+        else:
+            lines.append(str(entry or ""))
+    return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
+
+
 def _package_css():
-    return """
+    return (
+        "/* darklab shell evidence package CSS snapshot: package_format_version=1 */\n"
+        + _font_face_css(embed=True)
+        + "\n"
+        + """
 :root {
   color-scheme: dark;
   --bg: #0f1215;
@@ -888,17 +1034,23 @@ blockquote { margin: 8px 0 0; padding-left: 10px; border-left: 2px solid var(--b
   th:nth-child(4), td:nth-child(4) { display: none; }
 }
 """.strip()
+    )
 
 
-def _package_page(title, body, script=""):
+def _package_page(title, body, script="", *, css_href="assets/package.css"):
+    css_tag = (
+        f"<link rel=\"stylesheet\" href=\"{_package_html_escape(css_href)}\">\n"
+        if css_href else f"<style>{_package_css()}</style>\n"
+    )
     return (
         "<!doctype html>\n"
         "<html lang=\"en\">\n"
         "<head>\n"
         "<meta charset=\"utf-8\">\n"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+        "<meta name=\"darklab-package-format\" content=\"1\">\n"
         f"<title>{_package_html_escape(title)}</title>\n"
-        f"<style>{_package_css()}</style>\n"
+        f"{css_tag}"
         "</head>\n"
         "<body>\n"
         f"{body}\n"
@@ -908,7 +1060,15 @@ def _package_page(title, body, script=""):
     )
 
 
-def _render_package_run_html(run, entries, manifest, generated_at, *, redaction_rules=None):
+def _render_package_run_html(
+    run,
+    entries,
+    manifest,
+    generated_at,
+    *,
+    transcript_text_path="",
+    redaction_rules=None,
+):
     entries = redact_line_entries(entries, redaction_rules) if redaction_rules else entries
     run = _redact_package_run(run, redaction_rules)
     command = str(run.get("command") or "")
@@ -919,7 +1079,25 @@ def _render_package_run_html(run, entries, manifest, generated_at, *, redaction_
     line_count = output_line_count if isinstance(output_line_count, int) else len(entries)
     if isinstance(output_line_count, str) and output_line_count.isdecimal():
         line_count = int(output_line_count)
-    normalized = _normalize_permalink_lines(entries, command)
+    meta = {
+        "exit_code": run.get("exit_code"),
+        "duration": duration,
+        "lines": f"{line_count:,} lines",
+        "artifact_count": run.get("artifact_count") or 0,
+        "finding_count": run.get("finding_count") or 0,
+        "label_count": run.get("label_count") or 0,
+        "annotation_count": run.get("annotation_count") or 0,
+    }
+    permalink_model = _permalink_context(
+        title=command or str(run.get("id") or "Run transcript"),
+        label=command,
+        created=started or generated_at,
+        content_lines=entries,
+        json_url="../manifest.json",
+        extra_actions=[],
+        meta=meta,
+    )["page_model"]
+    normalized = permalink_model["transcript"]["lines"]
     rendered_lines = []
     for index, entry in enumerate(normalized, start=1):
         text = _package_html_escape(entry.get("text", "") if isinstance(entry, dict) else entry)
@@ -931,28 +1109,41 @@ def _render_package_run_html(run, entries, manifest, generated_at, *, redaction_
     if not rendered_lines:
         rendered_lines.append("<div class=\"line muted\">No output captured.</div>")
 
-    exit_code = run.get("exit_code")
-    exit_text = "still running" if exit_code is None else f"exit {exit_code}"
-    metrics = [
-        ("Started", started or "unknown"),
-        ("Finished", finished or "unknown"),
-        ("Duration", duration or "unknown"),
-        ("Lines", line_count),
-        ("Status", exit_text),
-    ]
+    header = permalink_model.get("header", {})
+    raw_metric_items = header.get("runMetaItems") if isinstance(header, dict) else []
+    metric_items = raw_metric_items if isinstance(raw_metric_items, list) else []
     metric_html = "".join(
         "<div class=\"metric\">"
-        f"<span>{_package_html_escape(label)}</span>"
-        f"<strong>{_package_html_escape(value)}</strong>"
+        f"<span>{_package_html_escape(item.get('kind') or 'item')}</span>"
+        f"<strong>{_package_html_escape(item.get('text') or '')}</strong>"
         "</div>"
-        for label, value in metrics
+        for item in metric_items
+        if isinstance(item, dict)
     )
+    if not metric_html:
+        metric_html = "".join(
+            "<div class=\"metric\">"
+            f"<span>{_package_html_escape(label)}</span>"
+            f"<strong>{_package_html_escape(value)}</strong>"
+            "</div>"
+            for label, value in [
+                ("Started", started or "unknown"),
+                ("Finished", finished or "unknown"),
+                ("Duration", duration or "unknown"),
+                ("Lines", line_count),
+            ]
+        )
     project_name = (
         manifest.get("project", {}).get("name", "Project")
         if isinstance(manifest.get("project"), dict)
         else "Project"
     )
     run_id_text = _package_html_escape(run.get("id"))
+    transcript_text_link = (
+        f"<p><a href=\"../{_package_html_escape(transcript_text_path)}\">"
+        "Download full text transcript</a></p>"
+        if transcript_text_path else ""
+    )
     body = (
         "<main class=\"page\">"
         f"<a href=\"../index.html\">Back to package index</a>"
@@ -961,11 +1152,12 @@ def _render_package_run_html(run, entries, manifest, generated_at, *, redaction_
         f"<p class=\"subtitle mono\">Run {run_id_text} · generated {_package_html_escape(generated_at)}</p>"
         f"<section class=\"grid\">{metric_html}</section>"
         "<h2>Transcript</h2>"
+        f"{transcript_text_link}"
         f"<section class=\"transcript\">{''.join(rendered_lines)}</section>"
         "<p class=\"footer\">Generated by darklab shell evidence packages.</p>"
         "</main>"
     )
-    return _package_page(command or "Run transcript", body)
+    return _package_page(command or "Run transcript", body, css_href="../assets/package.css")
 
 
 def _finding_run_anchor(finding):
@@ -1051,7 +1243,15 @@ def _package_index_sort_script():
 """.strip()
 
 
-def _render_package_index_html(package, manifest, generated_at, run_pages, artifact_paths, skipped_items):
+def _render_package_index_html(
+    package,
+    manifest,
+    generated_at,
+    run_pages,
+    run_text_paths,
+    artifact_paths,
+    skipped_items,
+):
     project = manifest.get("project") if isinstance(manifest.get("project"), dict) else {}
     counts = manifest.get("counts") if isinstance(manifest.get("counts"), dict) else {}
     targets = manifest.get("targets") if isinstance(manifest.get("targets"), list) else []
@@ -1091,12 +1291,19 @@ def _render_package_index_html(package, manifest, generated_at, run_pages, artif
             continue
         run_id = str(run.get("id") or "")
         href = run_pages.get(run_id, "")
+        text_href = run_text_paths.get(run_id, "")
+        text_link = (
+            f"<span>{_package_html_escape(run.get('output_line_count') or 0)} lines "
+            f"· <a href=\"{_package_html_escape(text_href)}\">full text</a></span>"
+            if text_href else
+            f"<span>{_package_html_escape(run.get('output_line_count') or 0)} lines</span>"
+        )
         run_html.append(
             "<li>"
             f"<a class=\"mono\" href=\"{_package_html_escape(href)}\">{_package_html_escape(run.get('command') or run_id)}</a>"
             "<div class=\"run-meta\">"
             f"<span>{_package_html_escape(run.get('started') or 'unknown start')}</span>"
-            f"<span>{_package_html_escape(run.get('output_line_count') or 0)} lines</span>"
+            f"{text_link}"
             f"<span>{_package_html_escape(run.get('link_source') or 'manual')} link</span>"
             "</div>"
             "</li>"
@@ -1175,8 +1382,11 @@ def _render_package_index_html(package, manifest, generated_at, run_pages, artif
         ("Findings JSON", "findings/findings.json"),
         ("Findings Markdown", "findings/findings.md"),
         ("Targets JSON", "targets/targets.json"),
+        ("Targets Markdown", "targets/targets.md"),
         ("Labels JSON", "metadata/labels.json"),
         ("Annotations JSON", "notes/annotations.json"),
+        ("Annotations Markdown", "notes/annotations.md"),
+        ("Project Notes Markdown", "notes/project.md"),
     ]
     if skipped_items:
         export_links.append(("Skipped items JSON", "skipped-items.json"))
@@ -1228,7 +1438,15 @@ def _render_package_index_html(package, manifest, generated_at, run_pages, artif
     )
 
 
-def _render_package_readme(package, manifest, generated_at, run_pages, artifact_paths, skipped_items):
+def _render_package_readme(
+    package,
+    manifest,
+    generated_at,
+    run_pages,
+    run_text_paths,
+    artifact_paths,
+    skipped_items,
+):
     project = manifest.get("project") if isinstance(manifest.get("project"), dict) else {}
     counts = manifest.get("counts") if isinstance(manifest.get("counts"), dict) else {}
     targets = manifest.get("targets") if isinstance(manifest.get("targets"), list) else []
@@ -1278,6 +1496,8 @@ def _render_package_readme(package, manifest, generated_at, run_pages, artifact_
             lines.append(f"- {_package_markdown_link(label, run_pages.get(run_id, ''))}")
             lines.append(f"  - Started: {_package_markdown_text(run.get('started') or 'unknown')}")
             lines.append(f"  - Lines: {_package_int(run.get('output_line_count'))}")
+            if run_text_paths.get(run_id):
+                lines.append(f"  - Full text: {_package_markdown_link('transcript text', run_text_paths[run_id])}")
     else:
         lines.append("- No selected runs.")
     lines.extend(["", "## Findings", ""])
@@ -1333,8 +1553,11 @@ def _render_package_readme(package, manifest, generated_at, run_pages, artifact_
         f"- {_package_markdown_link('Findings JSON', 'findings/findings.json')}",
         f"- {_package_markdown_link('Findings Markdown', 'findings/findings.md')}",
         f"- {_package_markdown_link('Targets JSON', 'targets/targets.json')}",
+        f"- {_package_markdown_link('Targets Markdown', 'targets/targets.md')}",
         f"- {_package_markdown_link('Labels JSON', 'metadata/labels.json')}",
         f"- {_package_markdown_link('Annotations JSON', 'notes/annotations.json')}",
+        f"- {_package_markdown_link('Annotations Markdown', 'notes/annotations.md')}",
+        f"- {_package_markdown_link('Project Notes Markdown', 'notes/project.md')}",
     ])
     if skipped_items:
         lines.append(f"- {_package_markdown_link('Skipped items JSON', 'skipped-items.json')}")
@@ -1393,6 +1616,34 @@ def _package_findings_markdown_bytes(manifest, run_pages):
                 f"| `{_package_markdown_text(finding.get('raw_line') or '')}`"
                 f"{_package_finding_metadata_markdown(finding)} |"
             )
+        lines.extend(["", "## Finding Details", ""])
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            finding_label = _package_markdown_text(
+                finding.get("title") or finding.get("raw_line") or finding.get("id") or "Finding"
+            )
+            source_line = finding.get("line_number") if finding.get("line_number") is not None else ""
+            lines.extend([
+                f"### {finding_label}",
+                "",
+                f"- ID: `{_package_markdown_text(finding.get('id') or '')}`",
+                f"- Run: `{_package_markdown_text(finding.get('run_id') or '')}`",
+                f"- Scope: `{_package_markdown_text(finding.get('scope') or 'finding')}`",
+                f"- Severity: `{_package_markdown_text(finding.get('severity') or 'info')}`",
+                f"- Review state: `{_package_markdown_text(finding.get('review_state') or 'new')}`",
+                f"- Source line: `{_package_markdown_text(source_line)}`",
+            ])
+            target_ids = _package_finding_target_ids(finding)
+            if target_ids:
+                lines.append("- Targets: " + ", ".join(f"`{_package_markdown_text(target_id)}`" for target_id in target_ids))
+            raw_line = _package_markdown_text(finding.get("raw_line") or "")
+            if raw_line:
+                lines.extend(["", "```text", raw_line, "```"])
+            metadata = _package_finding_metadata_markdown(finding).replace("<br>", "\n")
+            if metadata.strip():
+                lines.extend(["", metadata.strip()])
+            lines.append("")
     else:
         lines.append("- No selected findings.")
     return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
@@ -1446,6 +1697,55 @@ def _package_targets_json_bytes(manifest, generated_at):
         "targets": exported,
     }
     return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _package_targets_markdown_bytes(manifest):
+    targets = manifest.get("targets") if isinstance(manifest.get("targets"), list) else []
+    findings = manifest.get("findings") if isinstance(manifest.get("findings"), list) else []
+    lines = ["# Targets", "", f"Selected targets: {len([item for item in targets if isinstance(item, dict)])}", ""]
+    if not targets:
+        lines.append("- No selected targets.")
+        return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        target_id = str(target.get("id") or "")
+        target_label = _package_markdown_text(target.get("label") or target.get("value") or target_id or "Target")
+        lines.extend([
+            f"## {target_label}",
+            "",
+            f"- ID: `{_package_markdown_text(target_id)}`",
+            f"- Type: `{_package_markdown_text(target.get('type') or 'target')}`",
+            f"- Value: `{_package_markdown_text(target.get('value') or '')}`",
+        ])
+        if target.get("notes"):
+            lines.extend(["", "### Notes", "", _package_markdown_text(target.get("notes") or "")])
+        labels = target.get("labels") if isinstance(target.get("labels"), list) else []
+        if labels:
+            label_values = [
+                _package_markdown_text(label.get("label") or "")
+                for label in labels
+                if isinstance(label, dict) and label.get("label")
+            ]
+            if label_values:
+                lines.extend(["", "### Labels", "", ", ".join(f"`{value}`" for value in label_values)])
+        annotations = target.get("annotations") if isinstance(target.get("annotations"), list) else []
+        if annotations:
+            lines.extend(["", "### Annotations", ""])
+            for annotation in annotations:
+                if isinstance(annotation, dict) and annotation.get("body"):
+                    lines.append(f"- {_package_markdown_text(annotation.get('body') or '')}")
+        linked_findings = [
+            finding for finding in findings
+            if isinstance(finding, dict) and target_id in _package_finding_target_ids(finding)
+        ]
+        if linked_findings:
+            lines.extend(["", "### Related Findings", ""])
+            for finding in linked_findings:
+                finding_label = _package_markdown_text(finding.get("title") or finding.get("raw_line") or finding.get("id"))
+                lines.append(f"- {finding_label} (`{_package_markdown_text(finding.get('id') or '')}`)")
+        lines.append("")
+    return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
 
 
 def _package_metadata_targets(package, manifest):
@@ -1593,6 +1893,60 @@ def _package_annotations_json_bytes(annotations, generated_at, *, included, reda
         "annotations": exported,
     }
     return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _package_project_notes_markdown_bytes(manifest, generated_at):
+    project = manifest.get("project") if isinstance(manifest.get("project"), dict) else {}
+    project_name = _package_markdown_text(project.get("name") or "Project")
+    project_notes = _package_markdown_text(project.get("notes") or "")
+    lines = [
+        f"# {project_name} Notes",
+        "",
+        f"Generated: {_package_markdown_text(generated_at)}",
+        "",
+    ]
+    if project_notes:
+        lines.extend([project_notes, ""])
+    else:
+        lines.extend(["No project notes were included in this package.", ""])
+    return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
+
+
+def _package_annotations_markdown_bytes(annotations, generated_at, *, included):
+    lines = [
+        "# Annotations",
+        "",
+        f"Generated: {_package_markdown_text(generated_at)}",
+        "",
+    ]
+    if not included:
+        lines.extend([
+            "Private annotations were excluded from this package.",
+            "",
+        ])
+        return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
+    if not annotations:
+        lines.extend(["No selected annotations were included in this package.", ""])
+        return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
+
+    for annotation in annotations:
+        if not isinstance(annotation, dict):
+            continue
+        entity_type = _package_markdown_text(annotation.get("entity_type") or "entity")
+        entity_id = _package_markdown_text(_package_short_id(annotation.get("entity_id")))
+        author = _package_markdown_text(annotation.get("author_label") or "anonymous")
+        created = _package_markdown_text(annotation.get("created") or "unknown")
+        body = _package_markdown_text(annotation.get("body") or "")
+        lines.extend([
+            f"## {entity_type} `{entity_id}`",
+            "",
+            f"- Author: {author}",
+            f"- Created: {created}",
+            "",
+            body or "_No annotation body._",
+            "",
+        ])
+    return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
 
 
 def _replace_target_token(command, target_value):
@@ -1932,11 +2286,36 @@ def delete_project(session_id, project_id):
         ).fetchone()
         if not project:
             return False
+        target_rows = conn.execute(
+            "SELECT id FROM project_targets WHERE project_id = ?",
+            (project_id,),
+        ).fetchall()
+        target_ids = [row["id"] for row in target_rows if row["id"]]
         package_rows = conn.execute(
             "SELECT id FROM evidence_packages WHERE session_id = ? AND project_id = ?",
             (session_id, project_id),
         ).fetchall()
         package_ids = [row["id"] for row in package_rows if row["id"]]
+        conn.execute(
+            "DELETE FROM entity_labels WHERE entity_type = 'project' AND entity_id = ?",
+            (project_id,),
+        )
+        conn.execute(
+            "DELETE FROM annotations WHERE entity_type = 'project' AND entity_id = ?",
+            (project_id,),
+        )
+        if target_ids:
+            placeholders = ",".join("?" for _ in target_ids)
+            conn.execute(
+                "DELETE FROM entity_labels WHERE entity_type = 'target' "
+                f"AND entity_id IN ({placeholders})",  # nosec B608
+                target_ids,
+            )
+            conn.execute(
+                "DELETE FROM annotations WHERE entity_type = 'target' "
+                f"AND entity_id IN ({placeholders})",  # nosec B608
+                target_ids,
+            )
         if package_ids:
             placeholders = ",".join("?" for _ in package_ids)
             conn.execute(
@@ -2055,6 +2434,11 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
         with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("manifest.json", manifest_bytes)
             projected_bytes = len(manifest_bytes)
+            css_bytes = (_package_css() + "\n").encode("utf-8")
+            projected_bytes += len(css_bytes)
+            if max_archive_bytes and projected_bytes > max_archive_bytes:
+                raise EvidencePackageTooLarge("evidence package CSS snapshot exceeds configured size limit")
+            archive.writestr("assets/package.css", css_bytes)
             if package["include_artifacts"]:
                 artifacts = manifest.get("artifacts")
                 artifact_items = artifacts if isinstance(artifacts, list) else []
@@ -2077,6 +2461,9 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                         resolved = resolve_workspace_path(session_id, workspace_path, cfg)
                         if not resolved.is_file():
                             raise ProjectWorkspaceError("artifact file is not available")
+                        mismatch_reason = _artifact_snapshot_mismatch_reason(artifact, resolved)
+                        if mismatch_reason:
+                            raise ProjectWorkspaceError(mismatch_reason)
                         projected_bytes += resolved.stat().st_size
                         if max_archive_bytes and projected_bytes > max_archive_bytes:
                             raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
@@ -2103,14 +2490,21 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 archive.writestr("skipped-artifacts.json", skipped_bytes)
 
             run_pages = {}
+            run_text_paths = {}
             run_ids = []
+            transcript_run_ids = []
             selected_entity_ids = manifest.get("selected_entity_ids")
             if isinstance(selected_entity_ids, dict) and isinstance(selected_entity_ids.get("run_ids"), list):
                 run_ids = [str(run_id) for run_id in selected_entity_ids["run_ids"] if str(run_id)]
+                if isinstance(selected_entity_ids.get("transcript_run_ids"), list):
+                    selected_transcripts = {str(run_id) for run_id in selected_entity_ids["transcript_run_ids"] if str(run_id)}
+                    transcript_run_ids = [run_id for run_id in run_ids if run_id in selected_transcripts]
+                else:
+                    transcript_run_ids = list(run_ids)
             with db_connect() as conn:
-                run_rows = _package_run_rows(conn, session_id, run_ids)
+                run_rows = _package_run_rows(conn, session_id, transcript_run_ids)
             found_run_ids = {str(row.get("id") or "") for row in run_rows}
-            for run_id in run_ids:
+            for run_id in transcript_run_ids:
                 if run_id in found_run_ids:
                     continue
                 skipped_items.append({
@@ -2123,21 +2517,38 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 run_id = str(run.get("id") or "")
                 if not run_id:
                     continue
-                entries = _package_run_output_entries(run, cfg=cfg)
-                for entry in entries:
-                    if str(entry.get("text") or "").startswith("[package transcript capped"):
+                entries, companion_entries, cap_notice = _package_run_output_entries(
+                    run,
+                    cfg=cfg,
+                    include_companion=True,
+                )
+                transcript_text_path = ""
+                if cap_notice:
+                    skipped_items.append({
+                        "kind": "transcript",
+                        "id": run_id,
+                        "label": run.get("command") or run_id,
+                        "reason": str(cap_notice.get("text") or "").strip("[]"),
+                    })
+                    companion_bytes = _package_run_text_bytes(companion_entries, redaction_rules)
+                    if max_archive_bytes and projected_bytes + len(companion_bytes) > max_archive_bytes:
                         skipped_items.append({
-                            "kind": "transcript",
+                            "kind": "transcript_companion",
                             "id": run_id,
                             "label": run.get("command") or run_id,
-                            "reason": str(entry.get("text") or "").strip("[]"),
+                            "reason": "full text transcript companion exceeds configured package size limit",
                         })
-                        break
+                    else:
+                        projected_bytes += len(companion_bytes)
+                        transcript_text_path = f"runs/{run_id}.txt"
+                        run_text_paths[run_id] = transcript_text_path
+                        archive.writestr(transcript_text_path, companion_bytes)
                 run_page = _render_package_run_html(
                     run,
                     entries,
                     render_manifest,
                     generated_at,
+                    transcript_text_path=transcript_text_path,
                     redaction_rules=redaction_rules,
                 )
                 run_page_bytes = run_page.encode("utf-8")
@@ -2164,6 +2575,11 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
             if max_archive_bytes and projected_bytes > max_archive_bytes:
                 raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
             archive.writestr("targets/targets.json", targets_json_bytes)
+            targets_markdown_bytes = _package_targets_markdown_bytes(render_manifest)
+            projected_bytes += len(targets_markdown_bytes)
+            if max_archive_bytes and projected_bytes > max_archive_bytes:
+                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
+            archive.writestr("targets/targets.md", targets_markdown_bytes)
 
             labels_json_bytes = _package_labels_json_bytes(label_items, generated_at)
             projected_bytes += len(labels_json_bytes)
@@ -2179,12 +2595,27 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
             if max_archive_bytes and projected_bytes > max_archive_bytes:
                 raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
             archive.writestr("notes/annotations.json", annotations_json_bytes)
+            annotations_markdown_bytes = _package_annotations_markdown_bytes(
+                annotation_items,
+                generated_at,
+                included=bool(render_manifest.get("include_private_annotations")),
+            )
+            projected_bytes += len(annotations_markdown_bytes)
+            if max_archive_bytes and projected_bytes > max_archive_bytes:
+                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
+            archive.writestr("notes/annotations.md", annotations_markdown_bytes)
+            project_notes_bytes = _package_project_notes_markdown_bytes(render_manifest, generated_at)
+            projected_bytes += len(project_notes_bytes)
+            if max_archive_bytes and projected_bytes > max_archive_bytes:
+                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
+            archive.writestr("notes/project.md", project_notes_bytes)
 
             index_page = _render_package_index_html(
                 render_package,
                 render_manifest,
                 generated_at,
                 run_pages,
+                run_text_paths,
                 artifact_archive_paths,
                 skipped_items,
             )
@@ -2198,6 +2629,7 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 render_manifest,
                 generated_at,
                 run_pages,
+                run_text_paths,
                 artifact_archive_paths,
                 skipped_items,
             )

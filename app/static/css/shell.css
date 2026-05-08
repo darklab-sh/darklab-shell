@@ -3146,6 +3146,26 @@ button.project-explorer-item:focus-visible,
   line-height: 1.35;
 }
 
+.project-package-preview-skipped {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  background: var(--theme-chrome-row-bg);
+}
+
+.project-package-preview-skipped h3 {
+  margin: 0;
+  color: var(--warn);
+  font-size: 13px;
+}
+
+.project-package-preview-skipped ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .project-package-preset.is-active {
   border-color: var(--green-dim);
   color: var(--green);
@@ -3174,6 +3194,10 @@ button.project-explorer-item:focus-visible,
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--theme-chrome-row-bg);
+}
+
+.project-package-selection-row.is-disabled {
+  opacity: 0.62;
 }
 
 .project-package-selection-text {

@@ -1099,11 +1099,16 @@
     const artifacts = _projectArtifactItems(summary);
     const targets = _projectTargetItems(summary);
     const findingItems = Array.isArray(findings) ? findings : [];
+    const runIds = runs.map(run => String(run.id || '')).filter(Boolean);
+    const findingRunIds = new Set(findingItems.map(finding => String(finding.run_id || '')).filter(Boolean));
     const redactionMode = normalizedPreset === 'redacted' ? 'redacted' : 'raw';
     const includeArtifacts = normalizedPreset !== 'summary' && redactionMode !== 'redacted';
     const selectedFindings = findingItems.filter(finding => (
       normalizedPreset === 'full' || String(finding.review_state || 'new') !== 'false_positive'
     ));
+    const selectedTranscriptRunIds = normalizedPreset === 'summary'
+      ? []
+      : runIds.filter(runId => findingRunIds.has(runId));
     return {
       preset: normalizedPreset,
       step: 1,
@@ -1113,7 +1118,8 @@
       name: '',
       description: '',
       selection: {
-        runIds: new Set(runs.map(run => String(run.id || '')).filter(Boolean)),
+        runIds: new Set(runIds),
+        transcriptRunIds: new Set(selectedTranscriptRunIds),
         findingIds: new Set(selectedFindings.map(finding => String(finding.id || '')).filter(Boolean)),
         artifactIds: new Set(includeArtifacts ? artifacts.map(artifact => String(artifact.id || '')).filter(Boolean) : []),
         targetIds: new Set(targets.map(target => String(target.id || '')).filter(Boolean)),
@@ -1175,6 +1181,7 @@
     const includeArtifacts = redactionMode === 'redacted'
       ? false
       : Boolean(pkg?.include_artifacts ?? options.raw_artifacts);
+    const selectedRunIds = _projectPackageManifestIds(manifest, 'run_ids', _projectRunItems(summary));
     projectPackageWizard = {
       projectId: String(projectId || ''),
       preset,
@@ -1185,7 +1192,12 @@
       name: String(pkg?.name || _projectPackageSuggestedName(_selectedProject(), preset)),
       description: String(pkg?.description || ''),
       selection: {
-        runIds: _projectPackageManifestIds(manifest, 'run_ids', _projectRunItems(summary)),
+        runIds: selectedRunIds,
+        transcriptRunIds: _projectPackageManifestIds(
+          manifest,
+          'transcript_run_ids',
+          [...selectedRunIds].map(id => ({ id })),
+        ),
         findingIds: _projectPackageManifestIds(manifest, 'finding_ids', _projectFindingItems(projectId)),
         artifactIds: _projectPackageManifestIds(manifest, 'artifact_ids', _projectArtifactItems(summary)),
         targetIds: _projectPackageManifestIds(manifest, 'target_ids', _projectTargetItems(summary)),
@@ -1242,12 +1254,47 @@
     return wrap;
   }
 
-  function _packageSelectionCheckbox({ kind, id, label, detail = '', checked = true }) {
+  function _projectPackageManifest(pkg) {
+    return pkg && typeof pkg.manifest === 'object' && pkg.manifest ? pkg.manifest : {};
+  }
+
+  function _projectPackageCountsText(pkg) {
+    const counts = _projectPackageManifest(pkg).counts || {};
+    const parts = [
+      ['run', counts.runs],
+      ['finding', counts.findings],
+      ['artifact', counts.artifacts],
+      ['target', counts.targets],
+    ].map(([label, value]) => {
+      const count = Math.max(0, Number(value || 0));
+      return `${count} ${label}${count === 1 ? '' : 's'}`;
+    });
+    return parts.join(' · ');
+  }
+
+  function _projectPackageMetaText(pkg) {
+    const manifest = _projectPackageManifest(pkg);
+    const parts = [];
+    const preset = String(manifest.preset || 'custom').trim();
+    const redaction = String(pkg?.redaction_mode || manifest.redaction_mode || 'raw').trim();
+    if (preset) parts.push(preset);
+    if (redaction) parts.push(redaction);
+    const estimate = manifest.estimated_archive && typeof manifest.estimated_archive === 'object'
+      ? Number(manifest.estimated_archive.estimated_uncompressed_bytes || 0)
+      : 0;
+    if (estimate > 0) parts.push(`~${_formatProjectBytes(estimate)}`);
+    parts.push(pkg?.include_artifacts ? 'includes artifacts' : 'metadata only');
+    return parts.join(' · ');
+  }
+
+  function _packageSelectionCheckbox({ kind, id, label, detail = '', checked = true, disabled = false }) {
     const row = document.createElement('label');
     row.className = 'project-package-selection-row';
+    if (disabled) row.classList.add('is-disabled');
     const input = document.createElement('input');
     input.type = 'checkbox';
     input.checked = checked;
+    input.disabled = disabled;
     input.dataset.projectPackageSelection = kind;
     input.value = String(id || '');
     const text = document.createElement('span');
@@ -1264,15 +1311,101 @@
     return row;
   }
 
+  function _renderPackageRunSelections(section, runs) {
+    const selectedRuns = _packageWizardSetFor('run');
+    const selectedTranscripts = _packageWizardSetFor('transcript');
+    runs.forEach((run) => {
+      const runId = String(run.id || '');
+      const runSelected = selectedRuns.has(runId);
+      section.appendChild(_packageSelectionCheckbox({
+        kind: 'run',
+        id: runId,
+        label: run.command || run.id,
+        detail: _formatProjectDate(run.started),
+        checked: runSelected,
+      }));
+      section.appendChild(_packageSelectionCheckbox({
+        kind: 'transcript',
+        id: runId,
+        label: 'Include transcript',
+        detail: run.command || run.id,
+        checked: runSelected && selectedTranscripts.has(runId),
+        disabled: !runSelected,
+      }));
+    });
+  }
+
   function _packageWizardSetFor(kind) {
     if (!projectPackageWizard) return new Set();
     const map = {
       run: projectPackageWizard.selection.runIds,
+      transcript: projectPackageWizard.selection.transcriptRunIds,
       finding: projectPackageWizard.selection.findingIds,
       artifact: projectPackageWizard.selection.artifactIds,
       target: projectPackageWizard.selection.targetIds,
     };
     return map[kind] || new Set();
+  }
+
+  function _packageWizardCurrentIds(kind, projectId, summary) {
+    const items = {
+      run: _projectRunItems(summary),
+      transcript: _projectRunItems(summary),
+      finding: _projectFindingItems(projectId),
+      artifact: _projectArtifactItems(summary),
+      target: _projectTargetItems(summary),
+    }[kind] || [];
+    return new Set(items.map(item => String(item && item.id || '')).filter(Boolean));
+  }
+
+  function _packageWizardMissingIds(kind, projectId, summary) {
+    const current = _packageWizardCurrentIds(kind, projectId, summary);
+    return Array.from(_packageWizardSetFor(kind)).filter(id => !current.has(String(id || '')));
+  }
+
+  function _packageWizardSkippedPreview(projectId, summary) {
+    const items = [];
+    [
+      ['run', 'Run'],
+      ['finding', 'Finding'],
+      ['target', 'Target'],
+    ].forEach(([kind, label]) => {
+      _packageWizardMissingIds(kind, projectId, summary).forEach((id) => {
+        items.push({ kind, id, label: `${label} ${_shortProjectRunId(id) || id}`, reason: 'No longer linked to this project.' });
+      });
+    });
+    _packageWizardMissingIds('transcript', projectId, summary).forEach((id) => {
+      items.push({ kind: 'transcript', id, label: `Transcript ${_shortProjectRunId(id) || id}`, reason: 'Source run is no longer linked to this project.' });
+    });
+    if (projectPackageWizard?.includeArtifacts) {
+      _projectArtifactItems(summary)
+        .filter(artifact => projectPackageWizard.selection.artifactIds.has(String(artifact.id || '')))
+        .filter(artifact => _projectArtifactStatus(artifact) !== 'available')
+        .forEach((artifact) => {
+          items.push({
+            kind: 'artifact',
+            id: String(artifact.id || ''),
+            label: artifact.display_name || artifact.workspace_path || artifact.id,
+            reason: artifact.file_status_detail || 'Artifact is missing or changed and will be skipped.',
+          });
+        });
+      _packageWizardMissingIds('artifact', projectId, summary).forEach((id) => {
+        items.push({ kind: 'artifact', id, label: `Artifact ${_shortProjectRunId(id) || id}`, reason: 'No longer linked to this project.' });
+      });
+    }
+    return items;
+  }
+
+  function _renderMissingPackageSelection(section, kind, projectId, summary) {
+    _packageWizardMissingIds(kind, projectId, summary).forEach((id) => {
+      section.appendChild(_packageSelectionCheckbox({
+        kind,
+        id,
+        label: `Unavailable ${kind}`,
+        detail: `${id} is no longer linked to this project. Uncheck it before creating the package.`,
+        checked: true,
+      }));
+    });
   }
 
   function _renderPackageWizardStepHeader(wrap) {
@@ -1333,8 +1466,13 @@
       const heading = document.createElement('h3');
       heading.textContent = `${title} (${items.length})`;
       section.appendChild(heading);
-      if (!items.length) {
+      const missingIds = _packageWizardMissingIds(kind, projectId, summary);
+      if (!items.length && !missingIds.length) {
         section.appendChild(_emptyProjectPanel(`No ${title.toLowerCase()} available.`));
+      } else if (kind === 'run') {
+        _renderPackageRunSelections(section, items);
+        _renderMissingPackageSelection(section, 'run', projectId, summary);
+        _renderMissingPackageSelection(section, 'transcript', projectId, summary);
       } else {
         const selected = _packageWizardSetFor(kind);
         items.forEach((item) => {
@@ -1346,6 +1484,7 @@
             checked: selected.has(String(item.id || '')),
           }));
         });
+        _renderMissingPackageSelection(section, kind, projectId, summary);
       }
       wrap.appendChild(section);
     });
@@ -1422,6 +1561,8 @@
   }
 
   function _packageWizardManifestPreview(projectId, summary) {
+    const estimate = _packageWizardEstimate(summary);
+    const skippedPreview = _packageWizardSkippedPreview(projectId, summary);
     return {
       package_format_version: 1,
       preset: projectPackageWizard.preset,
@@ -1429,7 +1570,7 @@
         manifest_json: true,
         raw_artifacts: !!projectPackageWizard.includeArtifacts,
         index_html: true,
-        transcripts_html: true,
+        transcripts_html: projectPackageWizard.selection.transcriptRunIds.size > 0,
       },
       redaction_mode: projectPackageWizard.redactionMode || 'raw',
       include_private_annotations: !!projectPackageWizard.includePrivateAnnotations,
@@ -1441,10 +1582,14 @@
       },
       selected_entity_ids: {
         run_ids: Array.from(projectPackageWizard.selection.runIds),
+        transcript_run_ids: Array.from(projectPackageWizard.selection.transcriptRunIds)
+          .filter(runId => projectPackageWizard.selection.runIds.has(String(runId || ''))),
         finding_ids: Array.from(projectPackageWizard.selection.findingIds),
         artifact_ids: Array.from(projectPackageWizard.selection.artifactIds),
         target_ids: Array.from(projectPackageWizard.selection.targetIds),
       },
+      estimated_archive: estimate,
+      skipped_preview: skippedPreview,
       project: {
         id: projectId,
         name: summary?.project?.name || '',
@@ -1452,10 +1597,83 @@
     };
   }
 
+  function _packageWizardEstimate(summary) {
+    const selectedRuns = _projectRunItems(summary)
+      .filter(run => projectPackageWizard.selection.runIds.has(String(run.id || '')));
+    const selectedTranscriptRuns = selectedRuns
+      .filter(run => projectPackageWizard.selection.transcriptRunIds.has(String(run.id || '')));
+    const selectedArtifacts = _projectArtifactItems(summary)
+      .filter(artifact => projectPackageWizard.selection.artifactIds.has(String(artifact.id || '')));
+    const selectedFindings = _projectFindingItems(projectPackageWizard.projectId)
+      .filter(finding => projectPackageWizard.selection.findingIds.has(String(finding.id || '')));
+    const selectedTargets = _projectTargetItems(summary)
+      .filter(target => projectPackageWizard.selection.targetIds.has(String(target.id || '')));
+    const rawArtifactBytes = projectPackageWizard.includeArtifacts
+      ? selectedArtifacts
+        .filter(artifact => _projectArtifactStatus(artifact) === 'available')
+        .reduce((total, artifact) => total + Math.max(0, Number(artifact.byte_size || 0)), 0)
+      : 0;
+    const skippedArtifactCountEstimate = projectPackageWizard.includeArtifacts
+      ? selectedArtifacts.filter(artifact => _projectArtifactStatus(artifact) !== 'available').length
+      : 0;
+    const transcriptHtmlBytes = selectedTranscriptRuns.reduce((total, run) => (
+      total + 4096 + Math.max(0, Number(run.output_line_count || 0)) * 120
+    ), 0);
+    const metadataBytes = Math.max(
+      16 * 1024,
+      JSON.stringify({
+        runs: selectedRuns.length,
+        findings: selectedFindings.length,
+        artifacts: selectedArtifacts.length,
+        targets: selectedTargets.length,
+      }).length + 16 * 1024,
+    );
+    const estimatedUncompressedBytes = rawArtifactBytes + transcriptHtmlBytes + metadataBytes;
+    return {
+      estimated_uncompressed_bytes: estimatedUncompressedBytes,
+      estimated_archive_bytes: estimatedUncompressedBytes,
+      raw_artifact_bytes: rawArtifactBytes,
+      transcript_html_bytes: transcriptHtmlBytes,
+      metadata_bytes: metadataBytes,
+      selected_run_count: selectedRuns.length,
+      selected_transcript_count: selectedTranscriptRuns.length,
+      selected_artifact_count: selectedArtifacts.length,
+      skipped_artifact_count_estimate: skippedArtifactCountEstimate,
+      note: 'Pre-build estimate before ZIP compression; final download enforces archive caps and drift checks.',
+    };
+  }
+
   function _renderPackageWizardPreview(wrap, projectId, summary) {
+    const preview = _packageWizardManifestPreview(projectId, summary);
+    const estimate = preview.estimated_archive || {};
+    const note = document.createElement('p');
+    note.className = 'project-package-wizard-note';
+    note.textContent = `Estimated package size before compression: ${_formatProjectBytes(estimate.estimated_uncompressed_bytes || 0)}.`;
+    wrap.appendChild(note);
+    if (Number(estimate.skipped_artifact_count_estimate || 0) > 0) {
+      const skipped = document.createElement('p');
+      skipped.className = 'project-package-wizard-note';
+      skipped.textContent = `${estimate.skipped_artifact_count_estimate} selected artifact(s) are currently unavailable or changed and may be skipped.`;
+      wrap.appendChild(skipped);
+    }
+    if (Array.isArray(preview.skipped_preview) && preview.skipped_preview.length) {
+      const skippedWrap = document.createElement('div');
+      skippedWrap.className = 'project-package-preview-skipped';
+      const heading = document.createElement('h3');
+      heading.textContent = 'Items needing attention';
+      skippedWrap.appendChild(heading);
+      const list = document.createElement('ul');
+      preview.skipped_preview.forEach((item) => {
+        const row = document.createElement('li');
+        row.textContent = `${item.label || item.id}: ${item.reason || 'May be skipped.'}`;
+        list.appendChild(row);
+      });
+      skippedWrap.appendChild(list);
+      wrap.appendChild(skippedWrap);
+    }
     const pre = document.createElement('pre');
     pre.className = 'project-package-manifest-json project-package-preview-json nice-scroll';
-    pre.textContent = JSON.stringify(_packageWizardManifestPreview(projectId, summary), null, 2);
+    pre.textContent = JSON.stringify(preview, null, 2);
     wrap.appendChild(pre);
   }
 
@@ -1497,10 +1715,12 @@
       options: {
         manifest_json: true,
         index_html: true,
-        transcripts_html: true,
+        transcripts_html: projectPackageWizard.selection.transcriptRunIds.size > 0,
       },
       selection: {
         run_ids: Array.from(projectPackageWizard.selection.runIds),
+        transcript_run_ids: Array.from(projectPackageWizard.selection.transcriptRunIds)
+          .filter(runId => projectPackageWizard.selection.runIds.has(String(runId || ''))),
         finding_ids: Array.from(projectPackageWizard.selection.findingIds),
         artifact_ids: Array.from(projectPackageWizard.selection.artifactIds),
         target_ids: Array.from(projectPackageWizard.selection.targetIds),
@@ -1514,6 +1734,18 @@
     if (!payload.name) {
       _setProjectWorkspaceMessage('Package name is required.', { error: true });
       projectPackageWizard.step = 3;
+      _renderProjectExplorer();
+      return;
+    }
+    const summary = _projectSummary(projectId);
+    const missingSelections = _packageWizardSkippedPreview(projectId, summary)
+      .filter(item => item.kind !== 'artifact' || String(item.reason || '').includes('No longer linked'));
+    if (missingSelections.length) {
+      _setProjectWorkspaceMessage(
+        'Remove unavailable selected items before creating this package.',
+        { error: true },
+      );
+      projectPackageWizard.step = 2;
       _renderProjectExplorer();
       return;
     }
@@ -2579,6 +2811,7 @@
     if (project.status !== 'archived') {
       actions.appendChild(_makeProjectButton('Archive', 'archive', String(project.id || '')));
     }
+    actions.appendChild(_makeProjectButton('Delete', 'delete', String(project.id || ''), 'destructive'));
     header.append(titleWrap, actions);
 
     const tabs = document.createElement('div');
@@ -2805,10 +3038,15 @@
       return;
     }
     packages.forEach((pkg) => {
+      const counts = _projectPackageCountsText(pkg);
+      const updated = _formatProjectDate(pkg.updated);
+      const detail = [pkg.description || '', counts, updated ? `Updated ${updated}` : '']
+        .filter(Boolean)
+        .join(' · ');
       container.appendChild(_projectItemRow({
         title: pkg.name,
-        meta: pkg.include_artifacts ? 'includes artifacts' : 'manifest only',
-        detail: pkg.description || `Updated ${_formatProjectDate(pkg.updated)}`,
+        meta: _projectPackageMetaText(pkg),
+        detail,
         badge: pkg.status || 'draft',
         accessory: _projectPackageAccessory(projectId, pkg),
       }));
@@ -3022,6 +3260,31 @@
     return false;
   }
 
+  async function _confirmProjectDelete(projectName) {
+    const label = String(projectName || 'this project');
+    const confirmFn = typeof showConfirm === 'function'
+      ? showConfirm
+      : (global && typeof global.showConfirm === 'function' ? global.showConfirm : null);
+    if (confirmFn) {
+      const choice = await confirmFn({
+        body: {
+          text: `Delete project: ${label}?`,
+          note: 'This removes the project, its targets, packages, and project links. Source runs and saved history remain.',
+        },
+        tone: 'danger',
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'delete', label: 'Delete', role: 'destructive' },
+        ],
+      });
+      return choice === 'delete';
+    }
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      return window.confirm(`Delete project: ${label}?`);
+    }
+    return false;
+  }
+
   projectWorkspaceCreateForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const name = String(projectWorkspaceNameInput?.value || '').trim();
@@ -3143,10 +3406,16 @@
     const packageSelection = event.target.closest?.('[data-project-package-selection]');
     if (packageSelection && projectPackageWizard) {
       event.stopPropagation();
-      const selected = _packageWizardSetFor(String(packageSelection.dataset.projectPackageSelection || ''));
+      const kind = String(packageSelection.dataset.projectPackageSelection || '');
+      const selected = _packageWizardSetFor(kind);
       const value = String(packageSelection.value || '');
       if (packageSelection.checked) selected.add(value);
       else selected.delete(value);
+      if (kind === 'run') {
+        const transcriptRuns = _packageWizardSetFor('transcript');
+        if (packageSelection.checked) transcriptRuns.add(value);
+        else transcriptRuns.delete(value);
+      }
       _renderProjectExplorer();
       return;
     }
@@ -3328,6 +3597,18 @@
           await _projectWorkspaceRequest('/projects/active', { method: 'DELETE' });
         }
         _setProjectWorkspaceMessage('Project archived.');
+      } else if (action === 'delete') {
+        const project = projectWorkspaceRows.find(item => String(item.id || '') === projectId) || null;
+        const confirmed = await _confirmProjectDelete(project ? _projectDisplayName(project) : projectId);
+        if (!confirmed) return;
+        await _projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' });
+        if (projectWorkspaceSelectedId === projectId) {
+          projectWorkspaceSelectedId = '';
+          _closeProjectTargetEditor();
+        }
+        await refreshProjectWorkspace();
+        _setProjectWorkspaceMessage('Project deleted.');
+        return;
       } else if (action === 'new-target') {
         _setProjectWorkspaceMessage('');
         _openProjectTargetEditor(projectId);

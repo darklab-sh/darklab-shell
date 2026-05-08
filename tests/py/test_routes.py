@@ -295,10 +295,45 @@ class TestProjectRoutes:
         )
         assert [item["id"] for item in archived_list["projects"]] == [project["id"]]
 
+        cleanup_target_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "domain", "value": "cleanup.darklab.sh"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert cleanup_target_resp.status_code == 201
+        cleanup_target = json.loads(cleanup_target_resp.data)["target"]
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO entity_labels "
+                "(id, session_id, entity_type, entity_id, label, created) "
+                "VALUES (?, ?, 'project', ?, 'delete-me', datetime('now'))",
+                ("lbl_project_delete_" + uuid.uuid4().hex, session_id, project["id"]),
+            )
+            conn.execute(
+                "INSERT INTO annotations "
+                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES (?, ?, 'target', ?, 'delete target note', datetime('now'), datetime('now'))",
+                ("ann_target_delete_" + uuid.uuid4().hex, session_id, cleanup_target["id"]),
+            )
+            conn.commit()
+
         delete_resp = client.delete(f"/projects/{project['id']}", headers={"X-Session-ID": session_id})
         assert delete_resp.status_code == 200
         missing_resp = client.get(f"/projects/{project['id']}", headers={"X-Session-ID": session_id})
         assert missing_resp.status_code == 404
+        with sqlite3.connect(DB_PATH) as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM project_targets WHERE project_id = ?",
+                (project["id"],),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM entity_labels WHERE entity_type = 'project' AND entity_id = ?",
+                (project["id"],),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM annotations WHERE entity_type = 'target' AND entity_id = ?",
+                (cleanup_target["id"],),
+            ).fetchone()[0] == 0
 
     def test_projects_are_session_scoped_and_slugs_are_unique_per_session(self):
         client = get_client()
@@ -376,6 +411,11 @@ class TestProjectRoutes:
         archived_current, _ = execute_builtin_command("project current", cli_session)
         assert archived_current[0]["text"].startswith("No active project.")
 
+        delete_lines, _ = execute_builtin_command("project delete cli-case", cli_session)
+        assert "deleted CLI Case" in delete_lines[0]["text"]
+        deleted_list_lines, _ = execute_builtin_command("project list --all", cli_session)
+        assert "cli-case" not in "\n".join(line["text"] for line in deleted_list_lines)
+
     def test_active_project_rejects_cross_session_and_clears_stale_projects(self):
         client = get_client()
         session_id = self._session_id("project-active")
@@ -435,8 +475,11 @@ class TestProjectRoutes:
                     run_id,
                     session_id,
                     "nmap darklab.sh",
-                    json.dumps([{"text": "443/tcp open https", "cls": "", "line_index": 0}]),
-                    1,
+                    json.dumps([
+                        {"text": "443/tcp open https", "cls": "", "line_index": 0},
+                        {"text": "scan completed", "cls": "", "line_index": 1},
+                    ]),
+                    2,
                 ),
             )
             conn.execute(
@@ -721,6 +764,11 @@ class TestProjectRoutes:
         assert package["manifest"]["redaction_mode"] == "raw"
         assert package["manifest"]["options"]["index_html"] is True
         assert package["manifest"]["options"]["transcripts_html"] is True
+        assert package["manifest"]["selected_entity_ids"]["transcript_run_ids"] == [run_id]
+        assert package["manifest"]["estimated_archive"]["estimated_uncompressed_bytes"] > 0
+        assert package["manifest"]["estimated_archive"]["raw_artifact_bytes"] == 0
+        assert package["manifest"]["estimated_archive"]["skipped_artifact_count_estimate"] == 2
+        assert package["manifest"]["estimated_archive"]["selected_transcript_count"] == 1
 
         packages = json.loads(client.get(
             f"/projects/{project['id']}/packages",
@@ -732,7 +780,7 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         ).data)
         assert package_get["package"]["name"] == "Draft Evidence"
-        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}):
+        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": True, "max_output_lines": 1}):
             package_download = client.get(
                 f"/projects/{project['id']}/packages/{package['id']}/download",
                 headers={"X-Session-ID": session_id},
@@ -742,16 +790,21 @@ class TestProjectRoutes:
         with zipfile.ZipFile(io.BytesIO(package_download.data)) as archive:
             names = set(archive.namelist())
             assert "manifest.json" in names
+            assert "assets/package.css" in names
             assert "index.html" in names
             assert "README.md" in names
             assert "findings/findings.json" in names
             assert "findings/findings.md" in names
             assert "targets/targets.json" in names
+            assert "targets/targets.md" in names
             assert "metadata/labels.json" in names
             assert "notes/annotations.json" in names
+            assert "notes/annotations.md" in names
+            assert "notes/project.md" in names
             assert f"runs/{run_id}.html" in names
+            assert f"runs/{run_id}.txt" in names
             assert f"runs/{baseline_run_id}.html" not in names
-            assert "artifacts/reports/run.txt" in names
+            assert "artifacts/reports/run.txt" not in names
             assert "artifacts/reports/old.txt" not in names
             assert "skipped-artifacts.json" in names
             assert "skipped-items.json" in names
@@ -759,11 +812,15 @@ class TestProjectRoutes:
             findings_json = json.loads(archive.read("findings/findings.json"))
             findings_md = archive.read("findings/findings.md").decode("utf-8")
             targets_json = json.loads(archive.read("targets/targets.json"))
+            targets_md = archive.read("targets/targets.md").decode("utf-8")
             labels_json = json.loads(archive.read("metadata/labels.json"))
             annotations_json = json.loads(archive.read("notes/annotations.json"))
+            annotations_md = archive.read("notes/annotations.md").decode("utf-8")
+            project_notes_md = archive.read("notes/project.md").decode("utf-8")
             index_html = archive.read("index.html").decode("utf-8")
             readme = archive.read("README.md").decode("utf-8")
             run_html = archive.read(f"runs/{run_id}.html").decode("utf-8")
+            run_text = archive.read(f"runs/{run_id}.txt").decode("utf-8")
             skipped_items = json.loads(archive.read("skipped-items.json"))
         assert downloaded_manifest["package"]["id"] == package["id"]
         assert downloaded_manifest["manifest"]["counts"]["runs"] == 1
@@ -778,6 +835,9 @@ class TestProjectRoutes:
         assert targets_json["targets"][0]["finding_ids"] == [f"fnd_{run_id}"]
         assert targets_json["targets"][0]["run_ids"] == [run_id]
         assert targets_json["targets"][0]["labels"][0]["label"] == "production"
+        assert "# Targets" in targets_md
+        assert "darklab.sh" in targets_md
+        assert "Related Findings" in targets_md
         assert labels_json["count"] == 3
         assert {item["label"] for item in labels_json["labels"]} == {"baseline", "important", "production"}
         assert annotations_json["include_private_annotations"] is True
@@ -786,6 +846,10 @@ class TestProjectRoutes:
             "Confirmed service owner",
             "needs retest",
         }
+        assert "# Annotations" in annotations_md
+        assert "needs retest" in annotations_md
+        assert "# External Review Notes" in project_notes_md
+        assert "Package notes for the external handoff." in project_notes_md
         assert findings_json["findings"][0]["labels"][0]["label"] == "important"
         assert findings_json["findings"][0]["annotations"][0]["body"] == "needs retest"
         assert "Draft Evidence" in index_html
@@ -794,11 +858,14 @@ class TestProjectRoutes:
         assert 'data-sort-table="findings"' in index_html
         assert "important" in index_html
         assert "needs retest" in index_html
-        assert "artifacts/reports/run.txt" in index_html
+        assert "run.txt" in index_html
         assert "Package Exports" in index_html
         assert "findings/findings.json" in index_html
         assert "targets/targets.json" in index_html
+        assert "targets/targets.md" in index_html
         assert "metadata/labels.json" in index_html
+        assert "notes/annotations.md" in index_html
+        assert "notes/project.md" in index_html
         assert "Skipped Items" in index_html
         assert "reports/old.txt" in index_html
         assert "# Draft Evidence" in readme
@@ -808,12 +875,24 @@ class TestProjectRoutes:
         assert "needs retest" in readme
         assert "## Package Exports" in readme
         assert "notes/annotations.json" in readme
+        assert "targets/targets.md" in readme
+        assert "notes/annotations.md" in readme
+        assert "notes/project.md" in readme
+        assert f"runs/{run_id}.txt" in readme
         assert "## Skipped Items" in readme
         assert "reports/old.txt" in readme
         assert "nmap darklab.sh" in run_html
         assert "443/tcp open https" in run_html
+        assert "Download full text transcript" in run_html
+        assert "scan completed" in run_text
         assert skipped_items["items"][0]["kind"] == "artifact"
-        assert skipped_items["items"][0]["workspace_path"] == "reports/old.txt"
+        assert {item["kind"] for item in skipped_items["items"]} == {"artifact", "transcript"}
+        assert any(item.get("workspace_path") == "reports/old.txt" for item in skipped_items["items"])
+        assert any(
+            item.get("workspace_path") == "reports/run.txt"
+            and "checksum differs" in item.get("reason", "")
+            for item in skipped_items["items"]
+        )
         summary_after_package = json.loads(client.get(
             f"/projects/{project['id']}/summary",
             headers={"X-Session-ID": session_id},
@@ -995,13 +1074,17 @@ class TestProjectRoutes:
         with zipfile.ZipFile(io.BytesIO(package_download.data)) as archive:
             names = set(archive.namelist())
             assert "manifest.json" in names
+            assert "assets/package.css" in names
             assert "index.html" in names
             assert "README.md" in names
             assert "findings/findings.json" in names
             assert "findings/findings.md" in names
             assert "targets/targets.json" in names
+            assert "targets/targets.md" in names
             assert "metadata/labels.json" in names
             assert "notes/annotations.json" in names
+            assert "notes/annotations.md" in names
+            assert "notes/project.md" in names
             assert f"runs/{run_id}.html" in names
             assert not any(name.startswith("artifacts/") for name in names)
             package_text = "\n".join(
@@ -1013,8 +1096,11 @@ class TestProjectRoutes:
                     "findings/findings.json",
                     "findings/findings.md",
                     "targets/targets.json",
+                    "targets/targets.md",
                     "metadata/labels.json",
                     "notes/annotations.json",
+                    "notes/annotations.md",
+                    "notes/project.md",
                     f"runs/{run_id}.html",
                 )
             )
