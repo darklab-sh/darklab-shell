@@ -20,12 +20,12 @@ Workspace file behavior is intentionally split across all three layers: pytest o
 
 Current totals:
 
-- behavior tests: 2,525
+- behavior tests: 2,526
 - docs/inventory meta-tests: 30
-- `pytest`: 1273 (1243 behavior + 30 meta)
+- `pytest`: 1274 (1244 behavior + 30 meta)
 - `vitest`: 1042
 - `playwright`: 240
-- total: 2,555
+- total: 2,556
 
 This document is organized in two parts:
 
@@ -925,6 +925,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestProjectRoutes.test_sets_gets_and_clears_active_project` | Verifies active project context can be saved, read, and cleared for the current session. |
 | `TestProjectRoutes.test_active_project_rejects_cross_session_and_clears_stale_projects` | Verifies active project context rejects cross-session projects and clears archived or deleted projects. |
 | `TestProjectRoutes.test_links_run_and_unlinks_without_duplicate_rows` | Verifies project run link creation is idempotent and links can be removed. |
+| `TestProjectRoutes.test_redacted_evidence_package_redacts_manifest_and_transcripts` | Verifies redacted evidence packages redact manifests, static pages, and run transcripts while excluding raw artifacts. |
 | `TestProjectRoutes.test_project_workspace_write_quotas_return_conflict` | Verifies project workspace quotas return conflict responses without blocking idempotent writes. |
 | `TestProjectRoutes.test_evidence_package_download_enforces_size_limit` | Verifies evidence package downloads refuse archives that exceed the configured size cap. |
 | `TestProjectRoutes.test_project_workflow_promotion_replaces_exact_target_tokens_only` | Verifies workflow promotion only templates standalone project target values. |

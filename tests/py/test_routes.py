@@ -663,7 +663,7 @@ class TestProjectRoutes:
             json={
                 "name": "Draft Evidence",
                 "description": "Initial package manifest",
-                "redaction_mode": "redacted",
+                "redaction_mode": "raw",
                 "include_artifacts": True,
                 "preset": "custom",
                 "include_private_annotations": True,
@@ -842,6 +842,104 @@ class TestProjectRoutes:
 
         unlink_file_lines, _ = execute_builtin_command("project unlink file reports/notes.txt", session_id)
         assert unlink_file_lines[0]["text"] == "project: no link found for workspace_file reports/notes.txt"
+
+    def test_redacted_evidence_package_redacts_manifest_and_transcripts(self):
+        client = get_client()
+        session_id = self._session_id("project-package-redacted")
+        project = self._create_project(client, session_id)
+        run_id = "run-" + uuid.uuid4().hex
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, ?, datetime('now'), ?, ?)",
+                (
+                    run_id,
+                    session_id,
+                    "curl https://secret.darklab.sh -H 'Authorization: Bearer abc123'",
+                    json.dumps([
+                        {"text": "Authorization: Bearer abc123", "cls": "", "line_index": 0},
+                        {
+                            "text": "https://secret.darklab.sh responded from 192.168.1.5",
+                            "cls": "",
+                            "line_index": 1,
+                        },
+                    ]),
+                    2,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+                "VALUES (?, ?, 'run', ?, 'manual', datetime('now'))",
+                ("pln_" + uuid.uuid4().hex[:16], project["id"], run_id),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "VALUES (?, ?, ?, 'finding', 'token leak', ?, 0, ?, datetime('now'))",
+                (
+                    f"fnd_{run_id}",
+                    session_id,
+                    run_id,
+                    "Authorization: Bearer abc123 from secret.darklab.sh",
+                    f"fp-{run_id}",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "VALUES (?, ?, ?, 'reports/secrets.txt', 'secrets.txt', 'output', 12, 'workspace_flag', datetime('now'))",
+                (f"rfa_{run_id}", session_id, run_id),
+            )
+            conn.commit()
+
+        package_resp = client.post(
+            f"/projects/{project['id']}/packages",
+            json={
+                "name": "Redacted Evidence",
+                "redaction_mode": "redacted",
+                "include_artifacts": True,
+                "selection": {
+                    "run_ids": [run_id],
+                    "finding_ids": [f"fnd_{run_id}"],
+                    "artifact_ids": [f"rfa_{run_id}"],
+                    "target_ids": [],
+                },
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        assert package_resp.status_code == 201
+        package = json.loads(package_resp.data)["package"]
+        assert package["redaction_mode"] == "redacted"
+        assert package["include_artifacts"] is False
+        assert package["manifest"]["redaction_mode"] == "redacted"
+        assert package["manifest"]["include_artifacts"] is False
+        assert package["manifest"]["options"]["raw_artifacts"] is False
+        assert "Bearer abc123" not in json.dumps(package)
+        assert "secret.darklab.sh" not in json.dumps(package)
+        assert "192.168.1.5" not in json.dumps(package)
+
+        package_download = client.get(
+            f"/projects/{project['id']}/packages/{package['id']}/download",
+            headers={"X-Session-ID": session_id},
+        )
+        assert package_download.status_code == 200
+        with zipfile.ZipFile(io.BytesIO(package_download.data)) as archive:
+            names = set(archive.namelist())
+            assert "manifest.json" in names
+            assert "index.html" in names
+            assert "README.md" in names
+            assert f"runs/{run_id}.html" in names
+            assert not any(name.startswith("artifacts/") for name in names)
+            package_text = "\n".join(
+                archive.read(name).decode("utf-8")
+                for name in ("manifest.json", "index.html", "README.md", f"runs/{run_id}.html")
+            )
+        assert "Bearer abc123" not in package_text
+        assert "secret.darklab.sh" not in package_text
+        assert "192.168.1.5" not in package_text
+        assert "Bearer [redacted]" in package_text
+        assert "[host-redacted]" in package_text
+        assert "[ip-redacted]" in package_text
 
     def test_project_workspace_write_quotas_return_conflict(self):
         client = get_client()

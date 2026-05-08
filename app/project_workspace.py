@@ -20,12 +20,14 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from urllib.parse import urlparse
 
+import config as _config
 from database import (
     db_connect,
     validate_project_entity_type,
     validate_project_link_source,
 )
 from permalinks import _format_duration, _normalize_permalink_lines
+from redaction import apply_redaction_rules, redact_line_entries
 from run_output_store import load_full_output_entries
 from workspace import WorkspaceError, open_workspace_file_for_download, resolve_workspace_path
 
@@ -510,11 +512,17 @@ def _normalize_evidence_package_payload(data):
     options = data.get("options")
     if options is not None and not isinstance(options, dict):
         raise ProjectWorkspaceError("package options must be an object")
+    redaction_mode = _trim_text(data.get("redaction_mode"), 32).lower() or "raw"
+    if redaction_mode not in {"raw", "redacted"}:
+        raise ProjectWorkspaceError("package redaction mode must be raw or redacted")
+    include_artifacts = bool(data.get("include_artifacts"))
+    if redaction_mode == "redacted":
+        include_artifacts = False
     return {
         "name": name,
         "description": _trim_text(data.get("description"), MAX_PACKAGE_DESCRIPTION_LEN),
-        "redaction_mode": "raw",
-        "include_artifacts": bool(data.get("include_artifacts")),
+        "redaction_mode": redaction_mode,
+        "include_artifacts": include_artifacts,
         "preset": _trim_text(data.get("preset"), 32).lower() or "custom",
         "package_format_version": 1,
         "include_private_annotations": bool(data.get("include_private_annotations")),
@@ -672,6 +680,36 @@ def _package_markdown_link(label, href):
     safe_label = _package_markdown_text(label) or "link"
     safe_href = str(href or "").replace(")", "%29").replace(" ", "%20")
     return f"[{safe_label}]({safe_href})" if safe_href else safe_label
+
+
+def _redact_package_value(value, rules):
+    if isinstance(value, str):
+        return apply_redaction_rules(value, rules)
+    if isinstance(value, list):
+        return [_redact_package_value(item, rules) for item in value]
+    if isinstance(value, dict):
+        return {key: _redact_package_value(item, rules) for key, item in value.items()}
+    return value
+
+
+def _package_redaction_rules(redaction_mode, *, cfg=None):
+    if redaction_mode != "redacted":
+        return []
+    return _config.get_share_redaction_rules(cfg)
+
+
+def _redact_package_manifest(manifest, rules):
+    if not rules:
+        return dict(manifest or {})
+    redacted = _redact_package_value(manifest or {}, rules)
+    return redacted if isinstance(redacted, dict) else {}
+
+
+def _redact_package_run(run, rules):
+    if not rules:
+        return dict(run or {})
+    redacted = _redact_package_value(run or {}, rules)
+    return redacted if isinstance(redacted, dict) else {}
 
 
 def _package_output_entry(item):
@@ -854,12 +892,17 @@ def _package_page(title, body):
     )
 
 
-def _render_package_run_html(run, entries, manifest, generated_at):
+def _render_package_run_html(run, entries, manifest, generated_at, *, redaction_rules=None):
+    entries = redact_line_entries(entries, redaction_rules) if redaction_rules else entries
+    run = _redact_package_run(run, redaction_rules)
     command = str(run.get("command") or "")
     started = str(run.get("started") or "")
     finished = str(run.get("finished") or "")
     duration = _format_duration(started, finished)
-    line_count = int(run.get("output_line_count") or len(entries))
+    output_line_count = run.get("output_line_count")
+    line_count = output_line_count if isinstance(output_line_count, int) else len(entries)
+    if isinstance(output_line_count, str) and output_line_count.isdecimal():
+        line_count = int(output_line_count)
     normalized = _normalize_permalink_lines(entries, command)
     rendered_lines = []
     for index, entry in enumerate(normalized, start=1):
@@ -1551,20 +1594,27 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
         return None
     generated_at = _now()
     manifest = dict(package.get("manifest") or {})
+    redaction_rules = _package_redaction_rules(package.get("redaction_mode"), cfg=cfg)
+    render_manifest = _redact_package_manifest(manifest, redaction_rules)
+    render_package = {
+        **package,
+        "name": apply_redaction_rules(package["name"], redaction_rules),
+        "description": apply_redaction_rules(package["description"], redaction_rules),
+    }
     export_manifest = {
         "format": 1,
         "generated_at": generated_at,
         "package": {
             "id": package["id"],
-            "name": package["name"],
-            "description": package["description"],
+            "name": render_package["name"],
+            "description": render_package["description"],
             "redaction_mode": package["redaction_mode"],
             "include_artifacts": package["include_artifacts"],
             "status": package["status"],
             "created": package["created"],
             "updated": package["updated"],
         },
-        "manifest": manifest,
+        "manifest": render_manifest,
     }
     manifest_bytes = json.dumps(export_manifest, indent=2, sort_keys=True).encode("utf-8") + b"\n"
     max_archive_bytes = _cfg_mb_bytes("evidence_package_max_mb", 25, cfg=cfg)
@@ -1663,7 +1713,13 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                             "reason": str(entry.get("text") or "").strip("[]"),
                         })
                         break
-                run_page = _render_package_run_html(run, entries, manifest, generated_at)
+                run_page = _render_package_run_html(
+                    run,
+                    entries,
+                    render_manifest,
+                    generated_at,
+                    redaction_rules=redaction_rules,
+                )
                 run_page_bytes = run_page.encode("utf-8")
                 projected_bytes += len(run_page_bytes)
                 if max_archive_bytes and projected_bytes > max_archive_bytes:
@@ -1673,8 +1729,8 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 archive.writestr(run_path, run_page_bytes)
 
             index_page = _render_package_index_html(
-                package,
-                manifest,
+                render_package,
+                render_manifest,
                 generated_at,
                 run_pages,
                 artifact_archive_paths,
@@ -1686,8 +1742,8 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
             archive.writestr("index.html", index_bytes)
             readme = _render_package_readme(
-                package,
-                manifest,
+                render_package,
+                render_manifest,
                 generated_at,
                 run_pages,
                 artifact_archive_paths,
@@ -1713,7 +1769,7 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
             pass
         raise
     return {
-        "filename": _package_archive_name(package),
+        "filename": _package_archive_name(render_package),
         "mimetype": "application/zip",
         "path": archive_path,
         "byte_size": os.path.getsize(archive_path),
@@ -1728,6 +1784,11 @@ def create_evidence_package(session_id, project_id, data):
         return None
     findings = list_project_findings(session_id, project_id) or []
     manifest = _evidence_manifest_from_summary(summary, payload, findings)
+    redaction_rules = _package_redaction_rules(payload["redaction_mode"])
+    if redaction_rules:
+        manifest = _redact_package_manifest(manifest, redaction_rules)
+        payload["name"] = apply_redaction_rules(payload["name"], redaction_rules)
+        payload["description"] = apply_redaction_rules(payload["description"], redaction_rules)
     created = _now()
     with db_connect() as conn:
         row = conn.execute(

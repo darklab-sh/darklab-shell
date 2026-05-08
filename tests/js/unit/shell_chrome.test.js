@@ -1297,6 +1297,7 @@ describe('shell chrome project workspace', () => {
     const packagePayload = JSON.parse(packageCreateCall[1].body)
     expect(packagePayload.name).toBe('Scoped evidence')
     expect(packagePayload.preset).toBe('evidence')
+    expect(packagePayload.redaction_mode).toBe('raw')
     expect(packagePayload.include_artifacts).toBe(true)
     expect(packagePayload.options.index_html).toBe(true)
     expect(packagePayload.options.transcripts_html).toBe(true)

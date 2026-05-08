@@ -1099,7 +1099,8 @@
     const artifacts = _projectArtifactItems(summary);
     const targets = _projectTargetItems(summary);
     const findingItems = Array.isArray(findings) ? findings : [];
-    const includeArtifacts = normalizedPreset !== 'summary';
+    const redactionMode = normalizedPreset === 'redacted' ? 'redacted' : 'raw';
+    const includeArtifacts = normalizedPreset !== 'summary' && redactionMode !== 'redacted';
     const selectedFindings = findingItems.filter(finding => (
       normalizedPreset === 'full' || String(finding.review_state || 'new') !== 'false_positive'
     ));
@@ -1107,6 +1108,7 @@
       preset: normalizedPreset,
       step: 1,
       includeArtifacts,
+      redactionMode,
       includePrivateAnnotations: false,
       name: '',
       description: '',
@@ -1244,6 +1246,7 @@
     const presets = [
       ['summary', 'Summary', 'Manifest only, no raw artifacts.'],
       ['evidence', 'Evidence', 'Findings, targets, runs, and selected artifacts.'],
+      ['redacted', 'Redacted Evidence', 'Findings, targets, and transcripts with share redaction applied.'],
       ['full', 'Full archive', 'Everything currently linked to the project.'],
       ['custom', 'Custom', 'Start from the evidence preset and tune selections.'],
     ];
@@ -1340,16 +1343,35 @@
     const artifactsInput = document.createElement('input');
     artifactsInput.type = 'checkbox';
     artifactsInput.checked = !!projectPackageWizard.includeArtifacts;
+    artifactsInput.disabled = projectPackageWizard.redactionMode === 'redacted';
     artifactsInput.dataset.projectPackageIncludeArtifacts = '1';
     const artifactsText = document.createElement('span');
     artifactsText.className = 'project-package-selection-text';
     const artifactsStrong = document.createElement('strong');
     artifactsStrong.textContent = 'Include selected raw artifacts';
     const artifactsSmall = document.createElement('small');
-    artifactsSmall.textContent = 'Output is manifest-only for now; HTML and redaction controls stay hidden.';
+    artifactsSmall.textContent = projectPackageWizard.redactionMode === 'redacted'
+      ? 'Redacted packages exclude raw artifacts because file contents are not sanitized yet.'
+      : 'Static HTML, Markdown, and selected raw artifacts are included in the archive.';
     artifactsText.append(artifactsStrong, artifactsSmall);
     artifactsLabel.append(artifactsInput, artifactsText);
-    form.append(nameLabel, descLabel, artifactsLabel);
+    const redactionLabel = document.createElement('label');
+    redactionLabel.textContent = 'Redaction';
+    const redactionSelect = document.createElement('select');
+    redactionSelect.className = 'form-control form-control-compact';
+    redactionSelect.dataset.projectPackageField = 'redaction_mode';
+    [
+      ['raw', 'Raw package'],
+      ['redacted', 'Redacted package'],
+    ].forEach(([value, label]) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      option.selected = projectPackageWizard.redactionMode === value;
+      redactionSelect.appendChild(option);
+    });
+    redactionLabel.appendChild(redactionSelect);
+    form.append(nameLabel, descLabel, redactionLabel, artifactsLabel);
     wrap.appendChild(form);
   }
 
@@ -1363,6 +1385,7 @@
         index_html: true,
         transcripts_html: true,
       },
+      redaction_mode: projectPackageWizard.redactionMode || 'raw',
       include_private_annotations: !!projectPackageWizard.includePrivateAnnotations,
       counts: {
         runs: projectPackageWizard.selection.runIds.size,
@@ -1422,6 +1445,7 @@
       name: String(projectPackageWizard.name || '').trim(),
       description: String(projectPackageWizard.description || '').trim(),
       preset: String(projectPackageWizard.preset || 'custom'),
+      redaction_mode: String(projectPackageWizard.redactionMode || 'raw'),
       include_artifacts: !!projectPackageWizard.includeArtifacts,
       include_private_annotations: !!projectPackageWizard.includePrivateAnnotations,
       options: {
@@ -3045,6 +3069,12 @@
     const field = String(packageField.dataset.projectPackageField || '');
     if (field === 'name') projectPackageWizard.name = String(packageField.value || '');
     if (field === 'description') projectPackageWizard.description = String(packageField.value || '');
+    if (field === 'redaction_mode') {
+      const mode = String(packageField.value || 'raw') === 'redacted' ? 'redacted' : 'raw';
+      projectPackageWizard.redactionMode = mode;
+      if (mode === 'redacted') projectPackageWizard.includeArtifacts = false;
+      _renderProjectExplorer();
+    }
   });
 
   projectNotesForm?.addEventListener('submit', (event) => {
