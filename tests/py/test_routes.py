@@ -735,6 +735,8 @@ class TestProjectRoutes:
             assert "findings/findings.json" in names
             assert "findings/findings.md" in names
             assert "targets/targets.json" in names
+            assert "metadata/labels.json" in names
+            assert "notes/annotations.json" in names
             assert f"runs/{run_id}.html" in names
             assert f"runs/{baseline_run_id}.html" not in names
             assert "artifacts/reports/run.txt" in names
@@ -745,6 +747,8 @@ class TestProjectRoutes:
             findings_json = json.loads(archive.read("findings/findings.json"))
             findings_md = archive.read("findings/findings.md").decode("utf-8")
             targets_json = json.loads(archive.read("targets/targets.json"))
+            labels_json = json.loads(archive.read("metadata/labels.json"))
+            annotations_json = json.loads(archive.read("notes/annotations.json"))
             index_html = archive.read("index.html").decode("utf-8")
             readme = archive.read("README.md").decode("utf-8")
             run_html = archive.read(f"runs/{run_id}.html").decode("utf-8")
@@ -761,6 +765,14 @@ class TestProjectRoutes:
         assert targets_json["targets"][0]["value"] == "darklab.sh"
         assert targets_json["targets"][0]["finding_ids"] == [f"fnd_{run_id}"]
         assert targets_json["targets"][0]["run_ids"] == [run_id]
+        assert labels_json["count"] == 2
+        assert {item["label"] for item in labels_json["labels"]} == {"baseline", "important"}
+        assert annotations_json["include_private_annotations"] is True
+        assert annotations_json["count"] == 2
+        assert {item["body"] for item in annotations_json["annotations"]} == {
+            "Confirmed service owner",
+            "needs retest",
+        }
         assert "Draft Evidence" in index_html
         assert "443/tcp open https" in index_html
         assert "artifacts/reports/run.txt" in index_html
@@ -959,6 +971,8 @@ class TestProjectRoutes:
             assert "findings/findings.json" in names
             assert "findings/findings.md" in names
             assert "targets/targets.json" in names
+            assert "metadata/labels.json" in names
+            assert "notes/annotations.json" in names
             assert f"runs/{run_id}.html" in names
             assert not any(name.startswith("artifacts/") for name in names)
             package_text = "\n".join(
@@ -970,6 +984,8 @@ class TestProjectRoutes:
                     "findings/findings.json",
                     "findings/findings.md",
                     "targets/targets.json",
+                    "metadata/labels.json",
+                    "notes/annotations.json",
                     f"runs/{run_id}.html",
                 )
             )

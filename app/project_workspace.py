@@ -1289,6 +1289,93 @@ def _package_targets_json_bytes(manifest, generated_at):
     return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
+def _package_metadata_targets(package, manifest):
+    targets = {"project": [str(package.get("project_id") or "")]}
+    selected = manifest.get("selected_entity_ids") if isinstance(manifest.get("selected_entity_ids"), dict) else {}
+    mapping = {
+        "run": "run_ids",
+        "finding": "finding_ids",
+        "run_file_artifact": "artifact_ids",
+    }
+    for entity_type, key in mapping.items():
+        raw_ids = selected.get(key)
+        if isinstance(raw_ids, list):
+            targets[entity_type] = [str(value or "") for value in raw_ids if str(value or "")]
+    return {
+        entity_type: sorted({entity_id for entity_id in entity_ids if entity_id})
+        for entity_type, entity_ids in targets.items()
+        if any(entity_ids)
+    }
+
+
+def _package_metadata_rows(conn, session_id, table, targets):
+    rows = []
+    for entity_type, entity_ids in targets.items():
+        if not entity_ids:
+            continue
+        placeholders = ",".join("?" for _ in entity_ids)
+        if table == "entity_labels":
+            rows.extend(conn.execute(
+                "SELECT id, entity_type, entity_id, label, source, created "
+                f"FROM entity_labels WHERE session_id = ? AND entity_type = ? "  # nosec B608
+                f"AND entity_id IN ({placeholders}) ORDER BY entity_type ASC, entity_id ASC, label ASC",
+                [session_id, entity_type, *entity_ids],
+            ).fetchall())
+        elif table == "annotations":
+            rows.extend(conn.execute(
+                "SELECT id, entity_type, entity_id, body, visibility, author_label, created, updated "
+                f"FROM annotations WHERE session_id = ? AND entity_type = ? "  # nosec B608
+                f"AND entity_id IN ({placeholders}) ORDER BY entity_type ASC, entity_id ASC, created ASC, id ASC",
+                [session_id, entity_type, *entity_ids],
+            ).fetchall())
+    return rows
+
+
+def _package_labels_json_bytes(labels, generated_at, redaction_rules=None):
+    exported = [
+        _redact_package_value({
+            "id": row["id"],
+            "entity_type": row["entity_type"],
+            "entity_id": row["entity_id"],
+            "label": row["label"],
+            "source": row["source"],
+            "created": row["created"],
+        }, redaction_rules)
+        for row in labels
+    ]
+    payload = {
+        "format": 1,
+        "generated_at": generated_at,
+        "count": len(exported),
+        "labels": exported,
+    }
+    return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _package_annotations_json_bytes(annotations, generated_at, *, included, redaction_rules=None):
+    exported = [
+        _redact_package_value({
+            "id": row["id"],
+            "entity_type": row["entity_type"],
+            "entity_id": row["entity_id"],
+            "body": row["body"],
+            "visibility": row["visibility"],
+            "author_label": row["author_label"],
+            "created": row["created"],
+            "updated": row["updated"],
+        }, redaction_rules)
+        for row in annotations
+    ]
+    payload = {
+        "format": 1,
+        "generated_at": generated_at,
+        "include_private_annotations": bool(included),
+        "count": len(exported),
+        "annotations": exported,
+    }
+    return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
 def _replace_target_token(command, target_value):
     token = str(target_value or "").strip()
     if not token:
@@ -1843,6 +1930,30 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
             if max_archive_bytes and projected_bytes > max_archive_bytes:
                 raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
             archive.writestr("targets/targets.json", targets_json_bytes)
+
+            metadata_targets = _package_metadata_targets(package, manifest)
+            with db_connect() as conn:
+                label_rows = _package_metadata_rows(conn, session_id, "entity_labels", metadata_targets)
+                annotation_rows = (
+                    _package_metadata_rows(conn, session_id, "annotations", metadata_targets)
+                    if render_manifest.get("include_private_annotations")
+                    else []
+                )
+            labels_json_bytes = _package_labels_json_bytes(label_rows, generated_at, redaction_rules)
+            projected_bytes += len(labels_json_bytes)
+            if max_archive_bytes and projected_bytes > max_archive_bytes:
+                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
+            archive.writestr("metadata/labels.json", labels_json_bytes)
+            annotations_json_bytes = _package_annotations_json_bytes(
+                annotation_rows,
+                generated_at,
+                included=bool(render_manifest.get("include_private_annotations")),
+                redaction_rules=redaction_rules,
+            )
+            projected_bytes += len(annotations_json_bytes)
+            if max_archive_bytes and projected_bytes > max_archive_bytes:
+                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
+            archive.writestr("notes/annotations.json", annotations_json_bytes)
 
             index_page = _render_package_index_html(
                 render_package,
