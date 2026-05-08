@@ -96,6 +96,13 @@ function loadShellChrome({
           </form>
         </div>
       </div>
+      <div id="project-package-manifest-overlay" class="u-hidden" aria-hidden="true">
+        <div id="project-package-manifest-modal">
+          <span id="project-package-manifest-title"></span>
+          <button class="project-package-manifest-close" type="button"></button>
+          <pre id="project-package-manifest-json"></pre>
+        </div>
+      </div>
     </div>
   `
 
@@ -843,7 +850,11 @@ describe('shell chrome project workspace', () => {
 
   it('opens a finding source run at the recorded line', async () => {
     const restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-restored'))
-    const showConfirm = vi.fn(() => Promise.resolve('remove'))
+    const showConfirm = vi.fn((options = {}) => (
+      String(options.body || '').startsWith('Delete package:')
+        ? Promise.resolve('delete')
+        : Promise.resolve('remove')
+    ))
     const dismissibles = []
     const bindDismissible = vi.fn((el, options) => {
       dismissibles.push({ el, options })
@@ -905,6 +916,21 @@ describe('shell chrome project workspace', () => {
         created: '2026-05-07T00:01:12Z',
       },
     ]
+    let projectPackages = [
+      {
+        id: 'pkg-1',
+        name: 'Darklab evidence',
+        description: 'Initial package',
+        include_artifacts: true,
+        status: 'draft',
+        updated: '2026-05-07T00:02:12Z',
+        manifest: {
+          package_format_version: 1,
+          counts: { runs: 2, findings: 3, artifacts: 2 },
+          runs: ['run-1', 'run-2'],
+        },
+      },
+    ]
     const apiFetch = vi.fn((url, options = {}) => {
       if (url === '/projects/active') {
         return Promise.resolve({
@@ -922,11 +948,18 @@ describe('shell chrome project workspace', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            counts: { runs: projectRuns.length, findings: 3, artifacts: projectArtifacts.length, packages: 0, targets: targetStates.length, annotations: 0 },
+            counts: {
+              runs: projectRuns.length,
+              findings: 3,
+              artifacts: projectArtifacts.length,
+              packages: projectPackages.length,
+              targets: targetStates.length,
+              annotations: 0,
+            },
             runs: projectRuns,
             targets: targetStates,
             artifacts: projectArtifacts,
-            packages: [],
+            packages: projectPackages,
           }),
         })
       }
@@ -1011,6 +1044,25 @@ describe('shell chrome project workspace', () => {
         return Promise.resolve({
           ok: true,
           blob: () => Promise.resolve(new Blob(['{"template":"ok"}\n'], { type: 'application/json' })),
+        })
+      }
+      if (url === '/projects/project-1/packages/pkg-1') {
+        if (options.method === 'DELETE') {
+          projectPackages = projectPackages.filter(pkg => pkg.id !== 'pkg-1')
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ ok: true }),
+          })
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ package: projectPackages[0] }),
+        })
+      }
+      if (url === '/projects/project-1/packages/pkg-1/download') {
+        return Promise.resolve({
+          ok: true,
+          blob: () => Promise.resolve(new Blob(['package zip'], { type: 'application/zip' })),
         })
       }
       return Promise.resolve({
@@ -1147,6 +1199,45 @@ describe('shell chrome project workspace', () => {
     expect(globalThis.URL.createObjectURL).toHaveBeenCalled()
     expect(document.querySelector('[data-project-action="artifact-preview"][data-artifact-id="artifact-2"]').disabled)
       .toBe(true)
+
+    document.querySelector('[data-project-tab="packages"]').click()
+    await tick()
+    expect(document.getElementById('project-explorer-body').textContent).toContain('Darklab evidence')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('includes artifacts')
+    expect(document.querySelector('[data-project-action="package-manifest"][data-package-id="pkg-1"]')).not.toBeNull()
+    document.querySelector('[data-project-action="package-manifest"][data-package-id="pkg-1"]').click()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/projects/project-1/packages/pkg-1',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+    expect(document.getElementById('project-package-manifest-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('project-package-manifest-json').textContent).toContain('"package_format_version": 1')
+    document.querySelector('.project-package-manifest-close').click()
+    await tick()
+    expect(document.getElementById('project-package-manifest-overlay').classList.contains('open')).toBe(false)
+
+    document.querySelector('[data-project-action="package-download"][data-package-id="pkg-1"]').click()
+    await tick()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/projects/project-1/packages/pkg-1/download',
+      { cache: 'no-store' },
+    )
+    expect(globalThis.URL.createObjectURL).toHaveBeenCalled()
+
+    document.querySelector('[data-project-action="package-delete"][data-package-id="pkg-1"]').click()
+    await tick()
+    await tick()
+    await tick()
+    expect(showConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      body: 'Delete package: Darklab evidence?',
+      tone: 'danger',
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/packages/pkg-1', expect.objectContaining({
+      method: 'DELETE',
+    }))
+    expect(document.getElementById('project-explorer-body').textContent).toContain('No evidence packages yet.')
 
     document.querySelector('[data-project-tab="runs"]').click()
     await tick()

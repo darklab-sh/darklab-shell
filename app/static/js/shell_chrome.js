@@ -54,6 +54,9 @@
   const projectTargetLabelInput = document.getElementById('project-target-label');
   const projectTargetNotesInput = document.getElementById('project-target-notes');
   const projectTargetSubmitButton = document.getElementById('project-target-submit');
+  const projectPackageManifestOverlay = document.getElementById('project-package-manifest-overlay');
+  const projectPackageManifestTitle = document.getElementById('project-package-manifest-title');
+  const projectPackageManifestJson = document.getElementById('project-package-manifest-json');
   const projectNotesForm = document.getElementById('project-notes-form');
   const projectNotesInput = document.getElementById('project-notes-input');
   const projectNotesSaveStatus = document.getElementById('project-notes-save-status');
@@ -1013,6 +1016,36 @@
     return name || fallback;
   }
 
+  function _projectPackageDownloadName(pkg) {
+    const raw = String(pkg && pkg.name || 'evidence-package').trim().toLowerCase();
+    const safe = raw.replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+    return `${safe || 'evidence-package'}.zip`;
+  }
+
+  function _closeProjectPackageManifest() {
+    if (!projectPackageManifestOverlay) return;
+    projectPackageManifestOverlay.classList.add('u-hidden');
+    projectPackageManifestOverlay.classList.remove('open');
+    projectPackageManifestOverlay.setAttribute('aria-hidden', 'true');
+    if (projectPackageManifestJson) projectPackageManifestJson.textContent = '';
+  }
+
+  function _openProjectPackageManifest(pkg) {
+    if (!projectPackageManifestOverlay || !projectPackageManifestJson) {
+      throw new Error('Manifest preview is not available.');
+    }
+    const name = String(pkg && pkg.name || 'package').trim() || 'package';
+    if (projectPackageManifestTitle) projectPackageManifestTitle.textContent = `${name} manifest`;
+    const manifest = pkg && pkg.manifest && typeof pkg.manifest === 'object' ? pkg.manifest : {};
+    projectPackageManifestJson.textContent = JSON.stringify(manifest, null, 2);
+    projectPackageManifestOverlay.classList.remove('u-hidden');
+    projectPackageManifestOverlay.classList.add('open');
+    projectPackageManifestOverlay.setAttribute('aria-hidden', 'false');
+    window.setTimeout(() => {
+      projectPackageManifestOverlay.querySelector('.project-package-manifest-close')?.focus();
+    }, 0);
+  }
+
   async function _previewProjectArtifact(projectId, artifactId) {
     const resp = await apiFetch(
       `/projects/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/preview`,
@@ -1057,6 +1090,62 @@
 
   function _projectPackageItems(summary) {
     return summary && Array.isArray(summary.packages) ? summary.packages : [];
+  }
+
+  function _projectPackageById(summary, packageId) {
+    const normalized = String(packageId || '').trim();
+    if (!normalized) return null;
+    return _projectPackageItems(summary).find(item => String(item && item.id || '') === normalized) || null;
+  }
+
+  function _projectPackageAccessory(projectId, pkg) {
+    const wrap = document.createElement('div');
+    wrap.className = 'project-package-accessory';
+    const status = document.createElement('span');
+    status.className = 'project-explorer-item-badge';
+    status.textContent = String(pkg.status || 'draft');
+    wrap.appendChild(status);
+    const actions = document.createElement('div');
+    actions.className = 'project-package-actions';
+    [
+      ['package-download', 'Download'],
+      ['package-manifest', 'View manifest'],
+      ['package-delete', 'Delete'],
+    ].forEach(([actionName, label]) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-secondary btn-compact project-package-action'
+        + (actionName === 'package-delete' ? ' btn-danger' : '');
+      btn.dataset.projectAction = actionName;
+      btn.dataset.projectId = String(projectId || '');
+      btn.dataset.packageId = String(pkg.id || '');
+      btn.textContent = label;
+      actions.appendChild(btn);
+    });
+    wrap.appendChild(actions);
+    return wrap;
+  }
+
+  async function _downloadProjectPackage(projectId, pkg) {
+    const packageId = String(pkg && pkg.id || '').trim();
+    const resp = await apiFetch(
+      `/projects/${encodeURIComponent(projectId)}/packages/${encodeURIComponent(packageId)}/download`,
+      { cache: 'no-store' },
+    );
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.error || 'Unable to download package.');
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = _projectPackageDownloadName(pkg);
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    _setProjectWorkspaceMessage('Package download started.');
   }
 
   function _projectFindingItems(projectId = projectWorkspaceSelectedId) {
@@ -2299,7 +2388,7 @@
     });
   }
 
-  function _renderProjectPackages(container, summary) {
+  function _renderProjectPackages(container, projectId, summary) {
     const packages = _projectPackageItems(summary);
     if (!packages.length) {
       container.appendChild(_emptyProjectPanel('No evidence packages yet.'));
@@ -2311,6 +2400,7 @@
         meta: pkg.include_artifacts ? 'includes artifacts' : 'manifest only',
         detail: pkg.description || `Updated ${_formatProjectDate(pkg.updated)}`,
         badge: pkg.status || 'draft',
+        accessory: _projectPackageAccessory(projectId, pkg),
       }));
     });
   }
@@ -2340,7 +2430,7 @@
     else if (projectWorkspaceTab === 'runs') _renderProjectRuns(content, projectId, summary);
     else if (projectWorkspaceTab === 'findings') _renderProjectFindings(content, projectId, summary);
     else if (projectWorkspaceTab === 'artifacts') _renderProjectArtifacts(content, projectId, summary);
-    else if (projectWorkspaceTab === 'packages') _renderProjectPackages(content, summary);
+    else if (projectWorkspaceTab === 'packages') _renderProjectPackages(content, projectId, summary);
     projectExplorerBody.appendChild(content);
     if (typeof global.enhanceAppSelects === 'function') {
       global.enhanceAppSelects(content);
@@ -2427,6 +2517,7 @@
   function closeProjectWorkspace({ refocus = true } = {}) {
     _flushProjectNotesAutosave().catch(() => {});
     _closeProjectTargetEditor();
+    _closeProjectPackageManifest();
     _hideProjectWorkspaceOverlay();
     _setProjectWorkspaceMessage('');
     if (refocus && typeof refocusComposerAfterAction === 'function') {
@@ -2493,6 +2584,28 @@
     }
     if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
       return window.confirm(`Remove run from project: ${label}?`);
+    }
+    return false;
+  }
+
+  async function _confirmProjectPackageDelete(packageName) {
+    const label = String(packageName || 'this package');
+    const confirmFn = typeof showConfirm === 'function'
+      ? showConfirm
+      : (global && typeof global.showConfirm === 'function' ? global.showConfirm : null);
+    if (confirmFn) {
+      const choice = await confirmFn({
+        body: `Delete package: ${label}?`,
+        tone: 'danger',
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'delete', label: 'Delete', role: 'destructive' },
+        ],
+      });
+      return choice === 'delete';
+    }
+    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
+      return window.confirm(`Delete package: ${label}?`);
     }
     return false;
   }
@@ -2859,6 +2972,33 @@
         if (!projectId || !artifactId) throw new Error('Artifact is missing its identifier.');
         await _downloadProjectArtifact(projectId, artifactId, btn.dataset.artifactPath || '');
         return;
+      } else if (action === 'package-download' || action === 'package-manifest' || action === 'package-delete') {
+        const packageId = String(btn.dataset.packageId || '').trim();
+        if (!projectId || !packageId) throw new Error('Package is missing its identifier.');
+        const summary = projectWorkspaceSummaries.get(String(projectId || ''));
+        const pkg = _projectPackageById(summary, packageId) || { id: packageId, name: packageId };
+        if (action === 'package-download') {
+          await _downloadProjectPackage(projectId, pkg);
+          return;
+        }
+        if (action === 'package-manifest') {
+          const resp = await _projectWorkspaceRequest(
+            `/projects/${encodeURIComponent(projectId)}/packages/${encodeURIComponent(packageId)}`,
+            { cache: 'no-store' },
+          );
+          const data = await resp.json().catch(() => ({}));
+          _openProjectPackageManifest(data.package || pkg);
+          return;
+        }
+        const confirmed = await _confirmProjectPackageDelete(pkg.name || packageId);
+        if (!confirmed) return;
+        await _projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/packages/${encodeURIComponent(packageId)}`, {
+          method: 'DELETE',
+        });
+        _closeProjectPackageManifest();
+        await refreshProjectWorkspace();
+        _setProjectWorkspaceMessage('Package deleted.');
+        return;
       }
       await refreshProjectWorkspace();
     } catch (err) {
@@ -2876,6 +3016,17 @@
 
   projectTargetEditorOverlay?.querySelector('.project-target-editor-cancel')?.addEventListener('click', () => {
     _closeProjectTargetEditor();
+  });
+
+  projectPackageManifestOverlay?.querySelector('.project-package-manifest-close')?.addEventListener('click', () => {
+    _closeProjectPackageManifest();
+  });
+
+  projectPackageManifestOverlay?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    _closeProjectPackageManifest();
   });
 
   const bindDismissibleFn = global && typeof global.bindDismissible === 'function'
