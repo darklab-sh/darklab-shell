@@ -1030,7 +1030,7 @@
     showViewer(
       artifact.workspace_path || 'artifact',
       data.text || '',
-      { size: artifact.current_byte_size ?? artifact.byte_size ?? null },
+      { size: artifact.current_byte_size ?? artifact.byte_size ?? null, elevated: true },
     );
   }
 

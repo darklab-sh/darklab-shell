@@ -738,6 +738,10 @@ body.mobile-terminal-mode .output-follow-btn {
   justify-content: center;
 }
 
+#workspace-viewer-overlay.workspace-viewer-overlay-elevated {
+  z-index: 350;
+}
+
 #workspace-viewer {
   background: var(--theme-panel-bg);
   border: 1px solid var(--theme-panel-border);

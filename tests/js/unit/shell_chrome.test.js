@@ -1135,7 +1135,7 @@ describe('shell chrome project workspace', () => {
     expect(showWorkspaceViewer).toHaveBeenCalledWith(
       'reports/nuclei.json',
       '{"template":"ok"}\n',
-      { size: 2048 },
+      { size: 2048, elevated: true },
     )
     document.querySelector('[data-project-action="artifact-download"][data-artifact-id="artifact-1"]').click()
     await tick()

@@ -214,6 +214,7 @@ function hideWorkspaceViewer() {
   if (typeof workspaceViewerOverlay !== 'undefined' && workspaceViewerOverlay) {
     workspaceViewerOverlay.classList.add('u-hidden');
     workspaceViewerOverlay.classList.remove('open');
+    workspaceViewerOverlay.classList.remove('workspace-viewer-overlay-elevated');
   }
   if (_workspaceViewerRefreshSpinTimer) {
     clearTimeout(_workspaceViewerRefreshSpinTimer);
@@ -729,7 +730,7 @@ function showWorkspaceEditor(path = '', text = '', { readOnlyPath = false } = {}
   }, 0);
 }
 
-function showWorkspaceViewer(path = '', text = '', { size = null } = {}) {
+function showWorkspaceViewer(path = '', text = '', { size = null, elevated = false } = {}) {
   hideWorkspaceEditor();
   _workspaceViewedPath = String(path || '').trim();
   const numericSize = size == null ? NaN : Number(size);
@@ -744,6 +745,7 @@ function showWorkspaceViewer(path = '', text = '', { size = null } = {}) {
     workspaceViewer.classList.remove('u-hidden');
     workspaceViewer.scrollTop = 0;
     if (typeof workspaceViewerOverlay !== 'undefined' && workspaceViewerOverlay) {
+      workspaceViewerOverlay.classList.toggle('workspace-viewer-overlay-elevated', !!elevated);
       workspaceViewerOverlay.classList.remove('u-hidden');
       workspaceViewerOverlay.classList.add('open');
     }
