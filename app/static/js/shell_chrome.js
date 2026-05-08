@@ -1156,6 +1156,51 @@
     _renderProjectExplorer();
   }
 
+  function _projectPackageManifestIds(manifest, key, fallbackItems = []) {
+    const selected = manifest && typeof manifest === 'object' ? manifest.selected_entity_ids : null;
+    if (selected && typeof selected === 'object' && Array.isArray(selected[key])) {
+      return new Set(selected[key].map(value => String(value || '')).filter(Boolean));
+    }
+    return new Set(fallbackItems.map(item => String(item && item.id || '')).filter(Boolean));
+  }
+
+  function _openProjectPackageWizardFromPackage(projectId, pkg) {
+    const summary = _projectSummary(projectId);
+    const manifest = pkg && typeof pkg.manifest === 'object' && pkg.manifest ? pkg.manifest : {};
+    const preset = String(manifest.preset || pkg?.preset || 'custom') || 'custom';
+    const redactionMode = String(pkg?.redaction_mode || manifest.redaction_mode || 'raw') === 'redacted'
+      ? 'redacted'
+      : 'raw';
+    const options = manifest.options && typeof manifest.options === 'object' ? manifest.options : {};
+    const includeArtifacts = redactionMode === 'redacted'
+      ? false
+      : Boolean(pkg?.include_artifacts ?? options.raw_artifacts);
+    projectPackageWizard = {
+      projectId: String(projectId || ''),
+      preset,
+      step: 2,
+      includeArtifacts,
+      redactionMode,
+      includePrivateAnnotations: !!manifest.include_private_annotations,
+      name: String(pkg?.name || _projectPackageSuggestedName(_selectedProject(), preset)),
+      description: String(pkg?.description || ''),
+      selection: {
+        runIds: _projectPackageManifestIds(manifest, 'run_ids', _projectRunItems(summary)),
+        findingIds: _projectPackageManifestIds(manifest, 'finding_ids', _projectFindingItems(projectId)),
+        artifactIds: _projectPackageManifestIds(manifest, 'artifact_ids', _projectArtifactItems(summary)),
+        targetIds: _projectPackageManifestIds(manifest, 'target_ids', _projectTargetItems(summary)),
+      },
+    };
+    _setProjectWorkspaceMessage('');
+    if (!_projectFindingsLoaded(projectId)) {
+      _loadProjectFindings(projectId).then(() => {
+        if (_projectPackageWizardActive(projectId)) _renderProjectExplorer();
+      }).catch(() => {});
+    }
+    projectWorkspaceTab = 'packages';
+    _renderProjectExplorer();
+  }
+
   function _closeProjectPackageWizard() {
     projectPackageWizard = null;
     _setProjectWorkspaceMessage('');
@@ -1179,6 +1224,7 @@
     actions.className = 'project-package-actions';
     [
       ['package-download', 'Download'],
+      ['package-repackage', 'Re-package'],
       ['package-manifest', 'View manifest'],
       ['package-delete', 'Delete'],
     ].forEach(([actionName, label]) => {
@@ -3400,7 +3446,12 @@
         if (!projectId || !artifactId) throw new Error('Artifact is missing its identifier.');
         await _downloadProjectArtifact(projectId, artifactId, btn.dataset.artifactPath || '');
         return;
-      } else if (action === 'package-download' || action === 'package-manifest' || action === 'package-delete') {
+      } else if (
+        action === 'package-download'
+        || action === 'package-repackage'
+        || action === 'package-manifest'
+        || action === 'package-delete'
+      ) {
         const packageId = String(btn.dataset.packageId || '').trim();
         if (!projectId || !packageId) throw new Error('Package is missing its identifier.');
         const summary = projectWorkspaceSummaries.get(String(projectId || ''));
@@ -3409,12 +3460,16 @@
           await _downloadProjectPackage(projectId, pkg);
           return;
         }
-        if (action === 'package-manifest') {
+        if (action === 'package-repackage' || action === 'package-manifest') {
           const resp = await _projectWorkspaceRequest(
             `/projects/${encodeURIComponent(projectId)}/packages/${encodeURIComponent(packageId)}`,
             { cache: 'no-store' },
           );
           const data = await resp.json().catch(() => ({}));
+          if (action === 'package-repackage') {
+            _openProjectPackageWizardFromPackage(projectId, data.package || pkg);
+            return;
+          }
           _openProjectPackageManifest(data.package || pkg);
           return;
         }

@@ -926,8 +926,21 @@ describe('shell chrome project workspace', () => {
         updated: '2026-05-07T00:02:12Z',
         manifest: {
           package_format_version: 1,
+          preset: 'evidence',
+          redaction_mode: 'raw',
+          include_private_annotations: true,
+          options: {
+            raw_artifacts: true,
+            index_html: true,
+            transcripts_html: true,
+          },
           counts: { runs: 2, findings: 3, artifacts: 2 },
-          runs: ['run-1', 'run-2'],
+          selected_entity_ids: {
+            run_ids: ['run-1'],
+            finding_ids: ['finding-1'],
+            artifact_ids: ['artifact-1'],
+            target_ids: ['target-1'],
+          },
         },
       },
     ]
@@ -1251,6 +1264,25 @@ describe('shell chrome project workspace', () => {
       { cache: 'no-store' },
     )
     expect(globalThis.URL.createObjectURL).toHaveBeenCalled()
+
+    document.querySelector('[data-project-action="package-repackage"][data-package-id="pkg-1"]').click()
+    await tick()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/projects/project-1/packages/pkg-1',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+    expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Include')
+    expect(document.querySelector('[data-project-package-selection="run"][value="run-1"]').checked).toBe(true)
+    expect(document.querySelector('[data-project-package-selection="run"][value="run-2"]').checked).toBe(false)
+    expect(document.querySelector('[data-project-package-selection="artifact"][value="artifact-1"]').checked).toBe(true)
+    expect(document.querySelector('[data-project-package-selection="artifact"][value="artifact-2"]').checked).toBe(false)
+    document.querySelector('[data-project-action="package-wizard-next"]').click()
+    await tick()
+    expect(document.querySelector('[data-project-package-field="name"]').value).toBe('Darklab evidence')
+    expect(document.querySelector('[data-project-package-field="redaction_mode"]').value).toBe('raw')
+    document.querySelector('[data-project-action="package-wizard-cancel"]').click()
+    await tick()
 
     document.querySelector('[data-project-action="package-delete"][data-package-id="pkg-1"]').click()
     await tick()
