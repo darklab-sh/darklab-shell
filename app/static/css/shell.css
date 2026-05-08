@@ -3073,6 +3073,133 @@ button.project-explorer-item:focus-visible,
   background: color-mix(in srgb, var(--red) 8%, var(--surface));
 }
 
+.project-package-toolbar,
+.project-package-wizard-header,
+.project-package-wizard-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.project-package-wizard {
+  display: grid;
+  gap: 14px;
+}
+
+.project-package-wizard-header h2 {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 16px;
+  text-transform: uppercase;
+}
+
+.project-package-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.project-package-step {
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.project-package-step.is-active {
+  border-color: var(--green-dim);
+  color: var(--green);
+  background: var(--green-glow);
+}
+
+.project-package-wizard-body,
+.project-package-metadata-form {
+  display: grid;
+  gap: 12px;
+}
+
+.project-package-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.project-package-preset {
+  display: grid;
+  gap: 5px;
+  justify-items: start;
+  min-height: 72px;
+  text-align: left;
+}
+
+.project-package-preset small,
+.project-package-selection-text small,
+.project-package-wizard-note {
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.project-package-preset.is-active {
+  border-color: var(--green-dim);
+  color: var(--green);
+  background: var(--green-glow);
+}
+
+.project-package-selection-section {
+  display: grid;
+  gap: 7px;
+}
+
+.project-package-selection-section h3 {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.project-package-selection-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--theme-chrome-row-bg);
+}
+
+.project-package-selection-text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.project-package-selection-text strong {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.project-package-metadata-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.project-package-preview-json {
+  max-height: min(46vh, 420px);
+}
+
 .project-finding-review {
   flex: 0 0 auto;
   width: 156px;

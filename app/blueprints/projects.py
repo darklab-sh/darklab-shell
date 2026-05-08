@@ -3,7 +3,7 @@ Project workspace routes.
 """
 
 import logging
-from io import BytesIO
+import os
 
 from flask import Blueprint, jsonify, request, send_file
 
@@ -424,12 +424,29 @@ def projects_packages_download(project_id, package_id):
         "package_id": package_id,
         "skipped_artifacts": len(archive["skipped_artifacts"]),
     })
-    return send_file(
-        BytesIO(archive["bytes"]),
-        mimetype=archive["mimetype"],
-        as_attachment=True,
-        download_name=archive["filename"],
-    )
+    archive_path = archive["path"]
+    try:
+        response = send_file(
+            archive_path,
+            mimetype=archive["mimetype"],
+            as_attachment=True,
+            download_name=archive["filename"],
+        )
+    except Exception:
+        try:
+            os.unlink(archive_path)
+        except OSError:
+            pass
+        raise
+
+    @response.call_on_close
+    def _cleanup_evidence_package_archive():
+        try:
+            os.unlink(archive_path)
+        except OSError:
+            pass
+
+    return response
 
 
 @projects_bp.route("/projects/<project_id>/packages/<package_id>", methods=["DELETE"])

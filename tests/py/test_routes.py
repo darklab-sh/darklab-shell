@@ -423,12 +423,26 @@ class TestProjectRoutes:
         baseline_run_id = "run-" + uuid.uuid4().hex
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
-                (run_id, session_id, "nmap darklab.sh"),
+                "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, ?, datetime('now'), ?, ?)",
+                (
+                    run_id,
+                    session_id,
+                    "nmap darklab.sh",
+                    json.dumps([{"text": "443/tcp open https", "cls": "", "line_index": 0}]),
+                    1,
+                ),
             )
             conn.execute(
-                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
-                (baseline_run_id, session_id, "nmap darklab.sh"),
+                "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, ?, datetime('now'), ?, ?)",
+                (
+                    baseline_run_id,
+                    session_id,
+                    "nmap darklab.sh",
+                    json.dumps([{"text": "80/tcp open http", "cls": "", "line_index": 0}]),
+                    1,
+                ),
             )
             conn.commit()
 
@@ -651,6 +665,14 @@ class TestProjectRoutes:
                 "description": "Initial package manifest",
                 "redaction_mode": "redacted",
                 "include_artifacts": True,
+                "preset": "custom",
+                "include_private_annotations": True,
+                "selection": {
+                    "run_ids": [run_id],
+                    "finding_ids": [f"fnd_{run_id}"],
+                    "artifact_ids": [f"rfa_{run_id}", f"rfa_{baseline_run_id}"],
+                    "target_ids": [],
+                },
             },
             headers={"X-Session-ID": session_id},
         )
@@ -659,9 +681,21 @@ class TestProjectRoutes:
         assert package["project_id"] == project["id"]
         assert package["include_artifacts"] is True
         assert package["redaction_mode"] == "raw"
-        assert package["manifest"]["counts"]["runs"] == 2
-        assert package["manifest"]["counts"]["findings"] == 2
+        assert package["manifest"]["package_format_version"] == 1
+        assert package["manifest"]["counts"]["runs"] == 1
+        assert package["manifest"]["counts"]["findings"] == 1
+        assert package["manifest"]["counts"]["artifacts"] == 2
+        assert package["manifest"]["project_counts"]["runs"] == 2
+        assert package["manifest"]["selected_entity_ids"]["run_ids"] == [run_id]
+        assert package["manifest"]["selected_entity_ids"]["finding_ids"] == [f"fnd_{run_id}"]
+        assert package["manifest"]["selected_entity_ids"]["artifact_ids"] == [
+            f"rfa_{run_id}",
+            f"rfa_{baseline_run_id}",
+        ]
+        assert package["manifest"]["include_private_annotations"] is True
         assert package["manifest"]["redaction_mode"] == "raw"
+        assert package["manifest"]["options"]["index_html"] is True
+        assert package["manifest"]["options"]["transcripts_html"] is True
 
         packages = json.loads(client.get(
             f"/projects/{project['id']}/packages",
@@ -673,19 +707,44 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         ).data)
         assert package_get["package"]["name"] == "Draft Evidence"
-        package_download = client.get(
-            f"/projects/{project['id']}/packages/{package['id']}/download",
-            headers={"X-Session-ID": session_id},
-        )
+        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}):
+            package_download = client.get(
+                f"/projects/{project['id']}/packages/{package['id']}/download",
+                headers={"X-Session-ID": session_id},
+            )
         assert package_download.status_code == 200
         assert "attachment" in package_download.headers["Content-Disposition"]
         with zipfile.ZipFile(io.BytesIO(package_download.data)) as archive:
             names = set(archive.namelist())
             assert "manifest.json" in names
+            assert "index.html" in names
+            assert "README.md" in names
+            assert f"runs/{run_id}.html" in names
+            assert f"runs/{baseline_run_id}.html" not in names
+            assert "artifacts/reports/run.txt" in names
+            assert "artifacts/reports/old.txt" not in names
             assert "skipped-artifacts.json" in names
+            assert "skipped-items.json" in names
             downloaded_manifest = json.loads(archive.read("manifest.json"))
+            index_html = archive.read("index.html").decode("utf-8")
+            readme = archive.read("README.md").decode("utf-8")
+            run_html = archive.read(f"runs/{run_id}.html").decode("utf-8")
+            skipped_items = json.loads(archive.read("skipped-items.json"))
         assert downloaded_manifest["package"]["id"] == package["id"]
-        assert downloaded_manifest["manifest"]["counts"]["runs"] == 2
+        assert downloaded_manifest["manifest"]["counts"]["runs"] == 1
+        assert downloaded_manifest["manifest"]["counts"]["artifacts"] == 2
+        assert "Draft Evidence" in index_html
+        assert "443/tcp open https" in index_html
+        assert "artifacts/reports/run.txt" in index_html
+        assert "Skipped Items" in index_html
+        assert "reports/old.txt" in index_html
+        assert "# Draft Evidence" in readme
+        assert "## Skipped Items" in readme
+        assert "reports/old.txt" in readme
+        assert "nmap darklab.sh" in run_html
+        assert "443/tcp open https" in run_html
+        assert skipped_items["items"][0]["kind"] == "artifact"
+        assert skipped_items["items"][0]["workspace_path"] == "reports/old.txt"
         summary_after_package = json.loads(client.get(
             f"/projects/{project['id']}/summary",
             headers={"X-Session-ID": session_id},

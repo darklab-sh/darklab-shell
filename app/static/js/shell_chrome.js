@@ -158,6 +158,7 @@
   let projectWorkspaceRunFilters = new Map();
   let projectWorkspaceFindingStatusFilters = new Map();
   let projectWorkspaceCollapsedFindingGroups = new Set();
+  let projectPackageWizard = null;
   let projectNotesSaveTimer = null;
   let projectNotesSaveSeq = 0;
   let projectNotesSavedDelayTimer = null;
@@ -1092,6 +1093,73 @@
     return summary && Array.isArray(summary.packages) ? summary.packages : [];
   }
 
+  function _projectPackagePresetDefaults(preset, summary, findings) {
+    const normalizedPreset = String(preset || 'evidence').trim() || 'evidence';
+    const runs = _projectRunItems(summary);
+    const artifacts = _projectArtifactItems(summary);
+    const targets = _projectTargetItems(summary);
+    const findingItems = Array.isArray(findings) ? findings : [];
+    const includeArtifacts = normalizedPreset !== 'summary';
+    const selectedFindings = findingItems.filter(finding => (
+      normalizedPreset === 'full' || String(finding.review_state || 'new') !== 'false_positive'
+    ));
+    return {
+      preset: normalizedPreset,
+      step: 1,
+      includeArtifacts,
+      includePrivateAnnotations: false,
+      name: '',
+      description: '',
+      selection: {
+        runIds: new Set(runs.map(run => String(run.id || '')).filter(Boolean)),
+        findingIds: new Set(selectedFindings.map(finding => String(finding.id || '')).filter(Boolean)),
+        artifactIds: new Set(includeArtifacts ? artifacts.map(artifact => String(artifact.id || '')).filter(Boolean) : []),
+        targetIds: new Set(targets.map(target => String(target.id || '')).filter(Boolean)),
+      },
+    };
+  }
+
+  function _projectPackageWizardActive(projectId = projectWorkspaceSelectedId) {
+    return !!(projectPackageWizard && String(projectPackageWizard.projectId || '') === String(projectId || ''));
+  }
+
+  function _projectPackageSuggestedName(project, preset) {
+    const slug = String(project && (project.slug || project.name) || 'project').trim().toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'project';
+    const today = new Date().toISOString().slice(0, 10);
+    return `${slug}-${today}-${String(preset || 'evidence')}`;
+  }
+
+  function _openProjectPackageWizard(projectId, preset = 'evidence') {
+    const summary = _projectSummary(projectId);
+    const findings = _projectFindingItems(projectId);
+    projectPackageWizard = {
+      projectId: String(projectId || ''),
+      ..._projectPackagePresetDefaults(preset, summary, findings),
+    };
+    projectPackageWizard.name = _projectPackageSuggestedName(_selectedProject(), projectPackageWizard.preset);
+    _setProjectWorkspaceMessage('');
+    if (!_projectFindingsLoaded(projectId)) {
+      _loadProjectFindings(projectId).then(() => {
+        if (_projectPackageWizardActive(projectId)) {
+          const refreshed = _projectPackagePresetDefaults(projectPackageWizard.preset, _projectSummary(projectId), _projectFindingItems(projectId));
+          refreshed.name = projectPackageWizard.name;
+          refreshed.description = projectPackageWizard.description;
+          projectPackageWizard = { projectId: String(projectId || ''), ...refreshed };
+          _renderProjectExplorer();
+        }
+      }).catch(() => {});
+    }
+    _renderProjectExplorer();
+  }
+
+  function _closeProjectPackageWizard() {
+    projectPackageWizard = null;
+    _setProjectWorkspaceMessage('');
+    _renderProjectExplorer();
+  }
+
   function _projectPackageById(summary, packageId) {
     const normalized = String(packageId || '').trim();
     if (!normalized) return null;
@@ -1124,6 +1192,269 @@
     });
     wrap.appendChild(actions);
     return wrap;
+  }
+
+  function _packageSelectionCheckbox({ kind, id, label, detail = '', checked = true }) {
+    const row = document.createElement('label');
+    row.className = 'project-package-selection-row';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = checked;
+    input.dataset.projectPackageSelection = kind;
+    input.value = String(id || '');
+    const text = document.createElement('span');
+    text.className = 'project-package-selection-text';
+    const labelEl = document.createElement('strong');
+    labelEl.textContent = label;
+    text.appendChild(labelEl);
+    if (detail) {
+      const detailEl = document.createElement('small');
+      detailEl.textContent = detail;
+      text.appendChild(detailEl);
+    }
+    row.append(input, text);
+    return row;
+  }
+
+  function _packageWizardSetFor(kind) {
+    if (!projectPackageWizard) return new Set();
+    const map = {
+      run: projectPackageWizard.selection.runIds,
+      finding: projectPackageWizard.selection.findingIds,
+      artifact: projectPackageWizard.selection.artifactIds,
+      target: projectPackageWizard.selection.targetIds,
+    };
+    return map[kind] || new Set();
+  }
+
+  function _renderPackageWizardStepHeader(wrap) {
+    const steps = ['Preset', 'Include', 'Metadata', 'Preview'];
+    const list = document.createElement('div');
+    list.className = 'project-package-stepper';
+    steps.forEach((label, index) => {
+      const item = document.createElement('span');
+      item.className = 'project-package-step' + (projectPackageWizard.step === index + 1 ? ' is-active' : '');
+      item.textContent = `${index + 1}. ${label}`;
+      list.appendChild(item);
+    });
+    wrap.appendChild(list);
+  }
+
+  function _renderPackageWizardPreset(wrap, projectId, summary) {
+    const presets = [
+      ['summary', 'Summary', 'Manifest only, no raw artifacts.'],
+      ['evidence', 'Evidence', 'Findings, targets, runs, and selected artifacts.'],
+      ['full', 'Full archive', 'Everything currently linked to the project.'],
+      ['custom', 'Custom', 'Start from the evidence preset and tune selections.'],
+    ];
+    const grid = document.createElement('div');
+    grid.className = 'project-package-preset-grid';
+    presets.forEach(([id, title, detail]) => {
+      const btn = _makeProjectButton(title, 'package-wizard-preset', projectId);
+      btn.classList.add('project-package-preset');
+      btn.classList.toggle('is-active', projectPackageWizard.preset === id);
+      btn.dataset.preset = id;
+      const detailEl = document.createElement('small');
+      detailEl.textContent = detail;
+      btn.appendChild(detailEl);
+      grid.appendChild(btn);
+    });
+    wrap.appendChild(grid);
+    const note = document.createElement('p');
+    note.className = 'project-package-wizard-note';
+    note.textContent = `${_projectRunItems(summary).length} runs, ${_projectFindingItems(projectId).length} findings, `
+      + `${_projectArtifactItems(summary).length} artifacts, and ${_projectTargetItems(summary).length} targets are available.`;
+    wrap.appendChild(note);
+  }
+
+  function _renderPackageWizardSelections(wrap, projectId, summary) {
+    if (!_projectFindingsLoaded(projectId)) {
+      wrap.appendChild(_emptyProjectPanel('Loading findings for package selection...'));
+      return;
+    }
+    const sections = [
+      ['Runs', 'run', _projectRunItems(summary), item => item.command || item.id, item => _formatProjectDate(item.started)],
+      ['Findings', 'finding', _projectFindingItems(projectId), item => item.title || item.raw_line || item.id, item => item.raw_line || ''],
+      ['Artifacts', 'artifact', _projectArtifactItems(summary), item => item.display_name || item.workspace_path || item.id, item => _formatProjectBytes(item.byte_size)],
+      ['Targets', 'target', _projectTargetItems(summary), item => _projectTargetFilterLabel(item), item => item.notes || ''],
+    ];
+    sections.forEach(([title, kind, items, labelFn, detailFn]) => {
+      const section = document.createElement('section');
+      section.className = 'project-package-selection-section';
+      const heading = document.createElement('h3');
+      heading.textContent = `${title} (${items.length})`;
+      section.appendChild(heading);
+      if (!items.length) {
+        section.appendChild(_emptyProjectPanel(`No ${title.toLowerCase()} available.`));
+      } else {
+        const selected = _packageWizardSetFor(kind);
+        items.forEach((item) => {
+          section.appendChild(_packageSelectionCheckbox({
+            kind,
+            id: item.id,
+            label: labelFn(item),
+            detail: detailFn(item),
+            checked: selected.has(String(item.id || '')),
+          }));
+        });
+      }
+      wrap.appendChild(section);
+    });
+    const privateLabel = document.createElement('label');
+    privateLabel.className = 'project-package-selection-row';
+    const privateInput = document.createElement('input');
+    privateInput.type = 'checkbox';
+    privateInput.checked = !!projectPackageWizard.includePrivateAnnotations;
+    privateInput.dataset.projectPackagePrivateNotes = '1';
+    const privateText = document.createElement('span');
+    privateText.className = 'project-package-selection-text';
+    const strong = document.createElement('strong');
+    strong.textContent = 'Include private notes/annotations';
+    const small = document.createElement('small');
+    small.textContent = 'Private metadata stays excluded unless this is checked.';
+    privateText.append(strong, small);
+    privateLabel.append(privateInput, privateText);
+    wrap.appendChild(privateLabel);
+  }
+
+  function _renderPackageWizardMetadata(wrap) {
+    const form = document.createElement('div');
+    form.className = 'project-package-metadata-form';
+    const nameLabel = document.createElement('label');
+    nameLabel.textContent = 'Name';
+    const nameInput = document.createElement('input');
+    nameInput.className = 'form-control form-control-compact';
+    nameInput.dataset.projectPackageField = 'name';
+    nameInput.value = projectPackageWizard.name;
+    nameLabel.appendChild(nameInput);
+    const descLabel = document.createElement('label');
+    descLabel.textContent = 'Description';
+    const descInput = document.createElement('textarea');
+    descInput.className = 'form-control form-control-compact';
+    descInput.dataset.projectPackageField = 'description';
+    descInput.rows = 3;
+    descInput.value = projectPackageWizard.description;
+    descLabel.appendChild(descInput);
+    const artifactsLabel = document.createElement('label');
+    artifactsLabel.className = 'project-package-selection-row';
+    const artifactsInput = document.createElement('input');
+    artifactsInput.type = 'checkbox';
+    artifactsInput.checked = !!projectPackageWizard.includeArtifacts;
+    artifactsInput.dataset.projectPackageIncludeArtifacts = '1';
+    const artifactsText = document.createElement('span');
+    artifactsText.className = 'project-package-selection-text';
+    const artifactsStrong = document.createElement('strong');
+    artifactsStrong.textContent = 'Include selected raw artifacts';
+    const artifactsSmall = document.createElement('small');
+    artifactsSmall.textContent = 'Output is manifest-only for now; HTML and redaction controls stay hidden.';
+    artifactsText.append(artifactsStrong, artifactsSmall);
+    artifactsLabel.append(artifactsInput, artifactsText);
+    form.append(nameLabel, descLabel, artifactsLabel);
+    wrap.appendChild(form);
+  }
+
+  function _packageWizardManifestPreview(projectId, summary) {
+    return {
+      package_format_version: 1,
+      preset: projectPackageWizard.preset,
+      options: {
+        manifest_json: true,
+        raw_artifacts: !!projectPackageWizard.includeArtifacts,
+        index_html: true,
+        transcripts_html: true,
+      },
+      include_private_annotations: !!projectPackageWizard.includePrivateAnnotations,
+      counts: {
+        runs: projectPackageWizard.selection.runIds.size,
+        findings: projectPackageWizard.selection.findingIds.size,
+        artifacts: projectPackageWizard.selection.artifactIds.size,
+        targets: projectPackageWizard.selection.targetIds.size,
+      },
+      selected_entity_ids: {
+        run_ids: Array.from(projectPackageWizard.selection.runIds),
+        finding_ids: Array.from(projectPackageWizard.selection.findingIds),
+        artifact_ids: Array.from(projectPackageWizard.selection.artifactIds),
+        target_ids: Array.from(projectPackageWizard.selection.targetIds),
+      },
+      project: {
+        id: projectId,
+        name: summary?.project?.name || '',
+      },
+    };
+  }
+
+  function _renderPackageWizardPreview(wrap, projectId, summary) {
+    const pre = document.createElement('pre');
+    pre.className = 'project-package-manifest-json project-package-preview-json nice-scroll';
+    pre.textContent = JSON.stringify(_packageWizardManifestPreview(projectId, summary), null, 2);
+    wrap.appendChild(pre);
+  }
+
+  function _renderProjectPackageWizard(container, projectId, summary) {
+    const wizard = document.createElement('section');
+    wizard.className = 'project-package-wizard';
+    const header = document.createElement('div');
+    header.className = 'project-package-wizard-header';
+    const title = document.createElement('h2');
+    title.textContent = 'New evidence package';
+    const cancel = _makeProjectButton('Cancel', 'package-wizard-cancel', projectId);
+    header.append(title, cancel);
+    wizard.appendChild(header);
+    _renderPackageWizardStepHeader(wizard);
+    const body = document.createElement('div');
+    body.className = 'project-package-wizard-body';
+    if (projectPackageWizard.step === 1) _renderPackageWizardPreset(body, projectId, summary);
+    else if (projectPackageWizard.step === 2) _renderPackageWizardSelections(body, projectId, summary);
+    else if (projectPackageWizard.step === 3) _renderPackageWizardMetadata(body);
+    else _renderPackageWizardPreview(body, projectId, summary);
+    wizard.appendChild(body);
+    const footer = document.createElement('div');
+    footer.className = 'project-package-wizard-footer';
+    if (projectPackageWizard.step > 1) footer.appendChild(_makeProjectButton('Back', 'package-wizard-back', projectId));
+    const next = _makeProjectButton(projectPackageWizard.step === 4 ? 'Create package' : 'Next', 'package-wizard-next', projectId);
+    footer.appendChild(next);
+    wizard.appendChild(footer);
+    container.appendChild(wizard);
+  }
+
+  function _projectPackageWizardPayload() {
+    return {
+      name: String(projectPackageWizard.name || '').trim(),
+      description: String(projectPackageWizard.description || '').trim(),
+      preset: String(projectPackageWizard.preset || 'custom'),
+      include_artifacts: !!projectPackageWizard.includeArtifacts,
+      include_private_annotations: !!projectPackageWizard.includePrivateAnnotations,
+      options: {
+        manifest_json: true,
+        index_html: true,
+        transcripts_html: true,
+      },
+      selection: {
+        run_ids: Array.from(projectPackageWizard.selection.runIds),
+        finding_ids: Array.from(projectPackageWizard.selection.findingIds),
+        artifact_ids: Array.from(projectPackageWizard.selection.artifactIds),
+        target_ids: Array.from(projectPackageWizard.selection.targetIds),
+      },
+    };
+  }
+
+  async function _createProjectPackageFromWizard(projectId) {
+    if (!projectPackageWizard) return;
+    const payload = _projectPackageWizardPayload();
+    if (!payload.name) {
+      _setProjectWorkspaceMessage('Package name is required.', { error: true });
+      projectPackageWizard.step = 3;
+      _renderProjectExplorer();
+      return;
+    }
+    await _projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/packages`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    projectPackageWizard = null;
+    await refreshProjectWorkspace();
+    projectWorkspaceTab = 'packages';
+    _setProjectWorkspaceMessage('Package created.');
   }
 
   async function _downloadProjectPackage(projectId, pkg) {
@@ -2389,6 +2720,15 @@
   }
 
   function _renderProjectPackages(container, projectId, summary) {
+    if (_projectPackageWizardActive(projectId)) {
+      _renderProjectPackageWizard(container, projectId, summary);
+      return;
+    }
+    const toolbar = document.createElement('div');
+    toolbar.className = 'project-package-toolbar';
+    const newBtn = _makeProjectButton('New package', 'package-wizard-open', projectId);
+    toolbar.appendChild(newBtn);
+    container.appendChild(toolbar);
     const packages = _projectPackageItems(summary);
     if (!packages.length) {
       container.appendChild(_emptyProjectPanel('No evidence packages yet.'));
@@ -2438,6 +2778,7 @@
     if (
       projectWorkspaceTab === 'findings'
       || ['runs', 'artifacts'].includes(projectWorkspaceTab)
+      || _projectPackageWizardActive(projectId)
       || _projectTargetFilterActive(projectId, summary)
     ) {
       _loadProjectFindings(projectId).catch(() => {});
@@ -2518,6 +2859,7 @@
     _flushProjectNotesAutosave().catch(() => {});
     _closeProjectTargetEditor();
     _closeProjectPackageManifest();
+    projectPackageWizard = null;
     _hideProjectWorkspaceOverlay();
     _setProjectWorkspaceMessage('');
     if (refocus && typeof refocusComposerAfterAction === 'function') {
@@ -2697,6 +3039,14 @@
     _flushProjectNotesAutosave().catch(() => {});
   });
 
+  projectWorkspaceModal?.addEventListener('input', (event) => {
+    const packageField = event.target.closest?.('[data-project-package-field]');
+    if (!packageField || !projectPackageWizard) return;
+    const field = String(packageField.dataset.projectPackageField || '');
+    if (field === 'name') projectPackageWizard.name = String(packageField.value || '');
+    if (field === 'description') projectPackageWizard.description = String(packageField.value || '');
+  });
+
   projectNotesForm?.addEventListener('submit', (event) => {
     event.preventDefault();
     _flushProjectNotesAutosave().catch(() => {});
@@ -2714,6 +3064,30 @@
   }
 
   projectWorkspaceModal?.addEventListener('change', async (event) => {
+    const packageSelection = event.target.closest?.('[data-project-package-selection]');
+    if (packageSelection && projectPackageWizard) {
+      event.stopPropagation();
+      const selected = _packageWizardSetFor(String(packageSelection.dataset.projectPackageSelection || ''));
+      const value = String(packageSelection.value || '');
+      if (packageSelection.checked) selected.add(value);
+      else selected.delete(value);
+      _renderProjectExplorer();
+      return;
+    }
+    const packagePrivateNotes = event.target.closest?.('[data-project-package-private-notes]');
+    if (packagePrivateNotes && projectPackageWizard) {
+      event.stopPropagation();
+      projectPackageWizard.includePrivateAnnotations = !!packagePrivateNotes.checked;
+      _renderProjectExplorer();
+      return;
+    }
+    const packageIncludeArtifacts = event.target.closest?.('[data-project-package-include-artifacts]');
+    if (packageIncludeArtifacts && projectPackageWizard) {
+      event.stopPropagation();
+      projectPackageWizard.includeArtifacts = !!packageIncludeArtifacts.checked;
+      _renderProjectExplorer();
+      return;
+    }
     const targetFilterControl = event.target.closest?.('[data-project-target-filter-option]');
     if (targetFilterControl) {
       event.stopPropagation();
@@ -2881,6 +3255,30 @@
       } else if (action === 'new-target') {
         _setProjectWorkspaceMessage('');
         _openProjectTargetEditor(projectId);
+        return;
+      } else if (action === 'package-wizard-open') {
+        _openProjectPackageWizard(projectId, 'evidence');
+        return;
+      } else if (action === 'package-wizard-cancel') {
+        _closeProjectPackageWizard();
+        return;
+      } else if (action === 'package-wizard-preset') {
+        const preset = String(btn.dataset.preset || 'evidence');
+        _openProjectPackageWizard(projectId, preset);
+        return;
+      } else if (action === 'package-wizard-back') {
+        if (projectPackageWizard) projectPackageWizard.step = Math.max(1, projectPackageWizard.step - 1);
+        _renderProjectExplorer();
+        return;
+      } else if (action === 'package-wizard-next') {
+        if (!projectPackageWizard) return;
+        if (projectPackageWizard.step >= 4) {
+          await _createProjectPackageFromWizard(projectId);
+          return;
+        }
+        projectPackageWizard.step = Math.min(4, projectPackageWizard.step + 1);
+        _setProjectWorkspaceMessage('');
+        _renderProjectExplorer();
         return;
       } else if (action === 'edit-target') {
         const targetId = String(btn.dataset.targetId || '');

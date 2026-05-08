@@ -5,13 +5,16 @@ Session-scoped project workspace helpers.
 from __future__ import annotations
 
 import hashlib
-import io
+import html
+import gzip
 import ipaddress
 import json
+import os
 import re
 import secrets
 import shlex
 import sqlite3
+import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
@@ -22,6 +25,8 @@ from database import (
     validate_project_entity_type,
     validate_project_link_source,
 )
+from permalinks import _format_duration, _normalize_permalink_lines
+from run_output_store import load_full_output_entries
 from workspace import WorkspaceError, open_workspace_file_for_download, resolve_workspace_path
 
 MAX_PROJECT_NAME_LEN = 120
@@ -499,17 +504,88 @@ def _normalize_evidence_package_payload(data):
     name = _trim_text(data.get("name"), MAX_PACKAGE_NAME_LEN)
     if not name:
         raise ProjectWorkspaceError("package name is required")
+    selection = data.get("selection")
+    if selection is not None and not isinstance(selection, dict):
+        raise ProjectWorkspaceError("package selection must be an object")
+    options = data.get("options")
+    if options is not None and not isinstance(options, dict):
+        raise ProjectWorkspaceError("package options must be an object")
     return {
         "name": name,
         "description": _trim_text(data.get("description"), MAX_PACKAGE_DESCRIPTION_LEN),
         "redaction_mode": "raw",
         "include_artifacts": bool(data.get("include_artifacts")),
+        "preset": _trim_text(data.get("preset"), 32).lower() or "custom",
+        "package_format_version": 1,
+        "include_private_annotations": bool(data.get("include_private_annotations")),
+        "selection": selection if isinstance(selection, dict) else None,
+        "options": options if isinstance(options, dict) else {},
     }
 
 
-def _evidence_manifest_from_summary(summary, payload):
+def _normalized_package_selection_ids(selection, key, allowed_ids):
+    allowed = {str(value) for value in allowed_ids if value}
+    if not isinstance(selection, dict) or key not in selection:
+        return sorted(allowed)
+    raw_values = selection.get(key)
+    if not isinstance(raw_values, list):
+        raise ProjectWorkspaceError(f"package selection {key} must be a list")
+    selected = []
+    seen = set()
+    for value in raw_values:
+        normalized = _trim_text(value, MAX_ENTITY_ID_LEN)
+        if not normalized:
+            continue
+        if normalized not in allowed:
+            raise ProjectWorkspaceError("package selection includes an entity that is not linked to this project")
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        selected.append(normalized)
+    return selected
+
+
+def _filter_package_items(items, selected_ids):
+    selected = {str(value) for value in selected_ids if value}
+    return [item for item in items if str(item.get("id") or "") in selected]
+
+
+def _evidence_manifest_from_summary(summary, payload, findings=None):
+    findings = findings if isinstance(findings, list) else []
+    selection = payload.get("selection")
+    run_ids = _normalized_package_selection_ids(
+        selection,
+        "run_ids",
+        [item.get("id") for item in summary.get("runs", [])],
+    )
+    finding_ids = _normalized_package_selection_ids(
+        selection,
+        "finding_ids",
+        [item.get("id") for item in findings],
+    )
+    artifact_ids = _normalized_package_selection_ids(
+        selection,
+        "artifact_ids",
+        [item.get("id") for item in summary.get("artifacts", [])],
+    )
+    target_ids = _normalized_package_selection_ids(
+        selection,
+        "target_ids",
+        [item.get("id") for item in summary.get("targets", [])],
+    )
+    selected_runs = _filter_package_items(summary.get("runs", []), run_ids)
+    selected_findings = _filter_package_items(findings, finding_ids)
+    selected_artifacts = _filter_package_items(summary.get("artifacts", []), artifact_ids)
+    selected_targets = _filter_package_items(summary.get("targets", []), target_ids)
+    output_options = {
+        "manifest_json": True,
+        "index_html": True,
+        "transcripts_html": True,
+        "raw_artifacts": bool(payload["include_artifacts"]),
+    }
     return {
         "format": 1,
+        "package_format_version": payload["package_format_version"],
         "project": {
             "id": summary["project"]["id"],
             "name": summary["project"]["name"],
@@ -517,10 +593,27 @@ def _evidence_manifest_from_summary(summary, payload):
             "description": summary["project"].get("description", ""),
             "notes": summary["project"].get("notes", ""),
         },
-        "counts": summary["counts"],
+        "counts": {
+            "runs": len(selected_runs),
+            "findings": len(selected_findings),
+            "artifacts": len(selected_artifacts),
+            "targets": len(selected_targets),
+        },
+        "project_counts": summary["counts"],
+        "selected_entity_ids": {
+            "run_ids": run_ids,
+            "finding_ids": finding_ids,
+            "artifact_ids": artifact_ids,
+            "target_ids": target_ids,
+        },
+        "preset": payload["preset"],
+        "options": output_options,
+        "include_private_annotations": payload["include_private_annotations"],
         "links": summary["links"],
-        "targets": summary["targets"],
-        "artifacts": summary.get("artifacts", []),
+        "runs": selected_runs,
+        "findings": selected_findings,
+        "targets": selected_targets,
+        "artifacts": selected_artifacts,
         "redaction_mode": payload["redaction_mode"],
         "include_artifacts": payload["include_artifacts"],
     }
@@ -552,6 +645,506 @@ def _package_zip_artifact_path(workspace_path, used_paths):
             used_paths.add(candidate)
             return candidate
     raise ProjectWorkspaceError("could not allocate artifact package path")
+
+
+def _package_html_escape(value):
+    return html.escape("" if value is None else str(value), quote=True)
+
+
+def _package_short_id(value):
+    text = str(value or "")
+    return text[:12] if len(text) > 12 else text
+
+
+def _package_int(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _package_markdown_text(value):
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    return text.replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ").strip()
+
+
+def _package_markdown_link(label, href):
+    safe_label = _package_markdown_text(label) or "link"
+    safe_href = str(href or "").replace(")", "%29").replace(" ", "%20")
+    return f"[{safe_label}]({safe_href})" if safe_href else safe_label
+
+
+def _package_output_entry(item):
+    if isinstance(item, dict) and isinstance(item.get("text"), str):
+        entry = {
+            "text": item["text"],
+            "cls": str(item.get("cls", "")),
+            "tsC": str(item.get("tsC", "")),
+            "tsE": str(item.get("tsE", "")),
+        }
+        if isinstance(item.get("signals"), list):
+            entry["signals"] = [str(signal) for signal in item["signals"] if str(signal)]
+        if isinstance(item.get("line_index"), int):
+            entry["line_index"] = item["line_index"]
+        if isinstance(item.get("command_root"), str):
+            entry["command_root"] = item["command_root"]
+        if isinstance(item.get("target"), str):
+            entry["target"] = item["target"]
+        return entry
+    return {"text": str(item or ""), "cls": "", "tsC": "", "tsE": ""}
+
+
+def _package_preview_output_entries(run):
+    raw = run.get("output_preview")
+    if raw is None:
+        raw = run.get("output")
+    if not raw:
+        return []
+    try:
+        loaded = json.loads(raw)
+    except (TypeError, ValueError):
+        return [{"text": line, "cls": "", "tsC": "", "tsE": ""} for line in str(raw).splitlines()]
+    if not isinstance(loaded, list):
+        return [{"text": str(loaded), "cls": "", "tsC": "", "tsE": ""}]
+    return [_package_output_entry(item) for item in loaded]
+
+
+def _package_run_rows(conn, session_id, run_ids):
+    ids = [str(run_id) for run_id in run_ids if run_id]
+    if not ids:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT r.*, art.rel_path "
+        "FROM runs r LEFT JOIN run_output_artifacts art ON art.run_id = r.id "
+        f"WHERE r.session_id = ? AND r.id IN ({placeholders})",  # nosec B608
+        [session_id, *ids],
+    ).fetchall()
+    by_id = {str(row["id"]): dict(row) for row in rows}
+    return [by_id[run_id] for run_id in ids if run_id in by_id]
+
+
+def _package_run_output_entries(run, *, cfg=None):
+    if run.get("full_output_available") and run.get("rel_path"):
+        try:
+            entries = load_full_output_entries(str(run["rel_path"]))
+        except (OSError, gzip.BadGzipFile, EOFError, ValueError):
+            entries = _package_preview_output_entries(run)
+        if run.get("full_output_truncated"):
+            entries.append({
+                "text": "[full output truncated by the server-side capture limit]",
+                "cls": "warn",
+                "tsC": "",
+                "tsE": "",
+            })
+    else:
+        entries = _package_preview_output_entries(run)
+        if run.get("preview_truncated"):
+            entries.append({
+                "text": "[preview truncated; full output was not available for this package export]",
+                "cls": "warn",
+                "tsC": "",
+                "tsE": "",
+            })
+
+    max_lines = _cfg_int("max_output_lines", 5000, cfg=cfg) or 5000
+    if len(entries) > max_lines:
+        hidden = len(entries) - max_lines
+        entries = entries[:max_lines]
+        entries.append({
+            "text": f"[package transcript capped at {max_lines} lines; {hidden} additional lines omitted]",
+            "cls": "warn",
+            "tsC": "",
+            "tsE": "",
+        })
+    return entries
+
+
+def _package_css():
+    return """
+:root {
+  color-scheme: dark;
+  --bg: #0f1215;
+  --panel: #171c20;
+  --panel-2: #20272d;
+  --text: #e6edf3;
+  --muted: #9da9b5;
+  --accent: #54d18a;
+  --border: #303a43;
+  --danger: #ff7b72;
+  --warn: #f2c94c;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.page { width: min(1180px, calc(100vw - 32px)); margin: 0 auto; padding: 32px 0 48px; }
+.topline { color: var(--muted); font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.08em; }
+h1, h2, h3 { margin: 0; line-height: 1.2; }
+h1 { margin-top: 8px; font-size: clamp(2rem, 5vw, 3.7rem); }
+h2 { margin: 32px 0 12px; font-size: 1.15rem; }
+.subtitle { max-width: 780px; margin: 12px 0 0; color: var(--muted); }
+.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin-top: 24px; }
+.metric, .card, .transcript {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 8px;
+}
+.metric { padding: 14px; }
+.metric strong { display: block; font-size: 1.6rem; }
+.metric span { color: var(--muted); font-size: 0.88rem; }
+.card { padding: 16px; margin-top: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 0.82rem;
+  padding: 4px 9px;
+}
+table { width: 100%; border-collapse: collapse; overflow-wrap: anywhere; }
+th, td { padding: 10px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+th { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; }
+.muted { color: var(--muted); }
+.warn { color: var(--warn); }
+.fail { color: var(--danger); }
+.mono, .transcript {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+.run-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+.run-list li { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: var(--panel); }
+.run-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; color: var(--muted); font-size: 0.84rem; }
+.transcript { padding: 16px; overflow: auto; white-space: pre-wrap; }
+.line { min-height: 1.35em; }
+.prompt-echo { color: var(--accent); }
+.line.warn { color: var(--warn); }
+.line:target { background: color-mix(in srgb, var(--accent) 18%, transparent); outline: 1px solid var(--accent); }
+.footer { margin-top: 36px; color: var(--muted); font-size: 0.84rem; }
+@media (max-width: 720px) {
+  .page { width: min(100vw - 20px, 1180px); padding-top: 20px; }
+  th:nth-child(4), td:nth-child(4) { display: none; }
+}
+""".strip()
+
+
+def _package_page(title, body):
+    return (
+        "<!doctype html>\n"
+        "<html lang=\"en\">\n"
+        "<head>\n"
+        "<meta charset=\"utf-8\">\n"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+        f"<title>{_package_html_escape(title)}</title>\n"
+        f"<style>{_package_css()}</style>\n"
+        "</head>\n"
+        "<body>\n"
+        f"{body}\n"
+        "</body>\n"
+        "</html>\n"
+    )
+
+
+def _render_package_run_html(run, entries, manifest, generated_at):
+    command = str(run.get("command") or "")
+    started = str(run.get("started") or "")
+    finished = str(run.get("finished") or "")
+    duration = _format_duration(started, finished)
+    line_count = int(run.get("output_line_count") or len(entries))
+    normalized = _normalize_permalink_lines(entries, command)
+    rendered_lines = []
+    for index, entry in enumerate(normalized, start=1):
+        text = _package_html_escape(entry.get("text", "") if isinstance(entry, dict) else entry)
+        cls = str(entry.get("cls", "") if isinstance(entry, dict) else "")
+        line_index = entry.get("line_index") if isinstance(entry, dict) else None
+        anchor = f" id=\"L{line_index + 1}\"" if isinstance(line_index, int) else f" id=\"line-{index}\""
+        cls_attr = f" line {_package_html_escape(cls)}".strip()
+        rendered_lines.append(f"<div{anchor} class=\"{cls_attr}\">{text}</div>")
+    if not rendered_lines:
+        rendered_lines.append("<div class=\"line muted\">No output captured.</div>")
+
+    exit_code = run.get("exit_code")
+    exit_text = "still running" if exit_code is None else f"exit {exit_code}"
+    metrics = [
+        ("Started", started or "unknown"),
+        ("Finished", finished or "unknown"),
+        ("Duration", duration or "unknown"),
+        ("Lines", line_count),
+        ("Status", exit_text),
+    ]
+    metric_html = "".join(
+        "<div class=\"metric\">"
+        f"<span>{_package_html_escape(label)}</span>"
+        f"<strong>{_package_html_escape(value)}</strong>"
+        "</div>"
+        for label, value in metrics
+    )
+    project_name = (
+        manifest.get("project", {}).get("name", "Project")
+        if isinstance(manifest.get("project"), dict)
+        else "Project"
+    )
+    run_id_text = _package_html_escape(run.get("id"))
+    body = (
+        "<main class=\"page\">"
+        f"<a href=\"../index.html\">Back to package index</a>"
+        f"<div class=\"topline\">{_package_html_escape(project_name)} evidence package</div>"
+        f"<h1>{_package_html_escape(command or run.get('id'))}</h1>"
+        f"<p class=\"subtitle mono\">Run {run_id_text} · generated {_package_html_escape(generated_at)}</p>"
+        f"<section class=\"grid\">{metric_html}</section>"
+        "<h2>Transcript</h2>"
+        f"<section class=\"transcript\">{''.join(rendered_lines)}</section>"
+        "<p class=\"footer\">Generated by darklab shell evidence packages.</p>"
+        "</main>"
+    )
+    return _package_page(command or "Run transcript", body)
+
+
+def _finding_run_anchor(finding):
+    run_id = str(finding.get("run_id") or "")
+    line_number = finding.get("line_number")
+    if isinstance(line_number, int):
+        return f"runs/{_package_html_escape(run_id)}.html#L{line_number + 1}"
+    return f"runs/{_package_html_escape(run_id)}.html"
+
+
+def _render_package_index_html(package, manifest, generated_at, run_pages, artifact_paths, skipped_items):
+    project = manifest.get("project") if isinstance(manifest.get("project"), dict) else {}
+    counts = manifest.get("counts") if isinstance(manifest.get("counts"), dict) else {}
+    targets = manifest.get("targets") if isinstance(manifest.get("targets"), list) else []
+    runs = manifest.get("runs") if isinstance(manifest.get("runs"), list) else []
+    findings = manifest.get("findings") if isinstance(manifest.get("findings"), list) else []
+    artifacts = manifest.get("artifacts") if isinstance(manifest.get("artifacts"), list) else []
+
+    metric_html = "".join(
+        "<div class=\"metric\">"
+        f"<span>{_package_html_escape(label)}</span>"
+        f"<strong>{_package_html_escape(counts.get(key, 0))}</strong>"
+        "</div>"
+        for key, label in (
+            ("runs", "Runs"),
+            ("findings", "Findings"),
+            ("artifacts", "Artifacts"),
+            ("targets", "Targets"),
+        )
+    )
+    target_html = "".join(
+        "<span class=\"chip\">"
+        f"{_package_html_escape(target.get('type', 'target'))}: {_package_html_escape(target.get('value', ''))}"
+        "</span>"
+        for target in targets
+        if isinstance(target, dict)
+    ) or "<span class=\"muted\">No selected targets.</span>"
+
+    run_html = []
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        run_id = str(run.get("id") or "")
+        href = run_pages.get(run_id, "")
+        run_html.append(
+            "<li>"
+            f"<a class=\"mono\" href=\"{_package_html_escape(href)}\">{_package_html_escape(run.get('command') or run_id)}</a>"
+            "<div class=\"run-meta\">"
+            f"<span>{_package_html_escape(run.get('started') or 'unknown start')}</span>"
+            f"<span>{_package_html_escape(run.get('output_line_count') or 0)} lines</span>"
+            f"<span>{_package_html_escape(run.get('link_source') or 'manual')} link</span>"
+            "</div>"
+            "</li>"
+        )
+    if not run_html:
+        run_html.append("<li class=\"muted\">No selected runs.</li>")
+
+    finding_rows = []
+    for finding in findings:
+        if not isinstance(finding, dict):
+            continue
+        finding_run_id = str(finding.get("run_id") or "")
+        finding_href = _finding_run_anchor(finding) if finding_run_id in run_pages else ""
+        finding_label = _package_html_escape(finding.get("title") or finding.get("raw_line"))
+        finding_link = f"<a href=\"{finding_href}\">{finding_label}</a>" if finding_href else finding_label
+        finding_rows.append(
+            "<tr>"
+            f"<td>{finding_link}</td>"
+            f"<td>{_package_html_escape(finding.get('severity') or 'info')}</td>"
+            f"<td>{_package_html_escape(finding.get('review_state') or 'new')}</td>"
+            f"<td class=\"mono\">{_package_html_escape(_package_short_id(finding.get('run_id')))}</td>"
+            f"<td class=\"mono\">{_package_html_escape(finding.get('raw_line') or '')}</td>"
+            "</tr>"
+        )
+    if not finding_rows:
+        finding_rows.append("<tr><td colspan=\"5\" class=\"muted\">No selected findings.</td></tr>")
+
+    artifact_rows = []
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            continue
+        artifact_id = str(artifact.get("id") or "")
+        href = artifact_paths.get(artifact_id, "")
+        name = artifact.get("display_name") or artifact.get("workspace_path") or artifact_id
+        link = (
+            f"<a href=\"{_package_html_escape(href)}\">{_package_html_escape(name)}</a>"
+            if href else _package_html_escape(name)
+        )
+        artifact_rows.append(
+            "<tr>"
+            f"<td>{link}</td>"
+            f"<td>{_package_html_escape(artifact.get('workspace_path') or '')}</td>"
+            f"<td>{_package_html_escape(artifact.get('byte_size') or 0)}</td>"
+            f"<td class=\"mono\">{_package_html_escape(_package_short_id(artifact.get('run_id')))}</td>"
+            "</tr>"
+        )
+    if not artifact_rows:
+        artifact_rows.append("<tr><td colspan=\"4\" class=\"muted\">No selected artifacts.</td></tr>")
+
+    skipped_html = ""
+    if skipped_items:
+        skipped_rows = "".join(
+            "<li>"
+            f"<span class=\"chip\">{_package_html_escape(item.get('kind') or 'item')}</span> "
+            "<span class=\"mono\">"
+            f"{_package_html_escape(item.get('label') or item.get('workspace_path') or item.get('id'))}"
+            "</span>"
+            f" <span class=\"muted\">{_package_html_escape(item.get('reason') or 'skipped')}</span>"
+            "</li>"
+            for item in skipped_items
+        )
+        skipped_html = f"<h2>Skipped Items</h2><section class=\"card\"><ul>{skipped_rows}</ul></section>"
+
+    body = (
+        "<main class=\"page\">"
+        "<div class=\"topline\">darklab shell evidence package</div>"
+        f"<h1>{_package_html_escape(package.get('name') or 'Evidence package')}</h1>"
+        f"<p class=\"subtitle\">"
+        f"{_package_html_escape(project.get('name') or 'Project')} · generated {_package_html_escape(generated_at)}"
+        "</p>"
+        f"<section class=\"grid\">{metric_html}</section>"
+        "<h2>Targets</h2>"
+        f"<section class=\"card chips\">{target_html}</section>"
+        "<h2>Runs</h2>"
+        f"<ul class=\"run-list\">{''.join(run_html)}</ul>"
+        "<h2>Findings</h2>"
+        "<section class=\"card\">"
+        "<table><thead><tr><th>Finding</th><th>Severity</th><th>Status</th><th>Run</th><th>Evidence</th></tr></thead>"
+        f"<tbody>{''.join(finding_rows)}</tbody></table>"
+        "</section>"
+        "<h2>Artifacts</h2>"
+        "<section class=\"card\">"
+        "<table><thead><tr><th>Artifact</th><th>Workspace path</th><th>Bytes</th><th>Run</th></tr></thead>"
+        f"<tbody>{''.join(artifact_rows)}</tbody></table>"
+        "</section>"
+        f"{skipped_html}"
+        "<p class=\"footer\">Generated HTML is raw output; redaction controls remain hidden until redaction is available.</p>"
+        "</main>"
+    )
+    return _package_page(str(package.get("name") or "Evidence package"), body)
+
+
+def _render_package_readme(package, manifest, generated_at, run_pages, artifact_paths, skipped_items):
+    project = manifest.get("project") if isinstance(manifest.get("project"), dict) else {}
+    counts = manifest.get("counts") if isinstance(manifest.get("counts"), dict) else {}
+    targets = manifest.get("targets") if isinstance(manifest.get("targets"), list) else []
+    runs = manifest.get("runs") if isinstance(manifest.get("runs"), list) else []
+    findings = manifest.get("findings") if isinstance(manifest.get("findings"), list) else []
+    artifacts = manifest.get("artifacts") if isinstance(manifest.get("artifacts"), list) else []
+    lines = [
+        f"# {_package_markdown_text(package.get('name') or 'Evidence package')}",
+        "",
+        f"- Project: {_package_markdown_text(project.get('name') or 'Project')}",
+        f"- Generated: {_package_markdown_text(generated_at)}",
+        f"- Preset: {_package_markdown_text(manifest.get('preset') or 'custom')}",
+        f"- Redaction mode: {_package_markdown_text(manifest.get('redaction_mode') or 'raw')}",
+        "",
+        "## Counts",
+        "",
+        "| Type | Count |",
+        "| --- | ---: |",
+    ]
+    for key, label in (("runs", "Runs"), ("findings", "Findings"), ("artifacts", "Artifacts"), ("targets", "Targets")):
+        lines.append(f"| {label} | {_package_int(counts.get(key))} |")
+    lines.extend(["", "## Targets", ""])
+    if targets:
+        for target in targets:
+            if isinstance(target, dict):
+                lines.append(
+                    f"- `{_package_markdown_text(target.get('type') or 'target')}` "
+                    f"{_package_markdown_text(target.get('value') or '')}"
+                )
+    else:
+        lines.append("- No selected targets.")
+    lines.extend(["", "## Runs", ""])
+    if runs:
+        for run in runs:
+            if not isinstance(run, dict):
+                continue
+            run_id = str(run.get("id") or "")
+            label = run.get("command") or run_id
+            lines.append(f"- {_package_markdown_link(label, run_pages.get(run_id, ''))}")
+            lines.append(f"  - Started: {_package_markdown_text(run.get('started') or 'unknown')}")
+            lines.append(f"  - Lines: {_package_int(run.get('output_line_count'))}")
+    else:
+        lines.append("- No selected runs.")
+    lines.extend(["", "## Findings", ""])
+    if findings:
+        lines.extend(["| Finding | Severity | Status | Run | Evidence |", "| --- | --- | --- | --- | --- |"])
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            run_id = str(finding.get("run_id") or "")
+            href = _finding_run_anchor(finding) if run_id in run_pages else ""
+            finding_label = finding.get("title") or finding.get("raw_line") or finding.get("id")
+            lines.append(
+                f"| {_package_markdown_link(finding_label, href)} "
+                f"| {_package_markdown_text(finding.get('severity') or 'info')} "
+                f"| {_package_markdown_text(finding.get('review_state') or 'new')} "
+                f"| `{_package_markdown_text(_package_short_id(run_id))}` "
+                f"| `{_package_markdown_text(finding.get('raw_line') or '')}` |"
+            )
+    else:
+        lines.append("- No selected findings.")
+    lines.extend(["", "## Artifacts", ""])
+    if artifacts:
+        lines.extend(["| Artifact | Workspace Path | Bytes | Run |", "| --- | --- | ---: | --- |"])
+        for artifact in artifacts:
+            if not isinstance(artifact, dict):
+                continue
+            artifact_id = str(artifact.get("id") or "")
+            name = artifact.get("display_name") or artifact.get("workspace_path") or artifact_id
+            lines.append(
+                f"| {_package_markdown_link(name, artifact_paths.get(artifact_id, ''))} "
+                f"| `{_package_markdown_text(artifact.get('workspace_path') or '')}` "
+                f"| {_package_int(artifact.get('byte_size'))} "
+                f"| `{_package_markdown_text(_package_short_id(artifact.get('run_id')))}` |"
+            )
+    else:
+        lines.append("- No selected artifacts.")
+    lines.extend(["", "## Skipped Items", ""])
+    if skipped_items:
+        for item in skipped_items:
+            label = item.get("label") or item.get("workspace_path") or item.get("id") or "item"
+            lines.append(
+                f"- `{_package_markdown_text(item.get('kind') or 'item')}` "
+                f"{_package_markdown_text(label)}: {_package_markdown_text(item.get('reason') or 'skipped')}"
+            )
+    else:
+        lines.append("- No skipped items.")
+    lines.extend([
+        "",
+        "## Notes",
+        "",
+        "Generated HTML and Markdown are raw output. Redaction controls remain hidden until redaction is available.",
+        "",
+    ])
+    return "\n".join(lines)
 
 
 def _replace_target_token(command, target_value):
@@ -978,53 +1571,152 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
     if max_archive_bytes and len(manifest_bytes) > max_archive_bytes:
         raise EvidencePackageTooLarge("evidence package manifest exceeds configured size limit")
     skipped_artifacts = []
-    buffer = io.BytesIO()
+    skipped_items = []
+    artifact_archive_paths = {}
+    temp_file = tempfile.NamedTemporaryFile(
+        prefix="darklab-evidence-package-",
+        suffix=".zip",
+        delete=False,
+    )
+    archive_path = temp_file.name
+    temp_file.close()
     used_paths = set()
-    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("manifest.json", manifest_bytes)
-        if package["include_artifacts"]:
-            artifacts = manifest.get("artifacts")
-            artifact_items = artifacts if isinstance(artifacts, list) else []
-            max_artifacts = _cfg_int("evidence_package_max_artifacts", 100, cfg=cfg)
-            if max_artifacts and len(artifact_items) > max_artifacts:
-                raise EvidencePackageTooLarge("evidence package artifact count exceeds configured limit")
+    try:
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("manifest.json", manifest_bytes)
             projected_bytes = len(manifest_bytes)
-            for artifact in artifact_items:
-                if not isinstance(artifact, dict):
-                    continue
-                workspace_path = _trim_text(artifact.get("workspace_path"), MAX_ENTITY_ID_LEN)
-                if not workspace_path:
-                    continue
-                try:
-                    declared_size = max(0, int(artifact.get("byte_size") or 0))
-                except (TypeError, ValueError):
-                    declared_size = 0
-                if max_archive_bytes and declared_size and projected_bytes + declared_size > max_archive_bytes:
-                    raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
-                try:
-                    resolved = resolve_workspace_path(session_id, workspace_path, cfg)
-                    if not resolved.is_file():
-                        raise ProjectWorkspaceError("artifact file is not available")
-                    projected_bytes += resolved.stat().st_size
-                    if max_archive_bytes and projected_bytes > max_archive_bytes:
+            if package["include_artifacts"]:
+                artifacts = manifest.get("artifacts")
+                artifact_items = artifacts if isinstance(artifacts, list) else []
+                max_artifacts = _cfg_int("evidence_package_max_artifacts", 100, cfg=cfg)
+                if max_artifacts and len(artifact_items) > max_artifacts:
+                    raise EvidencePackageTooLarge("evidence package artifact count exceeds configured limit")
+                for artifact in artifact_items:
+                    if not isinstance(artifact, dict):
+                        continue
+                    workspace_path = _trim_text(artifact.get("workspace_path"), MAX_ENTITY_ID_LEN)
+                    if not workspace_path:
+                        continue
+                    try:
+                        declared_size = max(0, int(artifact.get("byte_size") or 0))
+                    except (TypeError, ValueError):
+                        declared_size = 0
+                    if max_archive_bytes and declared_size and projected_bytes + declared_size > max_archive_bytes:
                         raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
-                    zip_path = _package_zip_artifact_path(workspace_path, used_paths)
-                    archive.write(resolved, arcname=zip_path)
-                except (OSError, ProjectWorkspaceError, WorkspaceError) as exc:
-                    skipped_artifacts.append({
-                        "id": artifact.get("id") or "",
-                        "workspace_path": workspace_path,
-                        "reason": str(exc),
-                    })
-        if skipped_artifacts:
-            archive.writestr(
-                "skipped-artifacts.json",
-                json.dumps({"artifacts": skipped_artifacts}, indent=2, sort_keys=True) + "\n",
+                    try:
+                        resolved = resolve_workspace_path(session_id, workspace_path, cfg)
+                        if not resolved.is_file():
+                            raise ProjectWorkspaceError("artifact file is not available")
+                        projected_bytes += resolved.stat().st_size
+                        if max_archive_bytes and projected_bytes > max_archive_bytes:
+                            raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
+                        zip_path = _package_zip_artifact_path(workspace_path, used_paths)
+                        archive.write(resolved, arcname=zip_path)
+                        artifact_archive_paths[str(artifact.get("id") or "")] = zip_path
+                    except (OSError, ProjectWorkspaceError, WorkspaceError) as exc:
+                        skipped_artifact = {
+                            "kind": "artifact",
+                            "id": artifact.get("id") or "",
+                            "label": artifact.get("display_name") or workspace_path,
+                            "workspace_path": workspace_path,
+                            "reason": str(exc),
+                        }
+                        skipped_artifacts.append(skipped_artifact)
+                        skipped_items.append(skipped_artifact)
+            if skipped_artifacts:
+                skipped_bytes = (
+                    json.dumps({"artifacts": skipped_artifacts}, indent=2, sort_keys=True) + "\n"
+                ).encode("utf-8")
+                projected_bytes += len(skipped_bytes)
+                if max_archive_bytes and projected_bytes > max_archive_bytes:
+                    raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
+                archive.writestr("skipped-artifacts.json", skipped_bytes)
+
+            run_pages = {}
+            run_ids = []
+            selected_entity_ids = manifest.get("selected_entity_ids")
+            if isinstance(selected_entity_ids, dict) and isinstance(selected_entity_ids.get("run_ids"), list):
+                run_ids = [str(run_id) for run_id in selected_entity_ids["run_ids"] if str(run_id)]
+            with db_connect() as conn:
+                run_rows = _package_run_rows(conn, session_id, run_ids)
+            found_run_ids = {str(row.get("id") or "") for row in run_rows}
+            for run_id in run_ids:
+                if run_id in found_run_ids:
+                    continue
+                skipped_items.append({
+                    "kind": "run",
+                    "id": run_id,
+                    "label": run_id,
+                    "reason": "run is no longer available or no longer belongs to this session",
+                })
+            for run in run_rows:
+                run_id = str(run.get("id") or "")
+                if not run_id:
+                    continue
+                entries = _package_run_output_entries(run, cfg=cfg)
+                for entry in entries:
+                    if str(entry.get("text") or "").startswith("[package transcript capped"):
+                        skipped_items.append({
+                            "kind": "transcript",
+                            "id": run_id,
+                            "label": run.get("command") or run_id,
+                            "reason": str(entry.get("text") or "").strip("[]"),
+                        })
+                        break
+                run_page = _render_package_run_html(run, entries, manifest, generated_at)
+                run_page_bytes = run_page.encode("utf-8")
+                projected_bytes += len(run_page_bytes)
+                if max_archive_bytes and projected_bytes > max_archive_bytes:
+                    raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
+                run_path = f"runs/{run_id}.html"
+                run_pages[run_id] = run_path
+                archive.writestr(run_path, run_page_bytes)
+
+            index_page = _render_package_index_html(
+                package,
+                manifest,
+                generated_at,
+                run_pages,
+                artifact_archive_paths,
+                skipped_items,
             )
+            index_bytes = index_page.encode("utf-8")
+            projected_bytes += len(index_bytes)
+            if max_archive_bytes and projected_bytes > max_archive_bytes:
+                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
+            archive.writestr("index.html", index_bytes)
+            readme = _render_package_readme(
+                package,
+                manifest,
+                generated_at,
+                run_pages,
+                artifact_archive_paths,
+                skipped_items,
+            )
+            readme_bytes = readme.encode("utf-8")
+            projected_bytes += len(readme_bytes)
+            if max_archive_bytes and projected_bytes > max_archive_bytes:
+                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
+            archive.writestr("README.md", readme_bytes)
+            if skipped_items:
+                skipped_item_bytes = (
+                    json.dumps({"items": skipped_items}, indent=2, sort_keys=True) + "\n"
+                ).encode("utf-8")
+                projected_bytes += len(skipped_item_bytes)
+                if max_archive_bytes and projected_bytes > max_archive_bytes:
+                    raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
+                archive.writestr("skipped-items.json", skipped_item_bytes)
+    except Exception:
+        try:
+            os.unlink(archive_path)
+        except OSError:
+            pass
+        raise
     return {
         "filename": _package_archive_name(package),
         "mimetype": "application/zip",
-        "bytes": buffer.getvalue(),
+        "path": archive_path,
+        "byte_size": os.path.getsize(archive_path),
         "skipped_artifacts": skipped_artifacts,
     }
 
@@ -1034,7 +1726,8 @@ def create_evidence_package(session_id, project_id, data):
     summary = get_project_summary(session_id, project_id)
     if summary is None:
         return None
-    manifest = _evidence_manifest_from_summary(summary, payload)
+    findings = list_project_findings(session_id, project_id) or []
+    manifest = _evidence_manifest_from_summary(summary, payload, findings)
     created = _now()
     with db_connect() as conn:
         row = conn.execute(

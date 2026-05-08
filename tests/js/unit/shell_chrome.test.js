@@ -1065,6 +1065,32 @@ describe('shell chrome project workspace', () => {
           blob: () => Promise.resolve(new Blob(['package zip'], { type: 'application/zip' })),
         })
       }
+      if (url === '/projects/project-1/packages' && options.method === 'POST') {
+        const payload = JSON.parse(options.body)
+        projectPackages = [{
+          id: 'pkg-2',
+          name: payload.name,
+          description: payload.description,
+          include_artifacts: payload.include_artifacts,
+          status: 'draft',
+          updated: '2026-05-07T00:03:12Z',
+          manifest: {
+            package_format_version: 1,
+            preset: payload.preset,
+            counts: {
+              runs: payload.selection.run_ids.length,
+              findings: payload.selection.finding_ids.length,
+              artifacts: payload.selection.artifact_ids.length,
+              targets: payload.selection.target_ids.length,
+            },
+            selected_entity_ids: payload.selection,
+          },
+        }]
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, package: projectPackages[0] }),
+        })
+      }
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({}),
@@ -1238,6 +1264,44 @@ describe('shell chrome project workspace', () => {
       method: 'DELETE',
     }))
     expect(document.getElementById('project-explorer-body').textContent).toContain('No evidence packages yet.')
+
+    document.querySelector('[data-project-action="package-wizard-open"]').click()
+    await tick()
+    expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Preset')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('Evidence')
+    document.querySelector('[data-project-action="package-wizard-next"]').click()
+    await tick()
+    expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Include')
+    const oldArtifactSelection = document.querySelector('[data-project-package-selection="artifact"][value="artifact-2"]')
+    expect(oldArtifactSelection).not.toBeNull()
+    oldArtifactSelection.checked = false
+    oldArtifactSelection.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    document.querySelector('[data-project-action="package-wizard-next"]').click()
+    await tick()
+    expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Metadata')
+    const packageName = document.querySelector('[data-project-package-field="name"]')
+    packageName.value = 'Scoped evidence'
+    packageName.dispatchEvent(new Event('input', { bubbles: true }))
+    document.querySelector('[data-project-action="package-wizard-next"]').click()
+    await tick()
+    expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Preview')
+    expect(document.querySelector('.project-package-preview-json')?.textContent).toContain('"artifacts": 1')
+    document.querySelector('[data-project-action="package-wizard-next"]').click()
+    await tick()
+    await tick()
+    const packageCreateCall = apiFetch.mock.calls.find(([url, options]) => (
+      url === '/projects/project-1/packages' && options?.method === 'POST'
+    ))
+    expect(packageCreateCall).toBeTruthy()
+    const packagePayload = JSON.parse(packageCreateCall[1].body)
+    expect(packagePayload.name).toBe('Scoped evidence')
+    expect(packagePayload.preset).toBe('evidence')
+    expect(packagePayload.include_artifacts).toBe(true)
+    expect(packagePayload.options.index_html).toBe(true)
+    expect(packagePayload.options.transcripts_html).toBe(true)
+    expect(packagePayload.selection.artifact_ids).toEqual(['artifact-1'])
+    expect(document.getElementById('project-explorer-body').textContent).toContain('Scoped evidence')
 
     document.querySelector('[data-project-tab="runs"]').click()
     await tick()
