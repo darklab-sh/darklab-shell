@@ -719,6 +719,8 @@ class TestProjectRoutes:
             assert "manifest.json" in names
             assert "index.html" in names
             assert "README.md" in names
+            assert "findings/findings.json" in names
+            assert "findings/findings.md" in names
             assert f"runs/{run_id}.html" in names
             assert f"runs/{baseline_run_id}.html" not in names
             assert "artifacts/reports/run.txt" in names
@@ -726,6 +728,8 @@ class TestProjectRoutes:
             assert "skipped-artifacts.json" in names
             assert "skipped-items.json" in names
             downloaded_manifest = json.loads(archive.read("manifest.json"))
+            findings_json = json.loads(archive.read("findings/findings.json"))
+            findings_md = archive.read("findings/findings.md").decode("utf-8")
             index_html = archive.read("index.html").decode("utf-8")
             readme = archive.read("README.md").decode("utf-8")
             run_html = archive.read(f"runs/{run_id}.html").decode("utf-8")
@@ -733,6 +737,11 @@ class TestProjectRoutes:
         assert downloaded_manifest["package"]["id"] == package["id"]
         assert downloaded_manifest["manifest"]["counts"]["runs"] == 1
         assert downloaded_manifest["manifest"]["counts"]["artifacts"] == 2
+        assert findings_json["count"] == 1
+        assert findings_json["findings"][0]["raw_line"] == "443/tcp open https"
+        assert findings_json["findings"][0]["run_page"] == f"runs/{run_id}.html#L1"
+        assert "# Findings" in findings_md
+        assert "443/tcp open https" in findings_md
         assert "Draft Evidence" in index_html
         assert "443/tcp open https" in index_html
         assert "artifacts/reports/run.txt" in index_html
@@ -928,11 +937,20 @@ class TestProjectRoutes:
             assert "manifest.json" in names
             assert "index.html" in names
             assert "README.md" in names
+            assert "findings/findings.json" in names
+            assert "findings/findings.md" in names
             assert f"runs/{run_id}.html" in names
             assert not any(name.startswith("artifacts/") for name in names)
             package_text = "\n".join(
                 archive.read(name).decode("utf-8")
-                for name in ("manifest.json", "index.html", "README.md", f"runs/{run_id}.html")
+                for name in (
+                    "manifest.json",
+                    "index.html",
+                    "README.md",
+                    "findings/findings.json",
+                    "findings/findings.md",
+                    f"runs/{run_id}.html",
+                )
             )
         assert "Bearer abc123" not in package_text
         assert "secret.darklab.sh" not in package_text
