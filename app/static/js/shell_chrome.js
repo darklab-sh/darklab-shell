@@ -57,6 +57,8 @@
   const projectPackageManifestOverlay = document.getElementById('project-package-manifest-overlay');
   const projectPackageManifestTitle = document.getElementById('project-package-manifest-title');
   const projectPackageManifestJson = document.getElementById('project-package-manifest-json');
+  const projectPackageWizardOverlay = document.getElementById('project-package-wizard-overlay');
+  const projectPackageWizardBody = document.getElementById('project-package-wizard-body');
   const projectNotesForm = document.getElementById('project-notes-form');
   const projectNotesInput = document.getElementById('project-notes-input');
   const projectNotesSaveStatus = document.getElementById('project-notes-save-status');
@@ -1023,6 +1025,12 @@
     return `${safe || 'evidence-package'}.zip`;
   }
 
+  function _revokeObjectUrlOnPagehide(url) {
+    if (!url || typeof URL === 'undefined' || typeof URL.revokeObjectURL !== 'function') return;
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+    window.addEventListener('pagehide', () => URL.revokeObjectURL(url), { once: true });
+  }
+
   function _closeProjectPackageManifest() {
     if (!projectPackageManifestOverlay) return;
     projectPackageManifestOverlay.classList.add('u-hidden');
@@ -1085,7 +1093,7 @@
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    _revokeObjectUrlOnPagehide(url);
     _setProjectWorkspaceMessage('Artifact download started.');
   }
 
@@ -1131,6 +1139,43 @@
     return !!(projectPackageWizard && String(projectPackageWizard.projectId || '') === String(projectId || ''));
   }
 
+  function isProjectPackageWizardOpen() {
+    return !!(projectPackageWizardOverlay && projectPackageWizardOverlay.classList.contains('open'));
+  }
+
+  function _hideProjectPackageWizardOverlay() {
+    if (!projectPackageWizardOverlay) return;
+    projectPackageWizardOverlay.classList.add('u-hidden');
+    projectPackageWizardOverlay.classList.remove('open');
+    projectPackageWizardOverlay.setAttribute('aria-hidden', 'true');
+    if (projectPackageWizardBody) projectPackageWizardBody.replaceChildren();
+  }
+
+  function _renderProjectPackageWizardModal({ focus = false } = {}) {
+    if (!projectPackageWizard || !projectPackageWizardOverlay || !projectPackageWizardBody) {
+      _hideProjectPackageWizardOverlay();
+      return;
+    }
+    const projectId = String(projectPackageWizard.projectId || projectWorkspaceSelectedId || '');
+    if (!projectId) {
+      _hideProjectPackageWizardOverlay();
+      return;
+    }
+    projectPackageWizardBody.replaceChildren();
+    _renderProjectPackageWizard(projectPackageWizardBody, projectId, _projectSummary(projectId));
+    projectPackageWizardOverlay.classList.remove('u-hidden');
+    projectPackageWizardOverlay.classList.add('open');
+    projectPackageWizardOverlay.setAttribute('aria-hidden', 'false');
+    if (typeof global.enhanceAppSelects === 'function') {
+      global.enhanceAppSelects(projectPackageWizardBody);
+    }
+    if (focus) {
+      window.setTimeout(() => {
+        projectPackageWizardBody.querySelector('[data-project-action="package-wizard-cancel"]')?.focus();
+      }, 0);
+    }
+  }
+
   function _projectPackageSuggestedName(project, preset) {
     const slug = String(project && (project.slug || project.name) || 'project').trim().toLowerCase()
       .replace(/[^a-z0-9._-]+/g, '-')
@@ -1156,10 +1201,12 @@
           refreshed.description = projectPackageWizard.description;
           projectPackageWizard = { projectId: String(projectId || ''), ...refreshed };
           _renderProjectExplorer();
+          _renderProjectPackageWizardModal();
         }
       }).catch(() => {});
     }
     _renderProjectExplorer();
+    _renderProjectPackageWizardModal({ focus: true });
   }
 
   function _projectPackageManifestIds(manifest, key, fallbackItems = []) {
@@ -1206,17 +1253,22 @@
     _setProjectWorkspaceMessage('');
     if (!_projectFindingsLoaded(projectId)) {
       _loadProjectFindings(projectId).then(() => {
-        if (_projectPackageWizardActive(projectId)) _renderProjectExplorer();
+        if (_projectPackageWizardActive(projectId)) {
+          _renderProjectExplorer();
+          _renderProjectPackageWizardModal();
+        }
       }).catch(() => {});
     }
     projectWorkspaceTab = 'packages';
     _renderProjectExplorer();
+    _renderProjectPackageWizardModal({ focus: true });
   }
 
-  function _closeProjectPackageWizard() {
+  function _closeProjectPackageWizard({ render = true } = {}) {
     projectPackageWizard = null;
+    _hideProjectPackageWizardOverlay();
     _setProjectWorkspaceMessage('');
-    _renderProjectExplorer();
+    if (render) _renderProjectExplorer();
   }
 
   function _projectPackageById(summary, packageId) {
@@ -1252,6 +1304,23 @@
     });
     wrap.appendChild(actions);
     return wrap;
+  }
+
+  function _setProjectPackageDownloadBusy(button, busy) {
+    if (!button) return;
+    if (busy) {
+      button.dataset.originalText = button.textContent || 'Download';
+      button.disabled = true;
+      button.classList.add('is-preparing');
+      button.setAttribute('aria-busy', 'true');
+      button.textContent = 'Preparing...';
+      return;
+    }
+    button.disabled = false;
+    button.classList.remove('is-preparing');
+    button.removeAttribute('aria-busy');
+    button.textContent = button.dataset.originalText || 'Download';
+    delete button.dataset.originalText;
   }
 
   function _projectPackageManifest(pkg) {
@@ -1335,47 +1404,101 @@
     });
   }
 
-  function _packageWizardSetFor(kind) {
-    if (!projectPackageWizard) return new Set();
-    const map = {
-      run: projectPackageWizard.selection.runIds,
-      transcript: projectPackageWizard.selection.transcriptRunIds,
-      finding: projectPackageWizard.selection.findingIds,
-      artifact: projectPackageWizard.selection.artifactIds,
-      target: projectPackageWizard.selection.targetIds,
+  function _projectPackageSelectionKind(kind, config) {
+    return {
+      ...config,
+      missingIds: (projectId, summary) => {
+        const current = new Set(config.currentItems(projectId, summary)
+          .map(item => String(item && item.id || ''))
+          .filter(Boolean));
+        return Array.from(_packageWizardSetFor(kind)).filter(id => !current.has(String(id || '')));
+      },
     };
-    return map[kind] || new Set();
   }
 
-  function _packageWizardCurrentIds(kind, projectId, summary) {
-    const items = {
-      run: _projectRunItems(summary),
-      transcript: _projectRunItems(summary),
-      finding: _projectFindingItems(projectId),
-      artifact: _projectArtifactItems(summary),
-      target: _projectTargetItems(summary),
-    }[kind] || [];
-    return new Set(items.map(item => String(item && item.id || '')).filter(Boolean));
+  const PROJECT_PACKAGE_SELECTION_KINDS = {
+    run: _projectPackageSelectionKind('run', {
+      set: wizard => wizard.selection.runIds,
+      currentItems: (_projectId, summary) => _projectRunItems(summary),
+      label: 'Run',
+      missingReason: 'No longer linked to this project.',
+    }),
+    transcript: _projectPackageSelectionKind('transcript', {
+      set: wizard => wizard.selection.transcriptRunIds,
+      currentItems: (_projectId, summary) => _projectRunItems(summary),
+      label: 'Transcript',
+      missingReason: 'Source run is no longer linked to this project.',
+    }),
+    finding: _projectPackageSelectionKind('finding', {
+      set: wizard => wizard.selection.findingIds,
+      currentItems: projectId => _projectFindingItems(projectId),
+      label: 'Finding',
+      missingReason: 'No longer linked to this project.',
+    }),
+    artifact: _projectPackageSelectionKind('artifact', {
+      set: wizard => wizard.selection.artifactIds,
+      currentItems: (_projectId, summary) => _projectArtifactItems(summary),
+      label: 'Artifact',
+      missingReason: 'No longer linked to this project.',
+    }),
+    target: _projectPackageSelectionKind('target', {
+      set: wizard => wizard.selection.targetIds,
+      currentItems: (_projectId, summary) => _projectTargetItems(summary),
+      label: 'Target',
+      missingReason: 'No longer linked to this project.',
+    }),
+  };
+
+  function _packageWizardKindConfig(kind) {
+    return PROJECT_PACKAGE_SELECTION_KINDS[String(kind || '')] || null;
+  }
+
+  function _packageWizardSetFor(kind) {
+    const config = _packageWizardKindConfig(kind);
+    if (!projectPackageWizard || !config) return new Set();
+    return config.set(projectPackageWizard) || new Set();
   }
 
   function _packageWizardMissingIds(kind, projectId, summary) {
-    const current = _packageWizardCurrentIds(kind, projectId, summary);
-    return Array.from(_packageWizardSetFor(kind)).filter(id => !current.has(String(id || '')));
+    const config = _packageWizardKindConfig(kind);
+    return config ? config.missingIds(projectId, summary) : [];
+  }
+
+  function _prunePackageWizardUnavailableSelections(items) {
+    if (!projectPackageWizard || !Array.isArray(items)) return 0;
+    let removed = 0;
+    items.forEach((item) => {
+      const kind = String(item && item.kind || '');
+      const id = String(item && item.id || '');
+      const selected = _packageWizardSetFor(kind);
+      if (!id || !selected.has(id)) return;
+      selected.delete(id);
+      removed += 1;
+    });
+    return removed;
   }
 
   function _packageWizardSkippedPreview(projectId, summary) {
     const items = [];
-    [
-      ['run', 'Run'],
-      ['finding', 'Finding'],
-      ['target', 'Target'],
-    ].forEach(([kind, label]) => {
+    ['run', 'finding', 'target'].forEach((kind) => {
+      const config = _packageWizardKindConfig(kind);
       _packageWizardMissingIds(kind, projectId, summary).forEach((id) => {
-        items.push({ kind, id, label: `${label} ${_shortProjectRunId(id) || id}`, reason: 'No longer linked to this project.' });
+        items.push({
+          kind,
+          id,
+          label: `${config.label} ${_shortProjectRunId(id) || id}`,
+          reason: config.missingReason,
+        });
       });
     });
+    const transcriptConfig = _packageWizardKindConfig('transcript');
     _packageWizardMissingIds('transcript', projectId, summary).forEach((id) => {
-      items.push({ kind: 'transcript', id, label: `Transcript ${_shortProjectRunId(id) || id}`, reason: 'Source run is no longer linked to this project.' });
+      items.push({
+        kind: 'transcript',
+        id,
+        label: `${transcriptConfig.label} ${_shortProjectRunId(id) || id}`,
+        reason: transcriptConfig.missingReason,
+      });
     });
     if (projectPackageWizard?.includeArtifacts) {
       _projectArtifactItems(summary)
@@ -1390,7 +1513,13 @@
           });
         });
       _packageWizardMissingIds('artifact', projectId, summary).forEach((id) => {
-        items.push({ kind: 'artifact', id, label: `Artifact ${_shortProjectRunId(id) || id}`, reason: 'No longer linked to this project.' });
+        const config = _packageWizardKindConfig('artifact');
+        items.push({
+          kind: 'artifact',
+          id,
+          label: `${config.label} ${_shortProjectRunId(id) || id}`,
+          reason: config.missingReason,
+        });
       });
     }
     return items;
@@ -1683,13 +1812,21 @@
     const header = document.createElement('div');
     header.className = 'project-package-wizard-header';
     const title = document.createElement('h2');
+    title.id = 'project-package-wizard-title';
     title.textContent = 'New evidence package';
     const cancel = _makeProjectButton('Cancel', 'package-wizard-cancel', projectId);
     header.append(title, cancel);
     wizard.appendChild(header);
     _renderPackageWizardStepHeader(wizard);
+    if (projectPackageWizard.notice) {
+      const message = document.createElement('p');
+      message.className = 'project-workspace-message project-package-wizard-message'
+        + (projectPackageWizard.noticeError ? ' is-error' : '');
+      message.textContent = projectPackageWizard.notice;
+      wizard.appendChild(message);
+    }
     const body = document.createElement('div');
-    body.className = 'project-package-wizard-body';
+    body.className = 'project-package-wizard-body nice-scroll';
     if (projectPackageWizard.step === 1) _renderPackageWizardPreset(body, projectId, summary);
     else if (projectPackageWizard.step === 2) _renderPackageWizardSelections(body, projectId, summary);
     else if (projectPackageWizard.step === 3) _renderPackageWizardMetadata(body);
@@ -1733,20 +1870,23 @@
     const payload = _projectPackageWizardPayload();
     if (!payload.name) {
       _setProjectWorkspaceMessage('Package name is required.', { error: true });
+      projectPackageWizard.notice = 'Package name is required.';
+      projectPackageWizard.noticeError = true;
       projectPackageWizard.step = 3;
-      _renderProjectExplorer();
+      _renderProjectPackageWizardModal();
       return;
     }
     const summary = _projectSummary(projectId);
     const missingSelections = _packageWizardSkippedPreview(projectId, summary)
       .filter(item => item.kind !== 'artifact' || String(item.reason || '').includes('No longer linked'));
     if (missingSelections.length) {
-      _setProjectWorkspaceMessage(
-        'Remove unavailable selected items before creating this package.',
-        { error: true },
-      );
+      const removedCount = _prunePackageWizardUnavailableSelections(missingSelections);
+      const noun = removedCount === 1 ? 'item' : 'items';
+      _setProjectWorkspaceMessage(`${removedCount} unavailable ${noun} removed; review your selection before continuing.`);
+      projectPackageWizard.notice = `${removedCount} unavailable ${noun} removed; review your selection before continuing.`;
+      projectPackageWizard.noticeError = false;
       projectPackageWizard.step = 2;
-      _renderProjectExplorer();
+      _renderProjectPackageWizardModal();
       return;
     }
     await _projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/packages`, {
@@ -1754,6 +1894,7 @@
       body: JSON.stringify(payload),
     });
     projectPackageWizard = null;
+    _hideProjectPackageWizardOverlay();
     await refreshProjectWorkspace();
     projectWorkspaceTab = 'packages';
     _setProjectWorkspaceMessage('Package created.');
@@ -1777,7 +1918,7 @@
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    _revokeObjectUrlOnPagehide(url);
     _setProjectWorkspaceMessage('Package download started.');
   }
 
@@ -3023,10 +3164,6 @@
   }
 
   function _renderProjectPackages(container, projectId, summary) {
-    if (_projectPackageWizardActive(projectId)) {
-      _renderProjectPackageWizard(container, projectId, summary);
-      return;
-    }
     const toolbar = document.createElement('div');
     toolbar.className = 'project-package-toolbar';
     const newBtn = _makeProjectButton('New package', 'package-wizard-open', projectId);
@@ -3102,6 +3239,7 @@
     }
     _renderProjectList();
     _renderProjectExplorer();
+    _renderProjectPackageWizardModal();
   }
 
   async function _loadProjectSummaries(projects) {
@@ -3167,7 +3305,7 @@
     _flushProjectNotesAutosave().catch(() => {});
     _closeProjectTargetEditor();
     _closeProjectPackageManifest();
-    projectPackageWizard = null;
+    _closeProjectPackageWizard({ render: false });
     _hideProjectWorkspaceOverlay();
     _setProjectWorkspaceMessage('');
     if (refocus && typeof refocusComposerAfterAction === 'function') {
@@ -3372,9 +3510,9 @@
     _flushProjectNotesAutosave().catch(() => {});
   });
 
-  projectWorkspaceModal?.addEventListener('input', (event) => {
+  function _handleProjectPackageWizardInput(event) {
     const packageField = event.target.closest?.('[data-project-package-field]');
-    if (!packageField || !projectPackageWizard) return;
+    if (!packageField || !projectPackageWizard) return false;
     const field = String(packageField.dataset.projectPackageField || '');
     if (field === 'name') projectPackageWizard.name = String(packageField.value || '');
     if (field === 'description') projectPackageWizard.description = String(packageField.value || '');
@@ -3382,8 +3520,14 @@
       const mode = String(packageField.value || 'raw') === 'redacted' ? 'redacted' : 'raw';
       projectPackageWizard.redactionMode = mode;
       if (mode === 'redacted') projectPackageWizard.includeArtifacts = false;
-      _renderProjectExplorer();
+      projectPackageWizard.notice = '';
+      _renderProjectPackageWizardModal();
     }
+    return true;
+  }
+
+  projectWorkspaceModal?.addEventListener('input', (event) => {
+    _handleProjectPackageWizardInput(event);
   });
 
   projectNotesForm?.addEventListener('submit', (event) => {
@@ -3402,7 +3546,8 @@
     }));
   }
 
-  projectWorkspaceModal?.addEventListener('change', async (event) => {
+  function _handleProjectPackageWizardChange(event) {
+    if (_handleProjectPackageWizardInput(event)) return true;
     const packageSelection = event.target.closest?.('[data-project-package-selection]');
     if (packageSelection && projectPackageWizard) {
       event.stopPropagation();
@@ -3416,23 +3561,31 @@
         if (packageSelection.checked) transcriptRuns.add(value);
         else transcriptRuns.delete(value);
       }
-      _renderProjectExplorer();
-      return;
+      projectPackageWizard.notice = '';
+      _renderProjectPackageWizardModal();
+      return true;
     }
     const packagePrivateNotes = event.target.closest?.('[data-project-package-private-notes]');
     if (packagePrivateNotes && projectPackageWizard) {
       event.stopPropagation();
       projectPackageWizard.includePrivateAnnotations = !!packagePrivateNotes.checked;
-      _renderProjectExplorer();
-      return;
+      projectPackageWizard.notice = '';
+      _renderProjectPackageWizardModal();
+      return true;
     }
     const packageIncludeArtifacts = event.target.closest?.('[data-project-package-include-artifacts]');
     if (packageIncludeArtifacts && projectPackageWizard) {
       event.stopPropagation();
       projectPackageWizard.includeArtifacts = !!packageIncludeArtifacts.checked;
-      _renderProjectExplorer();
-      return;
+      projectPackageWizard.notice = '';
+      _renderProjectPackageWizardModal();
+      return true;
     }
+    return false;
+  }
+
+  projectWorkspaceModal?.addEventListener('change', async (event) => {
+    if (_handleProjectPackageWizardChange(event)) return;
     const targetFilterControl = event.target.closest?.('[data-project-target-filter-option]');
     if (targetFilterControl) {
       event.stopPropagation();
@@ -3491,6 +3644,47 @@
       _setProjectWorkspaceMessage(err.message || 'Could not update finding review state.', { error: true });
     }
   });
+
+  async function _handleProjectPackageWizardAction(btn) {
+    if (!btn) return false;
+    const action = String(btn.dataset.projectAction || '');
+    if (!action.startsWith('package-wizard-')) return false;
+    const projectId = String(btn.dataset.projectId || projectPackageWizard?.projectId || '');
+    if (action === 'package-wizard-open') {
+      _openProjectPackageWizard(projectId, 'evidence');
+      return true;
+    }
+    if (action === 'package-wizard-cancel') {
+      _closeProjectPackageWizard();
+      return true;
+    }
+    if (action === 'package-wizard-preset') {
+      const preset = String(btn.dataset.preset || 'evidence');
+      _openProjectPackageWizard(projectId, preset);
+      return true;
+    }
+    if (action === 'package-wizard-back') {
+      if (projectPackageWizard) {
+        projectPackageWizard.step = Math.max(1, projectPackageWizard.step - 1);
+        projectPackageWizard.notice = '';
+      }
+      _renderProjectPackageWizardModal();
+      return true;
+    }
+    if (action === 'package-wizard-next') {
+      if (!projectPackageWizard) return true;
+      if (projectPackageWizard.step >= 4) {
+        await _createProjectPackageFromWizard(projectId);
+        return true;
+      }
+      projectPackageWizard.step = Math.min(4, projectPackageWizard.step + 1);
+      projectPackageWizard.notice = '';
+      _setProjectWorkspaceMessage('');
+      _renderProjectPackageWizardModal();
+      return true;
+    }
+    return false;
+  }
 
   projectWorkspaceModal?.addEventListener('click', async (event) => {
     if (event.target.closest?.('[data-project-review-state]')) return;
@@ -3613,29 +3807,7 @@
         _setProjectWorkspaceMessage('');
         _openProjectTargetEditor(projectId);
         return;
-      } else if (action === 'package-wizard-open') {
-        _openProjectPackageWizard(projectId, 'evidence');
-        return;
-      } else if (action === 'package-wizard-cancel') {
-        _closeProjectPackageWizard();
-        return;
-      } else if (action === 'package-wizard-preset') {
-        const preset = String(btn.dataset.preset || 'evidence');
-        _openProjectPackageWizard(projectId, preset);
-        return;
-      } else if (action === 'package-wizard-back') {
-        if (projectPackageWizard) projectPackageWizard.step = Math.max(1, projectPackageWizard.step - 1);
-        _renderProjectExplorer();
-        return;
-      } else if (action === 'package-wizard-next') {
-        if (!projectPackageWizard) return;
-        if (projectPackageWizard.step >= 4) {
-          await _createProjectPackageFromWizard(projectId);
-          return;
-        }
-        projectPackageWizard.step = Math.min(4, projectPackageWizard.step + 1);
-        _setProjectWorkspaceMessage('');
-        _renderProjectExplorer();
+      } else if (await _handleProjectPackageWizardAction(btn)) {
         return;
       } else if (action === 'edit-target') {
         const targetId = String(btn.dataset.targetId || '');
@@ -3738,7 +3910,12 @@
         const summary = projectWorkspaceSummaries.get(String(projectId || ''));
         const pkg = _projectPackageById(summary, packageId) || { id: packageId, name: packageId };
         if (action === 'package-download') {
-          await _downloadProjectPackage(projectId, pkg);
+          _setProjectPackageDownloadBusy(btn, true);
+          try {
+            await _downloadProjectPackage(projectId, pkg);
+          } finally {
+            _setProjectPackageDownloadBusy(btn, false);
+          }
           return;
         }
         if (action === 'package-repackage' || action === 'package-manifest') {
@@ -3786,6 +3963,30 @@
     _closeProjectPackageManifest();
   });
 
+  projectPackageWizardOverlay?.addEventListener('input', (event) => {
+    _handleProjectPackageWizardInput(event);
+  });
+
+  projectPackageWizardOverlay?.addEventListener('change', (event) => {
+    _handleProjectPackageWizardChange(event);
+  });
+
+  projectPackageWizardOverlay?.addEventListener('click', async (event) => {
+    const btn = event.target.closest?.('[data-project-action]');
+    if (!btn) return;
+    event.preventDefault();
+    try {
+      await _handleProjectPackageWizardAction(btn);
+    } catch (err) {
+      _setProjectWorkspaceMessage(err.message || 'Package action failed.', { error: true });
+      if (projectPackageWizard) {
+        projectPackageWizard.notice = err.message || 'Package action failed.';
+        projectPackageWizard.noticeError = true;
+        _renderProjectPackageWizardModal();
+      }
+    }
+  });
+
   projectPackageManifestOverlay?.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
     event.preventDefault();
@@ -3801,6 +4002,14 @@
       level: 'modal',
       isOpen: isProjectTargetEditorOpen,
       onClose: () => _closeProjectTargetEditor(),
+      closeButtons: null,
+    });
+  }
+  if (bindDismissibleFn && projectPackageWizardOverlay) {
+    bindDismissibleFn(projectPackageWizardOverlay, {
+      level: 'modal',
+      isOpen: isProjectPackageWizardOpen,
+      onClose: () => _closeProjectPackageWizard(),
       closeButtons: null,
     });
   }

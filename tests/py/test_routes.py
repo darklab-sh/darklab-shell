@@ -581,7 +581,8 @@ class TestProjectRoutes:
             conn.execute(
                 "INSERT INTO findings "
                 "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
-                "VALUES (?, ?, ?, 'finding', 'open port 443', '443/tcp open https', 0, ?, datetime('now'))",
+                "VALUES (?, ?, ?, 'finding', '[click](javascript:alert(1))', "
+                "'443/tcp open https', 0, ?, datetime('now'))",
                 (f"fnd_{run_id}", session_id, run_id, f"fp-{run_id}"),
             )
             conn.execute(
@@ -593,7 +594,8 @@ class TestProjectRoutes:
             conn.execute(
                 "INSERT INTO annotations "
                 "(id, session_id, entity_type, entity_id, body, created, updated) "
-                "VALUES (?, ?, 'finding', ?, 'needs retest', datetime('now'), datetime('now'))",
+                "VALUES (?, ?, 'finding', ?, 'needs [retest](javascript:alert(2))', "
+                "datetime('now'), datetime('now'))",
                 (f"ann_fnd_{run_id}", session_id, f"fnd_{run_id}"),
             )
             conn.execute(
@@ -780,13 +782,44 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         ).data)
         assert package_get["package"]["name"] == "Draft Evidence"
-        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": True, "max_output_lines": 1}):
+        with (
+            mock.patch.dict(shell_app.CFG, {"workspace_enabled": True, "max_output_lines": 1}),
+            mock.patch.object(project_routes.log, "info") as package_log,
+        ):
             package_download = client.get(
                 f"/projects/{project['id']}/packages/{package['id']}/download",
                 headers={"X-Session-ID": session_id},
             )
         assert package_download.status_code == 200
         assert "attachment" in package_download.headers["Content-Disposition"]
+        download_log = next(
+            call for call in package_log.call_args_list
+            if call.args and call.args[0] == "EVIDENCE_PACKAGE_DOWNLOADED"
+        )
+        download_log_extra = download_log.kwargs["extra"]
+        assert download_log_extra["duration_ms"] >= 0
+        assert download_log_extra["archive_bytes"] == len(package_download.data)
+        assert download_log_extra["projected_bytes"] > 0
+        assert download_log_extra["selected_runs"] == 1
+        assert download_log_extra["selected_findings"] == 1
+        assert download_log_extra["selected_artifacts"] == 2
+        assert download_log_extra["selected_targets"] == 1
+        assert download_log_extra["selected_transcripts"] == 1
+        assert download_log_extra["skipped_artifacts"] == 2
+        assert download_log_extra["skipped_items"] == 3
+        for metric_name in (
+            "metadata_ms",
+            "core_entries_ms",
+            "artifacts_ms",
+            "run_pages_ms",
+            "findings_ms",
+            "targets_ms",
+            "notes_ms",
+            "index_ms",
+            "readme_ms",
+            "zip_finalize_ms",
+        ):
+            assert download_log_extra[metric_name] >= 0
         with zipfile.ZipFile(io.BytesIO(package_download.data)) as archive:
             names = set(archive.namelist())
             assert "manifest.json" in names
@@ -830,6 +863,10 @@ class TestProjectRoutes:
         assert findings_json["findings"][0]["run_page"] == f"runs/{run_id}.html#L1"
         assert "# Findings" in findings_md
         assert "443/tcp open https" in findings_md
+        assert "[click](javascript:alert(1))" not in findings_md
+        assert r"\[click\]\(javascript:alert\(1\)\)" in findings_md
+        assert "[retest](javascript:alert(2))" not in findings_md
+        assert r"\[retest\]\(javascript:alert\(2\)\)" in findings_md
         assert targets_json["count"] == 1
         assert targets_json["targets"][0]["value"] == "darklab.sh"
         assert targets_json["targets"][0]["finding_ids"] == [f"fnd_{run_id}"]
@@ -838,26 +875,29 @@ class TestProjectRoutes:
         assert "# Targets" in targets_md
         assert "darklab.sh" in targets_md
         assert "Related Findings" in targets_md
+        assert "[click](javascript:alert(1))" not in targets_md
+        assert r"\[click\]\(javascript:alert\(1\)\)" in targets_md
         assert labels_json["count"] == 3
         assert {item["label"] for item in labels_json["labels"]} == {"baseline", "important", "production"}
         assert annotations_json["include_private_annotations"] is True
         assert annotations_json["count"] == 2
         assert {item["body"] for item in annotations_json["annotations"]} == {
             "Confirmed service owner",
-            "needs retest",
+            "needs [retest](javascript:alert(2))",
         }
         assert "# Annotations" in annotations_md
-        assert "needs retest" in annotations_md
+        assert "[retest](javascript:alert(2))" not in annotations_md
+        assert r"\[retest\]\(javascript:alert\(2\)\)" in annotations_md
         assert "# External Review Notes" in project_notes_md
         assert "Package notes for the external handoff." in project_notes_md
         assert findings_json["findings"][0]["labels"][0]["label"] == "important"
-        assert findings_json["findings"][0]["annotations"][0]["body"] == "needs retest"
+        assert findings_json["findings"][0]["annotations"][0]["body"] == "needs [retest](javascript:alert(2))"
         assert "Draft Evidence" in index_html
         assert "Package notes for the external handoff." in index_html
         assert "443/tcp open https" in index_html
         assert 'data-sort-table="findings"' in index_html
         assert "important" in index_html
-        assert "needs retest" in index_html
+        assert "needs [retest](javascript:alert(2))" in index_html
         assert "run.txt" in index_html
         assert "Package Exports" in index_html
         assert "findings/findings.json" in index_html
@@ -872,7 +912,10 @@ class TestProjectRoutes:
         assert "## Project Notes" in readme
         assert "Package notes for the external handoff." in readme
         assert "Labels: `important`" in readme
-        assert "needs retest" in readme
+        assert "[click](javascript:alert(1))" not in readme
+        assert r"\[click\]\(javascript:alert\(1\)\)" in readme
+        assert "[retest](javascript:alert(2))" not in readme
+        assert r"\[retest\]\(javascript:alert\(2\)\)" in readme
         assert "## Package Exports" in readme
         assert "notes/annotations.json" in readme
         assert "targets/targets.md" in readme

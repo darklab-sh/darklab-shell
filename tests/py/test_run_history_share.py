@@ -1022,7 +1022,7 @@ class TestRunStreaming:
         fake_proc = _FakeProc(lines=[
             "Nmap scan report for darklab.sh\n",
             "80/tcp open http\n",
-            "443/tcp open https\n",
+            "443/tcp open https {\"severity\":\"high\"}\n",
             "6788/tcp open unknown\n",
             "22/tcp open ssh\n",
             "",
@@ -1049,12 +1049,14 @@ class TestRunStreaming:
         data = json.loads(filtered.data)
         assert {item["raw_line"] for item in data["findings"]} == {
             "80/tcp open http",
-            "443/tcp open https",
+            "443/tcp open https {\"severity\":\"high\"}",
             "6788/tcp open unknown",
         }
         assert "22/tcp open ssh" not in {item["raw_line"] for item in data["findings"]}
         assert all(item["target_id"] == domain_target["id"] for item in data["findings"])
         assert all(port_target["id"] in item["target_ids"] for item in data["findings"])
+        severities = {item["raw_line"]: item["severity"] for item in data["findings"]}
+        assert severities["443/tcp open https {\"severity\":\"high\"}"] == "high"
 
     def test_nonblocking_stream_reader_preserves_partial_lines_until_finalize(self):
         read_fd, write_fd = os.pipe()

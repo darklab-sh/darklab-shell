@@ -248,7 +248,7 @@ function setupModalFocusTraps() {
   // open — otherwise focus falls through to the rail / tabs / HUD behind the
   // backdrop. #confirm-host wires its own focus trap per-open through
   // showConfirm() because the card's focusables change between shows; the
-  // four app-level modals have persistent DOM, so a one-shot idempotent bind
+  // app-level modals have persistent DOM, so a one-shot idempotent bind
   // at startup is equivalent. bindFocusTrap is a no-op when the card is
   // hidden (display: none on the overlay wrapper), so the listener is only
   // reachable while the modal is open.
@@ -259,6 +259,7 @@ function setupModalFocusTraps() {
     'faq-modal',
     'command-registry-modal',
     'project-workspace-modal',
+    'project-package-wizard-modal',
     'workspace-modal',
     'workflows-modal',
     'workflow-editor-form',

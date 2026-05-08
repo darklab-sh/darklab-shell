@@ -15,6 +15,7 @@ import secrets
 import shlex
 import sqlite3
 import tempfile
+import time
 import zipfile
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
@@ -797,7 +798,19 @@ def _package_int(value, default=0):
 
 def _package_markdown_text(value):
     text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
-    return text.replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ").strip()
+    text = text.replace("\n", " ").strip()
+    return re.sub(r"([\\`*_{}\[\]<>()#+!|])", r"\\\1", text)
+
+
+def _package_markdown_code(value):
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("\n", " ").strip()
+    if not text:
+        return "``"
+    text = text.replace("|", "\\|")
+    longest_tick = max((len(match.group(0)) for match in re.finditer(r"`+", text)), default=0)
+    fence = "`" * (longest_tick + 1)
+    return f"{fence}{text}{fence}" if longest_tick == 0 else f"{fence} {text} {fence}"
 
 
 def _package_markdown_link(label, href):
@@ -1196,12 +1209,12 @@ def _package_finding_metadata_markdown(finding):
     annotations = finding.get("annotations") if isinstance(finding.get("annotations"), list) else []
     parts = []
     label_values = [
-        _package_markdown_text(label.get("label") or "")
+        _package_markdown_code(label.get("label") or "")
         for label in labels
         if isinstance(label, dict) and label.get("label")
     ]
     if label_values:
-        parts.append("Labels: " + ", ".join(f"`{value}`" for value in label_values))
+        parts.append("Labels: " + ", ".join(label_values))
     annotation_values = [
         _package_markdown_text(annotation.get("body") or "")
         for annotation in annotations
@@ -1481,7 +1494,7 @@ def _render_package_readme(
         for target in targets:
             if isinstance(target, dict):
                 lines.append(
-                    f"- `{_package_markdown_text(target.get('type') or 'target')}` "
+                    f"- {_package_markdown_code(target.get('type') or 'target')} "
                     f"{_package_markdown_text(target.get('value') or '')}"
                 )
     else:
@@ -1513,8 +1526,8 @@ def _render_package_readme(
                 f"| {_package_markdown_link(finding_label, href)} "
                 f"| {_package_markdown_text(finding.get('severity') or 'info')} "
                 f"| {_package_markdown_text(finding.get('review_state') or 'new')} "
-                f"| `{_package_markdown_text(_package_short_id(run_id))}` "
-                f"| `{_package_markdown_text(finding.get('raw_line') or '')}`"
+                f"| {_package_markdown_code(_package_short_id(run_id))} "
+                f"| {_package_markdown_code(finding.get('raw_line') or '')}"
                 f"{_package_finding_metadata_markdown(finding)} |"
             )
     else:
@@ -1529,9 +1542,9 @@ def _render_package_readme(
             name = artifact.get("display_name") or artifact.get("workspace_path") or artifact_id
             lines.append(
                 f"| {_package_markdown_link(name, artifact_paths.get(artifact_id, ''))} "
-                f"| `{_package_markdown_text(artifact.get('workspace_path') or '')}` "
+                f"| {_package_markdown_code(artifact.get('workspace_path') or '')} "
                 f"| {_package_int(artifact.get('byte_size'))} "
-                f"| `{_package_markdown_text(_package_short_id(artifact.get('run_id')))}` |"
+                f"| {_package_markdown_code(_package_short_id(artifact.get('run_id')))} |"
             )
     else:
         lines.append("- No selected artifacts.")
@@ -1540,7 +1553,7 @@ def _render_package_readme(
         for item in skipped_items:
             label = item.get("label") or item.get("workspace_path") or item.get("id") or "item"
             lines.append(
-                f"- `{_package_markdown_text(item.get('kind') or 'item')}` "
+                f"- {_package_markdown_code(item.get('kind') or 'item')} "
                 f"{_package_markdown_text(label)}: {_package_markdown_text(item.get('reason') or 'skipped')}"
             )
     else:
@@ -1612,8 +1625,8 @@ def _package_findings_markdown_bytes(manifest, run_pages):
                 f"| {_package_markdown_link(finding_label, href)} "
                 f"| {_package_markdown_text(finding.get('severity') or 'info')} "
                 f"| {_package_markdown_text(finding.get('review_state') or 'new')} "
-                f"| `{_package_markdown_text(_package_short_id(run_id))}` "
-                f"| `{_package_markdown_text(finding.get('raw_line') or '')}`"
+                f"| {_package_markdown_code(_package_short_id(run_id))} "
+                f"| {_package_markdown_code(finding.get('raw_line') or '')}"
                 f"{_package_finding_metadata_markdown(finding)} |"
             )
         lines.extend(["", "## Finding Details", ""])
@@ -1627,19 +1640,19 @@ def _package_findings_markdown_bytes(manifest, run_pages):
             lines.extend([
                 f"### {finding_label}",
                 "",
-                f"- ID: `{_package_markdown_text(finding.get('id') or '')}`",
-                f"- Run: `{_package_markdown_text(finding.get('run_id') or '')}`",
-                f"- Scope: `{_package_markdown_text(finding.get('scope') or 'finding')}`",
-                f"- Severity: `{_package_markdown_text(finding.get('severity') or 'info')}`",
-                f"- Review state: `{_package_markdown_text(finding.get('review_state') or 'new')}`",
-                f"- Source line: `{_package_markdown_text(source_line)}`",
+                f"- ID: {_package_markdown_code(finding.get('id') or '')}",
+                f"- Run: {_package_markdown_code(finding.get('run_id') or '')}",
+                f"- Scope: {_package_markdown_code(finding.get('scope') or 'finding')}",
+                f"- Severity: {_package_markdown_code(finding.get('severity') or 'info')}",
+                f"- Review state: {_package_markdown_code(finding.get('review_state') or 'new')}",
+                f"- Source line: {_package_markdown_code(source_line)}",
             ])
             target_ids = _package_finding_target_ids(finding)
             if target_ids:
-                lines.append("- Targets: " + ", ".join(f"`{_package_markdown_text(target_id)}`" for target_id in target_ids))
-            raw_line = _package_markdown_text(finding.get("raw_line") or "")
+                lines.append("- Targets: " + ", ".join(_package_markdown_code(target_id) for target_id in target_ids))
+            raw_line = str(finding.get("raw_line") or "").replace("\r\n", "\n").replace("\r", "\n").strip()
             if raw_line:
-                lines.extend(["", "```text", raw_line, "```"])
+                lines.extend(["", "```text", raw_line.replace("```", "`\u200b``"), "```"])
             metadata = _package_finding_metadata_markdown(finding).replace("<br>", "\n")
             if metadata.strip():
                 lines.extend(["", metadata.strip()])
@@ -1714,21 +1727,21 @@ def _package_targets_markdown_bytes(manifest):
         lines.extend([
             f"## {target_label}",
             "",
-            f"- ID: `{_package_markdown_text(target_id)}`",
-            f"- Type: `{_package_markdown_text(target.get('type') or 'target')}`",
-            f"- Value: `{_package_markdown_text(target.get('value') or '')}`",
+            f"- ID: {_package_markdown_code(target_id)}",
+            f"- Type: {_package_markdown_code(target.get('type') or 'target')}",
+            f"- Value: {_package_markdown_code(target.get('value') or '')}",
         ])
         if target.get("notes"):
             lines.extend(["", "### Notes", "", _package_markdown_text(target.get("notes") or "")])
         labels = target.get("labels") if isinstance(target.get("labels"), list) else []
         if labels:
             label_values = [
-                _package_markdown_text(label.get("label") or "")
+                _package_markdown_code(label.get("label") or "")
                 for label in labels
                 if isinstance(label, dict) and label.get("label")
             ]
             if label_values:
-                lines.extend(["", "### Labels", "", ", ".join(f"`{value}`" for value in label_values)])
+                lines.extend(["", "### Labels", "", ", ".join(label_values)])
         annotations = target.get("annotations") if isinstance(target.get("annotations"), list) else []
         if annotations:
             lines.extend(["", "### Annotations", ""])
@@ -1743,7 +1756,7 @@ def _package_targets_markdown_bytes(manifest):
             lines.extend(["", "### Related Findings", ""])
             for finding in linked_findings:
                 finding_label = _package_markdown_text(finding.get("title") or finding.get("raw_line") or finding.get("id"))
-                lines.append(f"- {finding_label} (`{_package_markdown_text(finding.get('id') or '')}`)")
+                lines.append(f"- {finding_label} ({_package_markdown_code(finding.get('id') or '')})")
         lines.append("")
     return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
 
@@ -1933,12 +1946,12 @@ def _package_annotations_markdown_bytes(annotations, generated_at, *, included):
         if not isinstance(annotation, dict):
             continue
         entity_type = _package_markdown_text(annotation.get("entity_type") or "entity")
-        entity_id = _package_markdown_text(_package_short_id(annotation.get("entity_id")))
+        entity_id = _package_markdown_code(_package_short_id(annotation.get("entity_id")))
         author = _package_markdown_text(annotation.get("author_label") or "anonymous")
         created = _package_markdown_text(annotation.get("created") or "unknown")
         body = _package_markdown_text(annotation.get("body") or "")
         lines.extend([
-            f"## {entity_type} `{entity_id}`",
+            f"## {entity_type} {entity_id}",
             "",
             f"- Author: {author}",
             f"- Created: {created}",
@@ -2372,10 +2385,42 @@ def get_evidence_package(session_id, project_id, package_id):
     return _row_to_evidence_package(row)
 
 
+def _write_bounded_archive_entry(
+    archive,
+    name,
+    payload_bytes,
+    projected_bytes,
+    max_archive_bytes,
+    message="evidence package exceeds configured size limit",
+):
+    new_total = projected_bytes + len(payload_bytes)
+    if max_archive_bytes and new_total > max_archive_bytes:
+        raise EvidencePackageTooLarge(message)
+    archive.writestr(name, payload_bytes)
+    return new_total
+
+
+def _package_selected_id_count(manifest, key):
+    selected = manifest.get("selected_entity_ids") if isinstance(manifest, dict) else None
+    if not isinstance(selected, dict) or not isinstance(selected.get(key), list):
+        return 0
+    return len([item for item in selected[key] if str(item or "")])
+
+
 def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=None):
+    build_started = time.perf_counter()
+    timings = {}
+
+    def _elapsed_ms(started):
+        return int(round((time.perf_counter() - started) * 1000))
+
+    def _record_timing(name, started):
+        timings[f"{name}_ms"] = _elapsed_ms(started)
+
     package = get_evidence_package(session_id, project_id, package_id)
     if package is None:
         return None
+    metadata_started = time.perf_counter()
     generated_at = _now()
     manifest = dict(package.get("manifest") or {})
     redaction_rules = _package_redaction_rules(package.get("redaction_mode"), cfg=cfg)
@@ -2417,8 +2462,7 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
     }
     manifest_bytes = json.dumps(export_manifest, indent=2, sort_keys=True).encode("utf-8") + b"\n"
     max_archive_bytes = _cfg_mb_bytes("evidence_package_max_mb", 25, cfg=cfg)
-    if max_archive_bytes and len(manifest_bytes) > max_archive_bytes:
-        raise EvidencePackageTooLarge("evidence package manifest exceeds configured size limit")
+    _record_timing("metadata", metadata_started)
     skipped_artifacts = []
     skipped_items = []
     artifact_archive_paths = {}
@@ -2432,13 +2476,26 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
     used_paths = set()
     try:
         with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr("manifest.json", manifest_bytes)
-            projected_bytes = len(manifest_bytes)
+            core_started = time.perf_counter()
+            projected_bytes = _write_bounded_archive_entry(
+                archive,
+                "manifest.json",
+                manifest_bytes,
+                0,
+                max_archive_bytes,
+                "evidence package manifest exceeds configured size limit",
+            )
             css_bytes = (_package_css() + "\n").encode("utf-8")
-            projected_bytes += len(css_bytes)
-            if max_archive_bytes and projected_bytes > max_archive_bytes:
-                raise EvidencePackageTooLarge("evidence package CSS snapshot exceeds configured size limit")
-            archive.writestr("assets/package.css", css_bytes)
+            projected_bytes = _write_bounded_archive_entry(
+                archive,
+                "assets/package.css",
+                css_bytes,
+                projected_bytes,
+                max_archive_bytes,
+                "evidence package CSS snapshot exceeds configured size limit",
+            )
+            _record_timing("core_entries", core_started)
+            artifacts_started = time.perf_counter()
             if package["include_artifacts"]:
                 artifacts = manifest.get("artifacts")
                 artifact_items = artifacts if isinstance(artifacts, list) else []
@@ -2484,11 +2541,16 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 skipped_bytes = (
                     json.dumps({"artifacts": skipped_artifacts}, indent=2, sort_keys=True) + "\n"
                 ).encode("utf-8")
-                projected_bytes += len(skipped_bytes)
-                if max_archive_bytes and projected_bytes > max_archive_bytes:
-                    raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
-                archive.writestr("skipped-artifacts.json", skipped_bytes)
+                projected_bytes = _write_bounded_archive_entry(
+                    archive,
+                    "skipped-artifacts.json",
+                    skipped_bytes,
+                    projected_bytes,
+                    max_archive_bytes,
+                )
+            _record_timing("artifacts", artifacts_started)
 
+            run_pages_started = time.perf_counter()
             run_pages = {}
             run_text_paths = {}
             run_ids = []
@@ -2539,10 +2601,15 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                             "reason": "full text transcript companion exceeds configured package size limit",
                         })
                     else:
-                        projected_bytes += len(companion_bytes)
                         transcript_text_path = f"runs/{run_id}.txt"
                         run_text_paths[run_id] = transcript_text_path
-                        archive.writestr(transcript_text_path, companion_bytes)
+                        projected_bytes = _write_bounded_archive_entry(
+                            archive,
+                            transcript_text_path,
+                            companion_bytes,
+                            projected_bytes,
+                            max_archive_bytes,
+                        )
                 run_page = _render_package_run_html(
                     run,
                     entries,
@@ -2552,64 +2619,99 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                     redaction_rules=redaction_rules,
                 )
                 run_page_bytes = run_page.encode("utf-8")
-                projected_bytes += len(run_page_bytes)
-                if max_archive_bytes and projected_bytes > max_archive_bytes:
-                    raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
                 run_path = f"runs/{run_id}.html"
                 run_pages[run_id] = run_path
-                archive.writestr(run_path, run_page_bytes)
+                projected_bytes = _write_bounded_archive_entry(
+                    archive,
+                    run_path,
+                    run_page_bytes,
+                    projected_bytes,
+                    max_archive_bytes,
+                )
+            _record_timing("run_pages", run_pages_started)
 
+            findings_started = time.perf_counter()
             findings_json_bytes = _package_findings_json_bytes(render_manifest, generated_at, run_pages)
-            projected_bytes += len(findings_json_bytes)
-            if max_archive_bytes and projected_bytes > max_archive_bytes:
-                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
-            archive.writestr("findings/findings.json", findings_json_bytes)
+            projected_bytes = _write_bounded_archive_entry(
+                archive,
+                "findings/findings.json",
+                findings_json_bytes,
+                projected_bytes,
+                max_archive_bytes,
+            )
             findings_markdown_bytes = _package_findings_markdown_bytes(render_manifest, run_pages)
-            projected_bytes += len(findings_markdown_bytes)
-            if max_archive_bytes and projected_bytes > max_archive_bytes:
-                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
-            archive.writestr("findings/findings.md", findings_markdown_bytes)
+            projected_bytes = _write_bounded_archive_entry(
+                archive,
+                "findings/findings.md",
+                findings_markdown_bytes,
+                projected_bytes,
+                max_archive_bytes,
+            )
+            _record_timing("findings", findings_started)
 
+            targets_started = time.perf_counter()
             targets_json_bytes = _package_targets_json_bytes(render_manifest, generated_at)
-            projected_bytes += len(targets_json_bytes)
-            if max_archive_bytes and projected_bytes > max_archive_bytes:
-                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
-            archive.writestr("targets/targets.json", targets_json_bytes)
+            projected_bytes = _write_bounded_archive_entry(
+                archive,
+                "targets/targets.json",
+                targets_json_bytes,
+                projected_bytes,
+                max_archive_bytes,
+            )
             targets_markdown_bytes = _package_targets_markdown_bytes(render_manifest)
-            projected_bytes += len(targets_markdown_bytes)
-            if max_archive_bytes and projected_bytes > max_archive_bytes:
-                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
-            archive.writestr("targets/targets.md", targets_markdown_bytes)
+            projected_bytes = _write_bounded_archive_entry(
+                archive,
+                "targets/targets.md",
+                targets_markdown_bytes,
+                projected_bytes,
+                max_archive_bytes,
+            )
+            _record_timing("targets", targets_started)
 
+            notes_started = time.perf_counter()
             labels_json_bytes = _package_labels_json_bytes(label_items, generated_at)
-            projected_bytes += len(labels_json_bytes)
-            if max_archive_bytes and projected_bytes > max_archive_bytes:
-                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
-            archive.writestr("metadata/labels.json", labels_json_bytes)
+            projected_bytes = _write_bounded_archive_entry(
+                archive,
+                "metadata/labels.json",
+                labels_json_bytes,
+                projected_bytes,
+                max_archive_bytes,
+            )
             annotations_json_bytes = _package_annotations_json_bytes(
                 annotation_items,
                 generated_at,
                 included=bool(render_manifest.get("include_private_annotations")),
             )
-            projected_bytes += len(annotations_json_bytes)
-            if max_archive_bytes and projected_bytes > max_archive_bytes:
-                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
-            archive.writestr("notes/annotations.json", annotations_json_bytes)
+            projected_bytes = _write_bounded_archive_entry(
+                archive,
+                "notes/annotations.json",
+                annotations_json_bytes,
+                projected_bytes,
+                max_archive_bytes,
+            )
             annotations_markdown_bytes = _package_annotations_markdown_bytes(
                 annotation_items,
                 generated_at,
                 included=bool(render_manifest.get("include_private_annotations")),
             )
-            projected_bytes += len(annotations_markdown_bytes)
-            if max_archive_bytes and projected_bytes > max_archive_bytes:
-                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
-            archive.writestr("notes/annotations.md", annotations_markdown_bytes)
+            projected_bytes = _write_bounded_archive_entry(
+                archive,
+                "notes/annotations.md",
+                annotations_markdown_bytes,
+                projected_bytes,
+                max_archive_bytes,
+            )
             project_notes_bytes = _package_project_notes_markdown_bytes(render_manifest, generated_at)
-            projected_bytes += len(project_notes_bytes)
-            if max_archive_bytes and projected_bytes > max_archive_bytes:
-                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
-            archive.writestr("notes/project.md", project_notes_bytes)
+            projected_bytes = _write_bounded_archive_entry(
+                archive,
+                "notes/project.md",
+                project_notes_bytes,
+                projected_bytes,
+                max_archive_bytes,
+            )
+            _record_timing("notes", notes_started)
 
+            index_started = time.perf_counter()
             index_page = _render_package_index_html(
                 render_package,
                 render_manifest,
@@ -2620,10 +2722,15 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 skipped_items,
             )
             index_bytes = index_page.encode("utf-8")
-            projected_bytes += len(index_bytes)
-            if max_archive_bytes and projected_bytes > max_archive_bytes:
-                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
-            archive.writestr("index.html", index_bytes)
+            projected_bytes = _write_bounded_archive_entry(
+                archive,
+                "index.html",
+                index_bytes,
+                projected_bytes,
+                max_archive_bytes,
+            )
+            _record_timing("index", index_started)
+            readme_started = time.perf_counter()
             readme = _render_package_readme(
                 render_package,
                 render_manifest,
@@ -2634,30 +2741,58 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 skipped_items,
             )
             readme_bytes = readme.encode("utf-8")
-            projected_bytes += len(readme_bytes)
-            if max_archive_bytes and projected_bytes > max_archive_bytes:
-                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
-            archive.writestr("README.md", readme_bytes)
+            projected_bytes = _write_bounded_archive_entry(
+                archive,
+                "README.md",
+                readme_bytes,
+                projected_bytes,
+                max_archive_bytes,
+            )
+            _record_timing("readme", readme_started)
+            skipped_items_started = time.perf_counter()
             if skipped_items:
                 skipped_item_bytes = (
                     json.dumps({"items": skipped_items}, indent=2, sort_keys=True) + "\n"
                 ).encode("utf-8")
-                projected_bytes += len(skipped_item_bytes)
-                if max_archive_bytes and projected_bytes > max_archive_bytes:
-                    raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
-                archive.writestr("skipped-items.json", skipped_item_bytes)
+                projected_bytes = _write_bounded_archive_entry(
+                    archive,
+                    "skipped-items.json",
+                    skipped_item_bytes,
+                    projected_bytes,
+                    max_archive_bytes,
+                )
+            _record_timing("skipped_items", skipped_items_started)
+            zip_finalize_started = time.perf_counter()
+        _record_timing("zip_finalize", zip_finalize_started)
     except Exception:
         try:
             os.unlink(archive_path)
         except OSError:
             pass
         raise
+    final_archive_bytes = os.path.getsize(archive_path)
+    metrics = {
+        **timings,
+        "duration_ms": _elapsed_ms(build_started),
+        "projected_bytes": projected_bytes,
+        "archive_bytes": final_archive_bytes,
+        "max_archive_bytes": max_archive_bytes,
+        "skipped_artifacts": len(skipped_artifacts),
+        "skipped_items": len(skipped_items),
+        "selected_runs": _package_selected_id_count(manifest, "run_ids"),
+        "selected_transcripts": _package_selected_id_count(manifest, "transcript_run_ids"),
+        "selected_findings": _package_selected_id_count(manifest, "finding_ids"),
+        "selected_artifacts": _package_selected_id_count(manifest, "artifact_ids"),
+        "selected_targets": _package_selected_id_count(manifest, "target_ids"),
+    }
     return {
         "filename": _package_archive_name(render_package),
         "mimetype": "application/zip",
         "path": archive_path,
-        "byte_size": os.path.getsize(archive_path),
+        "byte_size": final_archive_bytes,
         "skipped_artifacts": skipped_artifacts,
+        "skipped_items": skipped_items,
+        "metrics": metrics,
     }
 
 
@@ -3346,8 +3481,34 @@ def record_run_file_artifacts(conn, session_id, run_id, artifacts):
 
 
 def _finding_severity_from_text(text):
-    match = re.search(r"\[(info|low|medium|high|critical)\]", str(text or ""), re.I)
-    return match.group(1).lower() if match else ""
+    raw_text = str(text or "")
+    bracket_match = re.search(r"\[(info|low|medium|high|critical)\]", raw_text, re.I)
+    if bracket_match:
+        return bracket_match.group(1).lower()
+    key_match = re.search(
+        r"(?:\"severity\"|'severity'|\bseverity\b|\brisk\b)\s*[:=]\s*[\"']?"
+        r"(info|low|medium|high|critical)\b",
+        raw_text,
+        re.I,
+    )
+    if key_match:
+        return key_match.group(1).lower()
+    phrase_match = re.search(r"\b(info|low|medium|high|critical)\s+severity\b", raw_text, re.I)
+    if phrase_match:
+        return phrase_match.group(1).lower()
+    cvss_match = re.search(r"\bcvss\b[^\n\r]{0,32}\bscore\b\s*[:=]?\s*(10(?:\.0)?|[0-9](?:\.\d)?)\b", raw_text, re.I)
+    if not cvss_match:
+        return ""
+    score = float(cvss_match.group(1))
+    if score >= 9.0:
+        return "critical"
+    if score >= 7.0:
+        return "high"
+    if score >= 4.0:
+        return "medium"
+    if score > 0:
+        return "low"
+    return "info"
 
 
 def _finding_fingerprint(run_id, line_index, text):
@@ -3592,6 +3753,9 @@ def record_run_findings(conn, session_id, run_id, entries):
         seen_fingerprints.add(fingerprint)
         title = _trim_text(raw_line, MAX_FINDING_TITLE_LEN)
         severity = _finding_severity_from_text(raw_line)
+        # The schema stores one primary target_id. Additional matches are still
+        # exposed as derived target_ids when listing project findings; persist
+        # richer many-target attribution with a future finding-target join table.
         target_id = _target_id_for_finding(target_rows, entry, raw_line)
         for _ in range(10):
             finding_id = _new_finding_id()

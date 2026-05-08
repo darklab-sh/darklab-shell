@@ -103,6 +103,11 @@ function loadShellChrome({
           <pre id="project-package-manifest-json"></pre>
         </div>
       </div>
+      <div id="project-package-wizard-overlay" class="u-hidden" aria-hidden="true">
+        <div id="project-package-wizard-modal">
+          <div id="project-package-wizard-body"></div>
+        </div>
+      </div>
     </div>
   `
 
@@ -1003,6 +1008,10 @@ describe('shell chrome project workspace', () => {
         },
       },
     ]
+    let resolvePackageDownloadBlob
+    const packageDownloadBlob = new Promise((resolve) => {
+      resolvePackageDownloadBlob = resolve
+    })
     const apiFetch = vi.fn((url, options = {}) => {
       if (url === '/projects/active') {
         return Promise.resolve({
@@ -1134,7 +1143,7 @@ describe('shell chrome project workspace', () => {
       if (url === '/projects/project-1/packages/pkg-1/download') {
         return Promise.resolve({
           ok: true,
-          blob: () => Promise.resolve(new Blob(['package zip'], { type: 'application/zip' })),
+          blob: () => packageDownloadBlob,
         })
       }
       if (url === '/projects/project-1/packages' && options.method === 'POST') {
@@ -1189,6 +1198,10 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('.project-explorer-section-heading')?.textContent).toContain('New')
     expect(bindDismissible).toHaveBeenCalledWith(
       document.getElementById('project-target-editor-overlay'),
+      expect.objectContaining({ level: 'modal' }),
+    )
+    expect(bindDismissible).toHaveBeenCalledWith(
+      document.getElementById('project-package-wizard-overlay'),
       expect.objectContaining({ level: 'modal' }),
     )
 
@@ -1301,6 +1314,7 @@ describe('shell chrome project workspace', () => {
     expect(globalThis.URL.createObjectURL).toHaveBeenCalled()
     expect(document.querySelector('[data-project-action="artifact-preview"][data-artifact-id="artifact-2"]').disabled)
       .toBe(true)
+    globalThis.URL.createObjectURL.mockClear()
 
     document.querySelector('[data-project-tab="packages"]').click()
     await tick()
@@ -1320,14 +1334,30 @@ describe('shell chrome project workspace', () => {
     await tick()
     expect(document.getElementById('project-package-manifest-overlay').classList.contains('open')).toBe(false)
 
-    document.querySelector('[data-project-action="package-download"][data-package-id="pkg-1"]').click()
+    const packageDownloadButton = document.querySelector('[data-project-action="package-download"][data-package-id="pkg-1"]')
+    packageDownloadButton.click()
     await tick()
     await tick()
     expect(apiFetch).toHaveBeenCalledWith(
       '/projects/project-1/packages/pkg-1/download',
       { cache: 'no-store' },
     )
+    expect(packageDownloadButton.disabled).toBe(true)
+    expect(packageDownloadButton.classList.contains('is-preparing')).toBe(true)
+    expect(packageDownloadButton.getAttribute('aria-busy')).toBe('true')
+    expect(packageDownloadButton.textContent).toBe('Preparing...')
+    expect(globalThis.URL.createObjectURL).not.toHaveBeenCalled()
+    resolvePackageDownloadBlob(new Blob(['package zip'], { type: 'application/zip' }))
+    await tick()
+    await tick()
     expect(globalThis.URL.createObjectURL).toHaveBeenCalled()
+    expect(packageDownloadButton.disabled).toBe(false)
+    expect(packageDownloadButton.classList.contains('is-preparing')).toBe(false)
+    expect(packageDownloadButton.getAttribute('aria-busy')).toBeNull()
+    expect(packageDownloadButton.textContent).toBe('Download')
+    expect(globalThis.URL.revokeObjectURL).not.toHaveBeenCalled()
+    window.dispatchEvent(new Event('pagehide'))
+    expect(globalThis.URL.revokeObjectURL).toHaveBeenCalledWith('blob:project-artifact')
 
     document.querySelector('[data-project-action="package-repackage"][data-package-id="pkg-1"]').click()
     await tick()
@@ -1341,15 +1371,26 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('[data-project-package-selection="run"][value="run-2"]').checked).toBe(false)
     expect(document.querySelector('[data-project-package-selection="transcript"][value="run-1"]').checked).toBe(true)
     expect(document.querySelector('[data-project-package-selection="transcript"][value="run-2"]').disabled).toBe(true)
-    expect(document.getElementById('project-explorer-body').textContent).toContain('run-missing is no longer linked')
+    expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('run-missing is no longer linked')
     expect(document.querySelector('[data-project-package-selection="artifact"][value="artifact-1"]').checked).toBe(true)
     expect(document.querySelector('[data-project-package-selection="artifact"][value="artifact-2"]').checked).toBe(false)
     document.querySelector('[data-project-action="package-wizard-next"]').click()
     await tick()
     expect(document.querySelector('[data-project-package-field="name"]').value).toBe('Darklab evidence')
     expect(document.querySelector('[data-project-package-field="redaction_mode"]').value).toBe('raw')
+    document.querySelector('[data-project-action="package-wizard-next"]').click()
+    await tick()
+    expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Preview')
+    document.querySelector('[data-project-action="package-wizard-next"]').click()
+    await tick()
+    expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Include')
+    expect(document.getElementById('project-workspace-message').textContent).toContain(
+      '2 unavailable items removed; review your selection before continuing.',
+    )
+    expect(document.getElementById('project-package-wizard-overlay').textContent).not.toContain('run-missing is no longer linked')
     document.querySelector('[data-project-action="package-wizard-cancel"]').click()
     await tick()
+    expect(document.getElementById('project-package-wizard-overlay').classList.contains('open')).toBe(false)
 
     document.querySelector('[data-project-action="package-delete"][data-package-id="pkg-1"]').click()
     await tick()
@@ -1366,8 +1407,9 @@ describe('shell chrome project workspace', () => {
 
     document.querySelector('[data-project-action="package-wizard-open"]').click()
     await tick()
+    expect(document.getElementById('project-package-wizard-overlay').classList.contains('open')).toBe(true)
     expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Preset')
-    expect(document.getElementById('project-explorer-body').textContent).toContain('Evidence')
+    expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Evidence')
     document.querySelector('[data-project-action="package-wizard-next"]').click()
     await tick()
     expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Include')
@@ -1388,7 +1430,7 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('.project-package-preview-json')?.textContent).toContain('"artifacts": 1')
     expect(document.querySelector('.project-package-preview-json')?.textContent).toContain('"estimated_archive"')
     expect(document.querySelector('.project-package-preview-json')?.textContent).toContain('"transcript_run_ids"')
-    expect(document.getElementById('project-explorer-body').textContent).toContain('Estimated package size before compression')
+    expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Estimated package size before compression')
     document.querySelector('[data-project-action="package-wizard-next"]').click()
     await tick()
     await tick()

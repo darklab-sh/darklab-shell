@@ -417,13 +417,16 @@ def projects_packages_download(project_id, package_id):
         return jsonify({"error": str(exc)}), 413
     if archive is None:
         return jsonify({"error": "package not found"}), 404
-    log.info("EVIDENCE_PACKAGE_DOWNLOADED", extra={
+    metrics = archive.get("metrics") if isinstance(archive.get("metrics"), dict) else {}
+    log_extra = {
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
         "project_id": project_id,
         "package_id": package_id,
         "skipped_artifacts": len(archive["skipped_artifacts"]),
-    })
+    }
+    log_extra.update(metrics)
+    log.info("EVIDENCE_PACKAGE_DOWNLOADED", extra=log_extra)
     archive_path = archive["path"]
     try:
         response = send_file(

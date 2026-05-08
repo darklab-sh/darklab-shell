@@ -2198,7 +2198,8 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 .project-target-editor-overlay.open,
-.project-package-manifest-overlay.open {
+.project-package-manifest-overlay.open,
+.project-package-wizard-overlay.open {
   display: flex;
 }
 
@@ -2210,8 +2211,22 @@ body.mobile-terminal-mode .output-follow-btn {
   z-index: 360;
 }
 
+.project-package-wizard-overlay {
+  z-index: 360;
+}
+
 .project-package-manifest-modal {
   width: min(720px, calc(100vw - 32px));
+}
+
+.project-package-wizard-modal {
+  width: min(980px, calc(100vw - 32px));
+  height: min(760px, calc(100vh - 40px));
+}
+
+#project-package-wizard-body {
+  min-height: 0;
+  height: 100%;
 }
 
 .project-package-manifest-json {
@@ -3041,6 +3056,24 @@ button.project-explorer-item:focus-visible,
   opacity: 0.48;
 }
 
+.project-package-action.is-preparing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.82;
+}
+
+.project-package-action.is-preparing::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid color-mix(in srgb, var(--text) 24%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: workspace-refresh-spin 0.8s linear infinite;
+}
+
 .project-artifact-status {
   display: inline-flex;
   align-items: center;
@@ -3085,6 +3118,10 @@ button.project-explorer-item:focus-visible,
 .project-package-wizard {
   display: grid;
   gap: 14px;
+  min-height: 0;
+  height: 100%;
+  padding: 16px;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
 }
 
 .project-package-wizard-header h2 {
@@ -3121,6 +3158,15 @@ button.project-explorer-item:focus-visible,
 .project-package-metadata-form {
   display: grid;
   gap: 12px;
+}
+
+.project-package-wizard-body {
+  min-height: 0;
+  overflow: auto;
+}
+
+.project-package-wizard-message {
+  margin: 0;
 }
 
 .project-package-preset-grid {
