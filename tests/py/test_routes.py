@@ -419,6 +419,12 @@ class TestProjectRoutes:
         client = get_client()
         session_id = self._session_id("project-link")
         project = self._create_project(client, session_id)
+        notes_resp = client.put(
+            f"/projects/{project['id']}",
+            json={"notes": "Package notes for the external handoff."},
+            headers={"X-Session-ID": session_id},
+        )
+        assert notes_resp.status_code == 200
         run_id = "run-" + uuid.uuid4().hex
         baseline_run_id = "run-" + uuid.uuid4().hex
         with sqlite3.connect(DB_PATH) as conn:
@@ -662,6 +668,12 @@ class TestProjectRoutes:
             json={"type": "domain", "value": "darklab.sh", "source_run_id": run_id},
             headers={"X-Session-ID": session_id},
         ).data)["target"]
+        target_label_resp = client.post(
+            f"/entities/target/{evidence_target['id']}/labels",
+            json={"label": "production"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert target_label_resp.status_code == 201
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "UPDATE findings SET target_id = ? WHERE id = ?",
@@ -765,20 +777,37 @@ class TestProjectRoutes:
         assert targets_json["targets"][0]["value"] == "darklab.sh"
         assert targets_json["targets"][0]["finding_ids"] == [f"fnd_{run_id}"]
         assert targets_json["targets"][0]["run_ids"] == [run_id]
-        assert labels_json["count"] == 2
-        assert {item["label"] for item in labels_json["labels"]} == {"baseline", "important"}
+        assert targets_json["targets"][0]["labels"][0]["label"] == "production"
+        assert labels_json["count"] == 3
+        assert {item["label"] for item in labels_json["labels"]} == {"baseline", "important", "production"}
         assert annotations_json["include_private_annotations"] is True
         assert annotations_json["count"] == 2
         assert {item["body"] for item in annotations_json["annotations"]} == {
             "Confirmed service owner",
             "needs retest",
         }
+        assert findings_json["findings"][0]["labels"][0]["label"] == "important"
+        assert findings_json["findings"][0]["annotations"][0]["body"] == "needs retest"
         assert "Draft Evidence" in index_html
+        assert "Package notes for the external handoff." in index_html
         assert "443/tcp open https" in index_html
+        assert 'data-sort-table="findings"' in index_html
+        assert "important" in index_html
+        assert "needs retest" in index_html
         assert "artifacts/reports/run.txt" in index_html
+        assert "Package Exports" in index_html
+        assert "findings/findings.json" in index_html
+        assert "targets/targets.json" in index_html
+        assert "metadata/labels.json" in index_html
         assert "Skipped Items" in index_html
         assert "reports/old.txt" in index_html
         assert "# Draft Evidence" in readme
+        assert "## Project Notes" in readme
+        assert "Package notes for the external handoff." in readme
+        assert "Labels: `important`" in readme
+        assert "needs retest" in readme
+        assert "## Package Exports" in readme
+        assert "notes/annotations.json" in readme
         assert "## Skipped Items" in readme
         assert "reports/old.txt" in readme
         assert "nmap darklab.sh" in run_html

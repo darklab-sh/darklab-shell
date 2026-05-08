@@ -853,6 +853,21 @@ h2 { margin: 32px 0 12px; font-size: 1.15rem; }
 table { width: 100%; border-collapse: collapse; overflow-wrap: anywhere; }
 th, td { padding: 10px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
 th { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; }
+button.table-sort {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+button.table-sort::after { content: " ↕"; color: var(--muted); }
+button.table-sort[aria-sort="ascending"]::after { content: " ↑"; color: var(--accent); }
+button.table-sort[aria-sort="descending"]::after { content: " ↓"; color: var(--accent); }
+blockquote { margin: 8px 0 0; padding-left: 10px; border-left: 2px solid var(--border); color: var(--muted); }
 .muted { color: var(--muted); }
 .warn { color: var(--warn); }
 .fail { color: var(--danger); }
@@ -875,7 +890,7 @@ th { color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-
 """.strip()
 
 
-def _package_page(title, body):
+def _package_page(title, body, script=""):
     return (
         "<!doctype html>\n"
         "<html lang=\"en\">\n"
@@ -887,6 +902,7 @@ def _package_page(title, body):
         "</head>\n"
         "<body>\n"
         f"{body}\n"
+        f"{script}\n"
         "</body>\n"
         "</html>\n"
     )
@@ -960,6 +976,81 @@ def _finding_run_anchor(finding):
     return f"runs/{_package_html_escape(run_id)}.html"
 
 
+def _package_finding_metadata_html(finding):
+    labels = finding.get("labels") if isinstance(finding.get("labels"), list) else []
+    annotations = finding.get("annotations") if isinstance(finding.get("annotations"), list) else []
+    pieces = []
+    if labels:
+        label_html = "".join(
+            f"<span class=\"chip\">{_package_html_escape(label.get('label') or '')}</span>"
+            for label in labels
+            if isinstance(label, dict)
+        )
+        pieces.append(f"<div class=\"chips\">{label_html}</div>")
+    if annotations:
+        annotation_html = "".join(
+            "<blockquote>"
+            f"{_package_html_escape(annotation.get('body') or '')}"
+            "</blockquote>"
+            for annotation in annotations
+            if isinstance(annotation, dict)
+        )
+        pieces.append(annotation_html)
+    return "".join(pieces)
+
+
+def _package_finding_metadata_markdown(finding):
+    labels = finding.get("labels") if isinstance(finding.get("labels"), list) else []
+    annotations = finding.get("annotations") if isinstance(finding.get("annotations"), list) else []
+    parts = []
+    label_values = [
+        _package_markdown_text(label.get("label") or "")
+        for label in labels
+        if isinstance(label, dict) and label.get("label")
+    ]
+    if label_values:
+        parts.append("Labels: " + ", ".join(f"`{value}`" for value in label_values))
+    annotation_values = [
+        _package_markdown_text(annotation.get("body") or "")
+        for annotation in annotations
+        if isinstance(annotation, dict) and annotation.get("body")
+    ]
+    if annotation_values:
+        parts.append("Annotations: " + " / ".join(annotation_values))
+    return "<br>" + "<br>".join(parts) if parts else ""
+
+
+def _package_index_sort_script():
+    return """
+<script>
+(() => {
+  const table = document.querySelector("[data-sort-table='findings']");
+  if (!table) return;
+  const body = table.querySelector("tbody");
+  if (!body) return;
+  const buttons = table.querySelectorAll("[data-sort-key]");
+  buttons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.sortKey;
+      const current = button.getAttribute("aria-sort");
+      const direction = current === "ascending" ? "descending" : "ascending";
+      buttons.forEach((item) => item.removeAttribute("aria-sort"));
+      button.setAttribute("aria-sort", direction);
+      const rows = Array.from(body.querySelectorAll("tr[data-finding-row]"));
+      rows.sort((left, right) => {
+        const leftValue = left.dataset[key] || "";
+        const rightValue = right.dataset[key] || "";
+        const result = leftValue.localeCompare(rightValue, undefined, { numeric: true, sensitivity: "base" });
+        return direction === "ascending" ? result : -result;
+      });
+      rows.forEach((row) => body.appendChild(row));
+    });
+  });
+})();
+</script>
+""".strip()
+
+
 def _render_package_index_html(package, manifest, generated_at, run_pages, artifact_paths, skipped_items):
     project = manifest.get("project") if isinstance(manifest.get("project"), dict) else {}
     counts = manifest.get("counts") if isinstance(manifest.get("counts"), dict) else {}
@@ -987,6 +1078,12 @@ def _render_package_index_html(package, manifest, generated_at, run_pages, artif
         for target in targets
         if isinstance(target, dict)
     ) or "<span class=\"muted\">No selected targets.</span>"
+    project_notes = str(project.get("notes") or "").strip()
+    notes_html = (
+        "<h2>Project Notes</h2>"
+        f"<section class=\"card\"><p>{_package_html_escape(project_notes)}</p></section>"
+        if project_notes else ""
+    )
 
     run_html = []
     for run in runs:
@@ -1015,13 +1112,22 @@ def _render_package_index_html(package, manifest, generated_at, run_pages, artif
         finding_href = _finding_run_anchor(finding) if finding_run_id in run_pages else ""
         finding_label = _package_html_escape(finding.get("title") or finding.get("raw_line"))
         finding_link = f"<a href=\"{finding_href}\">{finding_label}</a>" if finding_href else finding_label
+        finding_title = _package_html_escape(finding.get("title") or finding.get("raw_line") or "")
+        finding_severity = _package_html_escape(finding.get("severity") or "info")
+        finding_status = _package_html_escape(finding.get("review_state") or "new")
+        finding_run = _package_html_escape(_package_short_id(finding.get("run_id")))
         finding_rows.append(
-            "<tr>"
+            "<tr data-finding-row "
+            f"data-finding=\"{finding_title}\" "
+            f"data-severity=\"{finding_severity}\" "
+            f"data-status=\"{finding_status}\" "
+            f"data-run=\"{finding_run}\">"
             f"<td>{finding_link}</td>"
-            f"<td>{_package_html_escape(finding.get('severity') or 'info')}</td>"
-            f"<td>{_package_html_escape(finding.get('review_state') or 'new')}</td>"
-            f"<td class=\"mono\">{_package_html_escape(_package_short_id(finding.get('run_id')))}</td>"
-            f"<td class=\"mono\">{_package_html_escape(finding.get('raw_line') or '')}</td>"
+            f"<td>{finding_severity}</td>"
+            f"<td>{finding_status}</td>"
+            f"<td class=\"mono\">{finding_run}</td>"
+            f"<td class=\"mono\">{_package_html_escape(finding.get('raw_line') or '')}"
+            f"{_package_finding_metadata_html(finding)}</td>"
             "</tr>"
         )
     if not finding_rows:
@@ -1063,6 +1169,24 @@ def _render_package_index_html(package, manifest, generated_at, run_pages, artif
         )
         skipped_html = f"<h2>Skipped Items</h2><section class=\"card\"><ul>{skipped_rows}</ul></section>"
 
+    export_links = [
+        ("Manifest JSON", "manifest.json"),
+        ("README Markdown", "README.md"),
+        ("Findings JSON", "findings/findings.json"),
+        ("Findings Markdown", "findings/findings.md"),
+        ("Targets JSON", "targets/targets.json"),
+        ("Labels JSON", "metadata/labels.json"),
+        ("Annotations JSON", "notes/annotations.json"),
+    ]
+    if skipped_items:
+        export_links.append(("Skipped items JSON", "skipped-items.json"))
+    export_html = "".join(
+        "<li>"
+        f"<a href=\"{_package_html_escape(href)}\">{_package_html_escape(label)}</a>"
+        "</li>"
+        for label, href in export_links
+    )
+
     body = (
         "<main class=\"page\">"
         "<div class=\"topline\">darklab shell evidence package</div>"
@@ -1071,13 +1195,19 @@ def _render_package_index_html(package, manifest, generated_at, run_pages, artif
         f"{_package_html_escape(project.get('name') or 'Project')} · generated {_package_html_escape(generated_at)}"
         "</p>"
         f"<section class=\"grid\">{metric_html}</section>"
+        f"{notes_html}"
         "<h2>Targets</h2>"
         f"<section class=\"card chips\">{target_html}</section>"
         "<h2>Runs</h2>"
         f"<ul class=\"run-list\">{''.join(run_html)}</ul>"
         "<h2>Findings</h2>"
         "<section class=\"card\">"
-        "<table><thead><tr><th>Finding</th><th>Severity</th><th>Status</th><th>Run</th><th>Evidence</th></tr></thead>"
+        "<table data-sort-table=\"findings\"><thead><tr>"
+        "<th><button class=\"table-sort\" type=\"button\" data-sort-key=\"finding\">Finding</button></th>"
+        "<th><button class=\"table-sort\" type=\"button\" data-sort-key=\"severity\">Severity</button></th>"
+        "<th><button class=\"table-sort\" type=\"button\" data-sort-key=\"status\">Status</button></th>"
+        "<th><button class=\"table-sort\" type=\"button\" data-sort-key=\"run\">Run</button></th>"
+        "<th>Evidence</th></tr></thead>"
         f"<tbody>{''.join(finding_rows)}</tbody></table>"
         "</section>"
         "<h2>Artifacts</h2>"
@@ -1085,11 +1215,17 @@ def _render_package_index_html(package, manifest, generated_at, run_pages, artif
         "<table><thead><tr><th>Artifact</th><th>Workspace path</th><th>Bytes</th><th>Run</th></tr></thead>"
         f"<tbody>{''.join(artifact_rows)}</tbody></table>"
         "</section>"
+        "<h2>Package Exports</h2>"
+        f"<section class=\"card\"><ul>{export_html}</ul></section>"
         f"{skipped_html}"
         "<p class=\"footer\">Generated by darklab shell evidence packages. Redaction mode is recorded in manifest.json.</p>"
         "</main>"
     )
-    return _package_page(str(package.get("name") or "Evidence package"), body)
+    return _package_page(
+        str(package.get("name") or "Evidence package"),
+        body,
+        _package_index_sort_script(),
+    )
 
 
 def _render_package_readme(package, manifest, generated_at, run_pages, artifact_paths, skipped_items):
@@ -1114,6 +1250,14 @@ def _render_package_readme(package, manifest, generated_at, run_pages, artifact_
     ]
     for key, label in (("runs", "Runs"), ("findings", "Findings"), ("artifacts", "Artifacts"), ("targets", "Targets")):
         lines.append(f"| {label} | {_package_int(counts.get(key))} |")
+    project_notes = str(project.get("notes") or "").strip()
+    if project_notes:
+        lines.extend([
+            "",
+            "## Project Notes",
+            "",
+            _package_markdown_text(project_notes),
+        ])
     lines.extend(["", "## Targets", ""])
     if targets:
         for target in targets:
@@ -1150,7 +1294,8 @@ def _render_package_readme(package, manifest, generated_at, run_pages, artifact_
                 f"| {_package_markdown_text(finding.get('severity') or 'info')} "
                 f"| {_package_markdown_text(finding.get('review_state') or 'new')} "
                 f"| `{_package_markdown_text(_package_short_id(run_id))}` "
-                f"| `{_package_markdown_text(finding.get('raw_line') or '')}` |"
+                f"| `{_package_markdown_text(finding.get('raw_line') or '')}`"
+                f"{_package_finding_metadata_markdown(finding)} |"
             )
     else:
         lines.append("- No selected findings.")
@@ -1180,6 +1325,19 @@ def _render_package_readme(package, manifest, generated_at, run_pages, artifact_
             )
     else:
         lines.append("- No skipped items.")
+    lines.extend([
+        "",
+        "## Package Exports",
+        "",
+        f"- {_package_markdown_link('Manifest JSON', 'manifest.json')}",
+        f"- {_package_markdown_link('Findings JSON', 'findings/findings.json')}",
+        f"- {_package_markdown_link('Findings Markdown', 'findings/findings.md')}",
+        f"- {_package_markdown_link('Targets JSON', 'targets/targets.json')}",
+        f"- {_package_markdown_link('Labels JSON', 'metadata/labels.json')}",
+        f"- {_package_markdown_link('Annotations JSON', 'notes/annotations.json')}",
+    ])
+    if skipped_items:
+        lines.append(f"- {_package_markdown_link('Skipped items JSON', 'skipped-items.json')}")
     lines.extend([
         "",
         "## Notes",
@@ -1232,7 +1390,8 @@ def _package_findings_markdown_bytes(manifest, run_pages):
                 f"| {_package_markdown_text(finding.get('severity') or 'info')} "
                 f"| {_package_markdown_text(finding.get('review_state') or 'new')} "
                 f"| `{_package_markdown_text(_package_short_id(run_id))}` "
-                f"| `{_package_markdown_text(finding.get('raw_line') or '')}` |"
+                f"| `{_package_markdown_text(finding.get('raw_line') or '')}`"
+                f"{_package_finding_metadata_markdown(finding)} |"
             )
     else:
         lines.append("- No selected findings.")
@@ -1296,6 +1455,7 @@ def _package_metadata_targets(package, manifest):
         "run": "run_ids",
         "finding": "finding_ids",
         "run_file_artifact": "artifact_ids",
+        "target": "target_ids",
     }
     for entity_type, key in mapping.items():
         raw_ids = selected.get(key)
@@ -1306,6 +1466,57 @@ def _package_metadata_targets(package, manifest):
         for entity_type, entity_ids in targets.items()
         if any(entity_ids)
     }
+
+
+def _metadata_items_by_entity(items):
+    by_entity = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        key = (str(item.get("entity_type") or ""), str(item.get("entity_id") or ""))
+        if not key[0] or not key[1]:
+            continue
+        by_entity.setdefault(key, []).append(item)
+    return by_entity
+
+
+def _package_manifest_with_inline_metadata(manifest, labels, annotations):
+    enriched = dict(manifest)
+    label_map = _metadata_items_by_entity(labels)
+    annotation_map = _metadata_items_by_entity(annotations)
+
+    def _enrich_items(entity_type, key):
+        source_items = manifest.get(key) if isinstance(manifest.get(key), list) else []
+        enriched_items = []
+        for source_item in source_items:
+            if not isinstance(source_item, dict):
+                continue
+            item = dict(source_item)
+            entity_id = str(item.get("id") or "")
+            item_labels = label_map.get((entity_type, entity_id), [])
+            item_annotations = annotation_map.get((entity_type, entity_id), [])
+            if item_labels:
+                item["labels"] = item_labels
+            if item_annotations:
+                item["annotations"] = item_annotations
+            enriched_items.append(item)
+        enriched[key] = enriched_items
+
+    _enrich_items("run", "runs")
+    _enrich_items("finding", "findings")
+    _enrich_items("run_file_artifact", "artifacts")
+    _enrich_items("target", "targets")
+    project = manifest.get("project") if isinstance(manifest.get("project"), dict) else {}
+    enriched_project = dict(project)
+    project_id = str(project.get("id") or "")
+    project_labels = label_map.get(("project", project_id), [])
+    project_annotations = annotation_map.get(("project", project_id), [])
+    if project_labels:
+        enriched_project["labels"] = project_labels
+    if project_annotations:
+        enriched_project["annotations"] = project_annotations
+    enriched["project"] = enriched_project
+    return enriched
 
 
 def _package_metadata_rows(conn, session_id, table, targets):
@@ -1331,8 +1542,8 @@ def _package_metadata_rows(conn, session_id, table, targets):
     return rows
 
 
-def _package_labels_json_bytes(labels, generated_at, redaction_rules=None):
-    exported = [
+def _package_label_dicts(labels, redaction_rules=None):
+    return [
         _redact_package_value({
             "id": row["id"],
             "entity_type": row["entity_type"],
@@ -1343,6 +1554,10 @@ def _package_labels_json_bytes(labels, generated_at, redaction_rules=None):
         }, redaction_rules)
         for row in labels
     ]
+
+
+def _package_labels_json_bytes(labels, generated_at, redaction_rules=None):
+    exported = _package_label_dicts(labels, redaction_rules)
     payload = {
         "format": 1,
         "generated_at": generated_at,
@@ -1352,8 +1567,8 @@ def _package_labels_json_bytes(labels, generated_at, redaction_rules=None):
     return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
-def _package_annotations_json_bytes(annotations, generated_at, *, included, redaction_rules=None):
-    exported = [
+def _package_annotation_dicts(annotations, redaction_rules=None):
+    return [
         _redact_package_value({
             "id": row["id"],
             "entity_type": row["entity_type"],
@@ -1366,6 +1581,10 @@ def _package_annotations_json_bytes(annotations, generated_at, *, included, reda
         }, redaction_rules)
         for row in annotations
     ]
+
+
+def _package_annotations_json_bytes(annotations, generated_at, *, included, redaction_rules=None):
+    exported = _package_annotation_dicts(annotations, redaction_rules)
     payload = {
         "format": 1,
         "generated_at": generated_at,
@@ -1782,6 +2001,21 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
     manifest = dict(package.get("manifest") or {})
     redaction_rules = _package_redaction_rules(package.get("redaction_mode"), cfg=cfg)
     render_manifest = _redact_package_manifest(manifest, redaction_rules)
+    metadata_targets = _package_metadata_targets(package, manifest)
+    with db_connect() as conn:
+        label_rows = _package_metadata_rows(conn, session_id, "entity_labels", metadata_targets)
+        annotation_rows = (
+            _package_metadata_rows(conn, session_id, "annotations", metadata_targets)
+            if render_manifest.get("include_private_annotations")
+            else []
+        )
+    label_items = _package_label_dicts(label_rows, redaction_rules)
+    annotation_items = _package_annotation_dicts(annotation_rows, redaction_rules)
+    render_manifest = _package_manifest_with_inline_metadata(
+        render_manifest,
+        label_items,
+        annotation_items,
+    )
     render_package = {
         **package,
         "name": apply_redaction_rules(package["name"], redaction_rules),
@@ -1931,24 +2165,15 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
             archive.writestr("targets/targets.json", targets_json_bytes)
 
-            metadata_targets = _package_metadata_targets(package, manifest)
-            with db_connect() as conn:
-                label_rows = _package_metadata_rows(conn, session_id, "entity_labels", metadata_targets)
-                annotation_rows = (
-                    _package_metadata_rows(conn, session_id, "annotations", metadata_targets)
-                    if render_manifest.get("include_private_annotations")
-                    else []
-                )
-            labels_json_bytes = _package_labels_json_bytes(label_rows, generated_at, redaction_rules)
+            labels_json_bytes = _package_labels_json_bytes(label_items, generated_at)
             projected_bytes += len(labels_json_bytes)
             if max_archive_bytes and projected_bytes > max_archive_bytes:
                 raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
             archive.writestr("metadata/labels.json", labels_json_bytes)
             annotations_json_bytes = _package_annotations_json_bytes(
-                annotation_rows,
+                annotation_items,
                 generated_at,
                 included=bool(render_manifest.get("include_private_annotations")),
-                redaction_rules=redaction_rules,
             )
             projected_bytes += len(annotations_json_bytes)
             if max_archive_bytes and projected_bytes > max_archive_bytes:
