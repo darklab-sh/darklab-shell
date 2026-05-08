@@ -246,6 +246,11 @@ class TestProjectRoutes:
         assert json.loads(duplicate_target_resp.data)["target"]["id"] == target["id"]
         assert target["value"] == "darklab.sh"
         assert target["confidence"] == 1.0
+        assert target["review_state"] == "confirmed"
+        assert target["source"] == "user"
+        assert target["source_detail"] == {}
+        assert target["seen_count"] == 1
+        assert target["dismissed_at"] == ""
 
         updated_target = json.loads(client.put(
             f"/projects/{project['id']}/targets/{target['id']}",
@@ -294,6 +299,17 @@ class TestProjectRoutes:
             client.get("/projects?include_archived=1", headers={"X-Session-ID": session_id}).data
         )
         assert [item["id"] for item in archived_list["projects"]] == [project["id"]]
+
+        unarchive_resp = client.put(
+            f"/projects/{project['id']}",
+            json={"status": "active"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert unarchive_resp.status_code == 200
+        unarchived = json.loads(unarchive_resp.data)["project"]
+        assert unarchived["status"] == "active"
+        default_list_after_unarchive = json.loads(client.get("/projects", headers={"X-Session-ID": session_id}).data)
+        assert [item["id"] for item in default_list_after_unarchive["projects"]] == [project["id"]]
 
         cleanup_target_resp = client.post(
             f"/projects/{project['id']}/targets",
@@ -410,6 +426,12 @@ class TestProjectRoutes:
 
         archived_current, _ = execute_builtin_command("project current", cli_session)
         assert archived_current[0]["text"].startswith("No active project.")
+
+        unarchive_lines, _ = execute_builtin_command("project unarchive cli-case", cli_session)
+        assert "unarchived CLI Case" in unarchive_lines[0]["text"]
+
+        unarchived_current, _ = execute_builtin_command("project current", cli_session)
+        assert unarchived_current[0]["text"].startswith("No active project.")
 
         delete_lines, _ = execute_builtin_command("project delete cli-case", cli_session)
         assert "deleted CLI Case" in delete_lines[0]["text"]
@@ -660,6 +682,7 @@ class TestProjectRoutes:
             "snapshots": 0,
             "workspace_files": 0,
             "targets": 0,
+            "pending_targets": 0,
             "artifacts": 2,
             "findings": 2,
             "labels": 2,

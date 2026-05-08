@@ -30,7 +30,7 @@ from database import (
 from permalinks import _font_face_css, _format_duration, _permalink_context
 from redaction import apply_redaction_rules, redact_line_entries
 from run_output_store import load_full_output_entries
-from workspace import WorkspaceError, open_workspace_file_for_download, resolve_workspace_path
+from workspace import WorkspaceError, open_workspace_file_for_download, read_workspace_text_file, resolve_workspace_path
 
 MAX_PROJECT_NAME_LEN = 120
 MAX_PROJECT_DESCRIPTION_LEN = 1000
@@ -47,6 +47,9 @@ MAX_FINDING_TITLE_LEN = 240
 MAX_PACKAGE_NAME_LEN = 120
 MAX_PACKAGE_DESCRIPTION_LEN = 1000
 MAX_PROJECT_WORKFLOW_STEPS = 40
+MAX_PROJECT_TARGET_DISCOVERY_PER_RUN = 100
+MAX_PROJECT_TARGET_DISCOVERY_FILE_BYTES = 256 * 1024
+MAX_PROJECT_TARGET_DISCOVERY_FILE_LINES = 2000
 ACTIVE_PROJECT_PREF_KEY = "pref_active_project_id"
 PROJECT_AUTO_LINK_EXTERNAL_RUNS_PREF_KEY = "pref_project_auto_link_external_runs"
 
@@ -68,8 +71,14 @@ ENTITY_METADATA_TYPES = frozenset({
 })
 ANNOTATION_VISIBILITIES = frozenset({"private"})
 PROJECT_TARGET_TYPES = frozenset({"domain", "url", "host", "ip", "cidr", "port_set"})
+PROJECT_TARGET_REVIEW_STATES = frozenset({"confirmed", "pending", "dismissed"})
+PROJECT_TARGET_SOURCES = frozenset({"user", "auto_command", "auto_input_file"})
 FINDING_REVIEW_STATES = frozenset({"new", "reviewed", "important", "false_positive", "needs_followup"})
 EVIDENCE_PACKAGE_STATUSES = frozenset({"draft"})
+PROJECT_TARGET_SELECT_COLUMNS = (
+    "id, project_id, type, value, label, notes, source_run_id, confidence, "
+    "review_state, source, source_detail, seen_count, last_seen, dismissed_at, created, updated"
+)
 
 _URL_RE = re.compile(r"https?://[^\s<>'\"`]+", re.I)
 _DOMAIN_RE = re.compile(
@@ -144,6 +153,10 @@ def _new_project_target_id() -> str:
 
 def _new_finding_id() -> str:
     return "fnd_" + secrets.token_hex(8)
+
+
+def _new_finding_target_id() -> str:
+    return "fnt_" + secrets.token_hex(8)
 
 
 def _new_evidence_package_id() -> str:
@@ -307,6 +320,10 @@ def _row_to_annotation(row):
 def _row_to_target(row):
     if not row:
         return None
+    try:
+        source_detail = json.loads(row["source_detail"] or "{}")
+    except (TypeError, ValueError):
+        source_detail = {}
     return {
         "id": row["id"],
         "project_id": row["project_id"],
@@ -316,6 +333,12 @@ def _row_to_target(row):
         "notes": row["notes"],
         "source_run_id": row["source_run_id"],
         "confidence": row["confidence"],
+        "review_state": row["review_state"],
+        "source": row["source"],
+        "source_detail": source_detail if isinstance(source_detail, dict) else {},
+        "seen_count": int(row["seen_count"] or 0),
+        "last_seen": row["last_seen"] or "",
+        "dismissed_at": row["dismissed_at"] or "",
         "created": row["created"],
         "updated": row["updated"],
     }
@@ -466,27 +489,71 @@ def _command_root(value):
     return parts[0] if parts else ""
 
 
-def _finding_target_ids_from_row(row, target_rows=None):
-    target_ids = []
+def _finding_target_ids_from_row(row, relationship_target_ids=None, allowed_target_ids=None):
+    result = []
+    persisted_ids = [
+        str(target_id or "")
+        for target_id in (relationship_target_ids if isinstance(relationship_target_ids, list) else [])
+        if str(target_id or "")
+    ]
+    allowed_ids = {str(target_id or "") for target_id in allowed_target_ids} if allowed_target_ids is not None else None
+
+    def can_include(target_id):
+        return bool(target_id) and (allowed_ids is None or target_id in allowed_ids)
+
+    def add(target_id):
+        normalized = str(target_id or "")
+        if can_include(normalized) and normalized not in result:
+            result.append(normalized)
+
     primary = str(row["target_id"] or "") if row and "target_id" in row.keys() else ""
-    if primary:
-        target_ids.append(primary)
-    for target in target_rows or []:
-        if _target_value_matches_text(target, row["raw_line"] if row and "raw_line" in row.keys() else ""):
-            target_id = _target_row_id(target)
-            if target_id and target_id not in target_ids:
-                target_ids.append(target_id)
-    return target_ids
+    if not persisted_ids or primary in persisted_ids:
+        add(primary)
+    for target_id in persisted_ids:
+        add(target_id)
+    return result
 
 
-def _row_to_project_finding(row, target_rows=None):
+def _row_to_project_finding(row, target_ids=None, allowed_target_ids=None):
     finding = _row_to_finding(row)
     if not finding:
         return None
-    finding["target_ids"] = _finding_target_ids_from_row(row, target_rows)
+    finding["target_ids"] = _finding_target_ids_from_row(row, target_ids, allowed_target_ids)
     finding["run_command"] = row["run_command"] or ""
     finding["command_root"] = _command_root(row["run_command"])
     return finding
+
+
+def _finding_target_ids_by_finding(conn, session_id, finding_ids, project_id=None):
+    ids = [str(finding_id or "") for finding_id in finding_ids if finding_id]
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    params = [session_id, *ids]
+    if project_id:
+        rows = conn.execute(
+            "SELECT ft.finding_id, ft.target_id "
+            "FROM finding_targets ft "
+            "JOIN project_targets t ON t.id = ft.target_id "
+            f"WHERE ft.session_id = ? AND ft.finding_id IN ({placeholders}) "  # nosec B608
+            "AND t.project_id = ? "
+            "ORDER BY ft.created ASC, ft.id ASC",
+            [*params, project_id],
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT finding_id, target_id FROM finding_targets "
+            f"WHERE session_id = ? AND finding_id IN ({placeholders}) "  # nosec B608
+            "ORDER BY created ASC, id ASC",
+            params,
+        ).fetchall()
+    grouped = {finding_id: [] for finding_id in ids}
+    for row in rows:
+        finding_id = str(row["finding_id"] or "")
+        target_id = str(row["target_id"] or "")
+        if finding_id and target_id and target_id not in grouped.setdefault(finding_id, []):
+            grouped[finding_id].append(target_id)
+    return grouped
 
 
 def _row_to_evidence_package(row):
@@ -2106,8 +2173,9 @@ def get_project_summary(session_id, project_id):
             (project_id,),
         ).fetchall()
         target_rows = conn.execute(
-            "SELECT id, project_id, type, value, label, notes, source_run_id, confidence, created, updated "
-            "FROM project_targets WHERE project_id = ? ORDER BY type ASC, value COLLATE NOCASE ASC",
+            f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
+            "FROM project_targets WHERE project_id = ? AND review_state != 'dismissed' "
+            "ORDER BY type ASC, value COLLATE NOCASE ASC",
             (project_id,),
         ).fetchall()
         package_row = conn.execute(
@@ -2161,6 +2229,8 @@ def get_project_summary(session_id, project_id):
         )
     links = [_row_to_link(row) for row in link_rows]
     targets = [_row_to_target(row) for row in target_rows]
+    confirmed_target_count = sum(1 for target in targets if target and target.get("review_state") == "confirmed")
+    pending_target_count = sum(1 for target in targets if target and target.get("review_state") == "pending")
     runs = [item for item in (_row_to_project_run(row) for row in run_rows) if item]
     artifacts = []
     for item in (_row_to_run_file_artifact(row) for row in artifact_rows):
@@ -2182,7 +2252,8 @@ def get_project_summary(session_id, project_id):
             "runs": len(run_ids),
             "snapshots": len(snapshot_ids),
             "workspace_files": len(workspace_file_ids),
-            "targets": len(targets),
+            "targets": confirmed_target_count,
+            "pending_targets": pending_target_count,
             "artifacts": len(artifacts),
             "findings": len(finding_ids),
             "labels": label_count,
@@ -2319,6 +2390,16 @@ def delete_project(session_id, project_id):
         )
         if target_ids:
             placeholders = ",".join("?" for _ in target_ids)
+            conn.execute(
+                "DELETE FROM finding_targets WHERE session_id = ? "
+                f"AND target_id IN ({placeholders})",  # nosec B608
+                [session_id, *target_ids],
+            )
+            conn.execute(
+                "UPDATE findings SET target_id = '' WHERE session_id = ? "
+                f"AND target_id IN ({placeholders})",  # nosec B608
+                [session_id, *target_ids],
+            )
             conn.execute(
                 "DELETE FROM entity_labels WHERE entity_type = 'target' "
                 f"AND entity_id IN ({placeholders})",  # nosec B608
@@ -3054,6 +3135,22 @@ def list_project_findings(session_id, project_id, filters=None):
             clauses.append("f.run_id = ?")
             params.append(run_id)
         target_id = _trim_text(filters.get("target_id"), MAX_ENTITY_ID_LEN)
+        if target_id:
+            target = conn.execute(
+                "SELECT 1 FROM project_targets WHERE project_id = ? AND id = ?",
+                (project_id, target_id),
+            ).fetchone()
+            if not target:
+                return []
+            clauses.append(
+                "("
+                "f.target_id = ? OR EXISTS ("
+                "SELECT 1 FROM finding_targets ft "
+                "WHERE ft.session_id = f.session_id AND ft.finding_id = f.id AND ft.target_id = ?"
+                ")"
+                ")"
+            )
+            params.extend([target_id, target_id])
         review_state = _trim_text(filters.get("review_state"), 32).lower()
         if review_state:
             if review_state not in FINDING_REVIEW_STATES:
@@ -3105,16 +3202,24 @@ def list_project_findings(session_id, project_id, filters=None):
             params,
         ).fetchall()
         target_rows = conn.execute(
-            "SELECT id, type, value FROM project_targets WHERE project_id = ?",
+            "SELECT id FROM project_targets WHERE project_id = ?",
             (project_id,),
         ).fetchall()
+        project_target_ids = {str(row["id"] or "") for row in target_rows if row["id"]}
+        relationship_ids = _finding_target_ids_by_finding(
+            conn,
+            session_id,
+            [row["id"] for row in rows],
+            project_id,
+        )
 
-    findings = [item for item in (_row_to_project_finding(row, target_rows) for row in rows) if item]
-    if target_id:
-        findings = [
-            item for item in findings
-            if target_id == item.get("target_id") or target_id in (item.get("target_ids") or [])
-        ]
+    findings = [
+        item for item in (
+            _row_to_project_finding(row, relationship_ids.get(str(row["id"])), project_target_ids)
+            for row in rows
+        )
+        if item
+    ]
     command_root = _trim_text(filters.get("command_root"), 128)
     if command_root:
         findings = [item for item in findings if item["command_root"] == command_root]
@@ -3297,7 +3402,7 @@ def link_run_to_active_project(conn, session_id, run_id):
     if not project_id:
         return None
     project = conn.execute(
-        "SELECT id FROM projects WHERE session_id = ? AND id = ? AND status != 'archived'",
+        "SELECT id, name, slug FROM projects WHERE session_id = ? AND id = ? AND status != 'archived'",
         (session_id, project_id),
     ).fetchone()
     if not project:
@@ -3324,7 +3429,10 @@ def link_run_to_active_project(conn, session_id, run_id):
             (project_id, run_id),
         ).fetchone()
         if row:
-            return _row_to_link(row)
+            link = _row_to_link(row)
+            if link is not None:
+                link["project_name"] = project["name"] or project["slug"] or project["id"]
+            return link
     raise ProjectWorkspaceError("could not allocate an active project link id")
 
 
@@ -3713,6 +3821,41 @@ def _target_id_for_finding(target_rows, entry, raw_line):
     return target_ids[0] if target_ids else ""
 
 
+def _insert_finding_target_relationships(conn, session_id, run_id, finding_id, target_ids, created):
+    inserted = []
+    for index, target_id in enumerate(target_ids or []):
+        normalized = str(target_id or "")
+        if not normalized or normalized in inserted:
+            continue
+        source = "primary_match" if index == 0 else "line_match"
+        for _ in range(10):
+            conn.execute(
+                "INSERT OR IGNORE INTO finding_targets "
+                "(id, session_id, finding_id, target_id, run_id, source, confidence, created) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1.0, ?)",
+                (
+                    _new_finding_target_id(),
+                    session_id,
+                    finding_id,
+                    normalized,
+                    run_id,
+                    source,
+                    created,
+                ),
+            )
+            row = conn.execute(
+                "SELECT 1 FROM finding_targets "
+                "WHERE session_id = ? AND finding_id = ? AND target_id = ?",
+                (session_id, finding_id, normalized),
+            ).fetchone()
+            if row:
+                inserted.append(normalized)
+                break
+        else:
+            raise ProjectWorkspaceError("could not allocate a finding target relationship id")
+    return inserted
+
+
 def record_run_findings(conn, session_id, run_id, entries):
     run_id = _trim_text(run_id, MAX_ENTITY_ID_LEN)
     run = conn.execute(
@@ -3727,6 +3870,7 @@ def record_run_findings(conn, session_id, run_id, entries):
         "FROM project_targets t "
         "JOIN project_links l ON l.project_id = t.project_id "
         "WHERE l.entity_type = 'run' AND l.entity_id = ? "
+        "AND t.review_state != 'dismissed' "
         "ORDER BY LENGTH(t.value) DESC, t.confidence DESC",
         (run_id,),
     ).fetchall()
@@ -3753,10 +3897,8 @@ def record_run_findings(conn, session_id, run_id, entries):
         seen_fingerprints.add(fingerprint)
         title = _trim_text(raw_line, MAX_FINDING_TITLE_LEN)
         severity = _finding_severity_from_text(raw_line)
-        # The schema stores one primary target_id. Additional matches are still
-        # exposed as derived target_ids when listing project findings; persist
-        # richer many-target attribution with a future finding-target join table.
-        target_id = _target_id_for_finding(target_rows, entry, raw_line)
+        target_ids = _target_ids_for_finding(target_rows, entry, raw_line)
+        target_id = target_ids[0] if target_ids else ""
         for _ in range(10):
             finding_id = _new_finding_id()
             conn.execute(
@@ -3783,7 +3925,18 @@ def record_run_findings(conn, session_id, run_id, entries):
                 (finding_id,),
             ).fetchone()
             if row:
-                recorded.append(_row_to_finding(row))
+                relationship_ids = _insert_finding_target_relationships(
+                    conn,
+                    session_id,
+                    run_id,
+                    finding_id,
+                    target_ids,
+                    created,
+                )
+                finding = _row_to_finding(row)
+                if finding:
+                    finding["target_ids"] = _finding_target_ids_from_row(row, relationship_ids)
+                    recorded.append(finding)
                 break
         else:
             raise ProjectWorkspaceError("could not allocate a finding id")
@@ -3873,6 +4026,25 @@ def _normalize_target_payload(data, *, partial=False):
         except (TypeError, ValueError):
             raise ProjectWorkspaceError("target confidence must be a number") from None
         clean["confidence"] = min(1.0, max(0.0, confidence))
+    if "review_state" in data:
+        review_state = _trim_text(data.get("review_state"), 32).lower()
+        if review_state not in PROJECT_TARGET_REVIEW_STATES:
+            raise ProjectWorkspaceError("target review_state must be confirmed, pending, or dismissed")
+        clean["review_state"] = review_state
+    if "source" in data:
+        source = _trim_text(data.get("source"), 32).lower()
+        if source not in PROJECT_TARGET_SOURCES:
+            raise ProjectWorkspaceError("target source must be user, auto_command, or auto_input_file")
+        clean["source"] = source
+    if "source_detail" in data:
+        source_detail = data.get("source_detail")
+        if not isinstance(source_detail, dict):
+            raise ProjectWorkspaceError("target source_detail must be an object")
+        clean["source_detail"] = {
+            _trim_text(key, 64): _trim_text(value, 512)
+            for key, value in source_detail.items()
+            if _trim_text(key, 64)
+        }
     return clean
 
 
@@ -3902,6 +4074,71 @@ def _target_payload_from_candidate(value):
     if _DOMAIN_RE.fullmatch(candidate):
         return {"type": "domain", "value": candidate.lower()}
     return None
+
+
+def _target_payload_from_typed_value(value, value_type):
+    raw_value = _strip_target_token(value)
+    raw_type = _trim_text(value_type, 32).lower()
+    if not raw_value or raw_type not in PROJECT_TARGET_TYPES | {"target"}:
+        return None
+    if raw_type == "port_set":
+        return {"type": "port_set", "value": raw_value} if _target_port_ranges(raw_value) else None
+    inferred = _target_payload_from_candidate(raw_value)
+    if raw_type == "target":
+        return inferred
+    if inferred and inferred["type"] == raw_type:
+        return inferred
+    if raw_type in {"domain", "host"} and inferred and inferred["type"] in {"domain", "host", "ip"}:
+        return inferred
+    if raw_type == "url" and inferred and inferred["type"] == "url":
+        return inferred
+    if raw_type == "ip":
+        try:
+            return {"type": "ip", "value": str(ipaddress.ip_address(raw_value))}
+        except ValueError:
+            return None
+    if raw_type == "cidr":
+        try:
+            return {"type": "cidr", "value": str(ipaddress.ip_network(raw_value, strict=False))}
+        except ValueError:
+            return None
+    if raw_type == "host" and raw_value and not raw_value.startswith("-"):
+        return {"type": "host", "value": raw_value.lower()}
+    return None
+
+
+def _target_payloads_from_target_list_file(session_id, raw_item):
+    if not isinstance(raw_item, dict) or str(raw_item.get("source_kind") or "") != "flag":
+        return []
+    if str(raw_item.get("target_list_file") or "") != "1":
+        return []
+    workspace_path = _trim_text(raw_item.get("value"), MAX_TARGET_VALUE_LEN)
+    if not workspace_path or os.path.isabs(workspace_path):
+        return []
+    try:
+        text = read_workspace_text_file(session_id, workspace_path, _config.CFG)
+    except (OSError, WorkspaceError):
+        return []
+    payloads = []
+    seen = set()
+    for raw_line in text[:MAX_PROJECT_TARGET_DISCOVERY_FILE_BYTES].splitlines()[:MAX_PROJECT_TARGET_DISCOVERY_FILE_LINES]:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        payload = _target_payload_from_typed_value(line, raw_item.get("value_type"))
+        if not payload:
+            continue
+        key = (payload["type"], payload["value"])
+        if key in seen:
+            continue
+        seen.add(key)
+        payloads.append((payload, {
+            "kind": "input_file",
+            "name": _trim_text(raw_item.get("source_name"), 128),
+            "path": workspace_path,
+            "value_type": _trim_text(raw_item.get("value_type"), 32),
+        }))
+    return payloads
 
 
 def infer_project_target_payload(data):
@@ -4087,8 +4324,9 @@ def list_project_targets(session_id, project_id):
         if not project:
             return None
         rows = conn.execute(
-            "SELECT id, project_id, type, value, label, notes, source_run_id, confidence, created, updated "
-            "FROM project_targets WHERE project_id = ? ORDER BY type ASC, value COLLATE NOCASE ASC",
+            f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
+            "FROM project_targets WHERE project_id = ? AND review_state != 'dismissed' "
+            "ORDER BY type ASC, value COLLATE NOCASE ASC",
             (project_id,),
         ).fetchall()
     return [_row_to_target(row) for row in rows]
@@ -4108,11 +4346,35 @@ def add_project_target(session_id, project_id, data):
         if payload["source_run_id"] and not _entity_belongs_to_session(conn, session_id, "run", payload["source_run_id"]):
             raise ProjectWorkspaceError("source_run_id not found for this session")
         row = conn.execute(
-            "SELECT id, project_id, type, value, label, notes, source_run_id, confidence, created, updated "
+            f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
             "FROM project_targets WHERE project_id = ? AND type = ? AND value = ?",
             (project_id, payload["type"], payload["value"]),
         ).fetchone()
         if row:
+            if row["review_state"] in {"pending", "dismissed"}:
+                updated = _now()
+                conn.execute(
+                    "UPDATE project_targets SET review_state = 'confirmed', source = 'user', "
+                    "label = ?, notes = ?, source_run_id = ?, confidence = ?, source_detail = '{}', "
+                    "last_seen = ?, dismissed_at = '', updated = ? "
+                    "WHERE project_id = ? AND id = ?",
+                    (
+                        payload["label"],
+                        payload["notes"],
+                        payload["source_run_id"],
+                        payload["confidence"],
+                        updated,
+                        updated,
+                        project_id,
+                        row["id"],
+                    ),
+                )
+                conn.commit()
+                row = conn.execute(
+                    f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
+                    "FROM project_targets WHERE project_id = ? AND id = ?",
+                    (project_id, row["id"]),
+                ).fetchone()
             return _row_to_target(row)
         count_row = conn.execute(
             "SELECT COUNT(*) AS count FROM project_targets WHERE project_id = ?",
@@ -4128,8 +4390,9 @@ def add_project_target(session_id, project_id, data):
             target_id = _new_project_target_id()
             conn.execute(
                 "INSERT OR IGNORE INTO project_targets "
-                "(id, project_id, type, value, label, notes, source_run_id, confidence, created, updated) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "(id, project_id, type, value, label, notes, source_run_id, confidence, "
+                "review_state, source, source_detail, seen_count, last_seen, dismissed_at, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', 'user', '{}', 1, ?, '', ?, ?)",
                 (
                     target_id,
                     project_id,
@@ -4140,11 +4403,12 @@ def add_project_target(session_id, project_id, data):
                     payload["source_run_id"],
                     payload["confidence"],
                     created,
+                    created,
                     updated,
                 ),
             )
             row = conn.execute(
-                "SELECT id, project_id, type, value, label, notes, source_run_id, confidence, created, updated "
+                f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
                 "FROM project_targets WHERE project_id = ? AND type = ? AND value = ?",
                 (project_id, payload["type"], payload["value"]),
             ).fetchone()
@@ -4154,6 +4418,119 @@ def add_project_target(session_id, project_id, data):
         raise ProjectWorkspaceError("could not allocate a project target id")
 
 
+def record_project_target_discoveries(conn, session_id, project_id, run_id, command_inputs):
+    project_id = _trim_text(project_id, MAX_ENTITY_ID_LEN)
+    run_id = _trim_text(run_id, MAX_ENTITY_ID_LEN)
+    if not project_id or not run_id:
+        return []
+    project = conn.execute(
+        "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
+        (session_id, project_id),
+    ).fetchone()
+    if not project:
+        return []
+    created = _now()
+    recorded = []
+    seen_values = set()
+    input_items = command_inputs if isinstance(command_inputs, list) else []
+    for raw_item in input_items:
+        if len(recorded) >= MAX_PROJECT_TARGET_DISCOVERY_PER_RUN:
+            break
+        if not isinstance(raw_item, dict):
+            continue
+        is_target_list_file = str(raw_item.get("target_list_file") or "") == "1"
+        direct_payload = None if is_target_list_file else _target_payload_from_typed_value(
+            raw_item.get("value"),
+            raw_item.get("value_type"),
+        )
+        source_detail = {
+            "kind": _trim_text(raw_item.get("source_kind"), 64),
+            "name": _trim_text(raw_item.get("source_name"), 128),
+            "value_type": _trim_text(raw_item.get("value_type"), 32),
+        }
+        source_detail = {key: value for key, value in source_detail.items() if value}
+        payload_items = [(direct_payload, source_detail, "auto_command", 1.0)] if direct_payload else []
+        if not payload_items:
+            payload_items.extend(
+                (payload, detail, "auto_input_file", 0.85)
+                for payload, detail in _target_payloads_from_target_list_file(session_id, raw_item)
+            )
+        for payload, detail, source, confidence in payload_items:
+            if len(recorded) >= MAX_PROJECT_TARGET_DISCOVERY_PER_RUN:
+                break
+            if not payload:
+                continue
+            key = (payload["type"], payload["value"])
+            if key in seen_values:
+                continue
+            seen_values.add(key)
+            source_detail_json = json.dumps(detail, sort_keys=True)
+            row = conn.execute(
+                f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
+                "FROM project_targets WHERE project_id = ? AND type = ? AND value = ?",
+                (project_id, payload["type"], payload["value"]),
+            ).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE project_targets SET seen_count = seen_count + 1, last_seen = ?, updated = ? "
+                    "WHERE project_id = ? AND id = ?",
+                    (created, created, project_id, row["id"]),
+                )
+                refreshed = conn.execute(
+                    f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
+                    "FROM project_targets WHERE project_id = ? AND id = ?",
+                    (project_id, row["id"]),
+                ).fetchone()
+                target = _row_to_target(refreshed)
+                if target and target["review_state"] != "dismissed":
+                    recorded.append(target)
+                continue
+            count_row = conn.execute(
+                "SELECT COUNT(*) AS count FROM project_targets WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+            if _quota_exceeded(
+                int(count_row["count"] or 0) if count_row else 0,
+                "max_project_targets_per_project",
+                200,
+            ):
+                break
+            for _ in range(10):
+                target_id = _new_project_target_id()
+                conn.execute(
+                    "INSERT OR IGNORE INTO project_targets "
+                    "(id, project_id, type, value, label, notes, source_run_id, confidence, "
+                    "review_state, source, source_detail, seen_count, last_seen, dismissed_at, created, updated) "
+                    "VALUES (?, ?, ?, ?, '', '', ?, ?, 'pending', ?, ?, 1, ?, '', ?, ?)",
+                    (
+                        target_id,
+                        project_id,
+                        payload["type"],
+                        payload["value"],
+                        run_id,
+                        confidence,
+                        source,
+                        source_detail_json,
+                        created,
+                        created,
+                        created,
+                    ),
+                )
+                row = conn.execute(
+                    f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
+                    "FROM project_targets WHERE project_id = ? AND type = ? AND value = ?",
+                    (project_id, payload["type"], payload["value"]),
+                ).fetchone()
+                if row:
+                    target = _row_to_target(row)
+                    if target:
+                        recorded.append(target)
+                    break
+            else:
+                raise ProjectWorkspaceError("could not allocate a project target id")
+    return recorded
+
+
 def update_project_target(session_id, project_id, target_id, data):
     target_id = _trim_text(target_id, MAX_ENTITY_ID_LEN)
     payload = _normalize_target_payload(data, partial=True)
@@ -4161,7 +4538,8 @@ def update_project_target(session_id, project_id, target_id, data):
         raise ProjectWorkspaceError("target update payload is empty")
     with db_connect() as conn:
         current = conn.execute(
-            "SELECT t.id, t.project_id, t.type, t.value, t.label, t.notes, t.source_run_id, t.confidence "
+            "SELECT t.id, t.project_id, t.type, t.value, t.label, t.notes, t.source_run_id, t.confidence, "
+            "t.review_state, t.source, t.source_detail, t.seen_count, t.last_seen, t.dismissed_at "
             "FROM project_targets t JOIN projects p ON p.id = t.project_id "
             "WHERE p.session_id = ? AND t.project_id = ? AND t.id = ?",
             (session_id, project_id, target_id),
@@ -4174,20 +4552,48 @@ def update_project_target(session_id, project_id, target_id, data):
         notes = payload.get("notes", current["notes"])
         source_run_id = payload.get("source_run_id", current["source_run_id"])
         confidence = payload.get("confidence", current["confidence"])
+        review_state = payload.get("review_state", current["review_state"])
+        source = payload.get("source", current["source"])
+        source_detail = payload.get("source_detail")
+        source_detail_json = (
+            json.dumps(source_detail, sort_keys=True)
+            if isinstance(source_detail, dict)
+            else current["source_detail"]
+        )
+        dismissed_at = current["dismissed_at"]
         if source_run_id and not _entity_belongs_to_session(conn, session_id, "run", source_run_id):
             raise ProjectWorkspaceError("source_run_id not found for this session")
         updated = _now()
+        if review_state == "dismissed" and current["review_state"] != "dismissed":
+            dismissed_at = updated
+        elif review_state != "dismissed":
+            dismissed_at = ""
         try:
             conn.execute(
                 "UPDATE project_targets SET type = ?, value = ?, label = ?, notes = ?, "
-                "source_run_id = ?, confidence = ?, updated = ? "
+                "source_run_id = ?, confidence = ?, review_state = ?, source = ?, source_detail = ?, "
+                "dismissed_at = ?, updated = ? "
                 "WHERE project_id = ? AND id = ?",
-                (target_type, value, label, notes, source_run_id, confidence, updated, project_id, target_id),
+                (
+                    target_type,
+                    value,
+                    label,
+                    notes,
+                    source_run_id,
+                    confidence,
+                    review_state,
+                    source,
+                    source_detail_json,
+                    dismissed_at,
+                    updated,
+                    project_id,
+                    target_id,
+                ),
             )
         except sqlite3.IntegrityError:
             raise ProjectWorkspaceError("target already exists for this project") from None
         row = conn.execute(
-            "SELECT id, project_id, type, value, label, notes, source_run_id, confidence, created, updated "
+            f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
             "FROM project_targets WHERE project_id = ? AND id = ?",
             (project_id, target_id),
         ).fetchone()
@@ -4206,6 +4612,14 @@ def delete_project_target(session_id, project_id, target_id):
         ).fetchone()
         if not project:
             return None
+        conn.execute(
+            "DELETE FROM finding_targets WHERE session_id = ? AND target_id = ?",
+            (session_id, target_id),
+        )
+        conn.execute(
+            "UPDATE findings SET target_id = '' WHERE session_id = ? AND target_id = ?",
+            (session_id, target_id),
+        )
         result = conn.execute(
             "DELETE FROM project_targets WHERE project_id = ? AND id = ?",
             (project_id, target_id),
@@ -4225,7 +4639,18 @@ def list_run_findings(session_id, run_id):
             "FROM findings WHERE session_id = ? AND run_id = ? ORDER BY line_number ASC, created ASC",
             (session_id, run_id),
         ).fetchall()
-    return [_row_to_finding(row) for row in rows]
+        relationship_ids = _finding_target_ids_by_finding(
+            conn,
+            session_id,
+            [row["id"] for row in rows],
+        )
+    findings = []
+    for row in rows:
+        finding = _row_to_finding(row)
+        if finding:
+            finding["target_ids"] = _finding_target_ids_from_row(row, relationship_ids.get(str(row["id"])))
+            findings.append(finding)
+    return findings
 
 
 def update_finding_review_state(session_id, finding_id, data):

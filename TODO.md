@@ -20,7 +20,6 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 - **Future Project Workspace enhancements**
   - **Security and lifecycle**
     - Validate `workspace_file` entity ownership during session migration, or document that labels/annotations on workspace-file paths can drift when a migrated token lands in a session with a different file at the same path.
-    - Surface a one-line transcript notice when completed runs auto-link to the active project, such as `[project] linked run to <project name>`, so accidental active-project capture is visible.
     - Add a terminal-native `project rename <name-or-id> <new-name>` command so CLI users can rename projects without opening the modal.
     - Add parallel PATCH routes for partial project and target updates if the project workspace API ever becomes more than a trusted browser-only surface.
   - **Code organization**
@@ -28,17 +27,14 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - Move Projects modal rendering and event wiring out of `shell_chrome.js` into a dedicated project workspace browser module.
     - Reduce repeated `projects.py` route boilerplate with small serialization/404 helpers.
   - **Capture, tagging, and navigation**
-    - Add quick-add target entry points from selected transcript text, finding rows, history rows, and workspace file previews.
-    - Add a `Link last run` button in the Runs tab for manual backfill without dropping to the terminal builtin.
-    - Expose `Add label`, `Add annotation`, `Open in project`, and `Add as project target` on transcript right-click or signal-tagged token long-press.
+    - Expose `Add label`, `Add annotation`, `Open in project`, and `Add as project target` on transcript right-click or signal-tagged token long-press; this should replace the removed Projects-modal quick-add target flow.
+    - Add contextual quick-add target entry points from history rows and workspace file previews once the shared action-menu pattern exists.
     - Consider a per-project current-target sub-state so `${target}` placeholder substitution can follow sustained work on a single host.
     - Decide whether `host` remains a visible target type or is retained only as a backend compatibility value.
     - Add a compact project switcher near the prompt with recently used projects and a Create New action.
     - Show run, finding, artifact, and package counts on project-list rows so project scale is visible before opening each project.
-    - Refresh an open Projects modal when another tab in the same session mutates project data.
   - **Findings and comparison**
     - Extend the Findings tab filters beyond target/run/review state to command root, severity, scope, labels, and annotation state.
-    - Add sorting controls for findings, especially by severity, review state, run, and target.
     - Add multi-select plus bulk review actions for high-volume finding review.
     - Prefetch finding counts and severity distribution so tab labels can show useful state such as unreviewed/high counts without opening the tab.
     - Build a Compare Runs view on top of `/projects/<id>/compare`, with a row action for selecting a baseline and a diff view for added/removed findings, changed severity, changed exit code, and artifact changes.
@@ -49,7 +45,6 @@ This file tracks open work, known issues, technical debt, and product ideas for 
   - **Evidence packages**
     - Materialize evidence package archives at creation time if byte-for-byte repeat downloads become important.
     - Make package presets config-driven so new bundle profiles, such as internal review or external handoff, can be added without code changes.
-    - Allow package wizard run groups to collapse/expand when projects contain many linked runs.
     - Add richer per-finding remediation or verification fields if findings evolve beyond raw output capture.
     - Add richer target references in package exports, including derived relationships that are not directly visible in selected finding text.
     - Add richer provenance metadata and round-trip import hints for labels, annotations, targets, findings, and packages.
@@ -63,16 +58,6 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - Finish pruning/retention behavior for project-linked runs and run-scoped artifacts.
     - Replace or supplement the desktop-style Projects modal with a mobile-friendly staged layout: pick project, pick tab, then detail view with back navigation.
     - Add mobile gestures for target and finding rows, such as swipe to edit/remove targets and swipe to mark findings reviewed.
-
-- **Future project target matching enhancements**
-  - **Auto-discover project targets from finding-line metadata.** When classifier-extracted targets or normalized output candidates do not match an existing project target, stage them as candidate targets with `source_run_id`, confidence, and source metadata. Prefer a review queue over silently inserting large batches into `project_targets`.
-  - **Surface auto-discovered targets distinctly in the UI.** Render candidate or auto-discovered targets with an `auto` badge and inline `Confirm` / `Dismiss` actions so noisy scans do not quietly bloat the target list.
-  - **Parse input files captured as workspace artifacts.** For runs that consume target lists, parse captured input artifacts into candidate targets or artifact metadata. Respect workspace size caps, ignore blank/comment lines, strip ports and paths before classification, and keep the result reviewable before promotion.
-  - **Generalize per-tool output target extraction.** Add declarative target extractors for tools whose finding target is structural rather than command-derived, such as `gobuster vhost`, `nuclei` JSON/JSONL host fields, `httpx`/`pd-httpx`, and `ffuf` JSON output.
-  - **Persist richer finding-target relationships.** Consider a dedicated finding-target join table so one finding can be associated with multiple targets without relying on read-time derived `target_ids`.
-  - **Reuse target matching in workflow promotion.** Let workflow promotion offer targets found in run output and project context instead of relying primarily on command-line substitutions.
-  - **Batch re-attribution on demand.** Add a bounded `Re-attribute findings` project action that reapplies current matching rules after users add or edit targets, with a confirmation that previews the number of findings that would change.
-  - **Guardrails for auto-discovery.** Prefer user-declared exact targets over broader CIDR matches, attach discovered IPs to existing CIDR targets before creating new IP candidates, cap per-run candidate counts, and make alias collisions reviewable.
 
 - **Future interactive PTY enhancements**
   - **Current state:** `mtr --interactive <host>`, `ffuf --interactive ...`, and `masscan --interactive ...` have a guarded PTY path behind `interactive_pty_enabled`, use dedicated `/pty/runs` start/stream/input/resize routes, broker PTY events through Redis in multi-worker deployments, support bounded concurrent PTY runs per session with each live terminal scoped to its owning tab, require registry-owned input-safety profiles, render the live terminal in an xterm.js modal, and append completed PTY runs back into the normal terminal/history output path using server-side terminal capture. Redis PTY snapshots support cross-worker reattach, use bounded publish rates, and return specific failure statuses for missing, closed, stale, or not-yet-available runs.

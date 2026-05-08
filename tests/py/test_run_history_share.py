@@ -133,12 +133,13 @@ def _post_run(client, *, json=None, headers=None, **kwargs):
     if start_resp.status_code != 202:
         return start_resp
     data = json_module.loads(start_resp.data)
-    stream_resp = client.get(data["stream"], headers=headers)
-    for _ in range(10):
+    stream_resp = None
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        stream_resp = client.get(data["stream"], headers=headers)
         if stream_resp.status_code != 404:
             return _BrokerRunResponse(stream_resp)
-        time.sleep(0.01)
-        stream_resp = client.get(data["stream"], headers=headers)
+        time.sleep(0.025)
     return _BrokerRunResponse(stream_resp)
 
 
@@ -639,7 +640,10 @@ class TestRunStreaming:
              mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]), \
              mock.patch("blueprints.run.pid_pop") as pid_pop, \
              mock.patch("blueprints.run.active_run_remove") as active_remove, \
-             mock.patch("blueprints.run._finalize_completed_run", return_value=0.2) as finalize:
+             mock.patch(
+                 "blueprints.run._finalize_completed_run",
+                 return_value={"elapsed": 0.2, "active_project_link": None},
+             ) as finalize:
             run_routes._brokered_real_run_worker(
                 run_id="run-broker-worker",
                 proc=fake_proc,
@@ -688,7 +692,10 @@ class TestRunStreaming:
              mock.patch("blueprints.run._terminate_process_group") as terminate, \
              mock.patch("blueprints.run.pid_pop"), \
              mock.patch("blueprints.run.active_run_remove"), \
-             mock.patch("blueprints.run._finalize_completed_run", return_value=1.0):
+             mock.patch(
+                 "blueprints.run._finalize_completed_run",
+                 return_value={"elapsed": 1.0, "active_project_link": None},
+             ):
             run_routes._brokered_real_run_worker(
                 run_id="run-broker-timeout",
                 proc=fake_proc,
@@ -1055,8 +1062,153 @@ class TestRunStreaming:
         assert "22/tcp open ssh" not in {item["raw_line"] for item in data["findings"]}
         assert all(item["target_id"] == domain_target["id"] for item in data["findings"])
         assert all(port_target["id"] in item["target_ids"] for item in data["findings"])
+        with db_connect() as conn:
+            relationship_rows = conn.execute(
+                "SELECT f.raw_line, ft.target_id, ft.source "
+                "FROM finding_targets ft "
+                "JOIN findings f ON f.id = ft.finding_id "
+                "WHERE ft.session_id = ? "
+                "ORDER BY f.raw_line ASC, ft.source ASC",
+                (session_id,),
+            ).fetchall()
+        relationships = {(row["raw_line"], row["target_id"], row["source"]) for row in relationship_rows}
+        assert ("80/tcp open http", domain_target["id"], "primary_match") in relationships
+        assert ("80/tcp open http", port_target["id"], "line_match") in relationships
+        assert ("443/tcp open https {\"severity\":\"high\"}", port_target["id"], "line_match") in relationships
         severities = {item["raw_line"]: item["severity"] for item in data["findings"]}
         assert severities["443/tcp open https {\"severity\":\"high\"}"] == "high"
+
+    def test_active_project_auto_discovers_typed_command_targets(self):
+        client = get_client()
+        session_id = "sess-project-auto-targets"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "Auto Targets"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        fake_proc = _FakeProc(lines=[
+            "Nmap scan report for darklab.sh\n",
+            "80/tcp open http\n",
+            "",
+        ])
+
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "nmap -p 80 darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            )
+            resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        targets_resp = client.get(
+            f"/projects/{project['id']}/targets",
+            headers={"X-Session-ID": session_id},
+        )
+        targets = json.loads(targets_resp.data)["targets"]
+        by_value = {item["value"]: item for item in targets}
+        assert by_value["darklab.sh"]["review_state"] == "pending"
+        assert by_value["darklab.sh"]["source"] == "auto_command"
+        assert by_value["darklab.sh"]["source_detail"]["kind"] == "positional"
+        assert by_value["80"]["type"] == "port_set"
+        assert by_value["80"]["review_state"] == "pending"
+        assert by_value["80"]["source"] == "auto_command"
+
+        findings_resp = client.get(
+            f"/projects/{project['id']}/findings?target_id={by_value['80']['id']}",
+            headers={"X-Session-ID": session_id},
+        )
+        findings = json.loads(findings_resp.data)["findings"]
+        assert [item["raw_line"] for item in findings] == ["80/tcp open http"]
+        assert by_value["80"]["id"] in findings[0]["target_ids"]
+
+        dismiss_resp = client.put(
+            f"/projects/{project['id']}/targets/{by_value['80']['id']}",
+            json={"review_state": "dismissed"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert dismiss_resp.status_code == 200
+        visible_targets = json.loads(client.get(
+            f"/projects/{project['id']}/targets",
+            headers={"X-Session-ID": session_id},
+        ).data)["targets"]
+        assert "80" not in {item["value"] for item in visible_targets}
+
+        second_proc = _FakeProc(lines=["Nmap scan report for darklab.sh\n", "80/tcp open http\n", ""])
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=second_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]):
+            rerun = _post_run(
+                client,
+                json={"command": "nmap -p 80 darklab.sh"},
+                headers={"X-Session-ID": session_id},
+            )
+            rerun.get_data(as_text=True)
+        assert rerun.status_code == 200
+        with db_connect() as conn:
+            dismissed = conn.execute(
+                "SELECT review_state, seen_count FROM project_targets WHERE id = ?",
+                (by_value["80"]["id"],),
+            ).fetchone()
+        assert dismissed["review_state"] == "dismissed"
+        assert dismissed["seen_count"] == 2
+
+        manual_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "port_set", "value": "80"},
+            headers={"X-Session-ID": session_id},
+        )
+        manual_target = json.loads(manual_resp.data)["target"]
+        assert manual_resp.status_code == 201
+        assert manual_target["id"] == by_value["80"]["id"]
+        assert manual_target["review_state"] == "confirmed"
+        assert manual_target["source"] == "user"
+
+        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}, clear=False):
+            target_file = shell_workspace.resolve_workspace_path(
+                session_id,
+                "targets.txt",
+                shell_app.CFG,
+                ensure_parent=True,
+            )
+            target_file.write_text("ip.darklab.sh\n# ignored.example\n", encoding="utf-8")
+            file_proc = _FakeProc(lines=["Nmap scan report for ip.darklab.sh\n", "443/tcp open https\n", ""])
+            with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+                 mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+                 mock.patch("blueprints.run.subprocess.Popen", return_value=file_proc), \
+                 mock.patch("blueprints.run.pid_register"), \
+                 mock.patch("blueprints.run.pid_pop"), \
+                 mock.patch("blueprints.run._stdout_ready", side_effect=[True, True, True]):
+                file_run = _post_run(
+                    client,
+                    json={"command": "nmap -iL targets.txt"},
+                    headers={"X-Session-ID": session_id},
+                )
+                file_run.get_data(as_text=True)
+        assert file_run.status_code == 200
+        refreshed_targets = json.loads(client.get(
+            f"/projects/{project['id']}/targets",
+            headers={"X-Session-ID": session_id},
+        ).data)["targets"]
+        file_target = next(item for item in refreshed_targets if item["value"] == "ip.darklab.sh")
+        assert file_target["review_state"] == "pending"
+        assert file_target["source"] == "auto_input_file"
+        assert file_target["confidence"] == 0.85
+        assert file_target["source_detail"]["path"] == "targets.txt"
 
     def test_nonblocking_stream_reader_preserves_partial_lines_until_finalize(self):
         read_fd, write_fd = os.pipe()

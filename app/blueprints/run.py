@@ -25,6 +25,7 @@ from flask import Blueprint, Response, jsonify, request
 
 from commands import (
     CommandValidationResult,
+    command_project_target_inputs,
     command_root,
     interactive_pty_spec_for_command,
     is_command_allowed,
@@ -63,7 +64,12 @@ from run_broker import (
 )
 from run_output_store import RunOutputCapture, load_full_output_entries
 from output_signals import OutputSignalClassifier
-from project_workspace import link_run_to_active_project, record_run_file_artifacts, record_run_findings
+from project_workspace import (
+    link_run_to_active_project,
+    record_project_target_discoveries,
+    record_run_file_artifacts,
+    record_run_findings,
+)
 from session_variables import SessionVariableError, expand_session_variables
 from workspace import InvalidWorkspacePath, resolve_workspace_path, session_workspace_dir, WorkspaceDisabled
 from pty_service import (
@@ -279,6 +285,7 @@ def _save_completed_run(
         active_project_link = None
         recorded_artifacts = []
         recorded_findings = []
+        recorded_targets = []
         persisted_entries = preview_lines
         # Index full output when available so early lines of long runs are searchable.
         # Falls back to preview if the artifact can't be read.
@@ -355,6 +362,22 @@ def _save_completed_run(
                         "session": get_log_session_id(session_id),
                         "cmd": command,
                     })
+            if active_project_link:
+                try:
+                    recorded_targets = record_project_target_discoveries(
+                        conn,
+                        session_id,
+                        active_project_link["project_id"],
+                        run_id,
+                        command_project_target_inputs(command, cfg=CFG),
+                    )
+                except Exception:
+                    recorded_targets = []
+                    log.error("PROJECT_TARGET_DISCOVERY_ERROR", exc_info=True, extra={
+                        "run_id": run_id,
+                        "session": get_log_session_id(session_id),
+                        "cmd": command,
+                    })
             try:
                 recorded_findings = record_run_findings(conn, session_id, run_id, persisted_entries)
             except Exception:
@@ -383,10 +406,18 @@ def _save_completed_run(
                 "session": get_log_session_id(session_id),
                 "count": len(recorded_findings),
             })
+        if recorded_targets:
+            log.info("PROJECT_TARGETS_DISCOVERED", extra={
+                "run_id": run_id,
+                "session": get_log_session_id(session_id),
+                "count": len(recorded_targets),
+            })
+        return active_project_link
     except Exception:
         log.error("RUN_SAVED_ERROR", exc_info=True, extra={
             "run_id": run_id, "session": get_log_session_id(session_id), "cmd": command,
         })
+    return None
 
 
 def _finalize_completed_run(
@@ -408,13 +439,13 @@ def _finalize_completed_run(
         "exit_code": exit_code, "elapsed": elapsed, "cmd": original_command,
         "cmd_type": cmd_type,
     })
-    _save_completed_run(
+    active_project_link = _save_completed_run(
         run_id, session_id, original_command, run_started,
         finished.isoformat(), exit_code, capture,
         workspace_artifacts=workspace_artifacts,
         link_active_project=cmd_type == "real",
     )
-    return elapsed
+    return {"elapsed": elapsed, "active_project_link": active_project_link}
 
 
 _PTY_TRANSIENT_LINE_PATTERNS = (
@@ -1320,7 +1351,7 @@ def _brokered_real_run_worker(
                 run_started_dt=run_started_dt,
             )
         exit_code = _wait_for_proc_exit_code(proc)
-        elapsed = _finalize_completed_run(
+        finalize_info = _finalize_completed_run(
             run_id,
             session_id,
             client_ip,
@@ -1330,6 +1361,20 @@ def _brokered_real_run_worker(
             capture,
             workspace_artifacts=workspace_artifacts,
         )
+        elapsed = finalize_info["elapsed"]
+        active_project_link = finalize_info.get("active_project_link")
+        if active_project_link:
+            project_name = str(
+                active_project_link.get("project_name")
+                or active_project_link.get("project_id")
+                or "active project"
+            )
+            publish_run_event(run_id, "notice", {
+                "text": f"[project] linked run to {project_name}",
+                "project_id": active_project_link.get("project_id"),
+                "project_name": project_name,
+                "project_linked": True,
+            })
         publish_run_event(run_id, "exit", {
             "code": exit_code,
             "elapsed": elapsed,

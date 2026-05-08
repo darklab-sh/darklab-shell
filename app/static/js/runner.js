@@ -771,6 +771,9 @@ function _handleRunStreamMessage(msg, tabId) {
     _markTabRunStarted(tabId, msg.run_id);
   } else if (msg.type === 'notice') {
     _appendStreamLine(msg.text, 'notice', tabId, msg);
+    if (msg.project_linked && typeof globalThis.notifyProjectWorkspaceChanged === 'function') {
+      globalThis.notifyProjectWorkspaceChanged('run-linked', msg.project_id || '');
+    }
   } else if (msg.type === 'owner') {
     _handleRunOwnerChanged(msg, tabId);
   } else if (msg.type === 'killed') {

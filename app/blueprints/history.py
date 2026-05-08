@@ -662,12 +662,31 @@ def _run_findings_by_run(conn, run_ids):
         "ORDER BY line_number ASC, created ASC, id ASC",
         ids,
     ).fetchall()
+    target_ids_by_finding = {str(row["id"]): [] for row in rows}
+    if rows and _history_table_exists(conn, "finding_targets"):
+        finding_ids = [str(row["id"]) for row in rows if row["id"]]
+        finding_placeholders = ",".join("?" for _ in finding_ids)
+        for target_row in conn.execute(
+            "SELECT finding_id, target_id FROM finding_targets "
+            f"WHERE finding_id IN ({finding_placeholders}) "  # nosec B608
+            "ORDER BY created ASC, id ASC",
+            finding_ids,
+        ).fetchall():
+            finding_id = str(target_row["finding_id"] or "")
+            target_id = str(target_row["target_id"] or "")
+            if finding_id and target_id and target_id not in target_ids_by_finding.setdefault(finding_id, []):
+                target_ids_by_finding[finding_id].append(target_id)
     grouped = {run_id: [] for run_id in ids}
     for row in rows:
+        primary_target_id = str(row["target_id"] or "")
+        target_ids = list(target_ids_by_finding.get(str(row["id"]), []))
+        if primary_target_id and primary_target_id not in target_ids:
+            target_ids.insert(0, primary_target_id)
         grouped.setdefault(str(row["run_id"]), []).append({
             "id": row["id"],
             "run_id": row["run_id"],
-            "target_id": row["target_id"] or "",
+            "target_id": primary_target_id,
+            "target_ids": target_ids,
             "scope": row["scope"],
             "title": row["title"],
             "raw_line": row["raw_line"],

@@ -1781,6 +1781,7 @@ def _project_usage() -> list[dict[str, str]]:
         _output_line("  project current", "builtin-help-row"),
         _output_line("  project clear", "builtin-help-row"),
         _output_line("  project archive <name-or-id>", "builtin-help-row"),
+        _output_line("  project unarchive <name-or-id>", "builtin-help-row"),
         _output_line("  project delete <name-or-id>", "builtin-help-row"),
         _output_line("  project link last", "builtin-help-row"),
         _output_line("  project link run <run-id>", "builtin-help-row"),
@@ -2023,6 +2024,14 @@ def _run_builtin_project(command: str, session_id: str) -> list[dict[str, str]]:
                 clear_active_project(session_id)
             display_project = cast(dict[str, object], archived) if archived else project
             return [_output_line(f"project: archived {_project_display_name(display_project)}", "builtin-success")]
+        if subcommand == "unarchive":
+            ref = " ".join(parts[2:]).strip()
+            project = _resolve_project_ref(session_id, ref, include_archived=True)
+            if not project:
+                return [_output_line(f"project: not found: {ref}")]
+            unarchived = update_project(session_id, str(project["id"]), {"status": "active"})
+            display_project = cast(dict[str, object], unarchived) if unarchived else project
+            return [_output_line(f"project: unarchived {_project_display_name(display_project)}", "builtin-success")]
         if subcommand in {"delete", "rm", "remove"}:
             ref = " ".join(parts[2:]).strip()
             project = _resolve_project_ref(session_id, ref, include_archived=True)

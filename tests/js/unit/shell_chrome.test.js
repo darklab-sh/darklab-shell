@@ -502,6 +502,65 @@ describe('shell chrome project workspace', () => {
     expect(orderedProjectIds).toEqual(['project-1', 'project-3', 'project-2'])
   })
 
+  it('unarchives archived projects without changing the active project', async () => {
+    const projects = [
+      { id: 'project-1', name: 'darklab.sh', status: 'active' },
+      { id: 'project-2', name: 'old.darklab.sh', status: 'archived' },
+    ]
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project: projects[0] }),
+        })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects }),
+        })
+      }
+      if (url.endsWith('/summary')) {
+        const projectId = url.split('/')[2]
+        const project = projects.find(item => item.id === projectId) || null
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project,
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, annotations: 0 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      if (url === '/projects/project-2' && options.method === 'PUT') {
+        expect(JSON.parse(options.body)).toEqual({ status: 'active' })
+        projects[1] = { ...projects[1], status: 'active' }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ ok: true, project: projects[1] }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const shell = loadShellChrome({ apiFetch })
+
+    await shell.openProjectWorkspace()
+    await tick()
+    document.querySelector('[data-project-action="select"][data-project-id="project-2"]').click()
+    await tick()
+    document.querySelector('[data-project-action="unarchive"][data-project-id="project-2"]').click()
+    await tick()
+    await tick()
+
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-2', expect.objectContaining({ method: 'PUT' }))
+    expect(apiFetch).not.toHaveBeenCalledWith('/projects/active', expect.objectContaining({ method: 'POST' }))
+    expect(document.getElementById('project-workspace-message').textContent).toContain('Project unarchived.')
+    expect(document.querySelector('[data-project-action="archive"][data-project-id="project-2"]')).not.toBeNull()
+  })
+
   it('deletes a project from the project explorer after confirmation', async () => {
     let projects = [{ id: 'project-1', name: 'darklab.sh', status: 'active' }]
     let activeProject = projects[0]
@@ -1413,6 +1472,41 @@ describe('shell chrome project workspace', () => {
     document.querySelector('[data-project-action="package-wizard-next"]').click()
     await tick()
     expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Include')
+    expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Findings (2)')
+    expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Artifacts (1)')
+    let run2Group = document.querySelector('[data-project-package-selection="run"][value="run-2"]')
+      .closest('.project-package-run-selection')
+    let run2Toggle = run2Group.querySelector('[data-project-package-run-toggle]')
+    expect(run2Group.querySelector('.project-package-run-body').hidden).toBe(false)
+    run2Toggle.click()
+    await tick()
+    run2Group = document.querySelector('[data-project-package-selection="run"][value="run-2"]')
+      .closest('.project-package-run-selection')
+    run2Toggle = run2Group.querySelector('[data-project-package-run-toggle]')
+    expect(run2Group.classList.contains('is-collapsed')).toBe(true)
+    expect(run2Group.querySelector('.project-package-run-body').hidden).toBe(true)
+    run2Toggle.click()
+    await tick()
+    run2Group = document.querySelector('[data-project-package-selection="run"][value="run-2"]')
+      .closest('.project-package-run-selection')
+    expect(run2Group.classList.contains('is-collapsed')).toBe(false)
+    expect(run2Group.querySelector('.project-package-run-body').hidden).toBe(false)
+    const run2Selection = document.querySelector('[data-project-package-selection="run"][value="run-2"]')
+    run2Selection.checked = true
+    run2Selection.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(document.querySelector('[data-project-package-selection="transcript"][value="run-2"]').checked).toBe(true)
+    expect(document.querySelector('[data-project-package-selection="transcript"][value="run-2"]').disabled).toBe(false)
+    expect(document.querySelector('[data-project-package-selection="finding"][value="finding-2"]').checked).toBe(true)
+    expect(document.querySelector('[data-project-package-selection="artifact"][value="artifact-2"]').checked).toBe(true)
+    document.querySelector('[data-project-package-selection="run"][value="run-2"]').checked = false
+    document.querySelector('[data-project-package-selection="run"][value="run-2"]')
+      .dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(document.querySelector('[data-project-package-selection="transcript"][value="run-2"]').checked).toBe(false)
+    expect(document.querySelector('[data-project-package-selection="transcript"][value="run-2"]').disabled).toBe(true)
+    expect(document.querySelector('[data-project-package-selection="finding"][value="finding-2"]').checked).toBe(false)
+    expect(document.querySelector('[data-project-package-selection="artifact"][value="artifact-2"]').checked).toBe(false)
     const oldArtifactSelection = document.querySelector('[data-project-package-selection="artifact"][value="artifact-2"]')
     expect(oldArtifactSelection).not.toBeNull()
     oldArtifactSelection.checked = false
@@ -1445,7 +1539,8 @@ describe('shell chrome project workspace', () => {
     expect(packagePayload.include_artifacts).toBe(true)
     expect(packagePayload.options.index_html).toBe(true)
     expect(packagePayload.options.transcripts_html).toBe(true)
-    expect(packagePayload.selection.transcript_run_ids).toEqual(['run-1', 'run-2'])
+    expect(packagePayload.selection.run_ids).toEqual(['run-1'])
+    expect(packagePayload.selection.transcript_run_ids).toEqual(['run-1'])
     expect(packagePayload.selection.artifact_ids).toEqual(['artifact-1'])
     expect(document.getElementById('project-explorer-body').textContent).toContain('Scoped evidence')
 

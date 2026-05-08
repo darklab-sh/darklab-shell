@@ -168,6 +168,28 @@
   const PROJECT_NOTES_AUTOSAVE_DELAY_MS = 450;
   const FIELD_SAVED_INDICATOR_DELAY_MS = 200;
   const FIELD_SAVED_INDICATOR_VISIBLE_MS = 1600;
+  const PROJECT_WORKSPACE_BROADCAST_KEY = 'darklab_project_workspace_changed';
+  const PROJECT_FINDING_SORT_OPTIONS = [
+    { value: 'source', label: 'Source order' },
+    { value: 'run', label: 'Run' },
+    { value: 'severity', label: 'Severity' },
+    { value: 'review', label: 'Review state' },
+    { value: 'target', label: 'Target' },
+    { value: 'newest', label: 'Newest run' },
+  ];
+  const PROJECT_FINDING_SEVERITY_RANK = {
+    critical: 0,
+    high: 1,
+    medium: 2,
+    low: 3,
+    info: 4,
+  };
+  const PROJECT_FINDING_REVIEW_RANK = FINDING_REVIEW_STATES.reduce((acc, state, index) => {
+    acc[state.value] = index;
+    return acc;
+  }, {});
+  let projectWorkspaceExternalRefreshTimer = null;
+  let projectWorkspaceFindingSort = new Map();
 
   // ── Layout application ──────────────────────────────────────────
   function applyCollapsed() {
@@ -920,6 +942,64 @@
     return _projectFindingStatusFilterValues(projectId).length > 0;
   }
 
+  function _projectFindingSortValue(projectId = projectWorkspaceSelectedId) {
+    const value = String(projectWorkspaceFindingSort.get(String(projectId || '')) || 'source');
+    return PROJECT_FINDING_SORT_OPTIONS.some(option => option.value === value) ? value : 'source';
+  }
+
+  function _projectFindingTargetText(summary, finding) {
+    const targetIds = [..._projectFindingTargetIds(finding)];
+    if (!targetIds.length) return '';
+    return targetIds
+      .map(targetId => _projectTargetLabel(summary, targetId))
+      .filter(Boolean)
+      .join(', ');
+  }
+
+  function _projectFindingRunStarted(summary, finding) {
+    const run = _projectRunById(summary, finding && finding.run_id);
+    const timestamp = Date.parse(String(run && run.started || finding && finding.created || ''));
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  }
+
+  function _compareProjectFindingText(left, right) {
+    return String(left || '').localeCompare(String(right || ''), undefined, { sensitivity: 'base', numeric: true });
+  }
+
+  function _sortProjectFindings(findings, projectId, summary) {
+    const sortValue = _projectFindingSortValue(projectId);
+    if (sortValue === 'source') return findings;
+    return findings.slice().sort((left, right) => {
+      if (sortValue === 'severity') {
+        const leftRank = PROJECT_FINDING_SEVERITY_RANK[String(left && left.severity || '').toLowerCase()] ?? 99;
+        const rightRank = PROJECT_FINDING_SEVERITY_RANK[String(right && right.severity || '').toLowerCase()] ?? 99;
+        if (leftRank !== rightRank) return leftRank - rightRank;
+      } else if (sortValue === 'review') {
+        const leftRank = PROJECT_FINDING_REVIEW_RANK[String(left && left.review_state || 'new')] ?? 99;
+        const rightRank = PROJECT_FINDING_REVIEW_RANK[String(right && right.review_state || 'new')] ?? 99;
+        if (leftRank !== rightRank) return leftRank - rightRank;
+      } else if (sortValue === 'target') {
+        const targetCompare = _compareProjectFindingText(
+          _projectFindingTargetText(summary, left),
+          _projectFindingTargetText(summary, right),
+        );
+        if (targetCompare) return targetCompare;
+      } else if (sortValue === 'newest') {
+        const timeCompare = _projectFindingRunStarted(summary, right) - _projectFindingRunStarted(summary, left);
+        if (timeCompare) return timeCompare;
+      }
+      const runCompare = _compareProjectFindingText(
+        left && (left.run_command || left.run_id),
+        right && (right.run_command || right.run_id),
+      );
+      if (runCompare) return runCompare;
+      const leftLine = Number(left && left.line_number);
+      const rightLine = Number(right && right.line_number);
+      if (Number.isFinite(leftLine) && Number.isFinite(rightLine) && leftLine !== rightLine) return leftLine - rightLine;
+      return _compareProjectFindingText(left && (left.title || left.raw_line), right && (right.title || right.raw_line));
+    });
+  }
+
   function _findingReviewStateLabel(value) {
     const normalized = String(value || '').trim();
     const state = FINDING_REVIEW_STATES.find(item => item.value === normalized);
@@ -1125,6 +1205,7 @@
       includePrivateAnnotations: false,
       name: '',
       description: '',
+      collapsedRunIds: new Set(),
       selection: {
         runIds: new Set(runIds),
         transcriptRunIds: new Set(selectedTranscriptRunIds),
@@ -1151,7 +1232,7 @@
     if (projectPackageWizardBody) projectPackageWizardBody.replaceChildren();
   }
 
-  function _renderProjectPackageWizardModal({ focus = false } = {}) {
+  function _renderProjectPackageWizardModal({ focus = false, scrollTop = null } = {}) {
     if (!projectPackageWizard || !projectPackageWizardOverlay || !projectPackageWizardBody) {
       _hideProjectPackageWizardOverlay();
       return;
@@ -1168,6 +1249,10 @@
     projectPackageWizardOverlay.setAttribute('aria-hidden', 'false');
     if (typeof global.enhanceAppSelects === 'function') {
       global.enhanceAppSelects(projectPackageWizardBody);
+    }
+    if (Number.isFinite(scrollTop)) {
+      const scrollBody = projectPackageWizardBody.querySelector('.project-package-wizard-body');
+      if (scrollBody) scrollBody.scrollTop = Number(scrollTop);
     }
     if (focus) {
       window.setTimeout(() => {
@@ -1199,6 +1284,7 @@
           const refreshed = _projectPackagePresetDefaults(projectPackageWizard.preset, _projectSummary(projectId), _projectFindingItems(projectId));
           refreshed.name = projectPackageWizard.name;
           refreshed.description = projectPackageWizard.description;
+          refreshed.collapsedRunIds = projectPackageWizard.collapsedRunIds || new Set();
           projectPackageWizard = { projectId: String(projectId || ''), ...refreshed };
           _renderProjectExplorer();
           _renderProjectPackageWizardModal();
@@ -1238,6 +1324,7 @@
       includePrivateAnnotations: !!manifest.include_private_annotations,
       name: String(pkg?.name || _projectPackageSuggestedName(_selectedProject(), preset)),
       description: String(pkg?.description || ''),
+      collapsedRunIds: new Set(),
       selection: {
         runIds: selectedRunIds,
         transcriptRunIds: _projectPackageManifestIds(
@@ -1280,10 +1367,6 @@
   function _projectPackageAccessory(projectId, pkg) {
     const wrap = document.createElement('div');
     wrap.className = 'project-package-accessory';
-    const status = document.createElement('span');
-    status.className = 'project-explorer-item-badge';
-    status.textContent = String(pkg.status || 'draft');
-    wrap.appendChild(status);
     const actions = document.createElement('div');
     actions.className = 'project-package-actions';
     [
@@ -1356,7 +1439,7 @@
     return parts.join(' · ');
   }
 
-  function _packageSelectionCheckbox({ kind, id, label, detail = '', checked = true, disabled = false }) {
+  function _packageSelectionCheckbox({ kind, id, label, detail = '', checked = true, disabled = false, dataset = {} }) {
     const row = document.createElement('label');
     row.className = 'project-package-selection-row';
     if (disabled) row.classList.add('is-disabled');
@@ -1366,6 +1449,9 @@
     input.disabled = disabled;
     input.dataset.projectPackageSelection = kind;
     input.value = String(id || '');
+    Object.entries(dataset || {}).forEach(([key, value]) => {
+      input.dataset[key] = String(value || '');
+    });
     const text = document.createElement('span');
     text.className = 'project-package-selection-text';
     const labelEl = document.createElement('strong');
@@ -1380,27 +1466,109 @@
     return row;
   }
 
-  function _renderPackageRunSelections(section, runs) {
+  function _packageWizardRunChildIds(runId, projectId, summary) {
+    const normalizedRunId = String(runId || '');
+    return {
+      findingIds: _projectFindingItems(projectId)
+        .filter(finding => String(finding && finding.run_id || '') === normalizedRunId)
+        .map(finding => String(finding && finding.id || ''))
+        .filter(Boolean),
+      artifactIds: _projectArtifactItems(summary)
+        .filter(artifact => String(artifact && artifact.run_id || '') === normalizedRunId)
+        .map(artifact => String(artifact && artifact.id || ''))
+        .filter(Boolean),
+    };
+  }
+
+  function _appendPackageRunChildSelections(body, title, items, kind, runId, labelFn, detailFn) {
+    if (!items.length) return;
+    const selected = _packageWizardSetFor(kind);
+    const group = document.createElement('div');
+    group.className = 'project-package-run-child-group';
+    const heading = document.createElement('h4');
+    heading.textContent = `${title} (${items.length})`;
+    group.appendChild(heading);
+    items.forEach((item) => {
+      const row = _packageSelectionCheckbox({
+        kind,
+        id: item.id,
+        label: labelFn(item),
+        detail: detailFn(item),
+        checked: selected.has(String(item.id || '')),
+        dataset: { runId },
+      });
+      row.classList.add('project-package-selection-row-nested');
+      group.appendChild(row);
+    });
+    body.appendChild(group);
+  }
+
+  function _renderPackageRunSelections(section, projectId, summary) {
+    const runs = _projectRunItems(summary);
     const selectedRuns = _packageWizardSetFor('run');
     const selectedTranscripts = _packageWizardSetFor('transcript');
+    const findingsByRun = _groupBy(_projectFindingItems(projectId), finding => finding.run_id || '');
+    const artifactsByRun = _groupBy(_projectArtifactItems(summary), artifact => artifact.run_id || '');
     runs.forEach((run) => {
       const runId = String(run.id || '');
       const runSelected = selectedRuns.has(runId);
-      section.appendChild(_packageSelectionCheckbox({
+      const collapsed = !!(projectPackageWizard?.collapsedRunIds?.has(runId));
+      const group = document.createElement('div');
+      group.className = 'project-package-run-selection';
+      group.classList.toggle('is-collapsed', collapsed);
+      const header = document.createElement('div');
+      header.className = 'project-package-run-header';
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'project-package-run-toggle';
+      toggle.dataset.projectPackageRunToggle = '1';
+      toggle.dataset.runId = runId;
+      toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      toggle.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Collapse'} package options for this run`);
+      toggle.textContent = '▾';
+      const runRow = _packageSelectionCheckbox({
         kind: 'run',
         id: runId,
         label: run.command || run.id,
         detail: _formatProjectDate(run.started),
         checked: runSelected,
-      }));
-      section.appendChild(_packageSelectionCheckbox({
+      });
+      runRow.classList.add('project-package-selection-row-run');
+      header.append(toggle, runRow);
+      group.appendChild(header);
+      const body = document.createElement('div');
+      body.className = 'project-package-run-body';
+      body.hidden = collapsed;
+      const transcriptRow = _packageSelectionCheckbox({
         kind: 'transcript',
         id: runId,
         label: 'Include transcript',
-        detail: run.command || run.id,
         checked: runSelected && selectedTranscripts.has(runId),
         disabled: !runSelected,
-      }));
+        dataset: { runId },
+      });
+      transcriptRow.classList.add('project-package-selection-row-suboption');
+      body.appendChild(transcriptRow);
+      _appendPackageRunChildSelections(
+        body,
+        'Findings',
+        findingsByRun.get(runId) || [],
+        'finding',
+        runId,
+        item => item.title || item.raw_line || item.id,
+        item => item.raw_line || '',
+      );
+      _appendPackageRunChildSelections(
+        body,
+        'Artifacts',
+        artifactsByRun.get(runId) || [],
+        'artifact',
+        runId,
+        item => item.display_name || item.workspace_path || item.id,
+        item => _formatProjectBytes(item.byte_size),
+      );
+      group.appendChild(body);
+      section.appendChild(group);
     });
   }
 
@@ -1558,19 +1726,30 @@
       ['full', 'Full archive', 'Everything currently linked to the project.'],
       ['custom', 'Custom', 'Start from the evidence preset and tune selections.'],
     ];
-    const grid = document.createElement('div');
-    grid.className = 'project-package-preset-grid';
+    const list = document.createElement('div');
+    list.className = 'project-package-preset-list';
     presets.forEach(([id, title, detail]) => {
-      const btn = _makeProjectButton(title, 'package-wizard-preset', projectId);
-      btn.classList.add('project-package-preset');
-      btn.classList.toggle('is-active', projectPackageWizard.preset === id);
-      btn.dataset.preset = id;
+      const row = document.createElement('label');
+      row.className = 'project-package-preset';
+      row.classList.toggle('is-active', projectPackageWizard.preset === id);
+      const input = document.createElement('input');
+      input.type = 'radio';
+      input.name = `project-package-preset-${projectId}`;
+      input.value = id;
+      input.checked = projectPackageWizard.preset === id;
+      input.dataset.projectPackagePreset = '1';
+      input.dataset.projectId = projectId;
+      const text = document.createElement('span');
+      text.className = 'project-package-preset-text';
+      const titleEl = document.createElement('span');
+      titleEl.textContent = title;
       const detailEl = document.createElement('small');
       detailEl.textContent = detail;
-      btn.appendChild(detailEl);
-      grid.appendChild(btn);
+      text.append(titleEl, detailEl);
+      row.append(input, text);
+      list.appendChild(row);
     });
-    wrap.appendChild(grid);
+    wrap.appendChild(list);
     const note = document.createElement('p');
     note.className = 'project-package-wizard-note';
     note.textContent = `${_projectRunItems(summary).length} runs, ${_projectFindingItems(projectId).length} findings, `
@@ -1584,11 +1763,28 @@
       return;
     }
     const sections = [
-      ['Runs', 'run', _projectRunItems(summary), item => item.command || item.id, item => _formatProjectDate(item.started)],
-      ['Findings', 'finding', _projectFindingItems(projectId), item => item.title || item.raw_line || item.id, item => item.raw_line || ''],
-      ['Artifacts', 'artifact', _projectArtifactItems(summary), item => item.display_name || item.workspace_path || item.id, item => _formatProjectBytes(item.byte_size)],
       ['Targets', 'target', _projectTargetItems(summary), item => _projectTargetFilterLabel(item), item => item.notes || ''],
     ];
+    const runSection = document.createElement('section');
+    runSection.className = 'project-package-selection-section';
+    const runHeading = document.createElement('h3');
+    const runCount = _projectRunItems(summary).length;
+    runHeading.textContent = `Runs (${runCount})`;
+    runSection.appendChild(runHeading);
+    const runMissingIds = _packageWizardMissingIds('run', projectId, summary);
+    const transcriptMissingIds = _packageWizardMissingIds('transcript', projectId, summary);
+    const findingMissingIds = _packageWizardMissingIds('finding', projectId, summary);
+    const artifactMissingIds = _packageWizardMissingIds('artifact', projectId, summary);
+    if (!runCount && !runMissingIds.length && !transcriptMissingIds.length && !findingMissingIds.length && !artifactMissingIds.length) {
+      runSection.appendChild(_emptyProjectPanel('No runs available.'));
+    } else {
+      _renderPackageRunSelections(runSection, projectId, summary);
+      _renderMissingPackageSelection(runSection, 'run', projectId, summary);
+      _renderMissingPackageSelection(runSection, 'transcript', projectId, summary);
+      _renderMissingPackageSelection(runSection, 'finding', projectId, summary);
+      _renderMissingPackageSelection(runSection, 'artifact', projectId, summary);
+    }
+    wrap.appendChild(runSection);
     sections.forEach(([title, kind, items, labelFn, detailFn]) => {
       const section = document.createElement('section');
       section.className = 'project-package-selection-section';
@@ -1598,10 +1794,6 @@
       const missingIds = _packageWizardMissingIds(kind, projectId, summary);
       if (!items.length && !missingIds.length) {
         section.appendChild(_emptyProjectPanel(`No ${title.toLowerCase()} available.`));
-      } else if (kind === 'run') {
-        _renderPackageRunSelections(section, items);
-        _renderMissingPackageSelection(section, 'run', projectId, summary);
-        _renderMissingPackageSelection(section, 'transcript', projectId, summary);
       } else {
         const selected = _packageWizardSetFor(kind);
         items.forEach((item) => {
@@ -1672,7 +1864,7 @@
     const redactionLabel = document.createElement('label');
     redactionLabel.textContent = 'Redaction';
     const redactionSelect = document.createElement('select');
-    redactionSelect.className = 'form-control form-control-compact';
+    redactionSelect.className = 'form-select';
     redactionSelect.dataset.projectPackageField = 'redaction_mode';
     [
       ['raw', 'Raw package'],
@@ -2053,6 +2245,13 @@
     return control;
   }
 
+  function _findingRowAccessory(finding, projectId) {
+    const wrap = document.createElement('div');
+    wrap.className = 'project-finding-row-actions';
+    if (finding && finding.id) wrap.appendChild(_findingReviewControl(finding, projectId));
+    return wrap;
+  }
+
   function _setProjectTargetTypeValue(value) {
     if (!projectTargetTypeSelect) return;
     const normalized = String(value || 'domain');
@@ -2240,6 +2439,13 @@
     value.className = 'project-target-value';
     value.textContent = String(target.value || '');
     heading.append(type, value);
+    if (String(target.review_state || '') === 'pending') {
+      const badge = document.createElement('span');
+      badge.className = 'project-target-auto-badge';
+      badge.textContent = 'auto';
+      badge.title = 'Discovered from command input';
+      heading.appendChild(badge);
+    }
     main.appendChild(heading);
 
     const metaParts = [
@@ -2256,19 +2462,25 @@
     const actions = document.createElement('div');
     actions.className = 'project-target-actions';
     const edit = _makeProjectButton('Edit', 'edit-target', projectId);
-    const remove = _makeProjectButton('Remove', 'delete-target', projectId, 'danger');
+    const remove = _makeProjectButton('Remove', 'delete-target', projectId);
     const targetId = String(target.id || '');
-    [edit, remove].forEach((btn) => {
+    const buttons = [];
+    if (String(target.review_state || '') === 'pending') {
+      buttons.push(_makeProjectButton('Confirm', 'confirm-target', projectId, 'secondary'));
+      buttons.push(_makeProjectButton('Dismiss', 'dismiss-target', projectId));
+    }
+    buttons.push(edit, remove);
+    buttons.forEach((btn) => {
       btn.dataset.targetId = targetId;
       btn.dataset.targetValue = String(target.value || '');
     });
-    actions.append(edit, remove);
+    actions.append(...buttons);
     row.append(main, actions);
     return row;
   }
 
   function _projectRunRemoveControl(projectId, run) {
-    const btn = _makeProjectButton('Remove', 'unlink-run', projectId, 'danger');
+    const btn = _makeProjectButton('Remove', 'unlink-run', projectId);
     btn.dataset.runId = String(run.id || '');
     btn.dataset.runCommand = String(run.command || '');
     return btn;
@@ -2290,6 +2502,8 @@
     const runId = String(run && run.id || '');
     const wrap = document.createElement('div');
     wrap.className = 'project-run-row-actions';
+    const counts = document.createElement('div');
+    counts.className = 'project-run-row-counts';
     [
       ['finding', _projectRunFindingCount(projectId, runId), 'filter-run-findings'],
       ['artifact', _projectRunArtifactCount(summary, runId), 'filter-run-artifacts'],
@@ -2299,13 +2513,16 @@
       chip.disabled = !count;
       chip.dataset.runId = runId;
       chip.dataset.runCommand = String(run.command || '');
-      wrap.appendChild(chip);
+      counts.appendChild(chip);
     });
+    const actions = document.createElement('div');
+    actions.className = 'project-run-row-buttons';
     const restore = _makeProjectButton('Restore', 'open-run', projectId);
     restore.dataset.runId = runId;
     restore.dataset.runCommand = String(run.command || '');
-    wrap.appendChild(restore);
-    wrap.appendChild(_projectRunRemoveControl(projectId, run));
+    actions.appendChild(restore);
+    actions.appendChild(_projectRunRemoveControl(projectId, run));
+    wrap.append(counts, actions);
     return wrap;
   }
 
@@ -2470,6 +2687,14 @@
     return dropdown;
   }
 
+  function _closeProjectFilterMenus(exceptMenu = null) {
+    if (!projectWorkspaceModal) return;
+    projectWorkspaceModal.querySelectorAll('.project-target-filter-menu[open]').forEach((menu) => {
+      if (exceptMenu && menu === exceptMenu) return;
+      menu.removeAttribute('open');
+    });
+  }
+
   function _projectFilterOption({ labelText, value, checked, dataset }) {
     const label = document.createElement('label');
     label.className = 'project-target-filter-option';
@@ -2533,13 +2758,33 @@
     controls.appendChild(_projectFilterDropdown('Filter by run', selectedRuns.size, runOptions));
 
     const selectedStatuses = new Set(_projectFindingStatusFilterValues(projectId));
-    const statusOptions = FINDING_REVIEW_STATES.map(({ value, label: labelText }) => _projectFilterOption({
-      labelText,
-      value,
-      checked: selectedStatuses.has(value),
-      dataset: { projectFindingStatusFilterOption: '1', projectId },
-    }));
-    controls.appendChild(_projectFilterDropdown('Filter by status', selectedStatuses.size, statusOptions));
+    if (projectWorkspaceTab === 'findings') {
+      const statusOptions = FINDING_REVIEW_STATES.map(({ value, label: labelText }) => _projectFilterOption({
+        labelText,
+        value,
+        checked: selectedStatuses.has(value),
+        dataset: { projectFindingStatusFilterOption: '1', projectId },
+      }));
+      controls.appendChild(_projectFilterDropdown('Filter by status', selectedStatuses.size, statusOptions));
+
+      const sortWrap = document.createElement('label');
+      sortWrap.className = 'project-finding-sort-control';
+      const sortSelect = document.createElement('select');
+      sortSelect.className = 'form-select project-finding-sort-select';
+      sortSelect.dataset.projectFindingSort = '1';
+      sortSelect.dataset.projectId = projectId;
+      sortSelect.setAttribute('aria-label', 'Sort findings');
+      const currentSort = _projectFindingSortValue(projectId);
+      PROJECT_FINDING_SORT_OPTIONS.forEach(({ value, label: labelText }) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = labelText;
+        option.selected = value === currentSort;
+        sortSelect.appendChild(option);
+      });
+      sortWrap.appendChild(sortSelect);
+      controls.appendChild(sortWrap);
+    }
     wrap.appendChild(controls);
 
     const chips = document.createElement('div');
@@ -2662,7 +2907,7 @@
     if (statusFilters.size) {
       findings = findings.filter(finding => statusFilters.has(String(finding && finding.review_state || 'new')));
     }
-    return findings;
+    return _sortProjectFindings(findings, projectId, summary);
   }
 
   function _filteredProjectArtifacts(projectId, summary) {
@@ -2945,12 +3190,14 @@
       pill.className = 'project-explorer-active-pill';
       pill.textContent = 'active';
       actions.appendChild(pill);
-      actions.appendChild(_makeProjectButton('Clear', 'clear', String(project.id || '')));
+      actions.appendChild(_makeProjectButton('Clear active', 'clear', String(project.id || '')));
     } else if (project.status !== 'archived') {
       actions.appendChild(_makeProjectButton('Use as active', 'use', String(project.id || '')));
     }
     if (project.status !== 'archived') {
       actions.appendChild(_makeProjectButton('Archive', 'archive', String(project.id || '')));
+    } else {
+      actions.appendChild(_makeProjectButton('Unarchive', 'unarchive', String(project.id || '')));
     }
     actions.appendChild(_makeProjectButton('Delete', 'delete', String(project.id || ''), 'destructive'));
     header.append(titleWrap, actions);
@@ -3002,7 +3249,7 @@
     container.appendChild(targetSection);
 
     const notesSection = document.createElement('section');
-    notesSection.className = 'project-explorer-section';
+    notesSection.className = 'project-explorer-section project-explorer-notes-section';
     const notesTitle = document.createElement('h3');
     notesTitle.textContent = 'Notes';
     notesSection.appendChild(notesTitle);
@@ -3013,6 +3260,10 @@
   function _renderProjectRuns(container, projectId, summary) {
     const allRuns = _projectRunItems(summary);
     const filterActive = _projectTargetFilterActive(projectId, summary);
+    const toolbar = document.createElement('div');
+    toolbar.className = 'project-runs-toolbar';
+    toolbar.appendChild(_makeProjectButton('Link last run', 'link-last-run', projectId));
+    container.appendChild(toolbar);
     if (filterActive && !_projectFindingsLoaded(projectId)) {
       container.appendChild(_emptyProjectPanel('Loading target associations...'));
       return;
@@ -3095,7 +3346,7 @@
         const lineIndex = Number(finding.line_number);
         const metaParts = [
           finding.scope || 'finding',
-          _projectTargetLabel(summary, finding.target_id),
+          _projectFindingTargetText(summary, finding) || _projectTargetLabel(summary, finding.target_id),
           `line ${finding.line_number || 0}`,
         ].filter(Boolean);
         body.appendChild(_projectItemRow({
@@ -3103,7 +3354,7 @@
           meta: metaParts.join(' · '),
           detail: finding.raw_line || '',
           badge: finding.review_state || finding.severity || '',
-          accessory: finding.id ? _findingReviewControl(finding, projectId) : null,
+          accessory: _findingRowAccessory(finding, projectId),
           action: finding.run_id ? {
             action: 'open-finding',
             dataset: {
@@ -3184,7 +3435,6 @@
         title: pkg.name,
         meta: _projectPackageMetaText(pkg),
         detail,
-        badge: pkg.status || 'draft',
         accessory: _projectPackageAccessory(projectId, pkg),
       }));
     });
@@ -3192,6 +3442,7 @@
 
   function _renderProjectExplorer() {
     if (!projectExplorerBody) return;
+    projectExplorerBody.classList.toggle('project-explorer-body-details', projectWorkspaceTab === 'details');
     projectExplorerBody.replaceChildren();
     _ensureSelectedProject();
     const project = _selectedProject();
@@ -3208,17 +3459,21 @@
     _syncProjectForms(project);
     const projectId = String(project.id || '');
     const [header, tabs] = _renderProjectHeader(project, summary);
-    projectExplorerBody.append(header, _renderProjectFilterBar(projectId, summary), tabs);
+    const filterBar = _renderProjectFilterBar(projectId, summary);
+    projectExplorerBody.append(header, filterBar, tabs);
     const content = document.createElement('div');
     content.className = 'project-explorer-tab-panel';
-    if (projectWorkspaceTab === 'details') _renderProjectDetails(content, project, summary);
-    else if (projectWorkspaceTab === 'runs') _renderProjectRuns(content, projectId, summary);
+    if (projectWorkspaceTab === 'details') {
+      content.classList.add('project-explorer-tab-panel-details');
+      _renderProjectDetails(content, project, summary);
+    } else if (projectWorkspaceTab === 'runs') _renderProjectRuns(content, projectId, summary);
     else if (projectWorkspaceTab === 'findings') _renderProjectFindings(content, projectId, summary);
     else if (projectWorkspaceTab === 'artifacts') _renderProjectArtifacts(content, projectId, summary);
     else if (projectWorkspaceTab === 'packages') _renderProjectPackages(content, projectId, summary);
     projectExplorerBody.appendChild(content);
     if (typeof global.enhanceAppSelects === 'function') {
       global.enhanceAppSelects(content);
+      global.enhanceAppSelects(filterBar);
     }
     if (
       projectWorkspaceTab === 'findings'
@@ -3286,6 +3541,31 @@
     }
   }
 
+  function _scheduleProjectWorkspaceExternalRefresh() {
+    if (!isProjectWorkspaceOpen()) return;
+    if (projectWorkspaceExternalRefreshTimer) clearTimeout(projectWorkspaceExternalRefreshTimer);
+    projectWorkspaceExternalRefreshTimer = setTimeout(() => {
+      projectWorkspaceExternalRefreshTimer = null;
+      refreshProjectWorkspace().catch(() => {});
+    }, 250);
+  }
+
+  function _notifyProjectWorkspaceChanged(reason = 'updated', projectId = '', { local = true } = {}) {
+    const payload = {
+      reason: String(reason || 'updated'),
+      project_id: String(projectId || ''),
+      ts: Date.now(),
+      nonce: Math.random().toString(36).slice(2),
+    };
+    if (typeof emitUiEvent === 'function') emitUiEvent('app:project-workspace-mutated', payload);
+    if (local) _scheduleProjectWorkspaceExternalRefresh();
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(PROJECT_WORKSPACE_BROADCAST_KEY, JSON.stringify(payload));
+      }
+    } catch (_) {}
+  }
+
   async function openProjectWorkspace() {
     if (!projectWorkspaceOverlay || !projectWorkspaceBody) return;
     if (typeof global._closeMajorOverlays === 'function') global._closeMajorOverlays();
@@ -3314,6 +3594,7 @@
   }
 
   async function _projectWorkspaceRequest(url, options = {}) {
+    const method = String(options.method || 'GET').toUpperCase();
     const resp = await apiFetch(url, {
       ...options,
       headers: {
@@ -3329,7 +3610,35 @@
       } catch (_) {}
       throw new Error(message);
     }
+    if (method !== 'GET' && method !== 'HEAD') {
+      _notifyProjectWorkspaceChanged('write', projectWorkspaceSelectedId, { local: false });
+    }
     return resp;
+  }
+
+  async function _linkLastRunToProject(projectId, summary) {
+    const normalizedProjectId = String(projectId || projectWorkspaceSelectedId || '').trim();
+    if (!normalizedProjectId) throw new Error('Select or create a project before linking runs.');
+    const linkedRunIds = new Set(_projectRunItems(summary).map(run => String(run && run.id || '')).filter(Boolean));
+    const resp = await apiFetch('/history?type=runs&page_size=25', { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const candidates = Array.isArray(data.runs) ? data.runs : (Array.isArray(data.items) ? data.items : []);
+    const run = candidates.find(item => {
+      const runId = String(item && item.id || '');
+      return runId && !linkedRunIds.has(runId) && (!item.type || item.type === 'run');
+    });
+    if (!run) throw new Error('No unlinked recent run found.');
+    await _projectWorkspaceRequest(`/projects/${encodeURIComponent(normalizedProjectId)}/links`, {
+      method: 'POST',
+      body: JSON.stringify({
+        entity_type: 'run',
+        entity_id: String(run.id || ''),
+        source: 'manual',
+      }),
+    });
+    await refreshProjectWorkspace();
+    _setProjectWorkspaceMessage('Last run linked to this project.');
   }
 
   async function _confirmProjectTargetDelete(targetValue) {
@@ -3548,9 +3857,20 @@
 
   function _handleProjectPackageWizardChange(event) {
     if (_handleProjectPackageWizardInput(event)) return true;
+    const packagePreset = event.target.closest?.('[data-project-package-preset]');
+    if (packagePreset && projectPackageWizard) {
+      event.stopPropagation();
+      const projectId = String(packagePreset.dataset.projectId || projectPackageWizard.projectId || '');
+      const preset = String(packagePreset.value || 'evidence');
+      _openProjectPackageWizard(projectId, preset);
+      return true;
+    }
     const packageSelection = event.target.closest?.('[data-project-package-selection]');
     if (packageSelection && projectPackageWizard) {
       event.stopPropagation();
+      const scrollTop = projectPackageWizardBody
+        ?.querySelector('.project-package-wizard-body')
+        ?.scrollTop ?? null;
       const kind = String(packageSelection.dataset.projectPackageSelection || '');
       const selected = _packageWizardSetFor(kind);
       const value = String(packageSelection.value || '');
@@ -3558,27 +3878,46 @@
       else selected.delete(value);
       if (kind === 'run') {
         const transcriptRuns = _packageWizardSetFor('transcript');
-        if (packageSelection.checked) transcriptRuns.add(value);
-        else transcriptRuns.delete(value);
+        const childIds = _packageWizardRunChildIds(value, projectPackageWizard.projectId, _projectSummary(projectPackageWizard.projectId));
+        const findingIds = _packageWizardSetFor('finding');
+        const artifactIds = _packageWizardSetFor('artifact');
+        if (packageSelection.checked) {
+          transcriptRuns.add(value);
+          childIds.findingIds.forEach(id => findingIds.add(id));
+          childIds.artifactIds.forEach(id => artifactIds.add(id));
+        } else {
+          transcriptRuns.delete(value);
+          childIds.findingIds.forEach(id => findingIds.delete(id));
+          childIds.artifactIds.forEach(id => artifactIds.delete(id));
+        }
+      } else if (packageSelection.checked && ['transcript', 'finding', 'artifact'].includes(kind)) {
+        const runId = String(packageSelection.dataset.runId || (kind === 'transcript' ? value : ''));
+        if (runId) _packageWizardSetFor('run').add(runId);
       }
       projectPackageWizard.notice = '';
-      _renderProjectPackageWizardModal();
+      _renderProjectPackageWizardModal({ scrollTop });
       return true;
     }
     const packagePrivateNotes = event.target.closest?.('[data-project-package-private-notes]');
     if (packagePrivateNotes && projectPackageWizard) {
       event.stopPropagation();
+      const scrollTop = projectPackageWizardBody
+        ?.querySelector('.project-package-wizard-body')
+        ?.scrollTop ?? null;
       projectPackageWizard.includePrivateAnnotations = !!packagePrivateNotes.checked;
       projectPackageWizard.notice = '';
-      _renderProjectPackageWizardModal();
+      _renderProjectPackageWizardModal({ scrollTop });
       return true;
     }
     const packageIncludeArtifacts = event.target.closest?.('[data-project-package-include-artifacts]');
     if (packageIncludeArtifacts && projectPackageWizard) {
       event.stopPropagation();
+      const scrollTop = projectPackageWizardBody
+        ?.querySelector('.project-package-wizard-body')
+        ?.scrollTop ?? null;
       projectPackageWizard.includeArtifacts = !!packageIncludeArtifacts.checked;
       projectPackageWizard.notice = '';
-      _renderProjectPackageWizardModal();
+      _renderProjectPackageWizardModal({ scrollTop });
       return true;
     }
     return false;
@@ -3586,6 +3925,15 @@
 
   projectWorkspaceModal?.addEventListener('change', async (event) => {
     if (_handleProjectPackageWizardChange(event)) return;
+    const sortControl = event.target.closest?.('[data-project-finding-sort]');
+    if (sortControl) {
+      event.stopPropagation();
+      const projectId = String(sortControl.dataset.projectId || projectWorkspaceSelectedId || '');
+      if (!projectId) return;
+      projectWorkspaceFindingSort.set(projectId, String(sortControl.value || 'run'));
+      _renderProjectExplorer();
+      return;
+    }
     const targetFilterControl = event.target.closest?.('[data-project-target-filter-option]');
     if (targetFilterControl) {
       event.stopPropagation();
@@ -3644,6 +3992,16 @@
       _setProjectWorkspaceMessage(err.message || 'Could not update finding review state.', { error: true });
     }
   });
+
+  document.addEventListener('click', (event) => {
+    if (!isProjectWorkspaceOpen()) return;
+    const menu = event.target.closest?.('.project-target-filter-menu');
+    if (menu && projectWorkspaceModal?.contains(menu)) {
+      _closeProjectFilterMenus(menu);
+      return;
+    }
+    _closeProjectFilterMenus();
+  }, true);
 
   async function _handleProjectPackageWizardAction(btn) {
     if (!btn) return false;
@@ -3765,6 +4123,7 @@
     event.preventDefault();
     const action = btn.dataset.projectAction || '';
     const projectId = btn.dataset.projectId || '';
+    let successMessage = '';
     try {
       if (action === 'select') {
         await _flushProjectNotesAutosave();
@@ -3778,10 +4137,10 @@
           method: 'POST',
           body: JSON.stringify({ project_id: projectId }),
         });
-        _setProjectWorkspaceMessage('Active project updated.');
+        successMessage = 'Active project updated.';
       } else if (action === 'clear') {
         await _projectWorkspaceRequest('/projects/active', { method: 'DELETE' });
-        _setProjectWorkspaceMessage('Active project cleared.');
+        successMessage = 'Active project cleared.';
       } else if (action === 'archive') {
         await _projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}`, {
           method: 'PUT',
@@ -3790,7 +4149,13 @@
         if (activeProject && String(activeProject.id || '') === projectId) {
           await _projectWorkspaceRequest('/projects/active', { method: 'DELETE' });
         }
-        _setProjectWorkspaceMessage('Project archived.');
+        successMessage = 'Project archived.';
+      } else if (action === 'unarchive') {
+        await _projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}`, {
+          method: 'PUT',
+          body: JSON.stringify({ status: 'active' }),
+        });
+        successMessage = 'Project unarchived.';
       } else if (action === 'delete') {
         const project = projectWorkspaceRows.find(item => String(item.id || '') === projectId) || null;
         const confirmed = await _confirmProjectDelete(project ? _projectDisplayName(project) : projectId);
@@ -3832,6 +4197,20 @@
         }
         _setProjectWorkspaceMessage('Target removed.');
         return;
+      } else if (action === 'confirm-target' || action === 'dismiss-target') {
+        const targetId = String(btn.dataset.targetId || '');
+        if (!projectId || !targetId) throw new Error('Target is missing its identifier.');
+        const reviewState = action === 'confirm-target' ? 'confirmed' : 'dismissed';
+        await _projectWorkspaceRequest(`/projects/${encodeURIComponent(projectId)}/targets/${encodeURIComponent(targetId)}`, {
+          method: 'PUT',
+          body: JSON.stringify({ review_state: reviewState }),
+        });
+        await refreshProjectWorkspace();
+        if (typeof loadProjectAutocompleteTargets === 'function') {
+          loadProjectAutocompleteTargets().catch(() => {});
+        }
+        _setProjectWorkspaceMessage(reviewState === 'confirmed' ? 'Target confirmed.' : 'Target dismissed.');
+        return;
       } else if (action === 'filter-run' || action === 'filter-run-findings' || action === 'filter-run-artifacts') {
         const runId = String(btn.dataset.runId || '').trim();
         if (!projectId || !runId) throw new Error('Run is missing its identifier.');
@@ -3841,6 +4220,9 @@
         if (action === 'filter-run-findings') projectWorkspaceTab = 'findings';
         if (action === 'filter-run-artifacts') projectWorkspaceTab = 'artifacts';
         _renderProjectExplorer();
+        return;
+      } else if (action === 'link-last-run') {
+        await _linkLastRunToProject(projectId, projectWorkspaceSummaries.get(String(projectId || '')));
         return;
       } else if (action === 'open-run') {
         const runId = String(btn.dataset.runId || '').trim();
@@ -3942,6 +4324,7 @@
         return;
       }
       await refreshProjectWorkspace();
+      if (successMessage) _setProjectWorkspaceMessage(successMessage);
     } catch (err) {
       _setProjectWorkspaceMessage(err.message || 'Project action failed.', { error: true });
     }
@@ -3972,6 +4355,22 @@
   });
 
   projectPackageWizardOverlay?.addEventListener('click', async (event) => {
+    const runToggle = event.target.closest?.('[data-project-package-run-toggle]');
+    if (runToggle && projectPackageWizard) {
+      event.preventDefault();
+      event.stopPropagation();
+      const scrollTop = projectPackageWizardBody
+        ?.querySelector('.project-package-wizard-body')
+        ?.scrollTop ?? null;
+      const runId = String(runToggle.dataset.runId || '');
+      if (runId) {
+        if (!projectPackageWizard.collapsedRunIds) projectPackageWizard.collapsedRunIds = new Set();
+        if (projectPackageWizard.collapsedRunIds.has(runId)) projectPackageWizard.collapsedRunIds.delete(runId);
+        else projectPackageWizard.collapsedRunIds.add(runId);
+      }
+      _renderProjectPackageWizardModal({ scrollTop });
+      return;
+    }
     const btn = event.target.closest?.('[data-project-action]');
     if (!btn) return;
     event.preventDefault();
@@ -4124,6 +4523,10 @@
     if (e.key === 'session_token') {
       _renderSession();
       loadActiveProjectContext().catch(() => {});
+      return;
+    }
+    if (e.key === PROJECT_WORKSPACE_BROADCAST_KEY && e.newValue) {
+      _scheduleProjectWorkspaceExternalRefresh();
     }
   });
   document.addEventListener('visibilitychange', () => {
@@ -4209,5 +4612,6 @@
   global.closeProjectTargetEditor = _closeProjectTargetEditor;
   global.isProjectTargetEditorOpen = isProjectTargetEditorOpen;
   global.refreshProjectWorkspace = refreshProjectWorkspace;
+  global.notifyProjectWorkspaceChanged = _notifyProjectWorkspaceChanged;
 
 })(globalThis);

@@ -4566,6 +4566,9 @@ class TestDatabaseInit:
             artifact_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('run_file_artifacts')").fetchall()
             }
+            target_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('project_targets')").fetchall()
+            }
             conn.close()
 
         assert {
@@ -4574,11 +4577,67 @@ class TestDatabaseInit:
             "run_file_artifacts",
             "project_targets",
             "findings",
+            "finding_targets",
             "entity_labels",
             "annotations",
             "evidence_packages",
         }.issubset(tables)
         assert "content_sha256" in artifact_columns
+        assert {
+            "review_state",
+            "source",
+            "source_detail",
+            "seen_count",
+            "last_seen",
+            "dismissed_at",
+        }.issubset(target_columns)
+
+    def test_project_workspace_migration_backfills_finding_targets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            conn = sqlite3.connect(db_path)
+            conn.execute("""
+                CREATE TABLE findings (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    target_id TEXT NOT NULL DEFAULT '',
+                    scope TEXT NOT NULL,
+                    title TEXT NOT NULL DEFAULT '',
+                    raw_line TEXT NOT NULL,
+                    line_number INTEGER,
+                    severity TEXT NOT NULL DEFAULT '',
+                    fingerprint TEXT NOT NULL DEFAULT '',
+                    review_state TEXT NOT NULL DEFAULT 'new',
+                    created TEXT NOT NULL
+                )
+            """)
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, target_id, scope, title, raw_line, created) "
+                "VALUES ('fnd_legacy', 'sess_legacy', 'run_legacy', 'tgt_legacy', "
+                "'finding', 'open port 443', '443/tcp open https', '2026-05-08 00:00:00')"
+            )
+            conn.commit()
+            conn.close()
+
+            self._create_tables(db_path)
+
+            conn = sqlite3.connect(db_path)
+            rows = conn.execute(
+                "SELECT session_id, finding_id, target_id, run_id, source, confidence "
+                "FROM finding_targets"
+            ).fetchall()
+            conn.close()
+
+        assert rows == [(
+            "sess_legacy",
+            "fnd_legacy",
+            "tgt_legacy",
+            "run_legacy",
+            "legacy_primary",
+            1.0,
+        )]
 
     def test_project_workspace_entity_and_link_source_constants_are_validated(self):
         assert database.validate_project_entity_type("run") == "run"
@@ -4628,6 +4687,9 @@ class TestDatabaseInit:
             }
             target_indexes = {row[1] for row in conn.execute("PRAGMA index_list('project_targets')").fetchall()}
             finding_indexes = {row[1] for row in conn.execute("PRAGMA index_list('findings')").fetchall()}
+            finding_target_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('finding_targets')").fetchall()
+            }
             label_indexes = {row[1] for row in conn.execute("PRAGMA index_list('entity_labels')").fetchall()}
             annotation_indexes = {row[1] for row in conn.execute("PRAGMA index_list('annotations')").fetchall()}
             package_indexes = {row[1] for row in conn.execute("PRAGMA index_list('evidence_packages')").fetchall()}
@@ -4640,6 +4702,9 @@ class TestDatabaseInit:
         assert "idx_project_targets_project_type_value" in target_indexes
         assert "idx_findings_session_run_created" in finding_indexes
         assert "idx_findings_target_created" in finding_indexes
+        assert "idx_finding_targets_finding" in finding_target_indexes
+        assert "idx_finding_targets_target_created" in finding_target_indexes
+        assert "idx_finding_targets_run" in finding_target_indexes
         assert "idx_entity_labels_entity_created" in label_indexes
         assert "idx_annotations_entity_created" in annotation_indexes
         assert "idx_evidence_packages_project_updated" in package_indexes

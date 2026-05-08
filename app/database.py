@@ -226,6 +226,12 @@ def _create_project_workspace_schema(conn):
             notes         TEXT NOT NULL DEFAULT '',
             source_run_id TEXT NOT NULL DEFAULT '',
             confidence    REAL NOT NULL DEFAULT 1.0,
+            review_state  TEXT NOT NULL DEFAULT 'confirmed',
+            source        TEXT NOT NULL DEFAULT 'user',
+            source_detail TEXT NOT NULL DEFAULT '{}',
+            seen_count    INTEGER NOT NULL DEFAULT 1,
+            last_seen     TEXT NOT NULL DEFAULT '',
+            dismissed_at  TEXT NOT NULL DEFAULT '',
             created       TEXT NOT NULL,
             updated       TEXT NOT NULL,
             UNIQUE (project_id, type, value)
@@ -245,6 +251,19 @@ def _create_project_workspace_schema(conn):
             fingerprint  TEXT NOT NULL DEFAULT '',
             review_state TEXT NOT NULL DEFAULT 'new',
             created      TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS finding_targets (
+            id         TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            finding_id TEXT NOT NULL,
+            target_id  TEXT NOT NULL,
+            run_id     TEXT NOT NULL DEFAULT '',
+            source     TEXT NOT NULL DEFAULT 'primary_match',
+            confidence REAL NOT NULL DEFAULT 1.0,
+            created    TEXT NOT NULL,
+            UNIQUE (session_id, finding_id, target_id)
         )
     """)
     conn.execute("""
@@ -344,6 +363,18 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_findings_target_created "
         "ON findings (target_id, created)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_finding_targets_finding "
+        "ON finding_targets (session_id, finding_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_finding_targets_target_created "
+        "ON finding_targets (session_id, target_id, created)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_finding_targets_run "
+        "ON finding_targets (session_id, run_id)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_entity_labels_entity_created "
@@ -558,6 +589,36 @@ def _migrate_schema(conn):
         _create_project_workspace_schema(conn)
     except sqlite3.OperationalError:
         pass
+    for stmt in (
+        "ALTER TABLE project_targets ADD COLUMN review_state TEXT NOT NULL DEFAULT 'confirmed'",
+        "ALTER TABLE project_targets ADD COLUMN source TEXT NOT NULL DEFAULT 'user'",
+        "ALTER TABLE project_targets ADD COLUMN source_detail TEXT NOT NULL DEFAULT '{}'",
+        "ALTER TABLE project_targets ADD COLUMN seen_count INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE project_targets ADD COLUMN last_seen TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE project_targets ADD COLUMN dismissed_at TEXT NOT NULL DEFAULT ''",
+    ):
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass
+    try:
+        conn.execute("""
+            INSERT OR IGNORE INTO finding_targets
+                (id, session_id, finding_id, target_id, run_id, source, confidence, created)
+            SELECT
+                'fnt_' || lower(hex(randomblob(8))),
+                f.session_id,
+                f.id,
+                f.target_id,
+                f.run_id,
+                'legacy_primary',
+                1.0,
+                f.created
+            FROM findings f
+            WHERE f.target_id IS NOT NULL AND f.target_id != ''
+        """)
+    except sqlite3.OperationalError:
+        pass
     try:
         conn.execute("ALTER TABLE run_file_artifacts ADD COLUMN content_sha256 TEXT NOT NULL DEFAULT ''")
     except sqlite3.OperationalError:
@@ -626,6 +687,10 @@ def delete_run_artifacts(conn, run_ids):
         )
     if finding_ids:
         finding_placeholders = ",".join("?" for _ in finding_ids)
+        conn.execute(
+            f"DELETE FROM finding_targets WHERE finding_id IN ({finding_placeholders})",  # nosec B608
+            finding_ids,
+        )
         conn.execute(
             "DELETE FROM entity_labels WHERE entity_type = 'finding' "
             f"AND entity_id IN ({finding_placeholders})",  # nosec B608

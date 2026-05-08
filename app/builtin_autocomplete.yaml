@@ -337,6 +337,12 @@ commands:
             - value: "<name-or-id>"
               hint_only: true
               description: "Project name, slug, or id"
+        unarchive:
+          description: "Unarchive a project"
+          arguments:
+            - value: "<name-or-id>"
+              hint_only: true
+              description: "Project name, slug, or id"
         delete:
           description: "Delete a project"
           arguments:
