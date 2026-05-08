@@ -1239,6 +1239,56 @@ def _package_findings_markdown_bytes(manifest, run_pages):
     return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
 
 
+def _package_finding_target_ids(finding):
+    target_ids = []
+    primary = str(finding.get("target_id") or "") if isinstance(finding, dict) else ""
+    if primary:
+        target_ids.append(primary)
+    raw_target_ids = finding.get("target_ids") if isinstance(finding, dict) else None
+    if isinstance(raw_target_ids, list):
+        for target_id in raw_target_ids:
+            normalized = str(target_id or "")
+            if normalized and normalized not in target_ids:
+                target_ids.append(normalized)
+    return target_ids
+
+
+def _package_targets_json_bytes(manifest, generated_at):
+    targets = manifest.get("targets") if isinstance(manifest.get("targets"), list) else []
+    findings = manifest.get("findings") if isinstance(manifest.get("findings"), list) else []
+    exported = []
+    for target in targets:
+        if not isinstance(target, dict):
+            continue
+        item = dict(target)
+        target_id = str(item.get("id") or "")
+        finding_refs = []
+        run_refs = []
+        if target_id:
+            for finding in findings:
+                if not isinstance(finding, dict) or target_id not in _package_finding_target_ids(finding):
+                    continue
+                finding_id = str(finding.get("id") or "")
+                run_id = str(finding.get("run_id") or "")
+                if finding_id and finding_id not in finding_refs:
+                    finding_refs.append(finding_id)
+                if run_id and run_id not in run_refs:
+                    run_refs.append(run_id)
+        source_run_id = str(item.get("source_run_id") or "")
+        if source_run_id and source_run_id not in run_refs:
+            run_refs.append(source_run_id)
+        item["finding_ids"] = finding_refs
+        item["run_ids"] = run_refs
+        exported.append(item)
+    payload = {
+        "format": 1,
+        "generated_at": generated_at,
+        "count": len(exported),
+        "targets": exported,
+    }
+    return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
 def _replace_target_token(command, target_value):
     token = str(target_value or "").strip()
     if not token:
@@ -1787,6 +1837,12 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
             if max_archive_bytes and projected_bytes > max_archive_bytes:
                 raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
             archive.writestr("findings/findings.md", findings_markdown_bytes)
+
+            targets_json_bytes = _package_targets_json_bytes(render_manifest, generated_at)
+            projected_bytes += len(targets_json_bytes)
+            if max_archive_bytes and projected_bytes > max_archive_bytes:
+                raise EvidencePackageTooLarge("evidence package exceeds configured size limit")
+            archive.writestr("targets/targets.json", targets_json_bytes)
 
             index_page = _render_package_index_html(
                 render_package,

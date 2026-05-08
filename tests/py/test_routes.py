@@ -657,6 +657,17 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         )
         assert invalid_project_findings.status_code == 400
+        evidence_target = json.loads(client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "domain", "value": "darklab.sh", "source_run_id": run_id},
+            headers={"X-Session-ID": session_id},
+        ).data)["target"]
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "UPDATE findings SET target_id = ? WHERE id = ?",
+                (evidence_target["id"], f"fnd_{run_id}"),
+            )
+            conn.commit()
 
         package_resp = client.post(
             f"/projects/{project['id']}/packages",
@@ -671,7 +682,7 @@ class TestProjectRoutes:
                     "run_ids": [run_id],
                     "finding_ids": [f"fnd_{run_id}"],
                     "artifact_ids": [f"rfa_{run_id}", f"rfa_{baseline_run_id}"],
-                    "target_ids": [],
+                    "target_ids": [evidence_target["id"]],
                 },
             },
             headers={"X-Session-ID": session_id},
@@ -685,6 +696,7 @@ class TestProjectRoutes:
         assert package["manifest"]["counts"]["runs"] == 1
         assert package["manifest"]["counts"]["findings"] == 1
         assert package["manifest"]["counts"]["artifacts"] == 2
+        assert package["manifest"]["counts"]["targets"] == 1
         assert package["manifest"]["project_counts"]["runs"] == 2
         assert package["manifest"]["selected_entity_ids"]["run_ids"] == [run_id]
         assert package["manifest"]["selected_entity_ids"]["finding_ids"] == [f"fnd_{run_id}"]
@@ -692,6 +704,7 @@ class TestProjectRoutes:
             f"rfa_{run_id}",
             f"rfa_{baseline_run_id}",
         ]
+        assert package["manifest"]["selected_entity_ids"]["target_ids"] == [evidence_target["id"]]
         assert package["manifest"]["include_private_annotations"] is True
         assert package["manifest"]["redaction_mode"] == "raw"
         assert package["manifest"]["options"]["index_html"] is True
@@ -721,6 +734,7 @@ class TestProjectRoutes:
             assert "README.md" in names
             assert "findings/findings.json" in names
             assert "findings/findings.md" in names
+            assert "targets/targets.json" in names
             assert f"runs/{run_id}.html" in names
             assert f"runs/{baseline_run_id}.html" not in names
             assert "artifacts/reports/run.txt" in names
@@ -730,6 +744,7 @@ class TestProjectRoutes:
             downloaded_manifest = json.loads(archive.read("manifest.json"))
             findings_json = json.loads(archive.read("findings/findings.json"))
             findings_md = archive.read("findings/findings.md").decode("utf-8")
+            targets_json = json.loads(archive.read("targets/targets.json"))
             index_html = archive.read("index.html").decode("utf-8")
             readme = archive.read("README.md").decode("utf-8")
             run_html = archive.read(f"runs/{run_id}.html").decode("utf-8")
@@ -742,6 +757,10 @@ class TestProjectRoutes:
         assert findings_json["findings"][0]["run_page"] == f"runs/{run_id}.html#L1"
         assert "# Findings" in findings_md
         assert "443/tcp open https" in findings_md
+        assert targets_json["count"] == 1
+        assert targets_json["targets"][0]["value"] == "darklab.sh"
+        assert targets_json["targets"][0]["finding_ids"] == [f"fnd_{run_id}"]
+        assert targets_json["targets"][0]["run_ids"] == [run_id]
         assert "Draft Evidence" in index_html
         assert "443/tcp open https" in index_html
         assert "artifacts/reports/run.txt" in index_html
@@ -939,6 +958,7 @@ class TestProjectRoutes:
             assert "README.md" in names
             assert "findings/findings.json" in names
             assert "findings/findings.md" in names
+            assert "targets/targets.json" in names
             assert f"runs/{run_id}.html" in names
             assert not any(name.startswith("artifacts/") for name in names)
             package_text = "\n".join(
@@ -949,6 +969,7 @@ class TestProjectRoutes:
                     "README.md",
                     "findings/findings.json",
                     "findings/findings.md",
+                    "targets/targets.json",
                     f"runs/{run_id}.html",
                 )
             )
