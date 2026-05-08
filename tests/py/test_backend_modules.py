@@ -36,6 +36,7 @@ import process
 import pty_service
 import run_broker
 import database
+import project_workspace
 import app as shell_app
 import config as app_config
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
@@ -4579,7 +4580,7 @@ class TestDatabaseInit:
             "findings",
             "finding_targets",
             "entity_labels",
-            "annotations",
+            "entity_notes",
             "evidence_packages",
         }.issubset(tables)
         assert "content_sha256" in artifact_columns
@@ -4647,11 +4648,16 @@ class TestDatabaseInit:
         assert database.validate_project_link_source("snapshot_capture") == "snapshot_capture"
 
         with pytest.raises(ValueError):
-            database.validate_project_entity_type("annotation")
+            database.validate_project_entity_type("note")
         with pytest.raises(ValueError):
             database.validate_project_entity_type("ticket")
         with pytest.raises(ValueError):
             database.validate_project_link_source("guessed")
+
+        payload = {"type": "domain", "value": "darklab.sh", "notes": "x" * 2001}
+        with pytest.raises(project_workspace.ProjectWorkspaceError) as exc:
+            project_workspace._normalize_target_payload(payload)
+        assert "target notes must be 2000 characters or fewer" in str(exc.value)
 
     def test_creates_session_indexes(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -4691,7 +4697,7 @@ class TestDatabaseInit:
                 row[1] for row in conn.execute("PRAGMA index_list('finding_targets')").fetchall()
             }
             label_indexes = {row[1] for row in conn.execute("PRAGMA index_list('entity_labels')").fetchall()}
-            annotation_indexes = {row[1] for row in conn.execute("PRAGMA index_list('annotations')").fetchall()}
+            note_indexes = {row[1] for row in conn.execute("PRAGMA index_list('entity_notes')").fetchall()}
             package_indexes = {row[1] for row in conn.execute("PRAGMA index_list('evidence_packages')").fetchall()}
             conn.close()
 
@@ -4706,7 +4712,7 @@ class TestDatabaseInit:
         assert "idx_finding_targets_target_created" in finding_target_indexes
         assert "idx_finding_targets_run" in finding_target_indexes
         assert "idx_entity_labels_entity_created" in label_indexes
-        assert "idx_annotations_entity_created" in annotation_indexes
+        assert "idx_entity_notes_entity_updated" in note_indexes
         assert "idx_evidence_packages_project_updated" in package_indexes
         assert "idx_evidence_packages_session_project" in package_indexes
 

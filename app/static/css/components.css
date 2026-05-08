@@ -1357,6 +1357,19 @@ body #history-panel { background: var(--theme-chrome-bg); }
   white-space: pre-wrap;
 }
 
+.history-compare-object-content {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.history-compare-object-meta {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .history-compare-changed-list {
   gap: 8px;
 }

@@ -1718,6 +1718,73 @@ function _renderHistoryCompareChangedLines(lines) {
   return section;
 }
 
+function _historyCompareObjectText(item, kind) {
+  if (!item || typeof item !== 'object') return '';
+  if (kind === 'artifact') {
+    return item.workspace_path || item.display_name || item.id || '';
+  }
+  return item.title || item.raw_line || item.id || '';
+}
+
+function _historyCompareObjectMeta(item, kind) {
+  if (!item || typeof item !== 'object') return '';
+  if (kind === 'artifact') {
+    return [
+      item.kind || 'file',
+      item.byte_size !== undefined && item.byte_size !== null ? `${Number(item.byte_size).toLocaleString()} bytes` : '',
+      item.detected_by || '',
+    ].filter(Boolean).join(' · ');
+  }
+  return [
+    item.severity || '',
+    item.review_state || '',
+    item.line_number !== undefined && item.line_number !== null ? `line ${item.line_number}` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function _renderHistoryCompareObjectSection(title, items, kind, sign) {
+  const safeItems = Array.isArray(items) ? items : [];
+  const section = document.createElement('details');
+  section.className = 'history-compare-lines history-compare-object-section';
+  section.open = true;
+  const summary = document.createElement('summary');
+  summary.textContent = `${title} (${safeItems.length})`;
+  section.appendChild(summary);
+  if (!safeItems.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-compare-empty';
+    empty.textContent = `No ${title.toLowerCase()}.`;
+    section.appendChild(empty);
+    return section;
+  }
+  const list = document.createElement('div');
+  list.className = 'history-compare-line-list';
+  safeItems.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'history-compare-line history-compare-object-row';
+    const mark = document.createElement('span');
+    mark.className = sign === '+' ? 'history-compare-line-added' : 'history-compare-line-removed';
+    mark.textContent = sign;
+    row.appendChild(mark);
+    const content = document.createElement('div');
+    content.className = 'history-compare-object-content';
+    const primary = document.createElement('code');
+    primary.textContent = _historyCompareObjectText(item, kind);
+    content.appendChild(primary);
+    const meta = _historyCompareObjectMeta(item, kind);
+    if (meta) {
+      const metaEl = document.createElement('div');
+      metaEl.className = 'history-compare-object-meta';
+      metaEl.textContent = meta;
+      content.appendChild(metaEl);
+    }
+    row.appendChild(content);
+    list.appendChild(row);
+  });
+  section.appendChild(list);
+  return section;
+}
+
 function _historyCompareHasTabCapacity(count) {
   const maxTabs = Number((typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.max_tabs) || 0);
   if (!maxTabs || maxTabs <= 0 || typeof tabs === 'undefined' || !Array.isArray(tabs)) return true;
@@ -1749,7 +1816,14 @@ function _renderHistoryComparison(data) {
   const subtitle = overlay.querySelector('#history-compare-subtitle');
   if (!body) return;
   body.replaceChildren();
-  subtitle.textContent = 'Changed output only';
+  const hasOutputSections = !!(data.sections && (
+    (data.sections.changed || []).length
+    || (data.sections.added || []).length
+    || (data.sections.removed || []).length
+    || data.sections.added_omitted
+    || data.sections.removed_omitted
+  ));
+  subtitle.textContent = hasOutputSections ? 'Changed output only' : 'Changed findings and artifacts';
 
   const runs = document.createElement('div');
   runs.className = 'history-compare-run-grid';
@@ -1760,10 +1834,40 @@ function _renderHistoryComparison(data) {
   const deltas = data.deltas || {};
   const metrics = document.createElement('div');
   metrics.className = 'history-compare-metrics';
-  metrics.appendChild(_compareMetricCell('Exit', deltas.exit_code_changed ? `${deltas.exit_code.left} -> ${deltas.exit_code.right}` : `unchanged · ${deltas.exit_code?.right ?? 'n/a'}`, deltas.exit_code_changed ? 'is-changed' : ''));
-  metrics.appendChild(_compareMetricCell('Duration', _compareFormatDelta((deltas.duration_seconds && deltas.duration_seconds.delta) || 0, 's')));
-  metrics.appendChild(_compareMetricCell('Lines', _compareFormatDelta((deltas.output_lines && deltas.output_lines.delta) || 0)));
-  metrics.appendChild(_compareMetricCell('Findings', _compareFormatDelta((deltas.findings && deltas.findings.delta) || 0)));
+  if (deltas.exit_code) {
+    metrics.appendChild(_compareMetricCell(
+      'Exit',
+      deltas.exit_code_changed ? `${deltas.exit_code.left} -> ${deltas.exit_code.right}` : `unchanged · ${deltas.exit_code?.right ?? 'n/a'}`,
+      deltas.exit_code_changed ? 'is-changed' : '',
+    ));
+  }
+  if (deltas.duration_seconds) {
+    metrics.appendChild(_compareMetricCell('Duration', _compareFormatDelta(deltas.duration_seconds.delta || 0, 's')));
+  }
+  if (deltas.output_lines) {
+    metrics.appendChild(_compareMetricCell('Lines', _compareFormatDelta(deltas.output_lines.delta || 0)));
+  }
+  if (deltas.findings) {
+    metrics.appendChild(_compareMetricCell('Findings', _compareFormatDelta(deltas.findings.delta || 0)));
+  }
+  if (data.left && data.right && (
+    Number.isFinite(Number(data.left.persisted_finding_count))
+    || Number.isFinite(Number(data.right.persisted_finding_count))
+  )) {
+    metrics.appendChild(_compareMetricCell(
+      'Stored findings',
+      _compareFormatDelta(Number(data.right.persisted_finding_count || 0) - Number(data.left.persisted_finding_count || 0)),
+    ));
+  }
+  if (data.left && data.right && (
+    Number.isFinite(Number(data.left.artifact_count))
+    || Number.isFinite(Number(data.right.artifact_count))
+  )) {
+    metrics.appendChild(_compareMetricCell(
+      'Artifacts',
+      _compareFormatDelta(Number(data.right.artifact_count || 0) - Number(data.left.artifact_count || 0)),
+    ));
+  }
   body.appendChild(metrics);
 
   if (data.truncated && (data.truncated.left || data.truncated.right || data.truncated.changed_lines)) {
@@ -1829,6 +1933,13 @@ function _renderHistoryComparison(data) {
   const removedLines = sections.removed || [];
   const addedOmitted = sections.added_omitted || 0;
   const removedOmitted = sections.removed_omitted || 0;
+  const objects = data.objects || {};
+  const findingObjects = objects.findings || {};
+  const artifactObjects = objects.artifacts || {};
+  const addedFindings = Array.isArray(findingObjects.added) ? findingObjects.added : [];
+  const removedFindings = Array.isArray(findingObjects.removed) ? findingObjects.removed : [];
+  const addedArtifacts = Array.isArray(artifactObjects.added) ? artifactObjects.added : [];
+  const removedArtifacts = Array.isArray(artifactObjects.removed) ? artifactObjects.removed : [];
   if (changedLines.length) {
     body.appendChild(_renderHistoryCompareChangedLines(changedLines));
   }
@@ -1838,16 +1949,24 @@ function _renderHistoryComparison(data) {
   if (removedLines.length || removedOmitted) {
     body.appendChild(_renderHistoryCompareLines('Removed lines', removedLines, removedOmitted, '-'));
   }
-  if (!changedLines.length && !addedLines.length && !removedLines.length && !addedOmitted && !removedOmitted) {
+  if (addedFindings.length) body.appendChild(_renderHistoryCompareObjectSection('Added findings', addedFindings, 'finding', '+'));
+  if (removedFindings.length) body.appendChild(_renderHistoryCompareObjectSection('Removed findings', removedFindings, 'finding', '-'));
+  if (addedArtifacts.length) body.appendChild(_renderHistoryCompareObjectSection('Added artifacts', addedArtifacts, 'artifact', '+'));
+  if (removedArtifacts.length) body.appendChild(_renderHistoryCompareObjectSection('Removed artifacts', removedArtifacts, 'artifact', '-'));
+  if (
+    !changedLines.length && !addedLines.length && !removedLines.length && !addedOmitted && !removedOmitted
+    && !addedFindings.length && !removedFindings.length && !addedArtifacts.length && !removedArtifacts.length
+  ) {
     const empty = document.createElement('div');
     empty.className = 'history-compare-empty';
-    empty.textContent = 'No changed output.';
+    empty.textContent = 'No changed output, findings, or artifacts.';
     body.appendChild(empty);
   }
 }
 
-function fetchAndRenderHistoryComparison(leftId, rightId) {
+function fetchAndRenderHistoryComparison(leftId, rightId, options = {}) {
   if (!leftId || !rightId) return;
+  _openHistoryCompareOverlay();
   const body = document.querySelector('#history-compare-body');
   if (body) {
     body.replaceChildren();
@@ -1856,14 +1975,15 @@ function fetchAndRenderHistoryComparison(leftId, rightId) {
     loading.textContent = 'Comparing runs...';
     body.appendChild(loading);
   }
-  apiFetch(`/history/compare?left=${encodeURIComponent(leftId)}&right=${encodeURIComponent(rightId)}`)
+  const url = options.url || `/history/compare?left=${encodeURIComponent(leftId)}&right=${encodeURIComponent(rightId)}`;
+  apiFetch(url)
     .then(resp => resp.json())
     .then(data => {
       if (data.error) throw new Error(data.error);
       _renderHistoryComparison(data);
     })
     .catch(() => {
-      _renderHistoryCompareLauncher();
+      if (_historyCompareState && _historyCompareState.source) _renderHistoryCompareLauncher();
       showToast('Failed to compare runs', 'error');
     });
 }

@@ -166,7 +166,7 @@ def _normalize_permalink_run_meta(meta: dict | None) -> dict | None:
         "artifactCount": meta.get("artifact_count") or 0,
         "findingCount": meta.get("finding_count") or 0,
         "labelCount": meta.get("label_count") or 0,
-        "annotationCount": meta.get("annotation_count") or 0,
+        "noteCount": meta.get("note_count") or 0,
         "version": meta.get("version") or None,
     }
 
@@ -198,10 +198,10 @@ def _build_permalink_run_meta_items(run_meta: dict | None) -> list[dict]:
     if isinstance(label_count, int) and label_count > 0:
         label = "label" if label_count == 1 else "labels"
         items.append({"kind": "item", "text": f"{label_count} {label}"})
-    annotation_count = run_meta.get("annotationCount")
-    if isinstance(annotation_count, int) and annotation_count > 0:
-        label = "annotation" if annotation_count == 1 else "annotations"
-        items.append({"kind": "item", "text": f"{annotation_count} {label}"})
+    note_count = run_meta.get("noteCount")
+    if isinstance(note_count, int) and note_count > 0:
+        label = "note" if note_count == 1 else "notes"
+        items.append({"kind": "item", "text": f"{note_count} {label}"})
     if run_meta.get("version"):
         items.append({"kind": "item", "text": f"v{run_meta['version']}"})
     return items

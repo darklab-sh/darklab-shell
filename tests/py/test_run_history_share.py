@@ -892,7 +892,7 @@ class TestRunStreaming:
         assert data["findings"][0]["id"] == finding["id"]
         assert data["findings"][0]["target_id"] == target["id"]
         assert data["labels"] == []
-        assert data["annotations"] == []
+        assert data["note"] is None
         assert entry["text"] == "darklab.sh has address 104.21.4.35"
         assert entry["signals"] == ["findings"]
         assert entry["line_index"] == 0
@@ -3160,10 +3160,10 @@ class TestRunOutputArtifacts:
                 (f"lbl_{run_id}", session_id, finding_id),
             )
             conn.execute(
-                "INSERT INTO annotations "
+                "INSERT INTO entity_notes "
                 "(id, session_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'run_file_artifact', ?, 'review evidence', datetime('now'), datetime('now'))",
-                (f"ann_{run_id}", session_id, file_artifact_id),
+                (f"note_{run_id}", session_id, file_artifact_id),
             )
             conn.execute(
                 "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
@@ -3206,8 +3206,8 @@ class TestRunOutputArtifacts:
                 ("lbl_artifact-delete-run",),
             ).fetchone()[0] == 0
             assert conn.execute(
-                "SELECT COUNT(*) FROM annotations WHERE id = ?",
-                ("ann_artifact-delete-run",),
+                "SELECT COUNT(*) FROM entity_notes WHERE id = ?",
+                ("note_artifact-delete-run",),
             ).fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM project_links").fetchone()[0] == 0
 
@@ -3235,8 +3235,8 @@ class TestRunOutputArtifacts:
                 ("lbl_artifact-clear-a", "lbl_artifact-clear-b"),
             ).fetchone()[0] == 0
             assert conn.execute(
-                "SELECT COUNT(*) FROM annotations WHERE id IN (?, ?)",
-                ("ann_artifact-clear-a", "ann_artifact-clear-b"),
+                "SELECT COUNT(*) FROM entity_notes WHERE id IN (?, ?)",
+                ("note_artifact-clear-a", "note_artifact-clear-b"),
             ).fetchone()[0] == 0
             assert conn.execute("SELECT COUNT(*) FROM project_links").fetchone()[0] == 0
 

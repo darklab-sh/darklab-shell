@@ -47,9 +47,9 @@ speed and directness of the shell.
 | 2 | Project-aware shell flow | Medium | Active project context automatically captures new runs and generated artifacts |
 | 3 | Run-created file artifacts | Medium | Command-created outputs are associated with their source runs and active projects |
 | 4 | Targets and autocomplete context | Medium | Projects can own domains, URLs, hosts, and port sets that feed filtering and suggestions |
-| 5 | Findings, labels, and annotations | Medium-High | Findings, runs, snapshots, and files can be reviewed, labeled, annotated, and filtered by project |
+| 5 | Findings, labels, and notes | Medium-High | Findings, runs, snapshots, and files can be reviewed, labeled, noted, and filtered by project |
 | 6 | Project notes | Low-Medium | Each project gets one lightweight notes document |
-| 7 | Share/export packages | High | Runs, snapshots, findings, annotations, files, and notes can be packaged together |
+| 7 | Share/export packages | High | Runs, snapshots, findings, labels, files, and notes can be packaged together |
 | 8 | Workflow and comparison layer | High | Projects become useful for repeatable workflows, baselines, and drift comparison |
 | 9 | Polish, mobile, and operations | Medium | Project work is smooth across desktop, mobile, diagnostics, and retention paths |
 
@@ -342,7 +342,7 @@ Port sets should support named reusable values:
 
 ---
 
-## Phase 5: Findings, Labels, And Annotations
+## Phase 5: Findings, Labels, And Notes
 
 Goal: make findings and important runs reviewable project records instead of
 transient signal counts or one-off starred history rows.
@@ -357,7 +357,7 @@ Add a durable finding model when the classifier identifies high-signal output:
   - `session_id`
   - `run_id`
   - optional `project_id` through `project_links`
-  - optional `target_id`
+  - optional target relationships through `finding_targets`
   - `scope` such as `finding`, `warning`, `error`, `summary`
   - `title` or normalized summary
   - `raw_line`
@@ -366,7 +366,17 @@ Add a durable finding model when the classifier identifies high-signal output:
   - `fingerprint` for de-duplication
   - `created`
 
-Start simple: persist enough to power project filtering and annotations. Avoid
+- `finding_targets`
+  - `id`
+  - `session_id`
+  - `finding_id`
+  - `target_id`
+  - `run_id`
+  - `source`
+  - `confidence`
+  - `created`
+
+Start simple: persist enough to power project filtering and notes. Avoid
 building a vulnerability-management system too early.
 
 ### P5.2 Finding Review States
@@ -430,9 +440,9 @@ Project behavior:
   - `finding` / `customer-facing` runs become package candidates.
   - `follow-up` / `retest` labels help drive project next-action views.
 
-### P5.4 Annotations
+### P5.4 Entity Notes
 
-Add annotations that can attach to:
+Add one note per entity that can attach to:
 
 - findings
 - runs
@@ -440,23 +450,21 @@ Add annotations that can attach to:
 - workspace files / artifacts
 - project targets
 
-Suggested annotation fields:
+Suggested entity note fields:
 
 - `id`
 - `session_id`
 - `entity_type`
 - `entity_id`
 - `body`
-- `visibility` such as `private`, `package`
 - `created`
 - `updated`
-- optional `author_label`
 
 Rules:
 
-- Annotations are short comments, not full documents.
-- Annotations are private by default.
-- Share/export package flow chooses which annotations to include.
+- Entity notes are short comments, not full documents.
+- Entity notes are private by default.
+- Share/export package flow chooses whether private entity notes are included.
 
 ### P5.5 Project Findings View
 
@@ -468,7 +476,7 @@ Rules:
   - severity/scope
   - review state
   - run label/bookmark
-  - annotated/unannotated
+  - noted/unnoted
 - Allow opening the original run at the matched line.
 - Allow creating a snapshot or package from selected findings.
 
@@ -545,7 +553,7 @@ Package contents can include:
 - run list
 - selected raw outputs or output excerpts
 - findings
-- annotations
+- entity notes
 - project notes
 - workspace artifacts
 - redaction mode
@@ -563,7 +571,7 @@ Package contents can include:
 - Builder choices:
   - raw vs redacted
   - include/exclude notes
-  - include/exclude private annotations
+  - include/exclude private entity notes
   - include full output vs preview vs findings-only
   - include selected files/artifacts
   - include target inventory
@@ -603,7 +611,7 @@ Add real-browser tests for:
 - redacted package pages do not render secrets
 - raw package pages preserve selected content
 - downloaded HTML/ZIP contents match redaction choices
-- project notes and private annotations are excluded unless explicitly included
+- project notes and private entity notes are excluded unless explicitly included
 - artifact inclusion respects user choices
 
 ---
@@ -711,7 +719,7 @@ Goal: make project work practical in the real surfaces operators already use.
 - Add project counts to `/diag`:
   - projects
   - project-linked runs
-  - annotations
+  - entity notes
   - packages
   - artifact bytes
 - Add structured events:
@@ -719,7 +727,8 @@ Goal: make project work practical in the real surfaces operators already use.
   - `PROJECT_ARCHIVED`
   - `PROJECT_LINK_ADDED`
   - `PROJECT_LINK_REMOVED`
-  - `ANNOTATION_CREATED`
+  - `ENTITY_NOTE_SAVED`
+  - `ENTITY_NOTE_REMOVED`
   - `PACKAGE_CREATED`
   - `PACKAGE_DELETED`
   - `PACKAGE_VIEWED`
@@ -762,7 +771,7 @@ These fit the model, but should not block the core roadmap.
 ### Evidence Quality Checks
 
 - Warn when a package includes findings without raw supporting output.
-- Warn when annotations reference files that are not included.
+- Warn when notes reference files that are not included.
 - Warn when output was truncated and full artifact is unavailable.
 - Warn when package redaction rules changed since the source snapshot/run.
 
@@ -770,7 +779,7 @@ These fit the model, but should not block the core roadmap.
 
 - Tags can attach to projects, runs, findings, snapshots, files, and packages.
 - Consider whether tags are truly needed once projects, targets, review states,
-  and annotations exist.
+  and notes exist.
 - Avoid building a complicated tag manager too early.
 
 ### Target Extraction
@@ -781,7 +790,7 @@ These fit the model, but should not block the core roadmap.
 
 ### Collaboration Later
 
-- Author labels on annotations.
+- Author labels on notes.
 - Package preparer/reviewer labels.
 - Project handoff export/import.
 - Do not build real multi-user permissions unless the app grows an actual auth
@@ -813,7 +822,7 @@ These fit the model, but should not block the core roadmap.
 5. Add project-linked workspace files.
 6. Add declared output artifact capture for a few high-value tools.
 7. Add project targets and autocomplete suggestions.
-8. Persist findings and add annotation support.
+8. Persist findings and add entity note support.
 9. Add run labels/history bookmarks and terminal `tag <label>`.
 10. Add project notes.
 11. Build package export around the already-linked data.

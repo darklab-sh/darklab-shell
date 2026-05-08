@@ -218,16 +218,22 @@ class TestSessionMigrate:
                 ("fnd_migrate_test", session_id, "run_migrate_test"),
             )
             conn.execute(
+                "INSERT OR REPLACE INTO finding_targets "
+                "(id, session_id, finding_id, target_id, source, created) "
+                "VALUES (?, ?, 'fnd_migrate_test', 'ptarget_migrate_test', 'primary_match', datetime('now'))",
+                ("ftarget_migrate_test", session_id),
+            )
+            conn.execute(
                 "INSERT OR REPLACE INTO entity_labels "
                 "(id, session_id, entity_type, entity_id, label, created) "
                 "VALUES (?, ?, 'run', 'run_migrate_test', 'baseline', datetime('now'))",
                 ("lbl_migrate_test", session_id),
             )
             conn.execute(
-                "INSERT OR REPLACE INTO annotations "
+                "INSERT OR REPLACE INTO entity_notes "
                 "(id, session_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'run', 'run_migrate_test', 'note', datetime('now'), datetime('now'))",
-                ("ann_migrate_test", session_id),
+                ("note_migrate_test", session_id),
             )
             conn.execute(
                 "INSERT OR REPLACE INTO evidence_packages "
@@ -568,6 +574,10 @@ class TestSessionMigrate:
                 "SELECT session_id, workspace_path FROM run_file_artifacts "
                 "WHERE id = 'rfa_migrate_test'",
             ).fetchone()
+            finding_target = conn.execute(
+                "SELECT session_id, finding_id, target_id FROM finding_targets "
+                "WHERE id = 'ftarget_migrate_test'",
+            ).fetchone()
             evidence_package = conn.execute(
                 "SELECT session_id, project_id FROM evidence_packages "
                 "WHERE id = 'pkg_migrate_test'",
@@ -576,19 +586,21 @@ class TestSessionMigrate:
         assert data["migrated_projects"] == 1
         assert data["migrated_run_file_artifacts"] == 1
         assert data["migrated_findings"] == 1
+        assert data["migrated_finding_targets"] == 1
         assert data["migrated_entity_labels"] == 1
-        assert data["migrated_annotations"] == 1
+        assert data["migrated_entity_notes"] == 1
         assert data["migrated_evidence_packages"] == 1
         assert self._count_rows("projects", from_id) == 0
         assert self._count_rows("projects", to_id) == 2
         assert self._count_rows("run_file_artifacts", from_id) == 0
         assert self._count_rows("findings", from_id) == 0
         assert self._count_rows("entity_labels", from_id) == 0
-        assert self._count_rows("annotations", from_id) == 0
+        assert self._count_rows("entity_notes", from_id) == 0
         assert migrated_slug == "case-2"
         assert tuple(linked_workspace_file) == (to_id, "findings.txt")
         assert tuple(project_target) == (to_id, "darklab.sh")
         assert tuple(run_artifact) == (to_id, "findings.txt")
+        assert tuple(finding_target) == (to_id, "fnd_migrate_test", "ptarget_migrate_test")
         assert tuple(evidence_package) == (to_id, "prj_migrate_test")
 
     def test_migrates_recent_domains_and_merges_destination(self):

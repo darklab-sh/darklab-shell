@@ -59,6 +59,13 @@
   const projectPackageManifestJson = document.getElementById('project-package-manifest-json');
   const projectPackageWizardOverlay = document.getElementById('project-package-wizard-overlay');
   const projectPackageWizardBody = document.getElementById('project-package-wizard-body');
+  const projectEntityEditorOverlay = document.getElementById('project-entity-editor-overlay');
+  const projectEntityEditorTitle = document.getElementById('project-entity-editor-title');
+  const projectEntityEditorSubtitle = document.getElementById('project-entity-editor-subtitle');
+  const projectEntityEditorForm = document.getElementById('project-entity-editor-form');
+  const projectEntityLabelsInput = document.getElementById('project-entity-labels');
+  const projectEntityNoteInput = document.getElementById('project-entity-note');
+  const projectEntitySubmitButton = document.getElementById('project-entity-submit');
   const projectNotesForm = document.getElementById('project-notes-form');
   const projectNotesInput = document.getElementById('project-notes-input');
   const projectNotesSaveStatus = document.getElementById('project-notes-save-status');
@@ -87,6 +94,7 @@
     { value: 'url', label: 'url' },
     { value: 'port_set', label: 'port set' },
   ];
+  const PROJECT_TARGET_NOTES_MAX_LENGTH = 2000;
   const PROJECT_DOMAIN_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
   const PROJECT_HOST_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*\.?$/i;
   const PROJECT_IPV4_RE = /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
@@ -155,11 +163,13 @@
   let projectWorkspaceTab = 'details';
   let projectWorkspaceFindingsLoadingId = '';
   let projectWorkspaceEditingTargetId = '';
+  let projectWorkspaceEditingEntity = null;
   let projectWorkspaceLastTargetType = 'domain';
   let projectWorkspaceTargetFilters = new Map();
   let projectWorkspaceRunFilters = new Map();
   let projectWorkspaceFindingStatusFilters = new Map();
   let projectWorkspaceCollapsedFindingGroups = new Set();
+  let projectWorkspaceCollapsedArtifactGroups = new Set();
   let projectPackageWizard = null;
   let projectNotesSaveTimer = null;
   let projectNotesSaveSeq = 0;
@@ -508,6 +518,13 @@
     return btn;
   }
 
+  function _bindProjectRuntimePressable(el) {
+    if (el && typeof bindPressable === 'function') {
+      bindPressable(el, { onActivate: () => {}, refocusComposer: false });
+    }
+    return el;
+  }
+
   function buildHudActions() {
     if (!hudActions) return;
     hudActions.replaceChildren();
@@ -801,7 +818,20 @@
 
   function _setProjectWorkspaceMessage(text = '', { error = false } = {}) {
     if (!projectWorkspaceMessage) return;
-    projectWorkspaceMessage.textContent = text;
+    let messageText = projectWorkspaceMessage.querySelector('.project-workspace-message-text');
+    if (!messageText) {
+      projectWorkspaceMessage.replaceChildren();
+      messageText = document.createElement('span');
+      messageText.className = 'project-workspace-message-text';
+      const dismiss = document.createElement('button');
+      dismiss.type = 'button';
+      dismiss.className = 'btn btn-ghost btn-compact project-workspace-message-dismiss';
+      dismiss.dataset.projectMessageDismiss = '1';
+      dismiss.setAttribute('aria-label', 'Dismiss project message');
+      dismiss.textContent = '✕';
+      projectWorkspaceMessage.append(messageText, dismiss);
+    }
+    messageText.textContent = text;
     projectWorkspaceMessage.classList.toggle('u-hidden', !text);
     projectWorkspaceMessage.classList.toggle('is-error', !!error);
   }
@@ -837,7 +867,7 @@
       { id: 'artifacts', label: 'artifacts', value: counts.artifacts, tab: 'artifacts' },
       { id: 'targets', label: 'targets', value: counts.targets, tab: 'details' },
       { id: 'packages', label: 'packages', value: counts.packages, tab: 'packages' },
-      { id: 'notes', label: 'notes', value: counts.annotations, tab: 'details' },
+      { id: 'notes', label: 'notes', value: counts.notes, tab: 'details' },
     ].map(item => ({ ...item, value: Number(item.value || 0) }));
   }
 
@@ -1014,6 +1044,14 @@
     return projectWorkspaceCollapsedFindingGroups.has(_projectFindingGroupKey(projectId, runLabel));
   }
 
+  function _projectArtifactGroupKey(projectId, runId) {
+    return `${String(projectId || '')}\x1f${String(runId || '')}`;
+  }
+
+  function _projectArtifactGroupCollapsed(projectId, runId) {
+    return projectWorkspaceCollapsedArtifactGroups.has(_projectArtifactGroupKey(projectId, runId));
+  }
+
   function _projectRunItems(summary) {
     return summary && Array.isArray(summary.runs) ? summary.runs : [];
   }
@@ -1022,6 +1060,10 @@
     const normalized = String(runId || '');
     if (!normalized) return null;
     return _projectRunItems(summary).find(run => String(run.id || '') === normalized) || null;
+  }
+
+  function _projectComparableRuns(summary) {
+    return _projectRunItems(summary).filter(run => run && run.id);
   }
 
   function _shortProjectRunId(runId) {
@@ -1057,6 +1099,15 @@
     wrap.append(size, status);
     const actions = document.createElement('div');
     actions.className = 'project-artifact-actions';
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'btn btn-secondary btn-compact project-artifact-action';
+    edit.dataset.projectAction = 'edit-artifact-metadata';
+    edit.dataset.projectId = String(projectId || '');
+    edit.dataset.artifactId = String(artifact.id || '');
+    edit.textContent = 'Edit';
+    _bindProjectRuntimePressable(edit);
+    actions.appendChild(edit);
     const available = _projectArtifactStatus(artifact) !== 'missing';
     [
       ['preview', 'Preview'],
@@ -1072,10 +1123,56 @@
       btn.disabled = !available;
       btn.title = available ? label : 'Workspace file is missing';
       btn.textContent = label;
+      _bindProjectRuntimePressable(btn);
       actions.appendChild(btn);
     });
     wrap.appendChild(actions);
     return wrap;
+  }
+
+  function _entityLabelValues(entity) {
+    const labels = entity && Array.isArray(entity.labels) ? entity.labels : [];
+    return labels
+      .map(label => String(label && typeof label === 'object' ? label.label : label || '').trim())
+      .filter(Boolean);
+  }
+
+  function _entityNoteBody(entity) {
+    const note = entity && entity.note && typeof entity.note === 'object' ? entity.note : null;
+    return note ? String(note.body || '').trim() : '';
+  }
+
+  function _entityMetadataChips(entity) {
+    const chips = _entityLabelValues(entity).map(label => ({ label, kind: 'label' }));
+    if (_entityNoteBody(entity)) chips.push({ label: 'note', kind: 'note' });
+    return chips;
+  }
+
+  function _parseEntityLabelInput(value) {
+    const seen = new Set();
+    return String(value || '')
+      .split(',')
+      .map(item => item.trim())
+      .filter(Boolean)
+      .filter((item) => {
+        const key = item.toLocaleLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }
+
+  function _entityTitleForEditor(entityType, entity) {
+    if (entityType === 'finding') {
+      return String(entity && (entity.title || entity.raw_line || entity.id) || 'Finding');
+    }
+    if (entityType === 'run') {
+      return String(entity && (entity.command || entity.id) || 'Run');
+    }
+    if (entityType === 'run_file_artifact') {
+      return String(entity && (entity.display_name || entity.workspace_path || entity.id) || 'Artifact');
+    }
+    return String(entity && entity.id || 'Entity');
   }
 
   function _projectArtifactDetail(artifact) {
@@ -1202,7 +1299,7 @@
       step: 1,
       includeArtifacts,
       redactionMode,
-      includePrivateAnnotations: false,
+      includePrivateNotes: false,
       name: '',
       description: '',
       collapsedRunIds: new Set(),
@@ -1222,6 +1319,48 @@
 
   function isProjectPackageWizardOpen() {
     return !!(projectPackageWizardOverlay && projectPackageWizardOverlay.classList.contains('open'));
+  }
+
+  function isProjectEntityEditorOpen() {
+    return !!(projectEntityEditorOverlay && projectEntityEditorOverlay.classList.contains('open'));
+  }
+
+  function _closeProjectEntityEditor() {
+    if (!projectEntityEditorOverlay) return;
+    projectEntityEditorOverlay.classList.add('u-hidden');
+    projectEntityEditorOverlay.classList.remove('open');
+    projectEntityEditorOverlay.setAttribute('aria-hidden', 'true');
+    projectWorkspaceEditingEntity = null;
+    if (projectEntityEditorForm) {
+      projectEntityEditorForm.dataset.projectId = '';
+      projectEntityEditorForm.dataset.entityType = '';
+      projectEntityEditorForm.dataset.entityId = '';
+    }
+  }
+
+  function _openProjectEntityEditor(projectId, entityType, entity) {
+    if (!projectEntityEditorOverlay || !projectEntityEditorForm || !projectEntityLabelsInput || !projectEntityNoteInput) {
+      throw new Error('Metadata editor is not available.');
+    }
+    const entityId = String(entity && entity.id || '');
+    if (!projectId || !entityType || !entityId) throw new Error('Entity is missing its identifier.');
+    const title = _entityTitleForEditor(entityType, entity);
+    projectWorkspaceEditingEntity = { projectId: String(projectId), entityType: String(entityType), entityId, entity };
+    projectEntityEditorForm.dataset.projectId = String(projectId);
+    projectEntityEditorForm.dataset.entityType = String(entityType);
+    projectEntityEditorForm.dataset.entityId = entityId;
+    if (projectEntityEditorTitle) {
+      const label = entityType === 'finding' ? 'FINDING' : (entityType === 'run' ? 'RUN' : 'ARTIFACT');
+      projectEntityEditorTitle.textContent = `EDIT ${label}`;
+    }
+    if (projectEntityEditorSubtitle) projectEntityEditorSubtitle.textContent = title;
+    projectEntityLabelsInput.value = _entityLabelValues(entity).join(', ');
+    projectEntityNoteInput.value = _entityNoteBody(entity);
+    if (projectEntitySubmitButton) projectEntitySubmitButton.textContent = 'Save';
+    projectEntityEditorOverlay.classList.remove('u-hidden');
+    projectEntityEditorOverlay.classList.add('open');
+    projectEntityEditorOverlay.setAttribute('aria-hidden', 'false');
+    window.setTimeout(() => projectEntityLabelsInput.focus(), 0);
   }
 
   function _hideProjectPackageWizardOverlay() {
@@ -1321,7 +1460,7 @@
       step: 2,
       includeArtifacts,
       redactionMode,
-      includePrivateAnnotations: !!manifest.include_private_annotations,
+      includePrivateNotes: !!manifest.include_private_notes,
       name: String(pkg?.name || _projectPackageSuggestedName(_selectedProject(), preset)),
       description: String(pkg?.description || ''),
       collapsedRunIds: new Set(),
@@ -1383,6 +1522,7 @@
       btn.dataset.projectId = String(projectId || '');
       btn.dataset.packageId = String(pkg.id || '');
       btn.textContent = label;
+      _bindProjectRuntimePressable(btn);
       actions.appendChild(btn);
     });
     wrap.appendChild(actions);
@@ -1520,12 +1660,13 @@
       header.className = 'project-package-run-header';
       const toggle = document.createElement('button');
       toggle.type = 'button';
-      toggle.className = 'project-package-run-toggle';
+      toggle.className = 'toggle-btn project-package-run-toggle';
       toggle.dataset.projectPackageRunToggle = '1';
       toggle.dataset.runId = runId;
       toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
       toggle.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Collapse'} package options for this run`);
       toggle.textContent = '▾';
+      _bindProjectRuntimePressable(toggle);
       const runRow = _packageSelectionCheckbox({
         kind: 'run',
         id: runId,
@@ -1813,12 +1954,12 @@
     privateLabel.className = 'project-package-selection-row';
     const privateInput = document.createElement('input');
     privateInput.type = 'checkbox';
-    privateInput.checked = !!projectPackageWizard.includePrivateAnnotations;
+    privateInput.checked = !!projectPackageWizard.includePrivateNotes;
     privateInput.dataset.projectPackagePrivateNotes = '1';
     const privateText = document.createElement('span');
     privateText.className = 'project-package-selection-text';
     const strong = document.createElement('strong');
-    strong.textContent = 'Include private notes/annotations';
+    strong.textContent = 'Include private notes';
     const small = document.createElement('small');
     small.textContent = 'Private metadata stays excluded unless this is checked.';
     privateText.append(strong, small);
@@ -1894,7 +2035,7 @@
         transcripts_html: projectPackageWizard.selection.transcriptRunIds.size > 0,
       },
       redaction_mode: projectPackageWizard.redactionMode || 'raw',
-      include_private_annotations: !!projectPackageWizard.includePrivateAnnotations,
+      include_private_notes: !!projectPackageWizard.includePrivateNotes,
       counts: {
         runs: projectPackageWizard.selection.runIds.size,
         findings: projectPackageWizard.selection.findingIds.size,
@@ -2040,7 +2181,7 @@
       preset: String(projectPackageWizard.preset || 'custom'),
       redaction_mode: String(projectPackageWizard.redactionMode || 'raw'),
       include_artifacts: !!projectPackageWizard.includeArtifacts,
-      include_private_annotations: !!projectPackageWizard.includePrivateAnnotations,
+      include_private_notes: !!projectPackageWizard.includePrivateNotes,
       options: {
         manifest_json: true,
         index_html: true,
@@ -2179,21 +2320,25 @@
     return row;
   }
 
-  function _projectItemRow({ title, meta = '', detail = '', badge = '', action = null, accessory = null }) {
+  function _projectItemRow({ title, meta = '', detail = '', badge = '', chips = [], action = null, accessory = null }) {
     const row = document.createElement(action && !accessory ? 'button' : 'article');
     row.className = 'project-explorer-item';
     let contentHost = row;
     if (action) {
-      if (row.tagName === 'BUTTON') row.type = 'button';
+      if (row.tagName === 'BUTTON') {
+        row.type = 'button';
+        row.classList.add('control-row');
+      }
       else if (accessory) {
         contentHost = document.createElement('button');
         contentHost.type = 'button';
-        contentHost.className = 'project-explorer-item-click-target';
+        contentHost.className = 'control-row project-explorer-item-click-target';
       }
       contentHost.dataset.projectAction = action.action;
       Object.entries(action.dataset || {}).forEach(([key, value]) => {
         contentHost.dataset[key] = value;
       });
+      _bindProjectRuntimePressable(contentHost);
     }
     const main = document.createElement('div');
     main.className = 'project-explorer-item-main';
@@ -2212,6 +2357,17 @@
       detailEl.className = 'project-explorer-item-detail';
       detailEl.textContent = detail;
       main.appendChild(detailEl);
+    }
+    if (Array.isArray(chips) && chips.length) {
+      const chipWrap = document.createElement('div');
+      chipWrap.className = 'project-explorer-item-chips';
+      chips.forEach((chip) => {
+        const chipEl = document.createElement('span');
+        chipEl.className = `project-explorer-metadata-chip is-${String(chip.kind || 'label')}`;
+        chipEl.textContent = String(chip.label || '');
+        chipWrap.appendChild(chipEl);
+      });
+      main.appendChild(chipWrap);
     }
     contentHost.appendChild(main);
     if (contentHost !== row) row.appendChild(contentHost);
@@ -2248,7 +2404,12 @@
   function _findingRowAccessory(finding, projectId) {
     const wrap = document.createElement('div');
     wrap.className = 'project-finding-row-actions';
-    if (finding && finding.id) wrap.appendChild(_findingReviewControl(finding, projectId));
+    if (finding && finding.id) {
+      const edit = _makeProjectButton('Edit', 'edit-finding-metadata', projectId);
+      edit.dataset.findingId = String(finding.id || '');
+      wrap.appendChild(edit);
+      wrap.appendChild(_findingReviewControl(finding, projectId));
+    }
     return wrap;
   }
 
@@ -2279,10 +2440,13 @@
     }
   }
 
-  function _setProjectTargetValueError(message = '') {
+  function _setProjectTargetValueError(message = '', { target = 'value' } = {}) {
     const hasError = !!message;
     if (projectTargetValueInput) {
-      projectTargetValueInput.setAttribute('aria-invalid', hasError ? 'true' : 'false');
+      projectTargetValueInput.setAttribute('aria-invalid', hasError && target === 'value' ? 'true' : 'false');
+    }
+    if (projectTargetNotesInput) {
+      projectTargetNotesInput.setAttribute('aria-invalid', hasError && target === 'notes' ? 'true' : 'false');
     }
     if (projectTargetValueError) {
       projectTargetValueError.textContent = message;
@@ -2368,6 +2532,12 @@
     return `The target value does not match the selected type. ${copy.error}`;
   }
 
+  function _projectTargetNotesValidationError(notes) {
+    const length = String(notes || '').trim().length;
+    if (length <= PROJECT_TARGET_NOTES_MAX_LENGTH) return '';
+    return `Target notes must be ${PROJECT_TARGET_NOTES_MAX_LENGTH.toLocaleString()} characters or fewer.`;
+  }
+
   function _projectTargetEditorPayload() {
     return {
       type: String(projectTargetTypeSelect?.value || 'domain').trim() || 'domain',
@@ -2390,7 +2560,11 @@
     _setProjectTargetTypeValue(isEdit ? target.type : projectWorkspaceLastTargetType);
     if (projectTargetValueInput) projectTargetValueInput.value = isEdit ? String(target.value || '') : '';
     if (projectTargetLabelInput) projectTargetLabelInput.value = isEdit ? String(target.label || '') : '';
-    if (projectTargetNotesInput) projectTargetNotesInput.value = isEdit ? String(target.notes || '') : '';
+    if (projectTargetNotesInput) {
+      projectTargetNotesInput.maxLength = PROJECT_TARGET_NOTES_MAX_LENGTH;
+      projectTargetNotesInput.value = isEdit ? String(target.notes || '') : '';
+      projectTargetNotesInput.setAttribute('aria-invalid', 'false');
+    }
     if (projectTargetEditorTitle) projectTargetEditorTitle.textContent = isEdit ? 'EDIT TARGET' : 'NEW TARGET';
     if (projectTargetSubmitButton) projectTargetSubmitButton.textContent = isEdit ? 'Save Target' : 'Add Target';
     _setProjectTargetValueError('');
@@ -2448,15 +2622,20 @@
     }
     main.appendChild(heading);
 
-    const metaParts = [
-      String(target.label || '').trim(),
-      String(target.notes || '').trim(),
-    ].filter(Boolean);
-    if (metaParts.length) {
-      const meta = document.createElement('div');
-      meta.className = 'project-target-meta';
-      meta.textContent = metaParts.join(' · ');
-      main.appendChild(meta);
+    const chips = [];
+    const targetLabel = String(target.label || '').trim();
+    if (targetLabel) chips.push({ label: targetLabel, kind: 'label' });
+    if (String(target.notes || '').trim()) chips.push({ label: 'note', kind: 'note' });
+    if (chips.length) {
+      const chipWrap = document.createElement('div');
+      chipWrap.className = 'project-explorer-item-chips project-target-metadata-chips';
+      chips.forEach((chip) => {
+        const chipEl = document.createElement('span');
+        chipEl.className = `project-explorer-metadata-chip is-${String(chip.kind || 'label')}`;
+        chipEl.textContent = String(chip.label || '');
+        chipWrap.appendChild(chipEl);
+      });
+      main.appendChild(chipWrap);
     }
 
     const actions = document.createElement('div');
@@ -2517,12 +2696,41 @@
     });
     const actions = document.createElement('div');
     actions.className = 'project-run-row-buttons';
+    const edit = _makeProjectButton('Edit', 'edit-run-metadata', projectId);
+    edit.dataset.runId = runId;
+    edit.dataset.runCommand = String(run.command || '');
     const restore = _makeProjectButton('Restore', 'open-run', projectId);
     restore.dataset.runId = runId;
     restore.dataset.runCommand = String(run.command || '');
+    actions.appendChild(edit);
     actions.appendChild(restore);
     actions.appendChild(_projectRunRemoveControl(projectId, run));
     wrap.append(counts, actions);
+    return wrap;
+  }
+
+  function _renderProjectRunCompareControls(projectId, runs) {
+    const wrap = document.createElement('div');
+    wrap.className = 'project-run-compare-controls';
+    const leftSelect = document.createElement('select');
+    leftSelect.className = 'form-select form-control-compact project-run-compare-select';
+    leftSelect.dataset.projectCompareRun = 'left';
+    const rightSelect = document.createElement('select');
+    rightSelect.className = 'form-select form-control-compact project-run-compare-select';
+    rightSelect.dataset.projectCompareRun = 'right';
+    runs.forEach((run, index) => {
+      [leftSelect, rightSelect].forEach((select) => {
+        const option = document.createElement('option');
+        option.value = String(run.id || '');
+        option.textContent = String(run.command || run.id || 'run');
+        select.appendChild(option);
+      });
+      if (index === 0) leftSelect.value = String(run.id || '');
+      if (index === 1) rightSelect.value = String(run.id || '');
+    });
+    const compare = _makeProjectButton('Compare runs', 'compare-runs', projectId, runs.length >= 2 ? 'secondary' : 'ghost');
+    compare.disabled = runs.length < 2;
+    wrap.append(leftSelect, rightSelect, compare);
     return wrap;
   }
 
@@ -2584,18 +2792,20 @@
         const target = _projectTargetById(summary, targetId);
         const chip = document.createElement('button');
         chip.type = 'button';
-        chip.className = 'project-target-filter-chip';
+        chip.className = 'btn btn-ghost btn-compact project-target-filter-chip';
         chip.dataset.projectTargetFilterClear = targetId;
         chip.dataset.projectId = projectId;
         chip.textContent = `${_projectTargetFilterLabel(target)} ×`;
+        _bindProjectRuntimePressable(chip);
         chips.appendChild(chip);
       });
       const clearAll = document.createElement('button');
       clearAll.type = 'button';
-      clearAll.className = 'project-target-filter-clear';
+      clearAll.className = 'btn btn-ghost btn-compact project-target-filter-clear';
       clearAll.dataset.projectTargetFilterClear = 'all';
       clearAll.dataset.projectId = projectId;
       clearAll.textContent = 'Clear all';
+      _bindProjectRuntimePressable(clearAll);
       chips.appendChild(clearAll);
       wrap.appendChild(chips);
     }
@@ -2646,18 +2856,20 @@
       selected.forEach((status) => {
         const chip = document.createElement('button');
         chip.type = 'button';
-        chip.className = 'project-target-filter-chip';
+        chip.className = 'btn btn-ghost btn-compact project-target-filter-chip';
         chip.dataset.projectFindingStatusFilterClear = status;
         chip.dataset.projectId = projectId;
         chip.textContent = `${_findingReviewStateLabel(status)} ×`;
+        _bindProjectRuntimePressable(chip);
         chips.appendChild(chip);
       });
       const clearAll = document.createElement('button');
       clearAll.type = 'button';
-      clearAll.className = 'project-target-filter-clear';
+      clearAll.className = 'btn btn-ghost btn-compact project-target-filter-clear';
       clearAll.dataset.projectFindingStatusFilterClear = 'all';
       clearAll.dataset.projectId = projectId;
       clearAll.textContent = 'Clear statuses';
+      _bindProjectRuntimePressable(clearAll);
       chips.appendChild(clearAll);
       wrap.appendChild(chips);
     }
@@ -2719,10 +2931,11 @@
   function _projectFilterChip({ projectId, label, value, clearAttr }) {
     const chip = document.createElement('button');
     chip.type = 'button';
-    chip.className = 'project-target-filter-chip';
+    chip.className = 'btn btn-ghost btn-compact project-target-filter-chip';
     chip.dataset.projectId = projectId;
     chip.dataset[clearAttr] = value;
     chip.textContent = `${label} ×`;
+    _bindProjectRuntimePressable(chip);
     return chip;
   }
 
@@ -2818,10 +3031,11 @@
     if (hasFilters) {
       const clearAll = document.createElement('button');
       clearAll.type = 'button';
-      clearAll.className = 'project-target-filter-clear';
+      clearAll.className = 'btn btn-ghost btn-compact project-target-filter-clear';
       clearAll.dataset.projectFilterClearAll = '1';
       clearAll.dataset.projectId = projectId;
       clearAll.textContent = 'Clear filters';
+      _bindProjectRuntimePressable(clearAll);
       chips.appendChild(clearAll);
     } else {
       const empty = document.createElement('span');
@@ -3072,6 +3286,7 @@
     btn.textContent = label;
     btn.dataset.projectAction = action;
     if (projectId) btn.dataset.projectId = projectId;
+    _bindProjectRuntimePressable(btn);
     return btn;
   }
 
@@ -3106,11 +3321,12 @@
     const summary = _projectSummary(projectId);
     const row = document.createElement('button');
     row.type = 'button';
-    row.className = 'project-workspace-row'
+    row.className = 'control-row project-workspace-row'
       + (projectId === activeId ? ' is-active' : '')
       + (projectId === projectWorkspaceSelectedId ? ' is-selected' : '');
     row.dataset.projectId = projectId;
     row.dataset.projectAction = 'select';
+    _bindProjectRuntimePressable(row);
 
     const main = document.createElement('div');
     main.className = 'project-workspace-main';
@@ -3215,9 +3431,10 @@
     tabItems.forEach(({ id, label, count }) => {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'project-explorer-tab' + (projectWorkspaceTab === id ? ' is-active' : '');
+      btn.className = 'nav-item project-explorer-tab' + (projectWorkspaceTab === id ? ' is-active' : '');
       btn.dataset.projectTab = id;
       btn.textContent = count === undefined ? label : `${label} (${Number(count || 0)})`;
+      _bindProjectRuntimePressable(btn);
       tabs.appendChild(btn);
     });
     return [header, tabs];
@@ -3259,9 +3476,11 @@
 
   function _renderProjectRuns(container, projectId, summary) {
     const allRuns = _projectRunItems(summary);
+    const comparableRuns = _projectComparableRuns(summary);
     const filterActive = _projectTargetFilterActive(projectId, summary);
     const toolbar = document.createElement('div');
     toolbar.className = 'project-runs-toolbar';
+    toolbar.appendChild(_renderProjectRunCompareControls(projectId, comparableRuns));
     toolbar.appendChild(_makeProjectButton('Link last run', 'link-last-run', projectId));
     container.appendChild(toolbar);
     if (filterActive && !_projectFindingsLoaded(projectId)) {
@@ -3283,6 +3502,7 @@
         title: run.command,
         meta: _formatProjectDate(run.started),
         detail: `${exit} · ${Number(run.output_line_count || 0)} output lines · linked ${_formatProjectDate(run.created)}`,
+        chips: _entityMetadataChips(run),
         badge: run.id ? '' : exit,
         accessory: run.id ? _projectRunControls(projectId, run, summary) : null,
         action: run.id ? {
@@ -3317,16 +3537,17 @@
     }
     _groupBy(findings, finding => finding.run_command || finding.run_id).forEach((items, runLabel) => {
       const group = document.createElement('section');
-      group.className = 'project-explorer-group';
+      group.className = 'project-explorer-group project-findings-group';
       const collapsed = _projectFindingGroupCollapsed(projectId, runLabel);
       group.classList.toggle('is-collapsed', collapsed);
       const title = document.createElement('button');
       title.type = 'button';
-      title.className = 'project-explorer-group-toggle';
+      title.className = 'toggle-btn project-explorer-group-toggle';
       title.dataset.projectFindingGroupToggle = '1';
       title.dataset.projectId = projectId;
       title.dataset.projectFindingGroup = runLabel;
       title.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      _bindProjectRuntimePressable(title);
       const caret = document.createElement('span');
       caret.className = 'project-explorer-group-caret';
       caret.setAttribute('aria-hidden', 'true');
@@ -3354,6 +3575,7 @@
           meta: metaParts.join(' · '),
           detail: finding.raw_line || '',
           badge: finding.review_state || finding.severity || '',
+          chips: _entityMetadataChips(finding),
           accessory: _findingRowAccessory(finding, projectId),
           action: finding.run_id ? {
             action: 'open-finding',
@@ -3388,28 +3610,45 @@
     }
     _groupBy(artifacts, artifact => artifact.run_id).forEach((items, runId) => {
       const group = document.createElement('section');
-      group.className = 'project-explorer-group';
-      const title = document.createElement('h3');
+      group.className = 'project-explorer-group project-artifacts-group';
       const run = _projectRunById(summary, runId);
       const command = String(run?.command || '').trim();
       const shortId = _shortProjectRunId(runId);
-      const runLink = document.createElement('button');
-      runLink.type = 'button';
-      runLink.className = 'project-explorer-group-link';
-      runLink.dataset.projectAction = 'open-run';
-      runLink.dataset.runId = String(runId || '');
-      runLink.dataset.runCommand = command;
-      runLink.textContent = `${command || 'Run'}${shortId ? ` (${shortId})` : ''}`;
-      title.appendChild(runLink);
+      const collapsed = _projectArtifactGroupCollapsed(projectId, runId);
+      group.classList.toggle('is-collapsed', collapsed);
+      const title = document.createElement('button');
+      title.type = 'button';
+      title.className = 'toggle-btn project-explorer-group-toggle';
+      title.dataset.projectArtifactGroupToggle = '1';
+      title.dataset.projectId = projectId;
+      title.dataset.projectArtifactGroup = String(runId || '');
+      title.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      _bindProjectRuntimePressable(title);
+      const caret = document.createElement('span');
+      caret.className = 'project-explorer-group-caret';
+      caret.setAttribute('aria-hidden', 'true');
+      caret.textContent = '▾';
+      const label = document.createElement('span');
+      label.className = 'project-explorer-group-title';
+      label.textContent = `${command || 'Run'}${shortId ? ` (${shortId})` : ''}`;
+      const count = document.createElement('span');
+      count.className = 'project-explorer-group-count';
+      count.textContent = `${items.length} artifact${items.length === 1 ? '' : 's'}`;
+      title.append(caret, label, count);
       group.appendChild(title);
+      const body = document.createElement('div');
+      body.className = 'project-explorer-group-body';
+      body.hidden = collapsed;
       items.forEach((artifact) => {
-        group.appendChild(_projectItemRow({
+        body.appendChild(_projectItemRow({
           title: artifact.display_name || artifact.workspace_path,
           meta: artifact.workspace_path,
           detail: _projectArtifactDetail(artifact),
+          chips: _entityMetadataChips(artifact),
           accessory: _projectArtifactAccessory(projectId, artifact),
         }));
       });
+      group.appendChild(body);
       container.appendChild(group);
     });
   }
@@ -3584,6 +3823,7 @@
   function closeProjectWorkspace({ refocus = true } = {}) {
     _flushProjectNotesAutosave().catch(() => {});
     _closeProjectTargetEditor();
+    _closeProjectEntityEditor();
     _closeProjectPackageManifest();
     _closeProjectPackageWizard({ render: false });
     _hideProjectWorkspaceOverlay();
@@ -3614,6 +3854,69 @@
       _notifyProjectWorkspaceChanged('write', projectWorkspaceSelectedId, { local: false });
     }
     return resp;
+  }
+
+  async function _syncEntityLabels(entityType, entityId, nextLabels) {
+    const labelsUrl = `/entities/${encodeURIComponent(entityType)}/${encodeURIComponent(entityId)}/labels`;
+    const resp = await _projectWorkspaceRequest(labelsUrl, { cache: 'no-store' });
+    const data = await resp.json().catch(() => ({}));
+    const current = Array.isArray(data.labels) ? data.labels : [];
+    const currentValues = current.map(label => String(label && label.label || '').trim()).filter(Boolean);
+    const nextSet = new Set(nextLabels);
+    const currentSet = new Set(currentValues);
+    for (const label of currentValues) {
+      if (!nextSet.has(label)) {
+        await _projectWorkspaceRequest(labelsUrl, {
+          method: 'DELETE',
+          body: JSON.stringify({ label }),
+        });
+      }
+    }
+    for (const label of nextLabels) {
+      if (!currentSet.has(label)) {
+        await _projectWorkspaceRequest(labelsUrl, {
+          method: 'POST',
+          body: JSON.stringify({ label }),
+        });
+      }
+    }
+  }
+
+  async function _syncEntityNote(entityType, entityId, body) {
+    const noteUrl = `/entities/${encodeURIComponent(entityType)}/${encodeURIComponent(entityId)}/note`;
+    const value = String(body || '').trim();
+    if (value) {
+      await _projectWorkspaceRequest(noteUrl, {
+        method: 'PUT',
+        body: JSON.stringify({ body: value }),
+      });
+      return;
+    }
+    try {
+      await _projectWorkspaceRequest(noteUrl, { method: 'DELETE' });
+    } catch (err) {
+      if (!String(err && err.message || '').includes('not found')) throw err;
+    }
+  }
+
+  async function _saveProjectEntityMetadata() {
+    if (!projectWorkspaceEditingEntity || !projectEntityLabelsInput || !projectEntityNoteInput) return;
+    const { projectId, entityType, entityId } = projectWorkspaceEditingEntity;
+    const labels = _parseEntityLabelInput(projectEntityLabelsInput.value);
+    const noteBody = String(projectEntityNoteInput.value || '').trim();
+    if (projectEntitySubmitButton) projectEntitySubmitButton.disabled = true;
+    try {
+      await _syncEntityLabels(entityType, entityId, labels);
+      await _syncEntityNote(entityType, entityId, noteBody);
+      _closeProjectEntityEditor();
+      await refreshProjectWorkspace();
+      if (entityType === 'finding' && projectId) await _loadProjectFindings(projectId);
+      _renderProjectExplorer();
+      const label = entityType === 'finding' ? 'Finding' : (entityType === 'run' ? 'Run' : 'Artifact');
+      _setProjectWorkspaceMessage(`${label} metadata saved.`);
+    } finally {
+      if (projectEntitySubmitButton) projectEntitySubmitButton.disabled = false;
+    }
   }
 
   async function _linkLastRunToProject(projectId, summary) {
@@ -3771,6 +4074,10 @@
     _setProjectTargetValueError('');
   });
 
+  projectTargetNotesInput?.addEventListener('input', () => {
+    _setProjectTargetValueError('');
+  });
+
   projectTargetCreateForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const projectId = String(projectTargetCreateForm.dataset.projectId || projectWorkspaceSelectedId || (activeProject && activeProject.id ? activeProject.id : ''));
@@ -3784,6 +4091,14 @@
     if (validationError) {
       _setProjectTargetValueError(validationError);
       projectTargetValueInput?.focus();
+      return;
+    }
+    const notesValidationError = _projectTargetNotesValidationError(payload.notes);
+    if (notesValidationError) {
+      _setProjectTargetValueError(notesValidationError, { target: 'notes' });
+      if (projectTargetNotesInput) {
+        projectTargetNotesInput.focus();
+      }
       return;
     }
     try {
@@ -3803,6 +4118,15 @@
       _setProjectWorkspaceMessage(targetId ? 'Target updated.' : 'Target added to selected project.');
     } catch (err) {
       _setProjectWorkspaceMessage(err.message || 'Could not save target.', { error: true });
+    }
+  });
+
+  projectEntityEditorForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    try {
+      await _saveProjectEntityMetadata();
+    } catch (err) {
+      _setProjectWorkspaceMessage(err.message || 'Could not save metadata.', { error: true });
     }
   });
 
@@ -3904,7 +4228,7 @@
       const scrollTop = projectPackageWizardBody
         ?.querySelector('.project-package-wizard-body')
         ?.scrollTop ?? null;
-      projectPackageWizard.includePrivateAnnotations = !!packagePrivateNotes.checked;
+      projectPackageWizard.includePrivateNotes = !!packagePrivateNotes.checked;
       projectPackageWizard.notice = '';
       _renderProjectPackageWizardModal({ scrollTop });
       return true;
@@ -4046,6 +4370,13 @@
 
   projectWorkspaceModal?.addEventListener('click', async (event) => {
     if (event.target.closest?.('[data-project-review-state]')) return;
+    const messageDismiss = event.target.closest?.('[data-project-message-dismiss]');
+    if (messageDismiss) {
+      event.preventDefault();
+      event.stopPropagation();
+      _setProjectWorkspaceMessage('');
+      return;
+    }
     const findingGroupToggle = event.target.closest?.('[data-project-finding-group-toggle]');
     if (findingGroupToggle) {
       event.preventDefault();
@@ -4057,6 +4388,21 @@
         projectWorkspaceCollapsedFindingGroups.delete(key);
       } else {
         projectWorkspaceCollapsedFindingGroups.add(key);
+      }
+      _renderProjectExplorer();
+      return;
+    }
+    const artifactGroupToggle = event.target.closest?.('[data-project-artifact-group-toggle]');
+    if (artifactGroupToggle) {
+      event.preventDefault();
+      event.stopPropagation();
+      const projectId = String(artifactGroupToggle.dataset.projectId || projectWorkspaceSelectedId || '');
+      const runId = String(artifactGroupToggle.dataset.projectArtifactGroup || '');
+      const key = _projectArtifactGroupKey(projectId, runId);
+      if (projectWorkspaceCollapsedArtifactGroups.has(key)) {
+        projectWorkspaceCollapsedArtifactGroups.delete(key);
+      } else {
+        projectWorkspaceCollapsedArtifactGroups.add(key);
       }
       _renderProjectExplorer();
       return;
@@ -4114,6 +4460,8 @@
       await _flushProjectNotesAutosave();
       projectWorkspaceTab = tabBtn.dataset.projectTab || 'details';
       if (projectWorkspaceTab !== 'details') _closeProjectTargetEditor();
+      _closeProjectEntityEditor();
+      _setProjectWorkspaceMessage('');
       _renderProjectExplorer();
       return;
     }
@@ -4182,6 +4530,29 @@
         _setProjectWorkspaceMessage('');
         _openProjectTargetEditor(projectId, target);
         return;
+      } else if (action === 'edit-finding-metadata') {
+        const findingId = String(btn.dataset.findingId || '');
+        const finding = _projectFindingItems(projectId).find(item => String(item.id || '') === findingId);
+        if (!finding) throw new Error('Finding is missing its details.');
+        _setProjectWorkspaceMessage('');
+        _openProjectEntityEditor(projectId, 'finding', finding);
+        return;
+      } else if (action === 'edit-run-metadata') {
+        const runId = String(btn.dataset.runId || '');
+        const summary = projectWorkspaceSummaries.get(String(projectId || ''));
+        const run = _projectRunItems(summary).find(item => String(item.id || '') === runId);
+        if (!run) throw new Error('Run is missing its details.');
+        _setProjectWorkspaceMessage('');
+        _openProjectEntityEditor(projectId, 'run', run);
+        return;
+      } else if (action === 'edit-artifact-metadata') {
+        const artifactId = String(btn.dataset.artifactId || '');
+        const summary = projectWorkspaceSummaries.get(String(projectId || ''));
+        const artifact = _projectArtifactItems(summary).find(item => String(item.id || '') === artifactId);
+        if (!artifact) throw new Error('Artifact is missing its details.');
+        _setProjectWorkspaceMessage('');
+        _openProjectEntityEditor(projectId, 'run_file_artifact', artifact);
+        return;
       } else if (action === 'delete-target') {
         const targetId = String(btn.dataset.targetId || '');
         if (!projectId || !targetId) throw new Error('Target is missing its identifier.');
@@ -4220,6 +4591,25 @@
         if (action === 'filter-run-findings') projectWorkspaceTab = 'findings';
         if (action === 'filter-run-artifacts') projectWorkspaceTab = 'artifacts';
         _renderProjectExplorer();
+        return;
+      } else if (action === 'compare-runs') {
+        const leftId = String(projectExplorerBody?.querySelector('[data-project-compare-run="left"]')?.value || '');
+        const rightId = String(projectExplorerBody?.querySelector('[data-project-compare-run="right"]')?.value || '');
+        if (!projectId || !leftId || !rightId) throw new Error('Choose two project runs to compare.');
+        if (leftId === rightId) throw new Error('Choose two different project runs to compare.');
+        const compareFn = global && typeof global.fetchAndRenderHistoryComparison === 'function'
+          ? global.fetchAndRenderHistoryComparison
+          : (typeof window !== 'undefined' && typeof window.fetchAndRenderHistoryComparison === 'function'
+              ? window.fetchAndRenderHistoryComparison
+              : null);
+        if (!compareFn) throw new Error('Run comparison is not available.');
+        const params = new URLSearchParams({
+          left_run_id: leftId,
+          right_run_id: rightId,
+        });
+        compareFn(leftId, rightId, {
+          url: `/projects/${encodeURIComponent(projectId)}/compare?${params.toString()}`,
+        });
         return;
       } else if (action === 'link-last-run') {
         await _linkLastRunToProject(projectId, projectWorkspaceSummaries.get(String(projectId || '')));
@@ -4342,6 +4732,14 @@
     _closeProjectTargetEditor();
   });
 
+  projectEntityEditorOverlay?.querySelector('.project-entity-editor-close')?.addEventListener('click', () => {
+    _closeProjectEntityEditor();
+  });
+
+  projectEntityEditorOverlay?.querySelector('.project-entity-editor-cancel')?.addEventListener('click', () => {
+    _closeProjectEntityEditor();
+  });
+
   projectPackageManifestOverlay?.querySelector('.project-package-manifest-close')?.addEventListener('click', () => {
     _closeProjectPackageManifest();
   });
@@ -4401,6 +4799,14 @@
       level: 'modal',
       isOpen: isProjectTargetEditorOpen,
       onClose: () => _closeProjectTargetEditor(),
+      closeButtons: null,
+    });
+  }
+  if (bindDismissibleFn && projectEntityEditorOverlay) {
+    bindDismissibleFn(projectEntityEditorOverlay, {
+      level: 'modal',
+      isOpen: isProjectEntityEditorOpen,
+      onClose: () => _closeProjectEntityEditor(),
       closeButtons: null,
     });
   }

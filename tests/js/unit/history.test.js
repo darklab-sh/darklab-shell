@@ -1241,6 +1241,16 @@ describe('history panel actions', () => {
                 added: [{ text: '443/tcp open https' }],
                 removed: [{ text: '8080/tcp open http-proxy' }],
               },
+              objects: {
+                findings: {
+                  added: [{ title: 'open port 8080', raw_line: '8080/tcp open http-proxy', review_state: 'new' }],
+                  removed: [{ title: 'open port 443', raw_line: '443/tcp open https', severity: 'high' }],
+                },
+                artifacts: {
+                  added: [{ workspace_path: 'reports/new.json', kind: 'output', byte_size: 12 }],
+                  removed: [{ workspace_path: 'reports/old.json', kind: 'output', byte_size: 10 }],
+                },
+              },
               truncated: {},
             }),
         })
@@ -1291,6 +1301,9 @@ describe('history panel actions', () => {
     expect(document.querySelectorAll('.history-compare-line-delta')).toHaveLength(2)
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('443/tcp open https')
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('8080/tcp open http-proxy')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('Added findings (1)')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('Removed artifacts (1)')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('reports/new.json')
 
     const restoreBoth = [...document.querySelectorAll('.history-compare-actions button')]
       .find(button => button.textContent === 'Restore Both')

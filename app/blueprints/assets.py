@@ -86,7 +86,7 @@ _DIAG_PROJECT_WORKSPACE_COUNT_TABLES = {
     "project_targets": "targets",
     "findings": "findings",
     "entity_labels": "labels",
-    "annotations": "annotations",
+    "entity_notes": "notes",
     "evidence_packages": "packages",
 }
 

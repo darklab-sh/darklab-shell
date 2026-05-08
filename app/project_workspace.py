@@ -38,8 +38,7 @@ MAX_PROJECT_COLOR_LEN = 32
 MAX_PROJECT_NOTES_LEN = 20000
 MAX_ENTITY_ID_LEN = 512
 MAX_LABEL_LEN = 80
-MAX_ANNOTATION_BODY_LEN = 20000
-MAX_AUTHOR_LABEL_LEN = 120
+MAX_ENTITY_NOTE_BODY_LEN = 20000
 MAX_TARGET_VALUE_LEN = 512
 MAX_TARGET_LABEL_LEN = 160
 MAX_TARGET_NOTES_LEN = 2000
@@ -69,7 +68,6 @@ ENTITY_METADATA_TYPES = frozenset({
     "target",
     "package",
 })
-ANNOTATION_VISIBILITIES = frozenset({"private"})
 PROJECT_TARGET_TYPES = frozenset({"domain", "url", "host", "ip", "cidr", "port_set"})
 PROJECT_TARGET_REVIEW_STATES = frozenset({"confirmed", "pending", "dismissed"})
 PROJECT_TARGET_SOURCES = frozenset({"user", "auto_command", "auto_input_file"})
@@ -143,8 +141,8 @@ def _new_entity_label_id() -> str:
     return "lbl_" + secrets.token_hex(8)
 
 
-def _new_annotation_id() -> str:
-    return "ann_" + secrets.token_hex(8)
+def _new_entity_note_id() -> str:
+    return "note_" + secrets.token_hex(8)
 
 
 def _new_project_target_id() -> str:
@@ -165,6 +163,10 @@ def _new_evidence_package_id() -> str:
 
 def _trim_text(value, limit):
     return str(value or "").strip()[:limit]
+
+
+def _text_exceeds_limit(value, limit):
+    return len(str(value or "").strip()) > limit
 
 
 def _slugify(value):
@@ -301,7 +303,7 @@ def _row_to_label(row):
     }
 
 
-def _row_to_annotation(row):
+def _row_to_entity_note(row):
     if not row:
         return None
     return {
@@ -310,8 +312,6 @@ def _row_to_annotation(row):
         "entity_type": row["entity_type"],
         "entity_id": row["entity_id"],
         "body": row["body"],
-        "visibility": row["visibility"],
-        "author_label": row["author_label"],
         "created": row["created"],
         "updated": row["updated"],
     }
@@ -626,7 +626,7 @@ def _normalize_evidence_package_payload(data):
         "include_artifacts": include_artifacts,
         "preset": _trim_text(data.get("preset"), 32).lower() or "custom",
         "package_format_version": 1,
-        "include_private_annotations": bool(data.get("include_private_annotations")),
+        "include_private_notes": bool(data.get("include_private_notes")),
         "selection": selection if isinstance(selection, dict) else None,
         "options": options if isinstance(options, dict) else {},
     }
@@ -808,7 +808,7 @@ def _evidence_manifest_from_summary(summary, payload, findings=None):
             selected_targets,
             {**payload, "options": output_options},
         ),
-        "include_private_annotations": payload["include_private_annotations"],
+        "include_private_notes": payload["include_private_notes"],
         "links": summary["links"],
         "runs": selected_runs,
         "findings": selected_findings,
@@ -1166,7 +1166,7 @@ def _render_package_run_html(
         "artifact_count": run.get("artifact_count") or 0,
         "finding_count": run.get("finding_count") or 0,
         "label_count": run.get("label_count") or 0,
-        "annotation_count": run.get("annotation_count") or 0,
+        "note_count": run.get("note_count") or 0,
     }
     permalink_model = _permalink_context(
         title=command or str(run.get("id") or "Run transcript"),
@@ -1250,7 +1250,7 @@ def _finding_run_anchor(finding):
 
 def _package_finding_metadata_html(finding):
     labels = finding.get("labels") if isinstance(finding.get("labels"), list) else []
-    annotations = finding.get("annotations") if isinstance(finding.get("annotations"), list) else []
+    note = finding.get("note") if isinstance(finding.get("note"), dict) else None
     pieces = []
     if labels:
         label_html = "".join(
@@ -1259,21 +1259,18 @@ def _package_finding_metadata_html(finding):
             if isinstance(label, dict)
         )
         pieces.append(f"<div class=\"chips\">{label_html}</div>")
-    if annotations:
-        annotation_html = "".join(
+    if note:
+        pieces.append(
             "<blockquote>"
-            f"{_package_html_escape(annotation.get('body') or '')}"
+            f"{_package_html_escape(note.get('body') or '')}"
             "</blockquote>"
-            for annotation in annotations
-            if isinstance(annotation, dict)
         )
-        pieces.append(annotation_html)
     return "".join(pieces)
 
 
 def _package_finding_metadata_markdown(finding):
     labels = finding.get("labels") if isinstance(finding.get("labels"), list) else []
-    annotations = finding.get("annotations") if isinstance(finding.get("annotations"), list) else []
+    note = finding.get("note") if isinstance(finding.get("note"), dict) else None
     parts = []
     label_values = [
         _package_markdown_code(label.get("label") or "")
@@ -1282,13 +1279,8 @@ def _package_finding_metadata_markdown(finding):
     ]
     if label_values:
         parts.append("Labels: " + ", ".join(label_values))
-    annotation_values = [
-        _package_markdown_text(annotation.get("body") or "")
-        for annotation in annotations
-        if isinstance(annotation, dict) and annotation.get("body")
-    ]
-    if annotation_values:
-        parts.append("Annotations: " + " / ".join(annotation_values))
+    if note and note.get("body"):
+        parts.append("Note: " + _package_markdown_text(note.get("body") or ""))
     return "<br>" + "<br>".join(parts) if parts else ""
 
 
@@ -1464,8 +1456,8 @@ def _render_package_index_html(
         ("Targets JSON", "targets/targets.json"),
         ("Targets Markdown", "targets/targets.md"),
         ("Labels JSON", "metadata/labels.json"),
-        ("Annotations JSON", "notes/annotations.json"),
-        ("Annotations Markdown", "notes/annotations.md"),
+        ("Entity Notes JSON", "notes/entity-notes.json"),
+        ("Entity Notes Markdown", "notes/entity-notes.md"),
         ("Project Notes Markdown", "notes/project.md"),
     ]
     if skipped_items:
@@ -1635,8 +1627,8 @@ def _render_package_readme(
         f"- {_package_markdown_link('Targets JSON', 'targets/targets.json')}",
         f"- {_package_markdown_link('Targets Markdown', 'targets/targets.md')}",
         f"- {_package_markdown_link('Labels JSON', 'metadata/labels.json')}",
-        f"- {_package_markdown_link('Annotations JSON', 'notes/annotations.json')}",
-        f"- {_package_markdown_link('Annotations Markdown', 'notes/annotations.md')}",
+        f"- {_package_markdown_link('Entity Notes JSON', 'notes/entity-notes.json')}",
+        f"- {_package_markdown_link('Entity Notes Markdown', 'notes/entity-notes.md')}",
         f"- {_package_markdown_link('Project Notes Markdown', 'notes/project.md')}",
     ])
     if skipped_items:
@@ -1809,12 +1801,9 @@ def _package_targets_markdown_bytes(manifest):
             ]
             if label_values:
                 lines.extend(["", "### Labels", "", ", ".join(label_values)])
-        annotations = target.get("annotations") if isinstance(target.get("annotations"), list) else []
-        if annotations:
-            lines.extend(["", "### Annotations", ""])
-            for annotation in annotations:
-                if isinstance(annotation, dict) and annotation.get("body"):
-                    lines.append(f"- {_package_markdown_text(annotation.get('body') or '')}")
+        note = target.get("note") if isinstance(target.get("note"), dict) else None
+        if note and note.get("body"):
+            lines.extend(["", "### Entity Note", "", _package_markdown_text(note.get("body") or "")])
         linked_findings = [
             finding for finding in findings
             if isinstance(finding, dict) and target_id in _package_finding_target_ids(finding)
@@ -1829,7 +1818,10 @@ def _package_targets_markdown_bytes(manifest):
 
 
 def _package_metadata_targets(package, manifest):
-    targets = {"project": [str(package.get("project_id") or "")]}
+    targets = {
+        "project": [str(package.get("project_id") or "")],
+        "package": [str(package.get("id") or "")],
+    }
     selected = manifest.get("selected_entity_ids") if isinstance(manifest.get("selected_entity_ids"), dict) else {}
     mapping = {
         "run": "run_ids",
@@ -1860,10 +1852,10 @@ def _metadata_items_by_entity(items):
     return by_entity
 
 
-def _package_manifest_with_inline_metadata(manifest, labels, annotations):
+def _package_manifest_with_inline_metadata(manifest, labels, notes):
     enriched = dict(manifest)
     label_map = _metadata_items_by_entity(labels)
-    annotation_map = _metadata_items_by_entity(annotations)
+    note_map = _metadata_items_by_entity(notes)
 
     def _enrich_items(entity_type, key):
         source_items = manifest.get(key) if isinstance(manifest.get(key), list) else []
@@ -1874,11 +1866,11 @@ def _package_manifest_with_inline_metadata(manifest, labels, annotations):
             item = dict(source_item)
             entity_id = str(item.get("id") or "")
             item_labels = label_map.get((entity_type, entity_id), [])
-            item_annotations = annotation_map.get((entity_type, entity_id), [])
+            item_note = note_map.get((entity_type, entity_id), [])
             if item_labels:
                 item["labels"] = item_labels
-            if item_annotations:
-                item["annotations"] = item_annotations
+            if item_note:
+                item["note"] = item_note[0]
             enriched_items.append(item)
         enriched[key] = enriched_items
 
@@ -1890,11 +1882,11 @@ def _package_manifest_with_inline_metadata(manifest, labels, annotations):
     enriched_project = dict(project)
     project_id = str(project.get("id") or "")
     project_labels = label_map.get(("project", project_id), [])
-    project_annotations = annotation_map.get(("project", project_id), [])
+    project_note = note_map.get(("project", project_id), [])
     if project_labels:
         enriched_project["labels"] = project_labels
-    if project_annotations:
-        enriched_project["annotations"] = project_annotations
+    if project_note:
+        enriched_project["note"] = project_note[0]
     enriched["project"] = enriched_project
     return enriched
 
@@ -1912,11 +1904,11 @@ def _package_metadata_rows(conn, session_id, table, targets):
                 f"AND entity_id IN ({placeholders}) ORDER BY entity_type ASC, entity_id ASC, label ASC",
                 [session_id, entity_type, *entity_ids],
             ).fetchall())
-        elif table == "annotations":
+        elif table == "entity_notes":
             rows.extend(conn.execute(
-                "SELECT id, entity_type, entity_id, body, visibility, author_label, created, updated "
-                f"FROM annotations WHERE session_id = ? AND entity_type = ? "  # nosec B608
-                f"AND entity_id IN ({placeholders}) ORDER BY entity_type ASC, entity_id ASC, created ASC, id ASC",
+                "SELECT id, entity_type, entity_id, body, created, updated "
+                f"FROM entity_notes WHERE session_id = ? AND entity_type = ? "  # nosec B608
+                f"AND entity_id IN ({placeholders}) ORDER BY entity_type ASC, entity_id ASC, updated ASC, id ASC",
                 [session_id, entity_type, *entity_ids],
             ).fetchall())
     return rows
@@ -1947,30 +1939,28 @@ def _package_labels_json_bytes(labels, generated_at, redaction_rules=None):
     return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
 
-def _package_annotation_dicts(annotations, redaction_rules=None):
+def _package_note_dicts(notes, redaction_rules=None):
     return [
         _redact_package_value({
             "id": row["id"],
             "entity_type": row["entity_type"],
             "entity_id": row["entity_id"],
             "body": row["body"],
-            "visibility": row["visibility"],
-            "author_label": row["author_label"],
             "created": row["created"],
             "updated": row["updated"],
         }, redaction_rules)
-        for row in annotations
+        for row in notes
     ]
 
 
-def _package_annotations_json_bytes(annotations, generated_at, *, included, redaction_rules=None):
-    exported = _package_annotation_dicts(annotations, redaction_rules)
+def _package_notes_json_bytes(notes, generated_at, *, included, redaction_rules=None):
+    exported = _package_note_dicts(notes, redaction_rules)
     payload = {
         "format": 1,
         "generated_at": generated_at,
-        "include_private_annotations": bool(included),
+        "include_private_notes": bool(included),
         "count": len(exported),
-        "annotations": exported,
+        "notes": exported,
     }
     return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
@@ -1992,38 +1982,36 @@ def _package_project_notes_markdown_bytes(manifest, generated_at):
     return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
 
 
-def _package_annotations_markdown_bytes(annotations, generated_at, *, included):
+def _package_notes_markdown_bytes(notes, generated_at, *, included):
     lines = [
-        "# Annotations",
+        "# Entity Notes",
         "",
         f"Generated: {_package_markdown_text(generated_at)}",
         "",
     ]
     if not included:
         lines.extend([
-            "Private annotations were excluded from this package.",
+            "Private entity notes were excluded from this package.",
             "",
         ])
         return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
-    if not annotations:
-        lines.extend(["No selected annotations were included in this package.", ""])
+    if not notes:
+        lines.extend(["No selected entity notes were included in this package.", ""])
         return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
 
-    for annotation in annotations:
-        if not isinstance(annotation, dict):
+    for note in notes:
+        if not isinstance(note, dict):
             continue
-        entity_type = _package_markdown_text(annotation.get("entity_type") or "entity")
-        entity_id = _package_markdown_code(_package_short_id(annotation.get("entity_id")))
-        author = _package_markdown_text(annotation.get("author_label") or "anonymous")
-        created = _package_markdown_text(annotation.get("created") or "unknown")
-        body = _package_markdown_text(annotation.get("body") or "")
+        entity_type = _package_markdown_text(note.get("entity_type") or "entity")
+        entity_id = _package_markdown_code(_package_short_id(note.get("entity_id")))
+        updated = _package_markdown_text(note.get("updated") or note.get("created") or "unknown")
+        body = _package_markdown_text(note.get("body") or "")
         lines.extend([
             f"## {entity_type} {entity_id}",
             "",
-            f"- Author: {author}",
-            f"- Created: {created}",
+            f"- Updated: {updated}",
             "",
-            body or "_No annotation body._",
+            body or "_No note body._",
             "",
         ])
     return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
@@ -2076,12 +2064,16 @@ def migrate_project_workspace_session(conn, from_session_id, to_session_id):
         "UPDATE findings SET session_id = ? WHERE session_id = ?",
         (to_session_id, from_session_id),
     )
+    finding_target_result = conn.execute(
+        "UPDATE finding_targets SET session_id = ? WHERE session_id = ?",
+        (to_session_id, from_session_id),
+    )
     label_result = conn.execute(
         "UPDATE entity_labels SET session_id = ? WHERE session_id = ?",
         (to_session_id, from_session_id),
     )
-    annotation_result = conn.execute(
-        "UPDATE annotations SET session_id = ? WHERE session_id = ?",
+    note_result = conn.execute(
+        "UPDATE entity_notes SET session_id = ? WHERE session_id = ?",
         (to_session_id, from_session_id),
     )
     package_result = conn.execute(
@@ -2097,8 +2089,9 @@ def migrate_project_workspace_session(conn, from_session_id, to_session_id):
         "migrated_projects": migrated_projects,
         "migrated_run_file_artifacts": artifact_result.rowcount,
         "migrated_findings": finding_result.rowcount,
+        "migrated_finding_targets": finding_target_result.rowcount,
         "migrated_entity_labels": label_result.rowcount,
-        "migrated_annotations": annotation_result.rowcount,
+        "migrated_entity_notes": note_result.rowcount,
         "migrated_evidence_packages": package_result.rowcount,
         "migrated_active_project_preference": migrated_active_project_preference,
     }
@@ -2158,6 +2151,41 @@ def _count_entity_metadata_for_ids(conn, table, entity_type, entity_ids):
     return int(row["count"] or 0) if row else 0
 
 
+def _entity_labels_by_id(conn, session_id, entity_type, entity_ids):
+    values = [str(value) for value in entity_ids if value]
+    if not values:
+        return {}
+    placeholders = ",".join("?" for _ in values)
+    rows = conn.execute(
+        "SELECT id, session_id, entity_type, entity_id, label, source, created "
+        "FROM entity_labels WHERE session_id = ? AND entity_type = ? "
+        f"AND entity_id IN ({placeholders}) "  # nosec B608
+        "ORDER BY label COLLATE NOCASE ASC, created ASC",
+        [session_id, entity_type, *values],
+    ).fetchall()
+    grouped = {value: [] for value in values}
+    for row in rows:
+        grouped.setdefault(str(row["entity_id"]), []).append(_row_to_label(row))
+    return grouped
+
+
+def _entity_notes_by_id(conn, session_id, entity_type, entity_ids):
+    values = [str(value) for value in entity_ids if value]
+    if not values:
+        return {}
+    placeholders = ",".join("?" for _ in values)
+    rows = conn.execute(
+        "SELECT id, session_id, entity_type, entity_id, body, created, updated "
+        "FROM entity_notes WHERE session_id = ? AND entity_type = ? "
+        f"AND entity_id IN ({placeholders})",  # nosec B608
+        [session_id, entity_type, *values],
+    ).fetchall()
+    return {
+        str(row["entity_id"]): _row_to_entity_note(row)
+        for row in rows
+    }
+
+
 def get_project_summary(session_id, project_id):
     with db_connect() as conn:
         project_row = conn.execute(
@@ -2178,10 +2206,6 @@ def get_project_summary(session_id, project_id):
             "ORDER BY type ASC, value COLLATE NOCASE ASC",
             (project_id,),
         ).fetchall()
-        package_row = conn.execute(
-            "SELECT COUNT(*) AS count FROM evidence_packages WHERE session_id = ? AND project_id = ?",
-            (session_id, project_id),
-        ).fetchone()
         run_ids = [row["entity_id"] for row in link_rows if row["entity_type"] == "run"]
         snapshot_ids = [row["entity_id"] for row in link_rows if row["entity_type"] == "snapshot"]
         workspace_file_ids = [row["entity_id"] for row in link_rows if row["entity_type"] == "workspace_file"]
@@ -2211,6 +2235,16 @@ def get_project_summary(session_id, project_id):
             ).fetchall()
         artifact_ids = [row["id"] for row in artifact_rows]
         finding_ids = [row["id"] for row in finding_rows]
+        target_ids = [row["id"] for row in target_rows]
+        package_rows = conn.execute(
+            "SELECT id FROM evidence_packages WHERE session_id = ? AND project_id = ?",
+            (session_id, project_id),
+        ).fetchall()
+        package_ids = [row["id"] for row in package_rows]
+        run_labels = _entity_labels_by_id(conn, session_id, "run", run_ids)
+        run_notes = _entity_notes_by_id(conn, session_id, "run", run_ids)
+        artifact_labels = _entity_labels_by_id(conn, session_id, "run_file_artifact", artifact_ids)
+        artifact_notes = _entity_notes_by_id(conn, session_id, "run_file_artifact", artifact_ids)
         label_count = (
             _count_entity_metadata_for_ids(conn, "entity_labels", "project", [project_id])
             + _count_entity_metadata_for_ids(conn, "entity_labels", "run", run_ids)
@@ -2218,20 +2252,32 @@ def get_project_summary(session_id, project_id):
             + _count_entity_metadata_for_ids(conn, "entity_labels", "workspace_file", workspace_file_ids)
             + _count_entity_metadata_for_ids(conn, "entity_labels", "run_file_artifact", artifact_ids)
             + _count_entity_metadata_for_ids(conn, "entity_labels", "finding", finding_ids)
+            + _count_entity_metadata_for_ids(conn, "entity_labels", "target", target_ids)
+            + _count_entity_metadata_for_ids(conn, "entity_labels", "package", package_ids)
         )
-        annotation_count = (
-            _count_entity_metadata_for_ids(conn, "annotations", "project", [project_id])
-            + _count_entity_metadata_for_ids(conn, "annotations", "run", run_ids)
-            + _count_entity_metadata_for_ids(conn, "annotations", "snapshot", snapshot_ids)
-            + _count_entity_metadata_for_ids(conn, "annotations", "workspace_file", workspace_file_ids)
-            + _count_entity_metadata_for_ids(conn, "annotations", "run_file_artifact", artifact_ids)
-            + _count_entity_metadata_for_ids(conn, "annotations", "finding", finding_ids)
+        note_count = (
+            _count_entity_metadata_for_ids(conn, "entity_notes", "project", [project_id])
+            + _count_entity_metadata_for_ids(conn, "entity_notes", "run", run_ids)
+            + _count_entity_metadata_for_ids(conn, "entity_notes", "snapshot", snapshot_ids)
+            + _count_entity_metadata_for_ids(conn, "entity_notes", "workspace_file", workspace_file_ids)
+            + _count_entity_metadata_for_ids(conn, "entity_notes", "run_file_artifact", artifact_ids)
+            + _count_entity_metadata_for_ids(conn, "entity_notes", "finding", finding_ids)
+            + _count_entity_metadata_for_ids(conn, "entity_notes", "target", target_ids)
+            + _count_entity_metadata_for_ids(conn, "entity_notes", "package", package_ids)
         )
     links = [_row_to_link(row) for row in link_rows]
     targets = [_row_to_target(row) for row in target_rows]
     confirmed_target_count = sum(1 for target in targets if target and target.get("review_state") == "confirmed")
     pending_target_count = sum(1 for target in targets if target and target.get("review_state") == "pending")
-    runs = [item for item in (_row_to_project_run(row) for row in run_rows) if item]
+    runs = []
+    for item in (_row_to_project_run(row) for row in run_rows):
+        if not item:
+            continue
+        runs.append({
+            **item,
+            "labels": run_labels.get(str(item["id"]), []),
+            "note": run_notes.get(str(item["id"])),
+        })
     artifacts = []
     for item in (_row_to_run_file_artifact(row) for row in artifact_rows):
         if not item:
@@ -2239,6 +2285,8 @@ def get_project_summary(session_id, project_id):
         artifacts.append({
             **item,
             **_artifact_availability(session_id, item),
+            "labels": artifact_labels.get(str(item["id"]), []),
+            "note": artifact_notes.get(str(item["id"])),
         })
     packages = list_evidence_packages(session_id, project_id) or []
     return {
@@ -2257,8 +2305,8 @@ def get_project_summary(session_id, project_id):
             "artifacts": len(artifacts),
             "findings": len(finding_ids),
             "labels": label_count,
-            "annotations": annotation_count,
-            "packages": int(package_row["count"] or 0) if package_row else 0,
+            "notes": note_count,
+            "packages": len(package_ids),
         },
     }
 
@@ -2385,7 +2433,7 @@ def delete_project(session_id, project_id):
             (project_id,),
         )
         conn.execute(
-            "DELETE FROM annotations WHERE entity_type = 'project' AND entity_id = ?",
+            "DELETE FROM entity_notes WHERE entity_type = 'project' AND entity_id = ?",
             (project_id,),
         )
         if target_ids:
@@ -2406,7 +2454,7 @@ def delete_project(session_id, project_id):
                 target_ids,
             )
             conn.execute(
-                "DELETE FROM annotations WHERE entity_type = 'target' "
+                "DELETE FROM entity_notes WHERE entity_type = 'target' "
                 f"AND entity_id IN ({placeholders})",  # nosec B608
                 target_ids,
             )
@@ -2418,7 +2466,7 @@ def delete_project(session_id, project_id):
                 package_ids,
             )
             conn.execute(
-                "DELETE FROM annotations WHERE entity_type = 'package' "
+                "DELETE FROM entity_notes WHERE entity_type = 'package' "
                 f"AND entity_id IN ({placeholders})",  # nosec B608
                 package_ids,
             )
@@ -2509,36 +2557,43 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
     metadata_targets = _package_metadata_targets(package, manifest)
     with db_connect() as conn:
         label_rows = _package_metadata_rows(conn, session_id, "entity_labels", metadata_targets)
-        annotation_rows = (
-            _package_metadata_rows(conn, session_id, "annotations", metadata_targets)
-            if render_manifest.get("include_private_annotations")
+        note_rows = (
+            _package_metadata_rows(conn, session_id, "entity_notes", metadata_targets)
+            if render_manifest.get("include_private_notes")
             else []
         )
     label_items = _package_label_dicts(label_rows, redaction_rules)
-    annotation_items = _package_annotation_dicts(annotation_rows, redaction_rules)
+    note_items = _package_note_dicts(note_rows, redaction_rules)
     render_manifest = _package_manifest_with_inline_metadata(
         render_manifest,
         label_items,
-        annotation_items,
+        note_items,
     )
     render_package = {
         **package,
         "name": apply_redaction_rules(package["name"], redaction_rules),
         "description": apply_redaction_rules(package["description"], redaction_rules),
     }
+    package_labels = _metadata_items_by_entity(label_items).get(("package", str(package.get("id") or "")), [])
+    package_notes = _metadata_items_by_entity(note_items).get(("package", str(package.get("id") or "")), [])
+    export_package = {
+        "id": package["id"],
+        "name": render_package["name"],
+        "description": render_package["description"],
+        "redaction_mode": package["redaction_mode"],
+        "include_artifacts": package["include_artifacts"],
+        "status": package["status"],
+        "created": package["created"],
+        "updated": package["updated"],
+    }
+    if package_labels:
+        export_package["labels"] = package_labels
+    if package_notes:
+        export_package["note"] = package_notes[0]
     export_manifest = {
         "format": 1,
         "generated_at": generated_at,
-        "package": {
-            "id": package["id"],
-            "name": render_package["name"],
-            "description": render_package["description"],
-            "redaction_mode": package["redaction_mode"],
-            "include_artifacts": package["include_artifacts"],
-            "status": package["status"],
-            "created": package["created"],
-            "updated": package["updated"],
-        },
+        "package": export_package,
         "manifest": render_manifest,
     }
     manifest_bytes = json.dumps(export_manifest, indent=2, sort_keys=True).encode("utf-8") + b"\n"
@@ -2758,27 +2813,27 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 projected_bytes,
                 max_archive_bytes,
             )
-            annotations_json_bytes = _package_annotations_json_bytes(
-                annotation_items,
+            notes_json_bytes = _package_notes_json_bytes(
+                note_items,
                 generated_at,
-                included=bool(render_manifest.get("include_private_annotations")),
+                included=bool(render_manifest.get("include_private_notes")),
             )
             projected_bytes = _write_bounded_archive_entry(
                 archive,
-                "notes/annotations.json",
-                annotations_json_bytes,
+                "notes/entity-notes.json",
+                notes_json_bytes,
                 projected_bytes,
                 max_archive_bytes,
             )
-            annotations_markdown_bytes = _package_annotations_markdown_bytes(
-                annotation_items,
+            notes_markdown_bytes = _package_notes_markdown_bytes(
+                note_items,
                 generated_at,
-                included=bool(render_manifest.get("include_private_annotations")),
+                included=bool(render_manifest.get("include_private_notes")),
             )
             projected_bytes = _write_bounded_archive_entry(
                 archive,
-                "notes/annotations.md",
-                annotations_markdown_bytes,
+                "notes/entity-notes.md",
+                notes_markdown_bytes,
                 projected_bytes,
                 max_archive_bytes,
             )
@@ -2940,7 +2995,7 @@ def delete_evidence_package(session_id, project_id, package_id):
             (package_id,),
         )
         conn.execute(
-            "DELETE FROM annotations WHERE entity_type = 'package' AND entity_id = ?",
+            "DELETE FROM entity_notes WHERE entity_type = 'package' AND entity_id = ?",
             (package_id,),
         )
         result = conn.execute(
@@ -3177,16 +3232,16 @@ def list_project_findings(session_id, project_id, filters=None):
                 ")"
             )
             params.extend([session_id, label])
-        annotation_state = _trim_text(filters.get("annotation_state"), 32).lower()
-        if annotation_state:
-            if annotation_state not in {"annotated", "unannotated"}:
-                raise ProjectWorkspaceError("annotation_state must be annotated or unannotated")
-            operator = "EXISTS" if annotation_state == "annotated" else "NOT EXISTS"
+        note_state = _trim_text(filters.get("note_state"), 32).lower()
+        if note_state:
+            if note_state not in {"noted", "unnoted"}:
+                raise ProjectWorkspaceError("note_state must be noted or unnoted")
+            operator = "EXISTS" if note_state == "noted" else "NOT EXISTS"
             clauses.append(
                 f"{operator} ("  # nosec B608
-                "SELECT 1 FROM annotations ann "
-                "WHERE ann.session_id = ? AND ann.entity_type = 'finding' "
-                "AND ann.entity_id = f.id"
+                "SELECT 1 FROM entity_notes note "
+                "WHERE note.session_id = ? AND note.entity_type = 'finding' "
+                "AND note.entity_id = f.id"
                 ")"
             )
             params.append(session_id)
@@ -3212,6 +3267,9 @@ def list_project_findings(session_id, project_id, filters=None):
             [row["id"] for row in rows],
             project_id,
         )
+        finding_ids = [str(row["id"] or "") for row in rows if row["id"]]
+        finding_labels = _entity_labels_by_id(conn, session_id, "finding", finding_ids)
+        finding_notes = _entity_notes_by_id(conn, session_id, "finding", finding_ids)
 
     findings = [
         item for item in (
@@ -3220,6 +3278,10 @@ def list_project_findings(session_id, project_id, filters=None):
         )
         if item
     ]
+    for item in findings:
+        finding_id = str(item["id"] or "")
+        item["labels"] = finding_labels.get(finding_id, [])
+        item["note"] = finding_notes.get(finding_id)
     command_root = _trim_text(filters.get("command_root"), 128)
     if command_root:
         findings = [item for item in findings if item["command_root"] == command_root]
@@ -3307,6 +3369,22 @@ def _compare_items(left_items, right_items):
     }
 
 
+def _run_compare_summary(row):
+    if not row:
+        return {}
+    return {
+        "id": row["id"],
+        "command": row["command"],
+        "started": row["started"],
+        "finished": row["finished"],
+        "exit_code": row["exit_code"],
+        "output_line_count": int(row["output_line_count"] or 0),
+        "preview_truncated": bool(row["preview_truncated"]),
+        "full_output_available": bool(row["full_output_available"]),
+        "full_output_truncated": bool(row["full_output_truncated"]),
+    }
+
+
 def compare_project_runs(session_id, project_id, filters=None):
     filters = filters if isinstance(filters, dict) else {}
     with db_connect() as conn:
@@ -3337,16 +3415,49 @@ def compare_project_runs(session_id, project_id, filters=None):
         linked = set(linked_run_ids)
         if left_run_id not in linked or right_run_id not in linked:
             raise ProjectWorkspaceError("comparison runs must both be linked to this project")
+        run_rows = conn.execute(
+            "SELECT id, command, started, finished, exit_code, output_line_count, "
+            "preview_truncated, full_output_available, full_output_truncated "
+            "FROM runs WHERE session_id = ? AND id IN (?, ?)",
+            (session_id, left_run_id, right_run_id),
+        ).fetchall()
+        runs_by_id = {str(row["id"]): row for row in run_rows}
+        if left_run_id not in runs_by_id or right_run_id not in runs_by_id:
+            raise ProjectWorkspaceError("comparison runs must both be linked to this project")
         left_findings = _run_finding_compare_items(conn, session_id, left_run_id)
         right_findings = _run_finding_compare_items(conn, session_id, right_run_id)
         left_artifacts = _run_artifact_compare_items(conn, session_id, left_run_id)
         right_artifacts = _run_artifact_compare_items(conn, session_id, right_run_id)
+    finding_diff = _compare_items(left_findings, right_findings)
+    artifact_diff = _compare_items(left_artifacts, right_artifacts)
     return {
         "left_run_id": left_run_id,
         "right_run_id": right_run_id,
+        "left": {
+            **_run_compare_summary(runs_by_id[left_run_id]),
+            "persisted_finding_count": len(left_findings),
+            "artifact_count": len(left_artifacts),
+        },
+        "right": {
+            **_run_compare_summary(runs_by_id[right_run_id]),
+            "persisted_finding_count": len(right_findings),
+            "artifact_count": len(right_artifacts),
+        },
         "baseline_label": baseline_label,
-        "findings": _compare_items(left_findings, right_findings),
-        "artifacts": _compare_items(left_artifacts, right_artifacts),
+        "objects": {
+            "findings": finding_diff,
+            "artifacts": artifact_diff,
+        },
+        "sections": {
+            "changed": [],
+            "added": [],
+            "removed": [],
+            "added_omitted": 0,
+            "removed_omitted": 0,
+        },
+        "findings": finding_diff,
+        "artifacts": artifact_diff,
+        "truncated": {},
     }
 
 
@@ -3981,22 +4092,15 @@ def _normalize_label_payload(data):
     return label
 
 
-def _normalize_annotation_payload(data, *, partial=False):
+def _normalize_entity_note_payload(data, *, partial=False):
     if not isinstance(data, dict):
-        raise ProjectWorkspaceError("annotation payload must be an object")
+        raise ProjectWorkspaceError("note payload must be an object")
     clean = {}
     if "body" in data or not partial:
-        body = _trim_text(data.get("body"), MAX_ANNOTATION_BODY_LEN)
+        body = _trim_text(data.get("body"), MAX_ENTITY_NOTE_BODY_LEN)
         if not body:
-            raise ProjectWorkspaceError("annotation body is required")
+            raise ProjectWorkspaceError("note body is required")
         clean["body"] = body
-    if "visibility" in data or not partial:
-        visibility = _trim_text(data.get("visibility") or "private", 32).lower()
-        if visibility not in ANNOTATION_VISIBILITIES:
-            raise ProjectWorkspaceError("annotation visibility must be private")
-        clean["visibility"] = visibility
-    if "author_label" in data or not partial:
-        clean["author_label"] = _trim_text(data.get("author_label"), MAX_AUTHOR_LABEL_LEN)
     return clean
 
 
@@ -4017,6 +4121,8 @@ def _normalize_target_payload(data, *, partial=False):
     if "label" in data or not partial:
         clean["label"] = _trim_text(data.get("label"), MAX_TARGET_LABEL_LEN)
     if "notes" in data or not partial:
+        if _text_exceeds_limit(data.get("notes"), MAX_TARGET_NOTES_LEN):
+            raise ProjectWorkspaceError(f"target notes must be {MAX_TARGET_NOTES_LEN} characters or fewer")
         clean["notes"] = _trim_text(data.get("notes"), MAX_TARGET_NOTES_LEN)
     if "source_run_id" in data or not partial:
         clean["source_run_id"] = _trim_text(data.get("source_run_id"), MAX_ENTITY_ID_LEN)
@@ -4620,6 +4726,14 @@ def delete_project_target(session_id, project_id, target_id):
             "UPDATE findings SET target_id = '' WHERE session_id = ? AND target_id = ?",
             (session_id, target_id),
         )
+        conn.execute(
+            "DELETE FROM entity_labels WHERE session_id = ? AND entity_type = 'target' AND entity_id = ?",
+            (session_id, target_id),
+        )
+        conn.execute(
+            "DELETE FROM entity_notes WHERE session_id = ? AND entity_type = 'target' AND entity_id = ?",
+            (session_id, target_id),
+        )
         result = conn.execute(
             "DELETE FROM project_targets WHERE project_id = ? AND id = ?",
             (project_id, target_id),
@@ -4759,116 +4873,94 @@ def delete_entity_label(session_id, entity_type, entity_id, data):
     return result.rowcount > 0
 
 
-def list_entity_annotations(session_id, entity_type, entity_id):
+def entity_metadata_target_exists(session_id, entity_type, entity_id):
+    entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
+    with db_connect() as conn:
+        return _entity_belongs_to_session(conn, session_id, entity_type, entity_id)
+
+
+def get_entity_note(session_id, entity_type, entity_id):
     entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
     with db_connect() as conn:
         if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
             return None
-        rows = conn.execute(
-            "SELECT id, session_id, entity_type, entity_id, body, visibility, author_label, created, updated "
-            "FROM annotations WHERE session_id = ? AND entity_type = ? AND entity_id = ? "
-            "ORDER BY created ASC, id ASC",
+        row = conn.execute(
+            "SELECT id, session_id, entity_type, entity_id, body, created, updated "
+            "FROM entity_notes WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
             (session_id, entity_type, entity_id),
-        ).fetchall()
-    return [_row_to_annotation(row) for row in rows]
+        ).fetchone()
+    return _row_to_entity_note(row)
 
 
-def add_entity_annotation(session_id, entity_type, entity_id, data):
+def upsert_entity_note(session_id, entity_type, entity_id, data):
     entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
-    payload = _normalize_annotation_payload(data)
-    created = _now()
+    payload = _normalize_entity_note_payload(data)
+    now = _now()
     with db_connect() as conn:
         if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
             return None
+        existing = conn.execute(
+            "SELECT id, session_id, entity_type, entity_id, body, created, updated "
+            "FROM entity_notes WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
+            (session_id, entity_type, entity_id),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE entity_notes SET body = ?, updated = ? WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
+                (payload["body"], now, session_id, entity_type, entity_id),
+            )
+            row = conn.execute(
+                "SELECT id, session_id, entity_type, entity_id, body, created, updated "
+                "FROM entity_notes WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
+                (session_id, entity_type, entity_id),
+            ).fetchone()
+            conn.commit()
+            return _row_to_entity_note(row)
         session_count = conn.execute(
-            "SELECT COUNT(*) AS count FROM annotations WHERE session_id = ?",
+            "SELECT COUNT(*) AS count FROM entity_notes WHERE session_id = ?",
             (session_id,),
         ).fetchone()
         if _quota_exceeded(
             int(session_count["count"] or 0) if session_count else 0,
-            "max_entity_annotations_per_session",
+            "max_entity_notes_per_session",
             2000,
         ):
-            _raise_quota("annotation quota exceeded for this session")
-        entity_count = conn.execute(
-            "SELECT COUNT(*) AS count FROM annotations "
-            "WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
-            (session_id, entity_type, entity_id),
-        ).fetchone()
-        if _quota_exceeded(
-            int(entity_count["count"] or 0) if entity_count else 0,
-            "max_entity_annotations_per_entity",
-            50,
-        ):
-            _raise_quota("annotation quota exceeded for this entity")
+            _raise_quota("note quota exceeded for this session")
         for _ in range(10):
-            annotation_id = _new_annotation_id()
+            note_id = _new_entity_note_id()
             conn.execute(
-                "INSERT OR IGNORE INTO annotations "
-                "(id, session_id, entity_type, entity_id, body, visibility, author_label, created, updated) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO entity_notes "
+                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
-                    annotation_id,
+                    note_id,
                     session_id,
                     entity_type,
                     entity_id,
                     payload["body"],
-                    payload["visibility"],
-                    payload["author_label"],
-                    created,
-                    created,
+                    now,
+                    now,
                 ),
             )
             row = conn.execute(
-                "SELECT id, session_id, entity_type, entity_id, body, visibility, author_label, created, updated "
-                "FROM annotations WHERE id = ? AND session_id = ?",
-                (annotation_id, session_id),
+                "SELECT id, session_id, entity_type, entity_id, body, created, updated "
+                "FROM entity_notes WHERE id = ? AND session_id = ?",
+                (note_id, session_id),
             ).fetchone()
             if row:
                 conn.commit()
-                return _row_to_annotation(row)
-        raise ProjectWorkspaceError("could not allocate an annotation id")
+                return _row_to_entity_note(row)
+        raise ProjectWorkspaceError("could not allocate an entity note id")
 
 
-def update_entity_annotation(session_id, annotation_id, data):
-    annotation_id = _trim_text(annotation_id, MAX_ENTITY_ID_LEN)
-    payload = _normalize_annotation_payload(data, partial=True)
-    if not payload:
-        raise ProjectWorkspaceError("annotation update is empty")
-    assignments = []
-    values = []
-    for key in ("body", "visibility", "author_label"):
-        if key in payload:
-            assignments.append(f"{key} = ?")
-            values.append(payload[key])
-    updated = _now()
-    assignments.append("updated = ?")
-    values.append(updated)
-    values.extend([session_id, annotation_id])
+def delete_entity_note(session_id, entity_type, entity_id):
+    entity_type, entity_id = _normalize_metadata_target(entity_type, entity_id)
     with db_connect() as conn:
-        result = conn.execute(
-            f"UPDATE annotations SET {', '.join(assignments)} WHERE session_id = ? AND id = ?",  # nosec B608
-            values,
-        )
-        if result.rowcount <= 0:
+        if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
             return None
-        row = conn.execute(
-            "SELECT id, session_id, entity_type, entity_id, body, visibility, author_label, created, updated "
-            "FROM annotations WHERE session_id = ? AND id = ?",
-            (session_id, annotation_id),
-        ).fetchone()
-        conn.commit()
-    return _row_to_annotation(row)
-
-
-def delete_entity_annotation(session_id, annotation_id):
-    annotation_id = _trim_text(annotation_id, MAX_ENTITY_ID_LEN)
-    if not annotation_id:
-        raise ProjectWorkspaceError("annotation id is required")
-    with db_connect() as conn:
         result = conn.execute(
-            "DELETE FROM annotations WHERE session_id = ? AND id = ?",
-            (session_id, annotation_id),
+            "DELETE FROM entity_notes WHERE session_id = ? AND entity_type = ? AND entity_id = ?",
+            (session_id, entity_type, entity_id),
         )
         conn.commit()
     return result.rowcount > 0

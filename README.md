@@ -195,8 +195,7 @@ All application settings live in `app/conf/config.yaml`. The values below are th
 | `max_evidence_packages_per_project` | `25` | Server-side only. Maximum draft evidence package manifests per project |
 | `max_entity_labels_per_session` | `5000` | Server-side only. Maximum entity labels one session can create |
 | `max_entity_labels_per_entity` | `20` | Server-side only. Maximum labels attached to a single supported entity |
-| `max_entity_annotations_per_session` | `2000` | Server-side only. Maximum entity annotations one session can create |
-| `max_entity_annotations_per_entity` | `50` | Server-side only. Maximum annotations attached to a single supported entity |
+| `max_entity_notes_per_session` | `2000` | Server-side only. Maximum one-note-per-entity records one session can create |
 | `evidence_package_max_mb` | `25 MB` | Server-side only. Maximum uncompressed evidence package archive size before download is rejected |
 | `evidence_package_max_artifacts` | `100` | Server-side only. Maximum workspace artifacts included in one evidence package archive |
 | `evidence_package_download_rate_limit_per_minute` | `10` | Server-side only. Per-session evidence package download limit per minute |
@@ -581,7 +580,7 @@ To prevent commands from writing to either path directly, the app blocks any com
 - [tests/README.md](tests/README.md) - Detailed suite appendix, smoke-test coverage, and focused test commands
 - [THEME.md](THEME.md) - Theme registry, selector metadata, and override behavior
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - External command registry, rewrite, environment, Files, and smoke-test contracts
-- [docs/ROADMAP.md](docs/ROADMAP.md) - Product roadmap for projects, annotations, artifacts, notes, exports, and target context
+- [docs/ROADMAP.md](docs/ROADMAP.md) - Product roadmap for projects, findings, labels, notes, artifacts, exports, and target context
 - [FEATURES.md](FEATURES.md) - Full per-feature reference: autocomplete, pipe support, keyboard shortcuts, allowlist, welcome animation, history, permalinks, themes, and more
 
 ---
@@ -748,7 +747,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   └── history.db              #   stores run history and tab snapshots
 ├── docker-compose.yml
 ├── docs/
-│   ├── ROADMAP.md              # Product roadmap for projects, annotations, artifacts, notes, exports, and target context
+│   ├── ROADMAP.md              # Product roadmap for projects, findings, labels, notes, artifacts, exports, and target context
 │   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
 │   └── release-drafts/
 │       ├── v2.0-merge-request.md # Draft merge-request notes for the next major release

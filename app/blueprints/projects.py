@@ -14,7 +14,6 @@ from project_workspace import (
     EvidencePackageTooLarge,
     ProjectWorkspaceError,
     ProjectWorkspaceQuotaExceeded,
-    add_entity_annotation,
     add_entity_label,
     add_project_target,
     build_evidence_package_archive,
@@ -24,18 +23,19 @@ from project_workspace import (
     create_evidence_package,
     create_project,
     delete_evidence_package,
-    delete_entity_annotation,
     delete_entity_label,
+    delete_entity_note,
     delete_project,
     delete_project_target,
+    entity_metadata_target_exists,
     get_active_project,
     get_evidence_package,
+    get_entity_note,
     get_project,
     get_project_run_file_artifact,
     get_project_summary,
     infer_project_target_payload,
     link_project_entity,
-    list_entity_annotations,
     list_entity_labels,
     list_evidence_packages,
     list_project_findings,
@@ -45,8 +45,8 @@ from project_workspace import (
     list_projects,
     set_active_project,
     unlink_project_entity,
-    update_entity_annotation,
     update_finding_review_state,
+    upsert_entity_note,
     update_project,
     update_project_target,
 )
@@ -545,7 +545,7 @@ def projects_findings_list(project_id):
         "severity": request.args.get("severity"),
         "command_root": request.args.get("command_root"),
         "label": request.args.get("label"),
-        "annotation_state": request.args.get("annotation_state"),
+        "note_state": request.args.get("note_state"),
     }
     try:
         findings = list_project_findings(session_id, project_id, filters)
@@ -650,67 +650,52 @@ def entity_labels_delete(entity_type, entity_id):
     return jsonify({"ok": True})
 
 
-@projects_bp.route("/entities/<entity_type>/<path:entity_id>/annotations")
-def entity_annotations_list(entity_type, entity_id):
+@projects_bp.route("/entities/<entity_type>/<path:entity_id>/note")
+def entity_note_get(entity_type, entity_id):
     session_id = get_session_id()
     try:
-        annotations = list_entity_annotations(session_id, entity_type, entity_id)
+        if not entity_metadata_target_exists(session_id, entity_type, entity_id):
+            return jsonify({"error": "entity not found"}), 404
+        note = get_entity_note(session_id, entity_type, entity_id)
     except ProjectWorkspaceError as exc:
         return jsonify({"error": str(exc)}), 400
-    if annotations is None:
-        return jsonify({"error": "entity not found"}), 404
-    return jsonify({"annotations": annotations})
+    return jsonify({"note": note})
 
 
-@projects_bp.route("/entities/<entity_type>/<path:entity_id>/annotations", methods=["POST"])
+@projects_bp.route("/entities/<entity_type>/<path:entity_id>/note", methods=["PUT"])
 @limiter.limit(_project_write_limit)
-def entity_annotations_create(entity_type, entity_id):
+def entity_note_update(entity_type, entity_id):
     session_id = get_session_id()
     try:
-        annotation = add_entity_annotation(session_id, entity_type, entity_id, request.get_json(silent=True) or {})
+        note = upsert_entity_note(session_id, entity_type, entity_id, request.get_json(silent=True) or {})
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
-    if annotation is None:
+    if note is None:
         return jsonify({"error": "entity not found"}), 404
-    log.info("ENTITY_ANNOTATION_ADDED", extra={
+    log.info("ENTITY_NOTE_SAVED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
-        "entity_type": annotation["entity_type"],
+        "entity_type": note["entity_type"],
     })
-    return jsonify({"ok": True, "annotation": annotation}), 201
+    return jsonify({"ok": True, "note": note})
 
 
-@projects_bp.route("/annotations/<annotation_id>", methods=["PUT"])
+@projects_bp.route("/entities/<entity_type>/<path:entity_id>/note", methods=["DELETE"])
 @limiter.limit(_project_write_limit)
-def entity_annotations_update(annotation_id):
+def entity_note_delete(entity_type, entity_id):
     session_id = get_session_id()
     try:
-        annotation = update_entity_annotation(session_id, annotation_id, request.get_json(silent=True) or {})
+        deleted = delete_entity_note(session_id, entity_type, entity_id)
     except ProjectWorkspaceError as exc:
         return _project_error_response(exc)
-    if annotation is None:
-        return jsonify({"error": "annotation not found"}), 404
-    log.info("ENTITY_ANNOTATION_UPDATED", extra={
-        "ip": get_client_ip(),
-        "session": get_log_session_id(session_id),
-        "entity_type": annotation["entity_type"],
-    })
-    return jsonify({"ok": True, "annotation": annotation})
-
-
-@projects_bp.route("/annotations/<annotation_id>", methods=["DELETE"])
-@limiter.limit(_project_write_limit)
-def entity_annotations_delete(annotation_id):
-    session_id = get_session_id()
-    try:
-        deleted = delete_entity_annotation(session_id, annotation_id)
-    except ProjectWorkspaceError as exc:
-        return _project_error_response(exc)
+    if deleted is None:
+        return jsonify({"error": "entity not found"}), 404
     if not deleted:
-        return jsonify({"error": "annotation not found"}), 404
-    log.info("ENTITY_ANNOTATION_REMOVED", extra={
+        return jsonify({"error": "note not found"}), 404
+    log.info("ENTITY_NOTE_REMOVED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
-        "annotation_id": annotation_id,
+        "entity_type": entity_type,
+        "entity_id": entity_id,
     })
     return jsonify({"ok": True})

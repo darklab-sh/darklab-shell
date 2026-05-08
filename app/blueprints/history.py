@@ -618,7 +618,7 @@ def _run_file_artifacts_by_run(conn, run_ids):
 def _run_metadata_counts_by_run(conn, run_ids):
     ids = [str(run_id) for run_id in run_ids if run_id]
     counts = {
-        run_id: {"finding_count": 0, "label_count": 0, "annotation_count": 0}
+        run_id: {"finding_count": 0, "label_count": 0, "note_count": 0}
         for run_id in ids
     }
     if not ids:
@@ -629,7 +629,7 @@ def _run_metadata_counts_by_run(conn, run_ids):
             f"SELECT run_id, COUNT(*) AS count FROM findings WHERE run_id IN ({placeholders}) GROUP BY run_id",  # nosec B608
             ids,
         ).fetchall():
-            counts.setdefault(str(row["run_id"]), {"finding_count": 0, "label_count": 0, "annotation_count": 0})
+            counts.setdefault(str(row["run_id"]), {"finding_count": 0, "label_count": 0, "note_count": 0})
             counts[str(row["run_id"])]["finding_count"] = int(row["count"] or 0)
     if _history_table_exists(conn, "entity_labels"):
         for row in conn.execute(
@@ -637,16 +637,16 @@ def _run_metadata_counts_by_run(conn, run_ids):
             f"AND entity_id IN ({placeholders}) GROUP BY entity_id",  # nosec B608
             ids,
         ).fetchall():
-            counts.setdefault(str(row["entity_id"]), {"finding_count": 0, "label_count": 0, "annotation_count": 0})
+            counts.setdefault(str(row["entity_id"]), {"finding_count": 0, "label_count": 0, "note_count": 0})
             counts[str(row["entity_id"])]["label_count"] = int(row["count"] or 0)
-    if _history_table_exists(conn, "annotations"):
+    if _history_table_exists(conn, "entity_notes"):
         for row in conn.execute(
-            "SELECT entity_id, COUNT(*) AS count FROM annotations WHERE entity_type = 'run' "
+            "SELECT entity_id, COUNT(*) AS count FROM entity_notes WHERE entity_type = 'run' "
             f"AND entity_id IN ({placeholders}) GROUP BY entity_id",  # nosec B608
             ids,
         ).fetchall():
-            counts.setdefault(str(row["entity_id"]), {"finding_count": 0, "label_count": 0, "annotation_count": 0})
-            counts[str(row["entity_id"])]["annotation_count"] = int(row["count"] or 0)
+            counts.setdefault(str(row["entity_id"]), {"finding_count": 0, "label_count": 0, "note_count": 0})
+            counts[str(row["entity_id"])]["note_count"] = int(row["count"] or 0)
     return counts
 
 
@@ -723,13 +723,13 @@ def _run_labels_by_run(conn, run_ids):
     return grouped
 
 
-def _run_annotations_by_run(conn, run_ids):
+def _run_notes_by_run(conn, run_ids):
     ids = [str(run_id) for run_id in run_ids if run_id]
     if not ids:
         return {}
     placeholders = ",".join("?" for _ in ids)
     rows = conn.execute(
-        "SELECT id, entity_id, body, visibility, author_label, created, updated FROM annotations "
+        "SELECT id, entity_id, body, created, updated FROM entity_notes "
         "WHERE entity_type = 'run' "
         f"AND entity_id IN ({placeholders}) "  # nosec B608
         "ORDER BY created ASC, id ASC",
@@ -742,8 +742,6 @@ def _run_annotations_by_run(conn, run_ids):
             "entity_type": "run",
             "entity_id": row["entity_id"],
             "body": row["body"],
-            "visibility": row["visibility"],
-            "author_label": row["author_label"] or "",
             "created": row["created"],
             "updated": row["updated"],
         })
@@ -900,6 +898,59 @@ def _finding_count_for_entries(run, entries):
             count += 1
         previous_text = text.strip()
     return count
+
+
+def _run_finding_compare_items(conn, session_id, run_id):
+    rows = conn.execute(
+        "SELECT id, raw_line, title, severity, fingerprint, review_state, line_number, created "
+        "FROM findings WHERE session_id = ? AND run_id = ? ORDER BY created ASC, id ASC",
+        (session_id, run_id),
+    ).fetchall()
+    items = []
+    for row in rows:
+        key = row["fingerprint"] or row["raw_line"] or row["title"] or row["id"]
+        items.append({
+            "key": key,
+            "id": row["id"],
+            "title": row["title"] or "",
+            "raw_line": row["raw_line"] or "",
+            "severity": row["severity"] or "",
+            "review_state": row["review_state"] or "",
+            "line_number": row["line_number"],
+            "created": row["created"],
+        })
+    return items
+
+
+def _run_artifact_compare_items(conn, session_id, run_id):
+    rows = conn.execute(
+        "SELECT id, workspace_path, display_name, kind, byte_size, detected_by, content_sha256, created "
+        "FROM run_file_artifacts WHERE session_id = ? AND run_id = ? ORDER BY created ASC, id ASC",
+        (session_id, run_id),
+    ).fetchall()
+    return [{
+        "key": row["content_sha256"] or row["workspace_path"] or row["id"],
+        "id": row["id"],
+        "workspace_path": row["workspace_path"] or "",
+        "display_name": row["display_name"] or "",
+        "kind": row["kind"] or "",
+        "byte_size": row["byte_size"],
+        "detected_by": row["detected_by"] or "",
+        "content_sha256": row["content_sha256"] or "",
+        "created": row["created"],
+    } for row in rows]
+
+
+def _compare_object_items(left_items, right_items):
+    left_by_key = {item["key"]: item for item in left_items if item.get("key")}
+    right_by_key = {item["key"]: item for item in right_items if item.get("key")}
+    left_keys = set(left_by_key)
+    right_keys = set(right_by_key)
+    return {
+        "added": [left_by_key[key] for key in sorted(left_keys - right_keys)],
+        "removed": [right_by_key[key] for key in sorted(right_keys - left_keys)],
+        "unchanged_count": len(left_keys & right_keys),
+    }
 
 
 def _bounded_multiset_line_diff(left_entries, right_entries):
@@ -1189,7 +1240,7 @@ def get_history():
             item.update(metadata_counts_by_run.get(str(item["id"]), {
                 "finding_count": 0,
                 "label_count": 0,
-                "annotation_count": 0,
+                "note_count": 0,
             }))
         return paged_items, paged_runs, roots_rows, total_count, page_count, current_page, fts_q
 
@@ -1388,19 +1439,34 @@ def compare_history_runs():
     left_finding_count = _finding_count_for_entries(left_run, left_entries)
     right_finding_count = _finding_count_for_entries(right_run, right_entries)
     diff = _bounded_multiset_line_diff(left_entries, right_entries)
+    with db_connect() as conn:
+        left_findings = _run_finding_compare_items(conn, session_id, left_id)
+        right_findings = _run_finding_compare_items(conn, session_id, right_id)
+        left_artifacts = _run_artifact_compare_items(conn, session_id, left_id)
+        right_artifacts = _run_artifact_compare_items(conn, session_id, right_id)
+    finding_objects = _compare_object_items(left_findings, right_findings)
+    artifact_objects = _compare_object_items(left_artifacts, right_artifacts)
 
     return jsonify({
         "left": {
             **_compare_run_summary(left_run),
             "finding_count": left_finding_count,
+            "persisted_finding_count": len(left_findings),
+            "artifact_count": len(left_artifacts),
             "output_source": left_output,
         },
         "right": {
             **_compare_run_summary(right_run),
             "finding_count": right_finding_count,
+            "persisted_finding_count": len(right_findings),
+            "artifact_count": len(right_artifacts),
             "output_source": right_output,
         },
         "deltas": _compare_deltas(left_run, right_run, left_finding_count, right_finding_count),
+        "objects": {
+            "findings": finding_objects,
+            "artifacts": artifact_objects,
+        },
         "sections": {
             "changed": diff["changed"],
             "added": diff["added"],
@@ -1464,16 +1530,16 @@ def get_run(run_id):
         include_private_metadata = str(run.get("session_id") or "") == str(session_id or "")
         findings_by_run = _run_findings_by_run(conn, [run_id]) if include_private_metadata else {}
         labels_by_run = _run_labels_by_run(conn, [run_id]) if include_private_metadata else {}
-        annotations_by_run = _run_annotations_by_run(conn, [run_id]) if include_private_metadata else {}
+        notes_by_run = _run_notes_by_run(conn, [run_id]) if include_private_metadata else {}
     run["artifacts"] = artifacts_by_run.get(str(run_id), [])
     run["artifact_count"] = len(run["artifacts"])
     run["findings"] = findings_by_run.get(str(run_id), [])
     run["labels"] = labels_by_run.get(str(run_id), [])
-    run["annotations"] = annotations_by_run.get(str(run_id), [])
+    run["note"] = (notes_by_run.get(str(run_id), []) or [None])[0]
     run.update(metadata_counts_by_run.get(str(run_id), {
         "finding_count": 0,
         "label_count": 0,
-        "annotation_count": 0,
+        "note_count": 0,
     }))
     run["preview_notice"] = _preview_notice(run) if not is_full_view else None
     log.info("RUN_VIEWED", extra={
@@ -1509,7 +1575,7 @@ def get_run(run_id):
         "artifact_count": run["artifact_count"],
         "finding_count": run["finding_count"],
         "label_count": run["label_count"],
-        "annotation_count": run["annotation_count"],
+        "note_count": run["note_count"],
         "version": APP_VERSION,
     }
 

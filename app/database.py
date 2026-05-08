@@ -279,16 +279,15 @@ def _create_project_workspace_schema(conn):
         )
     """)
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS annotations (
+        CREATE TABLE IF NOT EXISTS entity_notes (
             id           TEXT PRIMARY KEY,
             session_id   TEXT NOT NULL,
             entity_type  TEXT NOT NULL,
             entity_id    TEXT NOT NULL,
             body         TEXT NOT NULL,
-            visibility   TEXT NOT NULL DEFAULT 'private',
-            author_label TEXT NOT NULL DEFAULT '',
             created      TEXT NOT NULL,
-            updated      TEXT NOT NULL
+            updated      TEXT NOT NULL,
+            UNIQUE (session_id, entity_type, entity_id)
         )
     """)
     conn.execute("""
@@ -381,8 +380,8 @@ def _create_indexes(conn):
         "ON entity_labels (entity_type, entity_id, created)"
     )
     conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_annotations_entity_created "
-        "ON annotations (entity_type, entity_id, created)"
+        "CREATE INDEX IF NOT EXISTS idx_entity_notes_entity_updated "
+        "ON entity_notes (entity_type, entity_id, updated)"
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_evidence_packages_project_updated "
@@ -669,7 +668,7 @@ def delete_run_artifacts(conn, run_ids):
         ids,
     )
     conn.execute(
-        "DELETE FROM annotations WHERE entity_type = 'run' "
+        "DELETE FROM entity_notes WHERE entity_type = 'run' "
         f"AND entity_id IN ({placeholders})",  # nosec B608
         ids,
     )
@@ -681,7 +680,7 @@ def delete_run_artifacts(conn, run_ids):
             file_artifact_ids,
         )
         conn.execute(
-            "DELETE FROM annotations WHERE entity_type = 'run_file_artifact' "
+            "DELETE FROM entity_notes WHERE entity_type = 'run_file_artifact' "
             f"AND entity_id IN ({artifact_placeholders})",  # nosec B608
             file_artifact_ids,
         )
@@ -697,7 +696,7 @@ def delete_run_artifacts(conn, run_ids):
             finding_ids,
         )
         conn.execute(
-            "DELETE FROM annotations WHERE entity_type = 'finding' "
+            "DELETE FROM entity_notes WHERE entity_type = 'finding' "
             f"AND entity_id IN ({finding_placeholders})",  # nosec B608
             finding_ids,
         )

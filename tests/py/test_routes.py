@@ -202,9 +202,8 @@ class TestProjectRoutes:
             project_routes.findings_review_update,
             project_routes.entity_labels_create,
             project_routes.entity_labels_delete,
-            project_routes.entity_annotations_create,
-            project_routes.entity_annotations_update,
-            project_routes.entity_annotations_delete,
+            project_routes.entity_note_update,
+            project_routes.entity_note_delete,
         ):
             assert "__wrapper-limiter-instance" in view.__dict__
         assert "__wrapper-limiter-instance" in project_routes.projects_packages_download.__dict__
@@ -265,6 +264,40 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         ).data)
         assert [item["id"] for item in targets["targets"]] == [target["id"]]
+        target_label = client.post(
+            f"/entities/target/{target['id']}/labels",
+            json={"label": "temporary"},
+            headers={"X-Session-ID": session_id},
+        )
+        target_note = client.put(
+            f"/entities/target/{target['id']}/note",
+            json={"body": "delete with target"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert target_label.status_code == 201
+        assert target_note.status_code == 200
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, target_id, scope, raw_line, created) "
+                "VALUES (?, ?, 'run_target_delete', ?, 'finding', 'target finding', datetime('now'))",
+                ("fnd_target_delete_" + uuid.uuid4().hex, session_id, target["id"]),
+            )
+            conn.execute(
+                "INSERT INTO finding_targets "
+                "(id, session_id, finding_id, target_id, source, created) "
+                "VALUES (?, ?, (SELECT id FROM findings WHERE run_id = 'run_target_delete'), ?, "
+                "'primary_match', datetime('now'))",
+                ("ftarget_delete_" + uuid.uuid4().hex, session_id, target["id"]),
+            )
+            conn.execute(
+                "INSERT INTO entity_labels "
+                "(id, session_id, entity_type, entity_id, label, created) "
+                "VALUES (?, ?, 'finding', (SELECT id FROM findings WHERE run_id = 'run_target_delete'), "
+                "'finding-kept', datetime('now'))",
+                ("lbl_finding_target_delete_" + uuid.uuid4().hex, session_id),
+            )
+            conn.commit()
         hidden_targets = client.get(
             f"/projects/{project['id']}/targets",
             headers={"X-Session-ID": "other-session"},
@@ -280,6 +313,29 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         ).data)
         assert targets_after_delete["targets"] == []
+        with sqlite3.connect(DB_PATH) as conn:
+            assert conn.execute(
+                "SELECT COUNT(*) FROM entity_labels WHERE entity_type = 'target' AND entity_id = ?",
+                (target["id"],),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM entity_notes WHERE entity_type = 'target' AND entity_id = ?",
+                (target["id"],),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM finding_targets WHERE target_id = ?",
+                (target["id"],),
+            ).fetchone()[0] == 0
+            assert conn.execute(
+                "SELECT COUNT(*) FROM entity_labels "
+                "WHERE session_id = ? AND entity_type = 'finding' AND label = 'finding-kept'",
+                (session_id,),
+            ).fetchone()[0] == 1
+            assert conn.execute(
+                "SELECT COUNT(*) FROM findings "
+                "WHERE session_id = ? AND run_id = 'run_target_delete' AND target_id = ''",
+                (session_id,),
+            ).fetchone()[0] == 1
 
         update_resp = client.put(
             f"/projects/{project['id']}",
@@ -326,10 +382,10 @@ class TestProjectRoutes:
                 ("lbl_project_delete_" + uuid.uuid4().hex, session_id, project["id"]),
             )
             conn.execute(
-                "INSERT INTO annotations "
+                "INSERT INTO entity_notes "
                 "(id, session_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'target', ?, 'delete target note', datetime('now'), datetime('now'))",
-                ("ann_target_delete_" + uuid.uuid4().hex, session_id, cleanup_target["id"]),
+                ("note_target_delete_" + uuid.uuid4().hex, session_id, cleanup_target["id"]),
             )
             conn.commit()
 
@@ -347,7 +403,7 @@ class TestProjectRoutes:
                 (project["id"],),
             ).fetchone()[0] == 0
             assert conn.execute(
-                "SELECT COUNT(*) FROM annotations WHERE entity_type = 'target' AND entity_id = ?",
+                "SELECT COUNT(*) FROM entity_notes WHERE entity_type = 'target' AND entity_id = ?",
                 (cleanup_target["id"],),
             ).fetchone()[0] == 0
 
@@ -565,31 +621,32 @@ class TestProjectRoutes:
         ).data)
         assert [item["label"] for item in labels["labels"]] == ["baseline"]
 
-        annotation_resp = client.post(
-            f"/entities/run/{run_id}/annotations",
-            json={"body": "Confirm service owner", "author_label": "nona"},
+        note_resp = client.put(
+            f"/entities/run/{run_id}/note",
+            json={"body": "Confirm service owner"},
             headers={"X-Session-ID": session_id},
         )
-        assert annotation_resp.status_code == 201
-        annotation = json.loads(annotation_resp.data)["annotation"]
-        assert annotation["body"] == "Confirm service owner"
-        assert annotation["entity_id"] == run_id
+        assert note_resp.status_code == 200
+        note = json.loads(note_resp.data)["note"]
+        assert note["body"] == "Confirm service owner"
+        assert note["entity_id"] == run_id
         with mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}):
             artifact_path = resolve_workspace_path(session_id, "reports/run.txt", shell_app.CFG, ensure_parent=True)
             artifact_bytes = b"0123456789"
             artifact_path.write_bytes(artifact_bytes)
             artifact_hash = hashlib.sha256(artifact_bytes).hexdigest()
-        updated_annotation = json.loads(client.put(
-            f"/annotations/{annotation['id']}",
+        updated_note = json.loads(client.put(
+            f"/entities/run/{run_id}/note",
             json={"body": "Confirmed service owner"},
             headers={"X-Session-ID": session_id},
-        ).data)["annotation"]
-        assert updated_annotation["body"] == "Confirmed service owner"
-        annotations = json.loads(client.get(
-            f"/entities/run/{run_id}/annotations",
+        ).data)["note"]
+        assert updated_note["id"] == note["id"]
+        assert updated_note["body"] == "Confirmed service owner"
+        note_payload = json.loads(client.get(
+            f"/entities/run/{run_id}/note",
             headers={"X-Session-ID": session_id},
         ).data)
-        assert [item["id"] for item in annotations["annotations"]] == [annotation["id"]]
+        assert note_payload["note"]["id"] == note["id"]
 
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
@@ -599,6 +656,19 @@ class TestProjectRoutes:
                 "VALUES (?, ?, ?, 'reports/run.txt', 'run.txt', 'output', 10, "
                 "'workspace_flag', ?, datetime('now'))",
                 (f"rfa_{run_id}", session_id, run_id, artifact_hash),
+            )
+            conn.execute(
+                "INSERT INTO entity_labels "
+                "(id, session_id, entity_type, entity_id, label, created) "
+                "VALUES (?, ?, 'run_file_artifact', ?, 'evidence', datetime('now'))",
+                (f"lbl_rfa_{run_id}", session_id, f"rfa_{run_id}"),
+            )
+            conn.execute(
+                "INSERT INTO entity_notes "
+                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES (?, ?, 'run_file_artifact', ?, 'Raw output reviewed', "
+                "datetime('now'), datetime('now'))",
+                (f"note_rfa_{run_id}", session_id, f"rfa_{run_id}"),
             )
             conn.execute(
                 "INSERT INTO findings "
@@ -614,11 +684,11 @@ class TestProjectRoutes:
                 (f"lbl_fnd_{run_id}", session_id, f"fnd_{run_id}"),
             )
             conn.execute(
-                "INSERT INTO annotations "
+                "INSERT INTO entity_notes "
                 "(id, session_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'finding', ?, 'needs [retest](javascript:alert(2))', "
                 "datetime('now'), datetime('now'))",
-                (f"ann_fnd_{run_id}", session_id, f"fnd_{run_id}"),
+                (f"note_fnd_{run_id}", session_id, f"fnd_{run_id}"),
             )
             conn.execute(
                 "INSERT INTO run_file_artifacts "
@@ -643,6 +713,8 @@ class TestProjectRoutes:
             assert artifact_statuses["reports/run.txt"]["file_available"] is True
             assert artifact_statuses["reports/run.txt"]["current_byte_size"] == 10
             assert artifact_statuses["reports/run.txt"]["content_sha256"] == artifact_hash
+            assert artifact_statuses["reports/run.txt"]["labels"][0]["label"] == "evidence"
+            assert artifact_statuses["reports/run.txt"]["note"]["body"] == "Raw output reviewed"
             assert artifact_statuses["reports/old.txt"]["file_status"] == "missing"
             assert artifact_statuses["reports/old.txt"]["file_available"] is False
             assert artifact_statuses["reports/old.txt"]["current_byte_size"] is None
@@ -685,8 +757,8 @@ class TestProjectRoutes:
             "pending_targets": 0,
             "artifacts": 2,
             "findings": 2,
-            "labels": 2,
-            "annotations": 2,
+            "labels": 3,
+            "notes": 3,
             "packages": 0,
         }
         assert {item["workspace_path"] for item in summary["artifacts"]} == {
@@ -694,18 +766,21 @@ class TestProjectRoutes:
             "reports/run.txt",
         }
         assert {item["id"] for item in summary["runs"]} == {run_id, baseline_run_id}
+        run_summaries = {item["id"]: item for item in summary["runs"]}
+        assert run_summaries[run_id]["labels"][0]["label"] == "baseline"
+        assert run_summaries[run_id]["note"]["body"] == "Confirmed service owner"
         project_findings = json.loads(client.get(
             f"/projects/{project['id']}/findings?review_state=new&command_root=nmap&run_id={run_id}"
-            "&label=important&annotation_state=annotated",
+            "&label=important&note_state=noted",
             headers={"X-Session-ID": session_id},
         ).data)
         assert [item["run_id"] for item in project_findings["findings"]] == [run_id]
         assert project_findings["findings"][0]["command_root"] == "nmap"
-        unannotated_findings = json.loads(client.get(
-            f"/projects/{project['id']}/findings?annotation_state=unannotated",
+        unnoted_findings = json.loads(client.get(
+            f"/projects/{project['id']}/findings?note_state=unnoted",
             headers={"X-Session-ID": session_id},
         ).data)
-        assert [item["run_id"] for item in unannotated_findings["findings"]] == [baseline_run_id]
+        assert [item["run_id"] for item in unnoted_findings["findings"]] == [baseline_run_id]
         comparison = json.loads(client.get(
             f"/projects/{project['id']}/compare?left_run_id={run_id}&right_run_id={baseline_run_id}",
             headers={"X-Session-ID": session_id},
@@ -742,6 +817,12 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         )
         assert target_label_resp.status_code == 201
+        target_note_resp = client.put(
+            f"/entities/target/{evidence_target['id']}/note",
+            json={"body": "Primary external target"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert target_note_resp.status_code == 200
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "UPDATE findings SET target_id = ? WHERE id = ?",
@@ -757,7 +838,7 @@ class TestProjectRoutes:
                 "redaction_mode": "raw",
                 "include_artifacts": True,
                 "preset": "custom",
-                "include_private_annotations": True,
+                "include_private_notes": True,
                 "selection": {
                     "run_ids": [run_id],
                     "finding_ids": [f"fnd_{run_id}"],
@@ -785,7 +866,7 @@ class TestProjectRoutes:
             f"rfa_{baseline_run_id}",
         ]
         assert package["manifest"]["selected_entity_ids"]["target_ids"] == [evidence_target["id"]]
-        assert package["manifest"]["include_private_annotations"] is True
+        assert package["manifest"]["include_private_notes"] is True
         assert package["manifest"]["redaction_mode"] == "raw"
         assert package["manifest"]["options"]["index_html"] is True
         assert package["manifest"]["options"]["transcripts_html"] is True
@@ -794,6 +875,18 @@ class TestProjectRoutes:
         assert package["manifest"]["estimated_archive"]["raw_artifact_bytes"] == 0
         assert package["manifest"]["estimated_archive"]["skipped_artifact_count_estimate"] == 2
         assert package["manifest"]["estimated_archive"]["selected_transcript_count"] == 1
+        package_label_resp = client.post(
+            f"/entities/package/{package['id']}/labels",
+            json={"label": "handoff"},
+            headers={"X-Session-ID": session_id},
+        )
+        package_note_resp = client.put(
+            f"/entities/package/{package['id']}/note",
+            json={"body": "Package review note"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert package_label_resp.status_code == 201
+        assert package_note_resp.status_code == 200
 
         packages = json.loads(client.get(
             f"/projects/{project['id']}/packages",
@@ -854,8 +947,8 @@ class TestProjectRoutes:
             assert "targets/targets.json" in names
             assert "targets/targets.md" in names
             assert "metadata/labels.json" in names
-            assert "notes/annotations.json" in names
-            assert "notes/annotations.md" in names
+            assert "notes/entity-notes.json" in names
+            assert "notes/entity-notes.md" in names
             assert "notes/project.md" in names
             assert f"runs/{run_id}.html" in names
             assert f"runs/{run_id}.txt" in names
@@ -870,8 +963,8 @@ class TestProjectRoutes:
             targets_json = json.loads(archive.read("targets/targets.json"))
             targets_md = archive.read("targets/targets.md").decode("utf-8")
             labels_json = json.loads(archive.read("metadata/labels.json"))
-            annotations_json = json.loads(archive.read("notes/annotations.json"))
-            annotations_md = archive.read("notes/annotations.md").decode("utf-8")
+            notes_json = json.loads(archive.read("notes/entity-notes.json"))
+            notes_md = archive.read("notes/entity-notes.md").decode("utf-8")
             project_notes_md = archive.read("notes/project.md").decode("utf-8")
             index_html = archive.read("index.html").decode("utf-8")
             readme = archive.read("README.md").decode("utf-8")
@@ -895,26 +988,39 @@ class TestProjectRoutes:
         assert targets_json["targets"][0]["finding_ids"] == [f"fnd_{run_id}"]
         assert targets_json["targets"][0]["run_ids"] == [run_id]
         assert targets_json["targets"][0]["labels"][0]["label"] == "production"
+        assert targets_json["targets"][0]["note"]["body"] == "Primary external target"
         assert "# Targets" in targets_md
         assert "darklab.sh" in targets_md
+        assert "Primary external target" in targets_md
         assert "Related Findings" in targets_md
         assert "[click](javascript:alert(1))" not in targets_md
         assert r"\[click\]\(javascript:alert\(1\)\)" in targets_md
-        assert labels_json["count"] == 3
-        assert {item["label"] for item in labels_json["labels"]} == {"baseline", "important", "production"}
-        assert annotations_json["include_private_annotations"] is True
-        assert annotations_json["count"] == 2
-        assert {item["body"] for item in annotations_json["annotations"]} == {
+        assert labels_json["count"] == 5
+        assert {item["label"] for item in labels_json["labels"]} == {
+            "baseline",
+            "evidence",
+            "handoff",
+            "important",
+            "production",
+        }
+        assert notes_json["include_private_notes"] is True
+        assert notes_json["count"] == 5
+        assert {item["body"] for item in notes_json["notes"]} == {
             "Confirmed service owner",
+            "Package review note",
+            "Primary external target",
+            "Raw output reviewed",
             "needs [retest](javascript:alert(2))",
         }
-        assert "# Annotations" in annotations_md
-        assert "[retest](javascript:alert(2))" not in annotations_md
-        assert r"\[retest\]\(javascript:alert\(2\)\)" in annotations_md
+        assert downloaded_manifest["package"]["labels"][0]["label"] == "handoff"
+        assert downloaded_manifest["package"]["note"]["body"] == "Package review note"
+        assert "# Entity Notes" in notes_md
+        assert "[retest](javascript:alert(2))" not in notes_md
+        assert r"\[retest\]\(javascript:alert\(2\)\)" in notes_md
         assert "# External Review Notes" in project_notes_md
         assert "Package notes for the external handoff." in project_notes_md
         assert findings_json["findings"][0]["labels"][0]["label"] == "important"
-        assert findings_json["findings"][0]["annotations"][0]["body"] == "needs [retest](javascript:alert(2))"
+        assert findings_json["findings"][0]["note"]["body"] == "needs [retest](javascript:alert(2))"
         assert "Draft Evidence" in index_html
         assert "Package notes for the external handoff." in index_html
         assert "443/tcp open https" in index_html
@@ -927,7 +1033,7 @@ class TestProjectRoutes:
         assert "targets/targets.json" in index_html
         assert "targets/targets.md" in index_html
         assert "metadata/labels.json" in index_html
-        assert "notes/annotations.md" in index_html
+        assert "notes/entity-notes.md" in index_html
         assert "notes/project.md" in index_html
         assert "Skipped Items" in index_html
         assert "reports/old.txt" in index_html
@@ -940,9 +1046,9 @@ class TestProjectRoutes:
         assert "[retest](javascript:alert(2))" not in readme
         assert r"\[retest\]\(javascript:alert\(2\)\)" in readme
         assert "## Package Exports" in readme
-        assert "notes/annotations.json" in readme
+        assert "notes/entity-notes.json" in readme
         assert "targets/targets.md" in readme
-        assert "notes/annotations.md" in readme
+        assert "notes/entity-notes.md" in readme
         assert "notes/project.md" in readme
         assert f"runs/{run_id}.txt" in readme
         assert "## Skipped Items" in readme
@@ -964,6 +1070,8 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         ).data)
         assert summary_after_package["counts"]["packages"] == 1
+        assert summary_after_package["counts"]["labels"] == 6
+        assert summary_after_package["counts"]["notes"] == 5
         assert [item["id"] for item in summary_after_package["packages"]] == [package["id"]]
 
         workflow_target = json.loads(client.post(
@@ -1017,11 +1125,11 @@ class TestProjectRoutes:
         hidden_label = client.get(f"/entities/run/{run_id}/labels", headers={"X-Session-ID": "other-session"})
         assert hidden_label.status_code == 404
 
-        delete_annotation = client.delete(
-            f"/annotations/{annotation['id']}",
+        delete_note = client.delete(
+            f"/entities/run/{run_id}/note",
             headers={"X-Session-ID": session_id},
         )
-        assert delete_annotation.status_code == 200
+        assert delete_note.status_code == 200
         delete_label = client.delete(
             f"/entities/run/{run_id}/labels",
             json={"label": "baseline"},
@@ -1148,8 +1256,8 @@ class TestProjectRoutes:
             assert "targets/targets.json" in names
             assert "targets/targets.md" in names
             assert "metadata/labels.json" in names
-            assert "notes/annotations.json" in names
-            assert "notes/annotations.md" in names
+            assert "notes/entity-notes.json" in names
+            assert "notes/entity-notes.md" in names
             assert "notes/project.md" in names
             assert f"runs/{run_id}.html" in names
             assert not any(name.startswith("artifacts/") for name in names)
@@ -1164,8 +1272,8 @@ class TestProjectRoutes:
                     "targets/targets.json",
                     "targets/targets.md",
                     "metadata/labels.json",
-                    "notes/annotations.json",
-                    "notes/annotations.md",
+                    "notes/entity-notes.json",
+                    "notes/entity-notes.md",
                     "notes/project.md",
                     f"runs/{run_id}.html",
                 )
@@ -1187,8 +1295,7 @@ class TestProjectRoutes:
             "max_evidence_packages_per_project": 1,
             "max_entity_labels_per_session": 5,
             "max_entity_labels_per_entity": 1,
-            "max_entity_annotations_per_session": 5,
-            "max_entity_annotations_per_entity": 1,
+            "max_entity_notes_per_session": 5,
         }, clear=False):
             project = self._create_project(client, session_id)
             first_run_id = "run-" + uuid.uuid4().hex
@@ -1268,18 +1375,19 @@ class TestProjectRoutes:
             assert duplicate_label.status_code == 201
             assert second_label.status_code == 409
 
-            first_annotation = client.post(
-                f"/entities/run/{first_run_id}/annotations",
+            first_note = client.put(
+                f"/entities/run/{first_run_id}/note",
                 json={"body": "first note"},
                 headers={"X-Session-ID": session_id},
             )
-            second_annotation = client.post(
-                f"/entities/run/{first_run_id}/annotations",
+            second_note = client.put(
+                f"/entities/run/{first_run_id}/note",
                 json={"body": "second note"},
                 headers={"X-Session-ID": session_id},
             )
-            assert first_annotation.status_code == 201
-            assert second_annotation.status_code == 409
+            assert first_note.status_code == 200
+            assert second_note.status_code == 200
+            assert json.loads(second_note.data)["note"]["body"] == "second note"
 
     def test_evidence_package_download_enforces_size_limit(self, tmp_path):
         client = get_client()
@@ -1478,7 +1586,7 @@ class TestProjectRoutes:
             conn.commit()
 
         cross_session = project_link_post({"entity_type": "run", "entity_id": other_run_id})
-        unsupported = project_link_post({"entity_type": "annotation", "entity_id": "ann_1"})
+        unsupported = project_link_post({"entity_type": "note", "entity_id": "note_1"})
         run_scoped = project_link_post({"entity_type": "run_file_artifact", "entity_id": "rfa_1"})
 
         assert cross_session.status_code == 400
@@ -2009,7 +2117,7 @@ class TestDiagRoute:
         assert isinstance(data["db"]["runs"], int)
         assert isinstance(data["db"]["snapshots"], int)
         project_workspace = data["db"]["project_workspace"]
-        for key in ("projects", "artifacts", "findings", "annotations", "packages"):
+        for key in ("projects", "artifacts", "findings", "notes", "packages"):
             assert isinstance(project_workspace[key], int)
 
     def test_db_section_error_on_db_failure(self):
@@ -4501,11 +4609,11 @@ class TestHistoryRoute:
                 ("label-search-run-1", session, run_ids[0], "2026-01-01T00:00:02"),
             )
             conn.execute(
-                "INSERT INTO annotations "
+                "INSERT INTO entity_notes "
                 "(id, session_id, entity_type, entity_id, body, created, updated) "
                 "VALUES (?, ?, 'run', ?, 'review note', ?, ?)",
                 (
-                    "annotation-search-run-1",
+                    "note-search-run-1",
                     session,
                     run_ids[0],
                     "2026-01-01T00:00:02",
@@ -4527,17 +4635,17 @@ class TestHistoryRoute:
             assert data["runs"][0]["artifacts"][0]["workspace_path"] == "darklab/findings.txt"
             assert data["runs"][0]["finding_count"] == 1
             assert data["runs"][0]["label_count"] == 1
-            assert data["runs"][0]["annotation_count"] == 1
+            assert data["runs"][0]["note_count"] == 1
             assert data["items"][0]["artifact_count"] == 1
             assert data["items"][0]["finding_count"] == 1
             assert data["items"][0]["label_count"] == 1
-            assert data["items"][0]["annotation_count"] == 1
+            assert data["items"][0]["note_count"] == 1
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.execute("DELETE FROM run_file_artifacts WHERE run_id = ?", (run_ids[0],))
             conn.execute("DELETE FROM findings WHERE run_id = ?", (run_ids[0],))
             conn.execute("DELETE FROM entity_labels WHERE entity_id = ?", (run_ids[0],))
-            conn.execute("DELETE FROM annotations WHERE entity_id = ?", (run_ids[0],))
+            conn.execute("DELETE FROM entity_notes WHERE entity_id = ?", (run_ids[0],))
             conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
             conn.commit()
             conn.close()
@@ -4835,6 +4943,30 @@ class TestHistoryRoute:
                     4,
                 ),
             )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "VALUES (?, ?, ?, 'finding', 'open port 8080', '8080/tcp open http-proxy', 1, ?, datetime('now'))",
+                ("cmp-finding-left", session, "cmp-left", "cmp-fp-left"),
+            )
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "VALUES (?, ?, ?, 'finding', 'open port 443', '443/tcp open https', 1, ?, datetime('now'))",
+                ("cmp-finding-right", session, "cmp-right", "cmp-fp-right"),
+            )
+            conn.execute(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "VALUES (?, ?, ?, 'reports/left.txt', 'left.txt', 'output', 10, 'workspace_flag', datetime('now'))",
+                ("cmp-artifact-left", session, "cmp-left"),
+            )
+            conn.execute(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "VALUES (?, ?, ?, 'reports/right.txt', 'right.txt', 'output', 12, 'workspace_flag', datetime('now'))",
+                ("cmp-artifact-right", session, "cmp-right"),
+            )
             conn.commit()
             conn.close()
 
@@ -4858,8 +4990,14 @@ class TestHistoryRoute:
             assert [line["text"] for line in data["sections"]["added"]] == ["443/tcp open https"]
             assert [line["text"] for line in data["sections"]["removed"]] == ["8080/tcp open http-proxy"]
             assert all("process exited" not in line["text"] for line in data["sections"]["added"])
+            assert [item["raw_line"] for item in data["objects"]["findings"]["added"]] == ["8080/tcp open http-proxy"]
+            assert [item["raw_line"] for item in data["objects"]["findings"]["removed"]] == ["443/tcp open https"]
+            assert [item["workspace_path"] for item in data["objects"]["artifacts"]["added"]] == ["reports/left.txt"]
+            assert [item["workspace_path"] for item in data["objects"]["artifacts"]["removed"]] == ["reports/right.txt"]
         finally:
             conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM findings WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM run_file_artifacts WHERE session_id = ?", (session,))
             conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
             conn.commit()
             conn.close()
@@ -5551,7 +5689,7 @@ class TestRunPermalinkRoute:
         conn = sqlite3.connect(DB_PATH)
         conn.execute("DELETE FROM findings WHERE run_id=?", (run_id,))
         conn.execute("DELETE FROM entity_labels WHERE entity_id=?", (run_id,))
-        conn.execute("DELETE FROM annotations WHERE entity_id=?", (run_id,))
+        conn.execute("DELETE FROM entity_notes WHERE entity_id=?", (run_id,))
         conn.execute("DELETE FROM run_file_artifacts WHERE run_id=?", (run_id,))
         conn.execute("DELETE FROM run_output_artifacts WHERE run_id=?", (run_id,))
         conn.execute("DELETE FROM runs WHERE id=?", (run_id,))
@@ -5622,10 +5760,10 @@ class TestRunPermalinkRoute:
             ("permalink-json-label", run_id),
         )
         conn.execute(
-            "INSERT INTO annotations "
+            "INSERT INTO entity_notes "
             "(id, session_id, entity_type, entity_id, body, created, updated) "
             "VALUES (?, 'test-session', 'run', ?, 'review note', datetime('now'), datetime('now'))",
-            ("permalink-json-annotation", run_id),
+            ("permalink-json-note", run_id),
         )
         conn.commit()
         conn.close()
@@ -5642,7 +5780,7 @@ class TestRunPermalinkRoute:
             assert data["artifacts"][0]["workspace_path"] == "reports/dig.txt"
             assert data["finding_count"] == 1
             assert data["label_count"] == 1
-            assert data["annotation_count"] == 1
+            assert data["note_count"] == 1
         finally:
             self._delete_run(run_id)
 

@@ -17,9 +17,14 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 
 ## Open TODOs
 
+- **Project Workspace code review follow-ups**
+  - **Expose or deliberately defer backend-only project surfaces**
+    - Review `/projects/<id>/compare`, generic entity labels, and generic entity notes against the shipped Projects modal and `project` built-in.
+    - Either add first-party UI or terminal entry points for compare, labels, and notes, or explicitly defer the UX and document the API-only status.
+    - Add at least one user-reachable test path for project compare and entity metadata if these surfaces remain shipped.
 - **Future Project Workspace enhancements**
   - **Security and lifecycle**
-    - Validate `workspace_file` entity ownership during session migration, or document that labels/annotations on workspace-file paths can drift when a migrated token lands in a session with a different file at the same path.
+    - Validate `workspace_file` entity ownership during session migration, or document that labels/notes on workspace-file paths can drift when a migrated token lands in a session with a different file at the same path.
     - Add a terminal-native `project rename <name-or-id> <new-name>` command so CLI users can rename projects without opening the modal.
     - Add parallel PATCH routes for partial project and target updates if the project workspace API ever becomes more than a trusted browser-only surface.
   - **Code organization**
@@ -27,14 +32,14 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - Move Projects modal rendering and event wiring out of `shell_chrome.js` into a dedicated project workspace browser module.
     - Reduce repeated `projects.py` route boilerplate with small serialization/404 helpers.
   - **Capture, tagging, and navigation**
-    - Expose `Add label`, `Add annotation`, `Open in project`, and `Add as project target` on transcript right-click or signal-tagged token long-press; this should replace the removed Projects-modal quick-add target flow.
+    - Expose `Add label`, `Add note`, `Open in project`, and `Add as project target` on transcript right-click or signal-tagged token long-press; this should replace the removed Projects-modal quick-add target flow.
     - Add contextual quick-add target entry points from history rows and workspace file previews once the shared action-menu pattern exists.
     - Consider a per-project current-target sub-state so `${target}` placeholder substitution can follow sustained work on a single host.
     - Decide whether `host` remains a visible target type or is retained only as a backend compatibility value.
     - Add a compact project switcher near the prompt with recently used projects and a Create New action.
     - Show run, finding, artifact, and package counts on project-list rows so project scale is visible before opening each project.
   - **Findings and comparison**
-    - Extend the Findings tab filters beyond target/run/review state to command root, severity, scope, labels, and annotation state.
+    - Extend the Findings tab filters beyond target/run/review state to command root, severity, scope, labels, and note state.
     - Add multi-select plus bulk review actions for high-volume finding review.
     - Prefetch finding counts and severity distribution so tab labels can show useful state such as unreviewed/high counts without opening the tab.
     - Build a Compare Runs view on top of `/projects/<id>/compare`, with a row action for selecting a baseline and a diff view for added/removed findings, changed severity, changed exit code, and artifact changes.
@@ -47,7 +52,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - Make package presets config-driven so new bundle profiles, such as internal review or external handoff, can be added without code changes.
     - Add richer per-finding remediation or verification fields if findings evolve beyond raw output capture.
     - Add richer target references in package exports, including derived relationships that are not directly visible in selected finding text.
-    - Add richer provenance metadata and round-trip import hints for labels, annotations, targets, findings, and packages.
+    - Add richer provenance metadata and round-trip import hints for labels, notes, targets, findings, and packages.
     - Explore fuller direct template reuse for package run transcript pages without reintroducing app-hosted asset links.
     - Add redacted text/JSON derivatives for safe artifact types before allowing raw artifact inclusion in redacted packages.
     - Add richer redaction previews and per-item redaction warnings for package creation.

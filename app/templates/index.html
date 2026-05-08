@@ -668,7 +668,10 @@
       </div>
       <button type="button" class="close-btn project-workspace-close" aria-label="Close projects">✕</button>
     </div>
-    <div id="project-workspace-message" class="project-workspace-message u-hidden" role="status"></div>
+    <div id="project-workspace-message" class="project-workspace-message u-hidden" role="status">
+      <span class="project-workspace-message-text"></span>
+      <button type="button" class="btn btn-ghost btn-compact project-workspace-message-dismiss" data-project-message-dismiss aria-label="Dismiss project message">✕</button>
+    </div>
     <div class="project-workspace-layout">
       <aside class="project-workspace-sidebar" aria-label="Project list">
         <form id="project-workspace-create-form" class="project-workspace-create">
@@ -737,6 +740,32 @@
   <div id="project-package-wizard-overlay" class="modal-overlay project-package-wizard-overlay u-hidden" aria-hidden="true">
     <div id="project-package-wizard-modal" class="modal-card project-package-wizard-modal" role="dialog" aria-modal="true" aria-labelledby="project-package-wizard-title">
       <div id="project-package-wizard-body"></div>
+    </div>
+  </div>
+  <div id="project-entity-editor-overlay" class="modal-overlay project-entity-editor-overlay u-hidden" aria-hidden="true">
+    <div id="project-entity-editor-modal" class="modal-card modal-card-compact project-entity-editor-modal" role="dialog" aria-modal="true" aria-labelledby="project-entity-editor-title">
+      <div class="faq-header">
+        <div>
+          <span class="faq-title" id="project-entity-editor-title">EDIT METADATA</span>
+          <div class="project-entity-editor-subtitle" id="project-entity-editor-subtitle"></div>
+        </div>
+        <button type="button" class="close-btn project-entity-editor-close" aria-label="Close metadata editor">✕</button>
+      </div>
+      <form id="project-entity-editor-form" class="project-target-editor-form project-entity-editor-form">
+        <label class="project-target-edit-field">
+          <span>Labels</span>
+          <input id="project-entity-labels" class="form-control form-control-compact" type="text" maxlength="512" placeholder="important, retest" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Entity labels">
+          <small class="project-target-value-help">Comma-separated labels. Existing labels not listed here will be removed.</small>
+        </label>
+        <label class="project-target-edit-field">
+          <span>Note</span>
+          <textarea id="project-entity-note" class="form-control form-control-compact" maxlength="20000" rows="4" placeholder="Optional note" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Entity note"></textarea>
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary btn-compact project-entity-editor-cancel">Cancel</button>
+          <button type="submit" id="project-entity-submit" class="btn btn-primary btn-compact">Save</button>
+        </div>
+      </form>
     </div>
   </div>
 </div>

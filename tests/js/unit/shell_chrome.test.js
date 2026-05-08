@@ -10,6 +10,31 @@ function tick() {
   return new Promise(resolve => setTimeout(resolve, 0))
 }
 
+const PRESSABLE_PRIMITIVE_CLASSES = new Set([
+  'btn',
+  'nav-item',
+  'close-btn',
+  'toggle-btn',
+  'kb-key',
+  'dropdown-item',
+  'control-row',
+  'hud-action-cell',
+  'diag-cmd-cell',
+  'gesture-handle',
+])
+
+function expectProjectPressablesBound(selectors) {
+  selectors.forEach((selector) => {
+    const controls = Array.from(document.querySelectorAll(selector))
+    expect(controls.length, `expected project pressables for ${selector}`).toBeGreaterThan(0)
+    controls.forEach((control) => {
+      const hasPrimitive = Array.from(control.classList).some(cls => PRESSABLE_PRIMITIVE_CLASSES.has(cls))
+      expect(hasPrimitive, `${selector} should use an allowed primitive class`).toBe(true)
+      expect(control.dataset.pressableBound, `${selector} should be bound through bindPressable`).toBe('1')
+    })
+  })
+}
+
 function loadShellChrome({
   fetch,
   apiFetch,
@@ -18,7 +43,15 @@ function loadShellChrome({
   restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-restored')),
   showWorkspaceViewer = vi.fn(),
   showConfirm = vi.fn(() => Promise.resolve('remove')),
+  fetchAndRenderHistoryComparison = vi.fn(),
   bindDismissible = null,
+  bindPressable = (el, options = {}) => {
+    if (el?.dataset) el.dataset.pressableBound = '1'
+    if (typeof options.onActivate === 'function') {
+      el.addEventListener('click', options.onActivate)
+    }
+    return { dispose: vi.fn() }
+  },
   enhanceAppSelects = vi.fn(),
   syncAppSelect = vi.fn(),
   getProjectAutoLinkExternalRunsPreference = () => preferences.pref_project_auto_link_external_runs || 'on',
@@ -108,6 +141,19 @@ function loadShellChrome({
           <div id="project-package-wizard-body"></div>
         </div>
       </div>
+      <div id="project-entity-editor-overlay" class="u-hidden" aria-hidden="true">
+        <div id="project-entity-editor-modal">
+          <span id="project-entity-editor-title"></span>
+          <div id="project-entity-editor-subtitle"></div>
+          <button class="project-entity-editor-close" type="button"></button>
+          <form id="project-entity-editor-form">
+            <input id="project-entity-labels">
+            <textarea id="project-entity-note"></textarea>
+            <button class="project-entity-editor-cancel" type="button"></button>
+            <button id="project-entity-submit" type="submit"></button>
+          </form>
+        </div>
+      </div>
     </div>
   `
 
@@ -128,6 +174,7 @@ function loadShellChrome({
     restoreHistoryRunIntoTab,
     showWorkspaceViewer,
     showConfirm,
+    fetchAndRenderHistoryComparison,
     bindDismissible,
     enhanceAppSelects,
     syncAppSelect,
@@ -202,7 +249,7 @@ function loadShellChrome({
         options.onToggle?.(open)
       })
     },
-    (el, options) => el.addEventListener('click', options.onActivate),
+    bindPressable,
     () => {},
     () => {},
     () => 'tab-1',
@@ -378,7 +425,7 @@ describe('shell chrome project workspace', () => {
           ok: true,
           json: () => Promise.resolve({
             project,
-            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, annotations: 0 },
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, notes: 0 },
             runs: [],
             targets: [],
             artifacts: [],
@@ -432,7 +479,7 @@ describe('shell chrome project workspace', () => {
           ok: true,
           json: () => Promise.resolve({
             project: { id: 'project-1', name: 'darklab.sh', status: 'active' },
-            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, annotations: 0 },
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, notes: 0 },
             runs: [],
             targets: [],
             artifacts: [],
@@ -479,7 +526,7 @@ describe('shell chrome project workspace', () => {
           ok: true,
           json: () => Promise.resolve({
             project,
-            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, annotations: 0 },
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, notes: 0 },
             runs: [],
             targets: [],
             artifacts: [],
@@ -527,7 +574,7 @@ describe('shell chrome project workspace', () => {
           ok: true,
           json: () => Promise.resolve({
             project,
-            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, annotations: 0 },
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, notes: 0 },
             runs: [],
             targets: [],
             artifacts: [],
@@ -583,7 +630,7 @@ describe('shell chrome project workspace', () => {
           ok: true,
           json: () => Promise.resolve({
             project: projects[0] || null,
-            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, annotations: 0 },
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, notes: 0 },
             runs: [],
             targets: [],
             artifacts: [],
@@ -634,7 +681,7 @@ describe('shell chrome project workspace', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, annotations: 0 },
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, notes: 0 },
             runs: [],
             targets: [],
             artifacts: [],
@@ -673,7 +720,7 @@ describe('shell chrome project workspace', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: targets.length, annotations: 0 },
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: targets.length, notes: 0 },
             runs: [],
             targets,
             artifacts: [],
@@ -761,7 +808,7 @@ describe('shell chrome project workspace', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, annotations: 0 },
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, notes: 0 },
             runs: [],
             targets: [],
             artifacts: [],
@@ -786,8 +833,10 @@ describe('shell chrome project workspace', () => {
 
     const typeSelect = document.getElementById('project-target-type')
     const valueInput = document.getElementById('project-target-value')
+    const notesInput = document.getElementById('project-target-notes')
     const valueError = document.getElementById('project-target-value-error')
     const form = document.getElementById('project-target-create-form')
+    expect(notesInput.maxLength).toBe(2000)
 
     valueInput.value = 'https://darklab.sh'
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
@@ -811,6 +860,19 @@ describe('shell chrome project workspace', () => {
     expect(apiFetch.mock.calls.some(([url, options]) => url === '/projects/project-1/targets' && options?.method === 'POST')).toBe(false)
 
     valueInput.value = '80,443,8000-8080'
+    notesInput.value = 'x'.repeat(2001)
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    expect(valueInput.getAttribute('aria-invalid')).toBe('false')
+    expect(notesInput.getAttribute('aria-invalid')).toBe('true')
+    expect(valueError.textContent).toContain('Target notes must be 2,000 characters or fewer.')
+    expect(apiFetch.mock.calls.some(([url, options]) => url === '/projects/project-1/targets' && options?.method === 'POST')).toBe(false)
+
+    notesInput.value = 'Scope notes'
+    notesInput.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(notesInput.getAttribute('aria-invalid')).toBe('false')
+    expect(valueError.classList.contains('u-hidden')).toBe(true)
+
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await tick()
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/targets', expect.objectContaining({
@@ -819,7 +881,7 @@ describe('shell chrome project workspace', () => {
         type: 'port_set',
         value: '80,443,8000-8080',
         label: '',
-        notes: '',
+        notes: 'Scope notes',
       }),
     }))
   })
@@ -857,7 +919,7 @@ describe('shell chrome project workspace', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            counts: { runs: projectRuns.length, findings: projectFindings.length, artifacts: 0, packages: 0, targets: 0, annotations: 0 },
+            counts: { runs: projectRuns.length, findings: projectFindings.length, artifacts: 0, packages: 0, targets: 0, notes: 0 },
             runs: projectRuns,
             targets: [],
             artifacts: [],
@@ -923,7 +985,7 @@ describe('shell chrome project workspace', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, annotations: 0 },
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, notes: 0 },
             runs: [],
             targets: [],
             artifacts: [],
@@ -1047,7 +1109,7 @@ describe('shell chrome project workspace', () => {
           package_format_version: 1,
           preset: 'evidence',
           redaction_mode: 'raw',
-          include_private_annotations: true,
+          include_private_notes: true,
           options: {
             raw_artifacts: true,
             index_html: true,
@@ -1067,6 +1129,34 @@ describe('shell chrome project workspace', () => {
         },
       },
     ]
+    const entityLabels = new Map([
+      ['run:run-1', ['baseline']],
+      ['finding:finding-1', ['old-label']],
+      ['run_file_artifact:artifact-1', []],
+    ])
+    const entityNotes = new Map([
+      ['run:run-1', 'Run note'],
+      ['finding:finding-1', 'Old finding note'],
+    ])
+    const metadataKey = (entityType, entityId) => `${entityType}:${entityId}`
+    const labelObjects = (entityType, entityId) => (
+      entityLabels.get(metadataKey(entityType, entityId)) || []
+    ).map((label, index) => ({
+      id: `label-${entityId}-${index}`,
+      entity_type: entityType,
+      entity_id: entityId,
+      label,
+      source: 'manual',
+    }))
+    const noteObject = (entityType, entityId) => {
+      const body = entityNotes.get(metadataKey(entityType, entityId)) || ''
+      return body ? {
+        id: `note-${entityId}`,
+        entity_type: entityType,
+        entity_id: entityId,
+        body,
+      } : null
+    }
     let resolvePackageDownloadBlob
     const packageDownloadBlob = new Promise((resolve) => {
       resolvePackageDownloadBlob = resolve
@@ -1094,11 +1184,19 @@ describe('shell chrome project workspace', () => {
               artifacts: projectArtifacts.length,
               packages: projectPackages.length,
               targets: targetStates.length,
-              annotations: 0,
+              notes: 0,
             },
-            runs: projectRuns,
+            runs: projectRuns.map(run => ({
+              ...run,
+              labels: labelObjects('run', run.id),
+              note: noteObject('run', run.id),
+            })),
             targets: targetStates,
-            artifacts: projectArtifacts,
+            artifacts: projectArtifacts.map(artifact => ({
+              ...artifact,
+              labels: labelObjects('run_file_artifact', artifact.id),
+              note: noteObject('run_file_artifact', artifact.id),
+            })),
             packages: projectPackages,
           }),
         })
@@ -1167,8 +1265,64 @@ describe('shell chrome project workspace', () => {
                 target_ids: ['target-1', 'target-3'],
                 review_state: 'important',
               },
-            ],
+            ].map(finding => ({
+              ...finding,
+              labels: labelObjects('finding', finding.id),
+              note: noteObject('finding', finding.id),
+            })),
           }),
+        })
+      }
+      const labelsMatch = String(url).match(/^\/entities\/([^/]+)\/([^/]+)\/labels$/)
+      if (labelsMatch) {
+        const entityType = decodeURIComponent(labelsMatch[1])
+        const entityId = decodeURIComponent(labelsMatch[2])
+        const key = metadataKey(entityType, entityId)
+        if (options.method === 'POST') {
+          const payload = JSON.parse(options.body)
+          const next = entityLabels.get(key) || []
+          if (!next.includes(payload.label)) entityLabels.set(key, [...next, payload.label])
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ label: labelObjects(entityType, entityId).find(item => item.label === payload.label) }),
+          })
+        }
+        if (options.method === 'DELETE') {
+          const payload = JSON.parse(options.body)
+          entityLabels.set(key, (entityLabels.get(key) || []).filter(label => label !== payload.label))
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ ok: true }),
+          })
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ labels: labelObjects(entityType, entityId) }),
+        })
+      }
+      const noteMatch = String(url).match(/^\/entities\/([^/]+)\/([^/]+)\/note$/)
+      if (noteMatch) {
+        const entityType = decodeURIComponent(noteMatch[1])
+        const entityId = decodeURIComponent(noteMatch[2])
+        const key = metadataKey(entityType, entityId)
+        if (options.method === 'PUT') {
+          const payload = JSON.parse(options.body)
+          entityNotes.set(key, payload.body)
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ note: noteObject(entityType, entityId) }),
+          })
+        }
+        if (options.method === 'DELETE') {
+          entityNotes.delete(key)
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ ok: true }),
+          })
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ note: noteObject(entityType, entityId) }),
         })
       }
       if (url === '/projects/project-1/artifacts/artifact-1/preview') {
@@ -1241,6 +1395,7 @@ describe('shell chrome project workspace', () => {
       })
     })
     const showWorkspaceViewer = vi.fn()
+    const fetchAndRenderHistoryComparison = vi.fn()
     globalThis.URL.createObjectURL = vi.fn(() => 'blob:project-artifact')
     globalThis.URL.revokeObjectURL = vi.fn()
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
@@ -1249,6 +1404,7 @@ describe('shell chrome project workspace', () => {
       restoreHistoryRunIntoTab,
       showWorkspaceViewer,
       showConfirm,
+      fetchAndRenderHistoryComparison,
       bindDismissible,
     })
 
@@ -1263,6 +1419,11 @@ describe('shell chrome project workspace', () => {
       document.getElementById('project-package-wizard-overlay'),
       expect.objectContaining({ level: 'modal' }),
     )
+    expectProjectPressablesBound([
+      '.project-workspace-row',
+      '.project-explorer-tab',
+      '.project-explorer-actions .btn',
+    ])
 
     document.querySelector('[data-project-action="edit-target"]').click()
     await tick()
@@ -1285,10 +1446,49 @@ describe('shell chrome project workspace', () => {
       }),
     }))
     expect(document.querySelector('.project-target-row')?.textContent).toContain('darklab.io')
+    expect(document.getElementById('project-workspace-message').textContent).toContain('Target updated.')
 
     document.querySelector('[data-project-tab="findings"]').click()
     await tick()
     await tick()
+    expect(document.getElementById('project-workspace-message').classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('project-explorer-body').textContent).toContain('old-label')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('note')
+    document.querySelector('[data-project-action="edit-finding-metadata"][data-finding-id="finding-1"]').click()
+    await tick()
+    expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('project-entity-editor-title').textContent).toBe('EDIT FINDING')
+    expect(document.getElementById('project-entity-editor-subtitle').textContent).toContain('missing security header')
+    expect(document.getElementById('project-entity-labels').value).toBe('old-label')
+    expect(document.getElementById('project-entity-note').value).toBe('Old finding note')
+    document.getElementById('project-entity-labels').value = 'important, retest, Important'
+    document.getElementById('project-entity-note').value = 'Needs retest'
+    document.getElementById('project-entity-editor-form')
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    await tick()
+    await tick()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/entities/finding/finding-1/labels', expect.objectContaining({
+      method: 'DELETE',
+      body: JSON.stringify({ label: 'old-label' }),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/entities/finding/finding-1/labels', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ label: 'important' }),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/entities/finding/finding-1/labels', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ label: 'retest' }),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/entities/finding/finding-1/note', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ body: 'Needs retest' }),
+    }))
+    expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(false)
+    expect(document.getElementById('project-explorer-body').textContent).toContain('retest')
+    expect(document.getElementById('project-explorer-body').textContent).not.toContain('old-label')
+
     const importantFilter = document.querySelector('[data-project-finding-status-filter-option][value="important"]')
     expect(importantFilter).not.toBeNull()
     importantFilter.checked = true
@@ -1298,6 +1498,12 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-explorer-body').textContent).toContain('web port responded')
     expect(document.getElementById('project-explorer-body').textContent).not.toContain('missing security header')
     expect(document.getElementById('project-explorer-body').textContent).not.toContain('api host responded')
+    expectProjectPressablesBound([
+      '.project-explorer-group-toggle',
+      '.project-explorer-item-click-target',
+      '.project-target-filter-chip',
+      '.project-target-filter-clear',
+    ])
 
     const groupToggle = document.querySelector('[data-project-finding-group-toggle]')
     expect(groupToggle).not.toBeNull()
@@ -1342,6 +1548,43 @@ describe('shell chrome project workspace', () => {
 
     document.querySelector('[data-project-tab="runs"]').click()
     await tick()
+    expect(document.getElementById('project-explorer-body').textContent).toContain('baseline')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('note')
+    expectProjectPressablesBound(['.project-run-compare-controls .btn'])
+    document.querySelector('[data-project-action="edit-run-metadata"][data-run-id="run-1"]').click()
+    await tick()
+    expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('project-entity-editor-title').textContent).toBe('EDIT RUN')
+    expect(document.getElementById('project-entity-editor-subtitle').textContent).toContain('nuclei https://darklab.sh')
+    expect(document.getElementById('project-entity-labels').value).toBe('baseline')
+    expect(document.getElementById('project-entity-note').value).toBe('Run note')
+    document.getElementById('project-entity-labels').value = 'baseline, reviewed'
+    document.getElementById('project-entity-note').value = 'Run triaged'
+    document.getElementById('project-entity-editor-form')
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    await tick()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/entities/run/run-1/labels', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ label: 'reviewed' }),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/entities/run/run-1/note', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ body: 'Run triaged' }),
+    }))
+    expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(false)
+    expect(document.getElementById('project-explorer-body').textContent).toContain('reviewed')
+
+    document.querySelector('[data-project-action="compare-runs"]').click()
+    await tick()
+    expect(fetchAndRenderHistoryComparison).toHaveBeenCalledWith(
+      'run-1',
+      'run-2',
+      {
+        url: '/projects/project-1/compare?left_run_id=run-1&right_run_id=run-2',
+      },
+    )
     expect(document.querySelector('[data-project-action="filter-run"][data-run-id="run-1"]')).not.toBeNull()
     expect(document.querySelector('[data-project-action="filter-run"][data-run-id="run-2"]')).toBeNull()
 
@@ -1352,6 +1595,33 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('.project-artifact-status.is-available')?.textContent).toBe('available')
     expect(document.querySelector('.project-artifact-status.is-missing')?.textContent).toBe('missing')
     expect(document.getElementById('project-explorer-body').textContent).toContain('workspace file is not available')
+    expectProjectPressablesBound([
+      '.project-explorer-group-toggle',
+      '.project-artifact-action',
+    ])
+    document.querySelector('[data-project-action="edit-artifact-metadata"][data-artifact-id="artifact-1"]').click()
+    await tick()
+    expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('project-entity-editor-title').textContent).toBe('EDIT ARTIFACT')
+    expect(document.getElementById('project-entity-editor-subtitle').textContent).toContain('nuclei.json')
+    document.getElementById('project-entity-labels').value = 'evidence'
+    document.getElementById('project-entity-note').value = 'Raw output reviewed'
+    document.getElementById('project-entity-editor-form')
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    await tick()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/entities/run_file_artifact/artifact-1/labels', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ label: 'evidence' }),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/entities/run_file_artifact/artifact-1/note', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ body: 'Raw output reviewed' }),
+    }))
+    expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(false)
+    expect(document.getElementById('project-explorer-body').textContent).toContain('evidence')
+
     document.querySelector('[data-project-action="artifact-preview"][data-artifact-id="artifact-1"]').click()
     await tick()
     expect(apiFetch).toHaveBeenCalledWith(
@@ -1381,6 +1651,7 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-explorer-body').textContent).toContain('evidence · raw · ~32 KB')
     expect(document.getElementById('project-explorer-body').textContent).toContain('2 runs · 3 findings · 2 artifacts')
     expect(document.querySelector('[data-project-action="package-manifest"][data-package-id="pkg-1"]')).not.toBeNull()
+    expectProjectPressablesBound(['.project-package-action'])
     document.querySelector('[data-project-action="package-manifest"][data-package-id="pkg-1"]').click()
     await tick()
     expect(apiFetch).toHaveBeenCalledWith(
@@ -1446,6 +1717,9 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-workspace-message').textContent).toContain(
       '2 unavailable items removed; review your selection before continuing.',
     )
+    document.querySelector('[data-project-message-dismiss]').click()
+    await tick()
+    expect(document.getElementById('project-workspace-message').classList.contains('u-hidden')).toBe(true)
     expect(document.getElementById('project-package-wizard-overlay').textContent).not.toContain('run-missing is no longer linked')
     document.querySelector('[data-project-action="package-wizard-cancel"]').click()
     await tick()
@@ -1474,6 +1748,7 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Include')
     expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Findings (2)')
     expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Artifacts (1)')
+    expectProjectPressablesBound(['.project-package-run-toggle'])
     let run2Group = document.querySelector('[data-project-package-selection="run"][value="run-2"]')
       .closest('.project-package-run-selection')
     let run2Toggle = run2Group.querySelector('[data-project-package-run-toggle]')
@@ -1618,24 +1893,21 @@ describe('shell chrome project workspace', () => {
     restoreHistoryRunIntoTab.mockClear()
     document.querySelector('[data-project-tab="artifacts"]').click()
     await tick()
-    const artifactRunLink = document.querySelector('.project-explorer-group-link[data-run-id="run-1"]')
-    expect(artifactRunLink?.textContent).toBe('nuclei https://darklab.sh (run-1)')
+    const artifactGroupToggle = document.querySelector('[data-project-artifact-group-toggle]')
+    expect(artifactGroupToggle?.textContent).toContain('nuclei https://darklab.sh (run-1)')
+    expect(artifactGroupToggle?.textContent).toContain('1 artifact')
+    expect(artifactGroupToggle.getAttribute('aria-expanded')).toBe('true')
     expect(document.querySelector('.project-explorer-item')?.textContent).toContain('nuclei.json')
     expect(document.querySelector('.project-artifact-status.is-available')?.textContent).toBe('available')
-    artifactRunLink.click()
+    artifactGroupToggle.click()
     await tick()
-    expect(restoreHistoryRunIntoTab).toHaveBeenCalledWith(
-      {
-        id: 'run-1',
-        command: 'nuclei https://darklab.sh',
-        full_output_available: true,
-      },
-      {
-        hidePanelOnSuccess: false,
-      },
-    )
-    expect(document.getElementById('project-workspace-overlay').classList.contains('open')).toBe(false)
-    restoreHistoryRunIntoTab.mockClear()
+    expect(document.querySelector('[data-project-artifact-group-toggle]').getAttribute('aria-expanded')).toBe('false')
+    expect(document.querySelector('.project-explorer-group-body').hidden).toBe(true)
+    expect(restoreHistoryRunIntoTab).not.toHaveBeenCalled()
+    document.querySelector('[data-project-artifact-group-toggle]').click()
+    await tick()
+    expect(document.querySelector('[data-project-artifact-group-toggle]').getAttribute('aria-expanded')).toBe('true')
+    expect(document.querySelector('.project-explorer-group-body').hidden).toBe(false)
 
     await shell.openProjectWorkspace()
     document.querySelector('[data-project-tab="findings"]').click()

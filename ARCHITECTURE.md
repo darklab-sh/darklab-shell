@@ -291,10 +291,9 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/entities/<entity_type>/<path:entity_id>/labels` | Lists current-session labels for a supported entity. |
 | `POST` | `/entities/<entity_type>/<path:entity_id>/labels` | Adds an idempotent manual label to a supported entity. |
 | `DELETE` | `/entities/<entity_type>/<path:entity_id>/labels` | Removes one manual label from a supported entity. |
-| `GET` | `/entities/<entity_type>/<path:entity_id>/annotations` | Lists current-session annotations for a supported entity. |
-| `POST` | `/entities/<entity_type>/<path:entity_id>/annotations` | Adds a private annotation to a supported entity. |
-| `PUT` | `/annotations/<annotation_id>` | Updates one current-session annotation. |
-| `DELETE` | `/annotations/<annotation_id>` | Deletes one current-session annotation. |
+| `GET` | `/entities/<entity_type>/<path:entity_id>/note` | Returns the current-session note for a supported entity. |
+| `PUT` | `/entities/<entity_type>/<path:entity_id>/note` | Creates or replaces the one current-session note for a supported entity. |
+| `DELETE` | `/entities/<entity_type>/<path:entity_id>/note` | Deletes the current-session note for a supported entity. |
 
 ### Workspace Routes
 
@@ -754,7 +753,7 @@ That split is what allows the app to keep the interactive shell fast while still
 
 ### Database
 
-`<data_dir>/history.db` — SQLite, WAL mode. Seventeen persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable.
+`<data_dir>/history.db` — SQLite, WAL mode. Eighteen persistent tables, one FTS5 virtual table, and file-backed run-output artifacts. `data_dir` is an operator config key; when unset, the app uses writable `/data` and falls back to `/tmp` for local/dev runs where the image-created `/data` directory is not mounted writable.
 
 Logical relationships are owned by the app rather than SQLite foreign-key constraints. Anonymous browser sessions can appear as `session_id` values without a matching `session_tokens` row.
 
@@ -836,7 +835,9 @@ erDiagram
     TEXT session_id
     TEXT name
     TEXT slug
+    TEXT description
     TEXT status
+    TEXT color
     TEXT notes
     TEXT created
     TEXT updated
@@ -854,9 +855,13 @@ erDiagram
     TEXT session_id
     TEXT run_id
     TEXT workspace_path
+    TEXT display_name
     TEXT kind
     INTEGER byte_size
     TEXT detected_by
+    TEXT content_type
+    TEXT preview_type
+    TEXT content_sha256
     TEXT created
   }
   PROJECT_TARGETS {
@@ -865,8 +870,15 @@ erDiagram
     TEXT type
     TEXT value
     TEXT label
+    TEXT notes
     TEXT source_run_id
     REAL confidence
+    TEXT review_state
+    TEXT source
+    TEXT source_detail
+    INTEGER seen_count
+    TEXT last_seen
+    TEXT dismissed_at
     TEXT created
     TEXT updated
   }
@@ -883,6 +895,16 @@ erDiagram
     TEXT review_state
     TEXT created
   }
+  FINDING_TARGETS {
+    TEXT id PK
+    TEXT session_id
+    TEXT finding_id
+    TEXT target_id
+    TEXT run_id
+    TEXT source
+    REAL confidence
+    TEXT created
+  }
   ENTITY_LABELS {
     TEXT id PK
     TEXT session_id
@@ -892,12 +914,12 @@ erDiagram
     TEXT source
     TEXT created
   }
-  ANNOTATIONS {
+  ENTITY_NOTES {
     TEXT id PK
     TEXT session_id
     TEXT entity_type
     TEXT entity_id
-    TEXT visibility
+    TEXT body
     TEXT created
     TEXT updated
   }
@@ -925,8 +947,9 @@ erDiagram
   LOGICAL_SESSION ||--o{ PROJECTS : "owns"
   LOGICAL_SESSION ||--o{ RUN_FILE_ARTIFACTS : "tracks"
   LOGICAL_SESSION ||--o{ FINDINGS : "captures"
+  LOGICAL_SESSION ||--o{ FINDING_TARGETS : "attributes"
   LOGICAL_SESSION ||--o{ ENTITY_LABELS : "labels"
-  LOGICAL_SESSION ||--o{ ANNOTATIONS : "comments"
+  LOGICAL_SESSION ||--o{ ENTITY_NOTES : "notes"
   LOGICAL_SESSION ||--o{ EVIDENCE_PACKAGES : "packages"
   RUNS ||--o| RUN_OUTPUT_ARTIFACTS : "full output"
   RUNS ||--o| RUNS_FTS : "search index"
@@ -935,7 +958,8 @@ erDiagram
   PROJECTS ||--o{ PROJECT_LINKS : "links top-level records"
   PROJECTS ||--o{ PROJECT_TARGETS : "scopes"
   PROJECTS ||--o{ EVIDENCE_PACKAGES : "packages"
-  PROJECT_TARGETS ||--o{ FINDINGS : "matches"
+  FINDINGS ||--o{ FINDING_TARGETS : "matches"
+  PROJECT_TARGETS ||--o{ FINDING_TARGETS : "matched by"
 ```
 
 - `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews store structured `{text, cls, tsC, tsE}` entries so run permalinks can preserve prompt echo and timestamp metadata. The preview is capped by both `max_output_lines` and `output_preview_max_mb`, which protects SQLite from huge single-line outputs while full artifacts retain the larger text when enabled. Also stores `output_search_text` (plain text extracted from the full artifact when available, otherwise the preview) for FTS indexing. Persists across restarts. Pruned by `permalink_retention_days`.
@@ -952,11 +976,11 @@ erDiagram
 - `project_links` — generic project membership rows `(project_id, entity_type, entity_id)`. The app owns the valid entity vocabulary and link sources so projects can link top-level records such as runs, snapshots, and manually selected workspace files without copying source data. Run-owned records such as file artifacts and findings are intentionally reached through linked runs instead of direct project links.
 - `run_file_artifacts` — durable file manifest rows for workspace files produced or consumed by a run, including recorded size and optional SHA-256 content checksum so project views can flag missing or changed workspace files. This is separate from `run_output_artifacts`, which stores the terminal transcript artifact behind a run permalink.
 - `project_targets` — project-scoped domains, URLs, hosts, IPs, CIDRs, and port sets. Targets can be manually entered or associated with source runs later.
-- `findings` — persisted output-signal rows linked to the source run and optionally to a project target. These records are intentionally lightweight so findings can power filtering, review state, annotations, and evidence packages without turning the app into a vulnerability-management system.
+- `findings` — persisted output-signal rows linked to the source run and optionally to a project target. These records are intentionally lightweight so findings can power filtering, review state, notes, and evidence packages without turning the app into a vulnerability-management system.
 - `entity_labels` — short user-controlled labels/bookmarks for supported entities. This is the broader relationship model that can eventually absorb run labels while preserving the existing star affordance.
-- `annotations` — short comments attached to supported entities. Annotations are private by default and can later be included or excluded from evidence packages.
+- `entity_notes` — one private note attached to each supported entity per session. Notes are intentionally singular so entity metadata behaves like project notes instead of a comment thread.
 - `evidence_packages` — draft package manifests scoped to a project and session. The first pass records package choices, redaction mode, artifact-inclusion preference, and a JSON manifest over the currently linked project data, then exports that manifest plus any still-available selected workspace artifacts as a downloadable archive.
-- Supporting indexes are part of the schema even though the ER diagram stays table-focused. `idx_runs_session_command_started` backs the Recent menu and prompt-history distinct-command query shape `(session_id, command, started DESC)`, while `idx_runs_session_started`, `idx_snapshots_session_created`, `idx_user_workflows_session_updated_created`, and `idx_recent_domains_session_last_used` keep session-scoped startup, history, workflow, share, and autocomplete reads bounded on large history databases. Project workspace indexes cover session project lists, project contents, reverse entity lookup, run file artifacts, targets, findings, labels, annotations, and evidence packages before UI routes depend on those query shapes.
+- Supporting indexes are part of the schema even though the ER diagram stays table-focused. `idx_runs_session_command_started` backs the Recent menu and prompt-history distinct-command query shape `(session_id, command, started DESC)`, while `idx_runs_session_started`, `idx_snapshots_session_created`, `idx_user_workflows_session_updated_created`, and `idx_recent_domains_session_last_used` keep session-scoped startup, history, workflow, share, and autocomplete reads bounded on large history databases. Project workspace indexes cover session project lists, project contents, reverse entity lookup, run file artifacts, targets, findings, labels, notes, and evidence packages before UI routes depend on those query shapes.
 - Redis-backed active-run metadata plus browser `sessionStorage` form a second persistence layer for reload continuity:
   - `/history/active` covers in-flight runs owned by the server/session
   - browser `sessionStorage` covers non-running tabs, transcript previews, status, draft input, and active-tab selection
