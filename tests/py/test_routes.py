@@ -890,6 +890,7 @@ class TestProjectRoutes:
             "item_limit": 0,
         }
 
+    @mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}, clear=False)
     def test_links_run_and_unlinks_without_duplicate_rows(self):
         client = get_client()
         session_id = self._session_id("project-link")
@@ -1814,6 +1815,63 @@ class TestProjectRoutes:
             named_temp.assert_not_called()
         assert resp.status_code == 413
         assert "size limit" in json.loads(resp.data)["error"]
+
+    def test_project_artifacts_are_explicitly_disabled_when_files_are_disabled(self):
+        client = get_client()
+        session_id = self._session_id("project-files-off")
+        project = self._create_project(client, session_id)
+        run_id = self._seed_run(session_id, "nuclei -u https://darklab.sh")
+        self._link_run(client, session_id, project["id"], run_id)
+        artifact_id = "rfa_" + uuid.uuid4().hex[:16]
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
+                "VALUES (?, ?, ?, 'reports/nuclei.json', 'nuclei.json', 'output', 42, "
+                "'workspace_flag', datetime('now'))",
+                (artifact_id, session_id, run_id),
+            )
+            conn.commit()
+
+        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": False}, clear=False):
+            summary_resp = client.get(
+                f"/projects/{project['id']}/summary",
+                headers={"X-Session-ID": session_id},
+            )
+            assert summary_resp.status_code == 200
+            artifact = json.loads(summary_resp.data)["artifacts"][0]
+            assert artifact["file_status"] == "disabled"
+            assert artifact["file_available"] is False
+            assert artifact["file_status_detail"] == "Files are disabled on this instance"
+
+            preview_resp = client.get(
+                f"/projects/{project['id']}/artifacts/{artifact_id}/preview",
+                headers={"X-Session-ID": session_id},
+            )
+            download_resp = client.get(
+                f"/projects/{project['id']}/artifacts/{artifact_id}/download",
+                headers={"X-Session-ID": session_id},
+            )
+            package_resp = client.post(
+                f"/projects/{project['id']}/packages",
+                json={
+                    "name": "Transcript Only",
+                    "include_artifacts": True,
+                    "selection": {"run_ids": [run_id], "artifact_ids": [artifact_id]},
+                },
+                headers={"X-Session-ID": session_id},
+            )
+
+        assert preview_resp.status_code == 403
+        assert json.loads(preview_resp.data)["error"] == "Files are disabled on this instance"
+        assert download_resp.status_code == 403
+        assert json.loads(download_resp.data)["error"] == "Files are disabled on this instance"
+        assert package_resp.status_code == 201
+        package = json.loads(package_resp.data)["package"]
+        assert package["include_artifacts"] is False
+        assert package["manifest"]["include_artifacts"] is False
+        assert package["manifest"]["options"]["raw_artifacts"] is False
+        assert package["manifest"]["artifacts"][0]["file_status"] == "disabled"
 
     def test_rejects_cross_session_or_unsupported_project_links(self):
         client = get_client()

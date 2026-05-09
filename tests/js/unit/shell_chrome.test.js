@@ -46,6 +46,7 @@ function loadShellChrome({
   showWorkspaceViewer = vi.fn(),
   showConfirm = vi.fn(() => Promise.resolve('remove')),
   showToast = vi.fn(),
+  appConfig = { workspace_enabled: true },
   fetchAndRenderHistoryComparison = vi.fn(),
   bindDismissible = null,
   bindPressable = (el, options = {}) => {
@@ -207,6 +208,7 @@ function loadShellChrome({
     window.setTimeout(revoke, 2000)
     window.addEventListener('pagehide', revoke, { once: true })
   }
+  global.APP_CONFIG = appConfig
 
   new Function(
     'global',
@@ -247,6 +249,7 @@ function loadShellChrome({
     'downloadBlobAsAttachment',
     `
       const globalThis = global;
+      const APP_CONFIG = global.APP_CONFIG || {};
       ${ENTITY_METADATA_SRC}
       ${SHELL_CHROME_SRC}
     `,
@@ -532,6 +535,30 @@ describe('shell chrome project workspace', () => {
 
     expect(document.getElementById('project-workspace-overlay').classList.contains('open')).toBe(true)
     expect(apiFetch).toHaveBeenCalledWith('/projects?include_archived=1', { cache: 'no-store' })
+  })
+
+  it('hides project detail inputs when no projects exist', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ project: null }) })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects: [] }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const shell = loadShellChrome({ apiFetch })
+
+    await shell.openProjectWorkspace()
+    await tick()
+    await tick()
+
+    expect(document.getElementById('project-workspace-body').textContent).toContain('No projects yet')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('Create or select a project')
+    expect(document.getElementById('project-notes-form').classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('project-labels-form').classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('project-labels-input').value).toBe('')
+    expect(document.getElementById('project-notes-input').value).toBe('')
   })
 
   it('separates current and archived projects when archived projects exist', async () => {
@@ -1231,6 +1258,69 @@ describe('shell chrome project workspace', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('hides project artifacts and raw package artifact inclusion when Files are disabled', async () => {
+    const project = { id: 'project-1', name: 'darklab.sh', status: 'active' }
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ project }) })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects: [project] }) })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project,
+            counts: { runs: 1, findings: 0, artifacts: 1, packages: 0, targets: 0, notes: 0 },
+            runs: [{ id: 'run-1', command: 'nuclei https://darklab.sh', output_line_count: 1 }],
+            targets: [],
+            artifacts: [{
+              id: 'artifact-1',
+              run_id: 'run-1',
+              workspace_path: 'reports/nuclei.json',
+              display_name: 'nuclei.json',
+              kind: 'output_file',
+              byte_size: 2048,
+              file_status: 'disabled',
+              file_available: false,
+              file_status_detail: 'Files are disabled on this instance',
+            }],
+            packages: [],
+          }),
+        })
+      }
+      if (url === '/projects/project-1/findings') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ findings: [] }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const shell = loadShellChrome({ apiFetch, appConfig: { workspace_enabled: false } })
+
+    await shell.openProjectWorkspace()
+    await tick()
+
+    expect(document.querySelector('[data-project-tab="artifacts"]')).toBeNull()
+    document.querySelector('[data-project-tab="runs"]').click()
+    await tick()
+    expect(document.querySelector('[data-project-action="filter-run-artifacts"]')).toBeNull()
+
+    document.querySelector('[data-project-tab="packages"]').click()
+    await tick()
+    document.querySelector('[data-project-action="package-wizard-open"]').click()
+    await tick()
+    document.querySelector('[data-project-action="package-wizard-next"]').click()
+    await tick()
+    document.querySelector('[data-project-action="package-wizard-next"]').click()
+    await tick()
+
+    const rawArtifactsInput = document.querySelector('[data-project-package-include-artifacts]')
+    expect(rawArtifactsInput.checked).toBe(false)
+    expect(rawArtifactsInput.disabled).toBe(true)
+    expect(document.getElementById('project-package-wizard-overlay').textContent)
+      .toContain('Raw artifact files are unavailable because Files are disabled on this instance.')
   })
 
   it('opens a finding source run at the recorded line', async () => {

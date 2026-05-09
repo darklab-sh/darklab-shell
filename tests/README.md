@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,550
+- behavior tests: 2,553
 - docs/inventory meta-tests: 30
-- `pytest`: 1283 (1253 behavior + 30 meta)
-- `vitest`: 1054
+- `pytest`: 1284 (1254 behavior + 30 meta)
+- `vitest`: 1056
 - `playwright`: 243
-- total: 2,580
+- total: 2,583
 
 This document is organized in two parts:
 
@@ -940,6 +940,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestProjectRoutes.test_redacted_evidence_package_redacts_manifest_and_transcripts` | Verifies redacted evidence packages redact manifests, static pages, and run transcripts while excluding raw artifacts. |
 | `TestProjectRoutes.test_project_workspace_write_quotas_return_conflict` | Verifies project workspace quotas return conflict responses without blocking idempotent writes. |
 | `TestProjectRoutes.test_evidence_package_download_enforces_size_limit` | Verifies evidence package downloads refuse archives that exceed the configured size cap. |
+| `TestProjectRoutes.test_project_artifacts_are_explicitly_disabled_when_files_are_disabled` | Verifies project artifact summaries, preview/download routes, and package manifests report Files-disabled artifacts explicitly while allowing transcript-only packages. |
 | `TestProjectRoutes.test_rejects_cross_session_or_unsupported_project_links` | Verifies project links reject cross-session source records and unsupported entity types. |
 | `TestClientLogRoute.test_accepts_client_error_payload` | Checks that the client log route accepts browser error reports without colliding with reserved logging fields. |
 | `TestStatusRoute.test_returns_200_even_when_db_fails` | `/status` is HUD polling and must never return 503; a DB failure degrades fields, not the response code. |
@@ -2260,6 +2261,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `keeps Redis as N/A on a failed poll when Redis was not configured` | Verifies that an unreachable server does not turn an already unconfigured Redis pill into a false configured-offline state. |
 | `labels only the current active project in the project list` | Verifies that the active project is pinned first and that only the current active project receives the active marker. |
 | `opens projects from the active project HUD chip` | Verifies that clicking the active project HUD chip opens the Projects modal. |
+| `hides project detail inputs when no projects exist` | Verifies that project label and note controls stay hidden until a project exists. |
 | `separates current and archived projects when archived projects exist` | Verifies that the Projects modal groups current and archived projects only when archived projects are present. |
 | `unarchives archived projects without changing the active project` | Verifies that archived projects can be restored from the Projects modal without claiming the active project slot. |
 | `deletes a project from the project explorer after confirmation` | Verifies that the Projects modal confirms destructive project deletion and refreshes the list afterward. |
@@ -2269,6 +2271,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `reloads project findings after linked runs change` | Verifies that project findings refresh after runs are linked or unlinked from the project. |
 | `autosaves project notes while editing` | Verifies that project notes save automatically from the Details tab without an explicit Save button. |
 | `edits project labels from the details tab` | Verifies that project labels can be edited from the project Details tab and reflected in project header/sidebar chips. |
+| `hides project artifacts and raw package artifact inclusion when Files are disabled` | Verifies the Projects modal hides the Artifacts tab/run artifact jump chips and prevents raw artifact inclusion when Files are unavailable. |
 | `opens a finding source run at the recorded line` | Verifies that project finding rows show target/review metadata, update review state without opening the run, and restore the source run at the persisted finding line number when clicked. |
 | `reorders project findings when the sort control changes` | Verifies that Projects modal finding sort modes visibly reorder finding rows by severity, target, and newest run. |
 | `refreshes an open Projects modal after a cross-tab project broadcast` | Verifies that a project-workspace storage broadcast refreshes an already-open Projects modal. |

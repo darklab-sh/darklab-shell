@@ -37,10 +37,8 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - Add a compact project switcher near the prompt with recently used projects and a Create New action.
     - Show run, finding, artifact, and package counts on project-list rows so project scale is visible before opening each project.
   - **Workspace-disabled behavior**
-    - Audit and harden Projects flows when `workspace_enabled` is false. Project CRUD, active project selection, run linking, labels/notes, targets, findings, comparisons, and transcript-only evidence packages should continue to work even when the Files workspace is disabled.
-    - Make run-file artifacts and workspace-file metadata explicitly unavailable instead of looking missing or stale. `_artifact_availability()` currently collapses `WorkspaceDisabled` into the generic "workspace file is not available" state, so Projects artifact preview/download can return a missing-file style response instead of a clear disabled-feature message.
-    - Keep package creation/download intentional in this mode: hide or disable raw artifact inclusion, explain skipped artifacts in the wizard and package metadata, and allow packages made only from runs, findings, targets, notes, and transcripts to succeed.
-    - Add backend, browser unit, and Playwright coverage with Files disabled for project summary artifacts, artifact preview/download responses, package wizard defaults, package creation/download, and skipped-artifact messaging.
+    - Add focused Playwright coverage with Files disabled for project summary artifact messaging, package wizard defaults, and transcript-only package creation/download. Backend and browser-unit coverage now cover the route/payload behavior; the remaining risk is real-modal wiring in a live browser.
+    - Consider returning an explicit Files-disabled response for direct `workspace_file` metadata API calls. The Files UI is hidden when workspaces are disabled, but direct generic metadata calls can still look like ordinary missing-entity responses.
   - **Findings and comparison**
     - Extend the Findings tab filters beyond target/run/review state to command root, severity, scope, labels, and note state.
     - Add multi-select plus bulk review actions for high-volume finding review.

@@ -458,10 +458,11 @@ def projects_artifacts_preview(project_id, artifact_id):
     if artifact is None:
         return jsonify({"error": "artifact not found"}), 404
     if not artifact.get("file_available"):
+        status = 403 if artifact.get("file_status") == "disabled" else 404
         return jsonify({
             "error": artifact.get("file_status_detail") or "artifact file is not available",
             "artifact": artifact,
-        }), 404
+        }), status
     try:
         text = read_workspace_text_file(session_id, artifact["workspace_path"], CFG)
     except WorkspaceError as exc:
@@ -476,10 +477,11 @@ def projects_artifacts_download(project_id, artifact_id):
     if artifact is None:
         return jsonify({"error": "artifact not found"}), 404
     if not artifact.get("file_available"):
+        status = 403 if artifact.get("file_status") == "disabled" else 404
         return jsonify({
             "error": artifact.get("file_status_detail") or "artifact file is not available",
             "artifact": artifact,
-        }), 404
+        }), status
     try:
         handle = open_workspace_file_for_download(session_id, artifact["workspace_path"], CFG)
     except WorkspaceError as exc:

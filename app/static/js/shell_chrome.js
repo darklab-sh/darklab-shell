@@ -1180,14 +1180,23 @@
     return summary && Array.isArray(summary.artifacts) ? summary.artifacts : [];
   }
 
+  function _projectFilesEnabled() {
+    return !!(typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.workspace_enabled === true);
+  }
+
+  function _projectArtifactsVisible() {
+    return _projectFilesEnabled();
+  }
+
   function _projectArtifactStatus(artifact) {
     const status = String(artifact && artifact.file_status || '').trim();
-    if (status === 'available' || status === 'missing' || status === 'changed') return status;
+    if (status === 'available' || status === 'missing' || status === 'changed' || status === 'disabled') return status;
     return artifact && artifact.file_available === false ? 'missing' : 'available';
   }
 
   function _projectArtifactStatusLabel(artifact) {
     const status = _projectArtifactStatus(artifact);
+    if (status === 'disabled') return 'disabled';
     if (status === 'changed') return 'changed';
     if (status === 'missing') return 'missing';
     return 'available';
@@ -1214,7 +1223,8 @@
     edit.textContent = 'Edit';
     _bindProjectRuntimePressable(edit);
     actions.appendChild(edit);
-    const available = _projectArtifactStatus(artifact) !== 'missing';
+    const artifactStatus = _projectArtifactStatus(artifact);
+    const available = artifactStatus !== 'missing' && artifactStatus !== 'disabled';
     [
       ['preview', 'Preview'],
       ['download', 'Download'],
@@ -1227,7 +1237,7 @@
       btn.dataset.artifactId = String(artifact.id || '');
       btn.dataset.artifactPath = String(artifact.workspace_path || '');
       btn.disabled = !available;
-      btn.title = available ? label : 'Workspace file is missing';
+      btn.title = available ? label : (artifact.file_status_detail || 'Workspace file is unavailable');
       btn.textContent = label;
       _bindProjectRuntimePressable(btn);
       actions.appendChild(btn);
@@ -1320,6 +1330,8 @@
       parts.push(`current ${_formatProjectBytes(artifact.current_byte_size)}`);
     } else if (status === 'missing') {
       parts.push(statusDetail || 'workspace file is missing');
+    } else if (status === 'disabled') {
+      parts.push(statusDetail || 'Files are disabled on this instance');
     }
     return parts.filter(Boolean).join(' · ');
   }
@@ -1419,7 +1431,7 @@
     const runIds = runs.map(run => String(run.id || '')).filter(Boolean);
     const findingRunIds = new Set(findingItems.map(finding => String(finding.run_id || '')).filter(Boolean));
     const redactionMode = normalizedPreset === 'redacted' ? 'redacted' : 'raw';
-    const includeArtifacts = normalizedPreset !== 'summary' && redactionMode !== 'redacted';
+    const includeArtifacts = normalizedPreset !== 'summary' && redactionMode !== 'redacted' && _projectFilesEnabled();
     const selectedFindings = findingItems.filter(finding => (
       normalizedPreset === 'full' || String(finding.review_state || 'new') !== 'false_positive'
     ));
@@ -1598,7 +1610,7 @@
       ? 'redacted'
       : 'raw';
     const options = manifest.options && typeof manifest.options === 'object' ? manifest.options : {};
-    const includeArtifacts = redactionMode === 'redacted'
+    const includeArtifacts = redactionMode === 'redacted' || !_projectFilesEnabled()
       ? false
       : Boolean(pkg?.include_artifacts ?? options.raw_artifacts);
     const selectedRunIds = _projectPackageManifestIds(manifest, 'run_ids', _projectRunItems(summary));
@@ -2163,16 +2175,18 @@
     const artifactsInput = document.createElement('input');
     artifactsInput.type = 'checkbox';
     artifactsInput.checked = !!projectPackageWizard.includeArtifacts;
-    artifactsInput.disabled = projectPackageWizard.redactionMode === 'redacted';
+    artifactsInput.disabled = projectPackageWizard.redactionMode === 'redacted' || !_projectFilesEnabled();
     artifactsInput.dataset.projectPackageIncludeArtifacts = '1';
     const artifactsText = document.createElement('span');
     artifactsText.className = 'project-package-selection-text';
     const artifactsStrong = document.createElement('strong');
     artifactsStrong.textContent = 'Include selected raw artifacts';
     const artifactsSmall = document.createElement('small');
-    artifactsSmall.textContent = projectPackageWizard.redactionMode === 'redacted'
-      ? 'Redacted packages exclude raw artifacts because file contents are not sanitized yet.'
-      : 'Static HTML, Markdown, and selected raw artifacts are included in the archive.';
+    artifactsSmall.textContent = !_projectFilesEnabled()
+      ? 'Raw artifact files are unavailable because Files are disabled on this instance.'
+      : (projectPackageWizard.redactionMode === 'redacted'
+        ? 'Redacted packages exclude raw artifacts because file contents are not sanitized yet.'
+        : 'Static HTML, Markdown, and selected raw artifacts are included in the archive.');
     artifactsText.append(artifactsStrong, artifactsSmall);
     artifactsLabel.append(artifactsInput, artifactsText);
     const redactionLabel = document.createElement('label');
@@ -2901,10 +2915,13 @@
     wrap.className = 'project-run-row-actions';
     const counts = document.createElement('div');
     counts.className = 'project-run-row-counts';
-    [
+    const countConfigs = [
       ['finding', _projectRunFindingCount(projectId, runId), 'filter-run-findings'],
-      ['artifact', _projectRunArtifactCount(summary, runId), 'filter-run-artifacts'],
-    ].forEach(([label, count, action]) => {
+    ];
+    if (_projectArtifactsVisible()) {
+      countConfigs.push(['artifact', _projectRunArtifactCount(summary, runId), 'filter-run-artifacts']);
+    }
+    countConfigs.forEach(([label, count, action]) => {
       const chip = _makeProjectButton(`${count} ${label}${count === 1 ? '' : 's'}`, action, projectId, count ? 'secondary' : 'ghost');
       chip.classList.add('project-run-count-chip');
       chip.disabled = !count;
@@ -3934,9 +3951,11 @@
       { id: 'details', label: 'Details' },
       { id: 'runs', label: 'Runs', count: _projectTabCountText(projectId, summary, 'runs', tabCounts.runs) },
       { id: 'findings', label: 'Findings', count: _projectTabCountText(projectId, summary, 'findings', tabCounts.findings) },
-      { id: 'artifacts', label: 'Artifacts', count: _projectTabCountText(projectId, summary, 'artifacts', tabCounts.artifacts) },
+      _projectArtifactsVisible()
+        ? { id: 'artifacts', label: 'Artifacts', count: _projectTabCountText(projectId, summary, 'artifacts', tabCounts.artifacts) }
+        : null,
       { id: 'packages', label: 'Packages', count: tabCounts.packages },
-    ];
+    ].filter(Boolean);
     tabItems.forEach(({ id, label, count }) => {
       const btn = document.createElement('button');
       btn.type = 'button';
@@ -4233,6 +4252,9 @@
       return;
     }
     _syncProjectForms(project);
+    if (projectWorkspaceTab === 'artifacts' && !_projectArtifactsVisible()) {
+      projectWorkspaceTab = 'details';
+    }
     const projectId = String(project.id || '');
     const [header, tabs] = _renderProjectHeader(project, summary);
     const filterBar = _renderProjectFilterBar(projectId, summary);
@@ -4645,7 +4667,7 @@
     if (field === 'redaction_mode') {
       const mode = String(packageField.value || 'raw') === 'redacted' ? 'redacted' : 'raw';
       projectPackageWizard.redactionMode = mode;
-      if (mode === 'redacted') projectPackageWizard.includeArtifacts = false;
+      if (mode === 'redacted' || !_projectFilesEnabled()) projectPackageWizard.includeArtifacts = false;
       projectPackageWizard.notice = '';
       _renderProjectPackageWizardModal();
     }
@@ -4742,7 +4764,7 @@
       const scrollTop = projectPackageWizardBody
         ?.querySelector('.project-package-wizard-body')
         ?.scrollTop ?? null;
-      projectPackageWizard.includeArtifacts = !!packageIncludeArtifacts.checked;
+      projectPackageWizard.includeArtifacts = _projectFilesEnabled() && !!packageIncludeArtifacts.checked;
       projectPackageWizard.notice = '';
       _renderProjectPackageWizardModal({ scrollTop });
       return true;

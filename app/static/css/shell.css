@@ -2239,6 +2239,11 @@ body.mobile-terminal-mode .output-follow-btn {
   padding: 0;
 }
 
+.project-notes-form.u-hidden,
+.project-labels-form.u-hidden {
+  display: none;
+}
+
 .project-target-editor-overlay,
 .project-entity-editor-overlay {
   z-index: 360;
@@ -3448,6 +3453,12 @@ button.project-explorer-item:focus-visible,
   border-color: color-mix(in srgb, var(--red) 62%, var(--border));
   color: var(--red);
   background: color-mix(in srgb, var(--red) 8%, var(--surface));
+}
+
+.project-artifact-status.is-disabled {
+  border-color: var(--border-strong);
+  color: var(--muted);
+  background: var(--panel);
 }
 
 .project-package-toolbar,

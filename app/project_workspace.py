@@ -31,7 +31,13 @@ from output_signals import strip_ansi_codes
 from permalinks import _font_face_css, _format_duration, _permalink_context
 from redaction import apply_redaction_rules, redact_line_entries
 from run_output_store import load_full_output_entries
-from workspace import WorkspaceError, open_workspace_file_for_download, read_workspace_text_file, resolve_workspace_path
+from workspace import (
+    WorkspaceDisabled,
+    WorkspaceError,
+    open_workspace_file_for_download,
+    read_workspace_text_file,
+    resolve_workspace_path,
+)
 
 MAX_PROJECT_NAME_LEN = 120
 MAX_PROJECT_DESCRIPTION_LEN = 1000
@@ -417,6 +423,13 @@ def _artifact_availability(session_id, artifact):
         if not resolved.is_file():
             return result
         current_size = max(0, int(resolved.stat().st_size))
+    except WorkspaceDisabled as exc:
+        return {
+            "file_status": "disabled",
+            "file_available": False,
+            "current_byte_size": None,
+            "file_status_detail": str(exc),
+        }
     except (OSError, WorkspaceError):
         return result
     try:
@@ -622,7 +635,7 @@ def _normalize_evidence_package_payload(data):
     if redaction_mode not in {"raw", "redacted"}:
         raise ProjectWorkspaceError("package redaction mode must be raw or redacted")
     include_artifacts = bool(data.get("include_artifacts"))
-    if redaction_mode == "redacted":
+    if redaction_mode == "redacted" or not bool(_config.CFG.get("workspace_enabled", False)):
         include_artifacts = False
     labels = []
     raw_labels = data.get("labels")
