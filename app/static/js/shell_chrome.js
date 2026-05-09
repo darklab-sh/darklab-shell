@@ -50,6 +50,10 @@
   const projectMobileSummary = document.getElementById('project-mobile-summary');
   const projectMobileCreateForm = document.getElementById('project-mobile-create-form');
   const projectMobileNameInput = document.getElementById('project-mobile-name');
+  const projectMobileDetailView = document.getElementById('project-mobile-detail-view');
+  const projectMobileDetailTopbar = document.getElementById('project-mobile-detail-topbar');
+  const projectMobileTabs = document.getElementById('project-mobile-tabs');
+  const projectMobileDetailBody = document.getElementById('project-mobile-detail-body');
   const projectTargetEditorOverlay = document.getElementById('project-target-editor-overlay');
   const projectTargetEditorTitle = document.getElementById('project-target-editor-title');
   const projectTargetCreateForm = document.getElementById('project-target-create-form');
@@ -180,6 +184,7 @@
   let projectWorkspaceSelectedId = '';
   let projectWorkspaceTab = 'details';
   let projectMobileCreateOpen = false;
+  let projectMobileView = 'list';
   let projectMobileArchivedOpen = false;
   let projectWorkspaceFindingsLoadingId = '';
   let projectWorkspaceFindingsLoadingPromise = null;
@@ -3916,6 +3921,48 @@
       .filter(item => ['runs', 'findings', 'artifacts', 'targets', 'packages'].includes(item.id));
   }
 
+  function _projectMobileTabItems(projectId, summary) {
+    const counts = _projectCounts(summary);
+    const clamp = (value) => {
+      const count = Number(value || 0);
+      if (!Number.isFinite(count) || count <= 0) return '0';
+      return count > 999 ? '999+' : String(count);
+    };
+    return [
+      { id: 'details', label: 'Details' },
+      { id: 'runs', label: 'Runs', count: clamp(counts.runs) },
+      { id: 'findings', label: 'Findings', count: clamp(counts.findings) },
+      _projectArtifactsVisible()
+        ? { id: 'artifacts', label: 'Artifacts', count: clamp(counts.artifacts) }
+        : null,
+      { id: 'packages', label: 'Packages', count: clamp(counts.packages) },
+    ].filter(Boolean);
+  }
+
+  function _syncProjectMobileActiveTabScroll() {
+    if (!projectMobileTabs) return;
+    const active = projectMobileTabs.querySelector('.is-active');
+    if (!active) {
+      _syncProjectMobileTabEdges();
+      return;
+    }
+    window.setTimeout(() => {
+      const targetLeft = active.offsetLeft - Math.max(0, (projectMobileTabs.clientWidth - active.offsetWidth) / 2);
+      projectMobileTabs.scrollLeft = Math.max(0, targetLeft);
+      _syncProjectMobileTabEdges();
+    }, 0);
+  }
+
+  function _syncProjectMobileTabEdges() {
+    if (!projectMobileTabs) return;
+    const wrap = projectMobileTabs.closest?.('.project-mobile-tabs-wrap');
+    if (!wrap) return;
+    const maxScroll = Math.max(0, projectMobileTabs.scrollWidth - projectMobileTabs.clientWidth);
+    const scrollLeft = Math.max(0, projectMobileTabs.scrollLeft || 0);
+    wrap.classList.toggle('has-left-overflow', scrollLeft > 2);
+    wrap.classList.toggle('has-right-overflow', scrollLeft < maxScroll - 2);
+  }
+
   function _renderProjectMobileListRow(project, activeId) {
     const projectId = String(project.id || '');
     const summary = _projectSummary(projectId);
@@ -3923,6 +3970,11 @@
     row.className = 'project-mobile-row'
       + (projectId === activeId ? ' is-active' : '')
       + (projectId === projectWorkspaceSelectedId ? ' is-selected' : '');
+    row.setAttribute('role', 'button');
+    row.tabIndex = 0;
+    row.dataset.projectMobileAction = 'open-project';
+    row.dataset.projectId = projectId;
+    _bindProjectRuntimePressable(row);
 
     const main = document.createElement('div');
     main.className = 'project-mobile-row-main';
@@ -3931,11 +3983,6 @@
     title.className = 'project-mobile-title-row';
     const titleButton = document.createElement('span');
     titleButton.className = 'control-row project-mobile-title-target';
-    titleButton.setAttribute('role', 'button');
-    titleButton.tabIndex = 0;
-    titleButton.dataset.projectMobileAction = 'open-project';
-    titleButton.dataset.projectId = projectId;
-    _bindProjectRuntimePressable(titleButton);
     const name = document.createElement('span');
     name.className = 'project-mobile-name';
     name.textContent = String(project.name || project.slug || projectId);
@@ -4016,11 +4063,23 @@
 
   function _setProjectMobileCreateOpen(open, { focus = false } = {}) {
     projectMobileCreateOpen = !!open;
-    if (projectMobileListView) projectMobileListView.classList.toggle('u-hidden', projectMobileCreateOpen);
-    if (projectMobileCreateForm) projectMobileCreateForm.classList.toggle('u-hidden', !projectMobileCreateOpen);
+    if (projectMobileCreateOpen) projectMobileView = 'create';
+    else if (projectMobileView === 'create') projectMobileView = 'list';
+    if (projectMobileListView) projectMobileListView.classList.toggle('u-hidden', projectMobileView !== 'list');
+    if (projectMobileCreateForm) projectMobileCreateForm.classList.toggle('u-hidden', projectMobileView !== 'create');
+    if (projectMobileDetailView) projectMobileDetailView.classList.toggle('u-hidden', projectMobileView !== 'detail');
     if (focus && projectMobileCreateOpen && projectMobileNameInput) {
       window.setTimeout(() => projectMobileNameInput.focus(), 0);
     }
+  }
+
+  function _setProjectMobileView(view) {
+    const normalized = ['list', 'create', 'detail'].includes(view) ? view : 'list';
+    projectMobileView = normalized;
+    projectMobileCreateOpen = normalized === 'create';
+    if (projectMobileListView) projectMobileListView.classList.toggle('u-hidden', normalized !== 'list');
+    if (projectMobileCreateForm) projectMobileCreateForm.classList.toggle('u-hidden', normalized !== 'create');
+    if (projectMobileDetailView) projectMobileDetailView.classList.toggle('u-hidden', normalized !== 'detail');
   }
 
   function _selectProjectFromMobile(projectId, tab = '') {
@@ -4033,8 +4092,188 @@
     _closeProjectTargetEditor();
     _closeProjectEntityEditor();
     _setProjectWorkspaceMessage('');
-    _setProjectMobileCreateOpen(false);
+    _setProjectMobileView('detail');
     _renderProjectWorkspace();
+  }
+
+  function _renderProjectMobileDetailTopbar(project, activeId) {
+    if (!projectMobileDetailTopbar) return;
+    projectMobileDetailTopbar.replaceChildren();
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'btn btn-ghost btn-compact project-mobile-back-btn';
+    back.dataset.projectMobileAction = 'back-to-list';
+    back.setAttribute('aria-label', 'Back to project list');
+    back.textContent = '‹ Back';
+    _bindProjectRuntimePressable(back);
+
+    const titleWrap = document.createElement('div');
+    titleWrap.className = 'project-mobile-detail-title-wrap';
+    const title = document.createElement('div');
+    title.className = 'project-mobile-detail-title';
+    title.textContent = project ? _projectDisplayName(project) : 'Project';
+    titleWrap.appendChild(title);
+    const statusText = project && String(project.id || '') === activeId
+      ? 'active'
+      : (project && _projectIsArchived(project) ? 'archived' : '');
+    if (statusText) {
+      const status = document.createElement('span');
+      status.className = 'project-workspace-status' + (statusText === 'active' ? ' is-active' : '');
+      status.textContent = statusText;
+      titleWrap.appendChild(status);
+    }
+
+    const menu = document.createElement('button');
+    menu.type = 'button';
+    menu.className = 'btn btn-ghost btn-compact project-mobile-menu-btn';
+    menu.dataset.projectMobileAction = 'project-menu';
+    if (project && project.id) menu.dataset.projectId = String(project.id);
+    menu.setAttribute('aria-label', project ? `Project actions for ${_projectDisplayName(project)}` : 'Project actions');
+    menu.textContent = '⋮';
+    _bindProjectRuntimePressable(menu);
+
+    projectMobileDetailTopbar.append(back, titleWrap, menu);
+  }
+
+  function _renderProjectMobileTabs(projectId, summary) {
+    if (!projectMobileTabs) return;
+    projectMobileTabs.replaceChildren();
+    const items = _projectMobileTabItems(projectId, summary);
+    if (!items.some(item => item.id === projectWorkspaceTab)) projectWorkspaceTab = 'details';
+    items.forEach((item) => {
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = 'nav-item project-mobile-tab' + (projectWorkspaceTab === item.id ? ' is-active' : '');
+      tab.dataset.projectMobileDetailTab = item.id;
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-selected', projectWorkspaceTab === item.id ? 'true' : 'false');
+      const label = document.createElement('span');
+      label.className = 'project-mobile-tab-label';
+      label.textContent = item.label;
+      tab.appendChild(label);
+      if (item.count !== undefined) {
+        const count = document.createElement('span');
+        count.className = 'project-mobile-tab-count';
+        count.textContent = item.count;
+        tab.appendChild(count);
+      }
+      _bindProjectRuntimePressable(tab);
+      projectMobileTabs.appendChild(tab);
+    });
+    _syncProjectMobileActiveTabScroll();
+  }
+
+  function _projectMobileSummaryPanel(project, summary) {
+    const panel = document.createElement('section');
+    panel.className = 'project-mobile-detail-panel';
+    const heading = document.createElement('h3');
+    heading.textContent = 'Summary';
+    panel.appendChild(heading);
+    const meta = document.createElement('div');
+    meta.className = 'project-mobile-summary-grid';
+    [
+      ['Status', project.status || 'active'],
+      ['Created', _formatProjectDate(project.created)],
+      ['Updated', _formatProjectDate(project.updated)],
+      ['Targets', String(Number(_projectCounts(summary).targets || 0))],
+    ].forEach(([label, value]) => {
+      const item = document.createElement('div');
+      item.className = 'project-mobile-summary-item';
+      const key = document.createElement('span');
+      key.textContent = label;
+      const body = document.createElement('strong');
+      body.textContent = value;
+      item.append(key, body);
+      meta.appendChild(item);
+    });
+    panel.appendChild(meta);
+    const labels = _entityLabelValues(project);
+    if (labels.length) {
+      const chips = document.createElement('div');
+      chips.className = 'project-mobile-label-chips';
+      labels.forEach((label) => {
+        const chip = document.createElement('span');
+        chip.className = _entityMetadataChipClass('label');
+        chip.textContent = label;
+        chips.appendChild(chip);
+      });
+      panel.appendChild(chips);
+    }
+    const note = _entityNoteBody(project);
+    if (note) {
+      const noteEl = document.createElement('p');
+      noteEl.className = 'project-mobile-note-preview';
+      noteEl.textContent = note;
+      panel.appendChild(noteEl);
+    }
+    return panel;
+  }
+
+  function _projectMobileTabSummary(tab, summary) {
+    const counts = _projectCounts(summary);
+    if (tab === 'runs') return `${Number(counts.runs || 0)} linked run${Number(counts.runs || 0) === 1 ? '' : 's'}`;
+    if (tab === 'findings') return `${Number(counts.findings || 0)} finding${Number(counts.findings || 0) === 1 ? '' : 's'}`;
+    if (tab === 'artifacts') return `${Number(counts.artifacts || 0)} artifact${Number(counts.artifacts || 0) === 1 ? '' : 's'}`;
+    if (tab === 'packages') return `${Number(counts.packages || 0)} package${Number(counts.packages || 0) === 1 ? '' : 's'}`;
+    return '';
+  }
+
+  function _renderProjectMobileTabBody(project, summary) {
+    if (!projectMobileDetailBody) return;
+    projectMobileDetailBody.replaceChildren();
+    if (!summary) {
+      const panel = _emptyProjectPanel('Could not load this project. It may have been deleted.');
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'btn btn-secondary btn-compact';
+      retry.dataset.projectMobileAction = 'retry';
+      retry.textContent = 'Retry';
+      _bindProjectRuntimePressable(retry);
+      panel.appendChild(retry);
+      projectMobileDetailBody.appendChild(panel);
+      return;
+    }
+    if (projectWorkspaceTab === 'details') {
+      projectMobileDetailBody.appendChild(_projectMobileSummaryPanel(project, summary));
+      return;
+    }
+    const panel = document.createElement('section');
+    panel.className = 'project-mobile-detail-panel';
+    const heading = document.createElement('h3');
+    heading.textContent = projectWorkspaceTab.charAt(0).toLocaleUpperCase() + projectWorkspaceTab.slice(1);
+    const summaryLine = document.createElement('p');
+    summaryLine.className = 'project-mobile-tab-summary';
+    summaryLine.textContent = _projectMobileTabSummary(projectWorkspaceTab, summary);
+    panel.append(heading, summaryLine);
+    projectMobileDetailBody.appendChild(panel);
+  }
+
+  function _renderProjectMobileDetail() {
+    if (!projectMobileDetailView || !projectMobileDetailBody) return;
+    const selectedId = String(projectWorkspaceSelectedId || '');
+    if (!selectedId) {
+      _setProjectMobileView('list');
+      return;
+    }
+    const activeId = activeProject && activeProject.id ? String(activeProject.id) : '';
+    const summary = _projectSummary(selectedId);
+    const project = summary && summary.project && typeof summary.project === 'object'
+      ? summary.project
+      : projectWorkspaceRows.find(item => String(item.id || '') === selectedId);
+    if (projectWorkspaceLoading) {
+      _renderProjectMobileDetailTopbar(project || null, activeId);
+      if (projectMobileTabs) projectMobileTabs.replaceChildren();
+      projectMobileDetailBody.replaceChildren(_emptyProjectPanel('Loading project...'));
+      return;
+    }
+    if (!project) {
+      _setProjectMobileView('list');
+      projectWorkspaceSelectedId = '';
+      return;
+    }
+    _renderProjectMobileDetailTopbar(project, activeId);
+    _renderProjectMobileTabs(selectedId, summary);
+    _renderProjectMobileTabBody(project, summary);
   }
 
   function _renderProjectMobile() {
@@ -4045,8 +4284,10 @@
         ? `${count} project${count === 1 ? '' : 's'} in this session`
         : 'Create a project to group related work';
     }
-    _setProjectMobileCreateOpen(projectMobileCreateOpen);
+    if (projectMobileView === 'detail' && !projectWorkspaceSelectedId) projectMobileView = 'list';
+    _setProjectMobileView(projectMobileView);
     projectMobileBody.replaceChildren();
+    _renderProjectMobileDetail();
     if (projectWorkspaceLoading) {
       projectMobileBody.appendChild(_emptyProjectPanel('Loading projects...'));
       return;
@@ -5152,6 +5393,20 @@
 
   projectWorkspaceModal?.addEventListener('click', async (event) => {
     if (event.target.closest?.('[data-project-review-state]')) return;
+    const mobileDetailTab = event.target.closest?.('[data-project-mobile-detail-tab]');
+    if (mobileDetailTab) {
+      event.preventDefault();
+      event.stopPropagation();
+      await _flushProjectNotesAutosave();
+      const nextTab = String(mobileDetailTab.dataset.projectMobileDetailTab || 'details');
+      if (projectWorkspaceTab !== nextTab && projectMobileDetailBody) projectMobileDetailBody.scrollTop = 0;
+      projectWorkspaceTab = nextTab;
+      _closeProjectTargetEditor();
+      _closeProjectEntityEditor();
+      _setProjectWorkspaceMessage('');
+      _renderProjectMobileDetail();
+      return;
+    }
     const mobileTab = event.target.closest?.('[data-project-mobile-tab]');
     if (mobileTab) {
       event.preventDefault();
@@ -5174,6 +5429,17 @@
       if (action === 'cancel-create') {
         _setProjectWorkspaceMessage('');
         _setProjectMobileCreateOpen(false);
+        return;
+      }
+      if (action === 'back-to-list') {
+        await _flushProjectNotesAutosave();
+        _setProjectWorkspaceMessage('');
+        _setProjectMobileView('list');
+        _renderProjectMobile();
+        return;
+      }
+      if (action === 'retry') {
+        refreshProjectWorkspace().catch(() => {});
         return;
       }
       if (action === 'toggle-archived') {
@@ -5578,6 +5844,10 @@
       _setProjectWorkspaceMessage(err.message || 'Project action failed.', { error: true });
     }
   });
+
+  projectMobileTabs?.addEventListener('scroll', () => {
+    _syncProjectMobileTabEdges();
+  }, { passive: true });
 
   projectWorkspaceOverlay?.querySelector('.project-workspace-close')?.addEventListener('click', () => {
     closeProjectWorkspace();

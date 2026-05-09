@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,555
+- behavior tests: 2,556
 - docs/inventory meta-tests: 30
 - `pytest`: 1284 (1254 behavior + 30 meta)
-- `vitest`: 1058
+- `vitest`: 1059
 - `playwright`: 243
-- total: 2,585
+- total: 2,586
 
 This document is organized in two parts:
 
@@ -2262,6 +2262,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `labels only the current active project in the project list` | Verifies that the active project is pinned first and that only the current active project receives the active marker. |
 | `renders the mobile project list with active-first rows and collapsed archived projects` | Verifies that the mobile Projects list pins the active project first, truncates label chips, keeps archived projects collapsed, and lets count chips select the matching project tab. |
 | `creates projects from the mobile create sheet` | Verifies that the mobile Projects create entry point opens its sheet, creates a project, selects it as active, and returns to the list. |
+| `drills into mobile project detail tabs and returns to the list` | Verifies that mobile Projects drill into the detail shell, clamp tab counts, hide Artifacts when Files are disabled, switch tabs, and return to the list. |
 | `opens projects from the active project HUD chip` | Verifies that clicking the active project HUD chip opens the Projects modal. |
 | `hides project detail inputs when no projects exist` | Verifies that project label and note controls stay hidden until a project exists. |
 | `separates current and archived projects when archived projects exist` | Verifies that the Projects modal groups current and archived projects only when archived projects are present. |

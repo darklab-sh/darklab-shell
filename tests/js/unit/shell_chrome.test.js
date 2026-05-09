@@ -111,6 +111,13 @@ function loadShellChrome({
           <form id="project-mobile-create-form" class="u-hidden">
             <input id="project-mobile-name" maxlength="120">
           </form>
+          <div id="project-mobile-detail-view" class="u-hidden">
+            <div id="project-mobile-detail-topbar"></div>
+            <div class="project-mobile-tabs-wrap">
+              <div id="project-mobile-tabs"></div>
+            </div>
+            <div id="project-mobile-detail-body"></div>
+          </div>
         </section>
         <form id="project-workspace-create-form">
           <input id="project-workspace-name">
@@ -566,7 +573,7 @@ describe('shell chrome project workspace', () => {
       await tick()
       await tick()
 
-      const mobileRows = [...document.querySelectorAll('[data-project-mobile-action="open-project"]')]
+      const mobileRows = [...document.querySelectorAll('.project-mobile-row[data-project-mobile-action="open-project"]')]
       expect(mobileRows.map(row => row.dataset.projectId)).toEqual(['project-2', 'project-1'])
       expect(document.getElementById('project-mobile-body').textContent).toContain('Archived (1)')
       expect(document.getElementById('project-mobile-body').textContent).not.toContain('zulu.test')
@@ -581,6 +588,11 @@ describe('shell chrome project workspace', () => {
       document.querySelector('[data-project-mobile-action="toggle-archived"]').click()
       await tick()
       expect(document.getElementById('project-mobile-body').textContent).toContain('zulu.test')
+
+      document.querySelector('.project-mobile-row[data-project-id="project-2"]').click()
+      await tick()
+      expect(document.getElementById('project-mobile-detail-view').classList.contains('u-hidden')).toBe(false)
+      expect(document.getElementById('project-mobile-detail-topbar').textContent).toContain('darklab.sh')
     } finally {
       document.body.classList.remove('mobile-terminal-mode')
     }
@@ -644,6 +656,63 @@ describe('shell chrome project workspace', () => {
       expect(activeProjectId).toBe('project-mobile')
       expect(document.getElementById('project-mobile-create-form').classList.contains('u-hidden')).toBe(true)
       expect(document.getElementById('project-mobile-body').textContent).toContain('Mobile Project')
+    } finally {
+      document.body.classList.remove('mobile-terminal-mode')
+    }
+  })
+
+  it('drills into mobile project detail tabs and returns to the list', async () => {
+    document.body.classList.add('mobile-terminal-mode')
+    const projects = [{ id: 'project-1', name: 'darklab.sh', status: 'active' }]
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project: projects[0] }),
+        })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects }) })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project: projects[0],
+            counts: { runs: 1001, findings: 5, artifacts: 9, packages: 2, targets: 1, notes: 0 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+
+    try {
+      const shell = loadShellChrome({ apiFetch, appConfig: { workspace_enabled: false } })
+      await shell.openProjectWorkspace()
+      await tick()
+      await tick()
+
+      document.querySelector('[data-project-mobile-action="open-project"][data-project-id="project-1"]').click()
+      await tick()
+
+      expect(document.getElementById('project-mobile-list-view').classList.contains('u-hidden')).toBe(true)
+      expect(document.getElementById('project-mobile-detail-view').classList.contains('u-hidden')).toBe(false)
+      expect(document.getElementById('project-mobile-detail-topbar').textContent).toContain('darklab.sh')
+      expect(document.getElementById('project-mobile-tabs').textContent).toContain('999+')
+      expect(document.getElementById('project-mobile-tabs').textContent).not.toContain('Artifacts')
+
+      document.querySelector('[data-project-mobile-detail-tab="packages"]').click()
+      await tick()
+      expect(document.getElementById('project-mobile-detail-body').textContent).toContain('2 packages')
+
+      document.querySelector('[data-project-mobile-action="back-to-list"]').click()
+      await tick()
+      expect(document.getElementById('project-mobile-list-view').classList.contains('u-hidden')).toBe(false)
+      expect(document.getElementById('project-mobile-detail-view').classList.contains('u-hidden')).toBe(true)
     } finally {
       document.body.classList.remove('mobile-terminal-mode')
     }

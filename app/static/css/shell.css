@@ -2395,12 +2395,14 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 .project-mobile-list-view,
-.project-mobile-create-sheet {
+.project-mobile-create-sheet,
+.project-mobile-detail-view {
   flex: 1 1 auto;
   min-height: 0;
 }
 
-.project-mobile-list-view {
+.project-mobile-list-view,
+.project-mobile-detail-view {
   display: flex;
   flex-direction: column;
 }
@@ -2480,6 +2482,7 @@ body.mobile-terminal-mode .output-follow-btn {
   border-radius: 6px;
   background: var(--theme-chrome-row-bg);
   color: var(--text);
+  cursor: pointer;
 }
 
 .project-mobile-row-main {
@@ -2520,7 +2523,7 @@ body.mobile-terminal-mode .output-follow-btn {
   max-width: 100%;
   padding: 2px 8px;
   text-align: left;
-  cursor: pointer;
+  pointer-events: none;
 }
 
 .project-mobile-name {
@@ -2595,6 +2598,219 @@ body.mobile-terminal-mode .output-follow-btn {
 .project-mobile-create-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+.project-mobile-detail-view {
+  overflow: hidden;
+}
+
+.project-mobile-detail-topbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--theme-panel-border);
+}
+
+.project-mobile-detail-title-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.project-mobile-detail-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-mobile-tabs-wrap {
+  position: relative;
+  min-height: 52px;
+  border-bottom: 1px solid var(--theme-panel-border);
+  background: var(--theme-chrome-bg);
+  overflow: hidden;
+}
+
+.project-mobile-tabs-wrap::before,
+.project-mobile-tabs-wrap::after {
+  display: none;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 22px;
+  pointer-events: none;
+  content: '';
+}
+
+.project-mobile-tabs-wrap.has-left-overflow::before,
+.project-mobile-tabs-wrap.has-right-overflow::after {
+  display: block;
+}
+
+.project-mobile-tabs-wrap::before {
+  left: 0;
+  background: linear-gradient(90deg, var(--theme-chrome-bg) 26%, transparent);
+}
+
+.project-mobile-tabs-wrap::after {
+  right: 0;
+  background: linear-gradient(270deg, var(--theme-chrome-bg) 26%, transparent);
+}
+
+.project-mobile-tabs {
+  display: flex;
+  gap: 6px;
+  min-height: 52px;
+  padding: 8px 10px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.project-mobile-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.project-mobile-tabs .project-mobile-tab.nav-item {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  min-height: 40px;
+  max-width: 148px;
+  margin-bottom: -1px;
+  padding: 9px 12px;
+  border: 1px solid var(--border-bright);
+  border-top: 2px solid var(--border-bright);
+  border-bottom: 1px solid transparent;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  isolation: isolate;
+  touch-action: pan-x;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.project-mobile-tabs .project-mobile-tab.nav-item.is-active {
+  border-color: var(--border-bright);
+  border-top-color: color-mix(in srgb, var(--green) 55%, transparent);
+  border-bottom-color: var(--theme-tab-active-bg);
+  background: var(--theme-tab-active-bg);
+  color: var(--green);
+  box-shadow: none;
+}
+
+.project-mobile-tabs .project-mobile-tab.nav-item:hover:not([aria-disabled="true"]):not(:disabled) {
+  border-color: var(--border-bright);
+  border-top-color: var(--border-bright);
+  border-bottom-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.project-mobile-tabs .project-mobile-tab.nav-item.is-active:hover:not([aria-disabled="true"]):not(:disabled),
+.project-mobile-tabs .project-mobile-tab.nav-item.is-active:active:not([aria-disabled="true"]):not(:disabled) {
+  border-color: var(--border-bright);
+  border-top-color: color-mix(in srgb, var(--green) 55%, transparent);
+  border-bottom-color: var(--theme-tab-active-bg);
+  background: var(--theme-tab-active-bg);
+  color: var(--green);
+}
+
+.project-mobile-tabs .project-mobile-tab.nav-item[data-pressable-clearing="1"],
+.project-mobile-tabs .project-mobile-tab.nav-item.is-active[data-pressable-clearing="1"] {
+  border-color: var(--border-bright);
+  border-top-color: var(--border-bright);
+  border-bottom-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+
+.project-mobile-tabs .project-mobile-tab.nav-item.is-active[data-pressable-clearing="1"] {
+  border-top-color: color-mix(in srgb, var(--green) 55%, transparent);
+  border-bottom-color: var(--theme-tab-active-bg);
+  background: var(--theme-tab-active-bg);
+  color: var(--green);
+}
+
+.project-mobile-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-mobile-tab-count {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.project-mobile-detail-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 12px 14px calc(16px + env(safe-area-inset-bottom, 0));
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.project-mobile-detail-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--theme-chrome-row-bg);
+}
+
+.project-mobile-detail-panel h3 {
+  margin: 0;
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.project-mobile-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.project-mobile-summary-item {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.project-mobile-summary-item strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.project-mobile-note-preview,
+.project-mobile-tab-summary {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .project-workspace-sidebar {

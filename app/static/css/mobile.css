@@ -595,6 +595,7 @@
   body.mobile-terminal-mode .command-registry-body,
   body.mobile-terminal-mode .project-workspace-body,
   body.mobile-terminal-mode .project-mobile-body,
+  body.mobile-terminal-mode .project-mobile-detail-body,
   body.mobile-terminal-mode .project-explorer-body,
   body.mobile-terminal-mode .workflows-body,
   body.mobile-terminal-mode .workflow-editor-body {
@@ -635,7 +636,8 @@
   }
   body.mobile-terminal-mode .project-mobile-root.u-hidden,
   body.mobile-terminal-mode .project-mobile-list-view.u-hidden,
-  body.mobile-terminal-mode .project-mobile-create-sheet.u-hidden {
+  body.mobile-terminal-mode .project-mobile-create-sheet.u-hidden,
+  body.mobile-terminal-mode .project-mobile-detail-view.u-hidden {
     display: none !important;
   }
   body.mobile-terminal-mode #project-mobile-name {
