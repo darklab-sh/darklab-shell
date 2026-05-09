@@ -33,7 +33,6 @@ from run_output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
 
 def get_client(*, use_forwarded_for=True):
     shell_app.app.config["TESTING"] = True
-    shell_app.app.config["RATELIMIT_ENABLED"] = False
     client = shell_app.app.test_client()
     if use_forwarded_for:
         token = uuid.uuid4().hex

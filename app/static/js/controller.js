@@ -1144,6 +1144,7 @@ function isAnyPanelOverlayOpen() {
     || (typeof isWorkflowsOverlayOpen === 'function' && isWorkflowsOverlayOpen())
     || (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen())
     || (typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
+    || (typeof isHistoryRunOverlayOpen === 'function' && isHistoryRunOverlayOpen())
     || (typeof isOptionsOverlayOpen === 'function' && isOptionsOverlayOpen())
     || (typeof isThemeOverlayOpen === 'function' && isThemeOverlayOpen());
 }
@@ -1169,6 +1170,7 @@ document.addEventListener('keydown', e => {
     || isWorkflowsOverlayOpen()
     || isHistoryPanelOpen()
     || (typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
+    || (typeof isHistoryRunOverlayOpen === 'function' && isHistoryRunOverlayOpen())
   ) {
     if (handleChromeShortcut(e)) return;
     return;
@@ -1283,6 +1285,7 @@ document.addEventListener('keydown', e => {
     && cmdInput
     && !isFaqOverlayOpen() && !isWorkflowsOverlayOpen() && !isOptionsOverlayOpen() && !isThemeOverlayOpen()
     && !(typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
+    && !(typeof isHistoryRunOverlayOpen === 'function' && isHistoryRunOverlayOpen())
     && !(typeof isConfirmOpen === 'function' && isConfirmOpen())
   ) {
     e.preventDefault();
@@ -1394,6 +1397,7 @@ function _isMajorSurfaceOpenForPromptPaste() {
     || isWorkflowsOverlayOpen()
     || (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen())
     || (typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
+    || (typeof isHistoryRunOverlayOpen === 'function' && isHistoryRunOverlayOpen())
     || isHistoryPanelOpen()
     || (typeof isConfirmOpen === 'function' && isConfirmOpen())
   );

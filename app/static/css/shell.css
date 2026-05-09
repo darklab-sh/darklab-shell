@@ -3182,42 +3182,18 @@ body.mobile-terminal-mode .output-follow-btn {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
-  overflow: hidden;
-  border: 1px solid var(--border-bright);
-  border-radius: 4px;
-  background: var(--theme-chrome-control-bg);
+  gap: 4px;
 }
 
 .project-run-compare-mode-group[hidden] {
   display: none;
 }
 
-.project-run-compare-mode-button {
-  appearance: none;
-  -webkit-appearance: none;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  font-family: var(--font-mono);
+.project-run-compare-mode-button.toggle-btn {
+  min-height: 32px;
+  min-width: 52px;
+  padding: 7px 10px;
   font-size: 11px;
-  line-height: 1;
-  padding: 10px 11px;
-}
-
-.project-run-compare-mode-button + .project-run-compare-mode-button {
-  border-left: 1px solid var(--border);
-}
-
-.project-run-compare-mode-button:hover,
-.project-run-compare-mode-button:focus-visible {
-  color: var(--text);
-}
-
-.project-run-compare-mode-button.is-active {
-  background: var(--green-glow);
-  color: var(--green);
 }
 
 .project-runs-toolbar-actions {

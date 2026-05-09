@@ -18,9 +18,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 ## Open TODOs
 
 - **Project Workspace code review follow-ups**
-  - **Expose or deliberately defer remaining backend-only project surfaces**
-    - Build a first-party Projects modal entry point for `/projects/<id>/workflows/promote`, or keep it documented as backend/API support until the workflow-promotion UI is designed.
-    - Add a baseline-label selector to the Projects modal compare flow if `/projects/<id>/compare?baseline_label=...` should be user-facing; the current modal supports explicit run-to-run comparison.
+  - **Keep terminal documentation aligned**
     - Keep terminal `project` help aligned with actual shell-supported operations. Current shell commands intentionally stop at project CRUD/link/target operations.
 - **Future Project Workspace enhancements**
   - **Security and lifecycle**
@@ -44,9 +42,6 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - Prefetch finding counts and severity distribution so tab labels can show useful state such as unreviewed/high counts without opening the tab.
     - Extend the current Projects modal Compare Runs control with a row action for selecting a baseline and a diff view for changed severity, changed exit code, and richer artifact changes.
     - Extend comparison beyond run-to-run finding/artifact diffs to snapshots and package artifacts.
-  - **Workflows**
-    - Build the project-modal workflow promotion UI around explicit run and target selection.
-    - Offer target choices discovered from run output when promoting workflows instead of guessing only from command text.
   - **Evidence packages**
     - Materialize evidence package archives at creation time if byte-for-byte repeat downloads become important.
     - Make package presets config-driven so new bundle profiles, such as internal review or external handoff, can be added without code changes.

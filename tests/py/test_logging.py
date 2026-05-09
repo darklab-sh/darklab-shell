@@ -48,7 +48,6 @@ def _emit(formatter, level, msg, extra=None):
 
 def get_client(*, use_forwarded_for=True):
     shell_app.app.config["TESTING"] = True
-    shell_app.app.config["RATELIMIT_ENABLED"] = False
     client = shell_app.app.test_client()
     if use_forwarded_for:
         client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
@@ -413,9 +412,6 @@ class TestConfigureLogging:
 
 class TestCmdDeniedEvent:
     """CMD_DENIED is emitted at WARNING when is_command_allowed() returns False.
-
-    Uses a dedicated X-Forwarded-For IP so these tests get their own rate-limit
-    bucket and don't pollute the shared 127.0.0.1 counter used by test_routes.py.
     """
 
     # RFC 5737 TEST-NET-1 — never routed, guaranteed unique from real traffic
@@ -576,11 +572,6 @@ class TestShareCreatedEvent:
 
 class TestCmdRewriteEvent:
     """CMD_REWRITE is emitted at INFO when a command is silently rewritten.
-
-    Uses a dedicated X-Forwarded-For IP so these tests get a fresh rate-limit
-    bucket. Flask-Limiter 4.x increments in-memory counters even when
-    RATELIMIT_ENABLED=False; using a unique IP prevents counter overflow from
-    prior tests in the same second.
     """
 
     # RFC 5737 TEST-NET-3 — never routed, guaranteed unique from real traffic

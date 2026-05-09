@@ -268,12 +268,11 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/projects/<project_id>/summary` | Returns one project plus linked-record, package, and derived metadata counts. |
 | `PUT` | `/projects/<project_id>` | Updates project display metadata, status, entity-note-backed notes, and slug. |
 | `DELETE` | `/projects/<project_id>` | Deletes project metadata and project links without deleting linked source records. |
-| `GET` | `/projects/<project_id>/links` | Lists run and workspace-file source records linked into a project. |
-| `POST` | `/projects/<project_id>/links` | Links a supported current-session run or workspace file into a project. |
-| `DELETE` | `/projects/<project_id>/links` | Removes one supported run or workspace-file link from a project. |
+| `GET` | `/projects/<project_id>/links` | Lists run source records linked into a project. |
+| `POST` | `/projects/<project_id>/links` | Links a supported current-session run into a project. |
+| `DELETE` | `/projects/<project_id>/links` | Removes one supported run link from a project. |
 | `GET` | `/projects/<project_id>/targets` | Lists project-scoped targets. |
 | `POST` | `/projects/<project_id>/targets` | Adds an idempotent project target. |
-| `POST` | `/projects/<project_id>/targets/quick-add` | Infers and adds a target from selected text or an explicit value. |
 | `PUT` | `/projects/<project_id>/targets/<target_id>` | Updates one project target. |
 | `DELETE` | `/projects/<project_id>/targets/<target_id>` | Deletes one project target. |
 | `GET` | `/projects/<project_id>/packages` | Lists draft evidence package manifests for a project. |
@@ -284,7 +283,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/projects/<project_id>/artifacts/<artifact_id>/preview` | Returns text preview content for one project-linked run artifact. |
 | `GET` | `/projects/<project_id>/artifacts/<artifact_id>/download` | Downloads one available project-linked run artifact from the workspace. |
 | `GET` | `/projects/<project_id>/findings` | Lists findings reached through project-linked runs, with project filters. |
-| `GET` | `/projects/<project_id>/compare` | Compares findings and workspace artifacts between two project-linked runs, optionally selecting a baseline by run label. |
+| `GET` | `/projects/<project_id>/compare` | Compares findings and workspace artifacts between two project-linked runs, optionally selecting a baseline by run label. Each side is capped at 5,000 findings and 5,000 artifacts; capped responses include `truncated` with side/type flags and `item_limit`. |
 | `GET` | `/entities/run/<run_id>/findings` | Lists persisted findings captured for a current-session run. |
 | `PUT` | `/findings/<finding_id>/review` | Updates the review state for one current-session finding. |
 | `GET` | `/entities/<entity_type>/<path:entity_id>/labels` | Lists current-session labels for a supported entity. |
@@ -399,7 +398,7 @@ Within that non-module shell, repeated tab/history/FAQ-limit surfaces are built 
 
 External dependencies: local vendor routes serving committed builds of `ansi_up`, `jspdf`, xterm, and the xterm fit addon from `app/static/js/vendor/`, plus committed font files from `app/static/fonts/`. These browser libraries are tracked in `package.json` under `dependencies`. `scripts/build_vendor.mjs` generates `app/static/js/vendor/ansi_up.js` (an IIFE-wrapped browser global, because `ansi_up` v6 is ESM-only), `app/static/js/vendor/jspdf.umd.min.js` (copied from the npm UMD build), and the xterm JS/CSS files used by interactive PTY tabs. The generated files are committed so local development and docker-compose runs never need an explicit build step. Run `npm run vendor:sync` to regenerate after a version bump; `npm run vendor:check` verifies the committed files in `app/static/js/vendor/` match what `build_vendor.mjs` would produce from the current `node_modules/` packages. Fonts are committed to `app/static/fonts/` and served through `/vendor/fonts/`.
 
-**JS module load order:** `session.js` → `state.js` → `utils.js` → `export_html.js` → `config.js` → `dom.js` → `ui_helpers.js` → `ui_pressable.js` → `ui_disclosure.js` → `ui_dismissible.js` → `ui_focus_trap.js` → `ui_confirm.js` → `ui_outside_click.js` → `export_pdf.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `workspace.js` → `welcome.js` → `status_monitor.js` → `runner.js` → `app.js` → `mobile_sheet.js` → `controller.js` → `shell_chrome.js` → `mobile_chrome.js`. `state.js` owns the shared store boundary, `ui_helpers.js` owns DOM-facing setters/getters and visibility helpers, the `ui_*` helper modules form the shared UI interaction layer (see **UI Interaction Helpers** below), `app.js` still provides reusable browser helpers, `controller.js` owns the composition root, and `shell_chrome.js` / `mobile_chrome.js` load last so their rail, tabbar, HUD, and mobile-sheet wiring can attach after all tab, search, and action helpers are defined. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
+**JS module load order:** `session.js` → `state.js` → `utils.js` → `export_html.js` → `config.js` → `dom.js` → `ui_helpers.js` → `ui_pressable.js` → `ui_disclosure.js` → `ui_dismissible.js` → `ui_focus_trap.js` → `ui_confirm.js` → `ui_outside_click.js` → `ui_entity_metadata.js` → `export_pdf.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `workspace.js` → `welcome.js` → `status_monitor.js` → `runner.js` → `app.js` → `mobile_sheet.js` → `controller.js` → `shell_chrome.js` → `mobile_chrome.js`. `state.js` owns the shared store boundary, `ui_helpers.js` owns DOM-facing setters/getters and visibility helpers, the `ui_*` helper modules form the shared UI interaction layer (see **UI Interaction Helpers** below), `ui_entity_metadata.js` owns the shared `/entities/<type>/<id>` label/note client consumed by Files and Projects, `app.js` still provides reusable browser helpers, `controller.js` owns the composition root, and `shell_chrome.js` / `mobile_chrome.js` load last so their rail, tabbar, HUD, and mobile-sheet wiring can attach after all tab, search, and action helpers are defined. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
 
 **UI Interaction Helpers.** A five-helper family in `static/js/ui_helpers.js` + four sibling `ui_*.js` modules is the single contract for chrome-surface interaction. Every module loads before the domain scripts that consume it, so every downstream module sees the helpers as plain globals — no wiring glue at call sites.
 
@@ -610,6 +609,9 @@ flowchart TB
     Content["content.py"]
     Run["run.py"]
     History["history.py"]
+    Session["session.py"]
+    WorkspaceBp["workspace.py"]
+    Projects["projects.py"]
   end
 
   App["app.py"]
@@ -628,6 +630,8 @@ flowchart TB
   OutputStore --> Http
   CommandRules --> Run
   BuiltinCommands --> Run
+  CommandRules --> Projects
+  BuiltinCommands --> Projects
   Http --> App
 ```
 
@@ -635,15 +639,15 @@ flowchart TB
 - `logging_setup.py` must initialize before the rest of the app because module-import-time startup work, especially Redis setup, can log immediately.
 - The infrastructure/helper layer owns shared concerns like request metadata, persistence, process tracking, permalink shaping, artifact storage, and the Flask-Limiter singleton.
 - `commands.py` and `builtin_commands.py` stay logically adjacent to the run path but remain separate from the Flask factory so command policy and shell-helper behavior can be tested in isolation.
-- The HTTP layer owns the actual request/response surface, and `app.py` remains a thin factory that composes logging, limiter setup, blueprint registration, and request hooks.
+- The HTTP layer owns the actual request/response surface across assets/content, run streaming, history/share, session-token/session-state APIs, workspace-file APIs, and project workspace APIs. `app.py` remains a thin factory that composes logging, limiter setup, blueprint registration, and request hooks.
 
 ### Backend Runtime Boundaries
 
 This boundary view answers a different question than the dependency graph above: not "which module imports which," but "which runtime service owns which responsibility."
 
 - Flask + Gunicorn own routing, request hooks, response shaping, and template rendering.
-- Redis owns only the shared coordination required across Gunicorn workers: rate limiting and active-run PID tracking for `/kill`.
-- SQLite plus artifact files own durable run, snapshot, token, and search state.
+- Redis owns the shared coordination required across Gunicorn workers: rate limiting, active-run PID tracking for `/kill`, replayable run-broker streams, and PTY event/control streams when those brokered runtimes are enabled.
+- SQLite plus artifact files own durable run, snapshot, token, workflow, workspace metadata, project workspace, package, and search state.
 - Scanner subprocesses remain an out-of-process boundary rather than an in-worker extension of the Flask app.
 - Config and theme YAML files are filesystem-backed dependencies that shape both backend behavior and frontend presentation but do not become a general runtime datastore.
 
@@ -756,7 +760,7 @@ That split is what allows the app to keep the interactive shell fast while still
 
 Logical relationships are owned by the app rather than SQLite foreign-key constraints. Anonymous browser sessions can appear as `session_id` values without a matching `session_tokens` row.
 
-Project workspace tables are the relationship foundation for case-style grouping. Projects link to top-level source records instead of copying them, so runs and manually selected workspace files can remain usable outside any project and can belong to more than one project when that is useful. Snapshots remain share/history records and are not project-linked. Run-owned records such as artifacts and findings stay attached to their source run and surface in project views through linked runs.
+Project workspace tables are the relationship foundation for case-style grouping. Projects link to completed runs instead of copying them, so runs can remain usable outside any project and can belong to more than one project when that is useful. Snapshots and manually selected workspace files remain in their share/history/files surfaces and are not project-linked. Run-owned records such as artifacts and findings stay attached to their source run and surface in project views through linked runs.
 
 ```mermaid
 erDiagram
@@ -973,7 +977,7 @@ erDiagram
 - `user_workflows` — one row per saved workflow `(id, session_id, title, description, inputs, steps, created, updated)`. Backs the Workflows panel's **My workflows** section, the `workflow` terminal command, and session-token migration.
 - `recent_domains` — one row per recently used domain per session `(session_id, domain, last_used, use_count)`. Backs domain autocomplete across browsers that share the same named session token and follows the session-token migration path.
 - `projects` — one row per project/case folder. Stores session ownership, display metadata, status, timestamps, and a session-scoped slug. Project notes are stored through `entity_notes` with `entity_type='project'`.
-- `project_links` — generic project membership rows `(project_id, entity_type, entity_id)`. The app owns the valid entity vocabulary and link sources so projects can link top-level records such as runs and manually selected workspace files without copying source data. Run-owned records such as file artifacts and findings are intentionally reached through linked runs instead of direct project links.
+- `project_links` — generic project membership rows `(project_id, entity_type, entity_id)`. The app owns the valid entity vocabulary and link sources so projects can link completed runs without copying source data. Run-owned records such as file artifacts and findings are intentionally reached through linked runs instead of direct project links.
 - `run_file_artifacts` — durable file manifest rows for workspace files produced or consumed by a run, including recorded size and optional SHA-256 content checksum so project views can flag missing or changed workspace files. This is separate from `run_output_artifacts`, which stores the terminal transcript artifact behind a run permalink.
 - `project_targets` — project-scoped domains, URLs, hosts, IPs, CIDRs, and port sets. Targets can be manually entered or associated with source runs later.
 - `findings` — persisted output-signal rows linked to the source run, a primary target id when one is available, and a stable fingerprint for deduplication/context. The `finding_targets` relationship table stores every matched project target for a finding, so project views can show many-to-many target attribution without overloading the primary `target_id` field. These records are intentionally lightweight so findings can power filtering, review state, notes, and evidence packages without turning the app into a vulnerability-management system.
@@ -1209,12 +1213,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,544
+- behavior tests: 2,546
 - docs/inventory meta-tests: 30
-- `pytest`: 1279 (1249 behavior + 30 meta)
-- `vitest`: 1052
+- `pytest`: 1280 (1250 behavior + 30 meta)
+- `vitest`: 1054
 - `playwright`: 243
-- total: 2,574
+- total: 2,577
 
 ### Testing Architecture
 

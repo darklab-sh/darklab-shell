@@ -16,7 +16,7 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 import config as _config
-from database import db_connect, delete_run_artifacts
+from database import db_connect, delete_run_artifacts, delete_snapshot_metadata
 from helpers import (
     GRACEFUL_TERMINATION_EXIT_CODE,
     get_client_ip,
@@ -1768,12 +1768,11 @@ def delete_share(share_id):
     """Delete a snapshot owned by the current session."""
     session_id = get_session_id()
     with db_connect() as conn:
-        conn.execute(
-            "DELETE FROM project_links "
-            "WHERE entity_type = 'snapshot' "
-            "AND entity_id IN (SELECT id FROM snapshots WHERE id = ? AND session_id = ?)",
+        snapshot_rows = conn.execute(
+            "SELECT id FROM snapshots WHERE id = ? AND session_id = ?",
             (share_id, session_id),
-        )
+        ).fetchall()
+        delete_snapshot_metadata(conn, [row["id"] for row in snapshot_rows])
         cur = conn.execute(
             "DELETE FROM snapshots WHERE id = ? AND session_id = ?",
             (share_id, session_id),

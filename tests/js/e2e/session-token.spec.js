@@ -1,20 +1,12 @@
 import { test, expect } from '@playwright/test'
 import {
   ensurePromptReady,
-  makeTestIp,
   runCommand,
   setComposerValueForTest,
   waitForHistoryRuns,
 } from './helpers.js'
 
 const CMD = 'hostname'
-
-function testScopedIp(testInfo, baseOffset = 0) {
-  const key = `${testInfo.file}:${testInfo.title}`
-  let sum = 0
-  for (const ch of key) sum = (sum + ch.charCodeAt(0)) % 200
-  return makeTestIp(baseOffset + sum)
-}
 
 async function currentSessionId(page) {
   return page.evaluate(() => SESSION_ID)
@@ -103,8 +95,7 @@ async function answerTerminalConfirm(page, answer, expectedText, { timeout = 30_
 }
 
 test.describe('session-token lifecycle', () => {
-  test.beforeEach(async ({ page }, testInfo) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': testScopedIp(testInfo, 330) })
+  test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.evaluate(() => localStorage.clear())
     await page.reload()
@@ -181,7 +172,7 @@ test.describe('session-token lifecycle', () => {
   test('recent domain autocomplete follows the active session token across browser contexts', async ({
     page,
     browser,
-  }, testInfo) => {
+  }) => {
     const token = await issueSessionToken(page)
     await runCommand(page, `session-token set ${token}`)
     await expect.poll(async () => currentSessionId(page)).toBe(token)
@@ -193,9 +184,7 @@ test.describe('session-token lifecycle', () => {
       return data.domains || []
     })).toContain('darklab.sh')
 
-    const context = await browser.newContext({
-      extraHTTPHeaders: { 'X-Forwarded-For': testScopedIp(testInfo, 390) },
-    })
+    const context = await browser.newContext()
     const otherPage = await context.newPage()
     try {
       await otherPage.goto('/')

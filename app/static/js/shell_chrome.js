@@ -74,6 +74,13 @@
   const projectLabelsSaveButton = document.getElementById('project-labels-save-btn');
   const projectLabelsSaveStatus = document.getElementById('project-labels-save-status');
   const projectWorkspaceMessage = document.getElementById('project-workspace-message');
+  const EntityMetadataClient = (
+    typeof window !== 'undefined' && window.DarklabEntityMetadata
+  ) || (
+    typeof global !== 'undefined' && global.DarklabEntityMetadata
+  ) || (
+    typeof globalThis !== 'undefined' && globalThis.DarklabEntityMetadata
+  ) || {};
 
   // ── Prefs (cookie-backed) ───────────────────────────────────────
   const PREF_COLLAPSED = 'pref_rail_collapsed';
@@ -167,6 +174,7 @@
   let projectWorkspaceSelectedId = '';
   let projectWorkspaceTab = 'details';
   let projectWorkspaceFindingsLoadingId = '';
+  let projectWorkspaceFindingsLoadingPromise = null;
   let projectWorkspaceFilteredFindingsLoadingKey = '';
   let projectWorkspaceEditingTargetId = '';
   let projectWorkspaceEditingEntity = null;
@@ -833,6 +841,15 @@
     return !!(projectWorkspaceOverlay && projectWorkspaceOverlay.classList.contains('open'));
   }
 
+  function _showProjectWorkspaceToast(text, tone = 'success') {
+    const toastFn = typeof showToast === 'function'
+      ? showToast
+      : (global && typeof global.showToast === 'function' ? global.showToast : null);
+    if (!toastFn) return false;
+    toastFn(text, tone);
+    return true;
+  }
+
   function _setProjectWorkspaceMessage(text = '', { error = false } = {}) {
     if (!projectWorkspaceMessage) return;
     let messageText = projectWorkspaceMessage.querySelector('.project-workspace-message-text');
@@ -847,6 +864,12 @@
       dismiss.setAttribute('aria-label', 'Dismiss project message');
       dismiss.textContent = '✕';
       projectWorkspaceMessage.append(messageText, dismiss);
+    }
+    if (text && !error && _showProjectWorkspaceToast(text)) {
+      messageText.textContent = '';
+      projectWorkspaceMessage.classList.add('u-hidden');
+      projectWorkspaceMessage.classList.remove('is-error');
+      return;
     }
     messageText.textContent = text;
     projectWorkspaceMessage.classList.toggle('u-hidden', !text);
@@ -1254,20 +1277,6 @@
     parent.appendChild(wrap);
   }
 
-  function _parseEntityLabelInput(value) {
-    const seen = new Set();
-    return String(value || '')
-      .split(',')
-      .map(item => item.trim())
-      .filter(Boolean)
-      .filter((item) => {
-        const key = item.toLocaleLowerCase();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-  }
-
   function _entityTitleForEditor(entityType, entity) {
     if (entityType === 'finding') {
       return String(entity && (entity.title || entity.raw_line || entity.id) || 'Finding');
@@ -1326,30 +1335,8 @@
     return `${safe || 'evidence-package'}.zip`;
   }
 
-  function _revokeObjectUrlOnPagehide(url) {
-    if (!url || typeof URL === 'undefined' || typeof URL.revokeObjectURL !== 'function') return;
-    let revoked = false;
-    const revoke = () => {
-      if (revoked) return;
-      revoked = true;
-      URL.revokeObjectURL(url);
-    };
-    if (typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
-      window.setTimeout(revoke, 2000);
-    }
-    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
-    window.addEventListener('pagehide', revoke, { once: true });
-  }
-
   function _downloadBlobAsAttachment(blob, filename, successMessage = '') {
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    _revokeObjectUrlOnPagehide(url);
+    downloadBlobAsAttachment(blob, filename);
     if (successMessage) _setProjectWorkspaceMessage(successMessage);
   }
 
@@ -2211,6 +2198,13 @@
   function _packageWizardManifestPreview(projectId, summary) {
     const estimate = _packageWizardEstimate(summary);
     const skippedPreview = _packageWizardSkippedPreview(projectId, summary);
+    const projectPreview = {
+      id: projectId,
+      name: summary?.project?.name || '',
+    };
+    if (projectPackageWizard.includePrivateNotes && summary?.project?.note) {
+      projectPreview.note = summary.project.note;
+    }
     return {
       package_format_version: 1,
       preset: projectPackageWizard.preset,
@@ -2238,10 +2232,7 @@
       },
       estimated_archive: estimate,
       skipped_preview: skippedPreview,
-      project: {
-        id: projectId,
-        name: summary?.project?.name || '',
-      },
+      project: projectPreview,
     };
   }
 
@@ -2368,7 +2359,7 @@
       redaction_mode: String(projectPackageWizard.redactionMode || 'raw'),
       include_artifacts: !!projectPackageWizard.includeArtifacts,
       include_private_notes: !!projectPackageWizard.includePrivateNotes,
-      labels: _parseEntityLabelInput(projectPackageWizard.labels || ''),
+      labels: EntityMetadataClient.parseLabelInput(projectPackageWizard.labels || ''),
       notes: String(projectPackageWizard.notes || '').trim(),
       options: {
         manifest_json: true,
@@ -2773,7 +2764,7 @@
 
   function _projectTargetEditorMetadata() {
     return {
-      labels: _parseEntityLabelInput(projectTargetLabelInput?.value || ''),
+      labels: EntityMetadataClient.parseLabelInput(projectTargetLabelInput?.value || ''),
       noteBody: String(projectTargetNotesInput?.value || '').trim(),
     };
   }
@@ -3089,7 +3080,7 @@
       if (value === 'baseline' && !baselineLabels.length) return;
       const modeBtn = document.createElement('button');
       modeBtn.type = 'button';
-      modeBtn.className = 'project-run-compare-mode-button';
+      modeBtn.className = 'toggle-btn project-run-compare-mode-button';
       modeBtn.dataset.projectCompareModeValue = value;
       modeBtn.setAttribute('aria-pressed', value === modeInput.value ? 'true' : 'false');
       modeBtn.textContent = label;
@@ -3515,22 +3506,34 @@
 
   async function _loadProjectFindings(projectId) {
     const normalized = String(projectId || '');
-    if (!normalized || projectWorkspaceFindings.has(normalized) || projectWorkspaceFindingsLoadingId === normalized) return;
-    projectWorkspaceFindingsLoadingId = normalized;
-    _renderProjectExplorer();
-    try {
-      const resp = await apiFetch(`/projects/${encodeURIComponent(normalized)}/findings`, { cache: 'no-store' });
-      if (!resp.ok) throw await _projectResponseError(resp, 'Could not load project findings.');
-      const data = await resp.json();
-      projectWorkspaceFindings.set(normalized, Array.isArray(data.findings) ? data.findings : []);
-    } catch (err) {
-      projectWorkspaceFindings.set(normalized, []);
-      _setProjectWorkspaceMessage(err && err.message ? err.message : 'Could not load project findings.', { error: true });
-      if (typeof logClientError === 'function') logClientError('failed to load project findings', err);
-    } finally {
-      projectWorkspaceFindingsLoadingId = '';
-      _renderProjectExplorer();
+    if (!normalized || projectWorkspaceFindings.has(normalized)) return;
+    if (projectWorkspaceFindingsLoadingId === normalized && projectWorkspaceFindingsLoadingPromise) {
+      return projectWorkspaceFindingsLoadingPromise;
     }
+    projectWorkspaceFindingsLoadingId = normalized;
+    projectWorkspaceFindingsLoadingPromise = Promise.resolve().then(async () => {
+      _renderProjectExplorer();
+      try {
+        const resp = await apiFetch(`/projects/${encodeURIComponent(normalized)}/findings`, { cache: 'no-store' });
+        if (!resp.ok) throw await _projectResponseError(resp, 'Could not load project findings.');
+        const data = await resp.json();
+        projectWorkspaceFindings.set(normalized, Array.isArray(data.findings) ? data.findings : []);
+      } catch (err) {
+        projectWorkspaceFindings.set(normalized, []);
+        _setProjectWorkspaceMessage(err && err.message ? err.message : 'Could not load project findings.', { error: true });
+        if (typeof logClientError === 'function') logClientError('failed to load project findings', err);
+      } finally {
+        if (projectWorkspaceFindingsLoadingId === normalized) {
+          projectWorkspaceFindingsLoadingId = '';
+          projectWorkspaceFindingsLoadingPromise = null;
+        }
+        _renderProjectExplorer();
+        if (_projectPackageWizardActive(normalized)) {
+          _renderProjectPackageWizardModal();
+        }
+      }
+    });
+    return projectWorkspaceFindingsLoadingPromise;
   }
 
   async function _loadProjectFilteredFindings(projectId, summary = _projectSummary(projectId)) {
@@ -3579,7 +3582,9 @@
         ? `Labels for ${_projectDisplayName(project)}`
         : 'Select a project to edit labels';
     }
-    if (projectNotesInput && document.activeElement !== projectNotesInput) {
+    const notesProjectId = String(projectNotesInput?.dataset.projectId || '');
+    const hasPendingNotesEdit = !!projectNotesSaveTimer && notesProjectId === nextProjectId;
+    if (projectNotesInput && document.activeElement !== projectNotesInput && !hasPendingNotesEdit) {
       projectNotesInput.value = hasProject ? _entityNoteBody(project) : '';
       projectNotesInput.dataset.projectId = hasProject ? String(project.id || '') : '';
       projectNotesInput.dataset.savedNotes = projectNotesInput.value;
@@ -3687,7 +3692,7 @@
     if (!projectLabelsInput) return;
     const projectId = String(projectLabelsInput.dataset.projectId || projectWorkspaceSelectedId || '');
     if (!projectId) return;
-    const labels = _parseEntityLabelInput(projectLabelsInput.value);
+    const labels = EntityMetadataClient.parseLabelInput(projectLabelsInput.value);
     const labelText = labels.join(', ');
     if (labelText === String(projectLabelsInput.dataset.savedLabels || '')) return;
     if (projectLabelsSaveButton) projectLabelsSaveButton.disabled = true;
@@ -4389,75 +4394,27 @@
   }
 
   async function _projectWorkspaceRequest(url, options = {}) {
-    const method = String(options.method || 'GET').toUpperCase();
-    const resp = await apiFetch(url, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(options.headers || {}),
-      },
+    return EntityMetadataClient.entityMetadataRequest(url, options, {
+      onWrite: () => _notifyProjectWorkspaceChanged('write', projectWorkspaceSelectedId, { local: false }),
     });
-    if (!resp.ok) {
-      let message = `HTTP ${resp.status}`;
-      try {
-        const data = await resp.json();
-        if (data && data.error) message = data.error;
-      } catch (_) {}
-      throw new Error(message);
-    }
-    if (method !== 'GET' && method !== 'HEAD') {
-      _notifyProjectWorkspaceChanged('write', projectWorkspaceSelectedId, { local: false });
-    }
-    return resp;
   }
 
   async function _syncEntityLabels(entityType, entityId, nextLabels) {
-    const labelsUrl = `/entities/${encodeURIComponent(entityType)}/${encodeURIComponent(entityId)}/labels`;
-    const resp = await _projectWorkspaceRequest(labelsUrl, { cache: 'no-store' });
-    const data = await resp.json().catch(() => ({}));
-    const current = Array.isArray(data.labels) ? data.labels : [];
-    const currentValues = current.map(label => String(label && label.label || '').trim()).filter(Boolean);
-    const nextSet = new Set(nextLabels);
-    const currentSet = new Set(currentValues);
-    for (const label of currentValues) {
-      if (!nextSet.has(label)) {
-        await _projectWorkspaceRequest(labelsUrl, {
-          method: 'DELETE',
-          body: JSON.stringify({ label }),
-        });
-      }
-    }
-    for (const label of nextLabels) {
-      if (!currentSet.has(label)) {
-        await _projectWorkspaceRequest(labelsUrl, {
-          method: 'POST',
-          body: JSON.stringify({ label }),
-        });
-      }
-    }
+    await EntityMetadataClient.syncEntityLabels(entityType, entityId, nextLabels, {
+      request: _projectWorkspaceRequest,
+    });
   }
 
   async function _syncEntityNote(entityType, entityId, body) {
-    const noteUrl = `/entities/${encodeURIComponent(entityType)}/${encodeURIComponent(entityId)}/note`;
-    const value = String(body || '').trim();
-    if (value) {
-      await _projectWorkspaceRequest(noteUrl, {
-        method: 'PUT',
-        body: JSON.stringify({ body: value }),
-      });
-      return;
-    }
-    try {
-      await _projectWorkspaceRequest(noteUrl, { method: 'DELETE' });
-    } catch (err) {
-      if (!String(err && err.message || '').includes('not found')) throw err;
-    }
+    await EntityMetadataClient.syncEntityNote(entityType, entityId, body, {
+      request: _projectWorkspaceRequest,
+    });
   }
 
   async function _saveProjectEntityMetadata() {
     if (!projectWorkspaceEditingEntity || !projectEntityLabelsInput || !projectEntityNoteInput) return;
     const { projectId, entityType, entityId, onSaved } = projectWorkspaceEditingEntity;
-    const labels = _parseEntityLabelInput(projectEntityLabelsInput.value);
+    const labels = EntityMetadataClient.parseLabelInput(projectEntityLabelsInput.value);
     const noteBody = String(projectEntityNoteInput.value || '').trim();
     if (projectEntitySubmitButton) projectEntitySubmitButton.disabled = true;
     try {

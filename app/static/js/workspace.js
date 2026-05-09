@@ -19,6 +19,11 @@ let _workspaceViewedSize = null;
 let _workspaceDragPath = '';
 let _workspaceDragKind = '';
 const WorkspaceCore = window.DarklabWorkspaceCore;
+const EntityMetadataClient = (
+  typeof window !== 'undefined' && window.DarklabEntityMetadata
+) || (
+  typeof globalThis !== 'undefined' && globalThis.DarklabEntityMetadata
+) || {};
 
 const WORKSPACE_PREVIEW_LINE_LIMIT = 10000;
 const WORKSPACE_PREVIEW_TABLE_LIMIT = 250;
@@ -128,89 +133,9 @@ function _workspaceMetadataChips(file) {
   return chips;
 }
 
-function _parseWorkspaceLabelInput(value) {
-  const seen = new Set();
-  return String(value || '')
-    .split(',')
-    .map(item => item.trim())
-    .filter(Boolean)
-    .filter((item) => {
-      const key = item.toLocaleLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-}
-
-function _workspaceFileEntityUrl(path = '', suffix = '') {
-  return `/entities/workspace_file/${encodeURIComponent(path)}/${suffix}`;
-}
-
-async function _workspaceMetadataRequest(url, options = {}) {
-  const resp = await apiFetch(url, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-  });
-  if (!resp.ok) {
-    let message = `HTTP ${resp.status}`;
-    try {
-      const data = await resp.json();
-      if (data && data.error) message = data.error;
-    } catch (_) {}
-    throw new Error(message);
-  }
-  return resp;
-}
-
-async function _syncWorkspaceFileLabels(path, nextLabels) {
-  const labelsUrl = _workspaceFileEntityUrl(path, 'labels');
-  const resp = await _workspaceMetadataRequest(labelsUrl, { cache: 'no-store' });
-  const data = await resp.json().catch(() => ({}));
-  const current = Array.isArray(data.labels) ? data.labels : [];
-  const currentValues = current.map(label => String(label && label.label || '').trim()).filter(Boolean);
-  const nextSet = new Set(nextLabels);
-  const currentSet = new Set(currentValues);
-  for (const label of currentValues) {
-    if (!nextSet.has(label)) {
-      await _workspaceMetadataRequest(labelsUrl, {
-        method: 'DELETE',
-        body: JSON.stringify({ label }),
-      });
-    }
-  }
-  for (const label of nextLabels) {
-    if (!currentSet.has(label)) {
-      await _workspaceMetadataRequest(labelsUrl, {
-        method: 'POST',
-        body: JSON.stringify({ label }),
-      });
-    }
-  }
-}
-
-async function _syncWorkspaceFileNote(path, body) {
-  const noteUrl = _workspaceFileEntityUrl(path, 'note');
-  const value = String(body || '').trim();
-  if (value) {
-    await _workspaceMetadataRequest(noteUrl, {
-      method: 'PUT',
-      body: JSON.stringify({ body: value }),
-    });
-    return;
-  }
-  try {
-    await _workspaceMetadataRequest(noteUrl, { method: 'DELETE' });
-  } catch (err) {
-    if (!String(err && err.message || '').includes('not found')) throw err;
-  }
-}
-
 async function _syncWorkspaceFileMetadata(path, { labels = [], noteBody = '' } = {}) {
-  await _syncWorkspaceFileLabels(path, Array.isArray(labels) ? labels : []);
-  await _syncWorkspaceFileNote(path, noteBody);
+  await EntityMetadataClient.syncEntityLabels('workspace_file', path, Array.isArray(labels) ? labels : []);
+  await EntityMetadataClient.syncEntityNote('workspace_file', path, noteBody);
 }
 
 function _workspaceAutoRefreshDisabledReason() {
@@ -1527,14 +1452,7 @@ async function downloadWorkspaceFile(path) {
     return false;
   }
   const blob = await resp.blob();
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = path.split('/').filter(Boolean).pop() || 'workspace-file.txt';
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadBlobAsAttachment(blob, path.split('/').filter(Boolean).pop() || 'workspace-file.txt');
   return true;
 }
 
@@ -1777,7 +1695,7 @@ workspaceEditor?.addEventListener('submit', async (event) => {
       _workspacePathInCurrentDir(workspacePathInput?.value || ''),
       workspaceTextInput?.value || '',
       {
-        labels: _parseWorkspaceLabelInput(
+        labels: EntityMetadataClient.parseLabelInput(
           typeof workspaceLabelsInput !== 'undefined' && workspaceLabelsInput ? workspaceLabelsInput.value : '',
         ),
         noteBody: typeof workspaceNotesInput !== 'undefined' && workspaceNotesInput ? workspaceNotesInput.value : '',

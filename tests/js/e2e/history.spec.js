@@ -5,7 +5,6 @@ import {
   openHistoryWithEntries,
   waitForHistoryRuns,
   closeHistory,
-  makeTestIp,
   createShareSnapshot,
 } from './helpers.js'
 
@@ -15,7 +14,6 @@ const CMD_B = 'date'
 
 test.describe('history drawer', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(62) })
     await page.goto('/')
     // Clear any localStorage state left over from a previous test run and reload
     await page.evaluate(() => localStorage.clear())
@@ -23,7 +21,7 @@ test.describe('history drawer', () => {
     await page.locator('#cmd').waitFor()
   })
 
-  test('clicking a history entry injects the command into the composer and closes the drawer', async ({
+  test('clicking a history entry opens run details and keeps the drawer open', async ({
     page,
   }) => {
     await runCommand(page, CMD_A)
@@ -36,11 +34,14 @@ test.describe('history drawer', () => {
     await openHistoryWithEntries(page)
     await page.locator('.history-entry').first().click()
 
-    // Row click is the re-run path: command is ready in the input, drawer
-    // is closed, and no new tab is created (restoring would spawn one).
-    await expect(page.locator('#cmd')).toHaveValue(CMD_A)
-    await expect(page.locator('#history-panel')).not.toHaveClass(/open/)
+    await expect(page.locator('#history-run-overlay')).toHaveClass(/open/)
+    await expect(page.locator('#history-run-subtitle')).toContainText(CMD_A)
+    await expect(page.locator('#history-panel')).toHaveClass(/open/)
+    await expect(page.locator('#cmd')).toHaveValue('')
     await expect(page.locator('.tab')).toHaveCount(tabCountBefore)
+
+    await page.locator('[data-history-run-tab="findings"]').click()
+    await expect(page.locator('#history-run-body')).toContainText(/No structured findings|Loading findings/)
   })
 
   test('the history restore button loads output into a tab without touching the composer', async ({

@@ -10,6 +10,7 @@ const {
   renderMotd,
   showToast,
   copyTextToClipboard,
+  downloadBlobAsAttachment,
   shareUrl,
 } = fromScript(
   'app/static/js/utils.js',
@@ -21,6 +22,7 @@ const {
   'renderMotd',
   'showToast',
   'copyTextToClipboard',
+  'downloadBlobAsAttachment',
   'shareUrl',
 )
 
@@ -196,6 +198,56 @@ describe('showToast', () => {
     const toast = document.getElementById('permalink-toast')
     expect(toast.classList.contains('toast-success')).toBe(true)
     expect(toast.classList.contains('toast-error')).toBe(false)
+  })
+})
+
+describe('downloadBlobAsAttachment', () => {
+  let originalCreateObjectURL
+  let originalRevokeObjectURL
+
+  beforeEach(() => {
+    document.body.innerHTML = ''
+    originalCreateObjectURL = URL.createObjectURL
+    originalRevokeObjectURL = URL.revokeObjectURL
+  })
+
+  afterEach(() => {
+    URL.createObjectURL = originalCreateObjectURL
+    URL.revokeObjectURL = originalRevokeObjectURL
+    vi.restoreAllMocks()
+  })
+
+  it('clicks a temporary download anchor and revokes the object URL once', () => {
+    URL.createObjectURL = vi.fn(() => 'blob:download-test')
+    URL.revokeObjectURL = vi.fn()
+    const delayed = []
+    vi.spyOn(window, 'setTimeout').mockImplementation((callback, delay) => {
+      delayed.push({ callback, delay })
+      return delayed.length
+    })
+    const clicked = vi.fn()
+    const originalCreateElement = document.createElement.bind(document)
+    vi.spyOn(document, 'createElement').mockImplementation((tagName, options) => {
+      const element = originalCreateElement(tagName, options)
+      if (String(tagName).toLowerCase() === 'a') element.click = clicked
+      return element
+    })
+
+    downloadBlobAsAttachment(new Blob(['download me']), 'evidence.txt')
+
+    expect(URL.createObjectURL).toHaveBeenCalledOnce()
+    expect(clicked).toHaveBeenCalledOnce()
+    expect(document.querySelector('a[download="evidence.txt"]')).toBeNull()
+    expect(delayed).toHaveLength(1)
+    expect(delayed[0].delay).toBe(2000)
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+
+    window.dispatchEvent(new Event('pagehide'))
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:download-test')
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+
+    delayed[0].callback()
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
   })
 })
 

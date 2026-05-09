@@ -5,6 +5,7 @@ import { resolve } from 'path'
 const SEARCH_CORE_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/search_core.js'), 'utf8')
 const SEARCH_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/search.js'), 'utf8')
 const CORE_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/workspace_core.js'), 'utf8')
+const ENTITY_METADATA_SRC = readFileSync(resolve(process.cwd(), 'app/static/js/ui_entity_metadata.js'), 'utf8')
 const SRC = readFileSync(resolve(process.cwd(), 'app/static/js/workspace.js'), 'utf8')
 
 export function responseJson(body, status = 200) {
@@ -136,6 +137,16 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     workspaceCloseViewerBtn: document.getElementById('workspace-close-viewer-btn'),
     workspaceSaveBtn: document.getElementById('workspace-save-btn'),
   }
+  globals.downloadBlobAsAttachment = (blob, filename) => {
+    const url = globals.URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename || 'download'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    globals.window.setTimeout(() => globals.URL.revokeObjectURL(url), 2000)
+  }
   Object.assign(globals, overrides)
   const names = Object.keys(globals)
   const values = Object.values(globals)
@@ -165,6 +176,6 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
       promptWorkspaceMove,
     };
   `
-  const fns = new Function(...names, `${SEARCH_CORE_SRC}\n${SEARCH_SRC}\n${CORE_SRC}\n${SRC}\n${returnExpr}`)(...values)
+  const fns = new Function(...names, `${SEARCH_CORE_SRC}\n${SEARCH_SRC}\n${CORE_SRC}\n${ENTITY_METADATA_SRC}\n${SRC}\n${returnExpr}`)(...values)
   return { ...fns, apiFetch, globals }
 }

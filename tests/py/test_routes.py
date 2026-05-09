@@ -33,12 +33,9 @@ from workspace import resolve_workspace_path
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
-# Route tests intentionally disable rate limiting so individual cases can focus
-# on route behavior rather than shared per-IP quota state.
 
 def get_client(*, use_forwarded_for=True):
     shell_app.app.config["TESTING"] = True
-    shell_app.app.config["RATELIMIT_ENABLED"] = False
     client = shell_app.app.test_client()
     if use_forwarded_for:
         client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
@@ -224,7 +221,6 @@ class TestProjectRoutes:
             project_routes.projects_links_create,
             project_routes.projects_links_delete,
             project_routes.projects_targets_create,
-            project_routes.projects_targets_quick_add,
             project_routes.projects_targets_update,
             project_routes.projects_targets_delete,
             project_routes.projects_packages_create,
@@ -898,6 +894,7 @@ class TestProjectRoutes:
         client = get_client()
         session_id = self._session_id("project-link")
         project = self._create_project(client, session_id)
+
         notes_resp = client.put(
             f"/projects/{project['id']}",
             json={"notes": "Package notes for the external handoff."},
@@ -1112,7 +1109,6 @@ class TestProjectRoutes:
         assert summary["project"]["id"] == project["id"]
         assert summary["counts"] == {
             "runs": 2,
-            "workspace_files": 0,
             "targets": 0,
             "pending_targets": 0,
             "artifacts": 2,
@@ -1451,31 +1447,6 @@ class TestProjectRoutes:
         assert summary_after_package["counts"]["notes"] == 6
         assert [item["id"] for item in summary_after_package["packages"]] == [package["id"]]
 
-        quick_domain = client.post(
-            f"/projects/{project['id']}/targets/quick-add",
-            json={"text": "Investigate https://api.darklab.sh/admin", "source_run_id": run_id},
-            headers={"X-Session-ID": session_id},
-        )
-        assert quick_domain.status_code == 201
-        quick_domain_data = json.loads(quick_domain.data)["target"]
-        assert quick_domain_data["type"] == "url"
-        assert quick_domain_data["value"] == "https://api.darklab.sh/admin"
-        assert quick_domain_data["source_run_id"] == run_id
-        quick_ip = client.post(
-            f"/projects/{project['id']}/targets/quick-add",
-            json={"value": "192.168.1.5"},
-            headers={"X-Session-ID": session_id},
-        )
-        assert quick_ip.status_code == 201
-        quick_ip_data = json.loads(quick_ip.data)["target"]
-        assert quick_ip_data["type"] == "ip"
-        assert quick_ip_data["value"] == "192.168.1.5"
-        invalid_quick_target = client.post(
-            f"/projects/{project['id']}/targets/quick-add",
-            json={"text": "no target here"},
-            headers={"X-Session-ID": session_id},
-        )
-        assert invalid_quick_target.status_code == 400
         hidden_label = client.get(f"/entities/run/{run_id}/labels", headers={"X-Session-ID": "other-session"})
         assert hidden_label.status_code == 404
 
@@ -1515,14 +1486,33 @@ class TestProjectRoutes:
         execute_builtin_command(f"project use {project['slug']}", session_id)
         link_last_lines, _ = execute_builtin_command("project link last", session_id)
         assert f"linked run {run_id}" in link_last_lines[0]["text"]
+        unsupported_file_link_lines, _ = execute_builtin_command("project link file reports/notes.txt", session_id)
+        assert unsupported_file_link_lines[0]["text"] == "project: project links support run"
 
-        unlink_file_lines, _ = execute_builtin_command("project unlink file reports/notes.txt", session_id)
-        assert unlink_file_lines[0]["text"] == "project: no link found for workspace_file reports/notes.txt"
+        with mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}, clear=False):
+            missing_label = client.post(
+                "/entities/workspace_file/reports/missing.txt/labels",
+                json={"label": "ghost"},
+                headers={"X-Session-ID": session_id},
+            )
+            assert missing_label.status_code == 404
+            missing_note = client.put(
+                "/entities/workspace_file/reports/missing.txt/note",
+                json={"body": "ghost"},
+                headers={"X-Session-ID": session_id},
+            )
+            assert missing_note.status_code == 404
 
     def test_redacted_evidence_package_redacts_manifest_and_transcripts(self):
         client = get_client()
         session_id = self._session_id("project-package-redacted")
         project = self._create_project(client, session_id)
+        project_note = client.put(
+            f"/projects/{project['id']}",
+            json={"notes": "Project private note should stay out"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert project_note.status_code == 200
         run_id = "run-" + uuid.uuid4().hex
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
@@ -1566,19 +1556,47 @@ class TestProjectRoutes:
                 "VALUES (?, ?, ?, 'reports/secrets.txt', 'secrets.txt', 'output', 12, 'workspace_flag', datetime('now'))",
                 (f"rfa_{run_id}", session_id, run_id),
             )
+            for note_id, entity_type, entity_id, body in (
+                (f"note_run_{run_id}", "run", run_id, "Run private note should stay out"),
+                (f"note_fnd_{run_id}", "finding", f"fnd_{run_id}", "Finding private note should stay out"),
+                (f"note_art_{run_id}", "run_file_artifact", f"rfa_{run_id}", "Artifact private note should stay out"),
+            ):
+                conn.execute(
+                    "INSERT INTO entity_notes "
+                    "(id, session_id, entity_type, entity_id, body, created, updated) "
+                    "VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))",
+                    (note_id, session_id, entity_type, entity_id, body),
+                )
+            conn.commit()
+
+        target_resp = client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "domain", "value": "secret.darklab.sh", "source_run_id": run_id},
+            headers={"X-Session-ID": session_id},
+        )
+        assert target_resp.status_code == 201
+        target_id = json.loads(target_resp.data)["target"]["id"]
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO entity_notes "
+                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES (?, ?, 'target', ?, 'Target private note should stay out', datetime('now'), datetime('now'))",
+                (f"note_tgt_{run_id}", session_id, target_id),
+            )
             conn.commit()
 
         package_resp = client.post(
             f"/projects/{project['id']}/packages",
             json={
                 "name": "Redacted Evidence",
+                "notes": "Package private note should stay out",
                 "redaction_mode": "redacted",
                 "include_artifacts": True,
                 "selection": {
                     "run_ids": [run_id],
                     "finding_ids": [f"fnd_{run_id}"],
                     "artifact_ids": [f"rfa_{run_id}"],
-                    "target_ids": [],
+                    "target_ids": [target_id],
                 },
             },
             headers={"X-Session-ID": session_id},
@@ -1590,6 +1608,8 @@ class TestProjectRoutes:
         assert package["manifest"]["redaction_mode"] == "redacted"
         assert package["manifest"]["include_artifacts"] is False
         assert package["manifest"]["options"]["raw_artifacts"] is False
+        assert "note" not in package["manifest"]["project"]
+        assert "Project private note" not in json.dumps(package["manifest"])
         assert "Bearer abc123" not in json.dumps(package)
         assert "secret.darklab.sh" not in json.dumps(package)
         assert "192.168.1.5" not in json.dumps(package)
@@ -1612,9 +1632,12 @@ class TestProjectRoutes:
             assert "metadata/labels.json" in names
             assert "notes/entity-notes.json" in names
             assert "notes/entity-notes.md" in names
-            assert "notes/project.md" in names
+            assert "notes/project.md" not in names
             assert f"runs/{run_id}.html" in names
             assert not any(name.startswith("artifacts/") for name in names)
+            notes_json = json.loads(archive.read("notes/entity-notes.json"))
+            assert notes_json["include_private_notes"] is False
+            assert notes_json["count"] == 0
             package_text = "\n".join(
                 archive.read(name).decode("utf-8")
                 for name in (
@@ -1628,7 +1651,6 @@ class TestProjectRoutes:
                     "metadata/labels.json",
                     "notes/entity-notes.json",
                     "notes/entity-notes.md",
-                    "notes/project.md",
                     f"runs/{run_id}.html",
                 )
             )
@@ -1638,6 +1660,13 @@ class TestProjectRoutes:
         assert "Bearer [redacted]" in package_text
         assert "[host-redacted]" in package_text
         assert "[ip-redacted]" in package_text
+        assert "Project private note" not in package_text
+        assert "Package private note" not in package_text
+        assert "Run private note" not in package_text
+        assert "Finding private note" not in package_text
+        assert "Target private note" not in package_text
+        assert "Artifact private note" not in package_text
+        assert "notes/project.md" not in package_text
 
     def test_project_workspace_write_quotas_return_conflict(self):
         client = get_client()
@@ -1650,8 +1679,6 @@ class TestProjectRoutes:
             "max_entity_labels_per_session": 5,
             "max_entity_labels_per_entity": 1,
             "max_entity_notes_per_session": 5,
-            "rate_limit_per_minute": 1000,
-            "rate_limit_per_second": 1000,
         }, clear=False):
             project = self._create_project(client, session_id)
             first_run_id = "run-" + uuid.uuid4().hex
@@ -1794,18 +1821,12 @@ class TestProjectRoutes:
         other_session = self._session_id("project-other")
         project = self._create_project(client, session_id)
         other_run_id = "run-" + uuid.uuid4().hex
-        request_index = 0
 
         def project_link_post(payload):
-            nonlocal request_index
-            request_index += 1
             return client.post(
                 f"/projects/{project['id']}/links",
                 json=payload,
-                headers={
-                    "X-Session-ID": session_id,
-                    "X-Forwarded-For": f"198.51.100.{request_index}",
-                },
+                headers={"X-Session-ID": session_id},
             )
 
         with sqlite3.connect(DB_PATH) as conn:
@@ -1823,8 +1844,9 @@ class TestProjectRoutes:
         unsupported = project_link_post({"entity_type": "note", "entity_id": "note_1"})
         run_scoped = project_link_post({"entity_type": "run_file_artifact", "entity_id": "rfa_1"})
         snapshot_link = project_link_post({"entity_type": "snapshot", "entity_id": f"{session_id}-snapshot"})
+        workspace_file_link = project_link_post({"entity_type": "workspace_file", "entity_id": "reports/notes.txt"})
 
-        assert cross_session.status_code == 400
+        assert cross_session.status_code == 404
         assert "not found" in json.loads(cross_session.data)["error"]
         assert unsupported.status_code == 400
         assert "Unsupported project entity type" in json.loads(unsupported.data)["error"]
@@ -1832,6 +1854,8 @@ class TestProjectRoutes:
         assert "do not support" in json.loads(run_scoped.data)["error"]
         assert snapshot_link.status_code == 400
         assert "do not support" in json.loads(snapshot_link.data)["error"]
+        assert workspace_file_link.status_code == 400
+        assert "do not support" in json.loads(workspace_file_link.data)["error"]
 
 
 # ── /log ──────────────────────────────────────────────────────────────────────
@@ -2256,7 +2280,6 @@ class TestDiagRoute:
     def _allowed_client(self):
         """Test client whose remote_addr (127.0.0.1) matches the allowed CIDR."""
         shell_app.app.config["TESTING"] = True
-        shell_app.app.config["RATELIMIT_ENABLED"] = False
         # No X-Forwarded-For — we want remote_addr to be 127.0.0.1 (Werkzeug default)
         return shell_app.app.test_client()
 
@@ -5684,6 +5707,18 @@ class TestShareRoute:
             headers={"X-Session-ID": "delete-share-session"},
         )
         share_id = json.loads(create_resp.data)["id"]
+        label_resp = client.post(
+            f"/entities/snapshot/{share_id}/labels",
+            json={"label": "handoff"},
+            headers={"X-Session-ID": "delete-share-session"},
+        )
+        note_resp = client.put(
+            f"/entities/snapshot/{share_id}/note",
+            json={"body": "Snapshot context"},
+            headers={"X-Session-ID": "delete-share-session"},
+        )
+        assert label_resp.status_code == 201
+        assert note_resp.status_code == 200
 
         resp = client.delete(
             f"/share/{share_id}",
@@ -5693,6 +5728,17 @@ class TestShareRoute:
         assert resp.status_code == 200
         assert json.loads(resp.data) == {"ok": True}
         assert client.get(f"/share/{share_id}").status_code == 404
+        with sqlite3.connect(DB_PATH) as conn:
+            label_count = conn.execute(
+                "SELECT COUNT(*) FROM entity_labels WHERE entity_type='snapshot' AND entity_id=?",
+                (share_id,),
+            ).fetchone()[0]
+            note_count = conn.execute(
+                "SELECT COUNT(*) FROM entity_notes WHERE entity_type='snapshot' AND entity_id=?",
+                (share_id,),
+            ).fetchone()[0]
+        assert label_count == 0
+        assert note_count == 0
 
     def test_get_share_json_returns_content(self):
         client = get_client()

@@ -712,6 +712,29 @@ def delete_run_artifacts(conn, run_ids):
         delete_artifact_file(row["rel_path"])
 
 
+def delete_snapshot_metadata(conn, snapshot_ids):
+    ids = [snapshot_id for snapshot_id in snapshot_ids if snapshot_id]
+    if not ids:
+        return
+
+    placeholders = ",".join("?" for _ in ids)
+    conn.execute(
+        "DELETE FROM project_links WHERE entity_type = 'snapshot' "
+        f"AND entity_id IN ({placeholders})",  # nosec B608
+        ids,
+    )
+    conn.execute(
+        "DELETE FROM entity_labels WHERE entity_type = 'snapshot' "
+        f"AND entity_id IN ({placeholders})",  # nosec B608
+        ids,
+    )
+    conn.execute(
+        "DELETE FROM entity_notes WHERE entity_type = 'snapshot' "
+        f"AND entity_id IN ({placeholders})",  # nosec B608
+        ids,
+    )
+
+
 def _prune_retention(conn):
     """Delete runs and snapshots older than permalink_retention_days."""
     days = CFG.get("permalink_retention_days", 0)
@@ -737,7 +760,15 @@ def _prune_retention(conn):
                 (f"-{days} days",)
             ).fetchall()
         ]
+        old_snapshot_ids = [
+            row["id"]
+            for row in conn.execute(
+                "SELECT id FROM snapshots WHERE created < datetime('now', ?)",
+                (f"-{days} days",)
+            ).fetchall()
+        ]
         delete_run_artifacts(conn, old_run_ids)
+        delete_snapshot_metadata(conn, old_snapshot_ids)
         cur_runs  = conn.execute(
             "DELETE FROM runs WHERE started < datetime('now', ?)",
             (f"-{days} days",)

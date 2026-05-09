@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { spawnSync } from 'child_process'
 import { existsSync, readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
-import { ensurePromptReady, runCommand, waitForHistoryRuns, makeTestIp } from './helpers.js'
+import { ensurePromptReady, runCommand, waitForHistoryRuns } from './helpers.js'
 
 async function confirmWorkspaceAction(page, actionId, { timeout = 15_000 } = {}) {
   const host = page.locator('#confirm-host')
@@ -12,6 +12,16 @@ async function confirmWorkspaceAction(page, actionId, { timeout = 15_000 } = {})
     host.waitFor({ state: 'hidden', timeout }),
     action.click(),
   ])
+}
+
+async function saveWorkspaceEditor(page, { timeout = 15_000 } = {}) {
+  const saveResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url())
+    return response.request().method() === 'POST' && url.pathname === '/workspace/files'
+  })
+  await page.locator('#workspace-save-btn').click()
+  expect((await saveResponse).ok()).toBe(true)
+  await expect(page.locator('#workspace-editor')).not.toBeVisible({ timeout })
 }
 
 function e2eDataDirForProject(testInfo) {
@@ -234,7 +244,7 @@ test.describe('FAQ modal', () => {
 
     await page.locator('#faq-allowed-text').getByRole('button', { name: 'Open Command Registry' }).click()
     await expect(page.locator('#command-registry-overlay')).toHaveClass(/open/)
-    await expect(page.locator('#command-registry-body')).toContainText('curl')
+    await expect(page.locator('#command-registry-body')).toContainText('curl', { timeout: 30_000 })
   })
 })
 
@@ -343,11 +353,16 @@ test.describe('Status Monitor', () => {
       return (data.command_mix || []).map(item => item.root)
     })).toContain('ping')
 
+    const insightsResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return url.pathname === '/history/insights'
+    })
     await page.locator('.rail-nav [data-action="status-monitor"]').click()
     await expect(page.locator('#status-monitor')).toBeVisible()
+    expect((await insightsResponse).ok()).toBe(true)
 
     const tile = page.getByRole('button', { name: /^ping: \d+ run\(s\),/ }).first()
-    await expect(tile).toBeVisible()
+    await expect(tile).toBeVisible({ timeout: 15_000 })
     await tile.click()
 
     await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
@@ -373,7 +388,6 @@ test.describe('Status Monitor', () => {
 
 test.describe('project workspace modal', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(240) })
     await page.goto('/')
     await ensurePromptReady(page)
   })
@@ -399,14 +413,68 @@ test.describe('project workspace modal', () => {
     }, { id: projectId, targetValue: value }), { timeout: 15_000 }).toBe(true)
   }
 
+  async function expectProjectTargetEditorReady(page, submitText) {
+    const editor = page.locator('#project-target-editor-overlay')
+    await expect(editor).toHaveClass(/\bopen\b/)
+    await expect(editor).toBeVisible()
+    for (const selector of ['#project-target-type', '#project-target-value', '#project-target-label', '#project-target-notes']) {
+      const field = editor.locator(selector)
+      await field.scrollIntoViewIfNeeded()
+      await expect(field).toBeVisible()
+      await expect(field).toBeEnabled()
+    }
+    const submit = page.locator('#project-target-submit')
+    await submit.scrollIntoViewIfNeeded()
+    await expect(submit).toBeVisible()
+    await expect(submit).toBeEnabled()
+    if (submitText) await expect(submit).toHaveText(submitText)
+    return editor
+  }
+
+  async function fillProjectTargetEditor(page, { value, labels, notes }) {
+    const editor = page.locator('#project-target-editor-overlay')
+    const valueInput = editor.locator('#project-target-value')
+    const labelInput = editor.locator('#project-target-label')
+    const notesInput = editor.locator('#project-target-notes')
+    await valueInput.scrollIntoViewIfNeeded()
+    await valueInput.fill(value)
+    await labelInput.scrollIntoViewIfNeeded()
+    await labelInput.fill(labels)
+    await notesInput.scrollIntoViewIfNeeded()
+    await expect(notesInput).toBeVisible()
+    await notesInput.fill(notes)
+  }
+
   async function createActiveProject(page, projectName) {
     await page.locator('#project-workspace-name').fill(projectName)
+    const createResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST' && url.pathname === '/projects'
+    })
+    const activeResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST' && url.pathname === '/projects/active'
+    })
     await page.locator('#project-workspace-create-form button[type="submit"]').click()
-    await expect(page.locator('.project-workspace-row.is-active')).toContainText(projectName)
-    await expect(page.locator('#project-explorer-body')).toContainText(projectName)
+    const created = await createResponse
+    expect(created.ok()).toBe(true)
+    const createdProject = (await created.json()).project
+    expect(createdProject?.name).toBe(projectName)
+    expect((await activeResponse).ok()).toBe(true)
+    await expect.poll(async () => {
+      const active = await readActiveProject(page)
+      return active.project?.name || ''
+    }).toBe(projectName)
+    await page.evaluate(async () => {
+      if (typeof refreshProjectWorkspace === 'function') await refreshProjectWorkspace()
+    })
+    await expect(page.locator('.project-workspace-row.is-active').filter({ hasText: projectName })).toBeVisible({
+      timeout: 15_000,
+    })
+    await expect(page.locator('#project-explorer-body')).toContainText(projectName, { timeout: 15_000 })
     const activeProject = await readActiveProject(page)
     expect(activeProject.project?.name).toBe(projectName)
-    const projectId = activeProject.project?.id
+    const projectId = activeProject.project?.id || createdProject?.id
     expect(projectId).toBeTruthy()
     return projectId
   }
@@ -419,7 +487,7 @@ test.describe('project workspace modal', () => {
     await openProjectsModal(page)
     await page.locator('[data-project-tab="runs"]').click()
     await page.locator('[data-project-action="link-last-run"]').click()
-    await expect(page.locator('#project-workspace-message')).toContainText('Last run linked to this project.')
+    await expect(page.locator('#permalink-toast')).toContainText('Last run linked to this project.')
     const runRow = page.locator('.project-explorer-item').filter({ hasText: 'hostname' }).first()
     await expect(runRow).toBeVisible()
     return runRow
@@ -446,11 +514,16 @@ test.describe('project workspace modal', () => {
 
     await page.locator('[data-project-tab="details"]').click()
     await page.locator('[data-project-action="new-target"]').click()
-    await expect(page.locator('#project-target-editor-overlay')).toHaveClass(/\bopen\b/)
-    await page.locator('#project-target-value').fill('playwright.example')
-    await page.locator('#project-target-label').fill('Primary target')
-    await page.locator('#project-target-notes').fill('Scope confirmed in browser test')
-    await page.locator('#project-target-submit').click()
+    await expectProjectTargetEditorReady(page, 'Add Target')
+    await fillProjectTargetEditor(page, {
+      value: 'playwright.example',
+      labels: 'Primary target',
+      notes: 'Scope confirmed in browser test',
+    })
+    const addTargetSubmit = page.locator('#project-target-submit')
+    await addTargetSubmit.scrollIntoViewIfNeeded()
+    await expect(addTargetSubmit).toBeVisible()
+    await addTargetSubmit.click()
     await expect(page.locator('#project-target-editor-overlay')).not.toHaveClass(/\bopen\b/)
     const targetRow = page.locator('.project-target-row').filter({ hasText: 'playwright.example' })
     await expect(targetRow).toBeVisible()
@@ -458,9 +531,13 @@ test.describe('project workspace modal', () => {
     await expect(targetRow).toContainText('note')
 
     await targetRow.locator('[data-project-action="edit-target"]').click()
+    await expectProjectTargetEditorReady(page, 'Save Target')
     await expect(page.locator('#project-target-editor-title')).toHaveText('EDIT TARGET')
-    await page.locator('#project-target-value').fill('projects.playwright.example')
-    await page.locator('#project-target-label').fill('Updated target')
+    await fillProjectTargetEditor(page, {
+      value: 'projects.playwright.example',
+      labels: 'Updated target',
+      notes: 'Scope confirmed in browser test',
+    })
     const targetUpdateResponse = page.waitForResponse((response) => {
       const url = new URL(response.url())
       return response.request().method() === 'PUT'
@@ -550,7 +627,7 @@ test.describe('project workspace modal', () => {
 
     await page.locator('[data-project-action="package-wizard-next"]').click()
     await expect(wizard).not.toHaveClass(/\bopen\b/)
-    await expect(page.locator('#project-workspace-message')).toContainText('Package created.')
+    await expect(page.locator('#permalink-toast')).toContainText('Package created.')
     const packageRow = page.locator('.project-explorer-item').filter({ hasText: 'Browser evidence' }).first()
     await expect(packageRow).toBeVisible()
     await expect(packageRow).toContainText('handoff')
@@ -617,8 +694,14 @@ test.describe('project workspace modal', () => {
     await expect(page.locator('#project-entity-editor-title')).toHaveText('EDIT FINDING')
     await page.locator('#project-entity-labels').fill('finding, triaged')
     await page.locator('#project-entity-note').fill('Finding note from Playwright')
+    const findingNoteSaveResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'PUT'
+        && url.pathname === `/entities/finding/${encodeURIComponent(fixture.findingId)}/note`
+    })
     await page.locator('#project-entity-submit').click()
-    await expect(page.locator('#project-entity-editor-overlay')).not.toHaveClass(/\bopen\b/)
+    expect((await findingNoteSaveResponse).ok()).toBe(true)
+    await expect(page.locator('#project-entity-editor-overlay')).not.toHaveClass(/\bopen\b/, { timeout: 15_000 })
     await expect(findingRow).toContainText('triaged')
     await expect(findingRow).toContainText('note')
 
@@ -630,8 +713,14 @@ test.describe('project workspace modal', () => {
     await expect(page.locator('#project-entity-editor-title')).toHaveText('EDIT ARTIFACT')
     await page.locator('#project-entity-labels').fill('evidence, reviewed')
     await page.locator('#project-entity-note').fill('Artifact note from Playwright')
+    const artifactNoteSaveResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'PUT'
+        && url.pathname === `/entities/run_file_artifact/${encodeURIComponent(fixture.artifactId)}/note`
+    })
     await page.locator('#project-entity-submit').click()
-    await expect(page.locator('#project-entity-editor-overlay')).not.toHaveClass(/\bopen\b/)
+    expect((await artifactNoteSaveResponse).ok()).toBe(true)
+    await expect(page.locator('#project-entity-editor-overlay')).not.toHaveClass(/\bopen\b/, { timeout: 15_000 })
     await expect(artifactRow).toContainText('reviewed')
     await expect(artifactRow).toContainText('note')
 
@@ -729,8 +818,7 @@ test.describe('workspace modal', () => {
     await textInput.click()
     await textInput.fill('darklab.sh\n')
     await expect(textInput).toHaveValue('darklab.sh\n')
-    await page.locator('#workspace-save-btn').click()
-    await expect(page.locator('#workspace-editor')).not.toBeVisible()
+    await saveWorkspaceEditor(page)
 
     const row = page.locator('.workspace-file-row').filter({ hasText: 'targets.txt' })
     await expect(row).toBeVisible()
@@ -746,8 +834,7 @@ test.describe('workspace modal', () => {
     await row.locator('[data-workspace-action="edit"]').click()
     await expect(page.locator('#workspace-editor')).toBeVisible()
     await page.locator('#workspace-text-input').fill('darklab.sh\nip.darklab.sh\n')
-    await page.locator('#workspace-save-btn').click()
-    await expect(page.locator('#workspace-editor')).not.toBeVisible()
+    await saveWorkspaceEditor(page)
     await row.locator('[data-workspace-action="view"]').click()
     await expect(page.locator('#workspace-viewer-text')).toContainText('ip.darklab.sh')
 
@@ -818,8 +905,7 @@ test.describe('workspace modal', () => {
     await page.locator('#workspace-new-btn').click()
     await page.locator('#workspace-path-input').fill('amass-viz/amass.html')
     await page.locator('#workspace-text-input').fill('<html>amass viz</html>\n')
-    await page.locator('#workspace-save-btn').click()
-    await expect(page.locator('#workspace-editor')).not.toBeVisible()
+    await saveWorkspaceEditor(page)
 
     const folder = page.locator('.workspace-folder-row').filter({ hasText: 'amass-viz' })
     await expect(folder).toBeVisible()

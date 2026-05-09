@@ -9,6 +9,18 @@ ROOT_DIR = Path(APP_DIR).parent
 os.chdir(APP_DIR)
 sys.path.insert(0, APP_DIR)
 
+import config as shell_config  # noqa: E402
+
+
+TEST_RATE_LIMIT_OVERRIDES = {
+    "rate_limit_per_minute": 100000,
+    "rate_limit_per_second": 1000,
+    "evidence_package_download_rate_limit_per_minute": 100000,
+    "evidence_package_download_rate_limit_per_second": 1000,
+}
+
+shell_config.CFG.update(TEST_RATE_LIMIT_OVERRIDES)
+
 
 def pytest_configure(config):
     # The container smoke test writes its own XML report because it is usually

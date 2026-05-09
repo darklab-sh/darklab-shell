@@ -1785,8 +1785,7 @@ def _project_usage() -> list[dict[str, str]]:
         _output_line("  project delete <name-or-id>", "builtin-help-row"),
         _output_line("  project link last", "builtin-help-row"),
         _output_line("  project link run <run-id>", "builtin-help-row"),
-        _output_line("  project link file <workspace-path>", "builtin-help-row"),
-        _output_line("  project unlink run|file <id-or-path>", "builtin-help-row"),
+        _output_line("  project unlink run <run-id>", "builtin-help-row"),
         _output_line("  project target list", "builtin-help-row"),
         _output_line("  project target add <type> <value>", "builtin-help-row"),
         _output_line("  project target quick-add <text-or-value>", "builtin-help-row"),
@@ -1855,19 +1854,17 @@ def _project_link_payload(parts: list[str], session_id: str) -> tuple[str, str]:
             raise ProjectWorkspaceError("no recent run is available to link")
         return "run", run_id
     if len(parts) < 4:
-        raise ProjectWorkspaceError("usage: project link run|file <id-or-path>")
+        raise ProjectWorkspaceError("usage: project link|unlink run <run-id>")
     entity_label = parts[2].lower()
     entity_id = " ".join(parts[3:]).strip()
     entity_map = {
         "run": "run",
-        "file": "workspace_file",
-        "workspace_file": "workspace_file",
     }
     entity_type = entity_map.get(entity_label)
     if not entity_type:
-        raise ProjectWorkspaceError("project links support run and file")
+        raise ProjectWorkspaceError("project links support run")
     if not entity_id:
-        raise ProjectWorkspaceError("project link id or path is required")
+        raise ProjectWorkspaceError("project link run id is required")
     return entity_type, entity_id
 
 

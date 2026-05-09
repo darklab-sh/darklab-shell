@@ -1,9 +1,7 @@
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady, runCommand, makeTestIp, waitForHistoryRuns } from './helpers.js'
+import { ensurePromptReady, runCommand, waitForHistoryRuns } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
-const TEST_IP = makeTestIp(70)
-const HIST_SEARCH_IP = makeTestIp(71)
 
 async function dispatchMacOptionKey(page, selector, init) {
   await page.locator(selector).evaluate((el, eventInit) => {
@@ -13,7 +11,6 @@ async function dispatchMacOptionKey(page, selector, init) {
 
 test.describe('keyboard shortcuts', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'clipboard', {
         value: { writeText: () => Promise.resolve() },
@@ -326,7 +323,6 @@ test.describe('keyboard shortcuts', () => {
 
 test.describe('Ctrl+R reverse-history search', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': HIST_SEARCH_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
   })
@@ -426,7 +422,6 @@ test.describe('Ctrl+R reverse-history search', () => {
 
 test.describe('? keyboard-shortcuts overlay', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(73) })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
     await ensurePromptReady(page)
@@ -541,7 +536,6 @@ test.describe('? keyboard-shortcuts overlay', () => {
 
 test.describe('desktop chrome keyboard shortcuts', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(74) })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
     await ensurePromptReady(page)

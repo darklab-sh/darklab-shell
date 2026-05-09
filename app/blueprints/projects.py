@@ -13,6 +13,7 @@ from helpers import get_client_ip, get_log_session_id, get_session_id
 from project_workspace import (
     EvidencePackageTooLarge,
     ProjectWorkspaceError,
+    ProjectWorkspaceNotFound,
     ProjectWorkspaceQuotaExceeded,
     add_entity_label,
     add_project_target,
@@ -33,7 +34,6 @@ from project_workspace import (
     get_project,
     get_project_run_file_artifact,
     get_project_summary,
-    infer_project_target_payload,
     link_project_entity,
     list_entity_labels,
     list_evidence_packages,
@@ -79,7 +79,12 @@ def _evidence_package_download_limit():
 
 
 def _project_error_response(exc):
-    status = 409 if isinstance(exc, ProjectWorkspaceQuotaExceeded) else 400
+    if isinstance(exc, ProjectWorkspaceNotFound):
+        status = 404
+    elif isinstance(exc, ProjectWorkspaceQuotaExceeded):
+        status = 409
+    else:
+        status = 400
     return jsonify({"error": str(exc)}), status
 
 
@@ -292,26 +297,6 @@ def projects_targets_create(project_id):
     if target is None:
         return jsonify({"error": "project not found"}), 404
     log.info("PROJECT_TARGET_ADDED", extra={
-        "ip": get_client_ip(),
-        "session": get_log_session_id(session_id),
-        "project_id": project_id,
-        "target_type": target["type"],
-    })
-    return jsonify({"ok": True, "target": target}), 201
-
-
-@projects_bp.route("/projects/<project_id>/targets/quick-add", methods=["POST"])
-@limiter.limit(_project_write_limit)
-def projects_targets_quick_add(project_id):
-    session_id = get_session_id()
-    try:
-        payload = infer_project_target_payload(request.get_json(silent=True) or {})
-        target = add_project_target(session_id, project_id, payload)
-    except ProjectWorkspaceError as exc:
-        return _project_error_response(exc)
-    if target is None:
-        return jsonify({"error": "project not found"}), 404
-    log.info("PROJECT_TARGET_QUICK_ADDED", extra={
         "ip": get_client_ip(),
         "session": get_log_session_id(session_id),
         "project_id": project_id,

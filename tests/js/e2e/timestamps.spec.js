@@ -1,16 +1,7 @@
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady, runCommand, makeTestIp, waitForActiveOutputSettled } from './helpers.js'
+import { ensurePromptReady, runCommand, waitForActiveOutputSettled } from './helpers.js'
 
 const CMD = 'hostname'
-
-// Browser specs share the same backend rate limiter, so derive a stable test-
-// scoped IP from the file/title instead of reusing one bucket for the suite.
-function testScopedIp(testInfo, baseOffset = 0) {
-  const key = `${testInfo.file}:${testInfo.title}`
-  let sum = 0
-  for (const ch of key) sum = (sum + ch.charCodeAt(0)) % 200
-  return makeTestIp(baseOffset + sum)
-}
 
 async function pinActiveOutputToLiveBottom(page) {
   await page.evaluate(() => {
@@ -43,8 +34,7 @@ async function pinActiveOutputToLiveBottom(page) {
 }
 
 test.describe('timestamp toggle', () => {
-  test.beforeEach(async ({ page }, testInfo) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': testScopedIp(testInfo, 67) })
+  test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.locator('#cmd').waitFor()
   })

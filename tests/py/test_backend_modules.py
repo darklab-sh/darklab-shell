@@ -4774,6 +4774,41 @@ class TestDatabaseInit:
             conn.close()
         assert count == 0
 
+    def test_retention_prunes_old_snapshot_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) "
+                "VALUES ('old-snap', 'sess', 'lbl', datetime('now', '-50 days'), '[]')"
+            )
+            conn.execute(
+                "INSERT INTO entity_labels "
+                "(id, session_id, entity_type, entity_id, label, source, created) "
+                "VALUES ('lbl-old-snap', 'sess', 'snapshot', 'old-snap', 'handoff', 'manual', datetime('now'))"
+            )
+            conn.execute(
+                "INSERT INTO entity_notes "
+                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES ('note-old-snap', 'sess', 'snapshot', 'old-snap', 'Snapshot note', datetime('now'), datetime('now'))"
+            )
+            conn.commit()
+            conn.close()
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 30}):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            label_count = conn.execute(
+                "SELECT COUNT(*) FROM entity_labels WHERE entity_type='snapshot' AND entity_id='old-snap'"
+            ).fetchone()[0]
+            note_count = conn.execute(
+                "SELECT COUNT(*) FROM entity_notes WHERE entity_type='snapshot' AND entity_id='old-snap'"
+            ).fetchone()[0]
+            conn.close()
+        assert label_count == 0
+        assert note_count == 0
+
     def test_zero_retention_does_not_prune(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)

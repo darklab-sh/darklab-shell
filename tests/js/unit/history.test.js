@@ -756,7 +756,7 @@ describe('history panel actions', () => {
     document.execCommand = originalExecCommand
   })
 
-  it('clicking a history entry row injects the command into the composer and closes the panel', async () => {
+  it('clicking a history entry row opens run details without closing the panel', async () => {
     const { refreshHistoryPanel } = loadHistoryPanel()
     const historyPanel = document.getElementById('history-panel')
     const cmdInput = document.getElementById('cmd')
@@ -767,9 +767,80 @@ describe('history panel actions', () => {
 
     const entry = document.querySelector('#history-list .history-entry')
     entry.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
 
-    expect(cmdInput.value).toBe('ping darklab.sh')
-    expect(historyPanel.classList.contains('open')).toBe(false)
+    expect(cmdInput.value).toBe('')
+    expect(historyPanel.classList.contains('open')).toBe(true)
+    expect(document.getElementById('history-run-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('history-run-subtitle').textContent).toBe('ping darklab.sh')
+  })
+
+  it('loads structured run findings into the run details findings tab', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            roots: ['nuclei'],
+            items: [{
+              id: 'run-findings',
+              type: 'run',
+              command: 'nuclei -u https://darklab.sh',
+              label: 'nuclei -u https://darklab.sh',
+              started: '2026-01-01T00:00:00Z',
+              created: '2026-01-01T00:00:00Z',
+              exit_code: 0,
+              finding_count: 1,
+            }],
+            runs: [],
+          }),
+        })
+      }
+      if (url === '/history/run-findings?json&preview=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            id: 'run-findings',
+            command: 'nuclei -u https://darklab.sh',
+            output: ['finding line'],
+            exit_code: 0,
+            finding_count: 1,
+          }),
+        })
+      }
+      if (url === '/entities/run/run-findings/findings') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            findings: [{
+              id: 'finding-1',
+              title: 'Missing security header',
+              raw_line: '[info] missing header',
+              severity: 'info',
+              review_state: 'new',
+              line_number: 0,
+              scope: 'http',
+            }],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+    document.querySelector('#history-list .history-entry')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await new Promise((resolve) => setImmediate(resolve))
+    await Promise.resolve()
+    document.querySelector('[data-history-run-tab="findings"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(apiFetch).toHaveBeenCalledWith('/entities/run/run-findings/findings', { cache: 'no-store' })
+    expect(document.getElementById('history-run-body').textContent).toContain('Missing security header')
+    expect(document.getElementById('history-run-body').textContent).toContain('[info] missing header')
   })
 
   it('closes the history panel for permalink but keeps it open for star and delete', async () => {
@@ -848,7 +919,7 @@ describe('history panel actions', () => {
 
     const entry = document.querySelector('#history-list .history-entry')
     const visibleActions = [...entry.querySelector('.history-actions').children].map(el => el.textContent)
-    expect(visibleActions).toEqual(['restore', 'delete', 'moreeditpermalinkcompareadd to active projectadd to projectcopy run id'])
+    expect(visibleActions).toEqual(['copy command', 'restore', 'delete', 'moreeditpermalinkcompareadd to active projectadd to projectcopy run id'])
     const menuActions = [...entry.querySelectorAll('.history-action-menu [data-action]')].map(el => el.dataset.action)
     expect(menuActions).toEqual([
       'edit-metadata',
@@ -908,6 +979,10 @@ describe('history panel actions', () => {
     refreshHistoryPanel()
     await new Promise((resolve) => setImmediate(resolve))
     const entry = document.querySelector('#history-list .history-entry')
+
+    entry.querySelector('[data-action="copy-command"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    expect(clipboard.writeText).toHaveBeenCalledWith('ping darklab.sh')
 
     entry.querySelector('[data-action="copy-run-id"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await Promise.resolve()

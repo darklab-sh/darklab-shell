@@ -11,7 +11,6 @@ import workspace
 
 def get_client():
     shell_app.app.config["TESTING"] = True
-    shell_app.app.config["RATELIMIT_ENABLED"] = False
     return shell_app.app.test_client()
 
 
@@ -192,12 +191,6 @@ class TestSessionMigrate:
                 "(id, session_id, name, slug, description, status, color, created, updated) "
                 "VALUES (?, ?, 'Case', ?, '', 'active', '', datetime('now'), datetime('now'))",
                 (project_id, session_id, slug),
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO project_links "
-                "(id, project_id, entity_type, entity_id, source, created) "
-                "VALUES (?, ?, 'workspace_file', 'findings.txt', 'manual', datetime('now'))",
-                ("plink_workspace_file_migrate_test", project_id),
             )
             conn.execute(
                 "INSERT OR REPLACE INTO project_targets "
@@ -560,11 +553,6 @@ class TestSessionMigrate:
                 "SELECT slug FROM projects WHERE session_id = ? AND id = 'prj_migrate_test'",
                 (to_id,),
             ).fetchone()[0]
-            linked_workspace_file = conn.execute(
-                "SELECT p.session_id, l.entity_id "
-                "FROM project_links l JOIN projects p ON p.id = l.project_id "
-                "WHERE l.id = 'plink_workspace_file_migrate_test'",
-            ).fetchone()
             project_target = conn.execute(
                 "SELECT p.session_id, t.value "
                 "FROM project_targets t JOIN projects p ON p.id = t.project_id "
@@ -597,7 +585,6 @@ class TestSessionMigrate:
         assert self._count_rows("entity_labels", from_id) == 0
         assert self._count_rows("entity_notes", from_id) == 0
         assert migrated_slug == "case-2"
-        assert tuple(linked_workspace_file) == (to_id, "findings.txt")
         assert tuple(project_target) == (to_id, "darklab.sh")
         assert tuple(run_artifact) == (to_id, "findings.txt")
         assert tuple(finding_target) == (to_id, "fnd_migrate_test", "ptarget_migrate_test")

@@ -53,7 +53,6 @@ PROJECT_AUTO_LINK_EXTERNAL_RUNS_PREF_KEY = "pref_project_auto_link_external_runs
 PROJECT_STATUSES = frozenset({"active", "archived"})
 PROJECT_LINK_ENTITY_TYPES = frozenset({
     "run",
-    "workspace_file",
 })
 ENTITY_METADATA_TYPES = frozenset({
     "project",
@@ -84,6 +83,10 @@ _DOMAIN_RE = re.compile(
 
 class ProjectWorkspaceError(ValueError):
     """Raised when project workspace input is invalid."""
+
+
+class ProjectWorkspaceNotFound(ProjectWorkspaceError):
+    """Raised when a referenced project workspace entity is missing."""
 
 
 class ProjectWorkspaceQuotaExceeded(ProjectWorkspaceError):
@@ -757,6 +760,27 @@ def _estimate_evidence_package_archive(selected_runs, selected_findings, selecte
     }
 
 
+def _package_manifest_without_private_notes(manifest):
+    if not isinstance(manifest, dict):
+        return manifest
+    clean = dict(manifest)
+    project = clean.get("project")
+    if isinstance(project, dict):
+        project = dict(project)
+        project.pop("note", None)
+        clean["project"] = project
+    for key in ("runs", "findings", "targets", "artifacts"):
+        items = clean.get(key)
+        if not isinstance(items, list):
+            continue
+        clean[key] = [
+            {item_key: item_value for item_key, item_value in item.items() if item_key != "note"}
+            if isinstance(item, dict) else item
+            for item in items
+        ]
+    return clean
+
+
 def _evidence_manifest_from_summary(summary, payload, findings=None):
     findings = findings if isinstance(findings, list) else []
     selection = payload.get("selection")
@@ -795,16 +819,18 @@ def _evidence_manifest_from_summary(summary, payload, findings=None):
         "transcripts_html": bool(transcript_run_ids),
         "raw_artifacts": bool(payload["include_artifacts"]),
     }
-    return {
+    project_payload = {
+        "id": summary["project"]["id"],
+        "name": summary["project"]["name"],
+        "slug": summary["project"]["slug"],
+        "description": summary["project"].get("description", ""),
+    }
+    if payload["include_private_notes"] and summary["project"].get("note"):
+        project_payload["note"] = summary["project"].get("note")
+    manifest = {
         "format": 1,
         "package_format_version": payload["package_format_version"],
-        "project": {
-            "id": summary["project"]["id"],
-            "name": summary["project"]["name"],
-            "slug": summary["project"]["slug"],
-            "description": summary["project"].get("description", ""),
-            "note": summary["project"].get("note"),
-        },
+        "project": project_payload,
         "counts": {
             "runs": len(selected_runs),
             "findings": len(selected_findings),
@@ -837,6 +863,9 @@ def _evidence_manifest_from_summary(summary, payload, findings=None):
         "redaction_mode": payload["redaction_mode"],
         "include_artifacts": payload["include_artifacts"],
     }
+    if not payload["include_private_notes"]:
+        manifest = _package_manifest_without_private_notes(manifest)
+    return manifest
 
 
 def _package_archive_name(package):
@@ -1478,8 +1507,9 @@ def _render_package_index_html(
         ("Labels JSON", "metadata/labels.json"),
         ("Entity Notes JSON", "notes/entity-notes.json"),
         ("Entity Notes Markdown", "notes/entity-notes.md"),
-        ("Project Notes Markdown", "notes/project.md"),
     ]
+    if project_notes:
+        export_links.append(("Project Notes Markdown", "notes/project.md"))
     if skipped_items:
         export_links.append(("Skipped items JSON", "skipped-items.json"))
     export_html = "".join(
@@ -1649,8 +1679,9 @@ def _render_package_readme(
         f"- {_package_markdown_link('Labels JSON', 'metadata/labels.json')}",
         f"- {_package_markdown_link('Entity Notes JSON', 'notes/entity-notes.json')}",
         f"- {_package_markdown_link('Entity Notes Markdown', 'notes/entity-notes.md')}",
-        f"- {_package_markdown_link('Project Notes Markdown', 'notes/project.md')}",
     ])
+    if project_notes:
+        lines.append(f"- {_package_markdown_link('Project Notes Markdown', 'notes/project.md')}")
     if skipped_items:
         lines.append(f"- {_package_markdown_link('Skipped items JSON', 'skipped-items.json')}")
     lines.extend([
@@ -1661,6 +1692,31 @@ def _render_package_readme(
         "",
     ])
     return "\n".join(lines)
+
+
+def _package_collection_json_bytes(collection_name, items, generated_at, *, extra=None):
+    exported = items if isinstance(items, list) else []
+    payload = {
+        "format": 1,
+        "generated_at": generated_at,
+        "count": len(exported),
+        collection_name: exported,
+    }
+    if extra:
+        payload.update(extra)
+    return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _package_collection_markdown_bytes(title, generated_at, body_lines, *, empty_message):
+    lines = [f"# {_package_markdown_text(title)}", ""]
+    if generated_at is not None:
+        lines.extend([f"Generated: {_package_markdown_text(generated_at)}", ""])
+    body = [str(line) for line in body_lines] if isinstance(body_lines, list) else []
+    if body:
+        lines.extend(body)
+    else:
+        lines.extend([empty_message, ""])
+    return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
 
 
 def _package_findings_json_bytes(manifest, generated_at, run_pages):
@@ -1674,13 +1730,7 @@ def _package_findings_json_bytes(manifest, generated_at, run_pages):
         if run_id in run_pages:
             item["run_page"] = _finding_run_anchor(item)
         exported.append(item)
-    payload = {
-        "format": 1,
-        "generated_at": generated_at,
-        "count": len(exported),
-        "findings": exported,
-    }
-    return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    return _package_collection_json_bytes("findings", exported, generated_at)
 
 
 def _package_findings_markdown_bytes(manifest, run_pages):
@@ -1738,7 +1788,12 @@ def _package_findings_markdown_bytes(manifest, run_pages):
             lines.append("")
     else:
         lines.append("- No selected findings.")
-    return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
+    return _package_collection_markdown_bytes(
+        "Findings",
+        None,
+        lines[2:],
+        empty_message="- No selected findings.",
+    )
 
 
 def _package_finding_target_ids(finding):
@@ -1782,13 +1837,7 @@ def _package_targets_json_bytes(manifest, generated_at):
         item["finding_ids"] = finding_refs
         item["run_ids"] = run_refs
         exported.append(item)
-    payload = {
-        "format": 1,
-        "generated_at": generated_at,
-        "count": len(exported),
-        "targets": exported,
-    }
-    return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    return _package_collection_json_bytes("targets", exported, generated_at)
 
 
 def _package_targets_markdown_bytes(manifest):
@@ -1797,7 +1846,12 @@ def _package_targets_markdown_bytes(manifest):
     lines = ["# Targets", "", f"Selected targets: {len([item for item in targets if isinstance(item, dict)])}", ""]
     if not targets:
         lines.append("- No selected targets.")
-        return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
+        return _package_collection_markdown_bytes(
+            "Targets",
+            None,
+            lines[2:],
+            empty_message="- No selected targets.",
+        )
     for target in targets:
         if not isinstance(target, dict):
             continue
@@ -1841,7 +1895,12 @@ def _package_targets_markdown_bytes(manifest):
                 finding_label = _package_markdown_text(finding.get("title") or finding.get("raw_line") or finding.get("id"))
                 lines.append(f"- {finding_label} ({_package_markdown_code(finding.get('id') or '')})")
         lines.append("")
-    return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
+    return _package_collection_markdown_bytes(
+        "Targets",
+        None,
+        lines[2:],
+        empty_message="- No selected targets.",
+    )
 
 
 def _package_metadata_targets(package, manifest):
@@ -1957,13 +2016,7 @@ def _package_label_dicts(labels, redaction_rules=None):
 
 def _package_labels_json_bytes(labels, generated_at, redaction_rules=None):
     exported = _package_label_dicts(labels, redaction_rules)
-    payload = {
-        "format": 1,
-        "generated_at": generated_at,
-        "count": len(exported),
-        "labels": exported,
-    }
-    return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    return _package_collection_json_bytes("labels", exported, generated_at)
 
 
 def _package_note_dicts(notes, redaction_rules=None):
@@ -1982,49 +2035,46 @@ def _package_note_dicts(notes, redaction_rules=None):
 
 def _package_notes_json_bytes(notes, generated_at, *, included, redaction_rules=None):
     exported = _package_note_dicts(notes, redaction_rules)
-    payload = {
-        "format": 1,
-        "generated_at": generated_at,
-        "include_private_notes": bool(included),
-        "count": len(exported),
-        "notes": exported,
-    }
-    return (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    return _package_collection_json_bytes(
+        "notes",
+        exported,
+        generated_at,
+        extra={"include_private_notes": bool(included)},
+    )
 
 
 def _package_project_notes_markdown_bytes(manifest, generated_at):
     project = manifest.get("project") if isinstance(manifest.get("project"), dict) else {}
-    project_name = _package_markdown_text(project.get("name") or "Project")
     project_notes = _package_markdown_text(_entity_note_body(project))
-    lines = [
-        f"# {project_name} Notes",
-        "",
-        f"Generated: {_package_markdown_text(generated_at)}",
-        "",
-    ]
+    lines = []
     if project_notes:
         lines.extend([project_notes, ""])
     else:
         lines.extend(["No project notes were included in this package.", ""])
-    return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
+    return _package_collection_markdown_bytes(
+        f"{project.get('name') or 'Project'} Notes",
+        generated_at,
+        lines,
+        empty_message="No project notes were included in this package.",
+    )
 
 
 def _package_notes_markdown_bytes(notes, generated_at, *, included):
-    lines = [
-        "# Entity Notes",
-        "",
-        f"Generated: {_package_markdown_text(generated_at)}",
-        "",
-    ]
+    lines = []
     if not included:
-        lines.extend([
-            "Private entity notes were excluded from this package.",
-            "",
-        ])
-        return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
+        return _package_collection_markdown_bytes(
+            "Entity Notes",
+            generated_at,
+            ["Private entity notes were excluded from this package.", ""],
+            empty_message="Private entity notes were excluded from this package.",
+        )
     if not notes:
-        lines.extend(["No selected entity notes were included in this package.", ""])
-        return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
+        return _package_collection_markdown_bytes(
+            "Entity Notes",
+            generated_at,
+            ["No selected entity notes were included in this package.", ""],
+            empty_message="No selected entity notes were included in this package.",
+        )
 
     for note in notes:
         if not isinstance(note, dict):
@@ -2041,7 +2091,12 @@ def _package_notes_markdown_bytes(notes, generated_at, *, included):
             body or "_No note body._",
             "",
         ])
-    return ("\n".join(lines).rstrip() + "\n").encode("utf-8")
+    return _package_collection_markdown_bytes(
+        "Entity Notes",
+        generated_at,
+        lines,
+        empty_message="No selected entity notes were included in this package.",
+    )
 
 
 def _allocate_slug(conn, session_id, name, *, project_id=None):
@@ -2313,7 +2368,7 @@ def get_project_summary(session_id, project_id):
         link_rows = conn.execute(
             "SELECT id, project_id, entity_type, entity_id, source, created "
             "FROM project_links WHERE project_id = ? "
-            "AND entity_type IN ('run', 'workspace_file') "
+            "AND entity_type = 'run' "
             "ORDER BY created DESC",
             (project_id,),
         ).fetchall()
@@ -2324,7 +2379,6 @@ def get_project_summary(session_id, project_id):
             (project_id,),
         ).fetchall()
         run_ids = [row["entity_id"] for row in link_rows if row["entity_type"] == "run"]
-        workspace_file_ids = [row["entity_id"] for row in link_rows if row["entity_type"] == "workspace_file"]
         artifact_rows = []
         finding_rows = []
         run_rows = []
@@ -2366,7 +2420,6 @@ def get_project_summary(session_id, project_id):
         label_count = (
             _count_entity_metadata_for_ids(conn, "entity_labels", "project", [project_id])
             + _count_entity_metadata_for_ids(conn, "entity_labels", "run", run_ids)
-            + _count_entity_metadata_for_ids(conn, "entity_labels", "workspace_file", workspace_file_ids)
             + _count_entity_metadata_for_ids(conn, "entity_labels", "run_file_artifact", artifact_ids)
             + _count_entity_metadata_for_ids(conn, "entity_labels", "finding", finding_ids)
             + _count_entity_metadata_for_ids(conn, "entity_labels", "target", target_ids)
@@ -2375,7 +2428,6 @@ def get_project_summary(session_id, project_id):
         note_count = (
             _count_entity_metadata_for_ids(conn, "entity_notes", "project", [project_id])
             + _count_entity_metadata_for_ids(conn, "entity_notes", "run", run_ids)
-            + _count_entity_metadata_for_ids(conn, "entity_notes", "workspace_file", workspace_file_ids)
             + _count_entity_metadata_for_ids(conn, "entity_notes", "run_file_artifact", artifact_ids)
             + _count_entity_metadata_for_ids(conn, "entity_notes", "finding", finding_ids)
             + _count_entity_metadata_for_ids(conn, "entity_notes", "target", target_ids)
@@ -2423,7 +2475,6 @@ def get_project_summary(session_id, project_id):
         "packages": packages,
         "counts": {
             "runs": len(run_ids),
-            "workspace_files": len(workspace_file_ids),
             "targets": confirmed_target_count,
             "pending_targets": pending_target_count,
             "artifacts": len(artifacts),
@@ -2719,6 +2770,8 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
     manifest = dict(package.get("manifest") or {})
     redaction_rules = _package_redaction_rules(package.get("redaction_mode"), cfg=cfg)
     render_manifest = _redact_package_manifest(manifest, redaction_rules)
+    if not render_manifest.get("include_private_notes"):
+        render_manifest = _package_manifest_without_private_notes(render_manifest)
     metadata_targets = _package_metadata_targets(package, manifest)
     with db_connect() as conn:
         label_rows = _package_metadata_rows(conn, session_id, "entity_labels", metadata_targets)
@@ -3003,14 +3056,15 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
                 projected_bytes,
                 max_archive_bytes,
             )
-            project_notes_bytes = _package_project_notes_markdown_bytes(render_manifest, generated_at)
-            projected_bytes = _write_bounded_archive_entry(
-                archive,
-                "notes/project.md",
-                project_notes_bytes,
-                projected_bytes,
-                max_archive_bytes,
-            )
+            if _entity_note_body(render_manifest.get("project") if isinstance(render_manifest, dict) else {}):
+                project_notes_bytes = _package_project_notes_markdown_bytes(render_manifest, generated_at)
+                projected_bytes = _write_bounded_archive_entry(
+                    archive,
+                    "notes/project.md",
+                    project_notes_bytes,
+                    projected_bytes,
+                    max_archive_bytes,
+                )
             _record_timing("notes", notes_started)
 
             index_started = time.perf_counter()
@@ -4357,9 +4411,17 @@ def _normalize_finding_review_payload(data):
     return review_state
 
 
+def _workspace_file_belongs_to_session(session_id, entity_id):
+    try:
+        path = resolve_workspace_path(session_id, entity_id, _config.CFG)
+        return path.is_file()
+    except (OSError, WorkspaceError):
+        return False
+
+
 def _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
     if entity_type == "workspace_file":
-        return not entity_id.startswith("/") and "\x00" not in entity_id and ".." not in entity_id.split("/")
+        return _workspace_file_belongs_to_session(session_id, entity_id)
     if entity_type == "project":
         row = conn.execute(
             "SELECT 1 FROM projects WHERE session_id = ? AND id = ?",
@@ -4413,7 +4475,7 @@ def list_project_links(session_id, project_id):
         rows = conn.execute(
             "SELECT id, project_id, entity_type, entity_id, source, created "
             "FROM project_links WHERE project_id = ? "
-            "AND entity_type IN ('run', 'workspace_file') "
+            "AND entity_type = 'run' "
             "ORDER BY created DESC",
             (project_id,),
         ).fetchall()
@@ -4431,7 +4493,7 @@ def link_project_entity(session_id, project_id, data):
         if not project:
             return None
         if not _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
-            raise ProjectWorkspaceError(f"{entity_type} not found for this session")
+            raise ProjectWorkspaceNotFound(f"{entity_type} not found for this session")
         row = conn.execute(
             "SELECT id, project_id, entity_type, entity_id, source, created "
             "FROM project_links WHERE project_id = ? AND entity_type = ? AND entity_id = ?",
@@ -4441,7 +4503,7 @@ def link_project_entity(session_id, project_id, data):
             return _row_to_link(row)
         count_row = conn.execute(
             "SELECT COUNT(*) AS count FROM project_links "
-            "WHERE project_id = ? AND entity_type IN ('run', 'workspace_file')",
+            "WHERE project_id = ? AND entity_type = 'run'",
             (project_id,),
         ).fetchone()
         if _quota_exceeded(

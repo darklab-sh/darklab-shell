@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
+const ENTITY_METADATA_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_entity_metadata.js'), 'utf8')
 const SHELL_CHROME_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/shell_chrome.js'), 'utf8')
 
 function tick() {
@@ -44,6 +45,7 @@ function loadShellChrome({
   restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-restored')),
   showWorkspaceViewer = vi.fn(),
   showConfirm = vi.fn(() => Promise.resolve('remove')),
+  showToast = vi.fn(),
   fetchAndRenderHistoryComparison = vi.fn(),
   bindDismissible = null,
   bindPressable = (el, options = {}) => {
@@ -182,10 +184,28 @@ function loadShellChrome({
     restoreHistoryRunIntoTab,
     showWorkspaceViewer,
     showConfirm,
+    showToast,
     fetchAndRenderHistoryComparison,
     bindDismissible,
     enhanceAppSelects,
     syncAppSelect,
+  }
+  const downloadBlobAsAttachment = (blob, filename) => {
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename || 'download'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    let revoked = false
+    const revoke = () => {
+      if (revoked) return
+      revoked = true
+      URL.revokeObjectURL(url)
+    }
+    window.setTimeout(revoke, 2000)
+    window.addEventListener('pagehide', revoke, { once: true })
   }
 
   new Function(
@@ -221,10 +241,13 @@ function loadShellChrome({
     'showWorkflowsOverlay',
     'openStatusMonitor',
     'showConfirm',
+    'showToast',
     'getProjectAutoLinkExternalRunsPreference',
     'applyProjectAutoLinkExternalRunsPreference',
+    'downloadBlobAsAttachment',
     `
       const globalThis = global;
+      ${ENTITY_METADATA_SRC}
       ${SHELL_CHROME_SRC}
     `,
   )(
@@ -277,8 +300,10 @@ function loadShellChrome({
     () => {},
     openStatusMonitor,
     showConfirm,
+    showToast,
     getProjectAutoLinkExternalRunsPreference,
     applyProjectAutoLinkExternalRunsPreference,
+    downloadBlobAsAttachment,
   )
 
   return {
@@ -294,6 +319,7 @@ function loadShellChrome({
     restoreHistoryRunIntoTab,
     showWorkspaceViewer,
     showConfirm,
+    showToast,
     bindDismissible,
     openProjectWorkspace: global.openProjectWorkspace,
     refreshProjectWorkspace: global.refreshProjectWorkspace,
@@ -612,7 +638,8 @@ describe('shell chrome project workspace', () => {
 
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-2', expect.objectContaining({ method: 'PUT' }))
     expect(apiFetch).not.toHaveBeenCalledWith('/projects/active', expect.objectContaining({ method: 'POST' }))
-    expect(document.getElementById('project-workspace-message').textContent).toContain('Project unarchived.')
+    expect(shell.showToast).toHaveBeenCalledWith('Project unarchived.', 'success')
+    expect(document.getElementById('project-workspace-message').classList.contains('u-hidden')).toBe(true)
     expect(document.querySelector('[data-project-action="archive"][data-project-id="project-2"]')).not.toBeNull()
   })
 
@@ -668,7 +695,8 @@ describe('shell chrome project workspace', () => {
     expect(apiFetch).toHaveBeenCalledWith('/projects/project-1', expect.objectContaining({ method: 'DELETE' }))
     expect(document.getElementById('project-workspace-body').textContent)
       .toContain('No projects yet')
-    expect(document.getElementById('project-workspace-message').textContent).toContain('Project deleted.')
+    expect(shell.showToast).toHaveBeenCalledWith('Project deleted.', 'success')
+    expect(document.getElementById('project-workspace-message').classList.contains('u-hidden')).toBe(true)
   })
 
   it('toggles the active project external run capture preference', async () => {
@@ -1031,12 +1059,20 @@ describe('shell chrome project workspace', () => {
 
     vi.useFakeTimers()
     try {
+      const flushNotesSave = async () => {
+        for (let index = 0; index < 20; index += 1) {
+          await Promise.resolve()
+        }
+      }
       input.value = 'Updated notes'
       input.dispatchEvent(new Event('input', { bubbles: true }))
       await vi.advanceTimersByTimeAsync(450)
-      expect(saved.classList.contains('u-hidden')).toBe(true)
-      await vi.advanceTimersByTimeAsync(200)
-      expect(saved.classList.contains('u-hidden')).toBe(false)
+      await flushNotesSave()
+      await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/projects/project-1', expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ notes: 'Updated notes' }),
+      })))
+      await vi.waitFor(() => expect(saved.classList.contains('u-hidden')).toBe(false))
     } finally {
       vi.useRealTimers()
     }
@@ -1665,6 +1701,7 @@ describe('shell chrome project workspace', () => {
       '.project-explorer-tab',
       '.project-explorer-actions .btn',
     ])
+    shell.showToast.mockClear()
 
     document.querySelector('[data-project-action="edit-target"]').click()
     await tick()
@@ -1697,7 +1734,8 @@ describe('shell chrome project workspace', () => {
       body: JSON.stringify({ body: 'Retest scope' }),
     }))
     expect(document.querySelector('.project-target-row')?.textContent).toContain('darklab.io')
-    expect(document.getElementById('project-workspace-message').textContent).toContain('Target updated.')
+    expect(shell.showToast).toHaveBeenCalledWith('Target updated.', 'success')
+    expect(document.getElementById('project-workspace-message').classList.contains('u-hidden')).toBe(true)
 
     document.querySelector('[data-project-tab="findings"]').click()
     await tick()
@@ -1865,7 +1903,10 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('[data-project-finding-label-filter-option][value="retest"]')).not.toBeNull()
     expect(document.querySelector('[data-project-finding-note-state]')).not.toBeNull()
     expect(document.querySelector('[data-project-finding-sort]')).toBeNull()
-    expectProjectPressablesBound(['.project-runs-toolbar-actions .btn'])
+    expectProjectPressablesBound([
+      '.project-runs-toolbar-actions .btn',
+      '.project-run-compare-mode-button',
+    ])
     document.querySelector('[data-project-action="edit-run-metadata"][data-run-id="run-1"]').click()
     await tick()
     expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(true)
@@ -2102,11 +2143,10 @@ describe('shell chrome project workspace', () => {
     document.querySelector('[data-project-action="package-wizard-next"]').click()
     await tick()
     expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Include')
-    expect(document.getElementById('project-workspace-message').textContent).toContain(
+    expect(shell.showToast).toHaveBeenCalledWith(
       '2 unavailable items removed; review your selection before continuing.',
+      'success',
     )
-    document.querySelector('[data-project-message-dismiss]').click()
-    await tick()
     expect(document.getElementById('project-workspace-message').classList.contains('u-hidden')).toBe(true)
     expect(document.getElementById('project-package-wizard-overlay').textContent).not.toContain('run-missing is no longer linked')
     document.querySelector('[data-project-action="package-wizard-cancel"]').click()
