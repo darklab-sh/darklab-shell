@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { spawnSync } from 'child_process'
-import { readFileSync, readdirSync } from 'fs'
+import { existsSync, readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import { ensurePromptReady, runCommand, waitForHistoryRuns, makeTestIp } from './helpers.js'
 
@@ -25,6 +25,30 @@ function e2eDataDirForProject(testInfo) {
   const dataDir = log.match(/^\[e2e-server\] data_dir=(.+)$/m)?.[1]
   if (!dataDir) throw new Error(`Cannot find data_dir in ${logName}`)
   return dataDir
+}
+
+let fixturePython = ''
+
+function pythonForE2EFixture() {
+  if (fixturePython) return fixturePython
+  const candidates = [
+    process.env.PYTHON,
+    '.venv/bin/python3',
+    'python3',
+    'python',
+  ].filter(Boolean)
+  for (const candidate of candidates) {
+    if (candidate.includes('/') && !existsSync(candidate)) continue
+    const probe = spawnSync(candidate, ['-c', 'import sqlite3'], {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+    })
+    if (probe.status === 0) {
+      fixturePython = candidate
+      return candidate
+    }
+  }
+  throw new Error('Failed to find a Python executable with sqlite3 for the e2e evidence fixture')
 }
 
 function seedProjectEvidenceFixture(testInfo, { sessionId, projectId }) {
@@ -84,12 +108,12 @@ finally:
     conn.close()
 print(json.dumps({"runId": run_id, "artifactId": artifact_id, "findingId": finding_id, "workspacePath": artifact_rel}))
 `
-  const result = spawnSync('.venv/bin/python3', ['-c', script, dataDir, sessionId, projectId], {
+  const result = spawnSync(pythonForE2EFixture(), ['-c', script, dataDir, sessionId, projectId], {
     cwd: process.cwd(),
     encoding: 'utf8',
   })
   if (result.status !== 0) {
-    throw new Error(`Failed to seed project evidence fixture: ${result.stderr || result.stdout}`)
+    throw new Error(`Failed to seed project evidence fixture: ${result.error?.message || result.stderr || result.stdout || `exit ${result.status}`}`)
   }
   return JSON.parse(result.stdout)
 }
@@ -367,6 +391,14 @@ test.describe('project workspace modal', () => {
     })
   }
 
+  async function waitForProjectTargetValue(page, projectId, value) {
+    await expect.poll(async () => page.evaluate(async ({ id, targetValue }) => {
+      const resp = await apiFetch(`/projects/${encodeURIComponent(id)}/summary`, { cache: 'no-store' })
+      const data = await resp.json()
+      return (data.targets || []).some((target) => target.value === targetValue)
+    }, { id: projectId, targetValue: value }), { timeout: 15_000 }).toBe(true)
+  }
+
   async function createActiveProject(page, projectName) {
     await page.locator('#project-workspace-name').fill(projectName)
     await page.locator('#project-workspace-create-form button[type="submit"]').click()
@@ -429,8 +461,17 @@ test.describe('project workspace modal', () => {
     await expect(page.locator('#project-target-editor-title')).toHaveText('EDIT TARGET')
     await page.locator('#project-target-value').fill('projects.playwright.example')
     await page.locator('#project-target-label').fill('Updated target')
+    const targetUpdateResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'PUT'
+        && url.pathname.startsWith(`/projects/${projectId}/targets/`)
+    })
     await page.locator('#project-target-submit').click()
-    await expect(page.locator('.project-target-row').filter({ hasText: 'projects.playwright.example' })).toBeVisible()
+    expect((await targetUpdateResponse).ok()).toBe(true)
+    await waitForProjectTargetValue(page, projectId, 'projects.playwright.example')
+    await expect(page.locator('.project-target-row').filter({ hasText: 'projects.playwright.example' })).toBeVisible({
+      timeout: 15_000,
+    })
 
     const runRow = await linkHostnameRunToOpenProject(page)
     await runRow.locator('[data-project-action="edit-run-metadata"]').click()
