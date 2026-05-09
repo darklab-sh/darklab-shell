@@ -898,6 +898,59 @@ class TestRunStreaming:
         assert entry["command_root"] == "host"
         assert entry["target"] == "darklab.sh"
 
+    def test_project_findings_strip_ansi_codes_before_storage(self):
+        client = get_client()
+        session_id = "sess-project-finding-ansi"
+        project_resp = client.post(
+            "/projects",
+            json={"name": "ANSI Findings"},
+            headers={"X-Session-ID": session_id},
+        )
+        project = json.loads(project_resp.data)["project"]
+        client.post(
+            f"/projects/{project['id']}/targets",
+            json={"type": "url", "value": "https://ip.darklab.sh"},
+            headers={"X-Session-ID": session_id},
+        )
+        client.post(
+            "/projects/active",
+            json={"project_id": project["id"]},
+            headers={"X-Session-ID": session_id},
+        )
+        ansi_line = (
+            "[\x1b[92mhttp-missing-security-headers\x1b[0m] "
+            "[\x1b[94mhttp\x1b[0m] [\x1b[34minfo\x1b[0m] https://ip.darklab.sh\n"
+        )
+        clean_line = "[http-missing-security-headers] [http] [info] https://ip.darklab.sh"
+        fake_proc = _FakeProc(lines=[ansi_line, ""])
+
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = _post_run(
+                client,
+                json={"command": "nuclei -u https://ip.darklab.sh -t http/"},
+                headers={"X-Session-ID": session_id},
+            )
+            resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        hist = client.get("/history", headers={"X-Session-ID": session_id})
+        run_id = json.loads(hist.data)["runs"][0]["id"]
+        with db_connect() as conn:
+            finding = conn.execute(
+                "SELECT title, raw_line, severity FROM findings WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+
+        assert finding is not None
+        assert finding["title"] == clean_line
+        assert finding["raw_line"] == clean_line
+        assert finding["severity"] == "info"
+
     def test_project_findings_prefer_classifier_target_metadata(self):
         client = get_client()
         session_id = "sess-project-finding-target-metadata"
@@ -1108,9 +1161,10 @@ class TestRunStreaming:
                 json={"command": "nmap -p 80 darklab.sh"},
                 headers={"X-Session-ID": session_id},
             )
-            resp.get_data(as_text=True)
+            first_body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
+        assert "[project] discovered 2 targets" in first_body
         targets_resp = client.get(
             f"/projects/{project['id']}/targets",
             headers={"X-Session-ID": session_id},
@@ -1156,8 +1210,9 @@ class TestRunStreaming:
                 json={"command": "nmap -p 80 darklab.sh"},
                 headers={"X-Session-ID": session_id},
             )
-            rerun.get_data(as_text=True)
+            rerun_body = rerun.get_data(as_text=True)
         assert rerun.status_code == 200
+        assert "[project] discovered" not in rerun_body
         with db_connect() as conn:
             dismissed = conn.execute(
                 "SELECT review_state, seen_count FROM project_targets WHERE id = ?",
@@ -2991,7 +3046,7 @@ class TestRunStreaming:
         }
         from workspace import session_workspace_name
         workspace_dir = tmp_path / session_workspace_name(session_id)
-        resume_path = workspace_dir / "katana" / "resume-abcd.cfg"
+        resume_path = workspace_dir / "tools" / "katana" / "resume-abcd.cfg"
         fake_proc = _FakeProc(lines=[f"Creating resume file: {resume_path}\n", ""])
         registry = {
             "commands": [
@@ -3002,7 +3057,7 @@ class TestRunStreaming:
                     "runtime_adaptations": {
                         "inject_flags": [
                             {
-                                "flags": ["env", "XDG_CONFIG_HOME={session_workspace}"],
+                                "flags": ["env", "XDG_CONFIG_HOME={session_workspace}/tools"],
                                 "position": "command_prefix",
                                 "requires_workspace": True,
                             },
@@ -3031,10 +3086,10 @@ class TestRunStreaming:
         assert resp.status_code == 200
         launched = popen.call_args.args[0]
         shell_command = launched[-1]
-        assert f"XDG_CONFIG_HOME={workspace_dir}" in shell_command
+        assert f"XDG_CONFIG_HOME={workspace_dir / 'tools'}" in shell_command
         assert "katana -u https://ip.darklab.sh -d 1" in shell_command
         assert str(workspace_dir) not in body
-        assert "Creating resume file: /katana/resume-abcd.cfg" in body
+        assert "Creating resume file: /tools/katana/resume-abcd.cfg" in body
 
     def test_session_variables_expand_before_validation_and_preserve_typed_history(self):
         client = get_client()

@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,546
+- behavior tests: 2,550
 - docs/inventory meta-tests: 30
-- `pytest`: 1280 (1250 behavior + 30 meta)
+- `pytest`: 1283 (1253 behavior + 30 meta)
 - `vitest`: 1054
 - `playwright`: 243
-- total: 2,577
+- total: 2,580
 
 This document is organized in two parts:
 
@@ -419,6 +419,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDerivedCommandRegistry.test_real_registry_gobuster_uses_subcommand_scoped_autocomplete` | Verifies that Gobuster autocomplete exposes mode subcommands and keeps mode-specific flags scoped to the matching subcommand. |
 | `TestDerivedCommandRegistry.test_real_registry_wordlist_metadata_covers_known_wordlist_flags` | Verifies that known wordlist-consuming command slots declare `value_type: wordlist` and the expected wordlist categories. |
 | `TestDerivedCommandRegistry.test_real_registry_restricted_input_metadata_covers_known_target_slots` | Verifies that known target-consuming command slots declare value metadata used by restricted command-input checks. |
+| `TestDerivedCommandRegistry.test_nuclei_url_target_discovery_ignores_template_path_flags` | Verifies that Nuclei URL target discovery ignores template path flags instead of treating template names as project targets. |
 | `TestDerivedCommandRegistry.test_autocomplete_context_can_be_derived_from_commands_registry` | Verifies that browser autocomplete context can be derived from command and pipe-helper registry entries. |
 | `TestDerivedCommandRegistry.test_builtin_autocomplete_registry_uses_app_owned_yaml` | Verifies that built-in autocomplete grammar is loaded from the app-owned YAML registry and normalized into the browser context shape. |
 | `TestDerivedCommandRegistry.test_builtin_autocomplete_workspace_roots_follow_feature_flag` | Verifies that Files-only built-in autocomplete roots are hidden unless workspace support is enabled. |
@@ -582,6 +583,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunOutputCapture.test_missing_hints_file_returns_empty_list` | Checks that missing hints file returns empty list. |
 | `TestRunOutputCapture.test_hints_loader_ignores_blank_lines_and_comments` | Checks that hints loader ignores blank lines and comments. |
 | `TestRunOutputCapture.test_hints_loader_skips_workspace_section_when_disabled` | Verifies that workspace-scoped welcome hints are hidden when Files are disabled and restored when Files are enabled. |
+| `TestRunOutputCapture.test_hints_loader_skips_interactive_pty_section_when_disabled` | Verifies that interactive-PTY welcome hints are hidden unless interactive PTY support is enabled. |
 | `TestMobileWelcomeHintLoading.test_missing_mobile_hints_file_returns_empty_list` | Checks that missing mobile hints file returns empty list. |
 | `TestMobileWelcomeHintLoading.test_mobile_hints_loader_ignores_blank_lines_and_comments` | Checks that mobile hints loader ignores blank lines and comments. |
 | `TestMobileWelcomeHintLoading.test_mobile_hints_loader_skips_workspace_section_when_disabled` | Verifies that workspace-scoped mobile welcome hints are hidden when Files are disabled and restored when Files are enabled. |
@@ -1219,6 +1221,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestRunStreaming.test_run_emits_started_notice_output_and_exit` | Checks that run emits started notice output and exit. |
 | `TestRunStreaming.test_run_output_events_include_signal_metadata` | Verifies that live `/runs` output events include backend signal metadata for classified lines. |
 | `TestRunStreaming.test_history_restore_json_preserves_signal_metadata` | Verifies that history restore JSON preserves per-line signal metadata from persisted run output. |
+| `TestRunStreaming.test_project_findings_strip_ansi_codes_before_storage` | Verifies that persisted project findings store ANSI-normalized plain text even when scanner output includes terminal formatting. |
 | `TestRunStreaming.test_project_findings_prefer_classifier_target_metadata` | Verifies that persisted project findings use classifier target metadata when the finding line does not repeat the input-file target. |
 | `TestRunStreaming.test_project_findings_match_classifier_ip_to_project_cidr_target` | Verifies that classifier-extracted IP targets attach findings to matching project CIDR targets. |
 | `TestRunStreaming.test_project_findings_filter_by_matching_port_set_target` | Verifies that project finding filters can match port-set targets even when the finding's primary target is the scanned host. |

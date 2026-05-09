@@ -1078,7 +1078,7 @@ commands:
       inject_flags:
         - flags:
             - env
-            - XDG_CONFIG_HOME={session_workspace}
+            - XDG_CONFIG_HOME={session_workspace}/tools
           position: command_prefix
           requires_workspace: true
     autocomplete:
@@ -1267,7 +1267,7 @@ commands:
     runtime_adaptations:
       managed_workspace_directory:
         flag: -dir
-        directory: amass
+        directory: tools/amass
         subcommands:
           - enum
           - subs
@@ -1278,7 +1278,7 @@ commands:
           - -help
           - --help
         reject_alternate: true
-        reject_message: Amass database commands use the managed amass session directory.
+        reject_message: Amass database commands use the managed tools/amass session directory.
       environment:
         - name: XDG_CONFIG_HOME
           value: "{managed_workspace_parent}"
@@ -1545,7 +1545,7 @@ commands:
       inject_flags:
         - flags:
             - env
-            - XDG_CONFIG_HOME={session_workspace}
+            - XDG_CONFIG_HOME={session_workspace}/tools
           position: command_prefix
           requires_workspace: true
     autocomplete:
@@ -1682,7 +1682,7 @@ commands:
       inject_flags:
         - flags:
             - env
-            - XDG_CONFIG_HOME={session_workspace}
+            - XDG_CONFIG_HOME={session_workspace}/tools
           position: command_prefix
           requires_workspace: true
     autocomplete:
@@ -2384,7 +2384,7 @@ commands:
             - -st
         - flags:
             - env
-            - XDG_CONFIG_HOME={session_workspace}
+            - XDG_CONFIG_HOME={session_workspace}/tools
           position: command_prefix
           requires_workspace: true
     autocomplete:
@@ -2557,7 +2557,7 @@ commands:
       inject_flags:
         - flags:
             - env
-            - XDG_CONFIG_HOME={session_workspace}
+            - XDG_CONFIG_HOME={session_workspace}/tools
           position: command_prefix
           requires_workspace: true
     autocomplete:
@@ -3589,7 +3589,7 @@ commands:
             - -ud
         - flags:
             - env
-            - XDG_CONFIG_HOME={session_workspace}
+            - XDG_CONFIG_HOME={session_workspace}/tools
           position: command_prefix
           requires_workspace: true
     autocomplete:

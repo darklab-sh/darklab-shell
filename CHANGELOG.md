@@ -28,6 +28,7 @@ Entries favor clear outcomes first, then implementation and test details when th
     - Added automatic project linking for completed external server-owned runs, with transcript notices and cross-tab Projects modal refresh when active-project capture happens, while keeping browser-owned built-ins out of project run links.
     - Added project-aware `/history` filtering through URL parameters and the History drawer, project metadata in history/permalink/restored-run/workspace-file payloads, `/diag` project workspace object counts, retention warnings for expiring project-linked runs, run-owned metadata cleanup on deletion, and project deletion cleanup that preserves source runs and saved history.
     - Added desktop/mobile active-project shell chrome, a desktop HUD project chip that opens the Projects modal, session-token migration for project workspace records and active-project context, and async-safe app-native select option refresh for dynamic dropdowns.
+    - Added end-user FAQ entries and welcome hints for Projects and interactive PTY mode, with PTY guidance hidden automatically unless interactive PTY support is enabled.
   - **Tests:**
     - Added database bootstrap coverage for fresh databases, legacy migrations, idempotent initialization, relationship constants, multi-target finding relationship backfills, and project workspace indexes.
     - Added route coverage for project CRUD, archive filtering, active project context, active-run linking for external runs, external-run auto-capture preferences, browser-owned built-in project-link exclusion, project summaries, artifact availability/checksum status, artifact preview/download, project terminal built-ins, project target CRUD, project finding filters, run comparison, snapshot/project separation, project-filtered history, route limiter behavior, write quotas, size caps, and session migration.
@@ -49,11 +50,20 @@ Entries favor clear outcomes first, then implementation and test details when th
 
 ### Changed
 
+- **Tool-created workspace state now lives under `/tools`** — ProjectDiscovery config/resume folders and the managed Amass database directory are scoped under the session workspace's `tools/` folder instead of creating separate top-level folders such as `/amass`, `/katana`, or `/nuclei`.
+  - **Why:** repeated tool-owned folders made the root Files view crowded and mixed user-created evidence with app-managed tool state.
+  - **What:** ProjectDiscovery tools now use `XDG_CONFIG_HOME=<workspace>/tools`, Amass uses the managed `tools/amass` directory, absolute workspace-path filtering reports paths such as `/tools/katana/resume.cfg`, and the external-command integration docs/fixture expectations were updated to match the new layout.
+  - **Tests:** added and updated command-registry, command-validation, run-streaming, and container-smoke fixture coverage for the `tools/` path convention.
+- **Command Registry details now include subcommand-specific reference data** — the command details modal renders root arguments, subcommand descriptions, subcommand examples, subcommand arguments, subcommand flags, workspace file flags, and app-handling notes instead of flattening or hiding subcommand metadata.
+  - **Why:** supported tools such as Amass, OpenSSL, and Gobuster rely on subcommand-specific flags/examples, and the modal should match the command catalog data already owned by `commands.yaml`.
+  - **Tests:** added browser unit coverage for subcommand arguments, flags, value hints, and examples in the Command Registry modal.
 - **SQLite run previews are now byte-bounded** — `output_preview_max_mb` caps the preview JSON stored in SQLite, so huge single-line output such as JSON scanner results cannot turn a short run preview into a multi-megabyte history row. Full-output artifacts still retain larger output up to `full_output_max_mb` when full-output persistence is enabled.
 - **Startup history queries now use targeted SQLite indexes** — recent-command, snapshot, and workflow lookups are backed by session-aware ordering indexes so the rail and startup restore paths do not scan large history tables before the UI finishes loading.
 
 ### Fixed
 
+- **Project finding text now strips ANSI formatting before storage** — scanner output with colored findings, such as Nuclei template results, is normalized before it is persisted as a project finding title/raw line.
+- **Project target discovery no longer announces duplicate rediscoveries** — re-running a command that only touches already known or dismissed targets increments target tracking without emitting a fresh "discovered targets" notice.
 - **Recent domain capture now preserves IPv4 addresses** — values captured from `value_type: domain` slots keep complete IPv4 addresses such as `192.168.1.5` instead of treating partial numeric labels like `192.168.1` as domains.
 - **macOS double-space period substitution no longer changes terminal commands** — the desktop command composer now opts out of autocorrect/smart text behavior like the mobile composer, and the shared composer input path normalizes the exact `word. ` substitution back to two literal spaces before autocomplete or draft state sees it.
 - **History restore now keys existing tabs by run identity** — restoring a run no longer jumps to an unrelated tab just because that tab has the same command text; only the same `runId` / `historyRunId` is reused.

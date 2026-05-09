@@ -40,7 +40,7 @@ ASCII_FILE            = os.path.join(_CONF, "ascii.txt")
 ASCII_MOBILE_FILE     = os.path.join(_CONF, "ascii_mobile.txt")
 APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
 APP_HINTS_MOBILE_FILE = os.path.join(_CONF, "app_hints_mobile.txt")
-AMASS_DEFAULT_WORKSPACE_DIR = "amass"
+AMASS_DEFAULT_WORKSPACE_DIR = "tools/amass"
 RESTRICTABLE_VALUE_TYPES = {"cidr", "domain", "host", "ip", "target", "url"}
 PROJECT_TARGET_VALUE_TYPES = RESTRICTABLE_VALUE_TYPES | {"port_set"}
 NMAP_DENIED_RAW_FLAGS = {"-sS"}
@@ -111,6 +111,48 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
                 "Commands can only read or write files through command flags explicitly enabled "
                 "in the command registry. Shell navigation and redirection are still blocked. "
                 "Files stay scoped to the current browser session or named session token."
+            ),
+        },
+        {
+            "question": "What are Projects?",
+            "answer": (
+                "Projects collect related runs, targets, findings, artifacts, labels, notes, and "
+                "evidence packages into one workspace."
+            ),
+            "answer_html": (
+                "<strong>Projects</strong> collect related work into one workspace so an investigation "
+                "doesn't have to live only in scattered history rows. Open the Projects modal from the "
+                "rail or mobile menu, press <code>Alt+P</code>, or use "
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"project help\">project help</span> "
+                "in the shell.<br><br>"
+                "An active project can link new runs automatically, track targets discovered from typed "
+                "command inputs and target-list files, organize run findings and file artifacts, compare "
+                "runs, and build evidence packages. Project, run, target, finding, artifact, file, and "
+                "package rows can carry labels and notes so the context stays attached to the work."
+            ),
+        },
+        {
+            "question": "What is Interactive PTY mode?",
+            "feature": "interactive_pty",
+            "answer": (
+                "Interactive PTY mode opens supported interactive tools in a terminal-style window "
+                "where you can type, resize the view, and save the finished output to history."
+            ),
+            "answer_html": (
+                "<strong>Interactive PTY</strong> mode is for tools that work better in a live "
+                "terminal-style view instead of plain scrolling output. Commands such as "
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"mtr --interactive darklab.sh\">"
+                "mtr --interactive</span>, "
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"ffuf --interactive "
+                "-u https://darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt\">"
+                "ffuf --interactive</span>, "
+                "and "
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"masscan --interactive darklab.sh -p80,443\">"
+                "masscan --interactive</span> "
+                "open a focused terminal window where you can type into the tool, resize the view, "
+                "and close or kill the run when you're done.<br><br>"
+                "When the command finishes, its captured output is saved like a normal run, so it can "
+                "still appear in history, search results, findings, and Projects when applicable."
             ),
         },
         {
@@ -1443,6 +1485,8 @@ def _feature_enabled(feature, cfg=None):
     active_cfg = app_config.CFG if cfg is None else cfg
     if normalized == "workspace":
         return bool(active_cfg.get("workspace_enabled", False))
+    if normalized in {"interactive_pty", "pty"}:
+        return bool(active_cfg.get("interactive_pty_enabled", False))
     return True
 
 
@@ -1985,6 +2029,8 @@ def _hint_category_enabled(category, cfg=None):
         return True
     if normalized == "workspace":
         return bool(active_cfg.get("workspace_enabled", False))
+    if normalized in {"interactive_pty", "pty"}:
+        return bool(active_cfg.get("interactive_pty_enabled", False))
     return True
 
 
@@ -3488,7 +3534,14 @@ def _rewrite_workspace_file_flags(
             if error:
                 return command, set(), [], [], [], error
             normalized_value = (user_value or "").rstrip(os.sep)
-            if normalized_value and os.path.basename(normalized_value) != managed_dir_name:
+            is_managed_value = (
+                normalized_value == managed_dir_name
+                or (
+                    os.path.isabs(normalized_value)
+                    and normalized_value.endswith(f"{os.sep}{managed_dir_name}")
+                )
+            )
+            if normalized_value and not is_managed_value:
                 reject_message = str(managed_dir.get("reject_message") or "").strip()
                 return (
                     command,

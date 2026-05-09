@@ -27,6 +27,7 @@ from database import (
     validate_project_entity_type,
     validate_project_link_source,
 )
+from output_signals import strip_ansi_codes
 from permalinks import _font_face_css, _format_duration, _permalink_context
 from redaction import apply_redaction_rules, redact_line_entries
 from run_output_store import load_full_output_entries
@@ -4121,7 +4122,7 @@ def record_run_findings(conn, session_id, run_id, entries):
         signal_values = {str(signal) for signal in signals} if isinstance(signals, list) else set()
         if "findings" not in signal_values:
             continue
-        raw_line = str(entry.get("text") or "").strip()
+        raw_line = strip_ansi_codes(str(entry.get("text") or "")).strip()
         if not raw_line:
             continue
         line_index = entry.get("line_index")
@@ -4712,14 +4713,6 @@ def record_project_target_discoveries(conn, session_id, project_id, run_id, comm
                     "WHERE project_id = ? AND id = ?",
                     (created, created, project_id, row["id"]),
                 )
-                refreshed = conn.execute(
-                    f"SELECT {PROJECT_TARGET_SELECT_COLUMNS} "  # nosec B608
-                    "FROM project_targets WHERE project_id = ? AND id = ?",
-                    (project_id, row["id"]),
-                ).fetchone()
-                target = _row_to_target(refreshed)
-                if target and target["review_state"] != "dismissed":
-                    recorded.append(target)
                 continue
             count_row = conn.execute(
                 "SELECT COUNT(*) AS count FROM project_targets WHERE project_id = ?",

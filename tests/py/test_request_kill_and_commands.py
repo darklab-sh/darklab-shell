@@ -529,32 +529,32 @@ class TestIsCommandAllowedEdges:
                 (
                     "amass enum -df domains.txt -timeout 10",
                     ["domains.txt"],
-                    ["amass"],
+                    ["tools/amass"],
                 ),
                 (
                     "amass subs -d darklab.sh -names",
                     [],
-                    ["amass"],
+                    ["tools/amass"],
                 ),
                 (
-                    "amass subs -d darklab.sh -names -dir amass",
+                    "amass subs -d darklab.sh -names -dir tools/amass",
                     [],
-                    ["amass"],
+                    ["tools/amass"],
                 ),
                 (
                     "amass subs -d darklab.sh -names -o amass-subdomains.txt",
                     [],
-                    ["amass-subdomains.txt", "amass"],
+                    ["amass-subdomains.txt", "tools/amass"],
                 ),
                 (
                     "amass track -d darklab.sh",
                     [],
-                    ["amass"],
+                    ["tools/amass"],
                 ),
                 (
                     "amass viz -d darklab.sh -d3 -o amass-viz",
                     [],
-                    ["amass-viz", "amass"],
+                    ["amass-viz", "tools/amass"],
                 ),
             ]
 
@@ -580,7 +580,7 @@ class TestIsCommandAllowedEdges:
                     cfg=cfg,
                 )
                 assert not denied.allowed
-                assert "managed amass session directory" in denied.reason
+                assert "managed tools/amass session directory" in denied.reason
 
                 denied = validate_command(
                     "amass enum -d darklab.sh -o unmanaged.txt",

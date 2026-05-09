@@ -4651,7 +4651,7 @@ describe('app helpers', () => {
                   category: 'Network',
                   description: 'Transfer data from URLs.',
                   example_count: 1,
-                  subcommand_count: 0,
+                  subcommand_count: 1,
                   flag_count: 1,
                 },
               ],
@@ -4664,7 +4664,7 @@ describe('app helpers', () => {
                       category: 'Network',
                       description: 'Transfer data from URLs.',
                       example_count: 1,
-                      subcommand_count: 0,
+                      subcommand_count: 1,
                       flag_count: 1,
                     },
                   ],
@@ -4690,7 +4690,23 @@ describe('app helpers', () => {
               category: 'Network',
               description: 'Transfer data from URLs.',
               examples: [{ value: 'curl https://darklab.sh', description: 'Fetch a URL' }],
-              subcommands: [],
+              arguments: [{ value: '<url>', description: 'Target URL', value_type: 'url' }],
+              subcommands: [
+                {
+                  name: 'trace',
+                  description: 'Show request timing details.',
+                  examples: [{ value: 'curl trace https://darklab.sh', description: 'Trace a URL' }],
+                  arguments: [{ value: '<url>', description: 'URL to trace', value_type: 'url' }],
+                  flags: [
+                    {
+                      value: '--format',
+                      description: 'Output format',
+                      takes_value: true,
+                      value_hints: [{ value: 'json' }, { value: 'text' }],
+                    },
+                  ],
+                },
+              ],
               flags: [{ value: '-L', description: 'Follow redirects' }],
               workspace_flags: [],
               runtime_notes: [],
@@ -4717,6 +4733,12 @@ describe('app helpers', () => {
 
     expect(document.getElementById('command-catalog-overlay').classList.contains('open')).toBe(true)
     expect(document.getElementById('command-catalog-body').textContent).toContain('Transfer data from URLs.')
+    expect(document.getElementById('command-catalog-body').textContent).toContain('Arguments')
+    expect(document.getElementById('command-catalog-body').textContent).toContain('<url>')
+    expect(document.getElementById('command-catalog-body').textContent).toContain('Subcommand: curl trace')
+    expect(document.getElementById('command-catalog-body').textContent).toContain('Show request timing details.')
+    expect(document.getElementById('command-catalog-body').textContent).toContain('curl trace https://darklab.sh')
+    expect(document.getElementById('command-catalog-body').textContent).toContain('--format json, text')
     expect(document.getElementById('command-catalog-body').textContent).not.toContain('App Handling')
     expect(mobileCmdInput.value).toBe('')
     expect(mobileCmdInput.focus).not.toHaveBeenCalled()

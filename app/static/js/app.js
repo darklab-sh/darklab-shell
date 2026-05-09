@@ -3408,6 +3408,74 @@ function makeCommandCatalogExampleRow(item) {
   return row;
 }
 
+function commandCatalogHintText(item) {
+  const bits = [];
+  const valueType = commandCatalogText(item?.value_type);
+  const wordlistCategory = item?.wordlist_category;
+  if (valueType) bits.push(valueType);
+  if (Array.isArray(wordlistCategory) && wordlistCategory.length) {
+    bits.push(`wordlists: ${wordlistCategory.map(value => commandCatalogText(value)).filter(Boolean).join(', ')}`);
+  } else if (wordlistCategory) {
+    bits.push(`wordlist: ${commandCatalogText(wordlistCategory)}`);
+  }
+  return bits.join(' · ');
+}
+
+function makeCommandCatalogArgumentRow(item) {
+  const value = commandCatalogText(item?.value);
+  if (!value) return null;
+  const description = [
+    commandCatalogText(item?.description),
+    commandCatalogHintText(item),
+  ].filter(Boolean).join(' · ');
+  return makeCommandCatalogRow(value, description);
+}
+
+function makeCommandCatalogFlagRow(item) {
+  const value = commandCatalogText(item?.value);
+  if (!value) return null;
+  const hints = Array.isArray(item?.value_hints) ? item.value_hints : [];
+  const hintText = hints
+    .map(hint => commandCatalogText(hint?.value))
+    .filter(Boolean)
+    .join(', ');
+  const suffix = item?.takes_value ? ` ${hintText || '<value>'}` : '';
+  const description = [
+    commandCatalogText(item?.description),
+    hintText && item?.takes_value ? `values: ${hintText}` : '',
+  ].filter(Boolean).join(' · ');
+  return makeCommandCatalogRow(`${value}${suffix}`, description);
+}
+
+function makeCommandCatalogNoteRow(item) {
+  return makeCommandCatalogRow(item, '');
+}
+
+function appendCommandCatalogSubcommand(body, root, item) {
+  const name = commandCatalogText(item?.name);
+  if (!body || !name) return;
+  const section = document.createElement('section');
+  section.className = 'command-catalog-section command-catalog-subcommand';
+
+  const heading = document.createElement('div');
+  heading.className = 'command-catalog-section-title';
+  heading.textContent = `Subcommand: ${root ? `${root} ` : ''}${name}`;
+  section.appendChild(heading);
+
+  const description = commandCatalogText(item?.description);
+  if (description) {
+    const desc = document.createElement('div');
+    desc.className = 'command-catalog-description';
+    desc.textContent = description;
+    section.appendChild(desc);
+  }
+
+  appendCommandCatalogSection(section, 'Examples', item?.examples || [], makeCommandCatalogExampleRow);
+  appendCommandCatalogSection(section, 'Arguments', item?.arguments || [], makeCommandCatalogArgumentRow);
+  appendCommandCatalogSection(section, 'Flags', item?.flags || [], makeCommandCatalogFlagRow);
+  body.appendChild(section);
+}
+
 function wireCommandCatalogExamples(root = commandCatalogBody) {
   if (!root) return;
   root.querySelectorAll('[data-command-example]').forEach(chip => {
@@ -3426,11 +3494,15 @@ function wireCommandCatalogExamples(root = commandCatalogBody) {
 function renderCommandCatalogModal(data) {
   if (!commandCatalogBody) return;
   commandCatalogBody.replaceChildren();
+  const rootLabel = [
+    commandCatalogText(data?.root, 'command'),
+    commandCatalogText(data?.subcommand),
+  ].filter(Boolean).join(' ');
   const summary = document.createElement('section');
   summary.className = 'command-catalog-summary';
   const root = document.createElement('div');
   root.className = 'command-catalog-root';
-  root.textContent = commandCatalogText(data?.root, 'command');
+  root.textContent = rootLabel;
   const description = document.createElement('div');
   description.className = 'command-catalog-description';
   description.textContent = commandCatalogText(data?.description, 'No description is available yet.');
@@ -3441,13 +3513,13 @@ function renderCommandCatalogModal(data) {
   commandCatalogBody.appendChild(summary);
 
   appendCommandCatalogSection(commandCatalogBody, 'Examples', data?.examples || [], makeCommandCatalogExampleRow);
-  appendCommandCatalogSection(commandCatalogBody, 'Subcommands', data?.subcommands || [], item => (
-    makeCommandCatalogRow(item?.name, item?.description)
+  appendCommandCatalogSection(commandCatalogBody, 'Arguments', data?.arguments || [], makeCommandCatalogArgumentRow);
+  (data?.subcommands || []).forEach(item => appendCommandCatalogSubcommand(commandCatalogBody, data?.root, item));
+  appendCommandCatalogSection(commandCatalogBody, 'Flags', data?.flags || [], makeCommandCatalogFlagRow);
+  appendCommandCatalogSection(commandCatalogBody, 'Workspace File Flags', data?.workspace_flags || [], item => (
+    makeCommandCatalogRow(item?.flag, [item?.mode, item?.value].map(value => commandCatalogText(value)).filter(Boolean).join(' · '))
   ));
-  appendCommandCatalogSection(commandCatalogBody, 'Flags', data?.flags || [], item => {
-    const suffix = item?.takes_value ? ' <value>' : '';
-    return makeCommandCatalogRow(`${commandCatalogText(item?.value)}${suffix}`, item?.description);
-  });
+  appendCommandCatalogSection(commandCatalogBody, 'App Handling', data?.runtime_notes || [], makeCommandCatalogNoteRow);
   wireCommandCatalogExamples(commandCatalogBody);
 }
 

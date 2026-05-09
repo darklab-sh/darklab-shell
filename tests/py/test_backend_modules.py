@@ -1060,6 +1060,20 @@ class TestDerivedCommandRegistry:
                 spec = spec["subcommands"][subcommand]
             assert spec["arg_hints"][trigger][0]["value_type"] == value_type
 
+    def test_nuclei_url_target_discovery_ignores_template_path_flags(self):
+        inputs = commands.command_project_target_inputs(
+            "nuclei -u https://ip.darklab.sh -t http/",
+            cfg={"workspace_enabled": True},
+        )
+
+        assert inputs == [{
+            "value": "https://ip.darklab.sh",
+            "value_type": "url",
+            "source_kind": "flag",
+            "source_name": "-u",
+            "target_list_file": "",
+        }]
+
     def test_autocomplete_context_can_be_derived_from_commands_registry(self):
         context = autocomplete_context_from_commands_registry({
             "commands": [
@@ -1202,14 +1216,14 @@ class TestDerivedCommandRegistry:
                 "subfinder -d darklab.sh -config subfinder-config.yaml -pc subfinder-provider-config.yaml -rL resolvers.txt": (
                     ["subfinder-config.yaml", "subfinder-provider-config.yaml", "resolvers.txt"], [],
                 ),
-                "amass enum -df domains.txt -timeout 10": (["domains.txt"], ["amass"]),
-                "amass subs -d darklab.sh -names": ([], ["amass"]),
-                "amass subs -d darklab.sh -names -dir amass": ([], ["amass"]),
+                "amass enum -df domains.txt -timeout 10": (["domains.txt"], ["tools/amass"]),
+                "amass subs -d darklab.sh -names": ([], ["tools/amass"]),
+                "amass subs -d darklab.sh -names -dir tools/amass": ([], ["tools/amass"]),
                 "amass subs -d darklab.sh -names -o amass-subdomains.txt": (
-                    [], ["amass-subdomains.txt", "amass"],
+                    [], ["amass-subdomains.txt", "tools/amass"],
                 ),
-                "amass track -d darklab.sh": ([], ["amass"]),
-                "amass viz -d darklab.sh -d3 -o amass-viz": ([], ["amass-viz", "amass"]),
+                "amass track -d darklab.sh": ([], ["tools/amass"]),
+                "amass viz -d darklab.sh -d3 -o amass-viz": ([], ["amass-viz", "tools/amass"]),
                 "dnsx -l subdomains.txt -o dnsx.txt": (["subdomains.txt"], ["dnsx.txt"]),
                 "pd-httpx -rr request.txt -status-code -o httpx-raw.txt": (
                     ["request.txt"], ["httpx-raw.txt"],
@@ -1298,7 +1312,7 @@ class TestDerivedCommandRegistry:
                     cfg=cfg,
                 )
                 assert not result.allowed
-                assert "managed amass session directory" in result.reason
+                assert "managed tools/amass session directory" in result.reason
 
                 result = commands.validate_command(
                     "amass enum -d darklab.sh -o unmanaged.txt",
@@ -1370,7 +1384,7 @@ class TestDerivedCommandRegistry:
             assert result.exec_command.startswith("env ")
             assert ";$(subshell)&`tick`" in result.exec_command
             tokens = commands.split_command_argv(result.exec_command)
-            amass_dir = resolve_workspace_path("amass-quote-sensitive-paths", "amass", cfg, ensure_parent=True)
+            amass_dir = resolve_workspace_path("amass-quote-sensitive-paths", "tools/amass", cfg, ensure_parent=True)
             assert tokens[:3] == [
                 "env",
                 f"XDG_CONFIG_HOME={amass_dir.parent}",
@@ -3935,6 +3949,31 @@ class TestRunOutputCapture:
                 assert load_welcome_hints({"workspace_enabled": True}) == [
                     "Use the history panel.",
                     "Use Files to create targets.txt.",
+                    "Press Enter to run.",
+                ]
+        finally:
+            os.unlink(path)
+
+    def test_hints_loader_skips_interactive_pty_section_when_disabled(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write(
+                "[general]\n"
+                "Use the history panel.\n"
+                "[interactive_pty]\n"
+                "Open supported tools in a terminal window.\n"
+                "[general]\n"
+                "Press Enter to run.\n"
+            )
+            path = f.name
+        try:
+            with mock.patch("commands.APP_HINTS_FILE", path):
+                assert load_welcome_hints({"interactive_pty_enabled": False}) == [
+                    "Use the history panel.",
+                    "Press Enter to run.",
+                ]
+                assert load_welcome_hints({"interactive_pty_enabled": True}) == [
+                    "Use the history panel.",
+                    "Open supported tools in a terminal window.",
                     "Press Enter to run.",
                 ]
         finally:

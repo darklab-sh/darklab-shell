@@ -159,8 +159,12 @@ _HOSTNAME_RE = re.compile(
 _NMAP_REPORT_TARGET_RE = re.compile(r"^Nmap scan report for\s+(.+?)(?:\s+\(([^)]+)\))?$", re.I)
 
 
-def _strip_ansi_codes(value: str) -> str:
+def strip_ansi_codes(value: str) -> str:
     return _ANSI_ESCAPE_RE.sub("", str(value or ""))
+
+
+def _strip_ansi_codes(value: str) -> str:
+    return strip_ansi_codes(value)
 
 
 def _normalize_signal_text(value: str) -> str:

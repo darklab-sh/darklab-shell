@@ -307,14 +307,14 @@
       "command": "amass enum -active -d darklab.sh",
       "exit_code": null,
       "stop_text": [
-        "[workspace] writing amass"
+        "[workspace] writing tools/amass"
       ],
       "expected_text": [
-        "[workspace] writing amass"
+        "[workspace] writing tools/amass"
       ],
       "allow_killed_early": true,
       "cleanup_files": [
-        "amass"
+        "tools/amass"
       ]
     },
     {
@@ -322,14 +322,14 @@
       "command": "amass enum -d darklab.sh",
       "exit_code": null,
       "stop_text": [
-        "[workspace] writing amass"
+        "[workspace] writing tools/amass"
       ],
       "expected_text": [
-        "[workspace] writing amass"
+        "[workspace] writing tools/amass"
       ],
       "allow_killed_early": true,
       "cleanup_files": [
-        "amass"
+        "tools/amass"
       ]
     },
     {
@@ -337,10 +337,10 @@
       "command": "amass subs -d darklab.sh -names",
       "exit_code": null,
       "expected_text": [
-        "[workspace] writing amass"
+        "[workspace] writing tools/amass"
       ],
       "cleanup_files": [
-        "amass"
+        "tools/amass"
       ]
     },
     {
@@ -348,10 +348,10 @@
       "command": "amass subs -d darklab.sh -show -ip -summary",
       "exit_code": null,
       "expected_text": [
-        "[workspace] writing amass"
+        "[workspace] writing tools/amass"
       ],
       "cleanup_files": [
-        "amass"
+        "tools/amass"
       ]
     },
     {
@@ -359,10 +359,10 @@
       "command": "amass subs -d darklab.sh -show",
       "exit_code": null,
       "expected_text": [
-        "[workspace] writing amass"
+        "[workspace] writing tools/amass"
       ],
       "cleanup_files": [
-        "amass"
+        "tools/amass"
       ]
     },
     {
@@ -373,7 +373,7 @@
         "amass-subdomains.txt": []
       },
       "cleanup_files": [
-        "amass",
+        "tools/amass",
         "amass-subdomains.txt"
       ]
     },
@@ -382,10 +382,10 @@
       "command": "amass track -d darklab.sh",
       "exit_code": null,
       "expected_text": [
-        "[workspace] writing amass"
+        "[workspace] writing tools/amass"
       ],
       "cleanup_files": [
-        "amass"
+        "tools/amass"
       ]
     },
     {
@@ -396,7 +396,7 @@
         "[workspace] writing amass-viz"
       ],
       "cleanup_files": [
-        "amass",
+        "tools/amass",
         "amass-viz"
       ]
     },
@@ -408,7 +408,7 @@
         "[workspace] writing amass-viz-dot"
       ],
       "cleanup_files": [
-        "amass",
+        "tools/amass",
         "amass-viz-dot"
       ]
     },

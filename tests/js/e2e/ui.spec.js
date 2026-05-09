@@ -24,6 +24,28 @@ async function saveWorkspaceEditor(page, { timeout = 15_000 } = {}) {
   await expect(page.locator('#workspace-editor')).not.toBeVisible({ timeout })
 }
 
+async function expectEntityMetadata(page, entityType, entityId, { labels = [], note = '' }, { timeout = 15_000 } = {}) {
+  await expect.poll(async () => page.evaluate(async ({ entityType: type, entityId: id, expectedLabels }) => {
+    const [labelsResp, noteResp] = await Promise.all([
+      apiFetch(`/entities/${encodeURIComponent(type)}/${encodeURIComponent(id)}/labels`, { cache: 'no-store' }),
+      apiFetch(`/entities/${encodeURIComponent(type)}/${encodeURIComponent(id)}/note`, { cache: 'no-store' }),
+    ])
+    const [labelsData, noteData] = await Promise.all([
+      labelsResp.json(),
+      noteResp.json(),
+    ])
+    const actualLabels = (labelsData.labels || []).map((label) => label.label)
+    return {
+      hasLabels: expectedLabels.every((label) => actualLabels.includes(label)),
+      note: noteData.note?.body || '',
+    }
+  }, {
+    entityType,
+    entityId,
+    expectedLabels: labels,
+  }), { timeout }).toEqual({ hasLabels: true, note })
+}
+
 function e2eDataDirForProject(testInfo) {
   const logDir = process.env.PW_E2E_SERVER_LOG_DIR || ''
   if (!logDir) throw new Error('PW_E2E_SERVER_LOG_DIR is not set')
@@ -557,9 +579,17 @@ test.describe('project workspace modal', () => {
     await page.locator('#project-entity-labels').fill('baseline, reviewed')
     await page.locator('#project-entity-note').fill('Run triaged from Playwright')
     await page.locator('#project-entity-submit').click()
-    await expect(page.locator('#project-entity-editor-overlay')).not.toHaveClass(/\bopen\b/)
-    await expect(runRow).toContainText('reviewed')
-    await expect(runRow).toContainText('note')
+    await expect(page.locator('#project-entity-editor-overlay')).not.toHaveClass(/\bopen\b/, { timeout: 15_000 })
+    const runId = await runRow.locator('[data-project-action="edit-run-metadata"]').getAttribute('data-run-id')
+    expect(runId).toBeTruthy()
+    await expectEntityMetadata(page, 'run', runId, {
+      labels: ['baseline', 'reviewed'],
+      note: 'Run triaged from Playwright',
+    })
+    await expect(runRow).toContainText('reviewed', { timeout: 15_000 })
+    await expect.poll(async () => runRow.textContent(), { timeout: 15_000 }).toMatch(
+      /note|Run triaged from Playwright/,
+    )
 
     await page.locator('[data-project-tab="details"]').click()
     const updatedTargetRow = page.locator('.project-target-row').filter({ hasText: 'projects.playwright.example' })
@@ -694,15 +724,13 @@ test.describe('project workspace modal', () => {
     await expect(page.locator('#project-entity-editor-title')).toHaveText('EDIT FINDING')
     await page.locator('#project-entity-labels').fill('finding, triaged')
     await page.locator('#project-entity-note').fill('Finding note from Playwright')
-    const findingNoteSaveResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url())
-      return response.request().method() === 'PUT'
-        && url.pathname === `/entities/finding/${encodeURIComponent(fixture.findingId)}/note`
-    })
     await page.locator('#project-entity-submit').click()
-    expect((await findingNoteSaveResponse).ok()).toBe(true)
     await expect(page.locator('#project-entity-editor-overlay')).not.toHaveClass(/\bopen\b/, { timeout: 15_000 })
-    await expect(findingRow).toContainText('triaged')
+    await expectEntityMetadata(page, 'finding', fixture.findingId, {
+      labels: ['finding', 'triaged'],
+      note: 'Finding note from Playwright',
+    })
+    await expect(findingRow).toContainText('triaged', { timeout: 15_000 })
     await expect(findingRow).toContainText('note')
 
     await page.locator('[data-project-tab="artifacts"]').click()
@@ -713,15 +741,13 @@ test.describe('project workspace modal', () => {
     await expect(page.locator('#project-entity-editor-title')).toHaveText('EDIT ARTIFACT')
     await page.locator('#project-entity-labels').fill('evidence, reviewed')
     await page.locator('#project-entity-note').fill('Artifact note from Playwright')
-    const artifactNoteSaveResponse = page.waitForResponse((response) => {
-      const url = new URL(response.url())
-      return response.request().method() === 'PUT'
-        && url.pathname === `/entities/run_file_artifact/${encodeURIComponent(fixture.artifactId)}/note`
-    })
     await page.locator('#project-entity-submit').click()
-    expect((await artifactNoteSaveResponse).ok()).toBe(true)
     await expect(page.locator('#project-entity-editor-overlay')).not.toHaveClass(/\bopen\b/, { timeout: 15_000 })
-    await expect(artifactRow).toContainText('reviewed')
+    await expectEntityMetadata(page, 'run_file_artifact', fixture.artifactId, {
+      labels: ['evidence', 'reviewed'],
+      note: 'Artifact note from Playwright',
+    })
+    await expect(artifactRow).toContainText('reviewed', { timeout: 15_000 })
     await expect(artifactRow).toContainText('note')
 
     await artifactRow.locator('[data-project-action="artifact-preview"]').click()
