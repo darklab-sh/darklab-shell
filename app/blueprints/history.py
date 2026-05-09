@@ -27,7 +27,6 @@ from helpers import (
 from output_signals import classify_line, command_root as output_command_root, extract_target
 from permalinks import _format_duration, _permalink_error_page, _permalink_page
 from process import active_runs_for_session
-from project_workspace import link_snapshot_to_project_context
 from redaction import redact_line_entries
 from run_output_store import load_full_output_entries
 
@@ -104,6 +103,15 @@ def _history_add_filters(sql, params, command_root, exit_code_filter, date_range
     return sql, params
 
 
+def _history_run_root_sql(column):
+    return (
+        "LOWER(CASE "
+        f"WHEN instr(trim({column}), ' ') > 0 THEN substr(trim({column}), 1, instr(trim({column}), ' ') - 1) "
+        f"ELSE trim({column}) "
+        "END)"
+    )
+
+
 def _history_command_roots(conn, session_id):
     rows = conn.execute(
         """
@@ -178,10 +186,23 @@ def _history_base_clause(
     project_id,
     *,
     starred_only=False,
+    run_kind="all",
     force_like=False,
 ):
     sql = " FROM runs r WHERE r.session_id = ?"
     params: list[Any] = [session_id]
+    if run_kind in {"builtin", "external"}:
+        builtin_roots = sorted(_app_builtin_command_roots())
+        if builtin_roots:
+            placeholders = ",".join("?" for _ in builtin_roots)
+            root_sql = _history_run_root_sql("r.command")
+            if run_kind == "builtin":
+                sql += f" AND {root_sql} IN ({placeholders})"  # nosec B608
+            else:
+                sql += f" AND {root_sql} NOT IN ({placeholders})"  # nosec B608
+            params.extend(builtin_roots)
+        elif run_kind == "builtin":
+            sql += " AND 1 = 0"
     if project_id:
         sql += (
             " AND EXISTS (SELECT 1 FROM project_links pl "
@@ -206,13 +227,7 @@ def _history_snapshot_base_clause(session_id, query, date_range, project_id=""):
     sql = " FROM snapshots s WHERE s.session_id = ?"
     params: list[Any] = [session_id]
     if project_id:
-        sql += (
-            " AND EXISTS (SELECT 1 FROM project_links pl "
-            "JOIN projects p ON p.id = pl.project_id "
-            "WHERE p.session_id = ? AND p.id = ? "
-            "AND pl.entity_type = 'snapshot' AND pl.entity_id = s.id)"
-        )
-        params.extend([session_id, project_id])
+        sql += " AND 1 = 0"
     if query:
         sql += " AND LOWER(s.label) LIKE ?"
         params.append(f"%{query.lower()}%")
@@ -650,6 +665,70 @@ def _run_metadata_counts_by_run(conn, run_ids):
     return counts
 
 
+def _entity_labels_by_entity_ids(conn, entity_type, entity_ids):
+    ids = [str(entity_id) for entity_id in entity_ids if entity_id]
+    if not ids:
+        return {}
+    if not _history_table_exists(conn, "entity_labels"):
+        return {entity_id: [] for entity_id in ids}
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT id, session_id, entity_type, entity_id, label, source, created FROM entity_labels "
+        "WHERE entity_type = ? "
+        f"AND entity_id IN ({placeholders}) "  # nosec B608
+        "ORDER BY label COLLATE NOCASE ASC, created ASC",
+        [entity_type, *ids],
+    ).fetchall()
+    grouped = {entity_id: [] for entity_id in ids}
+    for row in rows:
+        grouped.setdefault(str(row["entity_id"]), []).append({
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "entity_type": row["entity_type"],
+            "entity_id": row["entity_id"],
+            "label": row["label"],
+            "source": row["source"],
+            "created": row["created"],
+        })
+    return grouped
+
+
+def _entity_notes_by_entity_ids(conn, entity_type, entity_ids):
+    ids = [str(entity_id) for entity_id in entity_ids if entity_id]
+    if not ids:
+        return {}
+    if not _history_table_exists(conn, "entity_notes"):
+        return {entity_id: [] for entity_id in ids}
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT id, session_id, entity_type, entity_id, body, created, updated FROM entity_notes "
+        "WHERE entity_type = ? "
+        f"AND entity_id IN ({placeholders}) "  # nosec B608
+        "ORDER BY updated ASC, id ASC",
+        [entity_type, *ids],
+    ).fetchall()
+    grouped = {entity_id: [] for entity_id in ids}
+    for row in rows:
+        grouped.setdefault(str(row["entity_id"]), []).append({
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "entity_type": row["entity_type"],
+            "entity_id": row["entity_id"],
+            "body": row["body"],
+            "created": row["created"],
+            "updated": row["updated"],
+        })
+    return grouped
+
+
+def _run_labels_by_run(conn, run_ids):
+    return _entity_labels_by_entity_ids(conn, "run", run_ids)
+
+
+def _run_notes_by_run(conn, run_ids):
+    return _entity_notes_by_entity_ids(conn, "run", run_ids)
+
+
 def _run_findings_by_run(conn, run_ids):
     ids = [str(run_id) for run_id in run_ids if run_id]
     if not ids:
@@ -695,55 +774,6 @@ def _run_findings_by_run(conn, run_ids):
             "fingerprint": row["fingerprint"],
             "review_state": row["review_state"],
             "created": row["created"],
-        })
-    return grouped
-
-
-def _run_labels_by_run(conn, run_ids):
-    ids = [str(run_id) for run_id in run_ids if run_id]
-    if not ids:
-        return {}
-    placeholders = ",".join("?" for _ in ids)
-    rows = conn.execute(
-        "SELECT id, entity_id, label, created FROM entity_labels "
-        "WHERE entity_type = 'run' "
-        f"AND entity_id IN ({placeholders}) "  # nosec B608
-        "ORDER BY label COLLATE NOCASE ASC, created ASC",
-        ids,
-    ).fetchall()
-    grouped = {run_id: [] for run_id in ids}
-    for row in rows:
-        grouped.setdefault(str(row["entity_id"]), []).append({
-            "id": row["id"],
-            "entity_type": "run",
-            "entity_id": row["entity_id"],
-            "label": row["label"],
-            "created": row["created"],
-        })
-    return grouped
-
-
-def _run_notes_by_run(conn, run_ids):
-    ids = [str(run_id) for run_id in run_ids if run_id]
-    if not ids:
-        return {}
-    placeholders = ",".join("?" for _ in ids)
-    rows = conn.execute(
-        "SELECT id, entity_id, body, created, updated FROM entity_notes "
-        "WHERE entity_type = 'run' "
-        f"AND entity_id IN ({placeholders}) "  # nosec B608
-        "ORDER BY created ASC, id ASC",
-        ids,
-    ).fetchall()
-    grouped = {run_id: [] for run_id in ids}
-    for row in rows:
-        grouped.setdefault(str(row["entity_id"]), []).append({
-            "id": row["id"],
-            "entity_type": "run",
-            "entity_id": row["entity_id"],
-            "body": row["body"],
-            "created": row["created"],
-            "updated": row["updated"],
         })
     return grouped
 
@@ -947,8 +977,8 @@ def _compare_object_items(left_items, right_items):
     left_keys = set(left_by_key)
     right_keys = set(right_by_key)
     return {
-        "added": [left_by_key[key] for key in sorted(left_keys - right_keys)],
-        "removed": [right_by_key[key] for key in sorted(right_keys - left_keys)],
+        "added": [right_by_key[key] for key in sorted(right_keys - left_keys)],
+        "removed": [left_by_key[key] for key in sorted(left_keys - right_keys)],
         "unchanged_count": len(left_keys & right_keys),
     }
 
@@ -1134,8 +1164,12 @@ def get_history():
     # column. Reverse-i-search uses this to behave like bash i-search — matching
     # on typed command text, not on output text that FTS would otherwise pull in.
     scope = _normalize_history_filter_text(request.args.get("scope")).lower()
-    if type_filter not in {"all", "runs", "snapshots"}:
+    if type_filter not in {"all", "runs", "runs_builtin", "runs_external", "snapshots"}:
         type_filter = "all"
+    run_kind = {
+        "runs_builtin": "builtin",
+        "runs_external": "external",
+    }.get(type_filter, "all")
 
     def _query_history(conn, *, force_like=False):
         roots_rows = []
@@ -1143,7 +1177,7 @@ def get_history():
         run_sql = ""
         run_params: list[Any] = []
         snapshots_available = _history_table_exists(conn, "snapshots")
-        if type_filter in {"all", "runs"}:
+        if type_filter in {"all", "runs", "runs_builtin", "runs_external"}:
             run_sql, run_params, fts_q = _history_base_clause(
                 session_id,
                 query,
@@ -1153,6 +1187,7 @@ def get_history():
                 scope,
                 project_id,
                 starred_only=starred_only,
+                run_kind=run_kind,
                 force_like=force_like,
             )
             roots_rows = conn.execute(
@@ -1232,16 +1267,28 @@ def get_history():
                 item["full_output_truncated"] = bool(item.get("full_output_truncated"))
             paged_items.append(item)
         paged_runs = [item for item in paged_items if item.get("type") == "run"]
+        paged_snapshots = [item for item in paged_items if item.get("type") == "snapshot"]
         artifacts_by_run = _run_file_artifacts_by_run(conn, [item["id"] for item in paged_runs])
         metadata_counts_by_run = _run_metadata_counts_by_run(conn, [item["id"] for item in paged_runs])
+        labels_by_run = _entity_labels_by_entity_ids(conn, "run", [item["id"] for item in paged_runs])
+        notes_by_run = _entity_notes_by_entity_ids(conn, "run", [item["id"] for item in paged_runs])
+        labels_by_snapshot = _entity_labels_by_entity_ids(conn, "snapshot", [item["id"] for item in paged_snapshots])
+        notes_by_snapshot = _entity_notes_by_entity_ids(conn, "snapshot", [item["id"] for item in paged_snapshots])
         for item in paged_runs:
             item["artifacts"] = artifacts_by_run.get(str(item["id"]), [])
             item["artifact_count"] = len(item["artifacts"])
+            item["labels"] = labels_by_run.get(str(item["id"]), [])
+            item["note"] = (notes_by_run.get(str(item["id"]), []) or [None])[0]
             item.update(metadata_counts_by_run.get(str(item["id"]), {
                 "finding_count": 0,
                 "label_count": 0,
                 "note_count": 0,
             }))
+        for item in paged_snapshots:
+            item["labels"] = labels_by_snapshot.get(str(item["id"]), [])
+            item["note"] = (notes_by_snapshot.get(str(item["id"]), []) or [None])[0]
+            item["label_count"] = len(item["labels"])
+            item["note_count"] = 1 if item["note"] else 0
         return paged_items, paged_runs, roots_rows, total_count, page_count, current_page, fts_q
 
     with db_connect() as conn:
@@ -1646,7 +1693,6 @@ def save_share():
     label   = data.get("label", "untitled")
     content = data.get("content", [])  # list of {text, cls} objects
     apply_redaction = data.get("apply_redaction", True)
-    source_run_id = str(data.get("run_id") or data.get("history_run_id") or "").strip()
     session_id = get_session_id()
     if not isinstance(label, str):
         return jsonify({"error": "Label must be a string"}), 400
@@ -1673,16 +1719,10 @@ def save_share():
             "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
             (share_id, session_id, label, created, json.dumps(content))
         )
-        linked_projects = link_snapshot_to_project_context(
-            conn,
-            session_id,
-            share_id,
-            source_run_id=source_run_id,
-        )
         conn.commit()
     log.info("SHARE_CREATED", extra={
         "ip": get_client_ip(), "session": get_log_session_id(session_id), "share_id": share_id,
-        "label": label, "redacted": apply_redaction, "project_links": len(linked_projects),
+        "label": label, "redacted": apply_redaction,
     })
     return jsonify({"id": share_id, "url": f"/share/{share_id}"})
 

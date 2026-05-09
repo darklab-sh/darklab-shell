@@ -4,8 +4,13 @@ This file tracks the next major product direction for darklab_shell: moving from
 a command-at-a-time shell toward a lightweight project/case workspace for
 security and diagnostic work.
 
+Current status: this document is now a strategy and implementation-history
+reference for the project workspace direction. The current shipped behavior is
+documented in `FEATURES.md`, `ARCHITECTURE.md`, and the v2.0 release drafts.
+Open follow-up work belongs in `TODO.md`.
+
 The goal is not to become a full project manager, ticket tracker, or notes app.
-The goal is to help an operator keep related commands, findings, snapshots,
+The goal is to help an operator keep related commands, findings,
 workspace files, targets, and exportable evidence together without losing the
 speed and directness of the shell.
 
@@ -19,10 +24,10 @@ speed and directness of the shell.
   project is active" and have the app link the run, findings, and files
   automatically.
 - **Treat projects as case folders.** A project should be the first-class run
-  collection/case folder model: related runs, snapshots, findings, files,
+  collection/case folder model: related runs, findings, files,
   labels, and targets all collect there instead of adding a second grouping
   concept.
-- **Prefer links over copies.** Runs, snapshots, findings,
+- **Prefer links over copies.** Runs, findings,
   and workspace files should remain the source records. Projects should link to
   them instead of copying them.
 - **Design for evidence packages early.** Notes, labels, findings, files,
@@ -43,13 +48,13 @@ speed and directness of the shell.
 | Phase | Theme | Complexity | Outcome |
 |-------|-------|------------|---------|
 | 0 | Preconditions and safety fixes | Low-Medium | Clearer privacy/session behavior before larger organization features build on it |
-| 1 | Project data model | Medium | Users can create projects and manually associate runs, snapshots, and files |
+| 1 | Project data model | Medium | Users can create projects and manually associate runs and files |
 | 2 | Project-aware shell flow | Medium | Active project context automatically captures new runs and generated artifacts |
 | 3 | Run-created file artifacts | Medium | Command-created outputs are associated with their source runs and active projects |
 | 4 | Targets and autocomplete context | Medium | Projects can own domains, URLs, hosts, and port sets that feed filtering and suggestions |
-| 5 | Findings, labels, and notes | Medium-High | Findings, runs, snapshots, and files can be reviewed, labeled, noted, and filtered by project |
+| 5 | Findings, labels, and notes | Medium-High | Findings, runs, and files can be reviewed, labeled, noted, and filtered by project |
 | 6 | Project notes | Low-Medium | Each project gets one lightweight notes document |
-| 7 | Share/export packages | High | Runs, snapshots, findings, labels, files, and notes can be packaged together |
+| 7 | Share/export packages | High | Runs, findings, labels, files, and notes can be packaged together |
 | 8 | Workflow and comparison layer | High | Projects become useful for repeatable workflows, baselines, and drift comparison |
 | 9 | Polish, mobile, and operations | Medium | Project work is smooth across desktop, mobile, diagnostics, and retention paths |
 
@@ -120,7 +125,7 @@ Add a small set of durable project tables:
   - optional `color` or visual accent
 - `project_links`
   - `project_id`
-  - `entity_type` such as `run`, `snapshot`, `workspace_file`, `finding`
+  - `entity_type` such as `run`, `workspace_file`, `finding`
   - `entity_id` or stable path key
   - `created`
   - optional `source` such as `manual`, `active_project`, `target_match`,
@@ -131,11 +136,11 @@ Design notes:
 
 - This is the implementation home for the "run collections / case folders"
   idea. A project is the named investigation/case folder that groups related
-  runs, snapshots, findings, workspace files, artifacts, targets, notes, and
-  future packages.
+  runs, findings, workspace files, artifacts, targets, notes, and packages.
 - Prefer a generic link table for early flexibility, but keep constraints and
   helper functions strict so invalid entity types do not spread through the app.
-- Keep runs/snapshots/files usable outside projects.
+- Keep runs, snapshots, and files usable outside projects; snapshots remain
+  session/share history rather than project links.
 - Allow one entity to belong to multiple projects unless there is a strong reason
   to enforce one project only. Multi-project linking is useful for shared
   infrastructure, retests, and portfolio-wide findings.
@@ -143,9 +148,9 @@ Design notes:
 ### P1.2 Project CRUD API
 
 - Add routes for listing, creating, renaming, archiving, and deleting projects.
-- Add routes for linking and unlinking runs, snapshots, and workspace files.
+- Add routes for linking and unlinking runs and workspace files.
 - Deleting a project should remove project links and project metadata, not delete
-  underlying runs/snapshots/files by default.
+  underlying runs/files by default.
 - Add a separate destructive option later for "delete project and linked data" if
   it proves useful.
 
@@ -158,7 +163,6 @@ Design notes:
   - create project
   - rename/archive
   - linked runs
-  - linked snapshots
   - linked files
 - Add project filter chips to the history drawer and mobile recents/history view.
 
@@ -174,7 +178,6 @@ Add lightweight terminal commands:
 - `project archive <name-or-id>`
 - `project link last`
 - `project link run <run-id>`
-- `project link snapshot <snapshot-id>`
 - `project link file <path>`
 - `project unlink ...`
 
@@ -205,13 +208,11 @@ Goal: make project capture feel automatic once the user chooses an active projec
 - Decide whether purely local UI commands such as `theme set` and `config set`
   should be excluded from project linking by default.
 
-### P2.3 Project-Aware Snapshots
+### P2.3 Snapshots Stay Share-Scoped
 
-- When a snapshot is created from a tab whose run/project context is known, link
-  the snapshot to that project.
-- Allow the share prompt to show project context and choose whether the snapshot
-  should remain project-linked.
-- Add history filters for "snapshots in project."
+- Keep snapshot permalinks in session/share history, not project links.
+- Project-aware history filters should return linked runs and leave snapshots to
+  the normal snapshot filter.
 
 ### P2.4 Project-Aware Files
 
@@ -333,10 +334,9 @@ Port sets should support named reusable values:
 ### P4.4 Automatic Target Association
 
 - Infer target references from commands and signal metadata where reliable.
-- Link runs/findings/snapshots to project targets when:
+- Link runs/findings to project targets when:
   - the run command contains a known target
   - finding metadata names a known target
-  - a snapshot contains linked runs with known targets
 - Use a confidence/source field so inferred links can be shown differently from
   manual links.
 
@@ -498,14 +498,15 @@ Goal: give each project one small notes surface for operator context.
 
 ### P6.1 Notes Storage
 
-Use one notes field or one managed notes file per project:
+Use the generic entity-note store for project notes:
 
-- Option A: `projects.notes` text column.
+- Current implementation: `entity_notes` rows with `entity_type='project'`.
 - Option B: a reserved workspace-backed file such as `.darklab/project-notes.md`
   linked to the project.
 
-Prefer Option A unless there is a strong reason to expose the notes as a normal
-workspace file. It is simpler for export, permissions, migration, and retention.
+Prefer `entity_notes` unless there is a strong reason to expose notes as a normal
+workspace file. It keeps project notes consistent with labels/notes export,
+permissions, migration, and retention.
 
 ### P6.2 Notes UI
 
@@ -531,14 +532,13 @@ workspace file. It is simpler for export, permissions, migration, and retention.
 
 ## Phase 7: Share And Export Packages
 
-Goal: package evidence from snapshots, runs, and projects into coherent shareable
+Goal: package evidence from runs and projects into coherent shareable
 or downloadable artifacts.
 
 ### P7.1 Package Model
 
 Add a package concept that can be created from:
 
-- one snapshot
 - one run
 - selected runs
 - selected findings
@@ -565,7 +565,6 @@ Package contents can include:
 - Add "Create package" from:
   - active tab
   - history row
-  - snapshot row
   - project view
   - findings selection
 - Builder choices:
@@ -690,7 +689,7 @@ Goal: make project work practical in the real surfaces operators already use.
 
 - Project selector in the mobile menu.
 - Project detail as a mobile sheet.
-- Quick link current run/snapshot/file to project.
+- Quick link current run/file to project.
 - Findings review sheet optimized for one-handed use.
 - Package creation flow that works without desktop-only affordances.
 
@@ -735,7 +734,7 @@ Goal: make project work practical in the real surfaces operators already use.
 
 ### P9.5 Documentation And Onboarding
 
-- Update `FEATURES.md` with the project model once Phase 1 lands.
+- Keep `FEATURES.md` aligned with the current project model.
 - Update `ARCHITECTURE.md` with schema, route, migration, retention, and package
   lifecycle details.
 - Add FAQ entries:

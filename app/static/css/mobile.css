@@ -566,6 +566,8 @@
     line-height: 1.35;
   }
   body.mobile-terminal-mode #workspace-path-input,
+  body.mobile-terminal-mode #workspace-labels-input,
+  body.mobile-terminal-mode #workspace-notes-input,
   body.mobile-terminal-mode #workspace-text-input,
   body.mobile-terminal-mode .workspace-folder-form .form-input {
     font-size: 16px;

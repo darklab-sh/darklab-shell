@@ -176,12 +176,13 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **1276 pytest + 1044 Vitest + 240 Playwright = 2,560 tests**.
-That total includes 2,528 behavior tests plus 30 docs/inventory meta-tests.
+Current totals: **1281 pytest + 1051 Vitest + 243 Playwright = 2,575 tests**.
+That total includes 2,545 behavior tests plus 30 docs/inventory meta-tests.
 
 Playwright notes:
 
 - `npm run test:e2e` delegates to `bash scripts/run_playwright.sh`, which keeps local Playwright output quiet by default, clears the configured e2e ports, captures isolated server logs under `test-results/e2e-server-logs/`, and currently balances the browser suite across 5 isolated Chromium projects. On failure it prints the server log tails automatically. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
+- The wrapper defaults `PW_DISABLE_TS_ESM=1` because the current Playwright configs/specs are plain JavaScript and do not need Playwright's TypeScript/ESM loader. Set `PW_DISABLE_TS_ESM=0` only when adding TypeScript Playwright files that require that loader.
 - plain `npx playwright test` uses the default single-project config, which is the intended path for VS Code Test Explorer and focused local debugging
 - the parallel projects each get their own Flask server port and isolated local app state so history, run-output artifacts, and limiter/process state do not collide between workers
 

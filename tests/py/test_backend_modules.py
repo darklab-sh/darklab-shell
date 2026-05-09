@@ -4567,6 +4567,9 @@ class TestDatabaseInit:
             artifact_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('run_file_artifacts')").fetchall()
             }
+            project_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('projects')").fetchall()
+            }
             target_columns = {
                 row[1] for row in conn.execute("PRAGMA table_info('project_targets')").fetchall()
             }
@@ -4583,6 +4586,7 @@ class TestDatabaseInit:
             "entity_notes",
             "evidence_packages",
         }.issubset(tables)
+        assert "notes" not in project_columns
         assert "content_sha256" in artifact_columns
         assert {
             "review_state",
@@ -4645,7 +4649,6 @@ class TestDatabaseInit:
         assert database.validate_project_entity_type("workspace_file") == "workspace_file"
         assert database.validate_project_link_source("manual") == "manual"
         assert database.validate_project_link_source("active_project") == "active_project"
-        assert database.validate_project_link_source("snapshot_capture") == "snapshot_capture"
 
         with pytest.raises(ValueError):
             database.validate_project_entity_type("note")

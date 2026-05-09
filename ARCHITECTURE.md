@@ -217,7 +217,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 
 | Method | Endpoint | Description |
 | -------- | ---------- | ------------- |
-| `GET` | `/history` | Returns paginated current-session history items with run/snapshot filters, project filters, command/output search, starred-only filtering, and command-root summaries. |
+| `GET` | `/history` | Returns paginated current-session history items with run/snapshot/run-subtype filters, linked-run project filters, command/output search, starred-only filtering, labels/notes, and command-root summaries. |
 | `DELETE` | `/history` | Deletes all run history for the current session and removes matching full-output artifacts. |
 | `GET` | `/history/commands` | Returns newest distinct command strings for prompt history, desktop recents, and mobile recents. |
 | `GET` | `/history/stats` | Returns compact current-session counters for the Status Monitor dashboard. |
@@ -227,7 +227,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/history/compare` | Compares two current-session runs and returns metadata deltas plus bounded added/removed output lines. |
 | `GET` | `/history/<run_id>` | Serves an implicit-bearer styled run permalink, or raw JSON with `?json`; uses full-output artifacts when available unless `?preview=1` is set. |
 | `DELETE` | `/history/<run_id>` | Deletes one current-session run and its matching full-output artifact. |
-| `POST` | `/share` | Saves a tab snapshot, optionally applies share redaction, links project-associated tab snapshots, and returns a snapshot permalink URL. |
+| `POST` | `/share` | Saves a tab snapshot, optionally applies share redaction, and returns a snapshot permalink URL. |
 | `GET` | `/share/<share_id>` | Serves a styled snapshot permalink, or raw JSON with `?json`. |
 | `DELETE` | `/share/<share_id>` | Deletes one current-session snapshot permalink. |
 
@@ -265,26 +265,26 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `POST` | `/projects/active` | Sets the active project context after validating current-session ownership. |
 | `DELETE` | `/projects/active` | Clears the active project context for the current session. |
 | `GET` | `/projects/<project_id>` | Returns one current-session project. |
-| `GET` | `/projects/<project_id>/summary` | Returns one project plus linked-record and derived metadata counts. |
-| `PUT` | `/projects/<project_id>` | Updates project display metadata, status, notes, and slug. |
+| `GET` | `/projects/<project_id>/summary` | Returns one project plus linked-record, package, and derived metadata counts. |
+| `PUT` | `/projects/<project_id>` | Updates project display metadata, status, entity-note-backed notes, and slug. |
 | `DELETE` | `/projects/<project_id>` | Deletes project metadata and project links without deleting linked source records. |
-| `GET` | `/projects/<project_id>/links` | Lists source records linked into a project. |
-| `POST` | `/projects/<project_id>/links` | Links a supported current-session entity into a project. |
-| `DELETE` | `/projects/<project_id>/links` | Removes one supported entity link from a project. |
+| `GET` | `/projects/<project_id>/links` | Lists run and workspace-file source records linked into a project. |
+| `POST` | `/projects/<project_id>/links` | Links a supported current-session run or workspace file into a project. |
+| `DELETE` | `/projects/<project_id>/links` | Removes one supported run or workspace-file link from a project. |
 | `GET` | `/projects/<project_id>/targets` | Lists project-scoped targets. |
 | `POST` | `/projects/<project_id>/targets` | Adds an idempotent project target. |
 | `POST` | `/projects/<project_id>/targets/quick-add` | Infers and adds a target from selected text or an explicit value. |
 | `PUT` | `/projects/<project_id>/targets/<target_id>` | Updates one project target. |
 | `DELETE` | `/projects/<project_id>/targets/<target_id>` | Deletes one project target. |
 | `GET` | `/projects/<project_id>/packages` | Lists draft evidence package manifests for a project. |
-| `POST` | `/projects/<project_id>/packages` | Creates a draft evidence package manifest from current project records. |
+| `POST` | `/projects/<project_id>/packages` | Creates a draft evidence package manifest from current project records, with optional package labels/notes. |
 | `GET` | `/projects/<project_id>/packages/<package_id>` | Returns one draft evidence package manifest. |
 | `GET` | `/projects/<project_id>/packages/<package_id>/download` | Downloads one draft evidence package archive. |
 | `DELETE` | `/projects/<project_id>/packages/<package_id>` | Deletes one draft evidence package manifest. |
 | `GET` | `/projects/<project_id>/artifacts/<artifact_id>/preview` | Returns text preview content for one project-linked run artifact. |
 | `GET` | `/projects/<project_id>/artifacts/<artifact_id>/download` | Downloads one available project-linked run artifact from the workspace. |
 | `POST` | `/projects/<project_id>/workflows/promote` | Creates a user workflow from selected project-linked run commands. |
-| `GET` | `/projects/<project_id>/findings` | Lists findings reached through project-linked runs, with first-pass filters. |
+| `GET` | `/projects/<project_id>/findings` | Lists findings reached through project-linked runs, with project filters. |
 | `GET` | `/projects/<project_id>/compare` | Compares findings and workspace artifacts between two project-linked runs, optionally selecting a baseline by run label. |
 | `GET` | `/entities/run/<run_id>/findings` | Lists persisted findings captured for a current-session run. |
 | `PUT` | `/findings/<finding_id>/review` | Updates the review state for one current-session finding. |
@@ -299,10 +299,10 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 
 | Method | Endpoint | Description |
 | -------- | ---------- | ------------- |
-| `GET` | `/workspace/files` | Returns current-session workspace directories, files, usage, and quota limits. |
-| `POST` | `/workspace/files` | Writes a text file into the current session workspace and returns the refreshed workspace payload. |
-| `DELETE` | `/workspace/files` | Deletes a file or folder from the current session workspace and returns the refreshed workspace payload. |
-| `POST` | `/workspace/files/move` | Moves or renames a file or folder inside the current session workspace and returns the refreshed workspace payload. |
+| `GET` | `/workspace/files` | Returns current-session workspace directories, files, labels/notes, usage, and quota limits. |
+| `POST` | `/workspace/files` | Writes a text file into the current session workspace and returns the refreshed workspace payload; file labels/notes are managed through the generic entity metadata routes. |
+| `DELETE` | `/workspace/files` | Deletes a file or folder plus matching workspace-file labels/notes from the current session workspace and returns the refreshed workspace payload. |
+| `POST` | `/workspace/files/move` | Moves or renames a file or folder inside the current session workspace, moves matching workspace-file labels/notes, and returns the refreshed workspace payload. |
 | `POST` | `/workspace/directories` | Creates a current-session workspace directory and returns the refreshed workspace payload. |
 | `GET` | `/workspace/files/read` | Reads a workspace text file for the UI viewer/editor; binary files return an explicit unsupported-media response. |
 | `GET` | `/workspace/files/info` | Returns metadata for a workspace path, including directory file counts used by delete confirmations. |
@@ -522,7 +522,7 @@ Modal and panel content uses `.panel-row` instead of `.chrome-row`. The Files mo
 
 Pill-shaped UI uses two separate primitives so visual affordance matches behavior. `.chip` is for clickable or removable pill actions such as prompt history chips, active History filters, mobile recents filter chips, FAQ command chips, and workflow command chips. `.chip-action` keeps command-loading chips toolbar-like, while `.chip-removable` is used for active filters that clear state.
 
-`.badge` is for passive metadata labels that should not look clickable. History and mobile recents use badges for `RUN` / `SNAPSHOT` labels, with tone classes such as `.badge-tone-green` and `.badge-tone-muted` carrying the semantic color. Search signal chips intentionally remain text-like buttons even though they compose the chip primitive, because the search summary reads as inline metadata rather than a filter-chip row.
+`.badge` is for passive metadata labels that should not look clickable. History and mobile recents use badges for `RUN` / `SNAPSHOT` labels, project workspace metadata chips compose badges for entity labels/notes, and tone classes such as `.badge-tone-green` and `.badge-tone-muted` carry the semantic color. Search signal chips intentionally remain text-like buttons even though they compose the chip primitive, because the search summary reads as inline metadata rather than a filter-chip row.
 
 ### Form And Control Primitive Family
 
@@ -757,7 +757,7 @@ That split is what allows the app to keep the interactive shell fast while still
 
 Logical relationships are owned by the app rather than SQLite foreign-key constraints. Anonymous browser sessions can appear as `session_id` values without a matching `session_tokens` row.
 
-Project workspace tables are the relationship foundation for case-style grouping. Projects link to top-level source records instead of copying them, so runs, snapshots, and manually selected workspace files can remain usable outside any project and can belong to more than one project when that is useful. Run-owned records such as artifacts and findings stay attached to their source run and surface in project views through linked runs.
+Project workspace tables are the relationship foundation for case-style grouping. Projects link to top-level source records instead of copying them, so runs and manually selected workspace files can remain usable outside any project and can belong to more than one project when that is useful. Snapshots remain share/history records and are not project-linked. Run-owned records such as artifacts and findings stay attached to their source run and surface in project views through linked runs.
 
 ```mermaid
 erDiagram
@@ -838,7 +838,6 @@ erDiagram
     TEXT description
     TEXT status
     TEXT color
-    TEXT notes
     TEXT created
     TEXT updated
   }
@@ -892,6 +891,7 @@ erDiagram
     TEXT raw_line
     INTEGER line_number
     TEXT severity
+    TEXT fingerprint
     TEXT review_state
     TEXT created
   }
@@ -928,6 +928,7 @@ erDiagram
     TEXT session_id
     TEXT project_id
     TEXT name
+    TEXT description
     TEXT redaction_mode
     INTEGER include_artifacts
     TEXT manifest
@@ -972,14 +973,14 @@ erDiagram
 - `session_variables` — one row per session command variable `(session_id, name, value, updated)`. Backs the `var` built-in, `/session/variables`, and app-managed command expansion before validation.
 - `user_workflows` — one row per saved workflow `(id, session_id, title, description, inputs, steps, created, updated)`. Backs the Workflows panel's **My workflows** section, the `workflow` terminal command, and session-token migration.
 - `recent_domains` — one row per recently used domain per session `(session_id, domain, last_used, use_count)`. Backs domain autocomplete across browsers that share the same named session token and follows the session-token migration path.
-- `projects` — one row per project/case folder. Stores session ownership, display metadata, status, notes, timestamps, and a session-scoped slug.
-- `project_links` — generic project membership rows `(project_id, entity_type, entity_id)`. The app owns the valid entity vocabulary and link sources so projects can link top-level records such as runs, snapshots, and manually selected workspace files without copying source data. Run-owned records such as file artifacts and findings are intentionally reached through linked runs instead of direct project links.
+- `projects` — one row per project/case folder. Stores session ownership, display metadata, status, timestamps, and a session-scoped slug. Project notes are stored through `entity_notes` with `entity_type='project'`.
+- `project_links` — generic project membership rows `(project_id, entity_type, entity_id)`. The app owns the valid entity vocabulary and link sources so projects can link top-level records such as runs and manually selected workspace files without copying source data. Run-owned records such as file artifacts and findings are intentionally reached through linked runs instead of direct project links.
 - `run_file_artifacts` — durable file manifest rows for workspace files produced or consumed by a run, including recorded size and optional SHA-256 content checksum so project views can flag missing or changed workspace files. This is separate from `run_output_artifacts`, which stores the terminal transcript artifact behind a run permalink.
 - `project_targets` — project-scoped domains, URLs, hosts, IPs, CIDRs, and port sets. Targets can be manually entered or associated with source runs later.
-- `findings` — persisted output-signal rows linked to the source run and optionally to a project target. These records are intentionally lightweight so findings can power filtering, review state, notes, and evidence packages without turning the app into a vulnerability-management system.
-- `entity_labels` — short user-controlled labels/bookmarks for supported entities. This is the broader relationship model that can eventually absorb run labels while preserving the existing star affordance.
-- `entity_notes` — one private note attached to each supported entity per session. Notes are intentionally singular so entity metadata behaves like project notes instead of a comment thread.
-- `evidence_packages` — draft package manifests scoped to a project and session. The first pass records package choices, redaction mode, artifact-inclusion preference, and a JSON manifest over the currently linked project data, then exports that manifest plus any still-available selected workspace artifacts as a downloadable archive.
+- `findings` — persisted output-signal rows linked to the source run, a primary target id when one is available, and a stable fingerprint for deduplication/context. The `finding_targets` relationship table stores every matched project target for a finding, so project views can show many-to-many target attribution without overloading the primary `target_id` field. These records are intentionally lightweight so findings can power filtering, review state, notes, and evidence packages without turning the app into a vulnerability-management system.
+- `entity_labels` — short user-controlled labels/bookmarks for supported entities, including projects, runs, snapshots, workspace files, run file artifacts, findings, targets, and packages.
+- `entity_notes` — one private note attached to each supported entity per session, including project notes. Notes are intentionally singular so entity metadata remains an editable note surface instead of a comment thread.
+- `evidence_packages` — draft package manifests scoped to a project and session. The first pass records package name/description, redaction mode, artifact-inclusion preference, and a JSON manifest over the currently linked project data, then exports that manifest plus any still-available selected workspace artifacts as a downloadable archive. Package-level labels/notes are stored through the generic entity metadata tables.
 - Supporting indexes are part of the schema even though the ER diagram stays table-focused. `idx_runs_session_command_started` backs the Recent menu and prompt-history distinct-command query shape `(session_id, command, started DESC)`, while `idx_runs_session_started`, `idx_snapshots_session_created`, `idx_user_workflows_session_updated_created`, and `idx_recent_domains_session_last_used` keep session-scoped startup, history, workflow, share, and autocomplete reads bounded on large history databases. Project workspace indexes cover session project lists, project contents, reverse entity lookup, run file artifacts, targets, findings, labels, notes, and evidence packages before UI routes depend on those query shapes.
 - Redis-backed active-run metadata plus browser `sessionStorage` form a second persistence layer for reload continuity:
   - `/history/active` covers in-flight runs owned by the server/session
@@ -1209,12 +1210,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,528
+- behavior tests: 2,545
 - docs/inventory meta-tests: 30
-- `pytest`: 1276 (1246 behavior + 30 meta)
-- `vitest`: 1044
-- `playwright`: 240
-- total: 2,560
+- `pytest`: 1281 (1251 behavior + 30 meta)
+- `vitest`: 1051
+- `playwright`: 243
+- total: 2,575
 
 ### Testing Architecture
 

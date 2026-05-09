@@ -103,6 +103,11 @@ function loadShellChrome({
           <textarea id="project-notes-input"></textarea>
           <div id="project-notes-save-status" class="u-hidden">saved</div>
         </form>
+        <form id="project-labels-form">
+          <input id="project-labels-input">
+          <button id="project-labels-save-btn" type="submit"></button>
+          <div id="project-labels-save-status" class="u-hidden">saved</div>
+        </form>
         <div id="project-workspace-body"></div>
         <div id="project-explorer-body"></div>
       </div>
@@ -123,7 +128,7 @@ function loadShellChrome({
             <small id="project-target-value-help"></small>
             <div id="project-target-value-error" class="u-hidden"></div>
             <input id="project-target-label">
-            <textarea id="project-target-notes"></textarea>
+            <textarea id="project-target-notes" maxlength="2000"></textarea>
             <button class="project-target-editor-cancel" type="button"></button>
             <button id="project-target-submit" type="submit"></button>
           </form>
@@ -1029,6 +1034,156 @@ describe('shell chrome project workspace', () => {
     }))
   })
 
+  it('edits project labels from the details tab', async () => {
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project: {
+              id: 'project-1',
+              name: 'darklab.sh',
+              notes: '',
+              labels: [{ label: 'old-label' }],
+            },
+          }),
+        })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            projects: [{
+              id: 'project-1',
+              name: 'darklab.sh',
+              status: 'active',
+              notes: '',
+              labels: [{ label: 'old-label' }],
+            }, {
+              id: 'project-2',
+              name: 'Other project',
+              status: 'active',
+              notes: '',
+              labels: [],
+            }],
+          }),
+        })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project: {
+              id: 'project-1',
+              name: 'darklab.sh',
+              status: 'active',
+              notes: '',
+              labels: [{ label: 'old-label' }],
+            },
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, notes: 0 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      if (url === '/projects/project-2/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project: {
+              id: 'project-2',
+              name: 'Other project',
+              status: 'active',
+              notes: '',
+              labels: [],
+            },
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, notes: 0 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      if (url === '/entities/project/project-1/labels' && !options.method) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ labels: [{ label: 'old-label' }] }),
+        })
+      }
+      if (url === '/entities/project/project-1/labels' && options.method === 'DELETE') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ deleted: true }) })
+      }
+      if (url === '/entities/project/project-1/labels' && options.method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ label: { label: JSON.parse(options.body).label } }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const shell = loadShellChrome({ apiFetch })
+
+    await shell.openProjectWorkspace()
+    await tick()
+    const flushLabelsSave = async () => {
+      for (let index = 0; index < 20; index += 1) {
+        await Promise.resolve()
+      }
+    }
+    const input = document.getElementById('project-labels-input')
+    const saved = document.getElementById('project-labels-save-status')
+
+    expect(input.value).toBe('old-label')
+    expect(saved.closest('.project-labels-heading')).not.toBeNull()
+    expect(document.querySelector('.project-label-chips')?.textContent).toContain('old-label')
+
+    vi.useFakeTimers()
+    try {
+      input.value = 'important, retest, important'
+      document.getElementById('project-labels-form')
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+      await flushLabelsSave()
+
+      expect(apiFetch).toHaveBeenCalledWith('/entities/project/project-1/labels', expect.objectContaining({
+        method: 'DELETE',
+        body: JSON.stringify({ label: 'old-label' }),
+      }))
+      expect(apiFetch).toHaveBeenCalledWith('/entities/project/project-1/labels', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ label: 'important' }),
+      }))
+      expect(apiFetch).toHaveBeenCalledWith('/entities/project/project-1/labels', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ label: 'retest' }),
+      }))
+      expect(input.value).toBe('important, retest')
+      expect(saved.classList.contains('u-hidden')).toBe(false)
+      expect(document.querySelector('.project-label-chips')?.textContent).toContain('important')
+      expect(document.querySelector('.project-workspace-label-chips')?.textContent).toContain('retest')
+
+      await vi.advanceTimersByTimeAsync(1999)
+      expect(saved.classList.contains('u-hidden')).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(saved.classList.contains('u-hidden')).toBe(true)
+
+      input.value = 'triage'
+      document.getElementById('project-labels-form')
+        .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+      await flushLabelsSave()
+      expect(saved.classList.contains('u-hidden')).toBe(false)
+
+      document.querySelector('[data-project-id="project-2"][data-project-action="select"]')
+        .dispatchEvent(new Event('click', { bubbles: true, cancelable: true }))
+      await flushLabelsSave()
+      expect(saved.classList.contains('u-hidden')).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('opens a finding source run at the recorded line', async () => {
     const restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-restored'))
     const showConfirm = vi.fn((options = {}) => (
@@ -1133,10 +1288,12 @@ describe('shell chrome project workspace', () => {
       ['run:run-1', ['baseline']],
       ['finding:finding-1', ['old-label']],
       ['run_file_artifact:artifact-1', []],
+      ['package:pkg-1', ['handoff']],
     ])
     const entityNotes = new Map([
       ['run:run-1', 'Run note'],
       ['finding:finding-1', 'Old finding note'],
+      ['package:pkg-1', 'Initial package note'],
     ])
     const metadataKey = (entityType, entityId) => `${entityType}:${entityId}`
     const labelObjects = (entityType, entityId) => (
@@ -1197,7 +1354,11 @@ describe('shell chrome project workspace', () => {
               labels: labelObjects('run_file_artifact', artifact.id),
               note: noteObject('run_file_artifact', artifact.id),
             })),
-            packages: projectPackages,
+            packages: projectPackages.map(pkg => ({
+              ...pkg,
+              labels: labelObjects('package', pkg.id),
+              note: noteObject('package', pkg.id),
+            })),
           }),
         })
       }
@@ -1350,7 +1511,13 @@ describe('shell chrome project workspace', () => {
         }
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ package: projectPackages[0] }),
+          json: () => Promise.resolve({
+            package: {
+              ...projectPackages[0],
+              labels: labelObjects('package', projectPackages[0].id),
+              note: noteObject('package', projectPackages[0].id),
+            },
+          }),
         })
       }
       if (url === '/projects/project-1/packages/pkg-1/download') {
@@ -1384,9 +1551,18 @@ describe('shell chrome project workspace', () => {
             },
           },
         }]
+        entityLabels.set('package:pkg-2', payload.labels || [])
+        entityNotes.set('package:pkg-2', payload.notes || '')
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ ok: true, package: projectPackages[0] }),
+          json: () => Promise.resolve({
+            ok: true,
+            package: {
+              ...projectPackages[0],
+              labels: labelObjects('package', 'pkg-2'),
+              note: noteObject('package', 'pkg-2'),
+            },
+          }),
         })
       }
       return Promise.resolve({
@@ -1410,7 +1586,8 @@ describe('shell chrome project workspace', () => {
 
     await shell.openProjectWorkspace()
     expect(document.querySelector('.project-target-row')?.textContent).toContain('Primary domain')
-    expect(document.querySelector('.project-explorer-section-heading')?.textContent).toContain('New')
+    expect(Array.from(document.querySelectorAll('.project-explorer-section-heading'))
+      .some(heading => heading.textContent.includes('New'))).toBe(true)
     expect(bindDismissible).toHaveBeenCalledWith(
       document.getElementById('project-target-editor-overlay'),
       expect.objectContaining({ level: 'modal' }),
@@ -1454,6 +1631,7 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-workspace-message').classList.contains('u-hidden')).toBe(true)
     expect(document.getElementById('project-explorer-body').textContent).toContain('old-label')
     expect(document.getElementById('project-explorer-body').textContent).toContain('note')
+    expect(document.querySelector('.project-explorer-metadata-chip')?.classList.contains('badge')).toBe(true)
     document.querySelector('[data-project-action="edit-finding-metadata"][data-finding-id="finding-1"]').click()
     await tick()
     expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(true)
@@ -1650,6 +1828,32 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-explorer-body').textContent).toContain('Darklab evidence')
     expect(document.getElementById('project-explorer-body').textContent).toContain('evidence · raw · ~32 KB')
     expect(document.getElementById('project-explorer-body').textContent).toContain('2 runs · 3 findings · 2 artifacts')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('handoff')
+    expect(document.getElementById('project-explorer-body').textContent).toContain('note')
+    document.querySelector('[data-project-action="package-edit"][data-package-id="pkg-1"]').click()
+    await tick()
+    expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('project-entity-editor-title').textContent).toBe('EDIT PACKAGE')
+    expect(document.getElementById('project-entity-editor-subtitle').textContent).toContain('Darklab evidence')
+    expect(document.getElementById('project-entity-labels').value).toBe('handoff')
+    expect(document.getElementById('project-entity-note').value).toBe('Initial package note')
+    document.getElementById('project-entity-labels').value = 'handoff, approved'
+    document.getElementById('project-entity-note').value = 'Ready for client handoff'
+    document.getElementById('project-entity-editor-form')
+      .dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await tick()
+    await tick()
+    await tick()
+    expect(apiFetch).toHaveBeenCalledWith('/entities/package/pkg-1/labels', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ label: 'approved' }),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/entities/package/pkg-1/note', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ body: 'Ready for client handoff' }),
+    }))
+    expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(false)
+    expect(document.getElementById('project-explorer-body').textContent).toContain('approved')
     expect(document.querySelector('[data-project-action="package-manifest"][data-package-id="pkg-1"]')).not.toBeNull()
     expectProjectPressablesBound(['.project-package-action'])
     document.querySelector('[data-project-action="package-manifest"][data-package-id="pkg-1"]').click()
@@ -1743,6 +1947,14 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-package-wizard-overlay').classList.contains('open')).toBe(true)
     expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Preset')
     expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Evidence')
+    const packageLabels = document.querySelector('[data-project-package-field="labels"]')
+    const packageNotes = document.querySelector('[data-project-package-field="notes"]')
+    expect(packageLabels).not.toBeNull()
+    expect(packageNotes).not.toBeNull()
+    packageLabels.value = 'handoff, retest, Handoff'
+    packageLabels.dispatchEvent(new Event('input', { bubbles: true }))
+    packageNotes.value = 'Package notes for handoff'
+    packageNotes.dispatchEvent(new Event('input', { bubbles: true }))
     document.querySelector('[data-project-action="package-wizard-next"]').click()
     await tick()
     expect(document.querySelector('.project-package-step.is-active')?.textContent).toContain('Include')
@@ -1812,6 +2024,8 @@ describe('shell chrome project workspace', () => {
     expect(packagePayload.preset).toBe('evidence')
     expect(packagePayload.redaction_mode).toBe('raw')
     expect(packagePayload.include_artifacts).toBe(true)
+    expect(packagePayload.labels).toEqual(['handoff', 'retest'])
+    expect(packagePayload.notes).toBe('Package notes for handoff')
     expect(packagePayload.options.index_html).toBe(true)
     expect(packagePayload.options.transcripts_html).toBe(true)
     expect(packagePayload.selection.run_ids).toEqual(['run-1'])
@@ -1964,5 +2178,165 @@ describe('shell chrome project workspace', () => {
     }))
     expect(document.querySelector('[data-project-action="edit-target"][data-target-id="target-1"]')).toBeNull()
     expect(document.querySelector('.project-target-row')?.textContent).toContain('api.darklab.sh')
+  })
+
+  it('reorders project findings when the sort control changes', async () => {
+    const projectRuns = [
+      { id: 'run-old', command: 'nuclei old.example', started: '2026-05-07T00:00:00Z' },
+      { id: 'run-new', command: 'httpx new.example', started: '2026-05-07T01:00:00Z' },
+    ]
+    const projectTargets = [
+      { id: 'target-api', type: 'domain', value: 'api.example', label: 'API' },
+      { id: 'target-web', type: 'domain', value: 'web.example', label: 'Web' },
+    ]
+    const projectFindings = [
+      {
+        id: 'finding-low',
+        run_id: 'run-old',
+        run_command: 'nuclei old.example',
+        title: 'Low issue',
+        raw_line: 'low',
+        line_number: 20,
+        severity: 'low',
+        review_state: 'reviewed',
+        target_id: 'target-web',
+      },
+      {
+        id: 'finding-high',
+        run_id: 'run-new',
+        run_command: 'httpx new.example',
+        title: 'High issue',
+        raw_line: 'high',
+        line_number: 5,
+        severity: 'high',
+        review_state: 'new',
+        target_id: 'target-api',
+      },
+      {
+        id: 'finding-info',
+        run_id: 'run-new',
+        run_command: 'httpx new.example',
+        title: 'Critical issue',
+        raw_line: 'critical',
+        line_number: 9,
+        severity: 'critical',
+        review_state: 'important',
+        target_id: 'target-web',
+      },
+    ]
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project: { id: 'project-1', name: 'Sort Project' } }),
+        })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'Sort Project', status: 'active' }] }),
+        })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project: { id: 'project-1', name: 'Sort Project', status: 'active' },
+            counts: { runs: 2, findings: 3, artifacts: 0, packages: 0, targets: 2, notes: 0 },
+            runs: projectRuns,
+            targets: projectTargets,
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      if (url === '/projects/project-1/findings') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ findings: projectFindings }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const shell = loadShellChrome({ apiFetch })
+
+    await shell.openProjectWorkspace()
+    document.querySelector('[data-project-tab="findings"]').click()
+    await tick()
+    await tick()
+    const titles = () => Array.from(document.querySelectorAll('.project-explorer-item-title'))
+      .map(node => node.textContent.trim())
+
+    expect(titles()).toEqual(['Low issue', 'High issue', 'Critical issue'])
+
+    let sortControl = document.querySelector('[data-project-finding-sort]')
+    sortControl.value = 'severity'
+    sortControl.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(titles()).toEqual(['Critical issue', 'High issue', 'Low issue'])
+
+    sortControl = document.querySelector('[data-project-finding-sort]')
+    sortControl.value = 'target'
+    sortControl.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(titles()).toEqual(['High issue', 'Critical issue', 'Low issue'])
+
+    sortControl = document.querySelector('[data-project-finding-sort]')
+    sortControl.value = 'newest'
+    sortControl.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(titles()).toEqual(['High issue', 'Critical issue', 'Low issue'])
+  })
+
+  it('refreshes an open Projects modal after a cross-tab project broadcast', async () => {
+    let refreshed = false
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project: { id: 'project-1', name: refreshed ? 'Updated Project' : 'Initial Project' } }),
+        })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects: [{ id: 'project-1', name: refreshed ? 'Updated Project' : 'Initial Project', status: 'active' }] }),
+        })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project: { id: 'project-1', name: refreshed ? 'Updated Project' : 'Initial Project', status: 'active' },
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, notes: 0 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const shell = loadShellChrome({ apiFetch })
+
+    await shell.openProjectWorkspace()
+    expect(document.getElementById('project-workspace-body').textContent).toContain('Initial Project')
+
+    vi.useFakeTimers()
+    try {
+      refreshed = true
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'darklab_project_workspace_changed',
+        newValue: JSON.stringify({ reason: 'updated', project_id: 'project-1', ts: Date.now() }),
+      }))
+      await vi.advanceTimersByTimeAsync(250)
+      await Promise.resolve()
+    } finally {
+      vi.useRealTimers()
+    }
+
+    expect(apiFetch.mock.calls.filter(([url]) => url === '/projects/project-1/summary').length).toBeGreaterThan(1)
+    expect(document.getElementById('project-workspace-body').textContent).toContain('Updated Project')
   })
 })

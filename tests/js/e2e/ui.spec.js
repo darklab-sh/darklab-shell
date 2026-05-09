@@ -1,5 +1,8 @@
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady, runCommand, waitForHistoryRuns } from './helpers.js'
+import { spawnSync } from 'child_process'
+import { readFileSync, readdirSync } from 'fs'
+import { join } from 'path'
+import { ensurePromptReady, runCommand, waitForHistoryRuns, makeTestIp } from './helpers.js'
 
 async function confirmWorkspaceAction(page, actionId, { timeout = 15_000 } = {}) {
   const host = page.locator('#confirm-host')
@@ -9,6 +12,86 @@ async function confirmWorkspaceAction(page, actionId, { timeout = 15_000 } = {})
     host.waitFor({ state: 'hidden', timeout }),
     action.click(),
   ])
+}
+
+function e2eDataDirForProject(testInfo) {
+  const logDir = process.env.PW_E2E_SERVER_LOG_DIR || ''
+  if (!logDir) throw new Error('PW_E2E_SERVER_LOG_DIR is not set')
+  const slot = testInfo.project.name.match(/w\d+$/)?.[0]
+  if (!slot) throw new Error(`Cannot determine e2e server slot from ${testInfo.project.name}`)
+  const logName = readdirSync(logDir).find((name) => name.startsWith(`${slot}-`) && name.endsWith('.log'))
+  if (!logName) throw new Error(`Cannot find e2e server log for ${slot}`)
+  const log = readFileSync(join(logDir, logName), 'utf8')
+  const dataDir = log.match(/^\[e2e-server\] data_dir=(.+)$/m)?.[1]
+  if (!dataDir) throw new Error(`Cannot find data_dir in ${logName}`)
+  return dataDir
+}
+
+function seedProjectEvidenceFixture(testInfo, { sessionId, projectId }) {
+  const dataDir = e2eDataDirForProject(testInfo)
+  const script = String.raw`
+import hashlib
+import json
+from pathlib import Path
+import sqlite3
+import sys
+import uuid
+
+data_dir, session_id, project_id = sys.argv[1:4]
+run_id = "run_e2e_" + uuid.uuid4().hex[:16]
+artifact_id = "rfa_e2e_" + uuid.uuid4().hex[:16]
+finding_id = "fnd_e2e_" + uuid.uuid4().hex[:16]
+content = "artifact evidence from Playwright\n80/tcp open http\n"
+workspace_name = "sess_" + hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:32]
+artifact_rel = "reports/evidence.txt"
+artifact_path = Path(data_dir) / "workspaces" / workspace_name / artifact_rel
+artifact_path.parent.mkdir(parents=True, exist_ok=True)
+artifact_path.write_text(content, encoding="utf-8")
+byte_size = len(content.encode("utf-8"))
+
+conn = sqlite3.connect(str(Path(data_dir) / "history.db"))
+try:
+    conn.execute(
+        "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+        "output_preview, preview_truncated, output_line_count, full_output_available, full_output_truncated) "
+        "VALUES (?, ?, ?, datetime('now'), datetime('now'), 0, ?, 0, 2, 1, 0)",
+        (
+            run_id,
+            session_id,
+            "nmap -oN reports/evidence.txt playwright.example",
+            json.dumps(["80/tcp open http", "artifact evidence from Playwright"]),
+        ),
+    )
+    conn.execute(
+        "INSERT INTO project_links (id, project_id, entity_type, entity_id, source, created) "
+        "VALUES (?, ?, 'run', ?, 'active_project', datetime('now'))",
+        ("pln_e2e_" + uuid.uuid4().hex[:16], project_id, run_id),
+    )
+    conn.execute(
+        "INSERT INTO run_file_artifacts "
+        "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, content_type, preview_type, created) "
+        "VALUES (?, ?, ?, ?, 'evidence.txt', 'output', ?, 'workspace_flag', 'text/plain', 'text', datetime('now'))",
+        (artifact_id, session_id, run_id, artifact_rel, byte_size),
+    )
+    conn.execute(
+        "INSERT INTO findings "
+        "(id, session_id, run_id, scope, title, raw_line, line_number, severity, fingerprint, review_state, created) "
+        "VALUES (?, ?, ?, 'finding', '80/tcp open http', '80/tcp open http', 1, 'info', ?, 'new', datetime('now'))",
+        (finding_id, session_id, run_id, "fp-" + finding_id),
+    )
+    conn.commit()
+finally:
+    conn.close()
+print(json.dumps({"runId": run_id, "artifactId": artifact_id, "findingId": finding_id, "workspacePath": artifact_rel}))
+`
+  const result = spawnSync('.venv/bin/python3', ['-c', script, dataDir, sessionId, projectId], {
+    cwd: process.cwd(),
+    encoding: 'utf8',
+  })
+  if (result.status !== 0) {
+    throw new Error(`Failed to seed project evidence fixture: ${result.stderr || result.stdout}`)
+  }
+  return JSON.parse(result.stdout)
 }
 
 test.describe('theme selector', () => {
@@ -261,6 +344,318 @@ test.describe('Status Monitor', () => {
       return !!tab && tab.command === expectedCommand && !!tab.historyRunId
     }, command)
     await expect(page.locator('.tab-panel.active .output')).toContainText('[history')
+  })
+})
+
+test.describe('project workspace modal', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(240) })
+    await page.goto('/')
+    await ensurePromptReady(page)
+  })
+
+  async function openProjectsModal(page) {
+    await page.locator('.rail-nav [data-action="projects"]').click()
+    await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#project-workspace-body')).not.toContainText('Loading projects...')
+  }
+
+  async function readActiveProject(page) {
+    return page.evaluate(async () => {
+      const resp = await apiFetch('/projects/active', { cache: 'no-store' })
+      return resp.json()
+    })
+  }
+
+  async function createActiveProject(page, projectName) {
+    await page.locator('#project-workspace-name').fill(projectName)
+    await page.locator('#project-workspace-create-form button[type="submit"]').click()
+    await expect(page.locator('.project-workspace-row.is-active')).toContainText(projectName)
+    await expect(page.locator('#project-explorer-body')).toContainText(projectName)
+    const activeProject = await readActiveProject(page)
+    expect(activeProject.project?.name).toBe(projectName)
+    const projectId = activeProject.project?.id
+    expect(projectId).toBeTruthy()
+    return projectId
+  }
+
+  async function linkHostnameRunToOpenProject(page) {
+    await page.locator('.project-workspace-close').click()
+    await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
+    await runCommand(page, 'hostname')
+    await waitForHistoryRuns(page, 1)
+    await openProjectsModal(page)
+    await page.locator('[data-project-tab="runs"]').click()
+    await page.locator('[data-project-action="link-last-run"]').click()
+    await expect(page.locator('#project-workspace-message')).toContainText('Last run linked to this project.')
+    const runRow = page.locator('.project-explorer-item').filter({ hasText: 'hostname' }).first()
+    await expect(runRow).toBeVisible()
+    return runRow
+  }
+
+  test('creates an active project, manages targets, and edits linked run metadata', async ({ page }) => {
+    test.setTimeout(60_000)
+    await openProjectsModal(page)
+
+    const projectName = `Playwright Projects ${Date.now()}`
+    const projectId = await createActiveProject(page, projectName)
+
+    await page.locator('#project-labels-input').fill('e2e, client')
+    await page.locator('#project-labels-save-btn').click()
+    await expect(page.locator('#project-labels-save-status')).toBeVisible()
+    await expect(page.locator('.project-label-chips')).toContainText('e2e')
+    await page.locator('#project-notes-input').fill('Project notes from Playwright')
+    await page.locator('[data-project-tab="runs"]').click()
+    await expect.poll(async () => page.evaluate(async (id) => {
+      const resp = await apiFetch(`/projects/${encodeURIComponent(id)}`, { cache: 'no-store' })
+      const data = await resp.json()
+      return data.project?.notes || ''
+    }, projectId)).toBe('Project notes from Playwright')
+
+    await page.locator('[data-project-tab="details"]').click()
+    await page.locator('[data-project-action="new-target"]').click()
+    await expect(page.locator('#project-target-editor-overlay')).toHaveClass(/\bopen\b/)
+    await page.locator('#project-target-value').fill('playwright.example')
+    await page.locator('#project-target-label').fill('Primary target')
+    await page.locator('#project-target-notes').fill('Scope confirmed in browser test')
+    await page.locator('#project-target-submit').click()
+    await expect(page.locator('#project-target-editor-overlay')).not.toHaveClass(/\bopen\b/)
+    const targetRow = page.locator('.project-target-row').filter({ hasText: 'playwright.example' })
+    await expect(targetRow).toBeVisible()
+    await expect(targetRow).toContainText('Primary target')
+    await expect(targetRow).toContainText('note')
+
+    await targetRow.locator('[data-project-action="edit-target"]').click()
+    await expect(page.locator('#project-target-editor-title')).toHaveText('EDIT TARGET')
+    await page.locator('#project-target-value').fill('projects.playwright.example')
+    await page.locator('#project-target-label').fill('Updated target')
+    await page.locator('#project-target-submit').click()
+    await expect(page.locator('.project-target-row').filter({ hasText: 'projects.playwright.example' })).toBeVisible()
+
+    const runRow = await linkHostnameRunToOpenProject(page)
+    await runRow.locator('[data-project-action="edit-run-metadata"]').click()
+    await expect(page.locator('#project-entity-editor-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#project-entity-editor-title')).toHaveText('EDIT RUN')
+    await page.locator('#project-entity-labels').fill('baseline, reviewed')
+    await page.locator('#project-entity-note').fill('Run triaged from Playwright')
+    await page.locator('#project-entity-submit').click()
+    await expect(page.locator('#project-entity-editor-overlay')).not.toHaveClass(/\bopen\b/)
+    await expect(runRow).toContainText('reviewed')
+    await expect(runRow).toContainText('note')
+
+    await page.locator('[data-project-tab="details"]').click()
+    const updatedTargetRow = page.locator('.project-target-row').filter({ hasText: 'projects.playwright.example' })
+    await updatedTargetRow.locator('[data-project-action="delete-target"]').click()
+    await expect(page.locator('#confirm-host')).toBeVisible()
+    await page.locator('#confirm-host [data-confirm-action-id="remove"]').click()
+    await expect(page.locator('#confirm-host')).toBeHidden()
+    await expect(updatedTargetRow).toHaveCount(0)
+
+    const persisted = await page.evaluate(async (id) => {
+      const [projectResp, labelsResp, summaryResp] = await Promise.all([
+        apiFetch(`/projects/${encodeURIComponent(id)}`, { cache: 'no-store' }),
+        apiFetch(`/entities/project/${encodeURIComponent(id)}/labels`, { cache: 'no-store' }),
+        apiFetch(`/projects/${encodeURIComponent(id)}/summary`, { cache: 'no-store' }),
+      ])
+      const [projectData, labelsData, summaryData] = await Promise.all([
+        projectResp.json(),
+        labelsResp.json(),
+        summaryResp.json(),
+      ])
+      return {
+        notes: projectData.project?.notes,
+        labels: (labelsData.labels || []).map((label) => label.label),
+        targets: summaryData.targets || [],
+        runs: summaryData.runs || [],
+      }
+    }, projectId)
+    expect(persisted.notes).toBe('Project notes from Playwright')
+    expect(persisted.labels).toEqual(expect.arrayContaining(['e2e', 'client']))
+    expect(persisted.targets).toEqual([])
+    expect(persisted.runs.some((run) => (
+      run.command === 'hostname'
+      && (run.labels || []).some((label) => label.label === 'reviewed')
+      && run.note?.body === 'Run triaged from Playwright'
+    ))).toBe(true)
+  })
+
+  test('creates, edits, downloads, and deletes a project evidence package', async ({ page }) => {
+    test.setTimeout(60_000)
+    await openProjectsModal(page)
+    const projectId = await createActiveProject(page, `Playwright Package ${Date.now()}`)
+    await linkHostnameRunToOpenProject(page)
+
+    await page.locator('[data-project-tab="packages"]').click()
+    await page.locator('[data-project-action="package-wizard-open"]').click()
+    const wizard = page.locator('#project-package-wizard-overlay')
+    await expect(wizard).toHaveClass(/\bopen\b/)
+    await expect(wizard.locator('.project-package-step.is-active')).toContainText('Preset')
+    await page.locator('[data-project-package-field="labels"]').fill('handoff, e2e')
+    await page.locator('[data-project-package-field="notes"]').fill('Package notes from Playwright')
+
+    await page.locator('[data-project-action="package-wizard-next"]').click()
+    await expect(wizard.locator('.project-package-step.is-active')).toContainText('Include')
+    await expect(wizard).toContainText('Runs (1)')
+
+    await page.locator('[data-project-action="package-wizard-next"]').click()
+    await expect(wizard.locator('.project-package-step.is-active')).toContainText('Metadata')
+    await page.locator('[data-project-package-field="name"]').fill('Browser evidence')
+    await page.locator('[data-project-package-field="description"]').fill('Package created in a live browser')
+
+    await page.locator('[data-project-action="package-wizard-next"]').click()
+    await expect(wizard.locator('.project-package-step.is-active')).toContainText('Preview')
+    await expect(page.locator('.project-package-preview-json')).toContainText('"runs": 1')
+    await expect(page.locator('.project-package-preview-json')).toContainText('"transcript_run_ids"')
+
+    await page.locator('[data-project-action="package-wizard-next"]').click()
+    await expect(wizard).not.toHaveClass(/\bopen\b/)
+    await expect(page.locator('#project-workspace-message')).toContainText('Package created.')
+    const packageRow = page.locator('.project-explorer-item').filter({ hasText: 'Browser evidence' }).first()
+    await expect(packageRow).toBeVisible()
+    await expect(packageRow).toContainText('handoff')
+    await expect(packageRow).toContainText('note')
+
+    await packageRow.locator('[data-project-action="package-edit"]').click()
+    await expect(page.locator('#project-entity-editor-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#project-entity-editor-title')).toHaveText('EDIT PACKAGE')
+    await page.locator('#project-entity-labels').fill('handoff, approved')
+    await page.locator('#project-entity-note').fill('Ready for handoff from Playwright')
+    await page.locator('#project-entity-submit').click()
+    await expect(page.locator('#project-entity-editor-overlay')).not.toHaveClass(/\bopen\b/)
+    await expect(packageRow).toContainText('approved')
+    await expect(packageRow).toContainText('note')
+
+    await packageRow.locator('[data-project-action="package-manifest"]').click()
+    await expect(page.locator('#project-package-manifest-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#project-package-manifest-json')).toContainText('"package_format_version": 1')
+    await expect(page.locator('#project-package-manifest-json')).toContainText('"runs": 1')
+    await page.locator('.project-package-manifest-close').click()
+    await expect(page.locator('#project-package-manifest-overlay')).not.toHaveClass(/\bopen\b/)
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      packageRow.locator('[data-project-action="package-download"]').click(),
+    ])
+    expect(download.suggestedFilename()).toBe('browser-evidence.zip')
+
+    await packageRow.locator('[data-project-action="package-delete"]').click()
+    await expect(page.locator('#confirm-host')).toBeVisible()
+    await page.locator('#confirm-host [data-confirm-action-id="delete"]').click()
+    await expect(page.locator('#confirm-host')).toBeHidden()
+    await expect(packageRow).toHaveCount(0)
+    await expect(page.locator('#project-explorer-body')).toContainText('No evidence packages yet.')
+
+    const packages = await page.evaluate(async (id) => {
+      const resp = await apiFetch(`/projects/${encodeURIComponent(id)}/packages`, { cache: 'no-store' })
+      const data = await resp.json()
+      return data.packages || []
+    }, projectId)
+    expect(packages).toEqual([])
+  })
+
+  test('edits finding and artifact metadata and previews project artifacts', async ({ page }, testInfo) => {
+    test.setTimeout(60_000)
+    await openProjectsModal(page)
+    const projectId = await createActiveProject(page, `Playwright Evidence ${Date.now()}`)
+    const sessionId = await page.evaluate(() => (
+      typeof SESSION_ID === 'string' && SESSION_ID
+        ? SESSION_ID
+        : localStorage.getItem('session_id')
+    ))
+    const fixture = seedProjectEvidenceFixture(testInfo, { sessionId, projectId })
+
+    await page.locator('.project-workspace-close').click()
+    await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
+    await openProjectsModal(page)
+
+    await page.locator('[data-project-tab="findings"]').click()
+    const findingRow = page.locator('.project-explorer-item').filter({ hasText: '80/tcp open http' }).first()
+    await expect(findingRow).toBeVisible()
+    await findingRow.locator('[data-project-action="edit-finding-metadata"]').click()
+    await expect(page.locator('#project-entity-editor-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#project-entity-editor-title')).toHaveText('EDIT FINDING')
+    await page.locator('#project-entity-labels').fill('finding, triaged')
+    await page.locator('#project-entity-note').fill('Finding note from Playwright')
+    await page.locator('#project-entity-submit').click()
+    await expect(page.locator('#project-entity-editor-overlay')).not.toHaveClass(/\bopen\b/)
+    await expect(findingRow).toContainText('triaged')
+    await expect(findingRow).toContainText('note')
+
+    await page.locator('[data-project-tab="artifacts"]').click()
+    const artifactRow = page.locator('.project-explorer-item').filter({ hasText: 'evidence.txt' }).first()
+    await expect(artifactRow).toBeVisible()
+    await artifactRow.locator('[data-project-action="edit-artifact-metadata"]').click()
+    await expect(page.locator('#project-entity-editor-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#project-entity-editor-title')).toHaveText('EDIT ARTIFACT')
+    await page.locator('#project-entity-labels').fill('evidence, reviewed')
+    await page.locator('#project-entity-note').fill('Artifact note from Playwright')
+    await page.locator('#project-entity-submit').click()
+    await expect(page.locator('#project-entity-editor-overlay')).not.toHaveClass(/\bopen\b/)
+    await expect(artifactRow).toContainText('reviewed')
+    await expect(artifactRow).toContainText('note')
+
+    await artifactRow.locator('[data-project-action="artifact-preview"]').click()
+    await expect(page.locator('#workspace-viewer-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#workspace-viewer-title')).toHaveText(fixture.workspacePath)
+    await expect(page.locator('#workspace-viewer-text')).toContainText('artifact evidence from Playwright')
+    await page.locator('#workspace-close-viewer-btn').click()
+    await expect(page.locator('#workspace-viewer-overlay')).not.toHaveClass(/\bopen\b/)
+
+    const [download] = await Promise.all([
+      page.waitForEvent('download'),
+      artifactRow.locator('[data-project-action="artifact-download"]').click(),
+    ])
+    expect(download.suggestedFilename()).toBe('evidence.txt')
+
+    const persisted = await page.evaluate(async ({ findingId, artifactId }) => {
+      const [findingLabelsResp, findingNoteResp, artifactLabelsResp, artifactNoteResp] = await Promise.all([
+        apiFetch(`/entities/finding/${encodeURIComponent(findingId)}/labels`, { cache: 'no-store' }),
+        apiFetch(`/entities/finding/${encodeURIComponent(findingId)}/note`, { cache: 'no-store' }),
+        apiFetch(`/entities/run_file_artifact/${encodeURIComponent(artifactId)}/labels`, { cache: 'no-store' }),
+        apiFetch(`/entities/run_file_artifact/${encodeURIComponent(artifactId)}/note`, { cache: 'no-store' }),
+      ])
+      const [findingLabels, findingNote, artifactLabels, artifactNote] = await Promise.all([
+        findingLabelsResp.json(),
+        findingNoteResp.json(),
+        artifactLabelsResp.json(),
+        artifactNoteResp.json(),
+      ])
+      return {
+        findingLabels: (findingLabels.labels || []).map((label) => label.label),
+        findingNote: findingNote.note?.body || '',
+        artifactLabels: (artifactLabels.labels || []).map((label) => label.label),
+        artifactNote: artifactNote.note?.body || '',
+      }
+    }, fixture)
+    expect(persisted.findingLabels).toEqual(expect.arrayContaining(['finding', 'triaged']))
+    expect(persisted.findingNote).toBe('Finding note from Playwright')
+    expect(persisted.artifactLabels).toEqual(expect.arrayContaining(['evidence', 'reviewed']))
+    expect(persisted.artifactNote).toBe('Artifact note from Playwright')
+
+    await page.locator('[data-project-tab="runs"]').click()
+    const evidenceRunRow = page.locator('.project-explorer-item').filter({ hasText: 'nmap -oN reports/evidence.txt' }).first()
+    await expect(evidenceRunRow).toBeVisible()
+    await evidenceRunRow.locator('[data-project-action="filter-run-findings"]').click()
+    await expect(page.locator('.project-explorer-tab.is-active')).toContainText('Findings')
+    await expect(page.locator('[data-project-run-filter-clear]')).toContainText('run:')
+    await expect(page.locator('.project-explorer-item').filter({ hasText: '80/tcp open http' }).first()).toBeVisible()
+
+    await page.locator('[data-project-tab="runs"]').click()
+    await page.locator('[data-project-filter-clear-all]').click()
+    await expect(evidenceRunRow).toBeVisible()
+    await evidenceRunRow.locator('[data-project-action="filter-run-artifacts"]').click()
+    await expect(page.locator('.project-explorer-tab.is-active')).toContainText('Artifacts')
+    await expect(page.locator('[data-project-run-filter-clear]')).toContainText('run:')
+    await expect(page.locator('.project-explorer-item').filter({ hasText: 'evidence.txt' }).first()).toBeVisible()
+
+    await page.locator('[data-project-tab="runs"]').click()
+    await page.locator('[data-project-filter-clear-all]').click()
+    await evidenceRunRow.locator('[data-project-action="unlink-run"]').click()
+    await expect(page.locator('#confirm-host')).toBeVisible()
+    await page.locator('#confirm-host [data-confirm-action-id="remove"]').click()
+    await expect(page.locator('#confirm-host')).toBeHidden()
+    await expect(evidenceRunRow).toHaveCount(0)
+    await expect(page.locator('#project-explorer-body')).toContainText('No linked runs yet.')
   })
 })
 

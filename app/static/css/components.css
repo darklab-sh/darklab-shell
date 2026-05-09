@@ -470,6 +470,11 @@ body #search-toggle-btn.search-discover-pulse {
   color: color-mix(in srgb, var(--text) 72%, var(--muted));
 }
 
+.badge-tone-cyan {
+  color: var(--cyan);
+  border-color: color-mix(in srgb, var(--cyan) 42%, var(--border));
+}
+
 /* ── Form/control primitives ─────────────────────────────────────────────── */
 .form-control,
 .control-row {
@@ -1082,6 +1087,13 @@ body #history-panel { background: var(--theme-chrome-bg); }
 }
 .history-entry-date {
   color: color-mix(in srgb, var(--muted) 82%, var(--text));
+}
+.history-entry-label-badge,
+.history-entry-note-badge {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .history-entry-artifacts {
   color: var(--cyan);

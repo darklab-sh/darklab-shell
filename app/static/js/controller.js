@@ -259,7 +259,10 @@ function setupModalFocusTraps() {
     'faq-modal',
     'command-registry-modal',
     'project-workspace-modal',
+    'project-target-editor-modal',
+    'project-package-manifest-modal',
     'project-package-wizard-modal',
+    'project-entity-editor-modal',
     'workspace-modal',
     'workflows-modal',
     'workflow-editor-form',
@@ -1764,7 +1767,7 @@ cmdInput.addEventListener('keydown', e => {
     return;
   }
 
-  if (e.altKey && !e.ctrlKey && !e.metaKey && eventMatchesLetter(e, 'b')) {
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && eventMatchesLetter(e, 'b')) {
     e.preventDefault();
     if (typeof syncFocusedComposerState === 'function') syncFocusedComposerState(cmdInput);
     const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
@@ -1776,7 +1779,7 @@ cmdInput.addEventListener('keydown', e => {
     return;
   }
 
-  if (e.altKey && !e.ctrlKey && !e.metaKey && eventMatchesLetter(e, 'f')) {
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && eventMatchesLetter(e, 'f')) {
     e.preventDefault();
     if (typeof syncFocusedComposerState === 'function') syncFocusedComposerState(cmdInput);
     const value = typeof getComposerValue === 'function' ? getComposerValue() : '';

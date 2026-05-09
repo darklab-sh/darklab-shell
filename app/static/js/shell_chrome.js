@@ -69,6 +69,10 @@
   const projectNotesForm = document.getElementById('project-notes-form');
   const projectNotesInput = document.getElementById('project-notes-input');
   const projectNotesSaveStatus = document.getElementById('project-notes-save-status');
+  const projectLabelsForm = document.getElementById('project-labels-form');
+  const projectLabelsInput = document.getElementById('project-labels-input');
+  const projectLabelsSaveButton = document.getElementById('project-labels-save-btn');
+  const projectLabelsSaveStatus = document.getElementById('project-labels-save-status');
   const projectWorkspaceMessage = document.getElementById('project-workspace-message');
 
   // ── Prefs (cookie-backed) ───────────────────────────────────────
@@ -175,9 +179,11 @@
   let projectNotesSaveSeq = 0;
   let projectNotesSavedDelayTimer = null;
   let projectNotesSavedHideTimer = null;
+  let projectLabelsSavedHideTimer = null;
   const PROJECT_NOTES_AUTOSAVE_DELAY_MS = 450;
   const FIELD_SAVED_INDICATOR_DELAY_MS = 200;
   const FIELD_SAVED_INDICATOR_VISIBLE_MS = 1600;
+  const PROJECT_LABELS_SAVED_VISIBLE_MS = 2000;
   const PROJECT_WORKSPACE_BROADCAST_KEY = 'darklab_project_workspace_changed';
   const PROJECT_FINDING_SORT_OPTIONS = [
     { value: 'source', label: 'Source order' },
@@ -1148,6 +1154,29 @@
     return chips;
   }
 
+  function _entityMetadataChipClass(kind = 'label') {
+    const tone = String(kind || '') === 'note' ? 'badge-tone-cyan' : 'badge-tone-muted';
+    return `project-explorer-metadata-chip badge ${tone}`;
+  }
+
+  function _projectLabelChips(project) {
+    return _entityLabelValues(project).map(label => ({ label, kind: 'label' }));
+  }
+
+  function _appendProjectLabelChips(parent, project, { className = 'project-label-chips' } = {}) {
+    const chips = _projectLabelChips(project);
+    if (!parent || !chips.length) return;
+    const wrap = document.createElement('div');
+    wrap.className = className;
+    for (const chip of chips) {
+      const node = document.createElement('span');
+      node.className = _entityMetadataChipClass(chip.kind);
+      node.textContent = chip.label;
+      wrap.appendChild(node);
+    }
+    parent.appendChild(wrap);
+  }
+
   function _parseEntityLabelInput(value) {
     const seen = new Set();
     return String(value || '')
@@ -1169,10 +1198,28 @@
     if (entityType === 'run') {
       return String(entity && (entity.command || entity.id) || 'Run');
     }
+    if (entityType === 'snapshot') {
+      return String(entity && (entity.label || entity.id) || 'Snapshot');
+    }
+    if (entityType === 'package') {
+      return String(entity && (entity.name || entity.id) || 'Package');
+    }
     if (entityType === 'run_file_artifact') {
       return String(entity && (entity.display_name || entity.workspace_path || entity.id) || 'Artifact');
     }
     return String(entity && entity.id || 'Entity');
+  }
+
+  function _entityEditorLabelForType(entityType) {
+    if (entityType === 'finding') return 'FINDING';
+    if (entityType === 'run') return 'RUN';
+    if (entityType === 'snapshot') return 'SNAPSHOT';
+    if (entityType === 'run_file_artifact') return 'ARTIFACT';
+    if (entityType === 'project') return 'PROJECT';
+    if (entityType === 'package') return 'PACKAGE';
+    if (entityType === 'workspace_file') return 'WORKSPACE FILE';
+    if (entityType === 'target') return 'TARGET';
+    return 'METADATA';
   }
 
   function _projectArtifactDetail(artifact) {
@@ -1302,6 +1349,8 @@
       includePrivateNotes: false,
       name: '',
       description: '',
+      labels: '',
+      notes: '',
       collapsedRunIds: new Set(),
       selection: {
         runIds: new Set(runIds),
@@ -1338,20 +1387,25 @@
     }
   }
 
-  function _openProjectEntityEditor(projectId, entityType, entity) {
+  function _openProjectEntityEditor(projectId, entityType, entity, options = {}) {
     if (!projectEntityEditorOverlay || !projectEntityEditorForm || !projectEntityLabelsInput || !projectEntityNoteInput) {
       throw new Error('Metadata editor is not available.');
     }
     const entityId = String(entity && entity.id || '');
-    if (!projectId || !entityType || !entityId) throw new Error('Entity is missing its identifier.');
+    if (!entityType || !entityId) throw new Error('Entity is missing its identifier.');
     const title = _entityTitleForEditor(entityType, entity);
-    projectWorkspaceEditingEntity = { projectId: String(projectId), entityType: String(entityType), entityId, entity };
-    projectEntityEditorForm.dataset.projectId = String(projectId);
+    projectWorkspaceEditingEntity = {
+      projectId: String(projectId || ''),
+      entityType: String(entityType),
+      entityId,
+      entity,
+      onSaved: typeof options.onSaved === 'function' ? options.onSaved : null,
+    };
+    projectEntityEditorForm.dataset.projectId = String(projectId || '');
     projectEntityEditorForm.dataset.entityType = String(entityType);
     projectEntityEditorForm.dataset.entityId = entityId;
     if (projectEntityEditorTitle) {
-      const label = entityType === 'finding' ? 'FINDING' : (entityType === 'run' ? 'RUN' : 'ARTIFACT');
-      projectEntityEditorTitle.textContent = `EDIT ${label}`;
+      projectEntityEditorTitle.textContent = `EDIT ${_entityEditorLabelForType(entityType)}`;
     }
     if (projectEntityEditorSubtitle) projectEntityEditorSubtitle.textContent = title;
     projectEntityLabelsInput.value = _entityLabelValues(entity).join(', ');
@@ -1362,6 +1416,13 @@
     projectEntityEditorOverlay.setAttribute('aria-hidden', 'false');
     window.setTimeout(() => projectEntityLabelsInput.focus(), 0);
   }
+
+  global.openEntityMetadataEditor = function openEntityMetadataEditor(entityType, entity, options = {}) {
+    const projectId = options && Object.prototype.hasOwnProperty.call(options, 'projectId')
+      ? options.projectId
+      : '';
+    _openProjectEntityEditor(projectId, entityType, entity, options);
+  };
 
   function _hideProjectPackageWizardOverlay() {
     if (!projectPackageWizardOverlay) return;
@@ -1423,6 +1484,8 @@
           const refreshed = _projectPackagePresetDefaults(projectPackageWizard.preset, _projectSummary(projectId), _projectFindingItems(projectId));
           refreshed.name = projectPackageWizard.name;
           refreshed.description = projectPackageWizard.description;
+          refreshed.labels = projectPackageWizard.labels || '';
+          refreshed.notes = projectPackageWizard.notes || '';
           refreshed.collapsedRunIds = projectPackageWizard.collapsedRunIds || new Set();
           projectPackageWizard = { projectId: String(projectId || ''), ...refreshed };
           _renderProjectExplorer();
@@ -1463,6 +1526,8 @@
       includePrivateNotes: !!manifest.include_private_notes,
       name: String(pkg?.name || _projectPackageSuggestedName(_selectedProject(), preset)),
       description: String(pkg?.description || ''),
+      labels: _entityLabelValues(pkg).join(', '),
+      notes: _entityNoteBody(pkg),
       collapsedRunIds: new Set(),
       selection: {
         runIds: selectedRunIds,
@@ -1509,6 +1574,7 @@
     const actions = document.createElement('div');
     actions.className = 'project-package-actions';
     [
+      ['package-edit', 'Edit'],
       ['package-download', 'Download'],
       ['package-repackage', 'Re-package'],
       ['package-manifest', 'View manifest'],
@@ -1891,6 +1957,28 @@
       list.appendChild(row);
     });
     wrap.appendChild(list);
+    const metadata = document.createElement('div');
+    metadata.className = 'project-package-preset-metadata';
+    const labelsLabel = document.createElement('label');
+    labelsLabel.textContent = 'Labels';
+    const labelsInput = document.createElement('input');
+    labelsInput.className = 'form-control form-control-compact';
+    labelsInput.dataset.projectPackageField = 'labels';
+    labelsInput.value = projectPackageWizard.labels || '';
+    labelsInput.placeholder = 'handoff, retest';
+    labelsInput.autocomplete = 'off';
+    labelsLabel.appendChild(labelsInput);
+    const notesLabel = document.createElement('label');
+    notesLabel.textContent = 'Notes';
+    const notesInput = document.createElement('textarea');
+    notesInput.className = 'form-control form-control-compact';
+    notesInput.dataset.projectPackageField = 'notes';
+    notesInput.rows = 3;
+    notesInput.value = projectPackageWizard.notes || '';
+    notesInput.placeholder = 'Private package notes';
+    notesLabel.appendChild(notesInput);
+    metadata.append(labelsLabel, notesLabel);
+    wrap.appendChild(metadata);
     const note = document.createElement('p');
     note.className = 'project-package-wizard-note';
     note.textContent = `${_projectRunItems(summary).length} runs, ${_projectFindingItems(projectId).length} findings, `
@@ -2182,6 +2270,8 @@
       redaction_mode: String(projectPackageWizard.redactionMode || 'raw'),
       include_artifacts: !!projectPackageWizard.includeArtifacts,
       include_private_notes: !!projectPackageWizard.includePrivateNotes,
+      labels: _parseEntityLabelInput(projectPackageWizard.labels || ''),
+      notes: String(projectPackageWizard.notes || '').trim(),
       options: {
         manifest_json: true,
         index_html: true,
@@ -2363,7 +2453,7 @@
       chipWrap.className = 'project-explorer-item-chips';
       chips.forEach((chip) => {
         const chipEl = document.createElement('span');
-        chipEl.className = `project-explorer-metadata-chip is-${String(chip.kind || 'label')}`;
+        chipEl.className = _entityMetadataChipClass(chip.kind);
         chipEl.textContent = String(chip.label || '');
         chipWrap.appendChild(chipEl);
       });
@@ -2561,7 +2651,6 @@
     if (projectTargetValueInput) projectTargetValueInput.value = isEdit ? String(target.value || '') : '';
     if (projectTargetLabelInput) projectTargetLabelInput.value = isEdit ? String(target.label || '') : '';
     if (projectTargetNotesInput) {
-      projectTargetNotesInput.maxLength = PROJECT_TARGET_NOTES_MAX_LENGTH;
       projectTargetNotesInput.value = isEdit ? String(target.notes || '') : '';
       projectTargetNotesInput.setAttribute('aria-invalid', 'false');
     }
@@ -2631,7 +2720,7 @@
       chipWrap.className = 'project-explorer-item-chips project-target-metadata-chips';
       chips.forEach((chip) => {
         const chipEl = document.createElement('span');
-        chipEl.className = `project-explorer-metadata-chip is-${String(chip.kind || 'label')}`;
+        chipEl.className = _entityMetadataChipClass(chip.kind);
         chipEl.textContent = String(chip.label || '');
         chipWrap.appendChild(chipEl);
       });
@@ -3176,7 +3265,20 @@
   function _syncProjectForms(project = _selectedProject()) {
     const hasProject = !!(project && project.id);
     const showingDetails = projectWorkspaceTab === 'details';
+    const nextProjectId = hasProject ? String(project.id || '') : '';
+    if (!showingDetails || String(projectLabelsInput?.dataset.projectId || '') !== nextProjectId) {
+      _hideProjectLabelsSavedIndicator();
+    }
     if (projectNotesForm) projectNotesForm.classList.toggle('u-hidden', !hasProject || !showingDetails);
+    if (projectLabelsForm) projectLabelsForm.classList.toggle('u-hidden', !hasProject || !showingDetails);
+    if (projectLabelsInput && document.activeElement !== projectLabelsInput) {
+      projectLabelsInput.value = hasProject ? _entityLabelValues(project).join(', ') : '';
+      projectLabelsInput.dataset.projectId = nextProjectId;
+      projectLabelsInput.dataset.savedLabels = projectLabelsInput.value;
+      projectLabelsInput.placeholder = hasProject
+        ? `Labels for ${_projectDisplayName(project)}`
+        : 'Select a project to edit labels';
+    }
     if (projectNotesInput && document.activeElement !== projectNotesInput) {
       projectNotesInput.value = hasProject ? String(project.notes || '') : '';
       projectNotesInput.dataset.projectId = hasProject ? String(project.id || '') : '';
@@ -3220,6 +3322,30 @@
     }, FIELD_SAVED_INDICATOR_DELAY_MS);
   }
 
+  function _setProjectLabelsSavedIndicator(visible) {
+    if (!projectLabelsSaveStatus) return;
+    projectLabelsSaveStatus.classList.toggle('u-hidden', !visible);
+  }
+
+  function _hideProjectLabelsSavedIndicator() {
+    if (projectLabelsSavedHideTimer) {
+      clearTimeout(projectLabelsSavedHideTimer);
+      projectLabelsSavedHideTimer = null;
+    }
+    _setProjectLabelsSavedIndicator(false);
+  }
+
+  function _showProjectLabelsSavedIndicator(projectId) {
+    const normalizedProjectId = String(projectId || '');
+    _hideProjectLabelsSavedIndicator();
+    if (normalizedProjectId && String(projectLabelsInput?.dataset.projectId || '') !== normalizedProjectId) return;
+    _setProjectLabelsSavedIndicator(true);
+    projectLabelsSavedHideTimer = setTimeout(() => {
+      projectLabelsSavedHideTimer = null;
+      _setProjectLabelsSavedIndicator(false);
+    }, PROJECT_LABELS_SAVED_VISIBLE_MS);
+  }
+
   function _cacheProjectNotes(projectId, notes, updatedProject = null) {
     const normalizedProjectId = String(projectId || '');
     if (!normalizedProjectId) return;
@@ -3232,6 +3358,52 @@
     });
     if (activeProject && String(activeProject.id || '') === normalizedProjectId) {
       activeProject = replacement || { ...activeProject, notes };
+    }
+  }
+
+  function _cacheProjectLabels(projectId, labels) {
+    const normalizedProjectId = String(projectId || '');
+    const labelItems = (Array.isArray(labels) ? labels : []).map(label => ({ label: String(label || '').trim() })).filter(item => item.label);
+    if (!normalizedProjectId) return;
+    const update = project => (
+      String(project && project.id || '') === normalizedProjectId
+        ? { ...project, labels: labelItems }
+        : project
+    );
+    projectWorkspaceRows = projectWorkspaceRows.map(update);
+    const summary = projectWorkspaceSummaries.get(normalizedProjectId);
+    if (summary && summary.project) {
+      projectWorkspaceSummaries.set(normalizedProjectId, {
+        ...summary,
+        project: update(summary.project),
+      });
+    }
+    if (activeProject && String(activeProject.id || '') === normalizedProjectId) {
+      activeProject = update(activeProject);
+    }
+  }
+
+  async function _saveProjectLabelsNow() {
+    if (!projectLabelsInput) return;
+    const projectId = String(projectLabelsInput.dataset.projectId || projectWorkspaceSelectedId || '');
+    if (!projectId) return;
+    const labels = _parseEntityLabelInput(projectLabelsInput.value);
+    const labelText = labels.join(', ');
+    if (labelText === String(projectLabelsInput.dataset.savedLabels || '')) return;
+    if (projectLabelsSaveButton) projectLabelsSaveButton.disabled = true;
+    _hideProjectLabelsSavedIndicator();
+    try {
+      await _syncEntityLabels('project', projectId, labels);
+      projectLabelsInput.value = labelText;
+      projectLabelsInput.dataset.savedLabels = labelText;
+      _cacheProjectLabels(projectId, labels);
+      _renderProjectList();
+      _renderProjectExplorer();
+      _showProjectLabelsSavedIndicator(projectId);
+    } catch (err) {
+      _setProjectWorkspaceMessage(err.message || 'Could not save project labels.', { error: true });
+    } finally {
+      if (projectLabelsSaveButton) projectLabelsSaveButton.disabled = false;
     }
   }
 
@@ -3354,6 +3526,7 @@
       countsWrap.appendChild(chip);
     });
     main.append(title, countsWrap);
+    _appendProjectLabelChips(main, project, { className: 'project-workspace-label-chips' });
     row.appendChild(main);
     return row;
   }
@@ -3397,6 +3570,7 @@
     meta.className = 'project-explorer-meta';
     meta.textContent = `${String(project.slug || project.id || '')} · ${String(project.id || '')}`;
     titleWrap.append(title, meta);
+    _appendProjectLabelChips(titleWrap, project);
 
     const activeId = activeProject && activeProject.id ? String(activeProject.id) : '';
     const actions = document.createElement('div');
@@ -3449,6 +3623,18 @@
       _projectMetaRow('updated', _formatProjectDate(project.updated)),
     );
     container.appendChild(meta);
+
+    const labelsSection = document.createElement('section');
+    labelsSection.className = 'project-explorer-section project-explorer-labels-section';
+    const labelsHeading = document.createElement('div');
+    labelsHeading.className = 'project-explorer-section-heading project-labels-heading';
+    const labelsTitle = document.createElement('h3');
+    labelsTitle.textContent = 'Labels';
+    labelsHeading.appendChild(labelsTitle);
+    if (projectLabelsSaveStatus) labelsHeading.appendChild(projectLabelsSaveStatus);
+    labelsSection.appendChild(labelsHeading);
+    if (projectLabelsForm) labelsSection.appendChild(projectLabelsForm);
+    container.appendChild(labelsSection);
 
     const targets = _projectTargetItems(summary);
     const projectId = String(project.id || '');
@@ -3674,6 +3860,7 @@
         title: pkg.name,
         meta: _projectPackageMetaText(pkg),
         detail,
+        chips: _entityMetadataChips(pkg),
         accessory: _projectPackageAccessory(projectId, pkg),
       }));
     });
@@ -3901,7 +4088,7 @@
 
   async function _saveProjectEntityMetadata() {
     if (!projectWorkspaceEditingEntity || !projectEntityLabelsInput || !projectEntityNoteInput) return;
-    const { projectId, entityType, entityId } = projectWorkspaceEditingEntity;
+    const { projectId, entityType, entityId, onSaved } = projectWorkspaceEditingEntity;
     const labels = _parseEntityLabelInput(projectEntityLabelsInput.value);
     const noteBody = String(projectEntityNoteInput.value || '').trim();
     if (projectEntitySubmitButton) projectEntitySubmitButton.disabled = true;
@@ -3909,11 +4096,15 @@
       await _syncEntityLabels(entityType, entityId, labels);
       await _syncEntityNote(entityType, entityId, noteBody);
       _closeProjectEntityEditor();
-      await refreshProjectWorkspace();
-      if (entityType === 'finding' && projectId) await _loadProjectFindings(projectId);
-      _renderProjectExplorer();
-      const label = entityType === 'finding' ? 'Finding' : (entityType === 'run' ? 'Run' : 'Artifact');
-      _setProjectWorkspaceMessage(`${label} metadata saved.`);
+      if (typeof onSaved === 'function') {
+        await onSaved({ entityType, entityId, labels, noteBody });
+      } else {
+        await refreshProjectWorkspace();
+        if (entityType === 'finding' && projectId) await _loadProjectFindings(projectId);
+        _renderProjectExplorer();
+        const label = _entityEditorLabelForType(entityType).toLocaleLowerCase();
+        _setProjectWorkspaceMessage(`${label.charAt(0).toLocaleUpperCase()}${label.slice(1)} metadata saved.`);
+      }
     } finally {
       if (projectEntitySubmitButton) projectEntitySubmitButton.disabled = false;
     }
@@ -4149,6 +4340,8 @@
     const field = String(packageField.dataset.projectPackageField || '');
     if (field === 'name') projectPackageWizard.name = String(packageField.value || '');
     if (field === 'description') projectPackageWizard.description = String(packageField.value || '');
+    if (field === 'labels') projectPackageWizard.labels = String(packageField.value || '');
+    if (field === 'notes') projectPackageWizard.notes = String(packageField.value || '');
     if (field === 'redaction_mode') {
       const mode = String(packageField.value || 'raw') === 'redacted' ? 'redacted' : 'raw';
       projectPackageWizard.redactionMode = mode;
@@ -4166,6 +4359,15 @@
   projectNotesForm?.addEventListener('submit', (event) => {
     event.preventDefault();
     _flushProjectNotesAutosave().catch(() => {});
+  });
+
+  projectLabelsInput?.addEventListener('input', () => {
+    _hideProjectLabelsSavedIndicator();
+  });
+
+  projectLabelsForm?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    _saveProjectLabelsNow().catch(() => {});
   });
 
   function _setCachedFindingReviewState(projectId, findingId, reviewState) {
@@ -4672,7 +4874,8 @@
         await _downloadProjectArtifact(projectId, artifactId, btn.dataset.artifactPath || '');
         return;
       } else if (
-        action === 'package-download'
+        action === 'package-edit'
+        || action === 'package-download'
         || action === 'package-repackage'
         || action === 'package-manifest'
         || action === 'package-delete'
@@ -4681,6 +4884,10 @@
         if (!projectId || !packageId) throw new Error('Package is missing its identifier.');
         const summary = projectWorkspaceSummaries.get(String(projectId || ''));
         const pkg = _projectPackageById(summary, packageId) || { id: packageId, name: packageId };
+        if (action === 'package-edit') {
+          _openProjectEntityEditor(projectId, 'package', pkg);
+          return;
+        }
         if (action === 'package-download') {
           _setProjectPackageDownloadBusy(btn, true);
           try {

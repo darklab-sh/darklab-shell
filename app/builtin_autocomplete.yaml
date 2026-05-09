@@ -364,14 +364,6 @@ commands:
                   description: "Run id"
               close_after:
                 run: 1
-            snapshot:
-              description: "Link a snapshot"
-              arguments:
-                - value: "<snapshot-id>"
-                  hint_only: true
-                  description: "Snapshot id"
-              close_after:
-                snapshot: 1
             file:
               description: "Link a workspace file"
               arguments:
@@ -392,14 +384,6 @@ commands:
                   description: "Run id"
               close_after:
                 run: 1
-            snapshot:
-              description: "Unlink a snapshot"
-              arguments:
-                - value: "<snapshot-id>"
-                  hint_only: true
-                  description: "Snapshot id"
-              close_after:
-                snapshot: 1
             file:
               description: "Unlink a workspace file"
               arguments:

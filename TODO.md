@@ -18,10 +18,10 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 ## Open TODOs
 
 - **Project Workspace code review follow-ups**
-  - **Expose or deliberately defer backend-only project surfaces**
-    - Review `/projects/<id>/compare`, generic entity labels, and generic entity notes against the shipped Projects modal and `project` built-in.
-    - Either add first-party UI or terminal entry points for compare, labels, and notes, or explicitly defer the UX and document the API-only status.
-    - Add at least one user-reachable test path for project compare and entity metadata if these surfaces remain shipped.
+  - **Expose or deliberately defer remaining backend-only project surfaces**
+    - Build a first-party Projects modal entry point for `/projects/<id>/workflows/promote`, or keep it documented as backend/API support until the workflow-promotion UI is designed.
+    - Add a baseline-label selector to the Projects modal compare flow if `/projects/<id>/compare?baseline_label=...` should be user-facing; the current modal supports explicit run-to-run comparison.
+    - Keep terminal `project` help aligned with actual shell-supported operations. Current shell commands intentionally stop at project CRUD/link/target operations.
 - **Future Project Workspace enhancements**
   - **Security and lifecycle**
     - Validate `workspace_file` entity ownership during session migration, or document that labels/notes on workspace-file paths can drift when a migrated token lands in a session with a different file at the same path.
@@ -42,7 +42,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - Extend the Findings tab filters beyond target/run/review state to command root, severity, scope, labels, and note state.
     - Add multi-select plus bulk review actions for high-volume finding review.
     - Prefetch finding counts and severity distribution so tab labels can show useful state such as unreviewed/high counts without opening the tab.
-    - Build a Compare Runs view on top of `/projects/<id>/compare`, with a row action for selecting a baseline and a diff view for added/removed findings, changed severity, changed exit code, and artifact changes.
+    - Extend the current Projects modal Compare Runs control with a row action for selecting a baseline and a diff view for changed severity, changed exit code, and richer artifact changes.
     - Extend comparison beyond run-to-run finding/artifact diffs to snapshots and package artifacts.
   - **Workflows**
     - Build the project-modal workflow promotion UI around explicit run and target selection.

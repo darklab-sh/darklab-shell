@@ -42,7 +42,6 @@ PROJECT_LINK_SOURCES = frozenset({
     "manual",
     "active_project",
     "package_flow",
-    "snapshot_capture",
     "migration",
 })
 
@@ -183,7 +182,6 @@ def _create_project_workspace_schema(conn):
             description TEXT NOT NULL DEFAULT '',
             status      TEXT NOT NULL DEFAULT 'active',
             color       TEXT NOT NULL DEFAULT '',
-            notes       TEXT NOT NULL DEFAULT '',
             created     TEXT NOT NULL,
             updated     TEXT NOT NULL,
             UNIQUE (session_id, slug)

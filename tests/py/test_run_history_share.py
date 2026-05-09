@@ -3137,8 +3137,8 @@ class TestRunOutputArtifacts:
             finding_id = f"fnd_{run_id}"
             conn.execute(
                 "INSERT INTO projects "
-                "(id, session_id, name, slug, description, status, color, notes, created, updated) "
-                "VALUES (?, ?, 'Artifacts', ?, '', 'active', '', '', datetime('now'), datetime('now'))",
+                "(id, session_id, name, slug, description, status, color, created, updated) "
+                "VALUES (?, ?, 'Artifacts', ?, '', 'active', '', datetime('now'), datetime('now'))",
                 (project_id, session_id, f"artifacts-{run_id}"),
             )
             conn.execute(

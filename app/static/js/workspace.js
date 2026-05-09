@@ -96,6 +96,123 @@ function _workspaceFileReadBlockedReason(path = '') {
   return 'file exceeds session max file size';
 }
 
+function _workspaceFileByPath(path = '') {
+  const target = String(path || '').split('/').filter(Boolean).join('/');
+  if (!target) return null;
+  return _workspaceFiles.find(item => String(item?.path || '').split('/').filter(Boolean).join('/') === target) || null;
+}
+
+function _workspaceLabelValues(file) {
+  const labels = file && Array.isArray(file.labels) ? file.labels : [];
+  return labels
+    .map(label => String(label && typeof label === 'object' ? label.label : label || '').trim())
+    .filter(Boolean);
+}
+
+function _workspaceNoteBody(file) {
+  const note = file && file.note && typeof file.note === 'object' ? file.note : null;
+  return note ? String(note.body || '').trim() : '';
+}
+
+function _workspaceMetadataOptionsForPath(path = '', fallback = {}) {
+  const file = fallback && (Array.isArray(fallback.labels) || fallback.note) ? fallback : _workspaceFileByPath(path);
+  return {
+    labels: _workspaceLabelValues(file),
+    noteBody: _workspaceNoteBody(file),
+  };
+}
+
+function _workspaceMetadataChips(file) {
+  const chips = _workspaceLabelValues(file).map(label => ({ label, kind: 'label' }));
+  if (_workspaceNoteBody(file)) chips.push({ label: 'note', kind: 'note' });
+  return chips;
+}
+
+function _parseWorkspaceLabelInput(value) {
+  const seen = new Set();
+  return String(value || '')
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .filter((item) => {
+      const key = item.toLocaleLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function _workspaceFileEntityUrl(path = '', suffix = '') {
+  return `/entities/workspace_file/${encodeURIComponent(path)}/${suffix}`;
+}
+
+async function _workspaceMetadataRequest(url, options = {}) {
+  const resp = await apiFetch(url, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+  });
+  if (!resp.ok) {
+    let message = `HTTP ${resp.status}`;
+    try {
+      const data = await resp.json();
+      if (data && data.error) message = data.error;
+    } catch (_) {}
+    throw new Error(message);
+  }
+  return resp;
+}
+
+async function _syncWorkspaceFileLabels(path, nextLabels) {
+  const labelsUrl = _workspaceFileEntityUrl(path, 'labels');
+  const resp = await _workspaceMetadataRequest(labelsUrl, { cache: 'no-store' });
+  const data = await resp.json().catch(() => ({}));
+  const current = Array.isArray(data.labels) ? data.labels : [];
+  const currentValues = current.map(label => String(label && label.label || '').trim()).filter(Boolean);
+  const nextSet = new Set(nextLabels);
+  const currentSet = new Set(currentValues);
+  for (const label of currentValues) {
+    if (!nextSet.has(label)) {
+      await _workspaceMetadataRequest(labelsUrl, {
+        method: 'DELETE',
+        body: JSON.stringify({ label }),
+      });
+    }
+  }
+  for (const label of nextLabels) {
+    if (!currentSet.has(label)) {
+      await _workspaceMetadataRequest(labelsUrl, {
+        method: 'POST',
+        body: JSON.stringify({ label }),
+      });
+    }
+  }
+}
+
+async function _syncWorkspaceFileNote(path, body) {
+  const noteUrl = _workspaceFileEntityUrl(path, 'note');
+  const value = String(body || '').trim();
+  if (value) {
+    await _workspaceMetadataRequest(noteUrl, {
+      method: 'PUT',
+      body: JSON.stringify({ body: value }),
+    });
+    return;
+  }
+  try {
+    await _workspaceMetadataRequest(noteUrl, { method: 'DELETE' });
+  } catch (err) {
+    if (!String(err && err.message || '').includes('not found')) throw err;
+  }
+}
+
+async function _syncWorkspaceFileMetadata(path, { labels = [], noteBody = '' } = {}) {
+  await _syncWorkspaceFileLabels(path, Array.isArray(labels) ? labels : []);
+  await _syncWorkspaceFileNote(path, noteBody);
+}
+
 function _workspaceAutoRefreshDisabledReason() {
   if (Number.isFinite(_workspaceViewedSize) && _workspaceViewedSize > WORKSPACE_VIEWER_AUTO_REFRESH_MAX_BYTES) {
     return 'Auto-refresh is disabled for files larger than 1 MB to avoid reformatting large previews while browsing.';
@@ -202,6 +319,8 @@ function hideWorkspaceEditor() {
     workspacePathInput.readOnly = false;
     workspacePathInput.classList.remove('workspace-path-readonly');
   }
+  if (typeof workspaceLabelsInput !== 'undefined' && workspaceLabelsInput) workspaceLabelsInput.value = '';
+  if (typeof workspaceNotesInput !== 'undefined' && workspaceNotesInput) workspaceNotesInput.value = '';
   if (typeof workspaceEditorOverlay !== 'undefined' && workspaceEditorOverlay) {
     workspaceEditorOverlay.classList.add('u-hidden');
     workspaceEditorOverlay.classList.remove('open');
@@ -707,7 +826,7 @@ async function switchWorkspaceViewerMode(raw = false) {
   _workspaceRenderViewerPayload(_workspaceViewerPayloadCache, { raw });
 }
 
-function showWorkspaceEditor(path = '', text = '', { readOnlyPath = false } = {}) {
+function showWorkspaceEditor(path = '', text = '', { readOnlyPath = false, labels = [], noteBody = '' } = {}) {
   if (!workspaceEditor) return;
   hideWorkspaceViewer();
   workspaceEditor.classList.remove('u-hidden');
@@ -722,6 +841,12 @@ function showWorkspaceEditor(path = '', text = '', { readOnlyPath = false } = {}
     workspacePathInput.value = path;
     workspacePathInput.readOnly = !!readOnlyPath;
     workspacePathInput.classList.toggle('workspace-path-readonly', !!readOnlyPath);
+  }
+  if (typeof workspaceLabelsInput !== 'undefined' && workspaceLabelsInput) {
+    workspaceLabelsInput.value = (Array.isArray(labels) ? labels : []).join(', ');
+  }
+  if (typeof workspaceNotesInput !== 'undefined' && workspaceNotesInput) {
+    workspaceNotesInput.value = String(noteBody || '');
   }
   if (workspaceTextInput) workspaceTextInput.value = text;
   setTimeout(() => {
@@ -978,6 +1103,9 @@ function renderWorkspaceBrowser() {
     row.appendChild(_workspaceMetaNode(
       file.name || _workspaceFileBasename(file.path),
       `${_formatWorkspaceBytes(file.size)}${file.mtime ? ` · ${file.mtime}` : ''}${artifactDetails}`,
+      '',
+      '',
+      _workspaceMetadataChips(file),
     ));
     row.appendChild(_workspaceActionsNode([
       { action: 'view', label: 'View', tone: 'secondary' },
@@ -1015,7 +1143,7 @@ function _workspaceArtifactDetails(file) {
   return ` · ${parts.join(' · ')}`;
 }
 
-function _workspaceMetaNode(nameText, detailsText, iconClass = '', iconText = '') {
+function _workspaceMetaNode(nameText, detailsText, iconClass = '', iconText = '', chips = []) {
   const meta = document.createElement('div');
   meta.className = 'workspace-file-meta';
   if (iconText) {
@@ -1035,6 +1163,18 @@ function _workspaceMetaNode(nameText, detailsText, iconClass = '', iconText = ''
   details.textContent = detailsText;
   text.appendChild(name);
   text.appendChild(details);
+  const visibleChips = Array.isArray(chips) ? chips.filter(chip => chip && chip.label) : [];
+  if (visibleChips.length) {
+    const chipWrap = document.createElement('div');
+    chipWrap.className = 'workspace-metadata-chips';
+    for (const chip of visibleChips) {
+      const chipNode = document.createElement('span');
+      chipNode.className = `workspace-metadata-chip ${chip.kind === 'note' ? 'is-note' : 'is-label'}`;
+      chipNode.textContent = chip.label;
+      chipWrap.appendChild(chipNode);
+    }
+    text.appendChild(chipWrap);
+  }
   meta.appendChild(text);
   return meta;
 }
@@ -1160,17 +1300,27 @@ function getWorkspaceDirectoryEntries(path = '') {
   return _workspaceDirectEntries(path);
 }
 
-async function saveWorkspaceFile(path, text) {
+async function saveWorkspaceFile(path, text, metadata = null) {
   const resp = await apiFetch('/workspace/files', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path, text }),
   });
   const data = await _workspaceJson(resp);
-  renderWorkspaceFiles(data.workspace || {});
+  const savedPath = data.file?.path || path;
+  if (metadata) {
+    await _syncWorkspaceFileMetadata(savedPath, metadata);
+    try {
+      await refreshWorkspaceFiles();
+    } catch (_) {
+      renderWorkspaceFiles(data.workspace || {});
+    }
+  } else {
+    renderWorkspaceFiles(data.workspace || {});
+  }
   hideWorkspaceEditor();
   hideWorkspaceViewer();
-  setWorkspaceMessage(`Saved ${data.file?.path || path}`);
+  setWorkspaceMessage(`Saved ${savedPath}`);
   return data;
 }
 
@@ -1424,7 +1574,11 @@ async function openWorkspaceEditorFromCommand(action = 'add', path = '') {
     }
     try {
       const data = await readWorkspaceFile(fileName);
-      showWorkspaceEditor(data.path || fileName, data.text || '', { readOnlyPath: true });
+      const editorPath = data.path || fileName;
+      showWorkspaceEditor(editorPath, data.text || '', {
+        readOnlyPath: true,
+        ..._workspaceMetadataOptionsForPath(editorPath, data),
+      });
     } catch (err) {
       hideWorkspaceEditor();
       _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to load session file'), 'error');
@@ -1471,7 +1625,11 @@ async function handleWorkspaceFileAction(action, path) {
       await _workspaceAfterPaint();
       const data = await readWorkspaceFile(path);
       if (_workspaceViewedPath !== String(path || '').trim()) return;
-      showWorkspaceEditor(data.path || path, data.text || '', { readOnlyPath: true });
+      const editorPath = data.path || path;
+      showWorkspaceEditor(editorPath, data.text || '', {
+        readOnlyPath: true,
+        ..._workspaceMetadataOptionsForPath(editorPath, data),
+      });
     } else if (action === 'download') {
       await downloadWorkspaceFile(path);
     } else if (action === 'move') {
@@ -1615,7 +1773,16 @@ workspaceViewer?.addEventListener('click', event => {
 workspaceEditor?.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
-    await saveWorkspaceFile(_workspacePathInCurrentDir(workspacePathInput?.value || ''), workspaceTextInput?.value || '');
+    await saveWorkspaceFile(
+      _workspacePathInCurrentDir(workspacePathInput?.value || ''),
+      workspaceTextInput?.value || '',
+      {
+        labels: _parseWorkspaceLabelInput(
+          typeof workspaceLabelsInput !== 'undefined' && workspaceLabelsInput ? workspaceLabelsInput.value : '',
+        ),
+        noteBody: typeof workspaceNotesInput !== 'undefined' && workspaceNotesInput ? workspaceNotesInput.value : '',
+      },
+    );
   } catch (err) {
     setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to save session file'), 'error');
   }

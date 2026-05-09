@@ -189,8 +189,8 @@ class TestSessionMigrate:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO projects "
-                "(id, session_id, name, slug, description, status, color, notes, created, updated) "
-                "VALUES (?, ?, 'Case', ?, '', 'active', '', '', datetime('now'), datetime('now'))",
+                "(id, session_id, name, slug, description, status, color, created, updated) "
+                "VALUES (?, ?, 'Case', ?, '', 'active', '', datetime('now'), datetime('now'))",
                 (project_id, session_id, slug),
             )
             conn.execute(
@@ -541,8 +541,8 @@ class TestSessionMigrate:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO projects "
-                "(id, session_id, name, slug, description, status, color, notes, created, updated) "
-                "VALUES ('prj_existing_dest', ?, 'Case', 'case', '', 'active', '', '', "
+                "(id, session_id, name, slug, description, status, color, created, updated) "
+                "VALUES ('prj_existing_dest', ?, 'Case', 'case', '', 'active', '', "
                 "datetime('now'), datetime('now'))",
                 (to_id,),
             )

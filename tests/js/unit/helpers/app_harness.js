@@ -179,6 +179,31 @@ export async function loadAppFns({
         <div id="command-catalog-body"></div>
       </div>
     </div>
+    <div id="project-workspace-overlay" class="u-hidden">
+      <div id="project-workspace-modal">
+        <button class="project-workspace-close"></button>
+      </div>
+    </div>
+    <div id="project-target-editor-overlay" class="u-hidden">
+      <div id="project-target-editor-modal">
+        <button class="project-target-editor-close"></button>
+      </div>
+    </div>
+    <div id="project-package-manifest-overlay" class="u-hidden">
+      <div id="project-package-manifest-modal">
+        <button class="project-package-manifest-close"></button>
+      </div>
+    </div>
+    <div id="project-package-wizard-overlay" class="u-hidden">
+      <div id="project-package-wizard-modal">
+        <button class="project-package-wizard-close"></button>
+      </div>
+    </div>
+    <div id="project-entity-editor-overlay" class="u-hidden">
+      <div id="project-entity-editor-modal">
+        <button class="project-entity-editor-close"></button>
+      </div>
+    </div>
     <div id="theme-overlay"></div>
     <button class="theme-close"></button>
     <div id="theme-modal"></div>

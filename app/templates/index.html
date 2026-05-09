@@ -450,7 +450,9 @@
       <div id="history-advanced-filters" class="history-advanced-filters">
         <select id="history-type-filter" aria-label="Filter by history item type">
           <option value="all">type: all</option>
-          <option value="runs">type: runs</option>
+          <option value="runs">runs: all</option>
+          <option value="runs_builtin">runs: built-in</option>
+          <option value="runs_external">runs: external</option>
           <option value="snapshots">type: snapshots</option>
         </select>
         <div class="history-root-autocomplete">
@@ -555,8 +557,12 @@
     </div>
     <label class="workspace-label" for="workspace-path-input">File Name</label>
     <input id="workspace-path-input" class="form-input form-control" type="text" placeholder="targets.txt" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text">
+    <label class="workspace-label" for="workspace-labels-input">Labels</label>
+    <input id="workspace-labels-input" class="form-input form-control" type="text" placeholder="important, retest" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text">
+    <label class="workspace-label" for="workspace-notes-input">Notes</label>
+    <textarea id="workspace-notes-input" class="workspace-notes-textarea form-control nice-scroll" rows="3" placeholder="Add context for this file" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text"></textarea>
     <label class="workspace-label" for="workspace-text-input">Contents</label>
-    <textarea id="workspace-text-input" class="workspace-textarea form-control nice-scroll" rows="18" placeholder="Paste file contents here" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text"></textarea>
+    <textarea id="workspace-text-input" class="workspace-textarea form-control nice-scroll" rows="14" placeholder="Paste file contents here" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text"></textarea>
     <div class="workspace-editor-actions">
       <button type="submit" class="btn btn-primary btn-compact" id="workspace-save-btn">Save file</button>
     </div>
@@ -688,6 +694,11 @@
       <textarea id="project-notes-input" class="form-control form-control-compact project-notes-input" maxlength="20000" rows="3" placeholder="Notes for selected project" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Selected project notes"></textarea>
       <div id="project-notes-save-status" class="field-save-status u-hidden" role="status" aria-live="polite">saved</div>
     </form>
+    <form id="project-labels-form" class="project-labels-form u-hidden">
+      <input id="project-labels-input" class="form-control form-control-compact" type="text" maxlength="512" placeholder="important, retest" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Selected project labels">
+      <button type="submit" class="btn btn-secondary btn-compact" id="project-labels-save-btn">Save labels</button>
+      <div id="project-labels-save-status" class="field-save-status u-hidden" role="status" aria-live="polite">saved</div>
+    </form>
   </div>
   <div id="project-target-editor-overlay" class="modal-overlay project-target-editor-overlay u-hidden" aria-hidden="true">
     <div id="project-target-editor-modal" class="modal-card modal-card-compact project-target-editor-modal" role="dialog" aria-modal="true" aria-labelledby="project-target-editor-title">
@@ -719,7 +730,7 @@
         </label>
         <label class="project-target-edit-field">
           <span>Notes</span>
-          <textarea id="project-target-notes" class="form-control form-control-compact" maxlength="4000" rows="3" placeholder="Optional notes" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Project target notes"></textarea>
+          <textarea id="project-target-notes" class="form-control form-control-compact" maxlength="2000" rows="3" placeholder="Optional notes" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Project target notes"></textarea>
         </label>
         <div class="modal-actions">
           <button type="button" class="btn btn-secondary btn-compact project-target-editor-cancel">Cancel</button>
@@ -742,31 +753,32 @@
       <div id="project-package-wizard-body"></div>
     </div>
   </div>
-  <div id="project-entity-editor-overlay" class="modal-overlay project-entity-editor-overlay u-hidden" aria-hidden="true">
-    <div id="project-entity-editor-modal" class="modal-card modal-card-compact project-entity-editor-modal" role="dialog" aria-modal="true" aria-labelledby="project-entity-editor-title">
-      <div class="faq-header">
-        <div>
-          <span class="faq-title" id="project-entity-editor-title">EDIT METADATA</span>
-          <div class="project-entity-editor-subtitle" id="project-entity-editor-subtitle"></div>
-        </div>
-        <button type="button" class="close-btn project-entity-editor-close" aria-label="Close metadata editor">✕</button>
+</div>
+
+<div id="project-entity-editor-overlay" class="modal-overlay project-entity-editor-overlay u-hidden" aria-hidden="true">
+  <div id="project-entity-editor-modal" class="modal-card modal-card-compact project-entity-editor-modal" role="dialog" aria-modal="true" aria-labelledby="project-entity-editor-title">
+    <div class="faq-header">
+      <div>
+        <span class="faq-title" id="project-entity-editor-title">EDIT METADATA</span>
+        <div class="project-entity-editor-subtitle" id="project-entity-editor-subtitle"></div>
       </div>
-      <form id="project-entity-editor-form" class="project-target-editor-form project-entity-editor-form">
-        <label class="project-target-edit-field">
-          <span>Labels</span>
-          <input id="project-entity-labels" class="form-control form-control-compact" type="text" maxlength="512" placeholder="important, retest" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Entity labels">
-          <small class="project-target-value-help">Comma-separated labels. Existing labels not listed here will be removed.</small>
-        </label>
-        <label class="project-target-edit-field">
-          <span>Note</span>
-          <textarea id="project-entity-note" class="form-control form-control-compact" maxlength="20000" rows="4" placeholder="Optional note" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Entity note"></textarea>
-        </label>
-        <div class="modal-actions">
-          <button type="button" class="btn btn-secondary btn-compact project-entity-editor-cancel">Cancel</button>
-          <button type="submit" id="project-entity-submit" class="btn btn-primary btn-compact">Save</button>
-        </div>
-      </form>
+      <button type="button" class="close-btn project-entity-editor-close" aria-label="Close metadata editor">✕</button>
     </div>
+    <form id="project-entity-editor-form" class="project-target-editor-form project-entity-editor-form">
+      <label class="project-target-edit-field">
+        <span>Labels</span>
+        <input id="project-entity-labels" class="form-control form-control-compact" type="text" maxlength="512" placeholder="important, retest" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Entity labels">
+        <small class="project-target-value-help">Comma-separated labels. Existing labels not listed here will be removed.</small>
+      </label>
+      <label class="project-target-edit-field">
+        <span>Note</span>
+        <textarea id="project-entity-note" class="form-control form-control-compact" maxlength="20000" rows="4" placeholder="Optional note" autocomplete="off" autocapitalize="sentences" spellcheck="true" aria-label="Entity note"></textarea>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary btn-compact project-entity-editor-cancel">Cancel</button>
+        <button type="submit" id="project-entity-submit" class="btn btn-primary btn-compact">Save</button>
+      </div>
+    </form>
   </div>
 </div>
 

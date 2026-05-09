@@ -47,6 +47,8 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     <form id="workspace-editor" class="u-hidden">
       <div id="workspace-editor-title"></div>
       <input id="workspace-path-input">
+      <input id="workspace-labels-input">
+      <textarea id="workspace-notes-input"></textarea>
       <textarea id="workspace-text-input"></textarea>
       <button id="workspace-save-btn" type="submit"></button>
     </form>
@@ -124,6 +126,8 @@ export function setupWorkspace(apiFetch = vi.fn(), overrides = {}) {
     workspaceEditor: document.getElementById('workspace-editor'),
     workspaceEditorTitle: document.getElementById('workspace-editor-title'),
     workspacePathInput: document.getElementById('workspace-path-input'),
+    workspaceLabelsInput: document.getElementById('workspace-labels-input'),
+    workspaceNotesInput: document.getElementById('workspace-notes-input'),
     workspaceTextInput: document.getElementById('workspace-text-input'),
     workspaceRefreshBtn: document.getElementById('workspace-refresh-btn'),
     workspaceNewBtn: document.getElementById('workspace-new-btn'),

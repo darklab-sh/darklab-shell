@@ -229,6 +229,20 @@ describe('app helpers', () => {
     })
   })
 
+  it('binds focus traps for project workspace modal surfaces at startup', async () => {
+    await loadAppFns()
+
+    ;[
+      'project-workspace-modal',
+      'project-target-editor-modal',
+      'project-package-manifest-modal',
+      'project-package-wizard-modal',
+      'project-entity-editor-modal',
+    ].forEach((id) => {
+      expect(document.getElementById(id)?.dataset.focusTrapBound).toBe('1')
+    })
+  })
+
   it('applies the saved theme at startup', async () => {
     await loadAppFns({
       theme: 'theme_light_blue',
@@ -3542,6 +3556,7 @@ describe('app helpers', () => {
         altKey: true,
         shiftKey: true,
         bubbles: true,
+        cancelable: true,
       }),
     )
 
@@ -3592,6 +3607,7 @@ describe('app helpers', () => {
         altKey: true,
         shiftKey: true,
         bubbles: true,
+        cancelable: true,
       }),
     )
 
@@ -3651,8 +3667,7 @@ describe('app helpers', () => {
 
     cmdInput.dispatchEvent(
       new KeyboardEvent('keydown', {
-        key: 'F',
-        code: 'KeyF',
+        key: 'ƒ',
         altKey: true,
         shiftKey: true,
         bubbles: true,

@@ -1181,10 +1181,15 @@ function eventMatchesCode(e, code) {
   return !!(e && e.code === code);
 }
 
+const MAC_OPTION_KEY_ALIASES = {
+  f: ['ƒ'],
+};
+
 function eventMatchesLetter(e, letter) {
   if (eventMatchesCode(e, `Key${letter.toUpperCase()}`)) return true;
   const key = e && typeof e.key === 'string' ? e.key.toLowerCase() : '';
-  return key === letter.toLowerCase();
+  const normalizedLetter = String(letter || '').toLowerCase();
+  return key === normalizedLetter || (MAC_OPTION_KEY_ALIASES[normalizedLetter] || []).includes(key);
 }
 
 function eventMatchesDigit(e, digit) {

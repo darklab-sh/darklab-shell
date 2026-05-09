@@ -17,6 +17,8 @@ describe('workspace UI helpers', () => {
         artifact_count: 1,
         artifact_run_count: 1,
         project_names: ['Signal Case'],
+        labels: [{ label: 'important' }],
+        note: { body: 'Retest after scanner update.' },
       }],
       usage: { bytes_used: 11, file_count: 1 },
       limits: { quota_bytes: 1024, max_files: 10 },
@@ -26,6 +28,8 @@ describe('workspace UI helpers', () => {
     expect(document.querySelector('.workspace-file-name').textContent).toBe('targets.txt')
     expect(document.querySelector('.workspace-file-details').textContent)
       .toContain('1 artifact · 1 run · Signal Case')
+    expect([...document.querySelectorAll('.workspace-metadata-chip')].map(node => node.textContent))
+      .toEqual(['important', 'note'])
     expect([...document.querySelectorAll('[data-workspace-action]')].map(btn => btn.textContent)).toEqual([
       'View',
       'Edit',
@@ -378,6 +382,84 @@ describe('workspace UI helpers', () => {
     expect(document.getElementById('workspace-path-input').readOnly).toBe(true)
     expect(document.getElementById('workspace-path-input').value).toBe('response.html')
     expect(document.getElementById('workspace-text-input').value).toBe('<html></html>\n')
+  })
+
+  it('prefills and saves workspace file labels and notes from the editor', async () => {
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (String(url) === '/workspace/files/read?path=targets.txt') {
+        return Promise.resolve(responseJson({
+          path: 'targets.txt',
+          text: 'darklab.sh\n',
+          labels: [{ label: 'scope' }],
+          note: { body: 'seed note' },
+        }))
+      }
+      if (String(url) === '/workspace/files' && opts.method === 'POST') {
+        return Promise.resolve(responseJson({
+          file: { path: 'targets.txt', size: 14 },
+          workspace: {
+            files: [{ path: 'targets.txt', size: 14 }],
+            usage: { bytes_used: 14, file_count: 1 },
+            limits: { quota_bytes: 4096, max_files: 10 },
+          },
+        }))
+      }
+      if (String(url) === '/entities/workspace_file/targets.txt/labels' && !opts.method) {
+        return Promise.resolve(responseJson({ labels: [{ label: 'scope' }] }))
+      }
+      if (String(url) === '/entities/workspace_file/targets.txt/labels' && opts.method === 'DELETE') {
+        return Promise.resolve(responseJson({ deleted: true }))
+      }
+      if (String(url) === '/entities/workspace_file/targets.txt/labels' && opts.method === 'POST') {
+        return Promise.resolve(responseJson({ label: { label: 'review' } }, 201))
+      }
+      if (String(url) === '/entities/workspace_file/targets.txt/note' && opts.method === 'PUT') {
+        return Promise.resolve(responseJson({ note: { body: 'updated note' } }))
+      }
+      if (String(url) === '/workspace/files' && !opts.method) {
+        return Promise.resolve(responseJson({
+          files: [{
+            path: 'targets.txt',
+            size: 14,
+            labels: [{ label: 'review' }],
+            note: { body: 'updated note' },
+          }],
+          usage: { bytes_used: 14, file_count: 1 },
+          limits: { quota_bytes: 4096, max_files: 10 },
+        }))
+      }
+      return Promise.resolve(responseJson({}))
+    })
+    const { openWorkspaceEditorFromCommand } = setupWorkspace(apiFetch)
+
+    await openWorkspaceEditorFromCommand('edit', 'targets.txt')
+
+    expect(document.getElementById('workspace-labels-input').value).toBe('scope')
+    expect(document.getElementById('workspace-notes-input').value).toBe('seed note')
+
+    document.getElementById('workspace-labels-input').value = 'review'
+    document.getElementById('workspace-notes-input').value = 'updated note'
+    document.getElementById('workspace-editor').dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }))
+    for (let i = 0; i < 4; i += 1) await flushWorkspacePromises()
+
+    expect(apiFetch).toHaveBeenCalledWith('/workspace/files', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ path: 'targets.txt', text: 'darklab.sh\n' }),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/entities/workspace_file/targets.txt/labels', expect.objectContaining({
+      method: 'DELETE',
+      body: JSON.stringify({ label: 'scope' }),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/entities/workspace_file/targets.txt/labels', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ label: 'review' }),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/entities/workspace_file/targets.txt/note', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ body: 'updated note' }),
+    }))
+    expect([...document.querySelectorAll('.workspace-metadata-chip')].map(node => node.textContent))
+      .toEqual(['review', 'note'])
   })
 
   it('shows file contents in a read-only viewer and keeps edit mode separate', async () => {

@@ -183,6 +183,26 @@ class TestProjectRoutes:
         assert resp.status_code == 201
         return json.loads(resp.data)["project"]
 
+    def _seed_run(self, session_id, command="nmap darklab.sh", *, run_id=None):
+        run_id = run_id or "run-" + uuid.uuid4().hex
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, ?, datetime('now'), ?, 0)",
+                (run_id, session_id, command, "[]"),
+            )
+            conn.commit()
+        return run_id
+
+    def _link_run(self, client, session_id, project_id, run_id):
+        resp = client.post(
+            f"/projects/{project_id}/links",
+            json={"entity_type": "run", "entity_id": run_id, "source": "manual"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert resp.status_code == 201
+        return json.loads(resp.data)["link"]
+
     def test_project_write_routes_are_rate_limited(self):
         for view in (
             project_routes.projects_create,
@@ -222,6 +242,25 @@ class TestProjectRoutes:
 
         get_resp = client.get(f"/projects/{project['id']}", headers={"X-Session-ID": session_id})
         assert json.loads(get_resp.data)["project"]["description"] == "Quarterly case folder"
+
+        project_label = client.post(
+            f"/entities/project/{project['id']}/labels",
+            json={"label": "important"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert project_label.status_code == 201
+        labeled_list = json.loads(client.get("/projects", headers={"X-Session-ID": session_id}).data)
+        assert [label["label"] for label in labeled_list["projects"][0]["labels"]] == ["important"]
+        labeled_get = json.loads(client.get(
+            f"/projects/{project['id']}",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert [label["label"] for label in labeled_get["project"]["labels"]] == ["important"]
+        labeled_summary = json.loads(client.get(
+            f"/projects/{project['id']}/summary",
+            headers={"X-Session-ID": session_id},
+        ).data)
+        assert [label["label"] for label in labeled_summary["project"]["labels"]] == ["important"]
 
         target_resp = client.post(
             f"/projects/{project['id']}/targets",
@@ -348,6 +387,12 @@ class TestProjectRoutes:
         assert updated["slug"] == "renamed-review"
         assert updated["status"] == "archived"
         assert updated["notes"] == "private notes"
+        with sqlite3.connect(DB_PATH) as conn:
+            assert conn.execute(
+                "SELECT body FROM entity_notes "
+                "WHERE session_id = ? AND entity_type = 'project' AND entity_id = ?",
+                (session_id, project["id"]),
+            ).fetchone()[0] == "private notes"
 
         default_list = json.loads(client.get("/projects", headers={"X-Session-ID": session_id}).data)
         assert default_list["projects"] == []
@@ -532,6 +577,128 @@ class TestProjectRoutes:
         assert delete_resp.status_code == 200
         deleted = json.loads(client.get("/projects/active", headers={"X-Session-ID": session_id}).data)
         assert deleted["project"] is None
+
+    def test_entity_note_routes_enforce_session_and_payload_boundaries(self):
+        client = get_client()
+        session_id = self._session_id("note-owner")
+        other_session = self._session_id("note-other")
+        run_id = self._seed_run(session_id)
+
+        create_resp = client.put(
+            f"/entities/run/{run_id}/note",
+            json={"body": "Owner-only note"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert create_resp.status_code == 200
+
+        for method in ("get", "put", "delete"):
+            request = getattr(client, method)
+            kwargs = {"headers": {"X-Session-ID": other_session}}
+            if method == "put":
+                kwargs["json"] = {"body": "Cross-session overwrite"}
+            resp = request(f"/entities/run/{run_id}/note", **kwargs)
+            assert resp.status_code == 404
+
+        missing_body = client.put(
+            f"/entities/run/{run_id}/note",
+            json={},
+            headers={"X-Session-ID": session_id},
+        )
+        assert missing_body.status_code == 400
+        whitespace_body = client.put(
+            f"/entities/run/{run_id}/note",
+            json={"body": "   "},
+            headers={"X-Session-ID": session_id},
+        )
+        assert whitespace_body.status_code == 400
+        non_object = client.put(
+            f"/entities/run/{run_id}/note",
+            json=["not", "an", "object"],
+            headers={"X-Session-ID": session_id},
+        )
+        assert non_object.status_code == 400
+        client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
+        unsupported_type = client.put(
+            f"/entities/not_supported/{run_id}/note",
+            json={"body": "Nope"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert unsupported_type.status_code == 400
+        client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
+        missing_entity = client.put(
+            "/entities/run/missing-run/note",
+            json={"body": "Missing"},
+            headers={"X-Session-ID": session_id},
+        )
+        assert missing_entity.status_code == 404
+
+        owner_note = json.loads(client.get(
+            f"/entities/run/{run_id}/note",
+            headers={"X-Session-ID": session_id},
+        ).data)["note"]
+        assert owner_note["body"] == "Owner-only note"
+
+    def test_project_compare_rejects_unlinked_cross_session_and_invalid_pairs(self):
+        client = get_client()
+        session_id = self._session_id("compare")
+        other_session = self._session_id("compare-other")
+        project = self._create_project(client, session_id)
+        left_run_id = self._seed_run(session_id, "nmap darklab.sh")
+        right_run_id = self._seed_run(session_id, "httpx darklab.sh")
+        unlinked_run_id = self._seed_run(session_id, "nuclei darklab.sh")
+        other_run_id = self._seed_run(other_session, "nmap other.example")
+        self._link_run(client, session_id, project["id"], left_run_id)
+
+        one_linked = client.get(
+            f"/projects/{project['id']}/compare",
+            headers={"X-Session-ID": session_id},
+        )
+        assert one_linked.status_code == 400
+
+        self._link_run(client, session_id, project["id"], right_run_id)
+        same_run = client.get(
+            f"/projects/{project['id']}/compare?left_run_id={left_run_id}&right_run_id={left_run_id}",
+            headers={"X-Session-ID": session_id},
+        )
+        assert same_run.status_code == 400
+        unlinked = client.get(
+            f"/projects/{project['id']}/compare?left_run_id={left_run_id}&right_run_id={unlinked_run_id}",
+            headers={"X-Session-ID": session_id},
+        )
+        assert unlinked.status_code == 400
+        cross_session = client.get(
+            f"/projects/{project['id']}/compare?left_run_id={left_run_id}&right_run_id={other_run_id}",
+            headers={"X-Session-ID": session_id},
+        )
+        assert cross_session.status_code == 400
+        missing_baseline = client.get(
+            f"/projects/{project['id']}/compare?left_run_id={left_run_id}&baseline_label=missing",
+            headers={"X-Session-ID": session_id},
+        )
+        assert missing_baseline.status_code == 400
+        missing_project = client.get(
+            f"/projects/missing-project/compare?left_run_id={left_run_id}&right_run_id={right_run_id}",
+            headers={"X-Session-ID": session_id},
+        )
+        assert missing_project.status_code == 404
+
+    def test_project_compare_returns_empty_diffs_for_matching_empty_runs(self):
+        client = get_client()
+        session_id = self._session_id("compare-empty")
+        project = self._create_project(client, session_id)
+        left_run_id = self._seed_run(session_id, "nmap darklab.sh")
+        right_run_id = self._seed_run(session_id, "nmap darklab.sh")
+        self._link_run(client, session_id, project["id"], left_run_id)
+        self._link_run(client, session_id, project["id"], right_run_id)
+
+        resp = client.get(
+            f"/projects/{project['id']}/compare?left_run_id={left_run_id}&right_run_id={right_run_id}",
+            headers={"X-Session-ID": session_id},
+        )
+        assert resp.status_code == 200
+        payload = json.loads(resp.data)
+        assert payload["findings"] == {"added": [], "removed": [], "unchanged_count": 0}
+        assert payload["artifacts"] == {"added": [], "removed": [], "unchanged_count": 0}
 
     def test_links_run_and_unlinks_without_duplicate_rows(self):
         client = get_client()
@@ -751,14 +918,13 @@ class TestProjectRoutes:
         assert summary["project"]["id"] == project["id"]
         assert summary["counts"] == {
             "runs": 2,
-            "snapshots": 0,
             "workspace_files": 0,
             "targets": 0,
             "pending_targets": 0,
             "artifacts": 2,
             "findings": 2,
             "labels": 3,
-            "notes": 3,
+            "notes": 4,
             "packages": 0,
         }
         assert {item["workspace_path"] for item in summary["artifacts"]} == {
@@ -785,10 +951,10 @@ class TestProjectRoutes:
             f"/projects/{project['id']}/compare?left_run_id={run_id}&right_run_id={baseline_run_id}",
             headers={"X-Session-ID": session_id},
         ).data)
-        assert [item["raw_line"] for item in comparison["findings"]["added"]] == ["443/tcp open https"]
-        assert [item["raw_line"] for item in comparison["findings"]["removed"]] == ["80/tcp open http"]
-        assert [item["workspace_path"] for item in comparison["artifacts"]["added"]] == ["reports/run.txt"]
-        assert [item["workspace_path"] for item in comparison["artifacts"]["removed"]] == ["reports/old.txt"]
+        assert [item["raw_line"] for item in comparison["findings"]["added"]] == ["80/tcp open http"]
+        assert [item["raw_line"] for item in comparison["findings"]["removed"]] == ["443/tcp open https"]
+        assert [item["workspace_path"] for item in comparison["artifacts"]["added"]] == ["reports/old.txt"]
+        assert [item["workspace_path"] for item in comparison["artifacts"]["removed"]] == ["reports/run.txt"]
         baseline_label = client.post(
             f"/entities/run/{baseline_run_id}/labels",
             json={"label": "baseline"},
@@ -839,6 +1005,8 @@ class TestProjectRoutes:
                 "include_artifacts": True,
                 "preset": "custom",
                 "include_private_notes": True,
+                "labels": ["handoff"],
+                "notes": "Package review note",
                 "selection": {
                     "run_ids": [run_id],
                     "finding_ids": [f"fnd_{run_id}"],
@@ -853,6 +1021,8 @@ class TestProjectRoutes:
         assert package["project_id"] == project["id"]
         assert package["include_artifacts"] is True
         assert package["redaction_mode"] == "raw"
+        assert [item["label"] for item in package["labels"]] == ["handoff"]
+        assert package["note"]["body"] == "Package review note"
         assert package["manifest"]["package_format_version"] == 1
         assert package["manifest"]["counts"]["runs"] == 1
         assert package["manifest"]["counts"]["findings"] == 1
@@ -893,11 +1063,15 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         ).data)
         assert [item["id"] for item in packages["packages"]] == [package["id"]]
+        assert [item["label"] for item in packages["packages"][0]["labels"]] == ["handoff"]
+        assert packages["packages"][0]["note"]["body"] == "Package review note"
         package_get = json.loads(client.get(
             f"/projects/{project['id']}/packages/{package['id']}",
             headers={"X-Session-ID": session_id},
         ).data)
         assert package_get["package"]["name"] == "Draft Evidence"
+        assert [item["label"] for item in package_get["package"]["labels"]] == ["handoff"]
+        assert package_get["package"]["note"]["body"] == "Package review note"
         with (
             mock.patch.dict(shell_app.CFG, {"workspace_enabled": True, "max_output_lines": 1}),
             mock.patch.object(project_routes.log, "info") as package_log,
@@ -1004,10 +1178,11 @@ class TestProjectRoutes:
             "production",
         }
         assert notes_json["include_private_notes"] is True
-        assert notes_json["count"] == 5
+        assert notes_json["count"] == 6
         assert {item["body"] for item in notes_json["notes"]} == {
             "Confirmed service owner",
             "Package review note",
+            "Package notes for the external handoff.",
             "Primary external target",
             "Raw output reviewed",
             "needs [retest](javascript:alert(2))",
@@ -1071,7 +1246,7 @@ class TestProjectRoutes:
         ).data)
         assert summary_after_package["counts"]["packages"] == 1
         assert summary_after_package["counts"]["labels"] == 6
-        assert summary_after_package["counts"]["notes"] == 5
+        assert summary_after_package["counts"]["notes"] == 6
         assert [item["id"] for item in summary_after_package["packages"]] == [package["id"]]
 
         workflow_target = json.loads(client.post(
@@ -1583,11 +1758,16 @@ class TestProjectRoutes:
                 "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
                 (other_run_id, other_session, "dig darklab.sh"),
             )
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
+                (f"{session_id}-snapshot", session_id, "snapshot", "[]"),
+            )
             conn.commit()
 
         cross_session = project_link_post({"entity_type": "run", "entity_id": other_run_id})
         unsupported = project_link_post({"entity_type": "note", "entity_id": "note_1"})
         run_scoped = project_link_post({"entity_type": "run_file_artifact", "entity_id": "rfa_1"})
+        snapshot_link = project_link_post({"entity_type": "snapshot", "entity_id": f"{session_id}-snapshot"})
 
         assert cross_session.status_code == 400
         assert "not found" in json.loads(cross_session.data)["error"]
@@ -1595,6 +1775,8 @@ class TestProjectRoutes:
         assert "Unsupported project entity type" in json.loads(unsupported.data)["error"]
         assert run_scoped.status_code == 400
         assert "do not support" in json.loads(run_scoped.data)["error"]
+        assert snapshot_link.status_code == 400
+        assert "do not support" in json.loads(snapshot_link.data)["error"]
 
 
 # ── /log ──────────────────────────────────────────────────────────────────────
@@ -3233,6 +3415,88 @@ class TestWorkspaceRoutes:
             )
             assert other.status_code == 404
 
+    def test_workspace_file_routes_include_and_maintain_generic_metadata(self):
+        client = get_client()
+        session = "workspace-metadata-" + uuid.uuid4().hex[:8]
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(config.CFG, self._cfg(tmp)):
+            created = client.post(
+                "/workspace/files",
+                headers={"X-Session-ID": session},
+                json={"path": "targets.txt", "text": "darklab.sh\n"},
+            )
+            assert created.status_code == 200
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    "INSERT INTO entity_labels "
+                    "(id, session_id, entity_type, entity_id, label, created) "
+                    "VALUES (?, ?, 'workspace_file', 'targets.txt', 'important', datetime('now'))",
+                    ("lbl_workspace_file_" + uuid.uuid4().hex, session),
+                )
+                conn.execute(
+                    "INSERT INTO entity_notes "
+                    "(id, session_id, entity_type, entity_id, body, created, updated) "
+                    "VALUES (?, ?, 'workspace_file', 'targets.txt', 'manual context', datetime('now'), datetime('now'))",
+                    ("note_workspace_file_" + uuid.uuid4().hex, session),
+                )
+                conn.commit()
+
+            listed = client.get("/workspace/files", headers={"X-Session-ID": session})
+            assert listed.status_code == 200
+            listed_file = listed.get_json()["files"][0]
+            assert listed_file["path"] == "targets.txt"
+            assert [label["label"] for label in listed_file["labels"]] == ["important"]
+            assert listed_file["note"]["body"] == "manual context"
+
+            read = client.get(
+                "/workspace/files/read?path=targets.txt",
+                headers={"X-Session-ID": session},
+            )
+            assert read.status_code == 200
+            assert [label["label"] for label in read.get_json()["labels"]] == ["important"]
+            assert read.get_json()["note"]["body"] == "manual context"
+
+            created_dir = client.post(
+                "/workspace/directories",
+                headers={"X-Session-ID": session},
+                json={"path": "reports"},
+            )
+            assert created_dir.status_code == 200
+            moved = client.post(
+                "/workspace/files/move",
+                headers={"X-Session-ID": session},
+                json={"source": "targets.txt", "destination": "reports/targets.txt"},
+            )
+            assert moved.status_code == 200
+            with sqlite3.connect(DB_PATH) as conn:
+                assert conn.execute(
+                    "SELECT COUNT(*) FROM entity_labels "
+                    "WHERE session_id = ? AND entity_type = 'workspace_file' AND entity_id = 'targets.txt'",
+                    (session,),
+                ).fetchone()[0] == 0
+                assert conn.execute(
+                    "SELECT body FROM entity_notes "
+                    "WHERE session_id = ? AND entity_type = 'workspace_file' "
+                    "AND entity_id = 'reports/targets.txt'",
+                    (session,),
+                ).fetchone()[0] == "manual context"
+
+            deleted = client.delete(
+                "/workspace/files?path=reports/targets.txt",
+                headers={"X-Session-ID": session},
+            )
+            assert deleted.status_code == 200
+            with sqlite3.connect(DB_PATH) as conn:
+                assert conn.execute(
+                    "SELECT COUNT(*) FROM entity_labels "
+                    "WHERE session_id = ? AND entity_type = 'workspace_file'",
+                    (session,),
+                ).fetchone()[0] == 0
+                assert conn.execute(
+                    "SELECT COUNT(*) FROM entity_notes "
+                    "WHERE session_id = ? AND entity_type = 'workspace_file'",
+                    (session,),
+                ).fetchone()[0] == 0
+
     def test_create_directory_lists_empty_folder(self):
         client = get_client()
         session = "workspace-dir-" + uuid.uuid4().hex[:8]
@@ -3516,8 +3780,8 @@ class TestWorkspaceRoutes:
                 )
                 conn.execute(
                     "INSERT INTO projects "
-                    "(id, session_id, name, slug, description, status, color, notes, created, updated) "
-                    "VALUES (?, ?, 'Artifact Case', ?, '', 'active', '', '', datetime('now'), datetime('now'))",
+                    "(id, session_id, name, slug, description, status, color, created, updated) "
+                    "VALUES (?, ?, 'Artifact Case', ?, '', 'active', '', datetime('now'), datetime('now'))",
                     (project_id, session, f"artifact-case-{uuid.uuid4().hex[:8]}"),
                 )
                 conn.execute(
@@ -4481,6 +4745,24 @@ class TestHistoryRoute:
                 "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
                 ("snap-history-1", session, "baseline scan", "2026-01-01T00:00:03", "[]"),
             )
+            conn.execute(
+                "INSERT INTO entity_labels "
+                "(id, session_id, entity_type, entity_id, label, created) "
+                "VALUES (?, ?, 'snapshot', ?, 'handoff', ?)",
+                ("label-snap-history-1", session, "snap-history-1", "2026-01-01T00:00:04"),
+            )
+            conn.execute(
+                "INSERT INTO entity_notes "
+                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES (?, ?, 'snapshot', ?, 'snapshot note', ?, ?)",
+                (
+                    "note-snap-history-1",
+                    session,
+                    "snap-history-1",
+                    "2026-01-01T00:00:04",
+                    "2026-01-01T00:00:04",
+                ),
+            )
             conn.commit()
             conn.close()
 
@@ -4494,13 +4776,55 @@ class TestHistoryRoute:
             assert data["runs"] == []
             assert data["items"][0]["type"] == "snapshot"
             assert data["items"][0]["label"] == "baseline scan"
+            assert data["items"][0]["labels"][0]["label"] == "handoff"
+            assert data["items"][0]["note"]["body"] == "snapshot note"
+            assert data["items"][0]["label_count"] == 1
+            assert data["items"][0]["note_count"] == 1
         finally:
             conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM entity_labels WHERE entity_id = ?", ("snap-history-1",))
+            conn.execute("DELETE FROM entity_notes WHERE entity_id = ?", ("snap-history-1",))
             conn.execute("DELETE FROM snapshots WHERE id = ?", ("snap-history-1",))
             conn.commit()
             conn.close()
 
-    def test_history_filters_runs_and_snapshots_by_project(self):
+    def test_history_filters_run_subtypes(self):
+        client = get_client()
+        session = "history-run-subtypes-" + uuid.uuid4().hex[:8]
+        run_ids = [f"{session}-builtin", f"{session}-external"]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (run_ids[0], session, "project list", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]"),
+                    (run_ids[1], session, "nmap darklab.sh", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]"),
+                ],
+            )
+            conn.commit()
+            conn.close()
+
+            builtins = json.loads(client.get(
+                "/history?type=runs_builtin&include_total=1",
+                headers={"X-Session-ID": session},
+            ).data)
+            external = json.loads(client.get(
+                "/history?type=runs_external&include_total=1",
+                headers={"X-Session-ID": session},
+            ).data)
+
+            assert [item["id"] for item in builtins["items"]] == [run_ids[0]]
+            assert builtins["total_count"] == 1
+            assert [item["id"] for item in external["items"]] == [run_ids[1]]
+            assert external["total_count"] == 1
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+            conn.commit()
+            conn.close()
+
+    def test_history_filters_runs_by_project_and_ignores_legacy_snapshot_links(self):
         client = get_client()
         session = "project-history-" + uuid.uuid4().hex[:8]
         project_resp = client.post(
@@ -4535,7 +4859,7 @@ class TestHistoryRoute:
                 "VALUES (?, ?, ?, ?, ?, datetime('now'))",
                 [
                     (f"{session}-link-run", project["id"], "run", linked_run, "manual"),
-                    (f"{session}-link-snapshot", project["id"], "snapshot", linked_snapshot, "snapshot_capture"),
+                    (f"{session}-link-snapshot", project["id"], "snapshot", linked_snapshot, "migration"),
                 ],
             )
             conn.commit()
@@ -4547,8 +4871,8 @@ class TestHistoryRoute:
             )
             data = json.loads(resp.data)
 
-            assert data["total_count"] == 2
-            assert [item["id"] for item in data["items"]] == [linked_snapshot, linked_run]
+            assert data["total_count"] == 1
+            assert [item["id"] for item in data["items"]] == [linked_run]
             assert [run["id"] for run in data["runs"]] == [linked_run]
             assert data["roots"] == ["dig"]
 
@@ -4557,8 +4881,8 @@ class TestHistoryRoute:
                 headers={"X-Session-ID": session},
             )
             snapshots = json.loads(snapshots_resp.data)
-            assert snapshots["total_count"] == 1
-            assert snapshots["items"][0]["id"] == linked_snapshot
+            assert snapshots["total_count"] == 0
+            assert snapshots["items"] == []
             assert snapshots["runs"] == []
         finally:
             conn = sqlite3.connect(DB_PATH)
@@ -4636,10 +4960,14 @@ class TestHistoryRoute:
             assert data["runs"][0]["finding_count"] == 1
             assert data["runs"][0]["label_count"] == 1
             assert data["runs"][0]["note_count"] == 1
+            assert data["runs"][0]["labels"][0]["label"] == "baseline"
+            assert data["runs"][0]["note"]["body"] == "review note"
             assert data["items"][0]["artifact_count"] == 1
             assert data["items"][0]["finding_count"] == 1
             assert data["items"][0]["label_count"] == 1
             assert data["items"][0]["note_count"] == 1
+            assert data["items"][0]["labels"][0]["label"] == "baseline"
+            assert data["items"][0]["note"]["body"] == "review note"
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.execute("DELETE FROM run_file_artifacts WHERE run_id = ?", (run_ids[0],))
@@ -4990,10 +5318,10 @@ class TestHistoryRoute:
             assert [line["text"] for line in data["sections"]["added"]] == ["443/tcp open https"]
             assert [line["text"] for line in data["sections"]["removed"]] == ["8080/tcp open http-proxy"]
             assert all("process exited" not in line["text"] for line in data["sections"]["added"])
-            assert [item["raw_line"] for item in data["objects"]["findings"]["added"]] == ["8080/tcp open http-proxy"]
-            assert [item["raw_line"] for item in data["objects"]["findings"]["removed"]] == ["443/tcp open https"]
-            assert [item["workspace_path"] for item in data["objects"]["artifacts"]["added"]] == ["reports/left.txt"]
-            assert [item["workspace_path"] for item in data["objects"]["artifacts"]["removed"]] == ["reports/right.txt"]
+            assert [item["raw_line"] for item in data["objects"]["findings"]["added"]] == ["443/tcp open https"]
+            assert [item["raw_line"] for item in data["objects"]["findings"]["removed"]] == ["8080/tcp open http-proxy"]
+            assert [item["workspace_path"] for item in data["objects"]["artifacts"]["added"]] == ["reports/right.txt"]
+            assert [item["workspace_path"] for item in data["objects"]["artifacts"]["removed"]] == ["reports/left.txt"]
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.execute("DELETE FROM findings WHERE session_id = ?", (session,))
@@ -5070,7 +5398,7 @@ class TestShareRoute:
         assert "id" in data
         assert "url" in data
 
-    def test_post_links_snapshot_to_source_run_project(self):
+    def test_post_does_not_link_snapshot_to_source_run_project(self):
         client = get_client()
         session = "share-project-" + uuid.uuid4().hex[:8]
         run_id = "run-" + uuid.uuid4().hex
@@ -5102,7 +5430,7 @@ class TestShareRoute:
             headers={"X-Session-ID": session},
         )
         assert resp.status_code == 200
-        share_id = json.loads(resp.data)["id"]
+        assert "id" in json.loads(resp.data)
 
         conn = sqlite3.connect(DB_PATH)
         try:
@@ -5118,10 +5446,7 @@ class TestShareRoute:
             conn.execute("DELETE FROM projects WHERE session_id = ?", (session,))
             conn.commit()
             conn.close()
-        assert row is not None
-        assert row[0] == "snapshot"
-        assert row[1] == share_id
-        assert row[2] == "snapshot_capture"
+        assert row is None
 
     def test_post_rejects_non_string_label(self):
         client = get_client()

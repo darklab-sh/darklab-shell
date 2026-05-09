@@ -488,6 +488,7 @@ describe('history panel actions', () => {
     appConfig = {},
     activeProject = null,
     showConfirmImpl = vi.fn(() => Promise.resolve(null)),
+    openMetadataEditorImpl = vi.fn(),
   } = {}) {
     document.body.innerHTML = `
       <div id="history-panel"></div>
@@ -497,6 +498,8 @@ describe('history panel actions', () => {
       <select id="history-type-filter">
         <option value="all">all</option>
         <option value="runs">runs</option>
+        <option value="runs_builtin">built-in</option>
+        <option value="runs_external">external</option>
         <option value="snapshots">snapshots</option>
       </select>
       <input id="history-root-input" />
@@ -629,6 +632,7 @@ describe('history panel actions', () => {
     const cmdInput = document.getElementById('cmd')
     const location = { origin: 'https://example.test' }
     const windowOpen = vi.fn()
+    globalThis.openEntityMetadataEditor = openMetadataEditorImpl
 
     return {
       ...fromDomScripts(
@@ -721,6 +725,7 @@ describe('history panel actions', () => {
       bindDismissible,
       refocusComposerAfterAction,
       showConfirm: showConfirmImpl,
+      openMetadataEditor: openMetadataEditorImpl,
     }
   }
 
@@ -843,9 +848,10 @@ describe('history panel actions', () => {
 
     const entry = document.querySelector('#history-list .history-entry')
     const visibleActions = [...entry.querySelector('.history-actions').children].map(el => el.textContent)
-    expect(visibleActions).toEqual(['restore', 'delete', 'morepermalinkcompareadd to active projectadd to projectcopy run id'])
+    expect(visibleActions).toEqual(['restore', 'delete', 'moreeditpermalinkcompareadd to active projectadd to projectcopy run id'])
     const menuActions = [...entry.querySelectorAll('.history-action-menu [data-action]')].map(el => el.dataset.action)
     expect(menuActions).toEqual([
+      'edit-metadata',
       'permalink',
       'compare',
       'add-active-project',
@@ -1243,8 +1249,8 @@ describe('history panel actions', () => {
               },
               objects: {
                 findings: {
-                  added: [{ title: 'open port 8080', raw_line: '8080/tcp open http-proxy', review_state: 'new' }],
-                  removed: [{ title: 'open port 443', raw_line: '443/tcp open https', severity: 'high' }],
+                  added: [{ title: 'open port 443', raw_line: '443/tcp open https', severity: 'high' }],
+                  removed: [{ title: 'open port 8080', raw_line: '8080/tcp open http-proxy', review_state: 'new' }],
                 },
                 artifacts: {
                   added: [{ workspace_path: 'reports/new.json', kind: 'output', byte_size: 12 }],
@@ -1302,6 +1308,7 @@ describe('history panel actions', () => {
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('443/tcp open https')
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('8080/tcp open http-proxy')
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('Added findings (1)')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('Removed findings (1)')
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('Removed artifacts (1)')
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('reports/new.json')
 
@@ -1346,8 +1353,65 @@ describe('history panel actions', () => {
     expect(_buildHistoryRequestUrl()).toContain('type=snapshots')
   })
 
-  it('renders snapshot rows with open and copy-link actions', async () => {
+  it('includes run subtype filters in the request URL', () => {
+    const { _setHistoryFilter, _buildHistoryRequestUrl } = loadHistoryPanel()
+
+    _setHistoryFilter('type', 'runs_builtin')
+    expect(_buildHistoryRequestUrl()).toContain('type=runs_builtin')
+
+    _setHistoryFilter('type', 'runs_external')
+    expect(_buildHistoryRequestUrl()).toContain('type=runs_external')
+  })
+
+  it('renders run metadata badges and opens the metadata editor from the run menu', async () => {
+    const openMetadataEditor = vi.fn()
     const { refreshHistoryPanel } = loadHistoryPanel({
+      openMetadataEditorImpl: openMetadataEditor,
+      apiFetchImpl: vi.fn(() =>
+        Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              roots: ['nmap'],
+              items: [
+                {
+                  id: 'run-1',
+                  type: 'run',
+                  command: 'nmap darklab.sh',
+                  label: 'nmap darklab.sh',
+                  started: '2026-01-01T00:00:00Z',
+                  created: '2026-01-01T00:00:00Z',
+                  exit_code: 0,
+                  labels: [{ label: 'baseline' }],
+                  note: { body: 'review owner' },
+                },
+              ],
+              runs: [],
+            }),
+        }),
+      ),
+    })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(document.querySelector('.history-entry-label-badge')?.textContent).toBe('baseline')
+    expect(document.querySelector('.history-entry-note-badge')?.textContent).toBe('note')
+
+    document
+      .querySelector('#history-list .history-entry [data-action="edit-metadata"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(openMetadataEditor).toHaveBeenCalledWith(
+      'run',
+      expect.objectContaining({ id: 'run-1', command: 'nmap darklab.sh' }),
+      expect.objectContaining({ onSaved: expect.any(Function) }),
+    )
+  })
+
+  it('renders snapshot rows with open and copy-link actions', async () => {
+    const openMetadataEditor = vi.fn()
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      openMetadataEditorImpl: openMetadataEditor,
       apiFetchImpl: vi.fn(() =>
         Promise.resolve({
           json: () =>
@@ -1359,6 +1423,8 @@ describe('history panel actions', () => {
                   type: 'snapshot',
                   label: 'nmap baseline snapshot',
                   created: '2026-01-01T00:00:00Z',
+                  labels: [{ label: 'handoff' }],
+                  note: { body: 'send to client' },
                 },
               ],
               runs: [],
@@ -1372,8 +1438,20 @@ describe('history panel actions', () => {
 
     const entry = document.querySelector('#history-list .history-entry')
     expect(entry.querySelector('.history-entry-cmd')?.textContent).toBe('nmap baseline snapshot')
+    expect(entry.querySelector('.history-entry-label-badge')?.textContent).toBe('handoff')
+    expect(entry.querySelector('.history-entry-note-badge')?.textContent).toBe('note')
     expect(entry.querySelector('[data-action="open"]')?.textContent).toBe('open')
     expect(entry.querySelector('[data-action="link"]')?.textContent).toBe('copy link')
+    expect(entry.querySelector('[data-action="edit-metadata"]')?.textContent).toBe('edit')
+
+    entry
+      .querySelector('[data-action="edit-metadata"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(openMetadataEditor).toHaveBeenCalledWith(
+      'snapshot',
+      expect.objectContaining({ id: 'snap-1', label: 'nmap baseline snapshot' }),
+      expect.objectContaining({ onSaved: expect.any(Function) }),
+    )
   })
 
   it('shows a date in history metadata when the run is not from today', async () => {

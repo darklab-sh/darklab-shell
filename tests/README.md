@@ -18,14 +18,16 @@ The suites are layered on purpose:
 
 Workspace file behavior is intentionally split across all three layers: pytest owns route/path-safety checks, Vitest owns browser command parsing and Files modal interactions, and Playwright covers the user-facing workflow in a live app.
 
+Project workspace behavior follows the same split: pytest owns project routes, schema, migration, packages, history/share integration, and persistence edge cases; Vitest owns Projects modal, history drawer, Files metadata, and package-wizard browser behavior; Playwright covers full user flows when focus, navigation, or live browser state is the important risk. Interactive PTY behavior is split between pytest service/route coverage, Vitest browser-controller coverage, and focused Playwright checks for the real terminal modal path.
+
 Current totals:
 
-- behavior tests: 2,528
+- behavior tests: 2,545
 - docs/inventory meta-tests: 30
-- `pytest`: 1276 (1246 behavior + 30 meta)
-- `vitest`: 1044
-- `playwright`: 240
-- total: 2,560
+- `pytest`: 1281 (1251 behavior + 30 meta)
+- `vitest`: 1051
+- `playwright`: 243
+- total: 2,575
 
 This document is organized in two parts:
 
@@ -118,6 +120,7 @@ bash scripts/run_playwright.sh tests/js/e2e/failure-paths.spec.js --grep "histor
 Playwright notes:
 
 - `npm run test:e2e` delegates to [`scripts/run_playwright.sh`](../scripts/run_playwright.sh), which clears the configured e2e ports, keeps local Playwright output quiet by default, captures isolated server logs under `test-results/e2e-server-logs/`, and prints server log tails only when Playwright exits non-zero. It uses [config/playwright.parallel.config.js](../config/playwright.parallel.config.js) unless a `--config` argument is supplied. Add `--debug-logs` when live app/server logs are needed, `--ci` for CI-style retries, `--serial` to force one isolated project while debugging worker contention, `--server-timeout <ms>` to give slower hosts more startup time, or `--force-color` when color must be forced through non-TTY output.
+- The wrapper defaults `PW_DISABLE_TS_ESM=1` because the repo's current Playwright configs/specs are plain JavaScript and do not require Playwright's TypeScript/ESM loader. Set `PW_DISABLE_TS_ESM=0` only when adding TypeScript Playwright files that need the loader.
 - plain `npx playwright test` uses [config/playwright.config.js](../config/playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
 - each parallel project gets its own Flask server port plus isolated `APP_DATA_DIR` state, so SQLite history, run-output artifacts, and limiter/process state do not leak between workers
 - modal interaction specs wait for app-level `data-interaction-ready` markers before driving real keyboard focus movement, keeping focus-trap coverage browser-native without fixed sleeps or synthetic key events
@@ -925,6 +928,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestProjectRoutes.test_projects_are_session_scoped_and_slugs_are_unique_per_session` | Verifies project session isolation and per-session slug collision handling. |
 | `TestProjectRoutes.test_sets_gets_and_clears_active_project` | Verifies active project context can be saved, read, and cleared for the current session. |
 | `TestProjectRoutes.test_active_project_rejects_cross_session_and_clears_stale_projects` | Verifies active project context rejects cross-session projects and clears archived or deleted projects. |
+| `TestProjectRoutes.test_entity_note_routes_enforce_session_and_payload_boundaries` | Verifies entity note routes reject cross-session access and invalid note payloads while preserving the owner note. |
+| `TestProjectRoutes.test_project_compare_rejects_unlinked_cross_session_and_invalid_pairs` | Verifies project run comparison rejects one-run, same-run, unlinked, cross-session, missing-baseline, and missing-project requests. |
+| `TestProjectRoutes.test_project_compare_returns_empty_diffs_for_matching_empty_runs` | Verifies project run comparison returns empty added/removed diffs for linked runs with no findings or artifacts. |
 | `TestProjectRoutes.test_links_run_and_unlinks_without_duplicate_rows` | Verifies project run link creation is idempotent and links can be removed. |
 | `TestProjectRoutes.test_redacted_evidence_package_redacts_manifest_and_transcripts` | Verifies redacted evidence packages redact manifests, static pages, and run transcripts while excluding raw artifacts. |
 | `TestProjectRoutes.test_project_workspace_write_quotas_return_conflict` | Verifies project workspace quotas return conflict responses without blocking idempotent writes. |
@@ -1064,6 +1070,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestWorkspaceRoutes.test_disabled_workspace_returns_403` | Verifies that workspace routes stay unavailable while workspace storage is disabled. |
 | `TestWorkspaceRoutes.test_write_list_read_delete_lifecycle` | Verifies the route-level workspace lifecycle for write, list, read, and delete operations. |
 | `TestWorkspaceRoutes.test_workspace_files_are_session_isolated` | Verifies that a file created under one session cannot be read from another session workspace. |
+| `TestWorkspaceRoutes.test_workspace_file_routes_include_and_maintain_generic_metadata` | Verifies that workspace file list/read responses expose generic labels and notes, and that move/delete operations keep path metadata in sync. |
 | `TestWorkspaceRoutes.test_create_directory_lists_empty_folder` | Verifies that the Files API can create and list explicit empty session folders. |
 | `TestWorkspaceRoutes.test_info_and_delete_folder_recursively` | Verifies that the Files API reports folder file counts and deletes nested folder contents through the same validated delete endpoint. |
 | `TestWorkspaceRoutes.test_move_file_and_folder_paths` | Verifies that the Files API can move files into folders, rename folders while moving, and move files back to the workspace root. |
@@ -1111,7 +1118,8 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestHistoryRoute.test_history_reports_totals_and_keeps_roots_complete_across_pages` | Checks that paginated history responses report totals and keep command-root suggestions across pages. |
 | `TestHistoryRoute.test_history_applies_starred_only_server_side` | Checks that starred-only history filtering is applied server-side and reflected in totals. |
 | `TestHistoryRoute.test_history_can_return_snapshot_items` | Checks that `/history?type=snapshots` returns snapshot items through the mixed history payload while leaving the run subset empty. |
-| `TestHistoryRoute.test_history_filters_runs_and_snapshots_by_project` | Verifies project history filters return only runs and snapshots linked to the requested project. |
+| `TestHistoryRoute.test_history_filters_run_subtypes` | Verifies that `/history` can split run rows into app built-ins and external command runs. |
+| `TestHistoryRoute.test_history_filters_runs_by_project_and_ignores_legacy_snapshot_links` | Verifies project history filters return linked runs and ignore legacy snapshot project links. |
 | `TestHistoryRoute.test_history_search_filters_by_command_text` | Checks that `/history` command-text search narrows the returned runs. |
 | `TestHistoryRoute.test_history_command_scope_excludes_output_matches` | Verifies command-scoped history search excludes runs that only match through saved output text. |
 | `TestHistoryRoute.test_history_filters_by_command_root` | Checks that `/history` command-root filtering returns matching runs and exposes the session root list. |
@@ -1121,7 +1129,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestHistoryRoute.test_compare_history_runs_returns_metadata_and_changed_lines` | Verifies that run comparison returns metadata deltas, changed-line pairs, and added/removed output while ignoring terminal chrome. |
 | `TestHistoryRoute.test_compare_history_runs_leaves_very_long_lines_unpaired` | Verifies that run comparison avoids expensive similar-line pairing for very long changed lines. |
 | `TestShareRoute.test_post_creates_snapshot` | Checks post creates snapshot handling. |
-| `TestShareRoute.test_post_links_snapshot_to_source_run_project` | Verifies snapshots created from project-associated runs are linked back to that project. |
+| `TestShareRoute.test_post_does_not_link_snapshot_to_source_run_project` | Verifies snapshots created from project-associated runs are not linked back to that project. |
 | `TestShareRoute.test_post_rejects_non_string_label` | Checks that post rejects non string label. |
 | `TestShareRoute.test_post_rejects_non_list_content` | Checks that post rejects non list content. |
 | `TestShareRoute.test_post_rejects_invalid_content_item` | Checks that post rejects invalid content item. |
@@ -1482,6 +1490,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 
 | Test | Description |
 | --- | --- |
+| `binds focus traps for project workspace modal surfaces at startup` | Verifies that project workspace modal surfaces bind focus traps during startup. |
 | `applies the saved theme at startup` | Verifies that applies the saved theme at startup. |
 | `applies saved timestamp, line number, and HUD clock preferences from cookies at startup` | Verifies that applies saved timestamp, line number, and HUD clock preferences from cookies at startup. |
 | `applies saved session preferences on startup over stale local cookies` | Verifies that session-scoped preferences loaded from `/session/preferences` override stale browser-local cookies during boot. |
@@ -1840,6 +1849,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders changed added and removed lines after choosing a comparison candidate` | Verifies that choosing a comparison candidate renders paired changed lines plus added/removed output. |
 | `preflights Restore Both tab capacity before creating either tab` | Verifies that Restore Both checks available tab capacity before creating comparison restore tabs. |
 | `includes the history type filter in the request URL when snapshots are selected` | Verifies that switching the desktop history surface to snapshots adds the `type=snapshots` filter to the `/history` request. |
+| `includes run subtype filters in the request URL` | Verifies that the history drawer sends built-in and external run subtype filters to `/history`. |
+| `renders run metadata badges and opens the metadata editor from the run menu` | Verifies that run history rows render label and note badges and delegate Edit to the metadata editor. |
 | `renders snapshot rows with open and copy-link actions` | Verifies that snapshot-only history responses render the `SNAPSHOT` row treatment and expose the snapshot action set. |
 | `shows a date in history metadata when the run is not from today` | Verifies that older history entries include a date token in their metadata row. |
 | `omits the date in history metadata for runs from the current day` | Verifies that same-day history entries keep the compact time-only metadata row. |
@@ -2252,7 +2263,10 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `validates project target values before saving` | Verifies that project target values are validated client-side before the modal saves a new or edited target. |
 | `reloads project findings after linked runs change` | Verifies that project findings refresh after runs are linked or unlinked from the project. |
 | `autosaves project notes while editing` | Verifies that project notes save automatically from the Details tab without an explicit Save button. |
+| `edits project labels from the details tab` | Verifies that project labels can be edited from the project Details tab and reflected in project header/sidebar chips. |
 | `opens a finding source run at the recorded line` | Verifies that project finding rows show target/review metadata, update review state without opening the run, and restore the source run at the persisted finding line number when clicked. |
+| `reorders project findings when the sort control changes` | Verifies that Projects modal finding sort modes visibly reorder finding rows by severity, target, and newest run. |
+| `refreshes an open Projects modal after a cross-tab project broadcast` | Verifies that a project-workspace storage broadcast refreshes an already-open Projects modal. |
 
 #### `state.test.js`
 
@@ -2642,6 +2656,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `saves new files relative to the currently selected folder` | Verifies that New File keeps the name field clean while saving relative to the active folder. |
 | `keeps the editor hidden until the user starts or closes an edit` | Verifies that the workspace editor stays collapsed until New File or edit mode opens it, and closes cleanly afterward. |
 | `opens the editor with a prefilled file name from terminal commands` | Verifies that terminal-native file add/edit flows can open the Files editor with a prefilled file name. |
+| `prefills and saves workspace file labels and notes from the editor` | Verifies that the Files editor preloads generic workspace-file metadata and reconciles labels and notes when saving. |
 | `shows file contents in a read-only viewer and keeps edit mode separate` | Verifies that View opens a read-only file display at the top of the file without exposing the larger edit form. |
 | `opens the viewer with a loading preview while a file read is pending` | Verifies that clicking View opens the viewer immediately with loading feedback before the file read and preview rendering finish. |
 | `shows loading feedback before opening the editor for large files` | Verifies that Edit opens with loading feedback before large file contents are loaded into the editor modal. |
@@ -3008,6 +3023,9 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | `desktop Status Monitor loads dashboard endpoints together without route stubs` | Verifies that the Status Monitor opens against real dashboard endpoints for status, workspace files, history stats, and history insights. |
 | `active rows sit under the pulse strip with wide telemetry` | Verifies that active Status Monitor rows render directly under the pulse strip with wide telemetry and meter rails. |
 | `visual cards open filtered history and restore constellation runs` | Verifies that Status Monitor visual cards can open filtered History and restore a run from the constellation. |
+| `creates an active project, manages targets, and edits linked run metadata` | Verifies that the Projects modal can create and activate a project, persist project labels/notes, add/edit/delete targets, link the last run, and save linked-run metadata in a live browser. |
+| `creates, edits, downloads, and deletes a project evidence package` | Verifies that the Projects modal package wizard creates a linked-run evidence package with labels/notes, and that package edit, manifest, download, and delete actions work in a live browser. |
+| `edits finding and artifact metadata and previews project artifacts` | Verifies that seeded project findings and run artifacts can be edited, previewed, downloaded, filtered by source run, and unlinked through the Projects modal in a live browser. |
 | `creates, views, edits, downloads, and consumes session files` | Verifies that the workspace modal can create, view, edit, and download a session file, and that the terminal can consume it through `cat`. |
 | `navigates nested file output folders and exposes viewer actions` | Verifies that the workspace modal displays nested output paths as folders and exposes actions in the file viewer header. |
 | `input-driven workflows render prefilled form fields and runnable rendered steps` | Verifies that input-driven workflow cards render prefilled fields, runnable rendered steps, and a `Run all` control. |

@@ -799,6 +799,45 @@ function _historyMetaKindBadge(kind, label = kind.toUpperCase()) {
   return badge;
 }
 
+function _historyEntityLabelValues(entity) {
+  const labels = entity && Array.isArray(entity.labels) ? entity.labels : [];
+  return labels
+    .map(label => String(label && typeof label === 'object' ? label.label : label || '').trim())
+    .filter(Boolean);
+}
+
+function _historyEntityNoteBody(entity) {
+  const note = entity && entity.note && typeof entity.note === 'object' ? entity.note : null;
+  return note ? String(note.body || '').trim() : '';
+}
+
+function _appendHistoryMetadataBadges(parent, entity) {
+  if (!parent) return;
+  const labels = _historyEntityLabelValues(entity);
+  const visibleLabels = labels.slice(0, 3);
+  visibleLabels.forEach((label) => {
+    const badge = document.createElement('span');
+    badge.className = 'history-entry-label-badge badge badge-tone-muted';
+    badge.textContent = label;
+    badge.title = `label: ${label}`;
+    parent.appendChild(badge);
+  });
+  if (labels.length > visibleLabels.length) {
+    const overflow = document.createElement('span');
+    overflow.className = 'history-entry-label-badge badge badge-tone-muted';
+    overflow.textContent = `+${labels.length - visibleLabels.length}`;
+    overflow.title = `${labels.length - visibleLabels.length} more labels`;
+    parent.appendChild(overflow);
+  }
+  if (_historyEntityNoteBody(entity)) {
+    const note = document.createElement('span');
+    note.className = 'history-entry-note-badge badge badge-tone-cyan';
+    note.textContent = 'note';
+    note.title = 'note saved';
+    parent.appendChild(note);
+  }
+}
+
 function _historyExitCodeNumber(exitCode) {
   return _historyCore.exitCodeNumber(exitCode);
 }
@@ -1026,6 +1065,7 @@ function _createHistoryActionMenu(run) {
   const menu = document.createElement('div');
   menu.className = 'history-action-menu save-menu dropdown-surface';
   [
+    ['edit-metadata', 'edit'],
     ['permalink', 'permalink'],
     ['compare', 'compare'],
     ['add-active-project', 'add to active project'],
@@ -1082,6 +1122,7 @@ function _createHistoryEntry(run, isStarred) {
   const meta = document.createElement('div');
   meta.className = 'history-entry-meta';
   meta.appendChild(_historyMetaKindBadge('run'));
+  _appendHistoryMetadataBadges(meta, run);
   const timeEl = document.createElement('span');
   timeEl.textContent = time;
   meta.appendChild(timeEl);
@@ -1150,6 +1191,7 @@ function _createSnapshotHistoryEntry(snapshot) {
   const meta = document.createElement('div');
   meta.className = 'history-entry-meta';
   meta.appendChild(_historyMetaKindBadge('snapshot'));
+  _appendHistoryMetadataBadges(meta, snapshot);
   const createdAt = new Date(snapshot.created);
   const timeEl = document.createElement('span');
   timeEl.textContent = Number.isNaN(createdAt.getTime())
@@ -1175,6 +1217,13 @@ function _createSnapshotHistoryEntry(snapshot) {
   linkBtn.dataset.action = 'link';
   linkBtn.textContent = 'copy link';
   actions.appendChild(linkBtn);
+
+  const editBtn = document.createElement('button');
+  editBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+  editBtn.type = 'button';
+  editBtn.dataset.action = 'edit-metadata';
+  editBtn.textContent = 'edit';
+  actions.appendChild(editBtn);
 
   const deleteBtn = document.createElement('button');
   deleteBtn.className = 'history-action-btn btn btn-secondary btn-compact';
@@ -1202,9 +1251,24 @@ function openSnapshotLink(snapshot) {
 function _historyActionKeepsPanelOpen(action) {
   if (action === 'star') return true;
   if (action === 'compare') return true;
+  if (action === 'edit-metadata') return true;
   const mobileMode = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
   if (!mobileMode) return false;
   return action === 'permalink';
+}
+
+function _historyEditEntityMetadata(entityType, entity) {
+  const editor = typeof globalThis !== 'undefined' ? globalThis.openEntityMetadataEditor : null;
+  if (typeof editor !== 'function') {
+    showToast('Metadata editor is not available', 'error');
+    return;
+  }
+  editor(entityType, entity, {
+    onSaved: async () => {
+      refreshHistoryPanel();
+      showToast('Metadata saved');
+    },
+  });
 }
 
 function _compareFormatDate(value) {
@@ -2242,6 +2306,12 @@ function refreshHistoryPanel() {
             if (!_historyActionKeepsPanelOpen('permalink')) hideHistoryPanel();
           },
         });
+        bindPressable(entry.querySelector('[data-action="edit-metadata"]'), {
+          refocusComposer: false,
+          onActivate: () => {
+            _historyEditEntityMetadata('snapshot', item);
+          },
+        });
         bindPressable(entry.querySelector('[data-action="delete"]'), {
           onActivate: () => {
             confirmHistAction('delete', item.id, item.label || 'snapshot', 'snapshot');
@@ -2329,6 +2399,13 @@ function refreshHistoryPanel() {
           const url = `${location.origin}/history/${run.id}`;
           shareUrl(url).catch(() => showToast('Failed to copy link', 'error'));
           if (!_historyActionKeepsPanelOpen('permalink')) hideHistoryPanel();
+        },
+      });
+      bindPressable(entry.querySelector('[data-action="edit-metadata"]'), {
+        refocusComposer: false,
+        onActivate: () => {
+          _closeHistoryActionMenus();
+          _historyEditEntityMetadata('run', run);
         },
       });
       bindPressable(entry.querySelector('[data-action="compare"]'), {

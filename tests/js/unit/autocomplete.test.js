@@ -977,7 +977,6 @@ describe('autocomplete helpers', () => {
                 arg_hints: {
                   __positional__: [
                     { value: 'run', insertValue: 'run ', description: 'Link a run' },
-                    { value: 'snapshot', insertValue: 'snapshot ', description: 'Link a snapshot' },
                   ],
                 },
                 subcommands: {

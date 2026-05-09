@@ -55,7 +55,6 @@ PROJECT_AUTO_LINK_EXTERNAL_RUNS_PREF_KEY = "pref_project_auto_link_external_runs
 PROJECT_STATUSES = frozenset({"active", "archived"})
 PROJECT_LINK_ENTITY_TYPES = frozenset({
     "run",
-    "snapshot",
     "workspace_file",
 })
 ENTITY_METADATA_TYPES = frozenset({
@@ -174,7 +173,7 @@ def _slugify(value):
     return (slug or "project")[:80].strip("-") or "project"
 
 
-def _row_to_project(row):
+def _row_to_project(row, *, notes=""):
     if not row:
         return None
     return {
@@ -185,7 +184,7 @@ def _row_to_project(row):
         "description": row["description"] or "",
         "status": row["status"],
         "color": row["color"] or "",
-        "notes": row["notes"] or "",
+        "notes": notes or "",
         "created": row["created"],
         "updated": row["updated"],
     }
@@ -619,6 +618,23 @@ def _normalize_evidence_package_payload(data):
     include_artifacts = bool(data.get("include_artifacts"))
     if redaction_mode == "redacted":
         include_artifacts = False
+    labels = []
+    raw_labels = data.get("labels")
+    if raw_labels is not None:
+        if not isinstance(raw_labels, list):
+            raise ProjectWorkspaceError("package labels must be a list")
+        seen_labels = set()
+        for raw_label in raw_labels:
+            label = _trim_text(raw_label, MAX_LABEL_LEN)
+            if not label:
+                continue
+            key = label.lower()
+            if key in seen_labels:
+                continue
+            seen_labels.add(key)
+            labels.append(label)
+        if len(labels) > 20:
+            raise ProjectWorkspaceError("label quota exceeded for this entity")
     return {
         "name": name,
         "description": _trim_text(data.get("description"), MAX_PACKAGE_DESCRIPTION_LEN),
@@ -629,6 +645,8 @@ def _normalize_evidence_package_payload(data):
         "include_private_notes": bool(data.get("include_private_notes")),
         "selection": selection if isinstance(selection, dict) else None,
         "options": options if isinstance(options, dict) else {},
+        "labels": labels,
+        "notes": _trim_text(data.get("notes"), MAX_ENTITY_NOTE_BODY_LEN),
     }
 
 
@@ -2099,14 +2117,14 @@ def migrate_project_workspace_session(conn, from_session_id, to_session_id):
 
 def list_projects(session_id, *, include_archived=False):
     sql = (
-        "SELECT id, session_id, name, slug, description, status, color, notes, created, updated "
+        "SELECT id, session_id, name, slug, description, status, color, created, updated "
         "FROM projects WHERE session_id = ? ORDER BY updated DESC, created DESC"
     )
     params = (session_id,)
     with db_connect() as conn:
         if not include_archived:
             sql = (
-                "SELECT id, session_id, name, slug, description, status, color, notes, created, updated "
+                "SELECT id, session_id, name, slug, description, status, color, created, updated "
                 "FROM projects WHERE session_id = ? AND status != 'archived' "
                 "ORDER BY updated DESC, created DESC"
             )
@@ -2114,17 +2132,23 @@ def list_projects(session_id, *, include_archived=False):
             sql,
             params,
         ).fetchall()
-    return [_row_to_project(row) for row in rows]
+        projects = [_row_to_project(row) for row in rows]
+        _attach_project_notes(conn, session_id, projects)
+        _attach_project_labels(conn, session_id, projects)
+    return projects
 
 
 def get_project(session_id, project_id):
     with db_connect() as conn:
         row = conn.execute(
-            "SELECT id, session_id, name, slug, description, status, color, notes, created, updated "
+            "SELECT id, session_id, name, slug, description, status, color, created, updated "
             "FROM projects WHERE session_id = ? AND id = ?",
             (session_id, project_id),
         ).fetchone()
-    return _row_to_project(row)
+        project = _row_to_project(row)
+        _attach_project_notes(conn, session_id, [project])
+        _attach_project_labels(conn, session_id, [project])
+    return project
 
 
 def _count_rows_for_ids(conn, table, column, ids):
@@ -2186,18 +2210,100 @@ def _entity_notes_by_id(conn, session_id, entity_type, entity_ids):
     }
 
 
+def _attach_project_notes(conn, session_id, projects):
+    items = [project for project in projects if project]
+    if not items:
+        return items
+    note_map = _entity_notes_by_id(conn, session_id, "project", [project["id"] for project in items])
+    for project in items:
+        note = note_map.get(str(project["id"]))
+        project["notes"] = str(note.get("body") or "") if note else ""
+    return items
+
+
+def _attach_project_labels(conn, session_id, projects):
+    items = [project for project in projects if project]
+    if not items:
+        return items
+    label_map = _entity_labels_by_id(conn, session_id, "project", [project["id"] for project in items])
+    for project in items:
+        project["labels"] = label_map.get(str(project["id"]), [])
+    return items
+
+
+def _attach_package_metadata(conn, session_id, packages):
+    items = [package for package in packages if package]
+    if not items:
+        return items
+    package_ids = [package["id"] for package in items]
+    label_map = _entity_labels_by_id(conn, session_id, "package", package_ids)
+    note_map = _entity_notes_by_id(conn, session_id, "package", package_ids)
+    for package in items:
+        package_id = str(package["id"])
+        package["labels"] = label_map.get(package_id, [])
+        package["note"] = note_map.get(package_id)
+    return items
+
+
+def _save_project_note(conn, session_id, project_id, notes):
+    body = _trim_text(notes, MAX_PROJECT_NOTES_LEN)
+    now = _now()
+    if not body:
+        conn.execute(
+            "DELETE FROM entity_notes WHERE session_id = ? AND entity_type = 'project' AND entity_id = ?",
+            (session_id, project_id),
+        )
+        return
+    existing = conn.execute(
+        "SELECT id FROM entity_notes WHERE session_id = ? AND entity_type = 'project' AND entity_id = ?",
+        (session_id, project_id),
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE entity_notes SET body = ?, updated = ? WHERE session_id = ? AND entity_type = 'project' AND entity_id = ?",
+            (body, now, session_id, project_id),
+        )
+        return
+    session_count = conn.execute(
+        "SELECT COUNT(*) AS count FROM entity_notes WHERE session_id = ?",
+        (session_id,),
+    ).fetchone()
+    if _quota_exceeded(
+        int(session_count["count"] or 0) if session_count else 0,
+        "max_entity_notes_per_session",
+        2000,
+    ):
+        _raise_quota("note quota exceeded for this session")
+    for _ in range(10):
+        note_id = _new_entity_note_id()
+        result = conn.execute(
+            "INSERT OR IGNORE INTO entity_notes "
+            "(id, session_id, entity_type, entity_id, body, created, updated) "
+            "VALUES (?, ?, 'project', ?, ?, ?, ?)",
+            (note_id, session_id, project_id, body, now, now),
+        )
+        if result.rowcount:
+            return
+    raise ProjectWorkspaceError("could not allocate an entity note id")
+
+
 def get_project_summary(session_id, project_id):
     with db_connect() as conn:
         project_row = conn.execute(
-            "SELECT id, session_id, name, slug, description, status, color, notes, created, updated "
+            "SELECT id, session_id, name, slug, description, status, color, created, updated "
             "FROM projects WHERE session_id = ? AND id = ?",
             (session_id, project_id),
         ).fetchone()
         if not project_row:
             return None
+        project = _row_to_project(project_row)
+        _attach_project_notes(conn, session_id, [project])
+        _attach_project_labels(conn, session_id, [project])
         link_rows = conn.execute(
             "SELECT id, project_id, entity_type, entity_id, source, created "
-            "FROM project_links WHERE project_id = ? ORDER BY created DESC",
+            "FROM project_links WHERE project_id = ? "
+            "AND entity_type IN ('run', 'workspace_file') "
+            "ORDER BY created DESC",
             (project_id,),
         ).fetchall()
         target_rows = conn.execute(
@@ -2207,7 +2313,6 @@ def get_project_summary(session_id, project_id):
             (project_id,),
         ).fetchall()
         run_ids = [row["entity_id"] for row in link_rows if row["entity_type"] == "run"]
-        snapshot_ids = [row["entity_id"] for row in link_rows if row["entity_type"] == "snapshot"]
         workspace_file_ids = [row["entity_id"] for row in link_rows if row["entity_type"] == "workspace_file"]
         artifact_rows = []
         finding_rows = []
@@ -2248,7 +2353,6 @@ def get_project_summary(session_id, project_id):
         label_count = (
             _count_entity_metadata_for_ids(conn, "entity_labels", "project", [project_id])
             + _count_entity_metadata_for_ids(conn, "entity_labels", "run", run_ids)
-            + _count_entity_metadata_for_ids(conn, "entity_labels", "snapshot", snapshot_ids)
             + _count_entity_metadata_for_ids(conn, "entity_labels", "workspace_file", workspace_file_ids)
             + _count_entity_metadata_for_ids(conn, "entity_labels", "run_file_artifact", artifact_ids)
             + _count_entity_metadata_for_ids(conn, "entity_labels", "finding", finding_ids)
@@ -2258,7 +2362,6 @@ def get_project_summary(session_id, project_id):
         note_count = (
             _count_entity_metadata_for_ids(conn, "entity_notes", "project", [project_id])
             + _count_entity_metadata_for_ids(conn, "entity_notes", "run", run_ids)
-            + _count_entity_metadata_for_ids(conn, "entity_notes", "snapshot", snapshot_ids)
             + _count_entity_metadata_for_ids(conn, "entity_notes", "workspace_file", workspace_file_ids)
             + _count_entity_metadata_for_ids(conn, "entity_notes", "run_file_artifact", artifact_ids)
             + _count_entity_metadata_for_ids(conn, "entity_notes", "finding", finding_ids)
@@ -2290,7 +2393,7 @@ def get_project_summary(session_id, project_id):
         })
     packages = list_evidence_packages(session_id, project_id) or []
     return {
-        "project": _row_to_project(project_row),
+        "project": project,
         "links": links,
         "targets": targets,
         "runs": runs,
@@ -2298,7 +2401,6 @@ def get_project_summary(session_id, project_id):
         "packages": packages,
         "counts": {
             "runs": len(run_ids),
-            "snapshots": len(snapshot_ids),
             "workspace_files": len(workspace_file_ids),
             "targets": confirmed_target_count,
             "pending_targets": pending_target_count,
@@ -2351,8 +2453,8 @@ def create_project(session_id, data):
             slug = _allocate_slug(conn, session_id, payload["name"])
             result = conn.execute(
                 "INSERT OR IGNORE INTO projects "
-                "(id, session_id, name, slug, description, status, color, notes, created, updated) "
-                "VALUES (?, ?, ?, ?, ?, 'active', ?, '', ?, ?)",
+                "(id, session_id, name, slug, description, status, color, created, updated) "
+                "VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)",
                 (
                     project_id,
                     session_id,
@@ -2365,6 +2467,8 @@ def create_project(session_id, data):
                 ),
             )
             if result.rowcount:
+                if "notes" in payload:
+                    _save_project_note(conn, session_id, project_id, payload["notes"])
                 conn.commit()
                 return get_project(session_id, project_id)
         raise ProjectWorkspaceError("could not allocate a project id")
@@ -2377,7 +2481,7 @@ def update_project(session_id, project_id, data):
     updated = _now()
     with db_connect() as conn:
         current = conn.execute(
-            "SELECT id, name, slug, description, status, color, notes "
+            "SELECT id, name, slug, description, status, color "
             "FROM projects WHERE session_id = ? AND id = ?",
             (session_id, project_id),
         ).fetchone()
@@ -2388,7 +2492,6 @@ def update_project(session_id, project_id, data):
         description = current["description"]
         status = current["status"]
         color = current["color"]
-        notes = current["notes"]
         if "name" in payload:
             name = payload["name"]
             slug = _allocate_slug(conn, session_id, payload["name"], project_id=project_id)
@@ -2398,14 +2501,14 @@ def update_project(session_id, project_id, data):
             status = payload["status"]
         if "color" in payload:
             color = payload["color"]
-        if "notes" in payload:
-            notes = payload["notes"]
         conn.execute(
             "UPDATE projects "
-            "SET name = ?, slug = ?, description = ?, status = ?, color = ?, notes = ?, updated = ? "
+            "SET name = ?, slug = ?, description = ?, status = ?, color = ?, updated = ? "
             "WHERE session_id = ? AND id = ?",
-            (name, slug, description, status, color, notes, updated, session_id, project_id),
+            (name, slug, description, status, color, updated, session_id, project_id),
         )
+        if "notes" in payload:
+            _save_project_note(conn, session_id, project_id, payload["notes"])
         conn.commit()
     return get_project(session_id, project_id)
 
@@ -2500,7 +2603,9 @@ def list_evidence_packages(session_id, project_id):
             "ORDER BY updated DESC, created DESC",
             (session_id, project_id),
         ).fetchall()
-    return [_row_to_evidence_package(row) for row in rows]
+        packages = [_row_to_evidence_package(row) for row in rows]
+        _attach_package_metadata(conn, session_id, packages)
+    return packages
 
 
 def get_evidence_package(session_id, project_id, package_id):
@@ -2511,7 +2616,9 @@ def get_evidence_package(session_id, project_id, package_id):
             "FROM evidence_packages WHERE session_id = ? AND project_id = ? AND id = ?",
             (session_id, project_id, package_id),
         ).fetchone()
-    return _row_to_evidence_package(row)
+        package = _row_to_evidence_package(row)
+        _attach_package_metadata(conn, session_id, [package])
+    return package
 
 
 def _write_bounded_archive_entry(
@@ -2932,6 +3039,58 @@ def build_evidence_package_archive(session_id, project_id, package_id, *, cfg=No
     }
 
 
+def _save_new_package_metadata(conn, session_id, package_id, labels, notes):
+    label_values = [str(label or "").strip() for label in (labels or []) if str(label or "").strip()]
+    for label in label_values:
+        session_count = conn.execute(
+            "SELECT COUNT(*) AS count FROM entity_labels WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if _quota_exceeded(
+            int(session_count["count"] or 0) if session_count else 0,
+            "max_entity_labels_per_session",
+            5000,
+        ):
+            _raise_quota("label quota exceeded for this session")
+        for _ in range(10):
+            label_id = _new_entity_label_id()
+            result = conn.execute(
+                "INSERT OR IGNORE INTO entity_labels "
+                "(id, session_id, entity_type, entity_id, label, source, created) "
+                "VALUES (?, ?, 'package', ?, ?, 'manual', ?)",
+                (label_id, session_id, package_id, label, _now()),
+            )
+            if result.rowcount:
+                break
+        else:
+            raise ProjectWorkspaceError("could not allocate an entity label id")
+    body = _trim_text(notes, MAX_ENTITY_NOTE_BODY_LEN)
+    if not body:
+        return
+    session_count = conn.execute(
+        "SELECT COUNT(*) AS count FROM entity_notes WHERE session_id = ?",
+        (session_id,),
+    ).fetchone()
+    if _quota_exceeded(
+        int(session_count["count"] or 0) if session_count else 0,
+        "max_entity_notes_per_session",
+        2000,
+    ):
+        _raise_quota("note quota exceeded for this session")
+    now = _now()
+    for _ in range(10):
+        note_id = _new_entity_note_id()
+        result = conn.execute(
+            "INSERT OR IGNORE INTO entity_notes "
+            "(id, session_id, entity_type, entity_id, body, created, updated) "
+            "VALUES (?, ?, 'package', ?, ?, ?, ?)",
+            (note_id, session_id, package_id, body, now, now),
+        )
+        if result.rowcount:
+            return
+    raise ProjectWorkspaceError("could not allocate an entity note id")
+
+
 def create_evidence_package(session_id, project_id, data):
     payload = _normalize_evidence_package_payload(data)
     summary = get_project_summary(session_id, project_id)
@@ -2977,6 +3136,13 @@ def create_evidence_package(session_id, project_id, data):
                 ),
             )
             if result.rowcount:
+                _save_new_package_metadata(
+                    conn,
+                    session_id,
+                    package_id,
+                    payload["labels"],
+                    payload["notes"],
+                )
                 conn.commit()
                 return get_evidence_package(session_id, project_id, package_id)
         raise ProjectWorkspaceError("could not allocate a package id")
@@ -3363,8 +3529,8 @@ def _compare_items(left_items, right_items):
     left_keys = set(left_by_key)
     right_keys = set(right_by_key)
     return {
-        "added": [left_by_key[key] for key in sorted(left_keys - right_keys)],
-        "removed": [right_by_key[key] for key in sorted(right_keys - left_keys)],
+        "added": [right_by_key[key] for key in sorted(right_keys - left_keys)],
+        "removed": [left_by_key[key] for key in sorted(left_keys - right_keys)],
         "unchanged_count": len(left_keys & right_keys),
     }
 
@@ -3408,10 +3574,14 @@ def compare_project_runs(session_id, project_id, filters=None):
                 baseline_label,
                 excluded_run_ids=[left_run_id],
             )
+            if not right_run_id:
+                raise ProjectWorkspaceError("no linked project run matches the baseline label")
         if not right_run_id and len(linked_run_ids) >= 2:
             right_run_id = linked_run_ids[1]
         if not left_run_id or not right_run_id:
             raise ProjectWorkspaceError("project comparison needs two linked runs")
+        if left_run_id == right_run_id:
+            raise ProjectWorkspaceError("project comparison needs two different linked runs")
         linked = set(linked_run_ids)
         if left_run_id not in linked or right_run_id not in linked:
             raise ProjectWorkspaceError("comparison runs must both be linked to this project")
@@ -3468,7 +3638,7 @@ def get_active_project(session_id):
         if not project_id:
             return None
         row = conn.execute(
-            "SELECT id, session_id, name, slug, description, status, color, notes, created, updated "
+            "SELECT id, session_id, name, slug, description, status, color, created, updated "
             "FROM projects WHERE session_id = ? AND id = ? AND status != 'archived'",
             (session_id, project_id),
         ).fetchone()
@@ -3476,7 +3646,10 @@ def get_active_project(session_id):
             _clear_active_project_preference(conn, session_id)
             conn.commit()
             return None
-    return _row_to_project(row)
+        project = _row_to_project(row)
+        _attach_project_notes(conn, session_id, [project])
+        _attach_project_labels(conn, session_id, [project])
+    return project
 
 
 def set_active_project(session_id, project_id):
@@ -3485,7 +3658,7 @@ def set_active_project(session_id, project_id):
         raise ProjectWorkspaceError("project_id is required")
     with db_connect() as conn:
         row = conn.execute(
-            "SELECT id, session_id, name, slug, description, status, color, notes, created, updated "
+            "SELECT id, session_id, name, slug, description, status, color, created, updated "
             "FROM projects WHERE session_id = ? AND id = ? AND status != 'archived'",
             (session_id, project_id),
         ).fetchone()
@@ -3495,7 +3668,10 @@ def set_active_project(session_id, project_id):
         preferences[ACTIVE_PROJECT_PREF_KEY] = row["id"]
         _save_session_preferences(conn, session_id, preferences)
         conn.commit()
-    return _row_to_project(row)
+        project = _row_to_project(row)
+        _attach_project_notes(conn, session_id, [project])
+        _attach_project_labels(conn, session_id, [project])
+    return project
 
 
 def clear_active_project(session_id):
@@ -3567,51 +3743,6 @@ def _insert_project_link(conn, project_id, entity_type, entity_id, source):
         if row:
             return _row_to_link(row)
     raise ProjectWorkspaceError("could not allocate a project link id")
-
-
-def link_snapshot_to_project_context(conn, session_id, snapshot_id, *, source_run_id=""):
-    snapshot_id = _trim_text(snapshot_id, MAX_ENTITY_ID_LEN)
-    source_run_id = _trim_text(source_run_id, MAX_ENTITY_ID_LEN)
-    snapshot = conn.execute(
-        "SELECT 1 FROM snapshots WHERE session_id = ? AND id = ?",
-        (session_id, snapshot_id),
-    ).fetchone()
-    if not snapshot:
-        return []
-    project_ids = []
-    if source_run_id:
-        rows = conn.execute(
-            "SELECT DISTINCT l.project_id "
-            "FROM project_links l "
-            "JOIN projects p ON p.id = l.project_id "
-            "JOIN runs r ON r.id = l.entity_id "
-            "WHERE p.session_id = ? AND p.status != 'archived' "
-            "AND l.entity_type = 'run' AND l.entity_id = ? AND r.session_id = ?",
-            (session_id, source_run_id, session_id),
-        ).fetchall()
-        project_ids = [row["project_id"] for row in rows]
-    if not project_ids:
-        preferences = _load_session_preferences(conn, session_id)
-        active_project_id = str(preferences.get(ACTIVE_PROJECT_PREF_KEY) or "")
-        if active_project_id:
-            project = conn.execute(
-                "SELECT id FROM projects WHERE session_id = ? AND id = ? AND status != 'archived'",
-                (session_id, active_project_id),
-            ).fetchone()
-            if project:
-                project_ids = [project["id"]]
-            else:
-                _clear_active_project_preference(conn, session_id)
-    links = []
-    for project_id in project_ids:
-        links.append(_insert_project_link(
-            conn,
-            project_id,
-            "snapshot",
-            snapshot_id,
-            "snapshot_capture",
-        ))
-    return links
 
 
 def record_run_file_artifacts(conn, session_id, run_id, artifacts):
@@ -4307,11 +4438,6 @@ def _entity_belongs_to_session(conn, session_id, entity_type, entity_id):
             "SELECT 1 FROM runs WHERE session_id = ? AND id = ?",
             (session_id, entity_id),
         ).fetchone()
-    elif entity_type == "snapshot":
-        row = conn.execute(
-            "SELECT 1 FROM snapshots WHERE session_id = ? AND id = ?",
-            (session_id, entity_id),
-        ).fetchone()
     elif entity_type == "run_file_artifact":
         row = conn.execute(
             "SELECT 1 FROM run_file_artifacts WHERE session_id = ? AND id = ?",
@@ -4349,7 +4475,9 @@ def list_project_links(session_id, project_id):
             return None
         rows = conn.execute(
             "SELECT id, project_id, entity_type, entity_id, source, created "
-            "FROM project_links WHERE project_id = ? ORDER BY created DESC",
+            "FROM project_links WHERE project_id = ? "
+            "AND entity_type IN ('run', 'workspace_file') "
+            "ORDER BY created DESC",
             (project_id,),
         ).fetchall()
     return [_row_to_link(row) for row in rows]
@@ -4375,7 +4503,8 @@ def link_project_entity(session_id, project_id, data):
         if row:
             return _row_to_link(row)
         count_row = conn.execute(
-            "SELECT COUNT(*) AS count FROM project_links WHERE project_id = ?",
+            "SELECT COUNT(*) AS count FROM project_links "
+            "WHERE project_id = ? AND entity_type IN ('run', 'workspace_file')",
             (project_id,),
         ).fetchone()
         if _quota_exceeded(
