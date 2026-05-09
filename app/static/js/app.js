@@ -4244,6 +4244,7 @@ function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
     }
     const card = document.createElement('div');
     card.className = 'workflow-card workflow-card-accordion';
+    if (item.id) card.dataset.workflowId = String(item.id);
     if (item.source === 'user') card.classList.add('is-user-workflow');
     if (collapseCards) card.classList.add('is-collapsed');
 

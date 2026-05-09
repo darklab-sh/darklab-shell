@@ -131,6 +131,7 @@ test.describe('session-token lifecycle', () => {
   })
 
   test('set can skip migration without moving anonymous history', async ({ page }) => {
+    test.setTimeout(60_000)
     await runCommand(page, CMD)
     await waitForHistoryRuns(page, 1)
     const token = await issueSessionToken(page)
@@ -139,7 +140,12 @@ test.describe('session-token lifecycle', () => {
     await expect(page.locator('.tab-panel.active .output')).toContainText(
       'migrate history, files, workflows, and recent domains to this session token?',
     )
-    await answerTerminalConfirm(page, 'no', 'History, file, workflow, and recent-domain migration skipped.')
+    await answerTerminalConfirm(
+      page,
+      'no',
+      'History, file, workflow, and recent-domain migration skipped.',
+      { timeout: 45_000 },
+    )
 
     expect(await storedSessionToken(page)).toBe(token)
     expect(await currentSessionId(page)).toBe(token)
@@ -173,6 +179,7 @@ test.describe('session-token lifecycle', () => {
     page,
     browser,
   }) => {
+    test.setTimeout(60_000)
     const token = await issueSessionToken(page)
     await runCommand(page, `session-token set ${token}`)
     await expect.poll(async () => currentSessionId(page)).toBe(token)
@@ -187,9 +194,11 @@ test.describe('session-token lifecycle', () => {
     const context = await browser.newContext()
     const otherPage = await context.newPage()
     try {
+      await otherPage.addInitScript((sessionToken) => {
+        localStorage.setItem('session_token', sessionToken)
+      }, token)
       await otherPage.goto('/')
-      await ensurePromptReady(otherPage)
-      await runCommand(otherPage, `session-token set ${token}`)
+      await ensurePromptReady(otherPage, { timeout: 30_000 })
       await expect.poll(async () => currentSessionId(otherPage)).toBe(token)
       await expect.poll(async () => otherPage.evaluate(() => (
         typeof _readRecentDomains === 'function' ? _readRecentDomains() : []

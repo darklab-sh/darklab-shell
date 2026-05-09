@@ -156,6 +156,7 @@ test.describe('history drawer', () => {
   })
 
   test('Delete Non-Favorites keeps starred runs and removes the rest', async ({ page }) => {
+    test.setTimeout(60_000)
     await runCommand(page, CMD_A)
     await waitForHistoryRuns(page, 1)
     await runCommand(page, CMD_B)

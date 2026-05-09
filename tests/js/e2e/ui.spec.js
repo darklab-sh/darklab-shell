@@ -989,9 +989,12 @@ test.describe('workflows modal', () => {
       document.addEventListener('app:workflows-rendered', () => resolve(true), { once: true })
     }))
     await page.locator('#workflow-editor-save-btn').click()
-    expect((await saveResponse).ok()).toBe(true)
+    const response = await saveResponse
+    expect(response.ok()).toBe(true)
+    const data = await response.json()
     await catalogRendered
     await expect(page.locator('#workflow-editor-overlay')).not.toHaveClass(/\bopen\b/)
+    return data.workflow || null
   }
 
   test('input-driven workflows render prefilled form fields and runnable rendered steps', async ({ page }) => {
@@ -1081,9 +1084,12 @@ test.describe('workflows modal', () => {
     await page.locator('#workflow-editor-title-input').fill('Saved Whois')
     await page.locator('.workflow-editor-step-command').first().fill('whois {{domain}}')
     await page.locator('.workflow-editor-step-note').first().fill('Lookup registration')
-    await saveWorkflowEditorAndWait(page, 'POST')
+    const createdWorkflow = await saveWorkflowEditorAndWait(page, 'POST')
+    expect(createdWorkflow?.id).toBeTruthy()
 
-    const userCard = page.locator('#workflows-overlay .workflow-card.is-user-workflow').first()
+    const userCard = page.locator(
+      `#workflows-overlay .workflow-card.is-user-workflow[data-workflow-id="${createdWorkflow.id}"]`,
+    )
     await expect(userCard).toHaveClass(/\bis-user-workflow\b/)
     await expect(userCard.locator('.workflow-title')).toHaveText('Saved Whois')
     await expect(userCard.locator('.workflow-edit-btn')).toBeVisible()
