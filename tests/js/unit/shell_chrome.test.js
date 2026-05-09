@@ -102,6 +102,16 @@ function loadShellChrome({
         <button class="project-workspace-close" type="button"></button>
         <p id="project-workspace-subtitle"></p>
         <div id="project-workspace-message" class="u-hidden"></div>
+        <section id="project-mobile-root" class="project-mobile-root">
+          <div id="project-mobile-list-view" class="project-mobile-list-view">
+            <span id="project-mobile-summary"></span>
+            <button id="project-mobile-new-btn" type="button" data-project-mobile-action="new-project"></button>
+            <div id="project-mobile-body"></div>
+          </div>
+          <form id="project-mobile-create-form" class="u-hidden">
+            <input id="project-mobile-name" maxlength="120">
+          </form>
+        </section>
         <form id="project-workspace-create-form">
           <input id="project-workspace-name">
         </form>
@@ -495,6 +505,148 @@ describe('shell chrome project workspace', () => {
     expect(rowText('project-1')).not.toContain('active')
     expect(rowText('project-2')).toContain('active')
     expect(orderedProjectIds()).toEqual(['project-2', 'project-4', 'project-1', 'project-3'])
+  })
+
+  it('renders the mobile project list with active-first rows and collapsed archived projects', async () => {
+    document.body.classList.add('mobile-terminal-mode')
+    const projects = [
+      {
+        id: 'project-3',
+        name: 'zulu.test',
+        status: 'archived',
+        labels: [{ label: 'old' }],
+      },
+      {
+        id: 'project-1',
+        name: 'alpha.test',
+        status: 'active',
+        labels: [{ label: 'web' }, { label: 'prod' }, { label: 'retest' }, { label: 'handoff' }],
+      },
+      {
+        id: 'project-2',
+        name: 'darklab.sh',
+        status: 'active',
+        labels: [{ label: 'current' }],
+      },
+    ]
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project: projects[2] }),
+        })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects }),
+        })
+      }
+      if (url.endsWith('/summary')) {
+        const projectId = url.split('/')[2]
+        const project = projects.find(item => item.id === projectId) || null
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project,
+            counts: { runs: projectId === 'project-1' ? 2 : 0, findings: 1, artifacts: 0, packages: 0, targets: 1, notes: 0 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+
+    try {
+      const shell = loadShellChrome({ apiFetch })
+      await shell.openProjectWorkspace()
+      await tick()
+      await tick()
+
+      const mobileRows = [...document.querySelectorAll('[data-project-mobile-action="open-project"]')]
+      expect(mobileRows.map(row => row.dataset.projectId)).toEqual(['project-2', 'project-1'])
+      expect(document.getElementById('project-mobile-body').textContent).toContain('Archived (1)')
+      expect(document.getElementById('project-mobile-body').textContent).not.toContain('zulu.test')
+      expect(document.querySelector('[data-project-id="project-1"]').closest('.project-mobile-row').textContent).toContain('+1')
+
+      const findingsChip = document.querySelector('[data-project-id="project-1"][data-project-mobile-tab="findings"]')
+      findingsChip.click()
+      await tick()
+
+      expect(document.querySelector('.project-mobile-row.is-selected .project-mobile-name').textContent).toBe('alpha.test')
+
+      document.querySelector('[data-project-mobile-action="toggle-archived"]').click()
+      await tick()
+      expect(document.getElementById('project-mobile-body').textContent).toContain('zulu.test')
+    } finally {
+      document.body.classList.remove('mobile-terminal-mode')
+    }
+  })
+
+  it('creates projects from the mobile create sheet', async () => {
+    document.body.classList.add('mobile-terminal-mode')
+    let activeProjectId = ''
+    const projects = []
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (url === '/projects' && options.method === 'POST') {
+        const project = { id: 'project-mobile', name: JSON.parse(options.body).name, status: 'active' }
+        projects.push(project)
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ project }) })
+      }
+      if (url === '/projects/active' && options.method === 'POST') {
+        activeProjectId = JSON.parse(options.body).project_id
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+      }
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project: projects.find(project => project.id === activeProjectId) || null }),
+        })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects }) })
+      }
+      if (url.endsWith('/summary')) {
+        const projectId = url.split('/')[2]
+        const project = projects.find(item => item.id === projectId) || null
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            project,
+            counts: { runs: 0, findings: 0, artifacts: 0, packages: 0, targets: 0, notes: 0 },
+            runs: [],
+            targets: [],
+            artifacts: [],
+            packages: [],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+
+    try {
+      const shell = loadShellChrome({ apiFetch })
+      await shell.openProjectWorkspace()
+      await tick()
+
+      document.querySelector('[data-project-mobile-action="new-project"]').click()
+      await tick()
+      expect(document.getElementById('project-mobile-create-form').classList.contains('u-hidden')).toBe(false)
+
+      document.getElementById('project-mobile-name').value = 'Mobile Project'
+      document.getElementById('project-mobile-create-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+      await tick()
+      await tick()
+
+      expect(activeProjectId).toBe('project-mobile')
+      expect(document.getElementById('project-mobile-create-form').classList.contains('u-hidden')).toBe(true)
+      expect(document.getElementById('project-mobile-body').textContent).toContain('Mobile Project')
+    } finally {
+      document.body.classList.remove('mobile-terminal-mode')
+    }
   })
 
   it('opens projects from the active project HUD chip', async () => {

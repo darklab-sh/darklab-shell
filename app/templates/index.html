@@ -678,6 +678,33 @@
       <span class="project-workspace-message-text"></span>
       <button type="button" class="btn btn-ghost btn-compact project-workspace-message-dismiss" data-project-message-dismiss aria-label="Dismiss project message">✕</button>
     </div>
+    <section id="project-mobile-root" class="project-mobile-root" aria-label="Mobile projects">
+      <div id="project-mobile-list-view" class="project-mobile-list-view">
+        <div class="project-mobile-header">
+          <div class="project-mobile-heading">
+            <span id="project-mobile-summary" class="project-mobile-summary">No projects loaded</span>
+          </div>
+          <button type="button" id="project-mobile-new-btn" class="btn btn-secondary btn-compact" data-project-mobile-action="new-project">New Project</button>
+        </div>
+        <div id="project-mobile-body" class="project-mobile-body nice-scroll" aria-live="polite"></div>
+      </div>
+      <form id="project-mobile-create-form" class="project-mobile-create-sheet u-hidden" aria-label="Create project">
+        <div class="project-mobile-create-header">
+          <div class="project-mobile-heading">
+            <span class="project-mobile-kicker">New Project</span>
+            <span class="project-mobile-summary">Name the project to start grouping related work.</span>
+          </div>
+          <button type="button" class="btn btn-ghost btn-compact" data-project-mobile-action="cancel-create">Back</button>
+        </div>
+        <label class="project-mobile-create-field">
+          <span>Name</span>
+          <input id="project-mobile-name" class="form-control form-control-compact" type="text" maxlength="120" placeholder="New project name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="New project name">
+        </label>
+        <div class="project-mobile-create-actions">
+          <button type="submit" class="btn btn-secondary btn-compact">Create project</button>
+        </div>
+      </form>
+    </section>
     <div class="project-workspace-layout">
       <aside class="project-workspace-sidebar" aria-label="Project list">
         <form id="project-workspace-create-form" class="project-workspace-create">

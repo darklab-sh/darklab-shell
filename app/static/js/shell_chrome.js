@@ -44,6 +44,12 @@
   const projectWorkspaceSubtitle = document.getElementById('project-workspace-subtitle');
   const projectWorkspaceCreateForm = document.getElementById('project-workspace-create-form');
   const projectWorkspaceNameInput = document.getElementById('project-workspace-name');
+  const projectMobileRoot = document.getElementById('project-mobile-root');
+  const projectMobileListView = document.getElementById('project-mobile-list-view');
+  const projectMobileBody = document.getElementById('project-mobile-body');
+  const projectMobileSummary = document.getElementById('project-mobile-summary');
+  const projectMobileCreateForm = document.getElementById('project-mobile-create-form');
+  const projectMobileNameInput = document.getElementById('project-mobile-name');
   const projectTargetEditorOverlay = document.getElementById('project-target-editor-overlay');
   const projectTargetEditorTitle = document.getElementById('project-target-editor-title');
   const projectTargetCreateForm = document.getElementById('project-target-create-form');
@@ -173,6 +179,8 @@
   let projectWorkspaceLoading = false;
   let projectWorkspaceSelectedId = '';
   let projectWorkspaceTab = 'details';
+  let projectMobileCreateOpen = false;
+  let projectMobileArchivedOpen = false;
   let projectWorkspaceFindingsLoadingId = '';
   let projectWorkspaceFindingsLoadingPromise = null;
   let projectWorkspaceFilteredFindingsLoadingKey = '';
@@ -1283,6 +1291,26 @@
       node.className = _entityMetadataChipClass(chip.kind);
       node.textContent = chip.label;
       wrap.appendChild(node);
+    }
+    parent.appendChild(wrap);
+  }
+
+  function _appendProjectMobileLabelChips(parent, project) {
+    const chips = _projectLabelChips(project);
+    if (!parent || !chips.length) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'project-mobile-label-chips';
+    chips.slice(0, 3).forEach((chip) => {
+      const node = document.createElement('span');
+      node.className = _entityMetadataChipClass(chip.kind);
+      node.textContent = chip.label;
+      wrap.appendChild(node);
+    });
+    if (chips.length > 3) {
+      const overflow = document.createElement('span');
+      overflow.className = _entityMetadataChipClass('label');
+      overflow.textContent = `+${chips.length - 3}`;
+      wrap.appendChild(overflow);
     }
     parent.appendChild(wrap);
   }
@@ -3882,6 +3910,173 @@
     }
   }
 
+  function _projectMobileCountEntries(summary) {
+    return _projectCountEntries(summary)
+      .filter(item => item.id !== 'artifacts' || _projectArtifactsVisible())
+      .filter(item => ['runs', 'findings', 'artifacts', 'targets', 'packages'].includes(item.id));
+  }
+
+  function _renderProjectMobileListRow(project, activeId) {
+    const projectId = String(project.id || '');
+    const summary = _projectSummary(projectId);
+    const row = document.createElement('article');
+    row.className = 'project-mobile-row'
+      + (projectId === activeId ? ' is-active' : '')
+      + (projectId === projectWorkspaceSelectedId ? ' is-selected' : '');
+
+    const main = document.createElement('div');
+    main.className = 'project-mobile-row-main';
+
+    const title = document.createElement('div');
+    title.className = 'project-mobile-title-row';
+    const titleButton = document.createElement('span');
+    titleButton.className = 'control-row project-mobile-title-target';
+    titleButton.setAttribute('role', 'button');
+    titleButton.tabIndex = 0;
+    titleButton.dataset.projectMobileAction = 'open-project';
+    titleButton.dataset.projectId = projectId;
+    _bindProjectRuntimePressable(titleButton);
+    const name = document.createElement('span');
+    name.className = 'project-mobile-name';
+    name.textContent = String(project.name || project.slug || projectId);
+    titleButton.appendChild(name);
+    title.appendChild(titleButton);
+    const statusText = projectId === activeId
+      ? 'active'
+      : (_projectIsArchived(project) ? 'archived' : '');
+    if (statusText) {
+      const status = document.createElement('span');
+      status.className = 'project-workspace-status' + (projectId === activeId ? ' is-active' : '');
+      status.textContent = statusText;
+      title.appendChild(status);
+    }
+
+    const chips = document.createElement('div');
+    chips.className = 'project-mobile-counts';
+    const countEntries = _projectMobileCountEntries(summary).filter(item => Number(item.value || 0) > 0);
+    if (!countEntries.length) {
+      const empty = document.createElement('span');
+      empty.className = 'project-mobile-empty-hint';
+      empty.textContent = 'No linked runs yet';
+      chips.appendChild(empty);
+    }
+    countEntries.forEach((item) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'btn btn-ghost btn-compact project-mobile-count-chip';
+      chip.dataset.projectMobileTab = item.tab || 'details';
+      chip.dataset.projectId = projectId;
+      chip.textContent = `${item.value} ${item.label}`;
+      chip.setAttribute('aria-label', `Open ${item.label} for ${_projectDisplayName(project)}`);
+      _bindProjectRuntimePressable(chip);
+      chips.appendChild(chip);
+    });
+
+    main.appendChild(title);
+    _appendProjectMobileLabelChips(main, project);
+
+    const affordances = document.createElement('div');
+    affordances.className = 'project-mobile-affordances';
+    const menu = document.createElement('button');
+    menu.type = 'button';
+    menu.className = 'btn btn-ghost btn-compact project-mobile-menu-btn';
+    menu.dataset.projectMobileAction = 'project-menu';
+    menu.dataset.projectId = projectId;
+    menu.setAttribute('aria-label', `Project actions for ${_projectDisplayName(project)}`);
+    menu.textContent = '⋮';
+    _bindProjectRuntimePressable(menu);
+    const chevron = document.createElement('span');
+    chevron.className = 'project-mobile-chevron';
+    chevron.setAttribute('aria-hidden', 'true');
+    chevron.textContent = '›';
+    affordances.append(menu, chevron);
+
+    row.append(main, chips, affordances);
+    return row;
+  }
+
+  function _projectMobileSection(label, count, { open = true } = {}) {
+    const wrap = document.createElement('div');
+    wrap.className = 'project-mobile-section-heading';
+    const text = document.createElement('span');
+    text.textContent = `${label}${count ? ` (${count})` : ''}`;
+    wrap.appendChild(text);
+    if (label === 'Archived') {
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'btn btn-ghost btn-compact';
+      toggle.dataset.projectMobileAction = 'toggle-archived';
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.textContent = open ? 'Hide' : 'Show';
+      _bindProjectRuntimePressable(toggle);
+      wrap.appendChild(toggle);
+    }
+    return wrap;
+  }
+
+  function _setProjectMobileCreateOpen(open, { focus = false } = {}) {
+    projectMobileCreateOpen = !!open;
+    if (projectMobileListView) projectMobileListView.classList.toggle('u-hidden', projectMobileCreateOpen);
+    if (projectMobileCreateForm) projectMobileCreateForm.classList.toggle('u-hidden', !projectMobileCreateOpen);
+    if (focus && projectMobileCreateOpen && projectMobileNameInput) {
+      window.setTimeout(() => projectMobileNameInput.focus(), 0);
+    }
+  }
+
+  function _selectProjectFromMobile(projectId, tab = '') {
+    const nextProjectId = String(projectId || '').trim();
+    if (!nextProjectId) return;
+    const sameProject = nextProjectId === String(projectWorkspaceSelectedId || '');
+    projectWorkspaceSelectedId = nextProjectId;
+    if (tab) projectWorkspaceTab = tab;
+    else if (!sameProject) projectWorkspaceTab = 'details';
+    _closeProjectTargetEditor();
+    _closeProjectEntityEditor();
+    _setProjectWorkspaceMessage('');
+    _setProjectMobileCreateOpen(false);
+    _renderProjectWorkspace();
+  }
+
+  function _renderProjectMobile() {
+    if (!projectMobileRoot || !projectMobileBody) return;
+    if (projectMobileSummary) {
+      const count = projectWorkspaceRows.length;
+      projectMobileSummary.textContent = count
+        ? `${count} project${count === 1 ? '' : 's'} in this session`
+        : 'Create a project to group related work';
+    }
+    _setProjectMobileCreateOpen(projectMobileCreateOpen);
+    projectMobileBody.replaceChildren();
+    if (projectWorkspaceLoading) {
+      projectMobileBody.appendChild(_emptyProjectPanel('Loading projects...'));
+      return;
+    }
+    if (!projectWorkspaceRows.length) {
+      projectMobileArchivedOpen = false;
+      projectMobileBody.appendChild(_emptyProjectPanel('No projects yet. Create one to start grouping related work.'));
+      return;
+    }
+
+    const activeId = activeProject && activeProject.id ? String(activeProject.id) : '';
+    const currentProjects = projectWorkspaceRows.filter(project => !_projectIsArchived(project));
+    const archivedProjects = projectWorkspaceRows.filter(project => _projectIsArchived(project));
+    const hasArchived = archivedProjects.length > 0;
+    if (hasArchived && currentProjects.length) {
+      projectMobileBody.appendChild(_projectMobileSection('Current', currentProjects.length));
+    }
+    _orderedProjectRows(activeId, currentProjects).forEach(project => {
+      projectMobileBody.appendChild(_renderProjectMobileListRow(project, activeId));
+    });
+    if (hasArchived) {
+      projectMobileBody.appendChild(_projectMobileSection('Archived', archivedProjects.length, { open: projectMobileArchivedOpen }));
+      if (projectMobileArchivedOpen) {
+        _orderedProjectRows('', archivedProjects).forEach(project => {
+          projectMobileBody.appendChild(_renderProjectMobileListRow(project, activeId));
+        });
+      }
+    }
+  }
+
   function _projectTabCountText(projectId, summary, tabId, total) {
     const totalCount = Number(total || 0);
     const targetFiltersActive = _projectTargetFilterActive(projectId, summary);
@@ -4301,6 +4496,7 @@
         : 'Select a project to review its targets, runs, findings, artifacts, and packages.';
     }
     _renderProjectList();
+    _renderProjectMobile();
     _renderProjectExplorer();
     _renderProjectPackageWizardModal();
   }
@@ -4540,6 +4736,32 @@
     });
   }
 
+  async function _createProjectFromName(name, input) {
+    const normalizedName = String(name || '').trim();
+    if (!normalizedName) {
+      _setProjectWorkspaceMessage('Project name is required.', { error: true });
+      return;
+    }
+    const resp = await _projectWorkspaceRequest('/projects', {
+      method: 'POST',
+      body: JSON.stringify({ name: normalizedName }),
+    });
+    const data = await resp.json();
+    const projectId = data && data.project ? data.project.id : '';
+    if (projectId) {
+      await _projectWorkspaceRequest('/projects/active', {
+        method: 'POST',
+        body: JSON.stringify({ project_id: projectId }),
+      });
+    }
+    if (projectId) projectWorkspaceSelectedId = String(projectId);
+    projectWorkspaceTab = 'details';
+    if (input) input.value = '';
+    _setProjectMobileCreateOpen(false);
+    _setProjectWorkspaceMessage('Project created and selected.');
+    await refreshProjectWorkspace();
+  }
+
   projectWorkspaceCreateForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const name = String(projectWorkspaceNameInput?.value || '').trim();
@@ -4548,23 +4770,21 @@
       return;
     }
     try {
-      const resp = await _projectWorkspaceRequest('/projects', {
-        method: 'POST',
-        body: JSON.stringify({ name }),
-      });
-      const data = await resp.json();
-      const projectId = data && data.project ? data.project.id : '';
-      if (projectId) {
-        await _projectWorkspaceRequest('/projects/active', {
-          method: 'POST',
-          body: JSON.stringify({ project_id: projectId }),
-        });
-      }
-      if (projectId) projectWorkspaceSelectedId = String(projectId);
-      projectWorkspaceTab = 'details';
-      if (projectWorkspaceNameInput) projectWorkspaceNameInput.value = '';
-      _setProjectWorkspaceMessage('Project created and selected.');
-      await refreshProjectWorkspace();
+      await _createProjectFromName(name, projectWorkspaceNameInput);
+    } catch (err) {
+      _setProjectWorkspaceMessage(err.message || 'Could not create project.', { error: true });
+    }
+  });
+
+  projectMobileCreateForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const name = String(projectMobileNameInput?.value || '').trim();
+    if (!name) {
+      _setProjectWorkspaceMessage('Project name is required.', { error: true });
+      return;
+    }
+    try {
+      await _createProjectFromName(name, projectMobileNameInput);
     } catch (err) {
       _setProjectWorkspaceMessage(err.message || 'Could not create project.', { error: true });
     }
@@ -4932,6 +5152,44 @@
 
   projectWorkspaceModal?.addEventListener('click', async (event) => {
     if (event.target.closest?.('[data-project-review-state]')) return;
+    const mobileTab = event.target.closest?.('[data-project-mobile-tab]');
+    if (mobileTab) {
+      event.preventDefault();
+      event.stopPropagation();
+      await _flushProjectNotesAutosave();
+      _selectProjectFromMobile(mobileTab.dataset.projectId || '', mobileTab.dataset.projectMobileTab || 'details');
+      return;
+    }
+    const mobileAction = event.target.closest?.('[data-project-mobile-action]');
+    if (mobileAction) {
+      event.preventDefault();
+      event.stopPropagation();
+      const mobileProjectId = String(mobileAction.dataset.projectId || '');
+      const action = String(mobileAction.dataset.projectMobileAction || '');
+      if (action === 'new-project') {
+        _setProjectWorkspaceMessage('');
+        _setProjectMobileCreateOpen(true, { focus: true });
+        return;
+      }
+      if (action === 'cancel-create') {
+        _setProjectWorkspaceMessage('');
+        _setProjectMobileCreateOpen(false);
+        return;
+      }
+      if (action === 'toggle-archived') {
+        projectMobileArchivedOpen = !projectMobileArchivedOpen;
+        _renderProjectMobile();
+        return;
+      }
+      if (action === 'open-project') {
+        await _flushProjectNotesAutosave();
+        _selectProjectFromMobile(mobileProjectId);
+        return;
+      }
+      if (action === 'project-menu') {
+        return;
+      }
+    }
     const compareModeButton = event.target.closest?.('[data-project-compare-mode-value]');
     if (compareModeButton) {
       _setProjectRunCompareMode(compareModeButton, event);

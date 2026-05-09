@@ -20,6 +20,99 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 - **Project Workspace code review follow-ups**
   - **Keep terminal documentation aligned**
     - Keep terminal `project` help aligned with actual shell-supported operations. Current shell commands intentionally stop at project CRUD/link/target operations.
+- **Mobile Projects modal implementation plan**
+  - **Goal**
+    - Build a mobile-friendly Projects experience without changing the current desktop modal.
+    - Use a separate mobile DOM root inside the existing Projects overlay, selected at open time when `body.mobile-terminal-mode` is set.
+    - Share project data, selectors, `apiFetch`, `DarklabEntityMetadata`, `bindPressable`, `bindDisclosure`, `bindMobileSheet`, and app primitives with the desktop implementation, but do not reuse the desktop two-column layout markup.
+    - Remove the existing two-pane mobile fallback rules in `app/static/css/mobile.css:623-653` when the new flow ships.
+    - Anchor the visual reference to the Files modal/editor/viewer and existing mobile sheets: same list-to-detail flow, header behavior, sheet handle, buttons, inputs, row treatments, and dismiss mechanics.
+  - **Phase 1: Mobile root and project list**
+    - Add the mobile Projects root inside the existing Projects overlay without duplicating desktop modal IDs; use mobile-specific IDs, generated elements, or data hooks.
+    - Render the list as a full-height mobile sheet using the existing `.sheet-grab.gesture-handle` / `bindMobileSheet` behavior.
+    - Provide a top header/list action for New Project that opens a create sheet instead of keeping a persistent inline create input in the list.
+    - Create sheet contains one project-name input matching the desktop form, with the same 120-character cap and submit behavior.
+    - Pin the active project first, then show current projects using the same desktop sidebar ordering (`_orderedProjectRows(...)`), with archived projects collapsed by default.
+    - Project rows show name, active/archived state, compact count chips, and up to 3 label chips plus a `+N` overflow chip; the full label list appears after drill-in.
+    - Count chips are independent tap targets that stop row propagation and drill into the matching tab.
+    - Tapping the rest of the row opens the project using the normal initial-tab rule.
+    - Row trailing affordances use stable ordering: `⋮` overflow first, then a non-interactive `›` chevron.
+  - **Phase 2: Project detail shell and tab navigation**
+    - Build a drill-in detail screen with a fixed top bar containing `‹ Back`, project name, active/status indicator, and project overflow menu.
+    - Lay the top bar out as a sibling wrapper rather than stacking content inside an `.export-header`-style sticky container, so the unscoped sticky-header rule at `app/static/css/mobile.css:84` does not collapse the title row on iOS Safari.
+    - Add a sticky tab row for Details, Runs, Findings, Artifacts, and Packages; hide Artifacts entirely when Files are disabled.
+    - Clamp tab counts to `999+`; never strip counts to fit narrow viewports, and shorten labels before dropping count context in extreme cases.
+    - Set mobile tab `min-height` to 44px, add left/right edge fade gradients for horizontal scroll, and auto-scroll the active tab into view with direct `scrollLeft` assignment instead of `scrollIntoView({behavior:'smooth'})`.
+    - Initial tab behavior:
+      - same project preserves the last tab
+      - different project opens Details
+      - targeted navigation, such as a count chip, opens the relevant tab
+    - Render only the active tab body. Preserve existing module-owned state such as selected tab and finding/artifact group collapsed state; reset scroll position and transient DOM-only state on tab switches.
+    - Add existing-style loading panels for in-flight project list/summary loads and retryable inline error panels for fetch failures, including missing/deleted projects.
+    - Use the current toast/status path for non-fatal updates such as create, edit, archive, delete, link, and package actions.
+  - **Phase 3: Mobile tab content**
+    - Details tab:
+      - show summary/status, labels, notes, and targets
+      - use a section-level Add Target action
+      - move target-row actions into overflow menus
+    - Runs tab:
+      - row tap performs the primary run action
+      - metadata edit, restore, and remove live in overflow menus
+      - Link last run appears as a top action or empty-state CTA
+    - Findings tab:
+      - keep grouped-by-run collapsible sections
+      - row tap restores/highlights source output and auto-dismisses the sheet so the user lands on the terminal
+      - review state and metadata editing live in overflow menus
+      - empty states split by cause: no linked runs offers Link last run or a muted "open Runs to link a run" hint; linked runs with no findings show "No findings captured for linked runs yet"; active filters show "No findings match selected filters"
+    - Artifacts tab:
+      - group by run
+      - preserve availability/status badges
+      - preview, download, and metadata edit live in overflow menus
+      - hidden entirely when Files are disabled
+    - Packages tab:
+      - show package rows with summary counts
+      - package actions live in overflow menus
+      - Build Package is the empty-state CTA
+  - **Phase 4: Action sheets, editors, compare, and packages**
+    - Render every mobile row overflow as a mobile action sheet, not as a desktop-style dropdown.
+    - Action-sheet items use app primitives, 48px touch rows, destructive tone for Delete, and the same focus/dismiss behavior as other mobile sheets.
+    - Project-level overflow actions are Mark active / Unmark, Archive / Unarchive, Delete, and Edit metadata.
+    - Edit metadata invokes the shared metadata editor with the project entity object, for example `openEntityMetadataEditor('project', project, { projectId: project.id, onSaved: ... })`.
+    - Target editor, entity metadata editor, and package manifest preview follow the File Edit / File Viewer mobile sheet pattern: full-width `mobile-sheet-surface`, clear header context, stacked fields/content, visible close/back action, and bottom-aligned primary actions.
+    - The visual split is intentional: editing/reading surfaces are full-width Files-style sheets because they contain forms or dense content, while one-tap destructive confirmations stay compact through `showConfirm`.
+    - Destructive actions reuse the existing `showConfirm` compact confirmation overlay; do not add mobile-specific confirmation UI.
+    - Compare runs becomes a full-screen 3-step stepper: Left run -> mode -> Right run/label/baseline, with sticky Back/Next/Run footer and `baseline_label` parity with desktop.
+    - Package wizard renders as a full-screen sheet with sticky step header, scrollable body, and sticky Back/Next/Create footer.
+  - **Phase 5: Mobile mechanics, accessibility, and browser behavior**
+    - Reuse existing `bindMobileSheet` behavior and visible `.sheet-grab.gesture-handle` format for every Projects mobile sheet, including drag-to-close, tap-outside-to-close, and tap/keyboard activation on the handle.
+    - Nested sheets such as project detail and package wizard still expose header `‹ Back` as the primary in-flow navigation affordance.
+    - Hide legacy `✕` buttons on mobile sheets; do not introduce new per-sheet close buttons.
+    - Defer `history.pushState` / OS Back integration until after the base mobile Projects flow is stable. Until then, only in-app Back is guaranteed to step between mobile Projects levels; OS/browser Back follows existing app overlay/page behavior and should not be treated as nested Projects navigation in first-pass tests.
+    - When a nested sheet is shown, move focus into the top layer before setting the parent `inert` and `aria-hidden="true"`; restore focus when popping back.
+    - Apply `isolation: isolate` to every mobile sheet surface to prevent high-DPR paint bleed.
+    - Pair `overscroll-behavior: contain` on inner scrollers with the existing touchmove fallback pattern where needed to suppress pull-to-refresh.
+    - Place `safe-area-inset-bottom` padding on scroll containers, not sheet shells.
+    - For form-bearing sheets, reposition sticky action rows above the virtual keyboard via `visualViewport.resize`, scroll focused fields into view on `focus`, and allow `min-height` overrides while focused so iOS Safari `dvh` shrinkage does not clip content.
+    - Meet touch minimums: 44px tab strip, 44x44 row chevrons/overflow hit zones, and 48px action-sheet items.
+  - **Phase 6: Design audit and test coverage**
+    - Before implementation, audit existing mobile sheets/modals/shell surfaces and match their colors, borders, spacing, typography, button sizing, close actions, toggles, dropdowns, inputs, focus states, scroll behavior, and empty states.
+    - Use Files modal/editor/viewer as the closest structural analogue, then compare with mobile menu sheet, Workflows sheet, FAQ/options/theme/shortcuts overlays, confirmation dialogs, PTY modal constraints, and shared app-select menus.
+    - Add mobile-specific browser coverage for:
+      - project list to detail navigation and internal Back behavior
+      - count-chip drill-in targets with row-tap propagation stopped
+      - loading and retryable error states for project list and project summary fetches
+      - tab switching without layout jumps and active-tab auto-scroll on narrow viewports
+      - overflow actions for project rows, run rows, target rows, findings, artifacts, and packages
+      - first-pass browser/OS Back behavior as existing app-level overlay/page behavior, not nested Projects navigation
+      - Files-disabled behavior with the Artifacts tab hidden
+      - package wizard sticky actions on narrow viewports, including the `visualViewport` keyboard-adjust path
+      - focus trap and dismissible behavior for nested sheets, including `inert` / `aria-hidden` propagation to parents
+      - Compare runs stepper round-trip including `baseline_label`
+      - Findings tap-to-restore auto-dismiss landing on the terminal
+  - **Future-state mobile polish**
+    - Add OS Back / browser Back support with `history.pushState` after the base sheet navigation is stable.
+    - Add a project search/filter input above the mobile list once project counts justify it.
+    - Consider swipe gestures for target and finding rows only after overflow-menu interactions are shipped and tested.
 - **Future Project Workspace enhancements**
   - **Security and lifecycle**
     - Validate `workspace_file` entity ownership during session migration, or document that labels/notes on workspace-file paths can drift when a migrated token lands in a session with a different file at the same path.
@@ -59,8 +152,6 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - Move package HTML rendering toward shared Jinja autoescape paths so package output escaping is template-owned instead of manual per-call escaping.
   - **Retention and mobile**
     - Finish pruning/retention behavior for project-linked runs and run-scoped artifacts.
-    - Replace or supplement the desktop-style Projects modal with a mobile-friendly staged layout: pick project, pick tab, then detail view with back navigation.
-    - Add mobile gestures for target and finding rows, such as swipe to edit/remove targets and swipe to mark findings reviewed.
 
 - **Future interactive PTY enhancements**
   - **Current state:** `mtr --interactive <host>`, `ffuf --interactive ...`, and `masscan --interactive ...` have a guarded PTY path behind `interactive_pty_enabled`, use dedicated `/pty/runs` start/stream/input/resize routes, broker PTY events through Redis in multi-worker deployments, support bounded concurrent PTY runs per session with each live terminal scoped to its owning tab, require registry-owned input-safety profiles, render the live terminal in an xterm.js modal, and append completed PTY runs back into the normal terminal/history output path using server-side terminal capture. Redis PTY snapshots support cross-worker reattach, use bounded publish rates, and return specific failure statuses for missing, closed, stale, or not-yet-available runs.
