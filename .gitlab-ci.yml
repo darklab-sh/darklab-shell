@@ -36,6 +36,8 @@ before_script:
 test-py-pytest:
   stage: test
   rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -50,6 +52,8 @@ test-js-unit:
   stage: test
   image: $CI_NODE_IMAGE
   rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -67,6 +71,8 @@ test-js-e2e:
   stage: test
   image: $CI_PYTHON_E2E_IMAGE
   rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -88,6 +94,8 @@ test-js-e2e:
 lint-py:
   stage: lint
   rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -101,6 +109,8 @@ lint-js:
   stage: lint
   image: $CI_NODE_IMAGE
   rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -125,6 +135,8 @@ lint-js:
 audit-py:
   stage: audit
   rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -137,6 +149,8 @@ audit-js:
   stage: audit
   image: $CI_NODE_IMAGE
   rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "web"
@@ -195,6 +209,8 @@ docker-build:
     DOCKER_BUILDKIT: "1"
   before_script: []
   rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+      when: never
     # Always build on the main branch so there is always a verified image
     - if: $CI_COMMIT_BRANCH == "main"
     # Always build for merge requests targeting main so the merge gate sees a build
@@ -210,3 +226,32 @@ docker-build:
       allow_failure: true
   script:
     - docker build -t darklab_shell:$CI_COMMIT_SHA .
+
+.scheduled-docker-build:
+  stage: build
+  image: $CI_DOCKER_IMAGE
+  variables:
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_BUILDKIT: "1"
+  before_script: []
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $SCHEDULED_DOCKER_BUILD_FANOUT == "1"
+    - when: never
+  script:
+    - docker build -t darklab_shell:$CI_COMMIT_SHA .
+
+docker-build-bael:
+  extends: .scheduled-docker-build
+  tags:
+    - bael
+
+docker-build-bune:
+  extends: .scheduled-docker-build
+  tags:
+    - bune
+
+docker-build-botis:
+  extends: .scheduled-docker-build
+  tags:
+    - botis

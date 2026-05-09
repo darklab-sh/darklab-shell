@@ -350,7 +350,7 @@ commands:
               hint_only: true
               description: "Project name, slug, or id"
         link:
-          description: "Link a source record to the active project"
+          description: "Link a run to the active project"
           subcommands:
             last:
               description: "Link the latest run"
@@ -364,17 +364,8 @@ commands:
                   description: "Run id"
               close_after:
                 run: 1
-            file:
-              description: "Link a workspace file"
-              arguments:
-                - value: "<workspace-path>"
-                  hint_only: true
-                  value_type: target
-                  description: "Workspace file path"
-              close_after:
-                file: 1
         unlink:
-          description: "Unlink a source record from the active project"
+          description: "Unlink a run from the active project"
           subcommands:
             run:
               description: "Unlink a run"
@@ -384,15 +375,6 @@ commands:
                   description: "Run id"
               close_after:
                 run: 1
-            file:
-              description: "Unlink a workspace file"
-              arguments:
-                - value: "<workspace-path>"
-                  hint_only: true
-                  value_type: target
-                  description: "Workspace file path"
-              close_after:
-                file: 1
         target:
           description: "Manage active-project targets"
           subcommands:
