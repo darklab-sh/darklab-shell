@@ -137,6 +137,14 @@ function loadPermalink({
   const copyTextToClipboard = vi.fn(() => Promise.resolve())
   const showToast = vi.fn()
   const URL = makeUrlMock()
+  const downloadBlobAsAttachment = vi.fn((blob, filename) => {
+    const href = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = href
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(href)
+  })
   const win = Object.assign({}, window, {
     PermData: window.PermData,
     innerWidth: window.innerWidth,
@@ -155,8 +163,9 @@ function loadPermalink({
     'copyTextToClipboard',
     'showToast',
     'URL',
+    'downloadBlobAsAttachment',
     PERMALINK_SRC,
-  )(win, document, ansiUp.Ctor, ExportHtmlUtils, ExportPdfUtils, copyTextToClipboard, showToast, URL)
+  )(win, document, ansiUp.Ctor, ExportHtmlUtils, ExportPdfUtils, copyTextToClipboard, showToast, URL, downloadBlobAsAttachment)
 
   return {
     el: {
@@ -177,6 +186,7 @@ function loadPermalink({
       copyTextToClipboard,
       showToast,
       URL,
+      downloadBlobAsAttachment,
     },
   }
 }

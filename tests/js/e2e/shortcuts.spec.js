@@ -1,9 +1,7 @@
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady, runCommand, makeTestIp, waitForHistoryRuns } from './helpers.js'
+import { ensurePromptReady, runCommand, waitForHistoryRuns } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
-const TEST_IP = makeTestIp(70)
-const HIST_SEARCH_IP = makeTestIp(71)
 
 async function dispatchMacOptionKey(page, selector, init) {
   await page.locator(selector).evaluate((el, eventInit) => {
@@ -13,7 +11,6 @@ async function dispatchMacOptionKey(page, selector, init) {
 
 test.describe('keyboard shortcuts', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'clipboard', {
         value: { writeText: () => Promise.resolve() },
@@ -74,15 +71,16 @@ test.describe('keyboard shortcuts', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
-  test('macOS Option+P creates a permalink without inserting a symbol into the prompt', async ({
+  test('macOS Option+Shift+P creates a permalink without inserting a symbol into the prompt', async ({
     page,
   }) => {
     await runCommand(page, CMD)
 
     await dispatchMacOptionKey(page, '#cmd', {
-      key: 'π',
+      key: '∏',
       code: 'KeyP',
       altKey: true,
+      shiftKey: true,
     })
 
     await expect(page.locator('#confirm-host')).toBeVisible()
@@ -325,7 +323,6 @@ test.describe('keyboard shortcuts', () => {
 
 test.describe('Ctrl+R reverse-history search', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': HIST_SEARCH_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
   })
@@ -425,7 +422,6 @@ test.describe('Ctrl+R reverse-history search', () => {
 
 test.describe('? keyboard-shortcuts overlay', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(73) })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
     await ensurePromptReady(page)
@@ -540,7 +536,6 @@ test.describe('? keyboard-shortcuts overlay', () => {
 
 test.describe('desktop chrome keyboard shortcuts', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(74) })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
     await ensurePromptReady(page)
@@ -582,6 +577,26 @@ test.describe('desktop chrome keyboard shortcuts', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
     await dispatchMacOptionKey(page, '#cmd', { key: 'ß', code: 'KeyS', altKey: true })
     await expect(page.locator('#search-bar')).not.toBeVisible()
+  })
+
+  test('Alt+C toggles the Commands modal from the composer', async ({ page }) => {
+    const commands = page.locator('#command-registry-overlay')
+    await expect(commands).not.toHaveClass(/\bopen\b/)
+    await dispatchMacOptionKey(page, '#cmd', { key: 'ç', code: 'KeyC', altKey: true })
+    await expect(commands).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await dispatchMacOptionKey(page, '#cmd', { key: 'ç', code: 'KeyC', altKey: true })
+    await expect(commands).not.toHaveClass(/\bopen\b/)
+  })
+
+  test('Alt+P toggles the Projects modal from the composer', async ({ page }) => {
+    const projects = page.locator('#project-workspace-overlay')
+    await expect(projects).not.toHaveClass(/\bopen\b/)
+    await dispatchMacOptionKey(page, '#cmd', { key: 'π', code: 'KeyP', altKey: true })
+    await expect(projects).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await dispatchMacOptionKey(page, '#cmd', { key: 'π', code: 'KeyP', altKey: true })
+    await expect(projects).not.toHaveClass(/\bopen\b/)
   })
 
   test('Alt+M toggles the Status Monitor from the composer', async ({ page }) => {

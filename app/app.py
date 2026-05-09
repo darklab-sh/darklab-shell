@@ -62,6 +62,7 @@ from blueprints.run import run_bp, SUDO_BIN, KILL_BIN  # noqa: E402, F401 — re
 from blueprints.history import history_bp  # noqa: E402
 from blueprints.session import session_bp  # noqa: E402
 from blueprints.workspace import workspace_bp  # noqa: E402
+from blueprints.projects import projects_bp  # noqa: E402
 from workspace import cleanup_inactive_workspaces  # noqa: E402
 
 app = Flask(__name__, template_folder="templates")
@@ -130,6 +131,7 @@ app.register_blueprint(run_bp)
 app.register_blueprint(history_bp)
 app.register_blueprint(session_bp)
 app.register_blueprint(workspace_bp)
+app.register_blueprint(projects_bp)
 
 
 if __name__ == "__main__":

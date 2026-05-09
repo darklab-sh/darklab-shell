@@ -4,7 +4,7 @@ darklab_shell is a self-hosted web terminal for network diagnostics and security
 
 The backend runs on Flask/Gunicorn, Redis, and SQLite. Commands go through allow and deny rules, loopback checks, path checks, and shell-metacharacter blocking before anything starts. Scanner commands run as an unprivileged `scanner` user and can only write to the app-managed places you allow.
 
-The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile shell, session Files, sharing/redaction, themes, and coverage across pytest, Vitest, Playwright, and container smoke tests. A live instance is available at [shell.darklab.sh](https://shell.darklab.sh/).
+The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile shell, session Files, project workspaces, sharing/redaction, themes, and coverage across pytest, Vitest, Playwright, and container smoke tests. A live instance is available at [shell.darklab.sh](https://shell.darklab.sh/).
 
 <div align="center">
 <b>Desktop Demo</b><br>
@@ -37,12 +37,14 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy, `save ▾` exports (txt / html / pdf), jump-to-live / jump-to-bottom controls, and exports that keep permalink pages, saved HTML, and PDF output visually aligned where the PDF renderer allows
 - **History and sharing** — recent command chips, desktop/mobile history with full-text search across command text and stored output, filters, stars, changed-only run comparison, active-run reconnect after reload, idle-tab restore, run permalinks, snapshot rows, native mobile sharing, and full-output files for longer runs
 - **Session command variables** — `var set HOST ip.darklab.sh`, `var list`, and `var unset HOST` define per-session values you can reuse as `$HOST` or `${HOST}`. Expansion happens before command validation, typed history stays readable, and the transcript shows the expanded command that actually ran
-- **Session files** — optional per-session Files support for tools that need small input/output files. Users can create, view, edit, move/rename, download, and delete files; drag files into folders; preview JSON, JSONL/NDJSON, CSV/TSV, XML, HTTP responses, and large text; see quota/usage; use cwd-aware `ls`, `cat`, `mv`, and confirmed `rm`; use simple `*` patterns for list/move/delete flows; and let selected command flags safely read/write session files without opening shell navigation or redirection
-- **Session tokens** — persistent `tok_` session tokens carry history, shell identity, command variables, workspace files, user workflows, recent domain autocomplete, and saved options across browsers and devices. A phone or second browser using the same token can attach to a live command, replay earlier output, follow new output, and kill the run from the terminal or Status Monitor. `session-token generate/set/copy/clear/rotate/list/revoke` manage the token lifecycle with migration, rollback-safe rotate, confirmations, cross-tab sync, revocation, masked token history, and Options-panel shortcuts
+- **Session files** — optional per-session Files support for tools that need small input/output files. Users can create, view, edit, move/rename, download, delete, label, and note files; drag files into folders; preview JSON, JSONL/NDJSON, CSV/TSV, XML, HTTP responses, and large text; see quota/usage; use cwd-aware `ls`, `cat`, `mv`, and confirmed `rm`; use simple `*` patterns for list/move/delete flows; and let selected command flags safely read/write session files without opening shell navigation or redirection
+- **Project workspaces** — lightweight case folders group related runs, run-owned workspace artifacts, targets, findings, labels, notes, and draft evidence packages without copying the source records. Active projects can auto-link completed runs, project views expose finding/artifact review and metadata editing, and package exports preserve the selected project evidence with raw/redacted modes
+- **Interactive PTY mode** — optional xterm.js-backed live terminals for registry-approved screen tools such as `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`, with guarded input/resize routes, bounded runtime/concurrency, Redis-backed reattach in multi-worker deployments, and completed transcripts saved back into normal history
+- **Session tokens** — persistent `tok_` session tokens carry history, shell identity, command variables, workspace files, project workspace records, active-project context, user workflows, recent domain autocomplete, and saved options across browsers and devices. A phone or second browser using the same token can attach to a live command, replay earlier output, follow new output, and kill the run from the terminal or Status Monitor. `session-token generate/set/copy/clear/rotate/list/revoke` manage the token lifecycle with migration, rollback-safe rotate, confirmations, cross-tab sync, revocation, masked token history, and Options-panel shortcuts
 - **Safer sharing** — a built-in basic redaction baseline can mask common secrets or infrastructure details on snapshot permalinks, with optional operator regex rules appended on top. Permalink creation can choose raw vs redacted sharing per snapshot without changing the stored run history; local `save txt/html/pdf` exports remain raw
 - **Run notifications** — optional browser desktop notifications fire on run completion (any exit code or kill); toggled from the Options panel on desktop and intentionally hidden from the mobile Options sheet; uses only the command root in the notification title to avoid exposing arguments or token values
 - **Themes and presentation** — named theme variants, a terminal-native `theme` command, theme-aware permalink/export rendering, mobile/desktop theme parity, browser-aligned permalink/saved-HTML export styling with best-effort PDF parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), an operator-configurable FAQ modal, and user options for welcome-intro behavior plus default share-snapshot redaction that now follow the active session token instead of staying browser-local
-- **Built-in commands** — native shell commands like `help`, `commands`, `history`, `last`, `limits`, `status`, `runs`, `stats`, `workflow`, `file`, `ls`, `cat`, `mv`, `rm`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available. `commands info <tool>` and the desktop/mobile Command Registry expose supported external-tool descriptions, examples, flags, and subcommands from `commands.yaml`; `runs` / `jobs` show active app-run metadata with CPU and RSS memory, `runs --json` prints an automation-friendly snapshot, and `stats` summarizes session activity by command root
+- **Built-in commands** — native shell commands like `help`, `commands`, `history`, `last`, `limits`, `status`, `runs`, `stats`, `project`, `workflow`, `file`, `ls`, `cat`, `mv`, `rm`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available. `project` manages project selection, links, and targets from the terminal; `commands info <tool>` and the desktop/mobile Command Registry expose supported external-tool descriptions, examples, flags, and subcommands from `commands.yaml`; `runs` / `jobs` show active app-run metadata with CPU and RSS memory, `runs --json` prints an automation-friendly snapshot, and `stats` summarizes session activity by command root
 - **Guided workflows** — built-in sequences for DNS, TLS/HTTPS, HTTP, reachability, email, passive recon, subdomain checks, directory discovery, CDN/edge checks, API recon, network paths, port/service triage, and workspace-native recon chains. Users can save session-scoped workflows with `{{variables}}`, edit/delete them above the built-ins, and run them from the terminal with `workflow list/show/run`
 - **Security and operations** — registry-backed command policy with deny-prefix lists for loopback and path blocking, shell metacharacter blocking, Redis-backed rate limiting and PID tracking, structured logging with `text` and `gelf` format support, and an IP-gated `/diag` page showing app health, database and Redis status, activity stats, top commands, and per-tool availability
 - **Pre-installed security tooling** — nmap, rustscan, naabu, masscan, nuclei, ffuf, gobuster, katana, amass, wafw00f, sslscan, sslyze, openssl, and more, all sandboxed under a dedicated `scanner` user with enforced allowlists and the full [SecLists](https://github.com/danielmiessler/SecLists) collection pre-installed at `/usr/share/wordlists/seclists/`; the built-in `wordlist` command and typed autocomplete catalog show high-signal SecLists entries without dumping the whole corpus into suggestions
@@ -85,7 +87,7 @@ Before you begin, make sure you have:
 - Linux host or macOS (uses `os.setsid` for process group management; `sudo kill` for cross-user process termination)
 - (Optional) Redis 6.2+ (for `GETDEL` support). If not configured or available, the app falls back to in-process mode
 
-Other dependencies (Flask ≥ 2.0, PyYAML, Flask-Limiter[redis], redis-py, psutil) are installed automatically by the steps below.
+Other dependencies (Flask ≥ 2.0, PyYAML, Flask-Limiter[redis], redis-py, psutil, gunicorn, and pyte for server-side PTY terminal capture) are installed automatically by the steps below.
 
 The easiest path is to run:
 
@@ -158,6 +160,8 @@ All application settings live in `app/conf/config.yaml`. The values below are th
 - For an untracked local override layer, add `app/conf/config.local.yaml`. It loads after `config.yaml` and can override any subset of keys.
 - The same sibling `*.local.*` overlay pattern is also supported for the other operator-controlled config files under `app/conf/` and `app/conf/themes/`.
 
+Project workspace settings cap session-scoped case folders, links, targets, labels, notes, and package exports. Interactive PTY settings enable a separate guarded terminal path for approved screen-oriented tools; leave `interactive_pty_enabled` off unless the deployment is prepared for the runtime and Redis requirements described below.
+
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `app_name` | `darklab_shell` | Name shown in the browser tab, header, and permalink pages |
@@ -189,6 +193,17 @@ All application settings live in `app/conf/config.yaml`. The values below are th
 | `workspace_max_file_mb` | `5 MB` | Server-side only. Maximum single app-managed text file size |
 | `workspace_max_files` | `100` | Server-side only. Maximum file count per session workspace |
 | `workspace_inactivity_ttl_hours` | `1` | Server-side only. Inactive session workspace cleanup threshold in hours; `0` disables age-based cleanup. Workspace activity touches the hashed session directory, and periodic cleanup removes expired `sess_*` directories rather than aging out individual files |
+| `max_projects_per_session` | `100` | Server-side only. Maximum project workspace records one session can create |
+| `max_project_links_per_project` | `1000` | Server-side only. Maximum linked source records per project |
+| `max_project_targets_per_project` | `200` | Server-side only. Maximum targets per project |
+| `max_evidence_packages_per_project` | `25` | Server-side only. Maximum draft evidence package manifests per project |
+| `max_entity_labels_per_session` | `5000` | Server-side only. Maximum entity labels one session can create |
+| `max_entity_labels_per_entity` | `20` | Server-side only. Maximum labels attached to a single supported entity |
+| `max_entity_notes_per_session` | `2000` | Server-side only. Maximum one-note-per-entity records one session can create |
+| `evidence_package_max_mb` | `25 MB` | Server-side only. Maximum uncompressed evidence package archive size before download is rejected |
+| `evidence_package_max_artifacts` | `100` | Server-side only. Maximum workspace artifacts included in one evidence package archive |
+| `evidence_package_download_rate_limit_per_minute` | `10` | Server-side only. Per-session evidence package download limit per minute |
+| `evidence_package_download_rate_limit_per_second` | `2` | Server-side only. Per-session evidence package download burst limit per second |
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` = disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
 | `run_broker_enabled` | `true` | Enables the brokered run model for command start, output replay, and live reattachment |
@@ -199,7 +214,7 @@ All application settings live in `app/conf/config.yaml`. The values below are th
 | `run_broker_subscriber_block_seconds` | `15` | How long broker stream subscribers wait for new events before receiving a heartbeat |
 | `run_broker_heartbeat_seconds` | `20` | How often broker workers emit heartbeat events while a process is idle |
 | `run_broker_owner_stale_seconds` | `75` | How long an owner browser can go without touching a run before ownership is considered stale |
-| `interactive_pty_enabled` | `false` | Enables the guarded first-pass interactive PTY path for allowlisted screen tools such as `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`. Multi-worker deployments require Redis so PTY output, input, and resize events can be brokered across workers; without Redis this mode is limited to `WEB_CONCURRENCY=1` |
+| `interactive_pty_enabled` | `false` | Enables the guarded interactive PTY path for allowlisted screen tools such as `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`. Multi-worker deployments require Redis so PTY output, input, and resize events can be brokered across workers; without Redis this mode is limited to `WEB_CONCURRENCY=1` |
 | `interactive_pty_max_runtime_seconds` | `900` | Maximum lifetime for an interactive PTY command before the server terminates it |
 | `interactive_pty_max_concurrent_per_session` | `4` | Maximum number of active interactive PTY commands one browser session can run at the same time |
 | `welcome_char_ms` | `18` | Base delay between each typed character in the welcome animation (ms). Lower = faster typing |
@@ -569,7 +584,6 @@ To prevent commands from writing to either path directly, the app blocks any com
 - [tests/README.md](tests/README.md) - Detailed suite appendix, smoke-test coverage, and focused test commands
 - [THEME.md](THEME.md) - Theme registry, selector metadata, and override behavior
 - [docs/external-command-integrations.md](docs/external-command-integrations.md) - External command registry, rewrite, environment, Files, and smoke-test contracts
-- [docs/ROADMAP.md](docs/ROADMAP.md) - Product roadmap for projects, annotations, artifacts, notes, exports, and target context
 - [FEATURES.md](FEATURES.md) - Full per-feature reference: autocomplete, pipe support, keyboard shortcuts, allowlist, welcome animation, history, permalinks, themes, and more
 
 ---
@@ -607,6 +621,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── assets.py           # /vendor/*, /favicon.ico, /health, /diag (IP-gated operator diagnostics)
 │   │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*
 │   │   ├── history.py          # /history*, /share*; preview/full-output shaping helpers
+│   │   ├── projects.py         # /projects* project workspace CRUD and relationship routes
 │   │   ├── run.py              # /runs broker starts/streams, /run/client history persistence, /kill, and run-output capture helpers
 │   │   ├── session.py          # /session/token/*, /session/preferences, /session/variables, /session/workflows*, /session/recent-domains, /session/migrate, /session/starred*
 │   │   └── workspace.py        # /workspace/files* app-managed session file routes
@@ -637,6 +652,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── output_signals.py       # Server-side findings/warnings/errors/summaries classifier
 │   ├── permalinks.py           # Flask context/render helpers for /history/<id> and /share/<id>
 │   ├── process.py              # Redis setup, pid_register/pid_pop, in-process fallback
+│   ├── project_workspace.py    # Session-scoped project/case folder helpers and relationship validation
 │   ├── pty_service.py          # Interactive PTY process/service helpers for allowlisted screen tools
 │   ├── redaction.py            # Snapshot-share redaction helpers and built-in rule application
 │   ├── requirements.txt        # Python runtime dependencies
@@ -688,6 +704,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │       ├── ui_confirm.js   # showConfirm primitive — shared confirmation-dialog surface (promise-based, Enter-to-cancel default, stacks actions on narrow viewports)
 │   │       ├── ui_disclosure.js # bindDisclosure helper — aria-expanded + panel class lifecycle for expandable/collapsible controls, composed atop bindPressable
 │   │       ├── ui_dismissible.js # bindDismissible helper — modal/sheet/panel dismissal contract with backdrop-click, close buttons, and shared closeTopmostDismissible Escape dispatcher
+│   │       ├── ui_entity_metadata.js # Shared labels/notes client helpers for history, projects, packages, and Files metadata surfaces
 │   │       ├── ui_focus_trap.js # bindFocusTrap helper — keeps Tab / Shift+Tab cycling inside confirm modals so focus cannot escape to rail/tabs/HUD behind the backdrop
 │   │       ├── ui_helpers.js   # DOM-facing helpers and visibility setters
 │   │       ├── ui_outside_click.js # bindOutsideClickClose helper — ambient outside-click dismissal with trigger exemption, scope override, and selector-based exemptions
@@ -734,7 +751,6 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   └── history.db              #   stores run history and tab snapshots
 ├── docker-compose.yml
 ├── docs/
-│   ├── ROADMAP.md              # Product roadmap for projects, annotations, artifacts, notes, exports, and target context
 │   ├── external-command-integrations.md # External-tool rewrite, environment, Files, and smoke-test contracts
 │   └── release-drafts/
 │       ├── v2.0-merge-request.md # Draft merge-request notes for the next major release

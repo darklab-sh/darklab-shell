@@ -949,6 +949,96 @@ describe('autocomplete helpers', () => {
     expect(getAutocompleteMatches('amass viz -o ', 13).map(item => item.value)).toEqual(['amass-viz'])
   })
 
+  it('walks nested subcommands before suggesting the next project argument', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => '',
+        acSuggestions: [],
+        acContextRegistry: {
+          project: {
+            flags: [],
+            expects_value: [],
+            arg_hints: {
+              __positional__: [
+                { value: 'link', insertValue: 'link ', description: 'Link source record' },
+                { value: 'target', insertValue: 'target ', description: 'Manage targets' },
+              ],
+            },
+            subcommands: {
+              link: {
+                flags: [],
+                expects_value: [],
+                arg_hints: {
+                  __positional__: [
+                    { value: 'run', insertValue: 'run ', description: 'Link a run' },
+                  ],
+                },
+                subcommands: {
+                  run: {
+                    flags: [],
+                    expects_value: [],
+                    arg_hints: { __positional__: [{ value: '<run-id>', hintOnly: true, description: 'Run id' }] },
+                    close_after: { run: 1 },
+                    subcommands: {},
+                  },
+                },
+              },
+              target: {
+                flags: [],
+                expects_value: [],
+                arg_hints: { __positional__: [{ value: 'add', insertValue: 'add ', description: 'Add target' }] },
+                subcommands: {
+                  add: {
+                    flags: [],
+                    expects_value: [],
+                    arg_hints: {
+                      __positional__: [
+                        { value: 'domain', insertValue: 'domain ', description: 'Add a domain target' },
+                        { value: 'url', insertValue: 'url ', description: 'Add a URL target' },
+                      ],
+                    },
+                    subcommands: {
+                      domain: {
+                        flags: [],
+                        expects_value: [],
+                        arg_hints: {
+                          __positional__: [
+                            { value: '<domain>', hintOnly: true, value_type: 'domain', description: 'Domain value' },
+                          ],
+                        },
+                        close_after: { domain: 1 },
+                        subcommands: {},
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          ping: { flags: [], expects_value: [], arg_hints: {} },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('project target add ', 19).map(item => item.value)).toEqual(['domain', 'url'])
+    expect(getAutocompleteMatches('project target add domain ', 26).map(item => item.value)).toEqual(['<domain>'])
+    expect(getAutocompleteMatches('project target add domain darklab.sh ', 37)).toEqual([])
+    expect(getAutocompleteMatches('project link run ', 17).map(item => item.value)).toEqual(['<run-id>'])
+    expect(getAutocompleteMatches('project link run run-1 ', 23)).toEqual([])
+  })
+
   it('tracks recent domains from structured flag and positional slots, capped in memory', () => {
     const { rememberRecentDomainsFromCommand, _readRecentDomains } = fromDomScripts(
       ['app/static/js/utils.js', 'app/static/js/autocomplete_core.js', 'app/static/js/autocomplete.js'],
@@ -974,6 +1064,11 @@ describe('autocomplete helpers', () => {
             expects_value: ['-d'],
             arg_hints: { '-d': [{ value: '<domain>', hintOnly: true, value_type: 'domain', description: 'Target domain to enumerate' }] },
           },
+          nmap: {
+            flags: [],
+            expects_value: [],
+            arg_hints: { __positional__: [{ value: '<target>', hintOnly: true, value_type: 'target', description: 'Hostname, IP, or CIDR' }] },
+          },
         },
         acFiltered: [],
         acIndex: -1,
@@ -992,10 +1087,12 @@ describe('autocomplete helpers', () => {
     for (let i = 0; i < 10; i += 1) {
       rememberRecentDomainsFromCommand(`subfinder -d d${i}.example.com`)
     }
+    rememberRecentDomainsFromCommand('nmap target.example.dev')
     rememberRecentDomainsFromCommand('subfinder -d beta.example.org')
 
     expect(_readRecentDomains()).toEqual([
       'beta.example.org',
+      'target.example.dev',
       'd9.example.com',
       'd8.example.com',
       'd7.example.com',
@@ -1004,7 +1101,6 @@ describe('autocomplete helpers', () => {
       'd4.example.com',
       'd3.example.com',
       'd2.example.com',
-      'd1.example.com',
     ])
     expect(sessionStorage.getItem('recent_domains:session-a')).toBeNull()
   })
@@ -1077,6 +1173,58 @@ describe('autocomplete helpers', () => {
     expect(_readRecentDomains()).toEqual(['alpha.example.com', 'beta.example.org'])
   })
 
+  it('reloads active project targets after a same-session project workspace storage signal', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ project: { id: 'prj_abc123' } }),
+        })
+      }
+      if (url === '/projects/prj_abc123/targets') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            targets: [{ type: 'domain', value: 'new-target.example.com', label: 'CLI add' }],
+          }),
+        })
+      }
+      return Promise.reject(new Error(`Unexpected URL: ${url}`))
+    })
+    const { _readProjectTargets } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        SESSION_ID: 'session-a',
+        apiFetch,
+        acSuggestions: [],
+        acContextRegistry: {},
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      _readProjectTargets,
+    }`,
+    )
+
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'darklab_project_workspace_changed',
+      newValue: JSON.stringify({ session_id: 'session-a', changed_at: Date.now() }),
+    }))
+    for (let i = 0; i < 8; i += 1) await Promise.resolve()
+
+    expect(apiFetch).toHaveBeenCalledWith('/projects/active', { cache: 'no-store' })
+    expect(apiFetch).toHaveBeenCalledWith('/projects/prj_abc123/targets', { cache: 'no-store' })
+    expect(_readProjectTargets()).toEqual([
+      { type: 'domain', value: 'new-target.example.com', label: 'CLI add' },
+    ])
+  })
+
   it('persists captured recent domains without requiring browser storage', async () => {
     const apiFetch = vi.fn(() => Promise.resolve({
       json: () => Promise.resolve({ domains: ['alpha.example.com'] }),
@@ -1122,7 +1270,7 @@ describe('autocomplete helpers', () => {
   })
 
   it('suggests recent domains only inside known domain value slots', () => {
-    const { getAutocompleteMatches, rememberRecentDomainsFromCommand } = fromDomScripts(
+    const { getAutocompleteMatches, rememberRecentDomainsFromCommand, setProjectAutocompleteTargets } = fromDomScripts(
       ['app/static/js/utils.js', 'app/static/js/autocomplete_core.js', 'app/static/js/autocomplete.js'],
       {
         document,
@@ -1158,7 +1306,27 @@ describe('autocomplete helpers', () => {
             arg_hints: {
               '-c': [{ value: '4', description: 'Send four probes' }],
               '-i': [{ value: '0.5', description: 'Half-second probe interval' }],
-              __positional__: [{ value: '<host>', hintOnly: true, value_type: 'domain', description: 'Hostname or IP address to probe' }],
+              __positional__: [{ value: '<host>', hintOnly: true, value_type: 'host', description: 'Hostname or IP address to probe' }],
+            },
+          },
+          nmap: {
+            flags: [
+              { value: '-p', description: 'Ports to scan' },
+            ],
+            expects_value: ['-p'],
+            arg_hints: {
+              '-p': [
+                { value: '<ports>', hintOnly: true, value_type: 'port_set', description: 'Comma-separated ports or ranges' },
+                { value: '80,443', description: 'Common web ports' },
+              ],
+              __positional__: [{ value: '<target>', hintOnly: true, value_type: 'target', description: 'Hostname, IP, or CIDR' }],
+            },
+          },
+          curl: {
+            flags: [],
+            expects_value: [],
+            arg_hints: {
+              __positional__: [{ value: '<url>', hintOnly: true, value_type: 'url', description: 'URL to request' }],
             },
           },
         },
@@ -1169,14 +1337,22 @@ describe('autocomplete helpers', () => {
       `{
       getAutocompleteMatches,
       rememberRecentDomainsFromCommand,
+      setProjectAutocompleteTargets,
     }`,
     )
 
     rememberRecentDomainsFromCommand('subfinder -d alpha.example.com')
     rememberRecentDomainsFromCommand('dig beta.example.org')
-    rememberRecentDomainsFromCommand('ping darklab.sh')
+    rememberRecentDomainsFromCommand('subfinder -d darklab.sh')
+    setProjectAutocompleteTargets([
+      { type: 'domain', value: 'project.example.com', label: 'Primary' },
+      { type: 'ip', value: '192.0.2.10' },
+      { type: 'url', value: 'https://project.example.com/login' },
+      { type: 'port_set', value: '22,80' },
+    ])
 
     expect(getAutocompleteMatches('subfinder -d ', 13).map(item => item.value)).toEqual([
+      'project.example.com',
       'darklab.sh',
       'beta.example.org',
       'alpha.example.com',
@@ -1184,12 +1360,23 @@ describe('autocomplete helpers', () => {
     ])
     expect(getAutocompleteMatches('dig MX be', 9).map(item => item.value)).toEqual(['beta.example.org', '<domain>'])
     expect(getAutocompleteMatches('ping ', 5).map(item => item.value)).toEqual([
+      'project.example.com',
+      '192.0.2.10',
       'darklab.sh',
       'beta.example.org',
       'alpha.example.com',
       '-c',
       '-i',
       '<host>',
+    ])
+    expect(getAutocompleteMatches('nmap -p ', 8).map(item => item.value)).toEqual([
+      '22,80',
+      '<ports>',
+      '80,443',
+    ])
+    expect(getAutocompleteMatches('curl https://pro', 16).map(item => item.value)).toEqual([
+      'https://project.example.com/login',
+      '<url>',
     ])
     expect(getAutocompleteMatches('subfinder -o ', 13).map(item => item.value)).toEqual(['subdomains.txt'])
   })

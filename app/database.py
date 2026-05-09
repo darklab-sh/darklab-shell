@@ -4,7 +4,8 @@ Database lives in the configured data directory. If unset, /data is used when
 writable and /tmp is the local-dev fallback.
 
 Tables: runs, run_output_artifacts, snapshots, session_tokens, session_preferences,
-starred_commands, session_variables, user_workflows, recent_domains.
+starred_commands, session_variables, user_workflows, recent_domains, and project
+workspace relationship tables.
 FTS: runs_fts (FTS5 virtual table over runs.command + runs.output_search_text).
 """
 
@@ -25,6 +26,36 @@ log = logging.getLogger("shell")
 DATA_DIR = resolve_data_dir()
 DB_PATH  = os.path.join(DATA_DIR, "history.db")
 DB_INIT_LOCK_PATH = os.path.join(DATA_DIR, "history.db.init.lock")
+
+PROJECT_ENTITY_TYPES = frozenset({
+    "project",
+    "run",
+    "snapshot",
+    "workspace_file",
+    "run_file_artifact",
+    "finding",
+    "target",
+    "package",
+})
+
+PROJECT_LINK_SOURCES = frozenset({
+    "manual",
+    "active_project",
+    "package_flow",
+    "migration",
+})
+
+
+def validate_project_entity_type(entity_type):
+    if entity_type not in PROJECT_ENTITY_TYPES:
+        raise ValueError(f"Unsupported project entity type: {entity_type!r}")
+    return entity_type
+
+
+def validate_project_link_source(source):
+    if source not in PROJECT_LINK_SOURCES:
+        raise ValueError(f"Unsupported project link source: {source!r}")
+    return source
 
 
 def db_connect():
@@ -137,6 +168,139 @@ def _create_schema(conn):
             PRIMARY KEY (session_id, domain)
         )
     """)
+    _create_project_workspace_schema(conn)
+
+
+def _create_project_workspace_schema(conn):
+    """Create project workspace relationship tables."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS projects (
+            id          TEXT PRIMARY KEY,
+            session_id  TEXT NOT NULL,
+            name        TEXT NOT NULL,
+            slug        TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            status      TEXT NOT NULL DEFAULT 'active',
+            color       TEXT NOT NULL DEFAULT '',
+            created     TEXT NOT NULL,
+            updated     TEXT NOT NULL,
+            UNIQUE (session_id, slug)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS project_links (
+            id          TEXT PRIMARY KEY,
+            project_id  TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id   TEXT NOT NULL,
+            source      TEXT NOT NULL DEFAULT 'manual',
+            created     TEXT NOT NULL,
+            UNIQUE (project_id, entity_type, entity_id)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS run_file_artifacts (
+            id             TEXT PRIMARY KEY,
+            session_id     TEXT NOT NULL,
+            run_id         TEXT NOT NULL,
+            workspace_path TEXT NOT NULL,
+            display_name   TEXT NOT NULL DEFAULT '',
+            kind           TEXT NOT NULL DEFAULT 'unknown',
+            byte_size      INTEGER NOT NULL DEFAULT 0,
+            detected_by    TEXT NOT NULL DEFAULT 'manual',
+            content_type   TEXT NOT NULL DEFAULT '',
+            preview_type   TEXT NOT NULL DEFAULT '',
+            content_sha256 TEXT NOT NULL DEFAULT '',
+            created        TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS project_targets (
+            id            TEXT PRIMARY KEY,
+            project_id    TEXT NOT NULL,
+            type          TEXT NOT NULL,
+            value         TEXT NOT NULL,
+            source_run_id TEXT NOT NULL DEFAULT '',
+            confidence    REAL NOT NULL DEFAULT 1.0,
+            review_state  TEXT NOT NULL DEFAULT 'confirmed',
+            source        TEXT NOT NULL DEFAULT 'user',
+            source_detail TEXT NOT NULL DEFAULT '{}',
+            seen_count    INTEGER NOT NULL DEFAULT 1,
+            last_seen     TEXT NOT NULL DEFAULT '',
+            dismissed_at  TEXT NOT NULL DEFAULT '',
+            created       TEXT NOT NULL,
+            updated       TEXT NOT NULL,
+            UNIQUE (project_id, type, value)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS findings (
+            id           TEXT PRIMARY KEY,
+            session_id   TEXT NOT NULL,
+            run_id       TEXT NOT NULL,
+            target_id    TEXT NOT NULL DEFAULT '',
+            scope        TEXT NOT NULL,
+            title        TEXT NOT NULL DEFAULT '',
+            raw_line     TEXT NOT NULL,
+            line_number  INTEGER,
+            severity     TEXT NOT NULL DEFAULT '',
+            fingerprint  TEXT NOT NULL DEFAULT '',
+            review_state TEXT NOT NULL DEFAULT 'new',
+            created      TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS finding_targets (
+            id         TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            finding_id TEXT NOT NULL,
+            target_id  TEXT NOT NULL,
+            run_id     TEXT NOT NULL DEFAULT '',
+            source     TEXT NOT NULL DEFAULT 'primary_match',
+            confidence REAL NOT NULL DEFAULT 1.0,
+            created    TEXT NOT NULL,
+            UNIQUE (session_id, finding_id, target_id)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS entity_labels (
+            id          TEXT PRIMARY KEY,
+            session_id  TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id   TEXT NOT NULL,
+            label       TEXT NOT NULL,
+            source      TEXT NOT NULL DEFAULT 'manual',
+            created     TEXT NOT NULL,
+            UNIQUE (session_id, entity_type, entity_id, label)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS entity_notes (
+            id           TEXT PRIMARY KEY,
+            session_id   TEXT NOT NULL,
+            entity_type  TEXT NOT NULL,
+            entity_id    TEXT NOT NULL,
+            body         TEXT NOT NULL,
+            created      TEXT NOT NULL,
+            updated      TEXT NOT NULL,
+            UNIQUE (session_id, entity_type, entity_id)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS evidence_packages (
+            id                TEXT PRIMARY KEY,
+            session_id        TEXT NOT NULL,
+            project_id        TEXT NOT NULL,
+            name              TEXT NOT NULL,
+            description       TEXT NOT NULL DEFAULT '',
+            redaction_mode    TEXT NOT NULL DEFAULT 'redacted',
+            include_artifacts INTEGER NOT NULL DEFAULT 0,
+            manifest          TEXT NOT NULL DEFAULT '{}',
+            status            TEXT NOT NULL DEFAULT 'draft',
+            created           TEXT NOT NULL,
+            updated           TEXT NOT NULL
+        )
+    """)
 
 
 def _create_indexes(conn):
@@ -166,6 +330,62 @@ def _create_indexes(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_recent_domains_session_last_used "
         "ON recent_domains (session_id, last_used DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_projects_session_status_updated "
+        "ON projects (session_id, status, updated DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_links_project_entity_created "
+        "ON project_links (project_id, entity_type, created DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_links_entity_lookup "
+        "ON project_links (entity_type, entity_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_run_file_artifacts_session_run_path "
+        "ON run_file_artifacts (session_id, run_id, workspace_path)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_project_targets_project_type_value "
+        "ON project_targets (project_id, type, value)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_findings_session_run_created "
+        "ON findings (session_id, run_id, created)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_findings_target_created "
+        "ON findings (target_id, created)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_finding_targets_finding "
+        "ON finding_targets (session_id, finding_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_finding_targets_target_created "
+        "ON finding_targets (session_id, target_id, created)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_finding_targets_run "
+        "ON finding_targets (session_id, run_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entity_labels_entity_created "
+        "ON entity_labels (entity_type, entity_id, created)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entity_notes_entity_updated "
+        "ON entity_notes (entity_type, entity_id, updated)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evidence_packages_project_updated "
+        "ON evidence_packages (project_id, updated DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evidence_packages_session_project "
+        "ON evidence_packages (session_id, project_id)"
     )
 
 
@@ -360,6 +580,45 @@ def _migrate_schema(conn):
     except sqlite3.OperationalError:
         pass
 
+    try:
+        _create_project_workspace_schema(conn)
+    except sqlite3.OperationalError:
+        pass
+    for stmt in (
+        "ALTER TABLE project_targets ADD COLUMN review_state TEXT NOT NULL DEFAULT 'confirmed'",
+        "ALTER TABLE project_targets ADD COLUMN source TEXT NOT NULL DEFAULT 'user'",
+        "ALTER TABLE project_targets ADD COLUMN source_detail TEXT NOT NULL DEFAULT '{}'",
+        "ALTER TABLE project_targets ADD COLUMN seen_count INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE project_targets ADD COLUMN last_seen TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE project_targets ADD COLUMN dismissed_at TEXT NOT NULL DEFAULT ''",
+    ):
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            pass
+    try:
+        conn.execute("""
+            INSERT OR IGNORE INTO finding_targets
+                (id, session_id, finding_id, target_id, run_id, source, confidence, created)
+            SELECT
+                'fnt_' || lower(hex(randomblob(8))),
+                f.session_id,
+                f.id,
+                f.target_id,
+                f.run_id,
+                'legacy_primary',
+                1.0,
+                f.created
+            FROM findings f
+            WHERE f.target_id IS NOT NULL AND f.target_id != ''
+        """)
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE run_file_artifacts ADD COLUMN content_sha256 TEXT NOT NULL DEFAULT ''")
+    except sqlite3.OperationalError:
+        pass
+
     # output_search_text column + FTS rebuild — added in v1.6
     fts_needs_rebuild = False
     try:
@@ -384,6 +643,67 @@ def delete_run_artifacts(conn, run_ids):
         f"SELECT rel_path FROM run_output_artifacts WHERE run_id IN ({placeholders})",  # nosec B608
         ids,
     ).fetchall()
+    file_artifact_rows = conn.execute(
+        f"SELECT id FROM run_file_artifacts WHERE run_id IN ({placeholders})",  # nosec B608
+        ids,
+    ).fetchall()
+    finding_rows = conn.execute(
+        f"SELECT id FROM findings WHERE run_id IN ({placeholders})",  # nosec B608
+        ids,
+    ).fetchall()
+    file_artifact_ids = [row["id"] for row in file_artifact_rows if row["id"]]
+    finding_ids = [row["id"] for row in finding_rows if row["id"]]
+    conn.execute(
+        "DELETE FROM project_links WHERE entity_type = 'run' "
+        f"AND entity_id IN ({placeholders})",  # nosec B608
+        ids,
+    )
+    conn.execute(
+        "DELETE FROM entity_labels WHERE entity_type = 'run' "
+        f"AND entity_id IN ({placeholders})",  # nosec B608
+        ids,
+    )
+    conn.execute(
+        "DELETE FROM entity_notes WHERE entity_type = 'run' "
+        f"AND entity_id IN ({placeholders})",  # nosec B608
+        ids,
+    )
+    if file_artifact_ids:
+        artifact_placeholders = ",".join("?" for _ in file_artifact_ids)
+        conn.execute(
+            "DELETE FROM entity_labels WHERE entity_type = 'run_file_artifact' "
+            f"AND entity_id IN ({artifact_placeholders})",  # nosec B608
+            file_artifact_ids,
+        )
+        conn.execute(
+            "DELETE FROM entity_notes WHERE entity_type = 'run_file_artifact' "
+            f"AND entity_id IN ({artifact_placeholders})",  # nosec B608
+            file_artifact_ids,
+        )
+    if finding_ids:
+        finding_placeholders = ",".join("?" for _ in finding_ids)
+        conn.execute(
+            f"DELETE FROM finding_targets WHERE finding_id IN ({finding_placeholders})",  # nosec B608
+            finding_ids,
+        )
+        conn.execute(
+            "DELETE FROM entity_labels WHERE entity_type = 'finding' "
+            f"AND entity_id IN ({finding_placeholders})",  # nosec B608
+            finding_ids,
+        )
+        conn.execute(
+            "DELETE FROM entity_notes WHERE entity_type = 'finding' "
+            f"AND entity_id IN ({finding_placeholders})",  # nosec B608
+            finding_ids,
+        )
+        conn.execute(
+            f"DELETE FROM findings WHERE id IN ({finding_placeholders})",  # nosec B608
+            finding_ids,
+        )
+    conn.execute(
+        f"DELETE FROM run_file_artifacts WHERE run_id IN ({placeholders})",  # nosec B608
+        ids,
+    )
     conn.execute(
         f"DELETE FROM run_output_artifacts WHERE run_id IN ({placeholders})",  # nosec B608
         ids,
@@ -392,10 +712,47 @@ def delete_run_artifacts(conn, run_ids):
         delete_artifact_file(row["rel_path"])
 
 
+def delete_snapshot_metadata(conn, snapshot_ids):
+    ids = [snapshot_id for snapshot_id in snapshot_ids if snapshot_id]
+    if not ids:
+        return
+
+    placeholders = ",".join("?" for _ in ids)
+    conn.execute(
+        "DELETE FROM project_links WHERE entity_type = 'snapshot' "
+        f"AND entity_id IN ({placeholders})",  # nosec B608
+        ids,
+    )
+    conn.execute(
+        "DELETE FROM entity_labels WHERE entity_type = 'snapshot' "
+        f"AND entity_id IN ({placeholders})",  # nosec B608
+        ids,
+    )
+    conn.execute(
+        "DELETE FROM entity_notes WHERE entity_type = 'snapshot' "
+        f"AND entity_id IN ({placeholders})",  # nosec B608
+        ids,
+    )
+
+
 def _prune_retention(conn):
     """Delete runs and snapshots older than permalink_retention_days."""
     days = CFG.get("permalink_retention_days", 0)
     if days and days > 0:
+        linked_run_row = conn.execute(
+            "SELECT COUNT(DISTINCT r.id), COUNT(DISTINCT l.project_id) "
+            "FROM runs r JOIN project_links l ON l.entity_type = 'run' AND l.entity_id = r.id "
+            "WHERE r.started < datetime('now', ?)",
+            (f"-{days} days",),
+        ).fetchone()
+        linked_run_count = int(linked_run_row[0] or 0) if linked_run_row else 0
+        linked_project_count = int(linked_run_row[1] or 0) if linked_run_row else 0
+        if linked_run_count:
+            log.warning("PROJECT_RETENTION_WARNING", extra={
+                "linked_runs": linked_run_count,
+                "projects": linked_project_count,
+                "retention_days": days,
+            })
         old_run_ids = [
             row["id"]
             for row in conn.execute(
@@ -403,7 +760,15 @@ def _prune_retention(conn):
                 (f"-{days} days",)
             ).fetchall()
         ]
+        old_snapshot_ids = [
+            row["id"]
+            for row in conn.execute(
+                "SELECT id FROM snapshots WHERE created < datetime('now', ?)",
+                (f"-{days} days",)
+            ).fetchall()
+        ]
         delete_run_artifacts(conn, old_run_ids)
+        delete_snapshot_metadata(conn, old_snapshot_ids)
         cur_runs  = conn.execute(
             "DELETE FROM runs WHERE started < datetime('now', ?)",
             (f"-{days} days",)

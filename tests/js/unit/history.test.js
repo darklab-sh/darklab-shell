@@ -481,7 +481,15 @@ describe('command history hydration', () => {
 })
 
 describe('history panel actions', () => {
-  function loadHistoryPanel({ clipboardImpl, apiFetchImpl, mobileMode = false, appConfig = {} } = {}) {
+  function loadHistoryPanel({
+    clipboardImpl,
+    apiFetchImpl,
+    mobileMode = false,
+    appConfig = {},
+    activeProject = null,
+    showConfirmImpl = vi.fn(() => Promise.resolve(null)),
+    openMetadataEditorImpl = vi.fn(),
+  } = {}) {
     document.body.innerHTML = `
       <div id="history-panel"></div>
       <input id="history-search-input" />
@@ -490,6 +498,8 @@ describe('history panel actions', () => {
       <select id="history-type-filter">
         <option value="all">all</option>
         <option value="runs">runs</option>
+        <option value="runs_builtin">built-in</option>
+        <option value="runs_external">external</option>
         <option value="snapshots">snapshots</option>
       </select>
       <input id="history-root-input" />
@@ -506,6 +516,9 @@ describe('history panel actions', () => {
         <option value="24h">24h</option>
         <option value="7d">7d</option>
         <option value="30d">30d</option>
+      </select>
+      <select id="history-project-filter">
+        <option value="all">all</option>
       </select>
       <input id="history-starred-toggle" type="checkbox" />
       <button id="history-clear-filters"></button>
@@ -559,6 +572,12 @@ describe('history panel actions', () => {
               }),
           })
         }
+        if (url === '/projects?include_archived=1') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ projects: [] }),
+          })
+        }
         if (url === '/history/run-1?json&preview=1') {
           return Promise.resolve({
             json: () =>
@@ -603,6 +622,7 @@ describe('history panel actions', () => {
     const historyRootDropdown = document.getElementById('history-root-dropdown')
     const historyExitFilter = document.getElementById('history-exit-filter')
     const historyDateFilter = document.getElementById('history-date-filter')
+    const historyProjectFilter = document.getElementById('history-project-filter')
     const historyStarredToggle = document.getElementById('history-starred-toggle')
     const historyClearFiltersBtn = document.getElementById('history-clear-filters')
     const historyActiveFilters = document.getElementById('history-active-filters')
@@ -612,6 +632,7 @@ describe('history panel actions', () => {
     const cmdInput = document.getElementById('cmd')
     const location = { origin: 'https://example.test' }
     const windowOpen = vi.fn()
+    globalThis.openEntityMetadataEditor = openMetadataEditorImpl
 
     return {
       ...fromDomScripts(
@@ -634,6 +655,7 @@ describe('history panel actions', () => {
           historyRootDropdown,
           historyExitFilter,
           historyDateFilter,
+          historyProjectFilter,
           historyStarredToggle,
           historyClearFiltersBtn,
           historyActiveFilters,
@@ -641,7 +663,11 @@ describe('history panel actions', () => {
           historyPaginationSummary,
           historyPaginationControls,
           histRow: document.createElement('div'),
-          showConfirm: vi.fn(() => Promise.resolve(null)),
+          showConfirm: showConfirmImpl,
+          getActiveProjectContext: () => activeProject,
+          refreshActiveProjectContext: () => Promise.resolve(activeProject),
+          refreshProjectWorkspace: vi.fn(() => Promise.resolve()),
+          enhanceAppSelects: vi.fn(),
           cmdInput,
           tabs,
           getTab: id => tabs.find(t => t.id === id),
@@ -698,6 +724,8 @@ describe('history panel actions', () => {
       tabs,
       bindDismissible,
       refocusComposerAfterAction,
+      showConfirm: showConfirmImpl,
+      openMetadataEditor: openMetadataEditorImpl,
     }
   }
 
@@ -728,7 +756,7 @@ describe('history panel actions', () => {
     document.execCommand = originalExecCommand
   })
 
-  it('clicking a history entry row injects the command into the composer and closes the panel', async () => {
+  it('clicking a history entry row opens run details without closing the panel', async () => {
     const { refreshHistoryPanel } = loadHistoryPanel()
     const historyPanel = document.getElementById('history-panel')
     const cmdInput = document.getElementById('cmd')
@@ -739,9 +767,80 @@ describe('history panel actions', () => {
 
     const entry = document.querySelector('#history-list .history-entry')
     entry.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
 
-    expect(cmdInput.value).toBe('ping darklab.sh')
-    expect(historyPanel.classList.contains('open')).toBe(false)
+    expect(cmdInput.value).toBe('')
+    expect(historyPanel.classList.contains('open')).toBe(true)
+    expect(document.getElementById('history-run-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('history-run-subtitle').textContent).toBe('ping darklab.sh')
+  })
+
+  it('loads structured run findings into the run details findings tab', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            roots: ['nuclei'],
+            items: [{
+              id: 'run-findings',
+              type: 'run',
+              command: 'nuclei -u https://darklab.sh',
+              label: 'nuclei -u https://darklab.sh',
+              started: '2026-01-01T00:00:00Z',
+              created: '2026-01-01T00:00:00Z',
+              exit_code: 0,
+              finding_count: 1,
+            }],
+            runs: [],
+          }),
+        })
+      }
+      if (url === '/history/run-findings?json&preview=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            id: 'run-findings',
+            command: 'nuclei -u https://darklab.sh',
+            output: ['finding line'],
+            exit_code: 0,
+            finding_count: 1,
+          }),
+        })
+      }
+      if (url === '/entities/run/run-findings/findings') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            findings: [{
+              id: 'finding-1',
+              title: 'Missing security header',
+              raw_line: '[info] missing header',
+              severity: 'info',
+              review_state: 'new',
+              line_number: 0,
+              scope: 'http',
+            }],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+    document.querySelector('#history-list .history-entry')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await new Promise((resolve) => setImmediate(resolve))
+    await Promise.resolve()
+    document.querySelector('[data-history-run-tab="findings"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(apiFetch).toHaveBeenCalledWith('/entities/run/run-findings/findings', { cache: 'no-store' })
+    expect(document.getElementById('history-run-body').textContent).toContain('Missing security header')
+    expect(document.getElementById('history-run-body').textContent).toContain('[info] missing header')
   })
 
   it('closes the history panel for permalink but keeps it open for star and delete', async () => {
@@ -810,6 +909,102 @@ describe('history panel actions', () => {
 
     const btn = document.querySelector('#history-list .history-entry [data-action="permalink"]')
     expect(btn.textContent).toBe('permalink')
+  })
+
+  it('keeps restore and delete visible and moves secondary run actions into an ordered menu', async () => {
+    const { refreshHistoryPanel } = loadHistoryPanel()
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const entry = document.querySelector('#history-list .history-entry')
+    const visibleActions = [...entry.querySelector('.history-actions').children].map(el => el.textContent)
+    expect(visibleActions).toEqual(['copy command', 'restore', 'delete', 'moreeditpermalinkcompareadd to active projectadd to projectcopy run id'])
+    const menuActions = [...entry.querySelectorAll('.history-action-menu [data-action]')].map(el => el.dataset.action)
+    expect(menuActions).toEqual([
+      'edit-metadata',
+      'permalink',
+      'compare',
+      'add-active-project',
+      'add-project',
+      'copy-run-id',
+    ])
+  })
+
+  it('copies the run id and links runs to active or selected projects from the history menu', async () => {
+    const showConfirm = vi.fn(() => Promise.resolve('add'))
+    const apiFetch = vi.fn((url, options = {}) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              roots: ['ping'],
+              items: [{
+                id: 'run-1',
+                type: 'run',
+                command: 'ping darklab.sh',
+                label: 'ping darklab.sh',
+                started: '2026-01-01T00:00:00Z',
+                created: '2026-01-01T00:00:00Z',
+                exit_code: 0,
+              }],
+              runs: [],
+            }),
+        })
+      }
+      if (url === '/projects') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            projects: [
+              { id: 'project-2', name: 'zulu.test', status: 'active' },
+              { id: 'project-1', name: 'alpha.test', status: 'active' },
+            ],
+          }),
+        })
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ ok: true }),
+      })
+    })
+    const clipboard = { writeText: vi.fn(() => Promise.resolve()) }
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: apiFetch,
+      clipboardImpl: clipboard,
+      activeProject: { id: 'project-active', name: 'Active scope' },
+      showConfirmImpl: showConfirm,
+    })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+    const entry = document.querySelector('#history-list .history-entry')
+
+    entry.querySelector('[data-action="copy-command"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    expect(clipboard.writeText).toHaveBeenCalledWith('ping darklab.sh')
+
+    entry.querySelector('[data-action="copy-run-id"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    expect(clipboard.writeText).toHaveBeenCalledWith('run-1')
+
+    entry.querySelector('[data-action="add-active-project"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-active/links', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ entity_type: 'run', entity_id: 'run-1', source: 'manual' }),
+    }))
+
+    entry.querySelector('[data-action="add-project"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(showConfirm).toHaveBeenCalled()
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/links', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ entity_type: 'run', entity_id: 'run-1', source: 'manual' }),
+    }))
   })
 
   it('renders SIGTERM-terminated runs as neutral history rows instead of failures', async () => {
@@ -1127,6 +1322,16 @@ describe('history panel actions', () => {
                 added: [{ text: '443/tcp open https' }],
                 removed: [{ text: '8080/tcp open http-proxy' }],
               },
+              objects: {
+                findings: {
+                  added: [{ title: 'open port 443', raw_line: '443/tcp open https', severity: 'high' }],
+                  removed: [{ title: 'open port 8080', raw_line: '8080/tcp open http-proxy', review_state: 'new' }],
+                },
+                artifacts: {
+                  added: [{ workspace_path: 'reports/new.json', kind: 'output', byte_size: 12 }],
+                  removed: [{ workspace_path: 'reports/old.json', kind: 'output', byte_size: 10 }],
+                },
+              },
               truncated: {},
             }),
         })
@@ -1177,6 +1382,10 @@ describe('history panel actions', () => {
     expect(document.querySelectorAll('.history-compare-line-delta')).toHaveLength(2)
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('443/tcp open https')
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('8080/tcp open http-proxy')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('Added findings (1)')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('Removed findings (1)')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('Removed artifacts (1)')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('reports/new.json')
 
     const restoreBoth = [...document.querySelectorAll('.history-compare-actions button')]
       .find(button => button.textContent === 'Restore Both')
@@ -1219,8 +1428,65 @@ describe('history panel actions', () => {
     expect(_buildHistoryRequestUrl()).toContain('type=snapshots')
   })
 
-  it('renders snapshot rows with open and copy-link actions', async () => {
+  it('includes run subtype filters in the request URL', () => {
+    const { _setHistoryFilter, _buildHistoryRequestUrl } = loadHistoryPanel()
+
+    _setHistoryFilter('type', 'runs_builtin')
+    expect(_buildHistoryRequestUrl()).toContain('type=runs_builtin')
+
+    _setHistoryFilter('type', 'runs_external')
+    expect(_buildHistoryRequestUrl()).toContain('type=runs_external')
+  })
+
+  it('renders run metadata badges and opens the metadata editor from the run menu', async () => {
+    const openMetadataEditor = vi.fn()
     const { refreshHistoryPanel } = loadHistoryPanel({
+      openMetadataEditorImpl: openMetadataEditor,
+      apiFetchImpl: vi.fn(() =>
+        Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              roots: ['nmap'],
+              items: [
+                {
+                  id: 'run-1',
+                  type: 'run',
+                  command: 'nmap darklab.sh',
+                  label: 'nmap darklab.sh',
+                  started: '2026-01-01T00:00:00Z',
+                  created: '2026-01-01T00:00:00Z',
+                  exit_code: 0,
+                  labels: [{ label: 'baseline' }],
+                  note: { body: 'review owner' },
+                },
+              ],
+              runs: [],
+            }),
+        }),
+      ),
+    })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(document.querySelector('.history-entry-label-badge')?.textContent).toBe('baseline')
+    expect(document.querySelector('.history-entry-note-badge')?.textContent).toBe('note')
+
+    document
+      .querySelector('#history-list .history-entry [data-action="edit-metadata"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(openMetadataEditor).toHaveBeenCalledWith(
+      'run',
+      expect.objectContaining({ id: 'run-1', command: 'nmap darklab.sh' }),
+      expect.objectContaining({ onSaved: expect.any(Function) }),
+    )
+  })
+
+  it('renders snapshot rows with open and copy-link actions', async () => {
+    const openMetadataEditor = vi.fn()
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      openMetadataEditorImpl: openMetadataEditor,
       apiFetchImpl: vi.fn(() =>
         Promise.resolve({
           json: () =>
@@ -1232,6 +1498,8 @@ describe('history panel actions', () => {
                   type: 'snapshot',
                   label: 'nmap baseline snapshot',
                   created: '2026-01-01T00:00:00Z',
+                  labels: [{ label: 'handoff' }],
+                  note: { body: 'send to client' },
                 },
               ],
               runs: [],
@@ -1245,8 +1513,20 @@ describe('history panel actions', () => {
 
     const entry = document.querySelector('#history-list .history-entry')
     expect(entry.querySelector('.history-entry-cmd')?.textContent).toBe('nmap baseline snapshot')
+    expect(entry.querySelector('.history-entry-label-badge')?.textContent).toBe('handoff')
+    expect(entry.querySelector('.history-entry-note-badge')?.textContent).toBe('note')
     expect(entry.querySelector('[data-action="open"]')?.textContent).toBe('open')
     expect(entry.querySelector('[data-action="link"]')?.textContent).toBe('copy link')
+    expect(entry.querySelector('[data-action="edit-metadata"]')?.textContent).toBe('edit')
+
+    entry
+      .querySelector('[data-action="edit-metadata"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(openMetadataEditor).toHaveBeenCalledWith(
+      'snapshot',
+      expect.objectContaining({ id: 'snap-1', label: 'nmap baseline snapshot' }),
+      expect.objectContaining({ onSaved: expect.any(Function) }),
+    )
   })
 
   it('shows a date in history metadata when the run is not from today', async () => {
@@ -1395,6 +1675,43 @@ describe('history panel actions', () => {
     expect(typeof refreshHistoryPanel).toBe('function')
   })
 
+  it('includes the selected project in history requests and active filter chips', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            projects: [{ id: 'project-1', name: 'darklab.sh', status: 'active' }],
+          }),
+        })
+      }
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        return Promise.resolve({
+          json: () => Promise.resolve({ roots: [], items: [], runs: [], total_count: 0 }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { refreshHistoryPanel, _setHistoryFilter, _buildHistoryRequestUrl } = loadHistoryPanel({
+      apiFetchImpl: apiFetch,
+    })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+    document.getElementById('history-project-filter').value = 'project-1'
+    _setHistoryFilter('projectId', 'project-1')
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(_buildHistoryRequestUrl()).toBe(
+      '/history?page=1&page_size=8&include_total=1&project_id=project-1',
+    )
+    expect(document.getElementById('history-active-filters').textContent).toContain('project: darklab.sh')
+    expect(apiFetch).toHaveBeenLastCalledWith(
+      '/history?page=1&page_size=8&include_total=1&project_id=project-1',
+    )
+  })
+
   it('refreshHistoryPanel renders pagination controls and advances to the next page', async () => {
     const apiFetch = vi.fn((url) => {
       if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
@@ -1517,36 +1834,35 @@ describe('history panel actions', () => {
   })
 
   it('keeps root suggestions stable when a refresh returns no roots while typing', async () => {
-    const apiFetch = vi.fn(() =>
-      Promise.resolve({
+    let historyCall = 0
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ projects: [] }),
+        })
+      }
+      historyCall += 1
+      return Promise.resolve({
         json: () =>
-          Promise.resolve({
-            roots: [],
-            runs: [],
-          }),
-      }),
-    )
-      .mockResolvedValueOnce({
-        json: () =>
-          Promise.resolve({
-            roots: ['curl', 'dig', 'ping'],
-            runs: [
-              {
-                id: 'run-1',
-                command: 'dig darklab.sh A',
-                started: '2026-01-01T00:00:00Z',
-                exit_code: 0,
-              },
-            ],
-          }),
+          Promise.resolve(historyCall === 1
+            ? {
+                roots: ['curl', 'dig', 'ping'],
+                runs: [
+                  {
+                    id: 'run-1',
+                    command: 'dig darklab.sh A',
+                    started: '2026-01-01T00:00:00Z',
+                    exit_code: 0,
+                  },
+                ],
+              }
+            : {
+                roots: [],
+                runs: [],
+              }),
       })
-      .mockResolvedValueOnce({
-        json: () =>
-          Promise.resolve({
-            roots: [],
-            runs: [],
-          }),
-      })
+    })
     const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
 
     refreshHistoryPanel()
@@ -1845,6 +2161,7 @@ describe('history panel actions', () => {
     expect(document.getElementById('history-search-input').value).toBe('')
     expect(document.getElementById('history-root-input').value).toBe('')
     expect(document.getElementById('history-exit-filter').value).toBe('all')
+    expect(document.getElementById('history-project-filter').value).toBe('all')
     expect(document.getElementById('history-date-filter').value).toBe('all')
     expect(document.getElementById('history-starred-toggle').checked).toBe(false)
   })

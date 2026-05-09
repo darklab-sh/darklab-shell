@@ -7,8 +7,8 @@
 const TEST_IP_SEED = (Date.now() ^ process.pid) >>> 0
 
 /**
- * Return a per-test-run deterministic test-network address so repeated suite
- * runs and parallel specs do not reuse the same rate-limit bucket.
+ * Return a per-test-run deterministic test-network address for specs that
+ * explicitly exercise per-IP behavior.
  */
 export function makeTestIp(offset = 0) {
   const value = (TEST_IP_SEED + Math.max(0, offset)) >>> 0
@@ -209,6 +209,12 @@ export async function openHistoryWithEntries(page) {
     .locator('#history-list .history-entry')
     .first()
     .waitFor({ state: 'visible', timeout: 10_000 })
+}
+
+export async function clickHistoryRunMenuAction(entry, action) {
+  const menu = entry.locator('.history-action-menu-wrap')
+  await menu.locator('[data-action="history-menu"]').click()
+  await menu.locator(`[data-action="${action}"]`).click()
 }
 
 export async function waitForHistoryRuns(page, minRuns) {

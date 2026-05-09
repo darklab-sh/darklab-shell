@@ -1,15 +1,13 @@
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady, runCommand, makeTestIp } from './helpers.js'
+import { ensurePromptReady, runCommand } from './helpers.js'
 
 // Use allowed commands that complete quickly.
 const CMD = 'hostname'
 const CMD_B = 'date'
 const LONG_CMD = 'ping -c 1000 darklab.sh'
-const TEST_IP = makeTestIp(66)
 
 test.describe('max tabs', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
     await ensurePromptReady(page)
@@ -30,7 +28,6 @@ test.describe('max tabs', () => {
 
 test.describe('tab renaming', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
     await ensurePromptReady(page)
@@ -90,7 +87,6 @@ test.describe('tab renaming', () => {
 
 test.describe('tab command recall', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     // Wait for the app to be fully initialised
     await page.locator('#cmd').waitFor()
@@ -461,7 +457,6 @@ test.describe('tab command recall', () => {
 
 test.describe('tab closing', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
   })
@@ -482,7 +477,6 @@ test.describe('tab closing', () => {
 
 test.describe('tab strip interactions', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
     await ensurePromptReady(page)

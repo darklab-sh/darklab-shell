@@ -183,11 +183,7 @@
 
   function saveTxt() {
     var text = lines.map(function (entry, index) { return displayText(entry, index); }).join('\n');
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([text], {type: 'text/plain'}));
-    a.download = downloadName('txt');
-    a.click();
-    URL.revokeObjectURL(a.href);
+    downloadBlobAsAttachment(new Blob([text], {type: 'text/plain'}), downloadName('txt'));
   }
 
   function saveHtml() {
@@ -217,11 +213,7 @@
         fontFacesCss: fontFacesCss,
         exportCss: exportCss,
       });
-      var a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([html], {type: 'text/html'}));
-      a.download = downloadName('html');
-      a.click();
-      URL.revokeObjectURL(a.href);
+      downloadBlobAsAttachment(new Blob([html], {type: 'text/html'}), downloadName('html'));
     });
   }
 

@@ -26,7 +26,10 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Built-In Commands](#built-in-commands)
 - [Session Command Variables](#session-command-variables)
 - [Session Files](#session-files)
+- [Project Workspaces](#project-workspaces)
+- [Evidence Packages](#evidence-packages)
 - [Command Allowlist](#command-allowlist)
+- [Interactive PTY Mode](#interactive-pty-mode)
 - [Wordlists](#wordlists)
 - [Welcome Animation](#welcome-animation)
 - [Custom FAQ](#custom-faq)
@@ -622,7 +625,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 **Behavior:**
 
 - Each command runs in the active tab; the **+** button opens additional tabs for side-by-side sessions. Tabs show a status dot (amber running, green success, red failed/killed) and start with labels such as `shell 1`, `shell 2`, and `shell 3`. Commands that keep running past the brief visual grace period show temporarily in the tab label, then the tab returns to its stable label when the command finishes. Double-click to rename, drag to reorder, tab-scroll arrows when more tabs are open than fit the window width. Draft input is preserved per tab.
-- The **⧖ history** button opens a slide-out drawer listing persisted session history with a `type` filter for **all**, **runs**, and **snapshots**. Run rows keep the current model: clicking a row injects that command into the composer for re-run (matching the terminal up-arrow convention) and closes the drawer; each row also has a toggleable **star** plus **restore** / **permalink** / **delete** actions. Snapshot rows show the snapshot label and created time plus **open** / **copy link** / **delete** actions. The **restore** action loads the run's output into a tab with the command shown as a styled prompt line (activating an existing matching tab when one exists). Starred runs list before unstarred ones regardless of age. Star state persists server-side per session and follows named session tokens.
+- The **⧖ history** button opens a slide-out drawer listing persisted session history with a `type` filter for **all**, **runs: all**, **runs: built-in**, **runs: external**, and **snapshots**. Run rows keep the current model: clicking a row injects that command into the composer for re-run (matching the terminal up-arrow convention) and closes the drawer; each row also has a toggleable **star** plus **restore** / **permalink** / **delete** actions and a **more** menu for run metadata editing. Snapshot rows show the snapshot label and created time plus **open** / **copy link** / **edit** / **delete** actions. Run and snapshot rows surface existing label badges and note indicators so project/workflow context is visible without opening another modal. The **restore** action loads the run's output into a tab with the command shown as a styled prompt line (activating an existing matching tab when one exists). Starred runs list before unstarred ones regardless of age. Star state persists server-side per session and follows named session tokens.
 - When full-output persistence is enabled, the history drawer's permalink points at the complete saved artifact; loading into a tab still uses the capped preview and shows a notice linking to the permalink if truncated. The active tab's **share snapshot** action creates a separate `/share/<id>` snapshot and can optionally redact before saving.
 - The **delete all** button (history drawer + mobile recents sheet) prompts **Delete all** / **Delete Non-Favorites** / **Cancel** to separate destructive deletion from starred-only cleanup.
 - If the page reloads mid-run, the shell restores a running placeholder tab with the kill action available and subscribes back to the brokered `/runs/<run_id>/stream` for replay plus live output when events are still retained. Active-run recovery is client-aware: another browser using the same session token can see the live run in Status Monitor without automatically creating a terminal tab or taking over the stream. Non-running tabs restore separately from `sessionStorage` with labels, transcript previews, statuses, and draft input preserved; restored completed tabs remount a live prompt immediately.
@@ -633,7 +636,7 @@ Both views read from the same backend list (exposed to the browser via `GET /sho
 
 **Related files:** `app/static/js/tabs.js` (tab lifecycle + drag + rename), `app/static/js/history.js` (history drawer + search UI), `app/blueprints/history.py` (history API + FTS queries), `app/database.py` (SQLite schema + FTS5 trigger wiring).
 
-**Full-text search:** the history surfaces support a shared `type` filter plus full-text search across command text and stored run output for run rows, with additional filters for command name, exit status, recent date range, and starred-only. The search field placeholder reads "search history". Search is backed by a SQLite FTS5 virtual table (`runs_fts`) indexed on `command` and `output_search_text`. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so early lines of long runs stay reachable; otherwise it falls back to the capped preview window. Snapshot search in the first pass matches the snapshot label only. On mobile, advanced filters stay behind a dedicated `filters` toggle to preserve result space, the command-name field uses app-owned autocomplete, and row actions keep the sheet open where that matches the desktop action contract.
+**Full-text search:** the history surfaces support a shared `type` filter, run-subtype filters, project filters for linked runs, and full-text search across command text and stored run output for run rows, with additional filters for command name, exit status, recent date range, and starred-only. The search field placeholder reads "search history". Search is backed by a SQLite FTS5 virtual table (`runs_fts`) indexed on `command` and `output_search_text`. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so early lines of long runs stay reachable; otherwise it falls back to the capped preview window. Snapshot search in the first pass matches the snapshot label only, and snapshots remain share/history records rather than project-linked records. On mobile, advanced filters stay behind a dedicated `filters` toggle to preserve result space, the command-name field uses app-owned autocomplete, and row actions keep the sheet open where that matches the desktop action contract.
 
 On mobile, the **☰** menu in the top-right header opens a bottom-sheet that groups session-scoped actions (search, clear, line numbers, timestamps) and overlays (options, history, status, commands, workflows, files, theme, FAQ, diag) — see the Mobile Shell section below for the full layout.
 
@@ -699,7 +702,6 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 - **Tab snapshot** (`/share/<id>`) — **share snapshot** on any tab captures the current output and, when a full saved artifact exists, shares that full output as a snapshot. The resulting URL opens a styled HTML page with ANSI color rendering, a `save ▾` dropdown (txt, html, pdf), a **copy** button, a **view json** option, and a link back to the shell. Honors the browser's saved line-number and timestamp preferences on load. Uses the Web Share API where supported; otherwise copies the URL to the clipboard. Recommended sharing path.
 - **Single run** (`/history/<run_id>`) — the permalink button in the history drawer links to an individual run. Serves the full saved artifact when persistence is enabled; otherwise the capped preview stored in SQLite. Honors saved line-number and timestamp preferences on load.
-- **Full output alias** (`/history/<run_id>/full`) — backward-compatible alias to the same run permalink, kept so older links and tests continue to resolve.
 - Both permalink types persist across container restarts via the `./data` SQLite volume.
 
 **Limits:** retained for `permalink_retention_days` only; the `./data` directory is the only writable path in an otherwise read-only container (created automatically on first run).
@@ -766,6 +768,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - `status` prints a compact session summary: masked active session ID, session type, run count, snapshot count, starred-command count, whether saved Options exist for the session, session-variable count, active-run count, compact session file usage when Files are enabled, and the current instance-level save/retention limits.
 - `runs` prints app-native active-run metadata for the current session, including CPU percent derived from cumulative CPU seconds over run elapsed time, RSS-memory snapshot, and a hint that the desktop `STATUS` HUD pill opens real-time monitoring; `jobs` is a compatibility alias for the same terminal output. `runs -v` also prints full run IDs, started timestamps, cumulative CPU time, and active-run metadata source, while `runs --json` prints the active-run snapshot in JSON for debugging or automation. On desktop, the `STATUS`, `LAST EXIT`, and `TABS` HUD pills open the Status Monitor modal, and `Option+M` / `Alt+M` toggles the same view. The monitor is also available from the desktop rail and mobile menu, stays useful when idle with system/resource/session cards and visual history widgets, lists active commands as divided rows, exposes Attach/Kill actions for visible active runs, and shows best-effort CPU and RSS memory telemetry as circular meters/sparklines with memory fill normalized against 1 GB when backend process stats are available.
 - `stats` prints session activity totals and external-tool command-root breakdowns: runs, snapshots, starred commands, active runs, success rate, average duration, and the top non-built-in command roots by run count.
+- `project` manages case folders from the terminal: list/create/use/current/clear/archive/unarchive/delete, link or unlink runs, link the last eligible run, and list/add/quick-add/remove project targets.
 - `cd [folder]`, `pwd`, `file list [-l] [folder]`, `file show <file>`, `file add [file]`, `file add-dir <folder>`, `file edit <file>`, `file download <file>`, `file move <source> <destination>`, and confirmed `file delete [-r|-f|-rf] <file-or-folder>` / `file rm [-r|-f|-rf] <file-or-folder>`, plus the convenience aliases `ls [-l] [folder]`, `cat <file>`, `mkdir <folder>`, `mv <source> <destination>`, and confirmed `rm [-r|-f|-rf] <file-or-folder>`, expose keyboard-first access to the current session files when workspace storage is enabled. `cd` is tab-local and treats the session workspace root as `/`; relative file commands resolve from that tab's current workspace folder. `file add` opens a blank file editor, `file add <file>` opens the same editor with the file name prefilled, `file add-dir` / `mkdir` creates a folder, `file download <file>` starts a browser download, and `file move` / `mv` move or rename a file or folder. `file list` / `ls` list the current folder non-recursively in short form by default; `file list -l` / `ls -l` show the long listing with type, size, and modified columns.
 - `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq` also work as standalone workspace-file commands, for example `grep -i admin targets.txt`, `head -n 20 output.txt`, `wc -l urls.txt`, and `sort -u names.txt`. They reuse the same constrained helper implementation as built-in pipe stages and never expose arbitrary shell piping or host filesystem access.
 - `theme` lists and applies runtime theme variants from the terminal. `config` lists, reads, and updates user options such as line numbers, timestamps, welcome behavior, share redaction defaults, run notifications, and HUD clock mode.
@@ -825,6 +828,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Workspace access updates the hashed session directory activity timestamp. Periodic cleanup removes inactive `sess_*` directories after `workspace_inactivity_ttl_hours`; it does not delete individual files solely because their file timestamps are old.
 - File names are relative and display-friendly; absolute paths, traversal, backslashes, hidden names, symlinks, and paths outside the session root are rejected. Text reads and downloads also use final-component no-follow opens where supported, so the app keeps the same session-root boundary even if a path is swapped after validation.
 - The Files panel can create, view, edit, move, download, and delete text files owned by the current session; JSON and JSONL/NDJSON files are pretty-printed in the read-only viewer, and open file previews can be refreshed manually or opt into auto-refresh while following appended output at the bottom. Files can also be dragged onto folder rows after confirmation.
+- The add/edit file modal includes labels and a private note for the workspace file. File rows surface existing labels/notes from the generic entity metadata store, and move/delete operations update or clear that metadata with the file so project views and package exports do not keep stale paths.
 - The `file` built-in provides terminal access to the same file model through `cd [folder]`, `pwd`, `file list [-l] [folder]`, `file show <file>`, `file add [file]`, `file add-dir <folder>`, `file edit <file>`, `file download <file>`, `file move <source> <destination>`, and confirmed `file delete [-r|-f|-rf] <file-or-folder>` / `file rm [-r|-f|-rf] <file-or-folder>`; `file add` opens a blank file editor unless a filename is provided, `file add-dir` creates a folder, `file download <file>` starts the same browser download path as the Files panel, and `file move` moves or renames files and folders. `cd` is tracked per tab, treats the session workspace root as `/`, and causes relative commands such as `ls`, `cat`, `mv`, `rm`, and `file show` to resolve from the tab's current workspace folder.
 - The `ls [-l] [folder]`, `cat <file>`, `mkdir <folder>`, `mv <source> <destination>`, `rm [-r|-f|-rf] <file-or-folder>`, `grep <pattern> <file>`, `head [-n N] <file>`, `tail [-n N] <file>`, `wc -l <file>`, `sort [-r|-n|-u] <file>`, and `uniq [-c] <file>` aliases map to app-native workspace operations only; they do not expose arbitrary host/container filesystem access.
 - `file list`, `ls`, `file move`, `mv`, and confirmed `file delete` support simple `*` patterns such as `file ls darklab-*`, `mv darklab-* darklab/`, and `file delete scan-*`. A `*` matches inside one path segment and does not cross `/`; moving multiple matches requires the destination to already be a folder.
@@ -837,6 +841,49 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 **Configuration:** `workspace_enabled`, `workspace_backend`, `workspace_root`, `workspace_quota_mb`, `workspace_max_file_mb`, `workspace_max_files`, and `workspace_inactivity_ttl_hours` in `conf/config.yaml`; per-command `workspace_flags` in `conf/commands.yaml`.
 
 **Related files:** `app/workspace.py` (path, quota, permission, and cleanup helpers), `app/blueprints/workspace.py` (workspace file routes), `app/static/js/workspace.js` (Files panel), `app/builtin_commands.py` (`file` built-in), `app/commands.py` (workspace flag validation and rewrite).
+
+---
+
+## Project Workspaces
+
+**Purpose:** lightweight case folders that keep related shell work, findings, files, targets, and export packages together while leaving the terminal as the primary workflow.
+
+**Behavior:**
+
+- Projects group top-level source records by link rather than copy. Current project links support completed runs; run-owned artifacts and findings surface through linked runs. Snapshots and manually selected workspace files stay in their history/files surfaces and are intentionally not project-linked.
+- The desktop rail and mobile menu open the Projects modal for creating, selecting, clearing, archiving, deleting, and reviewing projects. The active-project HUD shows current project context, and project changes broadcast across same-session tabs.
+- Active projects can automatically link completed external command runs. Browser-owned built-ins stay in history without active-project links, and **Link last run** backfills the most recent eligible run when needed.
+- Project details expose project labels, project notes stored through `entity_notes` with `entity_type='project'`, editable targets, linked runs, findings, artifacts, and packages. Labels and notes are also editable for linked runs, findings, run file artifacts, workspace files, and packages through the shared entity metadata editor.
+- Finding review supports status updates, source-run restore with line highlighting, target attribution, filtering, and sorting. Artifact rows show availability/checksum state and offer scoped preview/download actions for still-available workspace files.
+- Evidence packages are draft project manifests. The wizard records name/description, package labels/notes, transcript/finding/artifact/target selections, redaction mode, artifact inclusion, private-note inclusion, and size estimates. Existing package rows support download, re-package, manifest preview, delete, and metadata edit actions.
+- Package downloads produce a capped archive with `manifest.json`, `README.md`, static `index.html`, selected run transcript pages, finding/target JSON and Markdown exports, selected metadata/notes exports, optional raw artifacts, and redacted variants when requested.
+- Project run comparison can compare two linked runs directly or compare a selected run against the newest linked run with a chosen run label. The API compares persisted findings and workspace artifacts, reports added/removed/unchanged items, includes per-side finding/artifact totals, and adds `truncated` with `item_limit` when either side exceeds the 5,000-item comparison cap.
+- History project filtering returns linked runs for the selected project. Run-subtype filters can further split all runs, built-in runs, and external runs while snapshots remain available through the normal snapshot filter.
+
+**Limits:** projects are session-scoped and do not copy source history. Deleting a project removes its project metadata, targets, packages, and links, but not the underlying run history or workspace files. Entity notes are intentionally one note per supported entity rather than comment threads.
+
+**Configuration:** `max_projects_per_session`, `max_project_links_per_project`, `max_project_targets_per_project`, `max_evidence_packages_per_project`, `max_entity_labels_per_session`, `max_entity_labels_per_entity`, `max_entity_notes_per_session`, `evidence_package_max_mb`, `evidence_package_max_artifacts`, `evidence_package_download_rate_limit_per_minute`, and `evidence_package_download_rate_limit_per_second` in `conf/config.yaml`.
+
+**Related files:** `app/project_workspace.py` (project relationship, metadata, and package helpers), `app/blueprints/projects.py` (project routes), `app/static/js/shell_chrome.js` (Projects modal), `app/static/js/history.js` (history project filters and metadata actions), `app/static/js/workspace.js` (workspace file metadata), and `app/database.py` (project workspace schema).
+
+---
+
+## Evidence Packages
+
+**Purpose:** turn selected project evidence into a downloadable review bundle while preserving raw/redacted export choices and private metadata boundaries.
+
+**Behavior:**
+
+- Package creation starts from the Projects modal's Packages tab. The wizard records name, description, labels, notes, redaction mode, artifact inclusion, private-note inclusion, and the selected runs, findings, artifacts, and targets.
+- Package rows show preset/redaction/size summaries and offer download, re-package, manifest preview, metadata edit, and delete actions.
+- Downloaded archives include `manifest.json`, `README.md`, static `index.html`, selected run transcript pages, full-text companions for capped transcripts, selected finding/target JSON and Markdown exports, selected label/private-note exports, note Markdown exports, optional raw artifacts, and redacted variants when requested.
+- Re-package starts from the previous manifest selection so an operator can rebuild the same bundle after project data changes.
+
+**Limits:** package manifests are draft records, and the archive is built at download time from still-available project data and workspace artifacts. Redacted packages exclude raw artifacts until artifact-content redaction exists.
+
+**Configuration:** `max_evidence_packages_per_project`, `evidence_package_max_mb`, `evidence_package_max_artifacts`, `evidence_package_download_rate_limit_per_minute`, and `evidence_package_download_rate_limit_per_second`.
+
+**Related files:** `app/project_workspace.py` (manifest and archive builder), `app/blueprints/projects.py` (package routes), and `app/static/js/shell_chrome.js` (wizard, package rows, and manifest preview).
 
 ---
 
@@ -892,6 +939,25 @@ Deny matching has a few extra rules worth calling out:
 curl -o /dev/null -s -w "%{http_code}" https://example.com
 wget -q -O /dev/null --server-response https://example.com
 ```
+
+---
+
+## Interactive PTY Mode
+
+**Purpose:** run approved screen-oriented tools inside a real browser terminal when line-oriented streaming would lose important live state.
+
+**Behavior:**
+
+- Commands with registry-owned interactive metadata, currently `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`, are reserved for the PTY route instead of normal `/runs`.
+- The browser opens a tab-scoped xterm.js modal, preloads the terminal assets, starts the PTY through `/pty/runs`, and sends keyboard input and terminal resizes through bounded POST routes.
+- Completed PTY runs append a saved static transcript and exit status back into the parent shell tab, then persist through the normal history/search/finding path. Registry transcript modes decide whether a tool saves the final visible frame or scrollback-style findings.
+- Reload recovery and Status Monitor Attach use bounded ANSI snapshots. Redis-backed deployments can serve output streams, input/resize control, and reattach snapshots from any worker without sticky routing; single-worker local development can run without Redis when configured.
+
+**Limits:** disabled by default, desktop-only, and restricted to commands that explicitly declare PTY behavior in the command registry. PTY runs have a configured max runtime and per-session concurrency cap. Multi-worker deployments require Redis unless `run_broker_require_redis` is intentionally relaxed for local development.
+
+**Configuration:** `interactive_pty_enabled`, `interactive_pty_max_runtime_seconds`, `interactive_pty_max_concurrent_per_session`, plus each command's `interactive` registry block in `conf/commands.yaml`.
+
+**Related files:** `app/pty_service.py` (server-side PTY lifecycle and snapshots), `app/blueprints/run.py` (PTY routes), `app/static/js/pty.js` (browser terminal controller), `app/static/js/vendor/xterm.js`, `app/static/js/vendor/xterm-addon-fit.js`, and `app/conf/commands.yaml` (interactive command metadata).
 
 ---
 
@@ -1107,11 +1173,11 @@ sqlite3 data/history.db "DELETE FROM snapshots;"
 
 ## Session Tokens
 
-**Purpose:** optional persistent named identity (`tok_<32 hex>`) so run history, snapshots, starred commands, session variables, and saved user options follow an operator across browsers and workstations without introducing a login layer.
+**Purpose:** optional persistent named identity (`tok_<32 hex>`) so run history, snapshots, starred commands, session variables, workspace files, project workspace records, recent domains, user workflows, active-project context, and saved user options follow an operator across browsers and workstations without introducing a login layer.
 
 **Behavior:**
 
-- By default each browser gets an anonymous UUID stored in `localStorage` under `session_id`, plus a separate browser/client id used for active-run ownership. A session token replaces the session identity with a persistent `tok_<32 hex>` so run history, snapshots, starred commands, session variables, theme choice, and other saved Options settings follow the operator across browsers and workstations without making every browser automatically own the same live run.
+- By default each browser gets an anonymous UUID stored in `localStorage` under `session_id`, plus a separate browser/client id used for active-run ownership. A session token replaces the session identity with a persistent `tok_<32 hex>` so run history, snapshots, starred commands, session variables, workspace files, project workspace records, recent domains, user workflows, active-project context, theme choice, and other saved Options settings follow the operator across browsers and workstations without making every browser automatically own the same live run.
 - Tokens are generated server-side as `tok_` + 32 lowercase hex characters (36 chars total, cryptographically random) and recorded in the `session_tokens` table.
 - The active token is stored in `localStorage` under `session_token`; the original UUID is always preserved under `session_id` so `session-token clear` has a stable fallback.
 - The browser sends the active identity as `X-Session-ID` on every request; possession of the token string is the only authorization check (matching the existing anonymous session model).
@@ -1121,11 +1187,11 @@ sqlite3 data/history.db "DELETE FROM snapshots;"
 **Terminal commands:**
 
 - `session-token` (no subcommand) — prints current status: active token in masked form or "anonymous session".
-- `session-token generate` — requests a new token and offers to migrate the current session's runs, snapshots, starred commands, saved user options, session variables, and workspace files when the current session has history or Files content. The token becomes active only after a successful migration; declining migration activates it as a fresh named session; migration failure leaves the old session active.
+- `session-token generate` — requests a new token and offers to migrate the current session's runs, snapshots, starred commands, saved user options, session variables, user workflows, project workspace records, recent domains, active-project context, and workspace files when the current session has portable data. The token becomes active only after a successful migration; declining migration activates it as a fresh named session; migration failure leaves the old session active.
 - `session-token set <token>` — adopts an existing token. UUIDs are always accepted; `tok_...` values must already exist on this server. The migration prompt is offered if the current session has history or workspace files; answering `no` skips migration and still applies the token, while `Ctrl+C` cancels the whole set flow.
 - `session-token copy` — copies the active token to the clipboard without printing the raw token in the terminal.
 - `session-token clear` — opens a terminal-owned yes/no confirmation, removes `session_token` from `localStorage` only after explicit confirmation, and reverts to the anonymous UUID session. `Ctrl+C` cancels the clear flow. Server-side session data remains and can be reclaimed with `session-token set`.
-- `session-token rotate` — generates a new token, migrates all runs, snapshots, starred commands, session variables, workspace files, and saved user options (when the destination has no saved preferences yet), then switches. The switch is **atomic** — migration failure aborts the rotation and keeps the old token active. Old token is retired on success.
+- `session-token rotate` — generates a new token, migrates all runs, snapshots, starred commands, session variables, user workflows, project workspace records, recent domains, active-project context, workspace files, and saved user options (when the destination has no saved preferences yet), then switches. The switch is **atomic** — migration failure aborts the rotation and keeps the old token active. Old token is retired on success.
 - `session-token list` — calls `GET /session/token/info` and shows the active token in masked form with its creation date (or "anonymous session").
 - `session-token revoke <token>` — opens a transcript-owned yes/no confirmation, warns that the token's history and workspace files will not be recoverable from the app after revocation, then permanently deletes the given token via `POST /session/token/revoke` only after an explicit `yes`. If the revoked token is the active one, the client clears `localStorage` and falls back to the anonymous UUID session. Runs, snapshots, starred rows, saved preferences, and workspace files for the revoked token are not deleted but become unreachable.
 
@@ -1139,11 +1205,11 @@ sqlite3 data/history.db "DELETE FROM snapshots;"
 | **Rotate** | Token active | Generates a new token, migrates session data, copies the new token |
 | **Clear** | Token active | Opens a destructive confirm, optionally copies the token, then reverts to the anonymous session |
 
-If a session has run history or workspace files, the terminal `generate` and `set` flows use transcript-owned yes/no migration prompts; `clear` and `revoke` use transcript-owned destructive confirmations. The Options panel uses the shared modal confirm primitive for its own set/clear actions. `list` and `revoke` remain terminal-only.
+If a session has run history, workspace files, project workspace records, user workflows, or recent domains, the terminal `generate` and `set` flows use transcript-owned yes/no migration prompts; `clear` and `revoke` use transcript-owned destructive confirmations. The Options panel uses the shared modal confirm primitive for its own set/clear actions. `list` and `revoke` remain terminal-only.
 
 **Limits:** there is no user-facing authentication — possession of the token is sufficient access. `POST /session/migrate` requires the `from_session_id` body field to match the caller's `X-Session-ID` header (mismatch returns 403), so a migration call can only move the caller's own data.
 
-**Configuration:** no config keys — token issuance is always enabled. Token scope covers runs, snapshots, starred commands, session variables, saved user options, and app-managed workspace files when Files are enabled.
+**Configuration:** no config keys — token issuance is always enabled. Token scope covers runs, snapshots, starred commands, session variables, user workflows, project workspace records, recent domains, active-project context, saved user options, and app-managed workspace files when Files are enabled.
 
 **Related files:** `app/static/js/session.js` (client-side token flow + cross-tab `storage` sync), `app/blueprints/session.py` (`/session/token/*`, `/session/preferences`, and `/session/migrate` routes), `app/database.py` (`session_tokens`, `session_preferences`, and `starred_commands` tables).
 

@@ -16,7 +16,7 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 import config as _config
-from database import db_connect, delete_run_artifacts
+from database import db_connect, delete_run_artifacts, delete_snapshot_metadata
 from helpers import (
     GRACEFUL_TERMINATION_EXIT_CODE,
     get_client_ip,
@@ -103,6 +103,15 @@ def _history_add_filters(sql, params, command_root, exit_code_filter, date_range
     return sql, params
 
 
+def _history_run_root_sql(column):
+    return (
+        "LOWER(CASE "
+        f"WHEN instr(trim({column}), ' ') > 0 THEN substr(trim({column}), 1, instr(trim({column}), ' ') - 1) "
+        f"ELSE trim({column}) "
+        "END)"
+    )
+
+
 def _history_command_roots(conn, session_id):
     rows = conn.execute(
         """
@@ -174,12 +183,34 @@ def _history_base_clause(
     exit_code_filter,
     date_range,
     scope,
+    project_id,
     *,
     starred_only=False,
+    run_kind="all",
     force_like=False,
 ):
     sql = " FROM runs r WHERE r.session_id = ?"
     params: list[Any] = [session_id]
+    if run_kind in {"builtin", "external"}:
+        builtin_roots = sorted(_app_builtin_command_roots())
+        if builtin_roots:
+            placeholders = ",".join("?" for _ in builtin_roots)
+            root_sql = _history_run_root_sql("r.command")
+            if run_kind == "builtin":
+                sql += f" AND {root_sql} IN ({placeholders})"  # nosec B608
+            else:
+                sql += f" AND {root_sql} NOT IN ({placeholders})"  # nosec B608
+            params.extend(builtin_roots)
+        elif run_kind == "builtin":
+            sql += " AND 1 = 0"
+    if project_id:
+        sql += (
+            " AND EXISTS (SELECT 1 FROM project_links pl "
+            "JOIN projects p ON p.id = pl.project_id "
+            "WHERE p.session_id = ? AND p.id = ? "
+            "AND pl.entity_type = 'run' AND pl.entity_id = r.id)"
+        )
+        params.extend([session_id, project_id])
     if starred_only:
         sql += (
             " AND EXISTS (SELECT 1 FROM starred_commands sc "
@@ -192,9 +223,11 @@ def _history_base_clause(
     return sql, params, fts_q
 
 
-def _history_snapshot_base_clause(session_id, query, date_range):
+def _history_snapshot_base_clause(session_id, query, date_range, project_id=""):
     sql = " FROM snapshots s WHERE s.session_id = ?"
     params: list[Any] = [session_id]
+    if project_id:
+        sql += " AND 1 = 0"
     if query:
         sql += " AND LOWER(s.label) LIKE ?"
         params.append(f"%{query.lower()}%")
@@ -566,6 +599,185 @@ def _preview_notice(run):
     )
 
 
+def _run_file_artifacts_by_run(conn, run_ids):
+    ids = [str(run_id) for run_id in run_ids if run_id]
+    if not ids:
+        return {}
+    if not _history_table_exists(conn, "run_file_artifacts"):
+        return {run_id: [] for run_id in ids}
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+        "detected_by, content_type, preview_type, created "
+        f"FROM run_file_artifacts WHERE run_id IN ({placeholders}) "  # nosec B608
+        "ORDER BY created ASC, workspace_path ASC",
+        ids,
+    ).fetchall()
+    grouped = {run_id: [] for run_id in ids}
+    for row in rows:
+        grouped.setdefault(str(row["run_id"]), []).append({
+            "id": row["id"],
+            "run_id": row["run_id"],
+            "workspace_path": row["workspace_path"],
+            "display_name": row["display_name"],
+            "kind": row["kind"],
+            "byte_size": int(row["byte_size"] or 0),
+            "detected_by": row["detected_by"],
+            "content_type": row["content_type"],
+            "preview_type": row["preview_type"],
+            "created": row["created"],
+        })
+    return grouped
+
+
+def _run_metadata_counts_by_run(conn, run_ids):
+    ids = [str(run_id) for run_id in run_ids if run_id]
+    counts = {
+        run_id: {"finding_count": 0, "label_count": 0, "note_count": 0}
+        for run_id in ids
+    }
+    if not ids:
+        return counts
+    placeholders = ",".join("?" for _ in ids)
+    if _history_table_exists(conn, "findings"):
+        for row in conn.execute(
+            f"SELECT run_id, COUNT(*) AS count FROM findings WHERE run_id IN ({placeholders}) GROUP BY run_id",  # nosec B608
+            ids,
+        ).fetchall():
+            counts.setdefault(str(row["run_id"]), {"finding_count": 0, "label_count": 0, "note_count": 0})
+            counts[str(row["run_id"])]["finding_count"] = int(row["count"] or 0)
+    if _history_table_exists(conn, "entity_labels"):
+        for row in conn.execute(
+            "SELECT entity_id, COUNT(*) AS count FROM entity_labels WHERE entity_type = 'run' "
+            f"AND entity_id IN ({placeholders}) GROUP BY entity_id",  # nosec B608
+            ids,
+        ).fetchall():
+            counts.setdefault(str(row["entity_id"]), {"finding_count": 0, "label_count": 0, "note_count": 0})
+            counts[str(row["entity_id"])]["label_count"] = int(row["count"] or 0)
+    if _history_table_exists(conn, "entity_notes"):
+        for row in conn.execute(
+            "SELECT entity_id, COUNT(*) AS count FROM entity_notes WHERE entity_type = 'run' "
+            f"AND entity_id IN ({placeholders}) GROUP BY entity_id",  # nosec B608
+            ids,
+        ).fetchall():
+            counts.setdefault(str(row["entity_id"]), {"finding_count": 0, "label_count": 0, "note_count": 0})
+            counts[str(row["entity_id"])]["note_count"] = int(row["count"] or 0)
+    return counts
+
+
+def _entity_labels_by_entity_ids(conn, entity_type, entity_ids):
+    ids = [str(entity_id) for entity_id in entity_ids if entity_id]
+    if not ids:
+        return {}
+    if not _history_table_exists(conn, "entity_labels"):
+        return {entity_id: [] for entity_id in ids}
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT id, session_id, entity_type, entity_id, label, source, created FROM entity_labels "
+        "WHERE entity_type = ? "
+        f"AND entity_id IN ({placeholders}) "  # nosec B608
+        "ORDER BY label COLLATE NOCASE ASC, created ASC",
+        [entity_type, *ids],
+    ).fetchall()
+    grouped = {entity_id: [] for entity_id in ids}
+    for row in rows:
+        grouped.setdefault(str(row["entity_id"]), []).append({
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "entity_type": row["entity_type"],
+            "entity_id": row["entity_id"],
+            "label": row["label"],
+            "source": row["source"],
+            "created": row["created"],
+        })
+    return grouped
+
+
+def _entity_notes_by_entity_ids(conn, entity_type, entity_ids):
+    ids = [str(entity_id) for entity_id in entity_ids if entity_id]
+    if not ids:
+        return {}
+    if not _history_table_exists(conn, "entity_notes"):
+        return {entity_id: [] for entity_id in ids}
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT id, session_id, entity_type, entity_id, body, created, updated FROM entity_notes "
+        "WHERE entity_type = ? "
+        f"AND entity_id IN ({placeholders}) "  # nosec B608
+        "ORDER BY updated ASC, id ASC",
+        [entity_type, *ids],
+    ).fetchall()
+    grouped = {entity_id: [] for entity_id in ids}
+    for row in rows:
+        grouped.setdefault(str(row["entity_id"]), []).append({
+            "id": row["id"],
+            "session_id": row["session_id"],
+            "entity_type": row["entity_type"],
+            "entity_id": row["entity_id"],
+            "body": row["body"],
+            "created": row["created"],
+            "updated": row["updated"],
+        })
+    return grouped
+
+
+def _run_labels_by_run(conn, run_ids):
+    return _entity_labels_by_entity_ids(conn, "run", run_ids)
+
+
+def _run_notes_by_run(conn, run_ids):
+    return _entity_notes_by_entity_ids(conn, "run", run_ids)
+
+
+def _run_findings_by_run(conn, run_ids):
+    ids = [str(run_id) for run_id in run_ids if run_id]
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        "SELECT id, session_id, run_id, target_id, scope, title, raw_line, line_number, "
+        "severity, fingerprint, review_state, created "
+        f"FROM findings WHERE run_id IN ({placeholders}) "  # nosec B608
+        "ORDER BY line_number ASC, created ASC, id ASC",
+        ids,
+    ).fetchall()
+    target_ids_by_finding = {str(row["id"]): [] for row in rows}
+    if rows and _history_table_exists(conn, "finding_targets"):
+        finding_ids = [str(row["id"]) for row in rows if row["id"]]
+        finding_placeholders = ",".join("?" for _ in finding_ids)
+        for target_row in conn.execute(
+            "SELECT finding_id, target_id FROM finding_targets "
+            f"WHERE finding_id IN ({finding_placeholders}) "  # nosec B608
+            "ORDER BY created ASC, id ASC",
+            finding_ids,
+        ).fetchall():
+            finding_id = str(target_row["finding_id"] or "")
+            target_id = str(target_row["target_id"] or "")
+            if finding_id and target_id and target_id not in target_ids_by_finding.setdefault(finding_id, []):
+                target_ids_by_finding[finding_id].append(target_id)
+    grouped = {run_id: [] for run_id in ids}
+    for row in rows:
+        primary_target_id = str(row["target_id"] or "")
+        target_ids = list(target_ids_by_finding.get(str(row["id"]), []))
+        if primary_target_id and primary_target_id not in target_ids:
+            target_ids.insert(0, primary_target_id)
+        grouped.setdefault(str(row["run_id"]), []).append({
+            "id": row["id"],
+            "run_id": row["run_id"],
+            "target_id": primary_target_id,
+            "target_ids": target_ids,
+            "scope": row["scope"],
+            "title": row["title"],
+            "raw_line": row["raw_line"],
+            "line_number": int(row["line_number"] or 0),
+            "severity": row["severity"] or "",
+            "fingerprint": row["fingerprint"],
+            "review_state": row["review_state"],
+            "created": row["created"],
+        })
+    return grouped
+
+
 # ── Run comparison helpers ────────────────────────────────────────────────────
 
 def _normalize_compare_command(command):
@@ -716,6 +928,59 @@ def _finding_count_for_entries(run, entries):
             count += 1
         previous_text = text.strip()
     return count
+
+
+def _run_finding_compare_items(conn, session_id, run_id):
+    rows = conn.execute(
+        "SELECT id, raw_line, title, severity, fingerprint, review_state, line_number, created "
+        "FROM findings WHERE session_id = ? AND run_id = ? ORDER BY created ASC, id ASC",
+        (session_id, run_id),
+    ).fetchall()
+    items = []
+    for row in rows:
+        key = row["fingerprint"] or row["raw_line"] or row["title"] or row["id"]
+        items.append({
+            "key": key,
+            "id": row["id"],
+            "title": row["title"] or "",
+            "raw_line": row["raw_line"] or "",
+            "severity": row["severity"] or "",
+            "review_state": row["review_state"] or "",
+            "line_number": row["line_number"],
+            "created": row["created"],
+        })
+    return items
+
+
+def _run_artifact_compare_items(conn, session_id, run_id):
+    rows = conn.execute(
+        "SELECT id, workspace_path, display_name, kind, byte_size, detected_by, content_sha256, created "
+        "FROM run_file_artifacts WHERE session_id = ? AND run_id = ? ORDER BY created ASC, id ASC",
+        (session_id, run_id),
+    ).fetchall()
+    return [{
+        "key": row["content_sha256"] or row["workspace_path"] or row["id"],
+        "id": row["id"],
+        "workspace_path": row["workspace_path"] or "",
+        "display_name": row["display_name"] or "",
+        "kind": row["kind"] or "",
+        "byte_size": row["byte_size"],
+        "detected_by": row["detected_by"] or "",
+        "content_sha256": row["content_sha256"] or "",
+        "created": row["created"],
+    } for row in rows]
+
+
+def _compare_object_items(left_items, right_items):
+    left_by_key = {item["key"]: item for item in left_items if item.get("key")}
+    right_by_key = {item["key"]: item for item in right_items if item.get("key")}
+    left_keys = set(left_by_key)
+    right_keys = set(right_by_key)
+    return {
+        "added": [right_by_key[key] for key in sorted(right_keys - left_keys)],
+        "removed": [left_by_key[key] for key in sorted(left_keys - right_keys)],
+        "unchanged_count": len(left_keys & right_keys),
+    }
 
 
 def _bounded_multiset_line_diff(left_entries, right_entries):
@@ -890,6 +1155,7 @@ def get_history():
     exit_code_filter = _normalize_history_filter_text(request.args.get("exit_code")).lower()
     date_range = _normalize_history_filter_text(request.args.get("date_range")).lower()
     type_filter = _normalize_history_filter_text(request.args.get("type")).lower() or "all"
+    project_id = _normalize_history_filter_text(request.args.get("project_id"))
     starred_only = _parse_history_bool(request.args.get("starred_only"))
     include_total = _parse_history_bool(request.args.get("include_total"))
     page = _parse_history_int(request.args.get("page"), 1)
@@ -898,8 +1164,12 @@ def get_history():
     # column. Reverse-i-search uses this to behave like bash i-search — matching
     # on typed command text, not on output text that FTS would otherwise pull in.
     scope = _normalize_history_filter_text(request.args.get("scope")).lower()
-    if type_filter not in {"all", "runs", "snapshots"}:
+    if type_filter not in {"all", "runs", "runs_builtin", "runs_external", "snapshots"}:
         type_filter = "all"
+    run_kind = {
+        "runs_builtin": "builtin",
+        "runs_external": "external",
+    }.get(type_filter, "all")
 
     def _query_history(conn, *, force_like=False):
         roots_rows = []
@@ -907,7 +1177,7 @@ def get_history():
         run_sql = ""
         run_params: list[Any] = []
         snapshots_available = _history_table_exists(conn, "snapshots")
-        if type_filter in {"all", "runs"}:
+        if type_filter in {"all", "runs", "runs_builtin", "runs_external"}:
             run_sql, run_params, fts_q = _history_base_clause(
                 session_id,
                 query,
@@ -915,7 +1185,9 @@ def get_history():
                 exit_code_filter,
                 date_range,
                 scope,
+                project_id,
                 starred_only=starred_only,
+                run_kind=run_kind,
                 force_like=force_like,
             )
             roots_rows = conn.execute(
@@ -945,7 +1217,7 @@ def get_history():
             and type_filter in {"all", "snapshots"}
             and not snapshot_filters_active
         ):
-            snap_sql, snap_params = _history_snapshot_base_clause(session_id, query, date_range)
+            snap_sql, snap_params = _history_snapshot_base_clause(session_id, query, date_range, project_id)
 
         total_count = None
         if include_total:
@@ -995,6 +1267,28 @@ def get_history():
                 item["full_output_truncated"] = bool(item.get("full_output_truncated"))
             paged_items.append(item)
         paged_runs = [item for item in paged_items if item.get("type") == "run"]
+        paged_snapshots = [item for item in paged_items if item.get("type") == "snapshot"]
+        artifacts_by_run = _run_file_artifacts_by_run(conn, [item["id"] for item in paged_runs])
+        metadata_counts_by_run = _run_metadata_counts_by_run(conn, [item["id"] for item in paged_runs])
+        labels_by_run = _entity_labels_by_entity_ids(conn, "run", [item["id"] for item in paged_runs])
+        notes_by_run = _entity_notes_by_entity_ids(conn, "run", [item["id"] for item in paged_runs])
+        labels_by_snapshot = _entity_labels_by_entity_ids(conn, "snapshot", [item["id"] for item in paged_snapshots])
+        notes_by_snapshot = _entity_notes_by_entity_ids(conn, "snapshot", [item["id"] for item in paged_snapshots])
+        for item in paged_runs:
+            item["artifacts"] = artifacts_by_run.get(str(item["id"]), [])
+            item["artifact_count"] = len(item["artifacts"])
+            item["labels"] = labels_by_run.get(str(item["id"]), [])
+            item["note"] = (notes_by_run.get(str(item["id"]), []) or [None])[0]
+            item.update(metadata_counts_by_run.get(str(item["id"]), {
+                "finding_count": 0,
+                "label_count": 0,
+                "note_count": 0,
+            }))
+        for item in paged_snapshots:
+            item["labels"] = labels_by_snapshot.get(str(item["id"]), [])
+            item["note"] = (notes_by_snapshot.get(str(item["id"]), []) or [None])[0]
+            item["label_count"] = len(item["labels"])
+            item["note_count"] = 1 if item["note"] else 0
         return paged_items, paged_runs, roots_rows, total_count, page_count, current_page, fts_q
 
     with db_connect() as conn:
@@ -1024,6 +1318,7 @@ def get_history():
         "exit_code_filter": exit_code_filter or None,
         "date_range": date_range or None,
         "type_filter": type_filter,
+        "project_id": project_id or None,
         "starred_only": starred_only or None,
         "page": current_page,
         "page_size": page_size,
@@ -1191,19 +1486,34 @@ def compare_history_runs():
     left_finding_count = _finding_count_for_entries(left_run, left_entries)
     right_finding_count = _finding_count_for_entries(right_run, right_entries)
     diff = _bounded_multiset_line_diff(left_entries, right_entries)
+    with db_connect() as conn:
+        left_findings = _run_finding_compare_items(conn, session_id, left_id)
+        right_findings = _run_finding_compare_items(conn, session_id, right_id)
+        left_artifacts = _run_artifact_compare_items(conn, session_id, left_id)
+        right_artifacts = _run_artifact_compare_items(conn, session_id, right_id)
+    finding_objects = _compare_object_items(left_findings, right_findings)
+    artifact_objects = _compare_object_items(left_artifacts, right_artifacts)
 
     return jsonify({
         "left": {
             **_compare_run_summary(left_run),
             "finding_count": left_finding_count,
+            "persisted_finding_count": len(left_findings),
+            "artifact_count": len(left_artifacts),
             "output_source": left_output,
         },
         "right": {
             **_compare_run_summary(right_run),
             "finding_count": right_finding_count,
+            "persisted_finding_count": len(right_findings),
+            "artifact_count": len(right_artifacts),
             "output_source": right_output,
         },
         "deltas": _compare_deltas(left_run, right_run, left_finding_count, right_finding_count),
+        "objects": {
+            "findings": finding_objects,
+            "artifacts": artifact_objects,
+        },
         "sections": {
             "changed": diff["changed"],
             "added": diff["added"],
@@ -1261,6 +1571,23 @@ def get_run(run_id):
     else:
         run["output_entries"] = _preview_output_entries_from_run(run)
         run["output"] = _preview_output_from_run(run)
+    with db_connect() as conn:
+        artifacts_by_run = _run_file_artifacts_by_run(conn, [run_id])
+        metadata_counts_by_run = _run_metadata_counts_by_run(conn, [run_id])
+        include_private_metadata = str(run.get("session_id") or "") == str(session_id or "")
+        findings_by_run = _run_findings_by_run(conn, [run_id]) if include_private_metadata else {}
+        labels_by_run = _run_labels_by_run(conn, [run_id]) if include_private_metadata else {}
+        notes_by_run = _run_notes_by_run(conn, [run_id]) if include_private_metadata else {}
+    run["artifacts"] = artifacts_by_run.get(str(run_id), [])
+    run["artifact_count"] = len(run["artifacts"])
+    run["findings"] = findings_by_run.get(str(run_id), [])
+    run["labels"] = labels_by_run.get(str(run_id), [])
+    run["note"] = (notes_by_run.get(str(run_id), []) or [None])[0]
+    run.update(metadata_counts_by_run.get(str(run_id), {
+        "finding_count": 0,
+        "label_count": 0,
+        "note_count": 0,
+    }))
     run["preview_notice"] = _preview_notice(run) if not is_full_view else None
     log.info("RUN_VIEWED", extra={
         "ip": get_client_ip(), "run_id": run_id,
@@ -1292,6 +1619,10 @@ def get_run(run_id):
         "exit_code": run.get("exit_code"),
         "duration": _format_duration(run["started"], run["finished"]) if run.get("finished") else None,
         "lines": lines_label,
+        "artifact_count": run["artifact_count"],
+        "finding_count": run["finding_count"],
+        "label_count": run["label_count"],
+        "note_count": run["note_count"],
         "version": APP_VERSION,
     }
 
@@ -1437,6 +1768,11 @@ def delete_share(share_id):
     """Delete a snapshot owned by the current session."""
     session_id = get_session_id()
     with db_connect() as conn:
+        snapshot_rows = conn.execute(
+            "SELECT id FROM snapshots WHERE id = ? AND session_id = ?",
+            (share_id, session_id),
+        ).fetchall()
+        delete_snapshot_metadata(conn, [row["id"] for row in snapshot_rows])
         cur = conn.execute(
             "DELETE FROM snapshots WHERE id = ? AND session_id = ?",
             (share_id, session_id),

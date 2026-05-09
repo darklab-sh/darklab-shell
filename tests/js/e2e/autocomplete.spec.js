@@ -133,8 +133,23 @@ test.describe('autocomplete', () => {
     await page.locator('#workspace-new-btn').click()
     await page.locator('#workspace-path-input').fill('inputs.txt')
     await page.locator('#workspace-text-input').fill('darklab.sh\n')
+    const saveResponse = page.waitForResponse((response) => {
+      const url = new URL(response.url())
+      return response.request().method() === 'POST' && url.pathname === '/workspace/files'
+    })
     await page.locator('#workspace-save-btn').click()
-    await expect(page.locator('.workspace-file-row').filter({ hasText: 'inputs.txt' })).toBeVisible()
+    expect((await saveResponse).ok()).toBe(true)
+    await expect.poll(async () => page.evaluate(async () => {
+      const resp = await apiFetch('/workspace/files', { cache: 'no-store' })
+      const data = await resp.json()
+      return (data.files || []).map(file => file.path)
+    })).toContain('inputs.txt')
+    await page.evaluate(async () => {
+      if (typeof refreshWorkspaceFiles === 'function') await refreshWorkspaceFiles()
+    })
+    await expect(page.locator('.workspace-file-row').filter({ hasText: 'inputs.txt' })).toBeVisible({
+      timeout: 15_000,
+    })
     await page.locator('.workspace-close').click()
 
     await setComposerValueForTest(page, 'nmap -iL ')

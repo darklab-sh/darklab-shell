@@ -771,6 +771,26 @@ function _handleRunStreamMessage(msg, tabId) {
     _markTabRunStarted(tabId, msg.run_id);
   } else if (msg.type === 'notice') {
     _appendStreamLine(msg.text, 'notice', tabId, msg);
+    const notifyProjectChange = typeof globalThis.notifyProjectWorkspaceChanged === 'function'
+      ? globalThis.notifyProjectWorkspaceChanged
+      : (typeof notifyProjectWorkspaceChanged === 'function' ? notifyProjectWorkspaceChanged : null);
+    if (msg.project_linked && notifyProjectChange) {
+      notifyProjectChange('run-linked', msg.project_id || '');
+    }
+    if (msg.project_targets_discovered) {
+      const rawCount = Number(msg.target_count || msg.count || 0);
+      const count = Number.isFinite(rawCount) ? rawCount : 0;
+      if (notifyProjectChange) {
+        notifyProjectChange('target-discovered', msg.project_id || '');
+      }
+      if (typeof emitUiEvent === 'function') {
+        emitUiEvent('app:project-target-discovered', {
+          project_id: msg.project_id || '',
+          project_name: msg.project_name || '',
+          count,
+        });
+      }
+    }
   } else if (msg.type === 'owner') {
     _handleRunOwnerChanged(msg, tabId);
   } else if (msg.type === 'killed') {
@@ -835,6 +855,7 @@ function _handleRunStreamMessage(msg, tabId) {
     if (typeof addToRecentPreview === 'function' && t && t.command && !t.unknownCommand) {
       addToRecentPreview(t.command);
     }
+    if (t && t.command) _refreshProjectContextAfterCommand(t.command, msg.code);
     if (t && /^var(?:\s|$)/i.test(String(t.command || '')) && typeof loadSessionVariables === 'function') {
       loadSessionVariables().catch(() => {});
     }
@@ -1530,6 +1551,52 @@ function _recordSuccessfulLocalCommand(cmd) {
   if (typeof addToRecentPreview !== 'function') return;
   const value = _historySafeCommand(cmd);
   if (value) addToRecentPreview(value);
+}
+
+function _isProjectWorkspaceCommand(cmd) {
+  return String(cmd || '').trim().split(/\s+/, 1)[0].toLowerCase() === 'project';
+}
+
+function _runnerProjectWorkspaceSyncStorageKey() {
+  return 'darklab_project_workspace_changed';
+}
+
+function _broadcastProjectWorkspaceChanged(cmd) {
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:project-workspace-changed', { command: String(cmd || '') });
+  }
+  if (typeof localStorage === 'undefined' || !localStorage || typeof localStorage.setItem !== 'function') return;
+  try {
+    localStorage.setItem(_runnerProjectWorkspaceSyncStorageKey(), JSON.stringify({
+      session_id: typeof SESSION_ID !== 'undefined' ? SESSION_ID : '',
+      command: String(cmd || ''),
+      changed_at: Date.now(),
+    }));
+  } catch (_) {
+    // Cross-tab refresh is best-effort; the local tab still refreshes below.
+  }
+}
+
+function _refreshProjectContextAfterCommand(cmd, exitCode) {
+  if (Number(exitCode) !== 0 || !_isProjectWorkspaceCommand(cmd)) return;
+  _broadcastProjectWorkspaceChanged(cmd);
+  const refreshWorkspace = typeof refreshProjectWorkspace === 'function'
+    && typeof isProjectWorkspaceOpen === 'function'
+    && isProjectWorkspaceOpen()
+    ? refreshProjectWorkspace
+    : null;
+  const refreshActive = refreshWorkspace || (
+    typeof refreshActiveProjectContext === 'function' ? refreshActiveProjectContext : null
+  );
+  if (!refreshActive) return;
+  try {
+    const result = refreshActive();
+    if (result && typeof result.catch === 'function') {
+      result.catch(err => _logRunnerError('failed to refresh active project after command', err));
+    }
+  } catch (err) {
+    _logRunnerError('failed to refresh active project after command', err);
+  }
 }
 
 function _clientSideRunExitCodeFromStatus(statusValue) {

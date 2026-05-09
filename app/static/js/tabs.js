@@ -1215,11 +1215,7 @@ function saveTab(id) {
   const text = lines.map(l => l.text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')).join('\n');
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const blob = new Blob([text], { type: 'text/plain' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = `${APP_CONFIG.app_name || 'shell'}-${ts}.txt`;
-  a.click();
-  URL.revokeObjectURL(a.href);
+  downloadBlobAsAttachment(blob, `${APP_CONFIG.app_name || 'shell'}-${ts}.txt`);
   if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
 }
 
@@ -1336,11 +1332,7 @@ async function exportTabHtml(id) {
       exportCss,
     });
     const blob = new Blob([html], { type: 'text/html' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${exportModel.appName}-${ExportHtmlUtils.exportTimestamp()}.html`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    downloadBlobAsAttachment(blob, `${exportModel.appName}-${ExportHtmlUtils.exportTimestamp()}.html`);
   } catch {
     showToast('Failed to export html', 'error');
   } finally {
@@ -1498,7 +1490,12 @@ async function permalinkTab(id) {
   apiFetch('/share', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label: _shareSnapshotLabel(t), content: shareContent, apply_redaction: applyRedaction })
+    body: JSON.stringify({
+      label: _shareSnapshotLabel(t),
+      content: shareContent,
+      apply_redaction: applyRedaction,
+      run_id: String(t.historyRunId || ''),
+    })
   }).then(r => r.json()).then(data => {
     const url = `${location.origin}${data.url}`;
     shareUrl(url).catch(() => showToast('Failed to copy link', 'error'));

@@ -677,6 +677,19 @@
   function _syncAppSelect(select) {
     const state = _appSelects.get(select);
     if (!state) return;
+    const currentOptions = Array.from(select.options);
+    const menuOptionsChanged = currentOptions.length !== state.options.length
+      || currentOptions.some((option, index) => {
+        const btn = state.options[index];
+        return !btn
+          || btn.dataset.value !== option.value
+          || btn.textContent !== option.textContent
+          || btn.disabled !== option.disabled;
+      });
+    if (menuOptionsChanged) {
+      state.menu.replaceChildren();
+      state.options = currentOptions.map(option => _buildAppSelectOption(select, option, state.menu));
+    }
     const selected = select.options[select.selectedIndex] || select.options[0] || null;
     state.valueEl.textContent = selected ? selected.textContent : '';
     state.trigger.disabled = !!select.disabled;
@@ -687,6 +700,25 @@
       btn.classList.toggle('active', active);
       btn.classList.toggle('dropdown-item-active', active);
     });
+  }
+  function _buildAppSelectOption(select, option, menu) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'dropdown-item dropdown-item-touch';
+    btn.setAttribute('role', 'option');
+    btn.dataset.value = option.value;
+    btn.textContent = option.textContent;
+    btn.disabled = option.disabled;
+    btn.addEventListener('click', () => {
+      if (select.value !== option.value) {
+        select.value = option.value;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      _closeAppSelects();
+      _syncAppSelect(select);
+    });
+    menu.appendChild(btn);
+    return btn;
   }
   function _enhanceAppSelect(select) {
     if (!select || _appSelects.has(select) || select.dataset.appSelectEnhanced === 'true') return;
@@ -710,25 +742,7 @@
     menu.className = 'app-select-menu dropdown-surface';
     menu.setAttribute('role', 'listbox');
     if (label) menu.setAttribute('aria-label', label);
-    const options = Array.from(select.options).map((option) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'dropdown-item dropdown-item-touch';
-      btn.setAttribute('role', 'option');
-      btn.dataset.value = option.value;
-      btn.textContent = option.textContent;
-      btn.disabled = option.disabled;
-      btn.addEventListener('click', () => {
-        if (select.value !== option.value) {
-          select.value = option.value;
-          select.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-        _closeAppSelects();
-        _syncAppSelect(select);
-      });
-      menu.appendChild(btn);
-      return btn;
-    });
+    const options = Array.from(select.options).map(option => _buildAppSelectOption(select, option, menu));
     wrap.append(trigger, menu);
     select.insertAdjacentElement('afterend', wrap);
     select.classList.add('app-select-native');
@@ -770,6 +784,7 @@
     root.querySelectorAll('select.form-select, .history-panel-filters select').forEach(_enhanceAppSelect);
   }
   global.syncAppSelect = (select) => _syncAppSelect(select);
+  global.enhanceAppSelects = enhanceAppSelects;
   enhanceAppSelects();
   if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
     document.addEventListener('click', (event) => {

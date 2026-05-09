@@ -408,6 +408,11 @@
     text-align: center;
     flex: 0 0 auto;
   }
+  .rail-nav-item.has-project-target-discovery .rail-nav-glyph,
+  .menu-item.has-project-target-discovery .menu-item-icon {
+    color: var(--green);
+    filter: drop-shadow(0 0 6px color-mix(in srgb, var(--green) 55%, transparent));
+  }
   .rail.rail-collapsed .rail-nav-item { color: var(--text); }
   .rail.rail-collapsed .rail-nav-item:hover .rail-nav-glyph { color: var(--green); }
   .rail.rail-collapsed .rail-nav-glyph {
@@ -626,6 +631,18 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
+  }
+
+  .hud-project-context {
+    max-width: 200px;
+  }
+
+  .hud-project-context .hud-value {
+    display: block;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .hud-value-green {

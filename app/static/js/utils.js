@@ -109,6 +109,35 @@ async function copyTextToClipboard(text) {
   return _copyTextFallback(value);
 }
 
+function downloadBlobAsAttachment(blob, filename, { revokeDelayMs = 2000 } = {}) {
+  if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+    throw new Error('Blob downloads are not available');
+  }
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename || 'download';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+
+  if (typeof URL.revokeObjectURL !== 'function') return;
+  let revoked = false;
+  const revoke = () => {
+    if (revoked) return;
+    revoked = true;
+    URL.revokeObjectURL(url);
+  };
+  if (typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
+    window.setTimeout(revoke, revokeDelayMs);
+  } else if (typeof setTimeout === 'function') {
+    setTimeout(revoke, revokeDelayMs);
+  }
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('pagehide', revoke, { once: true });
+  }
+}
+
 async function shareUrl(url) {
   // navigator.share requires a user gesture and a secure context (HTTPS).
   // Because shareUrl is always called from inside a fetch .then() callback

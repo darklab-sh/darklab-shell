@@ -14,6 +14,7 @@ export async function loadAppFns({
   requestWelcomeSettle: requestWelcomeSettleOverride = vi.fn(),
   tabs: tabsOverride = [],
   confirmKill: confirmKillOverride = vi.fn(),
+  bindOutsideClickClose: bindOutsideClickCloseOverride = undefined,
   interruptPromptLine: interruptPromptLineOverride = vi.fn(),
   welcomeActive = false,
   welcomeOwnsTab: welcomeOwnsTabOverride = () => false,
@@ -35,6 +36,9 @@ export async function loadAppFns({
   openStatusMonitor: openStatusMonitorOverride = vi.fn(() => Promise.resolve(false)),
   closeStatusMonitor: closeStatusMonitorOverride = vi.fn(),
   isStatusMonitorOpen: isStatusMonitorOpenOverride = vi.fn(() => false),
+  openProjectWorkspace: openProjectWorkspaceOverride = vi.fn(() => Promise.resolve(false)),
+  closeProjectWorkspace: closeProjectWorkspaceOverride = vi.fn(),
+  isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride = vi.fn(() => false),
   activeTabId = 'tab-1',
   acFiltered: acFilteredOverride = [],
   acSuggestions: acSuggestionsOverride = [],
@@ -54,6 +58,11 @@ export async function loadAppFns({
   copyTextToClipboard: copyTextToClipboardOverride = vi.fn(() => Promise.resolve()),
   reloadSessionHistory: reloadSessionHistoryOverride = vi.fn(() => Promise.resolve()),
   seedLocalStorageStarsToServer: seedLocalStorageStarsToServerOverride = vi.fn(() => Promise.resolve()),
+  setTimeout: setTimeoutOverride = (fn) => {
+    fn()
+    return 0
+  },
+  clearTimeout: clearTimeoutOverride = () => {},
   hydrateCmdHistory: hydrateCmdHistoryOverride = vi.fn(),
   hasPendingTerminalConfirm: hasPendingTerminalConfirmOverride = vi.fn(() => false),
   cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride = vi.fn(() => false),
@@ -171,6 +180,31 @@ export async function loadAppFns({
         <div id="command-catalog-body"></div>
       </div>
     </div>
+    <div id="project-workspace-overlay" class="u-hidden">
+      <div id="project-workspace-modal">
+        <button class="project-workspace-close"></button>
+      </div>
+    </div>
+    <div id="project-target-editor-overlay" class="u-hidden">
+      <div id="project-target-editor-modal">
+        <button class="project-target-editor-close"></button>
+      </div>
+    </div>
+    <div id="project-package-manifest-overlay" class="u-hidden">
+      <div id="project-package-manifest-modal">
+        <button class="project-package-manifest-close"></button>
+      </div>
+    </div>
+    <div id="project-package-wizard-overlay" class="u-hidden">
+      <div id="project-package-wizard-modal">
+        <button class="project-package-wizard-close"></button>
+      </div>
+    </div>
+    <div id="project-entity-editor-overlay" class="u-hidden">
+      <div id="project-entity-editor-modal">
+        <button class="project-entity-editor-close"></button>
+      </div>
+    </div>
     <div id="theme-overlay"></div>
     <button class="theme-close"></button>
     <div id="theme-modal"></div>
@@ -204,12 +238,14 @@ export async function loadAppFns({
         <option value="raw">raw</option>
       </select>
       <input id="options-notify-toggle" type="checkbox" />
+      <input id="options-project-auto-link-external-runs-toggle" type="checkbox" />
       <select id="options-hud-clock-select">
         <option value="utc">utc</option>
         <option value="local">local</option>
       </select>
       <input id="options-prompt-username-input" />
       <div id="options-prompt-username-error" class="u-hidden"></div>
+      <div id="options-prompt-username-saved" class="u-hidden"></div>
       <div id="shell-input-row" data-mobile-label="$">
         <input id="cmd" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="none" />
       </div>
@@ -304,9 +340,11 @@ export async function loadAppFns({
     optionsWelcomeSelect: document.getElementById('options-welcome-select'),
     optionsShareRedactionSelect: document.getElementById('options-share-redaction-select'),
     optionsNotifyToggle: document.getElementById('options-notify-toggle'),
+    optionsProjectAutoLinkExternalRunsToggle: document.getElementById('options-project-auto-link-external-runs-toggle'),
     optionsHudClockSelect: document.getElementById('options-hud-clock-select'),
     optionsPromptUsernameInput: document.getElementById('options-prompt-username-input'),
     optionsPromptUsernameError: document.getElementById('options-prompt-username-error'),
+    optionsPromptUsernameSaved: document.getElementById('options-prompt-username-saved'),
     themeSelect: document.getElementById('theme-select'),
     tsBtn: document.getElementById('ts-btn'),
     lnBtn: document.getElementById('ln-btn'),
@@ -519,6 +557,10 @@ export async function loadAppFns({
       openStatusMonitor: openStatusMonitorOverride,
       closeStatusMonitor: closeStatusMonitorOverride,
       isStatusMonitorOpen: isStatusMonitorOpenOverride,
+      openProjectWorkspace: openProjectWorkspaceOverride,
+      closeProjectWorkspace: closeProjectWorkspaceOverride,
+      isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride,
+      bindOutsideClickClose: bindOutsideClickCloseOverride,
       interruptPromptLine: interruptPromptLineOverride,
       _welcomeActive: welcomeActive,
       welcomeOwnsTab: welcomeOwnsTabOverride,
@@ -552,10 +594,8 @@ export async function loadAppFns({
       Event,
       showToast: showToastOverride,
       ...(NotificationOverride !== undefined ? { Notification: NotificationOverride } : {}),
-      setTimeout: (fn) => {
-        fn()
-        return 0
-      },
+      setTimeout: setTimeoutOverride,
+      clearTimeout: clearTimeoutOverride,
     },
     `{
     _setTsMode,
@@ -584,10 +624,12 @@ export async function loadAppFns({
     confirmPermalinkRedactionChoice,
     getWelcomeIntroPreference,
     getShareRedactionDefaultPreference,
+    getProjectAutoLinkExternalRunsPreference,
     getRunNotifyPreference,
     getHudClockPreference,
     getPromptUsernamePreference,
     applyRunNotifyPreference,
+    applyProjectAutoLinkExternalRunsPreference,
     applyHudClockPreference,
     applyPromptUsernamePreference,
     syncOptionsControls,
@@ -636,6 +678,7 @@ export async function loadAppFns({
     hasPendingTerminalConfirm: hasPendingTerminalConfirmOverride,
     cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride,
     confirmKill: confirmKillOverride,
+    bindOutsideClickClose: bindOutsideClickCloseOverride,
     createTab: createTabOverride,
     closeTab: closeTabOverride,
     activateTab: activateTabOverride,

@@ -1,12 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady, runCommand, makeTestIp } from './helpers.js'
+import { ensurePromptReady, runCommand } from './helpers.js'
 
 const CMD = 'hostname'
-const TEST_IP = makeTestIp(64)
 
 test.describe('command execution', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
     await ensurePromptReady(page)
@@ -39,7 +37,6 @@ test.describe('command execution', () => {
 
 test.describe('interactive PTY command execution', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(65) })
     await page.addInitScript(() => {
       const originalFetch = window.fetch.bind(window)
       const encoder = new TextEncoder()

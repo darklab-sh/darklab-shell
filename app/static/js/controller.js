@@ -120,6 +120,7 @@ function setupMobileSheetDragClose() {
   const workspaceModal = document.getElementById('workspace-modal');
   const workflowsModal = document.getElementById('workflows-modal');
   const workflowEditor = document.getElementById('workflow-editor-form');
+  const projectWorkspaceModal = document.getElementById('project-workspace-modal');
 
   bindMobileSheet(mobileMenu,         { onClose: () => hideMobileMenu() });
   bindMobileSheet(historyPanel,       { onClose: () => hideHistoryPanel() });
@@ -128,6 +129,7 @@ function setupMobileSheetDragClose() {
   bindMobileSheet(workflowEditor,     { onClose: () => { if (typeof closeWorkflowEditor === 'function') closeWorkflowEditor(); } });
   bindMobileSheet(faqModal,           { onClose: () => closeFaq() });
   bindMobileSheet(document.getElementById('command-registry-modal'), { onClose: () => closeCommandRegistryPanel() });
+  bindMobileSheet(projectWorkspaceModal, { onClose: () => { if (typeof closeProjectWorkspace === 'function') closeProjectWorkspace(); } });
   bindMobileSheet(optionsModal,       { onClose: () => closeOptions() });
 }
 
@@ -143,6 +145,8 @@ function setupDismissibleOverlays() {
   const shortcutsCloseBtn = shortcutsOverlayEl?.querySelector('.shortcuts-close');
   const workflowEditorOverlay = document.getElementById('workflow-editor-overlay');
   const workflowEditorCloseBtns = workflowEditorOverlay?.querySelectorAll('.workflow-editor-close');
+  const projectWorkspaceOverlay = document.getElementById('project-workspace-overlay');
+  const projectWorkspaceCloseBtn = projectWorkspaceOverlay?.querySelector('.project-workspace-close');
 
   bindDismissible(_uiOverlayRefs.workflowsOverlay, {
     level: 'panel',
@@ -194,6 +198,12 @@ function setupDismissibleOverlays() {
     onClose: closeCommandRegistryPanel,
     closeButtons: typeof commandRegistryCloseBtn !== 'undefined' ? commandRegistryCloseBtn : null,
   });
+  bindDismissible(projectWorkspaceOverlay, {
+    level: 'panel',
+    isOpen: () => typeof isProjectWorkspaceOpen === 'function' && isProjectWorkspaceOpen(),
+    onClose: () => { if (typeof closeProjectWorkspace === 'function') closeProjectWorkspace(); },
+    closeButtons: projectWorkspaceCloseBtn,
+  });
   bindDismissible(commandCatalogOverlay, {
     level: 'modal',
     isOpen: () => typeof isCommandCatalogOverlayOpen === 'function' && isCommandCatalogOverlayOpen(),
@@ -238,7 +248,7 @@ function setupModalFocusTraps() {
   // open — otherwise focus falls through to the rail / tabs / HUD behind the
   // backdrop. #confirm-host wires its own focus trap per-open through
   // showConfirm() because the card's focusables change between shows; the
-  // four app-level modals have persistent DOM, so a one-shot idempotent bind
+  // app-level modals have persistent DOM, so a one-shot idempotent bind
   // at startup is equivalent. bindFocusTrap is a no-op when the card is
   // hidden (display: none on the overlay wrapper), so the listener is only
   // reachable while the modal is open.
@@ -248,6 +258,11 @@ function setupModalFocusTraps() {
     'theme-modal',
     'faq-modal',
     'command-registry-modal',
+    'project-workspace-modal',
+    'project-target-editor-modal',
+    'project-package-manifest-modal',
+    'project-package-wizard-modal',
+    'project-entity-editor-modal',
     'workspace-modal',
     'workflows-modal',
     'workflow-editor-form',
@@ -363,6 +378,7 @@ function dispatchMobileMenuAction(action, btn = null) {
     refocusComposerAfterAction({ defer: true });
   }
   if (action === 'options') openOptions();
+  if (action === 'projects' && typeof openProjectWorkspace === 'function') void openProjectWorkspace();
   if (action === 'status-monitor' && typeof openStatusMonitor === 'function') {
     void openStatusMonitor({ source: 'mobile-menu' });
   }
@@ -448,14 +464,36 @@ optionsShareRedactionSelect?.addEventListener('change', e => {
 optionsNotifyToggle?.addEventListener('change', e => {
   applyRunNotifyPreference(e.target.checked ? 'on' : 'off');
 });
+optionsProjectAutoLinkExternalRunsToggle?.addEventListener('change', e => {
+  applyProjectAutoLinkExternalRunsPreference(e.target.checked ? 'on' : 'off');
+});
 optionsHudClockSelect?.addEventListener('change', e => {
   applyHudClockPreference(e.target.value);
 });
+let promptUsernameAutosaveTimer = null;
+const PROMPT_USERNAME_AUTOSAVE_DELAY_MS = 300;
+function clearPromptUsernameAutosave() {
+  if (!promptUsernameAutosaveTimer) return;
+  clearTimeout(promptUsernameAutosaveTimer);
+  promptUsernameAutosaveTimer = null;
+}
+function schedulePromptUsernameAutosave(value) {
+  clearPromptUsernameAutosave();
+  promptUsernameAutosaveTimer = setTimeout(() => {
+    promptUsernameAutosaveTimer = null;
+    applyPromptUsernamePreference(value);
+  }, PROMPT_USERNAME_AUTOSAVE_DELAY_MS);
+}
 optionsPromptUsernameInput?.addEventListener('input', () => {
-  syncPromptUsernameValidation();
+  if (typeof hidePromptUsernameSavedIndicator === 'function') hidePromptUsernameSavedIndicator();
+  if (syncPromptUsernameValidation()) schedulePromptUsernameAutosave(optionsPromptUsernameInput.value);
+  else clearPromptUsernameAutosave();
 });
 optionsPromptUsernameInput?.addEventListener('change', e => {
-  if (syncPromptUsernameValidation()) applyPromptUsernamePreference(e.target.value);
+  if (syncPromptUsernameValidation()) {
+    clearPromptUsernameAutosave();
+    applyPromptUsernamePreference(e.target.value);
+  }
 });
 
 // Session token options panel — UI-native controls
@@ -1106,6 +1144,7 @@ function isAnyPanelOverlayOpen() {
     || (typeof isWorkflowsOverlayOpen === 'function' && isWorkflowsOverlayOpen())
     || (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen())
     || (typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
+    || (typeof isHistoryRunOverlayOpen === 'function' && isHistoryRunOverlayOpen())
     || (typeof isOptionsOverlayOpen === 'function' && isOptionsOverlayOpen())
     || (typeof isThemeOverlayOpen === 'function' && isThemeOverlayOpen());
 }
@@ -1131,6 +1170,7 @@ document.addEventListener('keydown', e => {
     || isWorkflowsOverlayOpen()
     || isHistoryPanelOpen()
     || (typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
+    || (typeof isHistoryRunOverlayOpen === 'function' && isHistoryRunOverlayOpen())
   ) {
     if (handleChromeShortcut(e)) return;
     return;
@@ -1245,6 +1285,7 @@ document.addEventListener('keydown', e => {
     && cmdInput
     && !isFaqOverlayOpen() && !isWorkflowsOverlayOpen() && !isOptionsOverlayOpen() && !isThemeOverlayOpen()
     && !(typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
+    && !(typeof isHistoryRunOverlayOpen === 'function' && isHistoryRunOverlayOpen())
     && !(typeof isConfirmOpen === 'function' && isConfirmOpen())
   ) {
     e.preventDefault();
@@ -1356,6 +1397,7 @@ function _isMajorSurfaceOpenForPromptPaste() {
     || isWorkflowsOverlayOpen()
     || (typeof isWorkspaceOverlayOpen === 'function' && isWorkspaceOverlayOpen())
     || (typeof isHistoryCompareOverlayOpen === 'function' && isHistoryCompareOverlayOpen())
+    || (typeof isHistoryRunOverlayOpen === 'function' && isHistoryRunOverlayOpen())
     || isHistoryPanelOpen()
     || (typeof isConfirmOpen === 'function' && isConfirmOpen())
   );
@@ -1392,7 +1434,7 @@ if (historyPanel && typeof bindOutsideClickClose === 'function') {
     triggers: null,
     isOpen: isHistoryPanelOpen,
     onClose: hideHistoryPanel,
-    exemptSelectors: ['.hist-chip-overflow', '[data-action="history"]', '#history-compare-overlay'],
+    exemptSelectors: ['.hist-chip-overflow', '[data-action="history"]', '.modal-overlay', '#history-compare-overlay'],
   });
 }
 if (typeof bindOutsideClickClose === 'function' && typeof shellPromptWrap !== 'undefined' && shellPromptWrap) {
@@ -1563,6 +1605,7 @@ apiFetch('/autocomplete').then(r => r.json()).then(data => {
   acBuiltinCommandRoots = data.builtin_command_roots || [];
   if (typeof loadSessionVariables === 'function') loadSessionVariables().catch(() => {});
   if (typeof loadRecentDomains === 'function') loadRecentDomains().catch(() => {});
+  if (typeof loadProjectAutocompleteTargets === 'function') loadProjectAutocompleteTargets().catch(() => {});
   if (typeof scheduleSearchDiscoverabilityRefresh === 'function') scheduleSearchDiscoverabilityRefresh();
   else if (typeof refreshSearchDiscoverabilityUi === 'function') refreshSearchDiscoverabilityUi();
 }).catch(err => {
@@ -1728,7 +1771,7 @@ cmdInput.addEventListener('keydown', e => {
     return;
   }
 
-  if (e.altKey && !e.ctrlKey && !e.metaKey && eventMatchesLetter(e, 'b')) {
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && eventMatchesLetter(e, 'b')) {
     e.preventDefault();
     if (typeof syncFocusedComposerState === 'function') syncFocusedComposerState(cmdInput);
     const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
@@ -1740,7 +1783,7 @@ cmdInput.addEventListener('keydown', e => {
     return;
   }
 
-  if (e.altKey && !e.ctrlKey && !e.metaKey && eventMatchesLetter(e, 'f')) {
+  if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && eventMatchesLetter(e, 'f')) {
     e.preventDefault();
     if (typeof syncFocusedComposerState === 'function') syncFocusedComposerState(cmdInput);
     const value = typeof getComposerValue === 'function' ? getComposerValue() : '';

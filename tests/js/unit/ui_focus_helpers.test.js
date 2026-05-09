@@ -141,4 +141,21 @@ describe('app-native select enhancement', () => {
     expect(select.value).toBe('two')
     expect(onChange).toHaveBeenCalledTimes(1)
   })
+
+  it('refreshes custom menu options when native select options change', () => {
+    const g = loadHelpers()
+    const select = document.getElementById('demo-select')
+    const option = document.createElement('option')
+    option.value = 'three'
+    option.textContent = 'Three'
+    select.appendChild(option)
+
+    g.syncAppSelect(select)
+
+    expect([...document.querySelectorAll('.app-select-menu [role="option"]')].map(btn => btn.textContent)).toEqual([
+      'One',
+      'Two',
+      'Three',
+    ])
+  })
 })

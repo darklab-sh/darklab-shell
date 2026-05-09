@@ -12,6 +12,7 @@ from flask import Blueprint, jsonify, request
 
 from database import db_connect
 from helpers import get_client_ip, get_log_session_id, get_session_id, is_valid_anonymous_session_id
+from project_workspace import migrate_project_workspace_session
 from session_variables import list_session_variables
 from user_workflows import (
     UserWorkflowError,
@@ -28,6 +29,8 @@ log = logging.getLogger("shell")
 session_bp = Blueprint("session", __name__)
 
 _SESSION_PREFERENCE_KEYS = {
+    "pref_active_project_id",
+    "pref_project_auto_link_external_runs",
     "pref_theme_name",
     "pref_timestamps",
     "pref_line_numbers",
@@ -65,6 +68,10 @@ def _normalize_session_preferences(raw):
         value = value.strip()
         if not value:
             continue
+        if key == "pref_active_project_id" and not re.fullmatch(r"prj_[0-9a-f]{16}", value):
+            continue
+        if key == "pref_project_auto_link_external_runs":
+            value = "off" if value.lower() in {"0", "false", "no", "off"} else "on"
         if key == "pref_prompt_username" and not _PROMPT_USERNAME_RE.fullmatch(value):
             continue
         prefs[key] = value
@@ -429,6 +436,7 @@ def session_migrate():
             "UPDATE user_workflows SET session_id = ? WHERE session_id = ?",
             (to_session_id, from_session_id),
         )
+        project_migration = migrate_project_workspace_session(conn, from_session_id, to_session_id)
         migrated_recent_domains = _migrate_recent_domains(conn, from_session_id, to_session_id)
         conn.execute(
             "DELETE FROM starred_commands WHERE session_id = ?",
@@ -469,6 +477,7 @@ def session_migrate():
         "migrated_preferences": migrated_preferences,
         "migrated_variables": migrated_variables,
         "migrated_workflows": migrated_workflows,
+        **project_migration,
         "migrated_recent_domains": migrated_recent_domains,
         "migrated_workspace_files": workspace_migration.migrated_files,
         "skipped_workspace_files": workspace_migration.skipped_files,
@@ -483,6 +492,7 @@ def session_migrate():
         "migrated_preferences": migrated_preferences,
         "migrated_variables": migrated_variables,
         "migrated_workflows": migrated_workflows,
+        **project_migration,
         "migrated_recent_domains": migrated_recent_domains,
         "migrated_workspace_files": workspace_migration.migrated_files,
         "skipped_workspace_files": workspace_migration.skipped_files,

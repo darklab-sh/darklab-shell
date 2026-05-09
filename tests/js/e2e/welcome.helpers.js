@@ -1,10 +1,6 @@
-import { makeTestIp } from './helpers.js'
-
 export const CMD = 'curl http://localhost:5001/health'
-export const TEST_IP = makeTestIp(68)
 
 export async function setupWelcomePage(page) {
-  await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
   await page.route('**/session/preferences', (route) => {
     route.fulfill({
       status: 200,

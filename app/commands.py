@@ -42,6 +42,7 @@ APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
 APP_HINTS_MOBILE_FILE = os.path.join(_CONF, "app_hints_mobile.txt")
 AMASS_DEFAULT_WORKSPACE_DIR = "amass"
 RESTRICTABLE_VALUE_TYPES = {"cidr", "domain", "host", "ip", "target", "url"}
+PROJECT_TARGET_VALUE_TYPES = RESTRICTABLE_VALUE_TYPES | {"port_set"}
 NMAP_DENIED_RAW_FLAGS = {"-sS"}
 NMAP_SCAN_MODE_FLAGS = {
     "-sA", "-sF", "-sI", "-sL", "-sM", "-sN", "-sO", "-sS",
@@ -3106,6 +3107,128 @@ def _autocomplete_positional_value_types(spec: dict[str, object]) -> list[str]:
         if _value_type_is_restrictable(value_type):
             value_types.append(value_type)
     return _dedupe_preserve_order(value_types)
+
+
+def _autocomplete_positional_project_target_value_types(spec: dict[str, object]) -> list[str]:
+    value_types = []
+    for hint in _dict_value(spec, "arg_hints").get("__positional__", []) or []:
+        if not isinstance(hint, dict):
+            continue
+        value_type = str(hint.get("value_type") or "").strip().lower()
+        if value_type in PROJECT_TARGET_VALUE_TYPES:
+            value_types.append(value_type)
+    return _dedupe_preserve_order(value_types)
+
+
+def _autocomplete_value_flag_types(spec: dict[str, object]) -> dict[str, str]:
+    flags: dict[str, str] = {}
+    for flag in _list_value(spec, "flags"):
+        if not isinstance(flag, dict):
+            continue
+        token = str(flag.get("value") or "").strip()
+        if token:
+            flags[token] = str(flag.get("value_type") or "").strip().lower()
+    for trigger in _dict_value(spec, "arg_hints"):
+        token = str(trigger or "").strip()
+        if token and token != "__positional__":
+            flags[token] = flags.get(token) or _autocomplete_value_type_from_hint(spec, token)
+    return flags
+
+
+def _autocomplete_hint_marks_target_list_file(hint: dict) -> bool:
+    placeholder = str(hint.get("value") or hint.get("placeholder") or "").strip().lower()
+    description = str(hint.get("description") or "").strip().lower()
+    return "file" in placeholder or "file containing" in description or "one " in description and " per line" in description
+
+
+def _autocomplete_project_target_flag_specs(spec: dict[str, object]) -> dict[str, dict[str, object]]:
+    flags: dict[str, dict[str, object]] = {}
+    for flag in _list_value(spec, "flags"):
+        if not isinstance(flag, dict):
+            continue
+        token = str(flag.get("value") or "").strip()
+        if not token:
+            continue
+        flags[token] = {
+            "value_type": str(flag.get("value_type") or "").strip().lower(),
+            "target_list_file": False,
+        }
+    for trigger, hints in _dict_value(spec, "arg_hints").items():
+        token = str(trigger or "").strip()
+        if not token or token == "__positional__":
+            continue
+        flag_spec = flags.setdefault(token, {"value_type": "", "target_list_file": False})
+        for hint in hints if isinstance(hints, list) else []:
+            if not isinstance(hint, dict):
+                continue
+            value_type = str(hint.get("value_type") or "").strip().lower()
+            if value_type and not flag_spec.get("value_type"):
+                flag_spec["value_type"] = value_type
+            if value_type in PROJECT_TARGET_VALUE_TYPES and _autocomplete_hint_marks_target_list_file(hint):
+                flag_spec["target_list_file"] = True
+    return flags
+
+
+def command_project_target_inputs(command: str, cfg: dict | None = None) -> list[dict[str, str]]:
+    """Return registry-typed command inputs that can become project targets."""
+    tokens = split_command_argv(command)
+    if not tokens:
+        return []
+    spec, start_index = _autocomplete_spec_for_tokens(tokens, cfg=cfg)
+    if not spec:
+        return []
+    flag_value_specs = _autocomplete_project_target_flag_specs(spec)
+    positional_types = _autocomplete_positional_project_target_value_types(spec)
+    inputs = []
+    consumed: set[int] = set(range(start_index))
+    positional_index = 0
+
+    index = start_index
+    while index < len(tokens):
+        token = tokens[index]
+        matched_flag = ""
+        matched_value = ""
+        matched_value_index = index
+        matched_value_type = ""
+        matched_target_list_file = False
+        for flag, flag_spec in flag_value_specs.items():
+            value, value_index = _flag_value_from_token(tokens, index, flag)
+            if value is None or value_index is None:
+                continue
+            matched_flag = flag
+            matched_value = value
+            matched_value_index = value_index
+            matched_value_type = str(flag_spec.get("value_type") or "")
+            matched_target_list_file = bool(flag_spec.get("target_list_file"))
+            break
+        if matched_flag:
+            consumed.add(index)
+            consumed.add(matched_value_index)
+            if matched_value_type in PROJECT_TARGET_VALUE_TYPES:
+                inputs.append({
+                    "value": str(matched_value or ""),
+                    "value_type": matched_value_type,
+                    "source_kind": "flag",
+                    "source_name": matched_flag,
+                    "target_list_file": "1" if matched_target_list_file else "",
+                })
+            index = matched_value_index + 1
+            continue
+        if token.startswith("-"):
+            consumed.add(index)
+            index += 1
+            continue
+        if index not in consumed and positional_types:
+            value_type = positional_types[min(positional_index, len(positional_types) - 1)]
+            positional_index += 1
+            inputs.append({
+                "value": token,
+                "value_type": value_type,
+                "source_kind": "positional",
+                "source_name": f"argument_{positional_index}",
+            })
+        index += 1
+    return inputs
 
 
 def _autocomplete_spec_needs_normalization(spec: dict[str, object]) -> bool:

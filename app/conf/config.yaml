@@ -132,6 +132,49 @@
 # Server default if unset: 1
 # workspace_inactivity_ttl_hours: 1
 
+# ── Project Workspace Guardrails ─────────────────────────────────────────────
+#
+# Per-session and per-project caps for project workspace records. Set to 0 for
+# unlimited, though route rate limits still apply.
+# Server default if unset: 100
+# max_projects_per_session: 100
+#
+# Server default if unset: 1000
+# max_project_links_per_project: 1000
+#
+# Server default if unset: 200
+# max_project_targets_per_project: 200
+#
+# Server default if unset: 25
+# max_evidence_packages_per_project: 25
+#
+# Server default if unset: 5000
+# max_entity_labels_per_session: 5000
+#
+# Server default if unset: 20
+# max_entity_labels_per_entity: 20
+#
+# Server default if unset: 2000
+# max_entity_notes_per_session: 2000
+#
+# Evidence package archive size cap in megabytes. Set to 0 for unlimited.
+# Server default if unset: 25
+# evidence_package_max_mb: 25
+#
+# Maximum number of workspace artifacts included in one evidence package. Set
+# to 0 for unlimited.
+# Server default if unset: 100
+# evidence_package_max_artifacts: 100
+#
+# Evidence package download/build rate limits use the shared limiter and are
+# tighter than normal command/project writes because archive construction can
+# read many workspace files.
+# Server default if unset: 10
+# evidence_package_download_rate_limit_per_minute: 10
+#
+# Server default if unset: 2
+# evidence_package_download_rate_limit_per_second: 2
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 
 # Log verbosity level . Options: ERROR, WARN, INFO, DEBUG

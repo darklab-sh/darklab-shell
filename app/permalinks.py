@@ -163,6 +163,10 @@ def _normalize_permalink_run_meta(meta: dict | None) -> dict | None:
         "exitCode": meta.get("exit_code"),
         "duration": meta.get("duration") or None,
         "lines": meta.get("lines") or None,
+        "artifactCount": meta.get("artifact_count") or 0,
+        "findingCount": meta.get("finding_count") or 0,
+        "labelCount": meta.get("label_count") or 0,
+        "noteCount": meta.get("note_count") or 0,
         "version": meta.get("version") or None,
     }
 
@@ -182,6 +186,22 @@ def _build_permalink_run_meta_items(run_meta: dict | None) -> list[dict]:
         items.append({"kind": "item", "text": str(run_meta["duration"])})
     if run_meta.get("lines"):
         items.append({"kind": "item", "text": str(run_meta["lines"])})
+    artifact_count = run_meta.get("artifactCount")
+    if isinstance(artifact_count, int) and artifact_count > 0:
+        label = "artifact" if artifact_count == 1 else "artifacts"
+        items.append({"kind": "item", "text": f"{artifact_count} {label}"})
+    finding_count = run_meta.get("findingCount")
+    if isinstance(finding_count, int) and finding_count > 0:
+        label = "finding" if finding_count == 1 else "findings"
+        items.append({"kind": "item", "text": f"{finding_count} {label}"})
+    label_count = run_meta.get("labelCount")
+    if isinstance(label_count, int) and label_count > 0:
+        label = "label" if label_count == 1 else "labels"
+        items.append({"kind": "item", "text": f"{label_count} {label}"})
+    note_count = run_meta.get("noteCount")
+    if isinstance(note_count, int) and note_count > 0:
+        label = "note" if note_count == 1 else "notes"
+        items.append({"kind": "item", "text": f"{note_count} {label}"})
     if run_meta.get("version"):
         items.append({"kind": "item", "text": f"v{run_meta['version']}"})
     return items

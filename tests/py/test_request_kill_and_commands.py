@@ -43,7 +43,6 @@ def _command_validation_helpers():
 
 def get_client(*, use_forwarded_for=True):
     shell_app.app.config["TESTING"] = True
-    shell_app.app.config["RATELIMIT_ENABLED"] = False
     client = shell_app.app.test_client()
     if use_forwarded_for:
         client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
@@ -765,6 +764,7 @@ class TestBuiltinCommandResolution:
         assert resolve_builtin_command("who") == "who"
         assert resolve_builtin_command("whoami") == "whoami"
         assert resolve_builtin_command("ps aux") == "ps"
+        assert resolve_builtin_command("project current") == "project"
         with mock.patch.dict("config.CFG", {"workspace_enabled": True}):
             assert resolve_builtin_command("file list") == "file"
             assert resolve_builtin_command("workspace list") is None

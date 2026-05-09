@@ -382,6 +382,10 @@ function _applyOutputSignalMetadata(span, rawLine, metadata) {
     rawLine.line_index = metadata.line_index;
     span.dataset.lineIndex = String(metadata.line_index);
   }
+  if (Number.isInteger(metadata.line_number)) {
+    rawLine.line_number = metadata.line_number;
+    span.dataset.lineNumber = String(metadata.line_number);
+  }
   if (typeof metadata.command_root === 'string' && metadata.command_root) {
     rawLine.command_root = metadata.command_root;
     span.dataset.commandRoot = metadata.command_root;

@@ -649,6 +649,11 @@ function loadRunnerFns({
   getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride = undefined,
   normalizeWorkspaceCommandPath: normalizeWorkspaceCommandPathOverride = undefined,
   workspaceDisplayPath: workspaceDisplayPathOverride = undefined,
+  refreshActiveProjectContext: refreshActiveProjectContextOverride = undefined,
+  refreshProjectWorkspace: refreshProjectWorkspaceOverride = undefined,
+  isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride = undefined,
+  notifyProjectWorkspaceChanged: notifyProjectWorkspaceChangedOverride = undefined,
+  emitUiEvent: emitUiEventOverride = undefined,
   runnerInitCode = '',
 } = {}) {
   const normalizedTabs = tabs.map((tab) => ({
@@ -814,6 +819,11 @@ function loadRunnerFns({
       ...(getWorkspaceAutocompleteFileHintsOverride ? { getWorkspaceAutocompleteFileHints: getWorkspaceAutocompleteFileHintsOverride } : {}),
       ...(normalizeWorkspaceCommandPathOverride ? { normalizeWorkspaceCommandPath: normalizeWorkspaceCommandPathOverride } : {}),
       ...(workspaceDisplayPathOverride ? { workspaceDisplayPath: workspaceDisplayPathOverride } : {}),
+      ...(refreshActiveProjectContextOverride ? { refreshActiveProjectContext: refreshActiveProjectContextOverride } : {}),
+      ...(refreshProjectWorkspaceOverride ? { refreshProjectWorkspace: refreshProjectWorkspaceOverride } : {}),
+      ...(isProjectWorkspaceOpenOverride ? { isProjectWorkspaceOpen: isProjectWorkspaceOpenOverride } : {}),
+      ...(notifyProjectWorkspaceChangedOverride ? { notifyProjectWorkspaceChanged: notifyProjectWorkspaceChangedOverride } : {}),
+      ...(emitUiEventOverride ? { emitUiEvent: emitUiEventOverride } : {}),
       ...(NotificationOverride !== undefined ? { Notification: NotificationOverride } : {}),
     },
     `{
@@ -1306,10 +1316,14 @@ describe('runner helpers', () => {
 
   it('keeps subscribed tabs killable on owner metadata and reports remote kills', () => {
     const appendLine = vi.fn()
+    const notifyProjectWorkspaceChanged = vi.fn()
+    const emitUiEvent = vi.fn()
     const { _handleRunStreamMessage, tabs } = loadRunnerFns({
       clientId: 'client-1',
       tabs: [{ id: 'tab-1', st: 'running', runId: 'run-1', pendingKill: false, killed: false, attachMode: 'attached' }],
       appendLine,
+      notifyProjectWorkspaceChanged,
+      emitUiEvent,
     })
 
     _handleRunStreamMessage({ type: 'owner', owner_client_id: 'client-2', owner_tab_id: 'tab-9' }, 'tab-1')
@@ -1327,6 +1341,22 @@ describe('runner helpers', () => {
       'notice',
       'tab-1',
     )
+
+    _handleRunStreamMessage({
+      type: 'notice',
+      text: '[project] discovered 2 targets for Demo',
+      project_targets_discovered: true,
+      project_id: 'project-1',
+      project_name: 'Demo',
+      target_count: 2,
+    }, 'tab-1')
+
+    expect(notifyProjectWorkspaceChanged).toHaveBeenCalledWith('target-discovered', 'project-1')
+    expect(emitUiEvent).toHaveBeenCalledWith('app:project-target-discovered', {
+      project_id: 'project-1',
+      project_name: 'Demo',
+      count: 2,
+    })
   })
 
   it('pollActiveRunsAfterReload restores a completed reconnected run through history', async () => {
@@ -1864,6 +1894,33 @@ describe('runner helpers', () => {
       'tab-1',
     )
     expect(loaded.tabs[0].historyRunId).toBe('run-man')
+  })
+
+  it('runCommand refreshes and broadcasts project context after successful project built-ins', async () => {
+    const refreshActiveProjectContext = vi.fn(() => Promise.resolve())
+    const apiFetch = brokerApiFetch(
+      [
+        'data: {"type":"started","run_id":"run-project"}',
+        'data: {"type":"output","text":"project: target added domain new-target.example.com"}',
+        'data: {"type":"exit","code":0,"elapsed":0.1}',
+      ].join('\n\n') + '\n\n',
+      { runId: 'run-project' },
+    )
+    const loaded = loadRunnerFns({
+      cmdValue: 'project target add domain new-target.example.com',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      refreshActiveProjectContext,
+    })
+
+    loaded.runCommand()
+    await flushPromises()
+
+    expect(refreshActiveProjectContext).toHaveBeenCalledTimes(1)
+    expect(JSON.parse(loaded.storage.getItem('darklab_project_workspace_changed'))).toEqual(expect.objectContaining({
+      session_id: 'session-old',
+      command: 'project target add domain new-target.example.com',
+    }))
   })
 
   it('runCommand preserves output classes from streamed events', async () => {

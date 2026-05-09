@@ -19,6 +19,11 @@ let _workspaceViewedSize = null;
 let _workspaceDragPath = '';
 let _workspaceDragKind = '';
 const WorkspaceCore = window.DarklabWorkspaceCore;
+const EntityMetadataClient = (
+  typeof window !== 'undefined' && window.DarklabEntityMetadata
+) || (
+  typeof globalThis !== 'undefined' && globalThis.DarklabEntityMetadata
+) || {};
 
 const WORKSPACE_PREVIEW_LINE_LIMIT = 10000;
 const WORKSPACE_PREVIEW_TABLE_LIMIT = 250;
@@ -94,6 +99,43 @@ function _workspaceFileReadBlockedReason(path = '') {
   const fileSize = _workspaceViewerFileSize(path);
   if (!(Number.isFinite(fileSize) && fileSize > maxFileBytes)) return '';
   return 'file exceeds session max file size';
+}
+
+function _workspaceFileByPath(path = '') {
+  const target = String(path || '').split('/').filter(Boolean).join('/');
+  if (!target) return null;
+  return _workspaceFiles.find(item => String(item?.path || '').split('/').filter(Boolean).join('/') === target) || null;
+}
+
+function _workspaceLabelValues(file) {
+  const labels = file && Array.isArray(file.labels) ? file.labels : [];
+  return labels
+    .map(label => String(label && typeof label === 'object' ? label.label : label || '').trim())
+    .filter(Boolean);
+}
+
+function _workspaceNoteBody(file) {
+  const note = file && file.note && typeof file.note === 'object' ? file.note : null;
+  return note ? String(note.body || '').trim() : '';
+}
+
+function _workspaceMetadataOptionsForPath(path = '', fallback = {}) {
+  const file = fallback && (Array.isArray(fallback.labels) || fallback.note) ? fallback : _workspaceFileByPath(path);
+  return {
+    labels: _workspaceLabelValues(file),
+    noteBody: _workspaceNoteBody(file),
+  };
+}
+
+function _workspaceMetadataChips(file) {
+  const chips = _workspaceLabelValues(file).map(label => ({ label, kind: 'label' }));
+  if (_workspaceNoteBody(file)) chips.push({ label: 'note', kind: 'note' });
+  return chips;
+}
+
+async function _syncWorkspaceFileMetadata(path, { labels = [], noteBody = '' } = {}) {
+  await EntityMetadataClient.syncEntityLabels('workspace_file', path, Array.isArray(labels) ? labels : []);
+  await EntityMetadataClient.syncEntityNote('workspace_file', path, noteBody);
 }
 
 function _workspaceAutoRefreshDisabledReason() {
@@ -202,6 +244,8 @@ function hideWorkspaceEditor() {
     workspacePathInput.readOnly = false;
     workspacePathInput.classList.remove('workspace-path-readonly');
   }
+  if (typeof workspaceLabelsInput !== 'undefined' && workspaceLabelsInput) workspaceLabelsInput.value = '';
+  if (typeof workspaceNotesInput !== 'undefined' && workspaceNotesInput) workspaceNotesInput.value = '';
   if (typeof workspaceEditorOverlay !== 'undefined' && workspaceEditorOverlay) {
     workspaceEditorOverlay.classList.add('u-hidden');
     workspaceEditorOverlay.classList.remove('open');
@@ -214,6 +258,7 @@ function hideWorkspaceViewer() {
   if (typeof workspaceViewerOverlay !== 'undefined' && workspaceViewerOverlay) {
     workspaceViewerOverlay.classList.add('u-hidden');
     workspaceViewerOverlay.classList.remove('open');
+    workspaceViewerOverlay.classList.remove('workspace-viewer-overlay-elevated');
   }
   if (_workspaceViewerRefreshSpinTimer) {
     clearTimeout(_workspaceViewerRefreshSpinTimer);
@@ -706,7 +751,7 @@ async function switchWorkspaceViewerMode(raw = false) {
   _workspaceRenderViewerPayload(_workspaceViewerPayloadCache, { raw });
 }
 
-function showWorkspaceEditor(path = '', text = '', { readOnlyPath = false } = {}) {
+function showWorkspaceEditor(path = '', text = '', { readOnlyPath = false, labels = [], noteBody = '' } = {}) {
   if (!workspaceEditor) return;
   hideWorkspaceViewer();
   workspaceEditor.classList.remove('u-hidden');
@@ -722,6 +767,12 @@ function showWorkspaceEditor(path = '', text = '', { readOnlyPath = false } = {}
     workspacePathInput.readOnly = !!readOnlyPath;
     workspacePathInput.classList.toggle('workspace-path-readonly', !!readOnlyPath);
   }
+  if (typeof workspaceLabelsInput !== 'undefined' && workspaceLabelsInput) {
+    workspaceLabelsInput.value = (Array.isArray(labels) ? labels : []).join(', ');
+  }
+  if (typeof workspaceNotesInput !== 'undefined' && workspaceNotesInput) {
+    workspaceNotesInput.value = String(noteBody || '');
+  }
   if (workspaceTextInput) workspaceTextInput.value = text;
   setTimeout(() => {
     if (workspacePathInput && !path) workspacePathInput.focus();
@@ -729,7 +780,7 @@ function showWorkspaceEditor(path = '', text = '', { readOnlyPath = false } = {}
   }, 0);
 }
 
-function showWorkspaceViewer(path = '', text = '', { size = null } = {}) {
+function showWorkspaceViewer(path = '', text = '', { size = null, elevated = false } = {}) {
   hideWorkspaceEditor();
   _workspaceViewedPath = String(path || '').trim();
   const numericSize = size == null ? NaN : Number(size);
@@ -744,6 +795,7 @@ function showWorkspaceViewer(path = '', text = '', { size = null } = {}) {
     workspaceViewer.classList.remove('u-hidden');
     workspaceViewer.scrollTop = 0;
     if (typeof workspaceViewerOverlay !== 'undefined' && workspaceViewerOverlay) {
+      workspaceViewerOverlay.classList.toggle('workspace-viewer-overlay-elevated', !!elevated);
       workspaceViewerOverlay.classList.remove('u-hidden');
       workspaceViewerOverlay.classList.add('open');
     }
@@ -972,9 +1024,13 @@ function renderWorkspaceBrowser() {
     row.dataset.kind = 'file';
     row.dataset.path = file.path;
     row.draggable = true;
+    const artifactDetails = _workspaceArtifactDetails(file);
     row.appendChild(_workspaceMetaNode(
       file.name || _workspaceFileBasename(file.path),
-      `${_formatWorkspaceBytes(file.size)}${file.mtime ? ` · ${file.mtime}` : ''}`,
+      `${_formatWorkspaceBytes(file.size)}${file.mtime ? ` · ${file.mtime}` : ''}${artifactDetails}`,
+      '',
+      '',
+      _workspaceMetadataChips(file),
     ));
     row.appendChild(_workspaceActionsNode([
       { action: 'view', label: 'View', tone: 'secondary' },
@@ -999,7 +1055,20 @@ function renderWorkspaceBrowser() {
   }
 }
 
-function _workspaceMetaNode(nameText, detailsText, iconClass = '', iconText = '') {
+function _workspaceArtifactDetails(file) {
+  const artifactCount = Number(file && file.artifact_count ? file.artifact_count : 0);
+  if (!artifactCount) return '';
+  const runCount = Number(file && file.artifact_run_count ? file.artifact_run_count : 0);
+  const projects = Array.isArray(file.project_names) ? file.project_names.filter(Boolean) : [];
+  const parts = [
+    artifactCount === 1 ? '1 artifact' : `${artifactCount} artifacts`,
+  ];
+  if (runCount) parts.push(runCount === 1 ? '1 run' : `${runCount} runs`);
+  if (projects.length) parts.push(projects.slice(0, 2).join(', '));
+  return ` · ${parts.join(' · ')}`;
+}
+
+function _workspaceMetaNode(nameText, detailsText, iconClass = '', iconText = '', chips = []) {
   const meta = document.createElement('div');
   meta.className = 'workspace-file-meta';
   if (iconText) {
@@ -1019,6 +1088,18 @@ function _workspaceMetaNode(nameText, detailsText, iconClass = '', iconText = ''
   details.textContent = detailsText;
   text.appendChild(name);
   text.appendChild(details);
+  const visibleChips = Array.isArray(chips) ? chips.filter(chip => chip && chip.label) : [];
+  if (visibleChips.length) {
+    const chipWrap = document.createElement('div');
+    chipWrap.className = 'workspace-metadata-chips';
+    for (const chip of visibleChips) {
+      const chipNode = document.createElement('span');
+      chipNode.className = `workspace-metadata-chip ${chip.kind === 'note' ? 'is-note' : 'is-label'}`;
+      chipNode.textContent = chip.label;
+      chipWrap.appendChild(chipNode);
+    }
+    text.appendChild(chipWrap);
+  }
   meta.appendChild(text);
   return meta;
 }
@@ -1144,17 +1225,27 @@ function getWorkspaceDirectoryEntries(path = '') {
   return _workspaceDirectEntries(path);
 }
 
-async function saveWorkspaceFile(path, text) {
+async function saveWorkspaceFile(path, text, metadata = null) {
   const resp = await apiFetch('/workspace/files', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ path, text }),
   });
   const data = await _workspaceJson(resp);
-  renderWorkspaceFiles(data.workspace || {});
+  const savedPath = data.file?.path || path;
+  if (metadata) {
+    await _syncWorkspaceFileMetadata(savedPath, metadata);
+    try {
+      await refreshWorkspaceFiles();
+    } catch (_) {
+      renderWorkspaceFiles(data.workspace || {});
+    }
+  } else {
+    renderWorkspaceFiles(data.workspace || {});
+  }
   hideWorkspaceEditor();
   hideWorkspaceViewer();
-  setWorkspaceMessage(`Saved ${data.file?.path || path}`);
+  setWorkspaceMessage(`Saved ${savedPath}`);
   return data;
 }
 
@@ -1361,14 +1452,7 @@ async function downloadWorkspaceFile(path) {
     return false;
   }
   const blob = await resp.blob();
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = path.split('/').filter(Boolean).pop() || 'workspace-file.txt';
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadBlobAsAttachment(blob, path.split('/').filter(Boolean).pop() || 'workspace-file.txt');
   return true;
 }
 
@@ -1408,7 +1492,11 @@ async function openWorkspaceEditorFromCommand(action = 'add', path = '') {
     }
     try {
       const data = await readWorkspaceFile(fileName);
-      showWorkspaceEditor(data.path || fileName, data.text || '', { readOnlyPath: true });
+      const editorPath = data.path || fileName;
+      showWorkspaceEditor(editorPath, data.text || '', {
+        readOnlyPath: true,
+        ..._workspaceMetadataOptionsForPath(editorPath, data),
+      });
     } catch (err) {
       hideWorkspaceEditor();
       _showWorkspaceToast(_workspaceErrorMessage(err, 'Unable to load session file'), 'error');
@@ -1455,7 +1543,11 @@ async function handleWorkspaceFileAction(action, path) {
       await _workspaceAfterPaint();
       const data = await readWorkspaceFile(path);
       if (_workspaceViewedPath !== String(path || '').trim()) return;
-      showWorkspaceEditor(data.path || path, data.text || '', { readOnlyPath: true });
+      const editorPath = data.path || path;
+      showWorkspaceEditor(editorPath, data.text || '', {
+        readOnlyPath: true,
+        ..._workspaceMetadataOptionsForPath(editorPath, data),
+      });
     } else if (action === 'download') {
       await downloadWorkspaceFile(path);
     } else if (action === 'move') {
@@ -1599,7 +1691,16 @@ workspaceViewer?.addEventListener('click', event => {
 workspaceEditor?.addEventListener('submit', async (event) => {
   event.preventDefault();
   try {
-    await saveWorkspaceFile(_workspacePathInCurrentDir(workspacePathInput?.value || ''), workspaceTextInput?.value || '');
+    await saveWorkspaceFile(
+      _workspacePathInCurrentDir(workspacePathInput?.value || ''),
+      workspaceTextInput?.value || '',
+      {
+        labels: EntityMetadataClient.parseLabelInput(
+          typeof workspaceLabelsInput !== 'undefined' && workspaceLabelsInput ? workspaceLabelsInput.value : '',
+        ),
+        noteBody: typeof workspaceNotesInput !== 'undefined' && workspaceNotesInput ? workspaceNotesInput.value : '',
+      },
+    );
   } catch (err) {
     setWorkspaceMessage(_workspaceErrorMessage(err, 'Unable to save session file'), 'error');
   }
@@ -1662,6 +1763,7 @@ if (typeof window !== 'undefined') {
   window.moveWorkspacePath = moveWorkspacePath;
   window.deleteWorkspacePath = deleteWorkspacePath;
   window.downloadWorkspaceFile = downloadWorkspaceFile;
+  window.showWorkspaceViewer = showWorkspaceViewer;
   window.openWorkspaceEditorFromCommand = openWorkspaceEditorFromCommand;
   if (isWorkspaceEnabled()) setTimeout(() => { refreshWorkspaceFileCache(); }, 0);
 }

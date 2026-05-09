@@ -79,6 +79,16 @@ _DIAG_REDIS_KEY_PREFIXES = (
     ("procmeta", "procmeta:*"),
     ("sessionprocs", "sessionprocs:*"),
 )
+_DIAG_PROJECT_WORKSPACE_COUNT_TABLES = {
+    "projects": "projects",
+    "project_links": "links",
+    "run_file_artifacts": "artifacts",
+    "project_targets": "targets",
+    "findings": "findings",
+    "entity_labels": "labels",
+    "entity_notes": "notes",
+    "evidence_packages": "packages",
+}
 
 # Themed groupings for the Config card. Every key emitted into
 # `result["config"]` must appear in exactly one group, otherwise it is
@@ -430,11 +440,17 @@ def _diag_db_stats() -> dict:
             info["tables"] = tables
             # Backward-compat: the original /diag schema exposed `runs`
             # and `snapshots` counts at the top level.
+            table_counts = {str(t["name"]): int(t["rows"]) for t in tables}
             for t in tables:
                 if t["name"] == "runs":
                     info["runs"] = t["rows"]
                 elif t["name"] == "snapshots":
                     info["snapshots"] = t["rows"]
+            project_counts = {
+                label: table_counts.get(table_name, 0)
+                for table_name, label in _DIAG_PROJECT_WORKSPACE_COUNT_TABLES.items()
+            }
+            info["project_workspace"] = project_counts
         except Exception:
             pass
 

@@ -11,7 +11,6 @@ import workspace
 
 def get_client():
     shell_app.app.config["TESTING"] = True
-    shell_app.app.config["RATELIMIT_ENABLED"] = False
     return shell_app.app.test_client()
 
 
@@ -183,6 +182,58 @@ class TestSessionMigrate:
                     "VALUES (?, ?, ?, ?)",
                     (session_id, domain, last_used, use_count),
                 )
+            conn.commit()
+
+    def _seed_project_workspace_records(self, session_id, *, project_id="prj_migrate_test", slug="case"):
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO projects "
+                "(id, session_id, name, slug, description, status, color, created, updated) "
+                "VALUES (?, ?, 'Case', ?, '', 'active', '', datetime('now'), datetime('now'))",
+                (project_id, session_id, slug),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO project_targets "
+                "(id, project_id, type, value, created, updated) "
+                "VALUES (?, ?, 'domain', 'darklab.sh', datetime('now'), datetime('now'))",
+                ("ptarget_migrate_test", project_id),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, created) "
+                "VALUES (?, ?, ?, ?, datetime('now'))",
+                ("rfa_migrate_test", session_id, "run_migrate_test", "findings.txt"),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO findings "
+                "(id, session_id, run_id, scope, raw_line, created) "
+                "VALUES (?, ?, ?, 'finding', 'open port 443', datetime('now'))",
+                ("fnd_migrate_test", session_id, "run_migrate_test"),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO finding_targets "
+                "(id, session_id, finding_id, target_id, source, created) "
+                "VALUES (?, ?, 'fnd_migrate_test', 'ptarget_migrate_test', 'primary_match', datetime('now'))",
+                ("ftarget_migrate_test", session_id),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO entity_labels "
+                "(id, session_id, entity_type, entity_id, label, created) "
+                "VALUES (?, ?, 'run', 'run_migrate_test', 'baseline', datetime('now'))",
+                ("lbl_migrate_test", session_id),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO entity_notes "
+                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES (?, ?, 'run', 'run_migrate_test', 'note', datetime('now'), datetime('now'))",
+                ("note_migrate_test", session_id),
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO evidence_packages "
+                "(id, session_id, project_id, name, manifest, created, updated) "
+                "VALUES (?, ?, ?, 'Package', '{}', datetime('now'), datetime('now'))",
+                ("pkg_migrate_test", session_id, project_id),
+            )
             conn.commit()
 
     def _enable_workspace(self, monkeypatch, tmp_path, **overrides):
@@ -475,6 +526,70 @@ class TestSessionMigrate:
         assert self._count_rows("user_workflows", from_id) == 0
         assert self._count_rows("user_workflows", to_id) == 1
 
+    def test_migrates_project_workspace_records(self):
+        client = get_client()
+        from_id = "migrate-projects-from-" + __import__("uuid").uuid4().hex[:8]
+        to_id = str(__import__("uuid").uuid4())
+        self._seed_project_workspace_records(from_id)
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO projects "
+                "(id, session_id, name, slug, description, status, color, created, updated) "
+                "VALUES ('prj_existing_dest', ?, 'Case', 'case', '', 'active', '', "
+                "datetime('now'), datetime('now'))",
+                (to_id,),
+            )
+            conn.commit()
+
+        resp = client.post(
+            "/session/migrate",
+            json={"from_session_id": from_id, "to_session_id": to_id},
+            headers={"X-Session-ID": from_id},
+        )
+        data = json.loads(resp.data)
+
+        with sqlite3.connect(DB_PATH) as conn:
+            migrated_slug = conn.execute(
+                "SELECT slug FROM projects WHERE session_id = ? AND id = 'prj_migrate_test'",
+                (to_id,),
+            ).fetchone()[0]
+            project_target = conn.execute(
+                "SELECT p.session_id, t.value "
+                "FROM project_targets t JOIN projects p ON p.id = t.project_id "
+                "WHERE t.id = 'ptarget_migrate_test'",
+            ).fetchone()
+            run_artifact = conn.execute(
+                "SELECT session_id, workspace_path FROM run_file_artifacts "
+                "WHERE id = 'rfa_migrate_test'",
+            ).fetchone()
+            finding_target = conn.execute(
+                "SELECT session_id, finding_id, target_id FROM finding_targets "
+                "WHERE id = 'ftarget_migrate_test'",
+            ).fetchone()
+            evidence_package = conn.execute(
+                "SELECT session_id, project_id FROM evidence_packages "
+                "WHERE id = 'pkg_migrate_test'",
+            ).fetchone()
+        assert resp.status_code == 200
+        assert data["migrated_projects"] == 1
+        assert data["migrated_run_file_artifacts"] == 1
+        assert data["migrated_findings"] == 1
+        assert data["migrated_finding_targets"] == 1
+        assert data["migrated_entity_labels"] == 1
+        assert data["migrated_entity_notes"] == 1
+        assert data["migrated_evidence_packages"] == 1
+        assert self._count_rows("projects", from_id) == 0
+        assert self._count_rows("projects", to_id) == 2
+        assert self._count_rows("run_file_artifacts", from_id) == 0
+        assert self._count_rows("findings", from_id) == 0
+        assert self._count_rows("entity_labels", from_id) == 0
+        assert self._count_rows("entity_notes", from_id) == 0
+        assert migrated_slug == "case-2"
+        assert tuple(project_target) == (to_id, "darklab.sh")
+        assert tuple(run_artifact) == (to_id, "findings.txt")
+        assert tuple(finding_target) == (to_id, "fnd_migrate_test", "ptarget_migrate_test")
+        assert tuple(evidence_package) == (to_id, "prj_migrate_test")
+
     def test_migrates_recent_domains_and_merges_destination(self):
         client = get_client()
         from_id = "migrate-recents-from-" + __import__("uuid").uuid4().hex[:8]
@@ -532,6 +647,40 @@ class TestSessionMigrate:
                 (to_id,),
             ).fetchone()
         assert json.loads(dst[0]) == dst_prefs
+
+    def test_migrate_merges_active_project_preference_into_existing_destination_preferences(self):
+        client = get_client()
+        from_id = "migrate-active-project-src-" + __import__("uuid").uuid4().hex[:8]
+        to_id = str(__import__("uuid").uuid4())
+        project_id = "prj_active_pref_migrate"
+        self._seed_project_workspace_records(from_id, project_id=project_id, slug="active-pref")
+        self._seed_preferences(from_id, {
+            "pref_active_project_id": project_id,
+            "pref_theme_name": "theme_light_blue",
+        })
+        self._seed_preferences(to_id, {
+            "pref_theme_name": "darklab_obsidian.yaml",
+            "pref_timestamps": "off",
+        })
+
+        resp = client.post(
+            "/session/migrate",
+            json={"from_session_id": from_id, "to_session_id": to_id},
+            headers={"X-Session-ID": from_id},
+        )
+        data = json.loads(resp.data)
+
+        with sqlite3.connect(DB_PATH) as conn:
+            dst = conn.execute(
+                "SELECT preferences FROM session_preferences WHERE session_id = ?",
+                (to_id,),
+            ).fetchone()
+        preferences = json.loads(dst[0])
+        assert resp.status_code == 200
+        assert data["migrated_active_project_preference"] == 1
+        assert preferences["pref_active_project_id"] == project_id
+        assert preferences["pref_theme_name"] == "darklab_obsidian.yaml"
+        assert preferences["pref_timestamps"] == "off"
 
     def test_migrate_workspace_returns_zero_without_source_workspace(self, tmp_path, monkeypatch):
         client = get_client()
@@ -1150,6 +1299,7 @@ class TestSessionPreferences:
             "preferences": {
                 "pref_theme_name": "theme_light_blue",
                 "pref_timestamps": "clock",
+                "pref_project_auto_link_external_runs": "off",
                 "pref_run_notify": "on",
                 "pref_prompt_username": "operator_1",
             }

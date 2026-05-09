@@ -61,9 +61,13 @@ let _historyFilters = {
   commandRoot: '',
   exitCode: 'all',
   dateRange: 'all',
+  projectId: 'all',
   starredOnly: false,
 };
 let _historyMobileAdvancedOpen = false;
+let _historyProjectOptions = [];
+let _historyProjectOptionsLoaded = false;
+let _historyProjectOptionsLoading = null;
 let _historyRootSuggestions = [];
 let _historyRootFiltered = [];
 let _historyRootIndex = -1;
@@ -79,6 +83,64 @@ let _historyPaging = {
   hasPrev: false,
   hasNext: false,
 };
+let _historyRunModalState = {
+  run: null,
+  details: null,
+  findings: null,
+  projectState: null,
+  activeTab: 'summary',
+  loadingDetails: false,
+  loadingFindings: false,
+  loadingProject: false,
+  error: '',
+};
+let _historyRunModalToken = 0;
+
+function _closeHistoryActionMenus(except = null) {
+  document.querySelectorAll('.history-action-menu-wrap.open').forEach((wrap) => {
+    if (except && wrap === except) return;
+    wrap.classList.remove('open');
+    wrap.querySelector('[data-action="history-menu"]')?.setAttribute('aria-expanded', 'false');
+    _resetHistoryActionMenuPosition(wrap);
+  });
+}
+
+function _resetHistoryActionMenuPosition(wrap) {
+  const menu = wrap?.querySelector?.('.history-action-menu');
+  if (!menu) return;
+  menu.style.position = '';
+  menu.style.left = '';
+  menu.style.top = '';
+  menu.style.right = '';
+  menu.style.bottom = '';
+}
+
+function _positionHistoryActionMenu(wrap) {
+  const trigger = wrap?.querySelector?.('[data-action="history-menu"]');
+  const menu = wrap?.querySelector?.('.history-action-menu');
+  if (!trigger || !menu || typeof trigger.getBoundingClientRect !== 'function') return;
+  const triggerRect = trigger.getBoundingClientRect();
+  const menuWidth = Math.max(180, menu.offsetWidth || 180);
+  const menuHeight = Math.max(1, menu.offsetHeight || 1);
+  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : document.documentElement.clientWidth;
+  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : document.documentElement.clientHeight;
+  const gutter = 8;
+  const preferredLeft = triggerRect.left;
+  const left = Math.min(
+    Math.max(gutter, preferredLeft),
+    Math.max(gutter, viewportWidth - menuWidth - gutter),
+  );
+  const belowTop = triggerRect.bottom + 4;
+  const aboveTop = triggerRect.top - menuHeight - 4;
+  const top = belowTop + menuHeight <= viewportHeight - gutter
+    ? belowTop
+    : Math.max(gutter, aboveTop);
+  menu.style.position = 'fixed';
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+  menu.style.right = 'auto';
+  menu.style.bottom = 'auto';
+}
 let _historyCompareState = {
   source: null,
   candidates: [],
@@ -112,6 +174,7 @@ function _syncHistoryFilterControls() {
   if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.value = _historyFilters.commandRoot;
   if (typeof historyExitFilter !== 'undefined' && historyExitFilter) historyExitFilter.value = _historyFilters.exitCode;
   if (typeof historyDateFilter !== 'undefined' && historyDateFilter) historyDateFilter.value = _historyFilters.dateRange;
+  _syncHistoryProjectFilterOptions();
   if (typeof historyStarredToggle !== 'undefined' && historyStarredToggle) historyStarredToggle.checked = !!_historyFilters.starredOnly;
   const runOnlyEnabled = _historyFilters.type !== 'snapshots';
   if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.disabled = !runOnlyEnabled;
@@ -121,6 +184,7 @@ function _syncHistoryFilterControls() {
     if (typeof historyTypeFilter !== 'undefined') syncAppSelect(historyTypeFilter);
     if (typeof historyExitFilter !== 'undefined') syncAppSelect(historyExitFilter);
     if (typeof historyDateFilter !== 'undefined') syncAppSelect(historyDateFilter);
+    if (typeof historyProjectFilter !== 'undefined') syncAppSelect(historyProjectFilter);
   }
   if (typeof histClearAllBtn !== 'undefined' && histClearAllBtn) {
     histClearAllBtn.classList.toggle('u-hidden', _historyFilters.type === 'snapshots');
@@ -182,6 +246,7 @@ function _historyOutputLineMetadata(entry) {
   const metadata = {};
   if (Array.isArray(entry.signals) && entry.signals.length) metadata.signals = entry.signals;
   if (Number.isInteger(entry.line_index)) metadata.line_index = entry.line_index;
+  if (Number.isInteger(entry.line_number)) metadata.line_number = entry.line_number;
   if (typeof entry.command_root === 'string' && entry.command_root) metadata.command_root = entry.command_root;
   if (typeof entry.target === 'string' && entry.target) metadata.target = entry.target;
   return Object.keys(metadata).length ? metadata : null;
@@ -270,7 +335,10 @@ function _historyRefreshRootDropdown() {
 }
 
 function _historyActiveFilterItems() {
-  return _historyCore.activeFilterItems(_historyFilters);
+  return _historyCore.activeFilterItems({
+    ..._historyFilters,
+    projectLabel: _historyProjectLabelForId(_historyFilters.projectId),
+  });
 }
 
 function _historySetPage(nextPage, { refresh = true } = {}) {
@@ -434,6 +502,7 @@ function openHistoryWithFilters(filters = {}) {
     commandRoot: _normalizeHistoryFilterValue(nextFilters.commandRoot),
     exitCode: _normalizeHistoryFilterValue(nextFilters.exitCode) || 'all',
     dateRange: _normalizeHistoryFilterValue(nextFilters.dateRange) || 'all',
+    projectId: _normalizeHistoryFilterValue(nextFilters.projectId) || 'all',
     starredOnly: !!nextFilters.starredOnly,
   };
   _historyPaging.page = 1;
@@ -456,6 +525,7 @@ function clearHistoryFilters() {
     commandRoot: '',
     exitCode: 'all',
     dateRange: 'all',
+    projectId: 'all',
     starredOnly: false,
   };
   _historyPaging.page = 1;
@@ -741,6 +811,45 @@ function _historyMetaKindBadge(kind, label = kind.toUpperCase()) {
   return badge;
 }
 
+function _historyEntityLabelValues(entity) {
+  const labels = entity && Array.isArray(entity.labels) ? entity.labels : [];
+  return labels
+    .map(label => String(label && typeof label === 'object' ? label.label : label || '').trim())
+    .filter(Boolean);
+}
+
+function _historyEntityNoteBody(entity) {
+  const note = entity && entity.note && typeof entity.note === 'object' ? entity.note : null;
+  return note ? String(note.body || '').trim() : '';
+}
+
+function _appendHistoryMetadataBadges(parent, entity) {
+  if (!parent) return;
+  const labels = _historyEntityLabelValues(entity);
+  const visibleLabels = labels.slice(0, 3);
+  visibleLabels.forEach((label) => {
+    const badge = document.createElement('span');
+    badge.className = 'history-entry-label-badge badge badge-tone-muted';
+    badge.textContent = label;
+    badge.title = `label: ${label}`;
+    parent.appendChild(badge);
+  });
+  if (labels.length > visibleLabels.length) {
+    const overflow = document.createElement('span');
+    overflow.className = 'history-entry-label-badge badge badge-tone-muted';
+    overflow.textContent = `+${labels.length - visibleLabels.length}`;
+    overflow.title = `${labels.length - visibleLabels.length} more labels`;
+    parent.appendChild(overflow);
+  }
+  if (_historyEntityNoteBody(entity)) {
+    const note = document.createElement('span');
+    note.className = 'history-entry-note-badge badge badge-tone-cyan';
+    note.textContent = 'note';
+    note.title = 'note saved';
+    parent.appendChild(note);
+  }
+}
+
 function _historyExitCodeNumber(exitCode) {
   return _historyCore.exitCodeNumber(exitCode);
 }
@@ -767,6 +876,224 @@ function _historyElapsedSeconds(run) {
 
 function _historyElapsedLabel(run) {
   return _historyCore.elapsedLabel(run);
+}
+
+function _historyProjectDisplayName(project) {
+  if (!project || typeof project !== 'object') return '';
+  return String(project.name || project.slug || project.id || '').trim();
+}
+
+function _historyProjectLabelForId(projectId) {
+  const normalized = _normalizeHistoryFilterValue(projectId);
+  if (!normalized || normalized === 'all') return '';
+  const project = _historyProjectOptions.find(item => String(item && item.id || '') === normalized);
+  return _historyProjectDisplayName(project) || normalized;
+}
+
+function _syncHistoryProjectFilterOptions() {
+  if (typeof historyProjectFilter === 'undefined' || !historyProjectFilter) return;
+  const selected = _normalizeHistoryFilterValue(_historyFilters.projectId) || 'all';
+  historyProjectFilter.replaceChildren();
+  const allOption = document.createElement('option');
+  allOption.value = 'all';
+  allOption.textContent = 'project: all';
+  historyProjectFilter.appendChild(allOption);
+  _historyProjectOptions.forEach((project) => {
+    const projectId = String(project && project.id || '');
+    if (!projectId) return;
+    const option = document.createElement('option');
+    option.value = projectId;
+    option.textContent = `project: ${_historyProjectDisplayName(project) || projectId}`;
+    historyProjectFilter.appendChild(option);
+  });
+  if (selected !== 'all' && !_historyProjectOptions.some(project => String(project && project.id || '') === selected)) {
+    const stale = document.createElement('option');
+    stale.value = selected;
+    stale.textContent = `project: ${selected}`;
+    historyProjectFilter.appendChild(stale);
+  }
+  historyProjectFilter.value = selected;
+  if (typeof syncAppSelect === 'function') syncAppSelect(historyProjectFilter);
+}
+
+function _ensureHistoryProjectFilterOptions() {
+  if (_historyProjectOptionsLoaded) return Promise.resolve(_historyProjectOptions);
+  if (_historyProjectOptionsLoading) return _historyProjectOptionsLoading;
+  _historyProjectOptionsLoading = apiFetch('/projects?include_archived=1', { cache: 'no-store' })
+    .then((resp) => {
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return resp.json();
+    })
+    .then((data) => {
+      _historyProjectOptions = (Array.isArray(data.projects) ? data.projects : [])
+        .filter(project => project && project.id)
+        .sort((a, b) => _historyProjectDisplayName(a).localeCompare(
+          _historyProjectDisplayName(b),
+          undefined,
+          { sensitivity: 'base', numeric: true },
+        ));
+      _historyProjectOptionsLoaded = true;
+      _syncHistoryProjectFilterOptions();
+      return _historyProjectOptions;
+    })
+    .catch((err) => {
+      if (typeof logClientError === 'function') logClientError('failed to load /projects for history filter', err);
+      return _historyProjectOptions;
+    })
+    .finally(() => {
+      _historyProjectOptionsLoading = null;
+    });
+  return _historyProjectOptionsLoading;
+}
+
+async function _historyLoadActiveProject() {
+  if (typeof getActiveProjectContext === 'function') {
+    const current = getActiveProjectContext();
+    if (current && current.id) return current;
+  }
+  if (typeof refreshActiveProjectContext === 'function') {
+    try {
+      const refreshed = await refreshActiveProjectContext();
+      if (refreshed && refreshed.id) return refreshed;
+    } catch (_) {}
+  }
+  try {
+    const resp = await apiFetch('/projects/active', { cache: 'no-store' });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data && data.project && data.project.id ? data.project : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function _historyLoadProjects() {
+  const resp = await apiFetch('/projects', { cache: 'no-store' });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  return (Array.isArray(data.projects) ? data.projects : [])
+    .filter(project => project && project.id && project.status !== 'archived')
+    .sort((a, b) => _historyProjectDisplayName(a).localeCompare(_historyProjectDisplayName(b)));
+}
+
+async function _historyLinkRunToProject(run, project) {
+  if (!run || !run.id) throw new Error('Run is missing its identifier.');
+  if (!project || !project.id) throw new Error('Project is missing its identifier.');
+  const resp = await apiFetch(`/projects/${encodeURIComponent(project.id)}/links`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entity_type: 'run', entity_id: run.id, source: 'manual' }),
+  });
+  if (!resp.ok) {
+    let detail = '';
+    try {
+      const data = await resp.json();
+      detail = data && data.error ? data.error : '';
+    } catch (_) {}
+    throw new Error(detail || `HTTP ${resp.status}`);
+  }
+  if (typeof refreshProjectWorkspace === 'function') {
+    try { await refreshProjectWorkspace(); } catch (_) {}
+  }
+  const name = _historyProjectDisplayName(project) || 'project';
+  showToast(`Run added to ${name}`);
+}
+
+async function _historyAddRunToActiveProject(run) {
+  const project = await _historyLoadActiveProject();
+  if (!project || !project.id) {
+    showToast('No active project selected', 'error');
+    return;
+  }
+  await _historyLinkRunToProject(run, project);
+}
+
+function _historyProjectPickerContent(projects) {
+  const wrap = document.createElement('div');
+  wrap.className = 'history-project-picker';
+  const select = document.createElement('select');
+  select.className = 'form-select form-control-compact';
+  select.setAttribute('aria-label', 'Project');
+  projects.forEach((project) => {
+    const option = document.createElement('option');
+    option.value = String(project.id || '');
+    option.textContent = _historyProjectDisplayName(project) || String(project.id || '');
+    select.appendChild(option);
+  });
+  wrap.appendChild(select);
+  const help = document.createElement('div');
+  help.className = 'history-project-picker-help';
+  help.textContent = 'Choose a project to link this run.';
+  wrap.appendChild(help);
+  return { wrap, select };
+}
+
+async function _historyAddRunToProject(run) {
+  let projects;
+  try {
+    projects = await _historyLoadProjects();
+  } catch (_) {
+    showToast('Failed to load projects', 'error');
+    return;
+  }
+  if (!projects.length) {
+    showToast('No projects available', 'error');
+    return;
+  }
+  const { wrap, select } = _historyProjectPickerContent(projects);
+  const choicePromise = showConfirm({
+    body: 'Add this run to a project',
+    content: wrap,
+    tone: null,
+    defaultFocus: select,
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'add', label: 'Add to project', role: 'primary' },
+    ],
+  });
+  if (typeof enhanceAppSelects === 'function') {
+    enhanceAppSelects(wrap);
+  }
+  const choice = await choicePromise;
+  if (choice !== 'add') return;
+  const project = projects.find(item => String(item.id || '') === select.value);
+  try {
+    await _historyLinkRunToProject(run, project);
+  } catch (_) {
+    showToast('Failed to add run to project', 'error');
+  }
+}
+
+function _createHistoryActionMenu(run) {
+  const wrap = document.createElement('div');
+  wrap.className = 'history-action-menu-wrap save-menu-wrap save-menu-down';
+  const trigger = document.createElement('button');
+  trigger.className = 'history-action-btn btn btn-secondary btn-compact';
+  trigger.type = 'button';
+  trigger.dataset.action = 'history-menu';
+  trigger.textContent = 'more';
+  trigger.setAttribute('aria-label', 'More history actions');
+  trigger.setAttribute('aria-expanded', 'false');
+  const menu = document.createElement('div');
+  menu.className = 'history-action-menu save-menu dropdown-surface';
+  [
+    ['edit-metadata', 'edit'],
+    ['permalink', 'permalink'],
+    ['compare', 'compare'],
+    ['add-active-project', 'add to active project'],
+    ['add-project', 'add to project'],
+    ['copy-run-id', 'copy run id'],
+  ].forEach(([action, label]) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'dropdown-item dropdown-item-compact';
+    item.dataset.action = action;
+    item.dataset.runId = String(run.id || '');
+    item.textContent = label;
+    menu.appendChild(item);
+  });
+  wrap.append(trigger, menu);
+  return wrap;
 }
 
 function _createHistoryEntry(run, isStarred) {
@@ -807,6 +1134,7 @@ function _createHistoryEntry(run, isStarred) {
   const meta = document.createElement('div');
   meta.className = 'history-entry-meta';
   meta.appendChild(_historyMetaKindBadge('run'));
+  _appendHistoryMetadataBadges(meta, run);
   const timeEl = document.createElement('span');
   timeEl.textContent = time;
   meta.appendChild(timeEl);
@@ -823,6 +1151,13 @@ function _createHistoryEntry(run, isStarred) {
     elapsedEl.textContent = elapsedLabel;
     meta.appendChild(elapsedEl);
   }
+  const artifactCount = Number(run.artifact_count || (Array.isArray(run.artifacts) ? run.artifacts.length : 0));
+  if (Number.isFinite(artifactCount) && artifactCount > 0) {
+    const artifactEl = document.createElement('span');
+    artifactEl.className = 'history-entry-artifacts';
+    artifactEl.textContent = artifactCount === 1 ? '1 artifact' : `${artifactCount} artifacts`;
+    meta.appendChild(artifactEl);
+  }
   const exitEl = document.createElement('span');
   exitEl.className = exitCls;
   exitEl.textContent = _historyExitLabel(run.exit_code);
@@ -832,6 +1167,13 @@ function _createHistoryEntry(run, isStarred) {
   const actions = document.createElement('div');
   actions.className = 'history-actions';
 
+  const copyCommandBtn = document.createElement('button');
+  copyCommandBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+  copyCommandBtn.type = 'button';
+  copyCommandBtn.dataset.action = 'copy-command';
+  copyCommandBtn.textContent = 'copy command';
+  actions.appendChild(copyCommandBtn);
+
   const restoreBtn = document.createElement('button');
   restoreBtn.className = 'history-action-btn btn btn-secondary btn-compact';
   restoreBtn.type = 'button';
@@ -839,26 +1181,14 @@ function _createHistoryEntry(run, isStarred) {
   restoreBtn.textContent = 'restore';
   actions.appendChild(restoreBtn);
 
-  const permalinkBtn = document.createElement('button');
-  permalinkBtn.className = 'history-action-btn btn btn-secondary btn-compact';
-  permalinkBtn.type = 'button';
-  permalinkBtn.dataset.action = 'permalink';
-  permalinkBtn.textContent = 'permalink';
-  actions.appendChild(permalinkBtn);
-
-  const compareBtn = document.createElement('button');
-  compareBtn.className = 'history-action-btn btn btn-secondary btn-compact';
-  compareBtn.type = 'button';
-  compareBtn.dataset.action = 'compare';
-  compareBtn.textContent = 'compare';
-  actions.appendChild(compareBtn);
-
   const deleteBtn = document.createElement('button');
   deleteBtn.className = 'history-action-btn btn btn-secondary btn-compact';
   deleteBtn.type = 'button';
   deleteBtn.dataset.action = 'delete';
   deleteBtn.textContent = 'delete';
   actions.appendChild(deleteBtn);
+
+  actions.appendChild(_createHistoryActionMenu(run));
 
   entry.appendChild(actions);
   return entry;
@@ -880,6 +1210,7 @@ function _createSnapshotHistoryEntry(snapshot) {
   const meta = document.createElement('div');
   meta.className = 'history-entry-meta';
   meta.appendChild(_historyMetaKindBadge('snapshot'));
+  _appendHistoryMetadataBadges(meta, snapshot);
   const createdAt = new Date(snapshot.created);
   const timeEl = document.createElement('span');
   timeEl.textContent = Number.isNaN(createdAt.getTime())
@@ -905,6 +1236,13 @@ function _createSnapshotHistoryEntry(snapshot) {
   linkBtn.dataset.action = 'link';
   linkBtn.textContent = 'copy link';
   actions.appendChild(linkBtn);
+
+  const editBtn = document.createElement('button');
+  editBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+  editBtn.type = 'button';
+  editBtn.dataset.action = 'edit-metadata';
+  editBtn.textContent = 'edit';
+  actions.appendChild(editBtn);
 
   const deleteBtn = document.createElement('button');
   deleteBtn.className = 'history-action-btn btn btn-secondary btn-compact';
@@ -932,9 +1270,24 @@ function openSnapshotLink(snapshot) {
 function _historyActionKeepsPanelOpen(action) {
   if (action === 'star') return true;
   if (action === 'compare') return true;
+  if (action === 'edit-metadata') return true;
   const mobileMode = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
   if (!mobileMode) return false;
   return action === 'permalink';
+}
+
+function _historyEditEntityMetadata(entityType, entity) {
+  const editor = typeof globalThis !== 'undefined' ? globalThis.openEntityMetadataEditor : null;
+  if (typeof editor !== 'function') {
+    showToast('Metadata editor is not available', 'error');
+    return;
+  }
+  editor(entityType, entity, {
+    onSaved: async () => {
+      refreshHistoryPanel();
+      showToast('Metadata saved');
+    },
+  });
 }
 
 function _compareFormatDate(value) {
@@ -1018,6 +1371,534 @@ function _openHistoryCompareOverlay() {
 function isHistoryCompareOverlayOpen() {
   const overlay = document.getElementById('history-compare-overlay');
   return !!(overlay && overlay.classList.contains('open'));
+}
+
+function _ensureHistoryRunOverlay() {
+  let overlay = document.getElementById('history-run-overlay');
+  if (overlay) return overlay;
+
+  overlay = document.createElement('div');
+  overlay.id = 'history-run-overlay';
+  overlay.className = 'modal-overlay mobile-sheet-overlay u-hidden history-run-overlay';
+  overlay.innerHTML = `
+    <section id="history-run-modal" class="history-run-modal mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="history-run-title">
+      <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close run details"></div>
+      <div class="history-run-header surface-header">
+        <div class="history-run-heading">
+          <div id="history-run-title" class="history-run-title">RUN DETAILS</div>
+          <div id="history-run-subtitle" class="history-run-subtitle"></div>
+        </div>
+        <button type="button" class="close-btn history-run-close" aria-label="Close run details">✕</button>
+      </div>
+      <div class="history-run-tabs" role="tablist" aria-label="Run details sections">
+        <button type="button" class="toggle-btn history-run-tab" data-history-run-tab="summary" role="tab">Summary</button>
+        <button type="button" class="toggle-btn history-run-tab" data-history-run-tab="output" role="tab">Output</button>
+        <button type="button" class="toggle-btn history-run-tab" data-history-run-tab="findings" role="tab">Findings</button>
+        <button type="button" class="toggle-btn history-run-tab" data-history-run-tab="artifacts" role="tab">Artifacts</button>
+      </div>
+      <div id="history-run-body" class="history-run-body surface-body nice-scroll"></div>
+    </section>
+  `;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) closeHistoryRunOverlay();
+    const tab = e.target.closest?.('[data-history-run-tab]');
+    if (tab) {
+      _historyRunModalState.activeTab = String(tab.dataset.historyRunTab || 'summary');
+      _renderHistoryRunModal();
+      return;
+    }
+    const action = e.target.closest?.('[data-history-run-action]');
+    if (action) {
+      _handleHistoryRunModalAction(String(action.dataset.historyRunAction || ''));
+    }
+  });
+  overlay.querySelectorAll('.history-run-close, .sheet-grab').forEach(el => {
+    el.addEventListener('click', () => closeHistoryRunOverlay());
+    el.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        closeHistoryRunOverlay();
+      }
+    });
+  });
+  if (typeof bindDismissible === 'function') {
+    bindDismissible(overlay, {
+      level: 'modal',
+      isOpen: () => overlay.classList.contains('open'),
+      onClose: closeHistoryRunOverlay,
+      closeButtons: overlay.querySelectorAll('.history-run-close, .sheet-grab'),
+    });
+  }
+  return overlay;
+}
+
+function closeHistoryRunOverlay() {
+  const overlay = document.getElementById('history-run-overlay');
+  if (!overlay) return;
+  overlay.classList.remove('open');
+  overlay.classList.add('u-hidden');
+  overlay.setAttribute('aria-hidden', 'true');
+  _historyRunModalToken += 1;
+}
+
+function _openHistoryRunOverlay() {
+  const overlay = _ensureHistoryRunOverlay();
+  overlay.classList.remove('u-hidden');
+  overlay.classList.add('open');
+  overlay.setAttribute('aria-hidden', 'false');
+}
+
+function isHistoryRunOverlayOpen() {
+  const overlay = document.getElementById('history-run-overlay');
+  return !!(overlay && overlay.classList.contains('open'));
+}
+
+function _historyRunDisplay(run = _historyRunModalState.run) {
+  return run && run.command ? String(run.command) : 'run';
+}
+
+function _historyRunPrimary() {
+  return _historyRunModalState.details || _historyRunModalState.run || {};
+}
+
+function _historyRunOutputEntries(run) {
+  if (Array.isArray(run.output_entries)) {
+    return run.output_entries.map(entry => ({
+      text: String(entry && typeof entry === 'object' ? entry.text || '' : entry || ''),
+      cls: String(entry && typeof entry === 'object' ? entry.cls || '' : ''),
+    }));
+  }
+  if (Array.isArray(run.output)) {
+    return run.output.map(line => ({ text: String(line || ''), cls: '' }));
+  }
+  if (run.output_preview) {
+    return String(run.output_preview).split(/\r?\n/).map(line => ({ text: line, cls: '' }));
+  }
+  return [];
+}
+
+function _historyRunMetaRow(label, value) {
+  const row = document.createElement('div');
+  row.className = 'history-run-meta-row';
+  const key = document.createElement('span');
+  key.textContent = label;
+  const val = document.createElement('strong');
+  val.textContent = value == null || value === '' ? '—' : String(value);
+  row.append(key, val);
+  return row;
+}
+
+function _historyRunActionButton(label, action, { disabled = false, tone = 'secondary' } = {}) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = `btn btn-${tone} btn-compact`;
+  btn.dataset.historyRunAction = action;
+  btn.textContent = label;
+  btn.disabled = !!disabled;
+  return btn;
+}
+
+function _historyRunSectionHeader(title, action = null) {
+  const header = document.createElement('div');
+  header.className = 'history-run-section-header';
+  const heading = document.createElement('h3');
+  heading.textContent = title;
+  header.appendChild(heading);
+  if (action) header.appendChild(action);
+  return header;
+}
+
+function _historyRunField(label, content) {
+  const row = document.createElement('div');
+  row.className = 'history-run-field';
+  const key = document.createElement('span');
+  key.className = 'history-run-field-label';
+  key.textContent = label;
+  const value = document.createElement('div');
+  value.className = 'history-run-field-value';
+  if (typeof content === 'string') {
+    value.textContent = content;
+  } else if (content) {
+    value.appendChild(content);
+  }
+  row.append(key, value);
+  return row;
+}
+
+function _renderHistoryRunSummary(body, run) {
+  const summary = document.createElement('div');
+  summary.className = 'history-run-summary-grid';
+  summary.append(
+    _historyRunMetaRow('Status', _historyExitLabel(run.exit_code)),
+    _historyRunMetaRow('Started', run.started ? new Date(run.started).toLocaleString() : ''),
+    _historyRunMetaRow('Finished', run.finished ? new Date(run.finished).toLocaleString() : ''),
+    _historyRunMetaRow('Duration', _historyElapsedLabel(run)),
+    _historyRunMetaRow('Lines', run.output_line_count ? Number(run.output_line_count).toLocaleString() : ''),
+    _historyRunMetaRow('Findings', Number(run.finding_count || (_historyRunModalState.findings || []).length || 0).toLocaleString()),
+    _historyRunMetaRow('Artifacts', Number(run.artifact_count || (Array.isArray(run.artifacts) ? run.artifacts.length : 0) || 0).toLocaleString()),
+  );
+  body.appendChild(summary);
+
+  const context = document.createElement('div');
+  context.className = 'history-run-context-grid';
+
+  const metadata = document.createElement('div');
+  metadata.className = 'history-run-section';
+  metadata.appendChild(_historyRunSectionHeader(
+    'Metadata',
+    _historyRunActionButton('Edit', 'edit-metadata'),
+  ));
+
+  const metadataFields = document.createElement('div');
+  metadataFields.className = 'history-run-field-list';
+  const chips = document.createElement('div');
+  chips.className = 'history-run-chip-row';
+  _historyEntityLabelValues(run).forEach((label) => {
+    const chip = document.createElement('span');
+    chip.className = 'badge badge-tone-muted';
+    chip.textContent = label;
+    chips.appendChild(chip);
+  });
+  if (!chips.childElementCount) {
+    const empty = document.createElement('span');
+    empty.className = 'history-run-muted';
+    empty.textContent = 'No labels saved.';
+    chips.appendChild(empty);
+  }
+  metadataFields.appendChild(_historyRunField('Labels', chips));
+  const noteText = document.createElement('p');
+  noteText.className = 'history-run-muted history-run-note-preview';
+  noteText.textContent = _historyEntityNoteBody(run) || 'No notes saved.';
+  metadataFields.appendChild(_historyRunField('Notes', noteText));
+  metadata.appendChild(metadataFields);
+  context.appendChild(metadata);
+
+  const project = document.createElement('div');
+  project.className = 'history-run-section';
+  const projectState = _historyRunModalState.projectState;
+  const canAddToProject = !!(
+    projectState
+    && projectState.project
+    && !projectState.attached
+    && !_historyRunModalState.loadingProject
+  );
+  project.appendChild(_historyRunSectionHeader(
+    'Current project',
+    canAddToProject ? _historyRunActionButton('Add', 'add-active-project') : null,
+  ));
+  const projectFields = document.createElement('div');
+  projectFields.className = 'history-run-field-list';
+  const projectStatus = document.createElement('span');
+  projectStatus.className = 'badge badge-tone-muted';
+  let projectName = '—';
+  if (_historyRunModalState.loadingProject) {
+    projectStatus.textContent = 'Checking';
+  } else if (!projectState || !projectState.project) {
+    projectStatus.textContent = 'No active project';
+  } else if (projectState.attached) {
+    projectStatus.className = 'badge badge-tone-cyan';
+    projectStatus.textContent = 'Attached';
+    projectName = _historyProjectDisplayName(projectState.project);
+  } else {
+    projectStatus.textContent = 'Not attached';
+    projectName = _historyProjectDisplayName(projectState.project);
+  }
+  projectFields.appendChild(_historyRunField('Status', projectStatus));
+  projectFields.appendChild(_historyRunField('Project', projectName));
+  project.appendChild(projectFields);
+  context.appendChild(project);
+  body.appendChild(context);
+
+  const actions = document.createElement('div');
+  actions.className = 'history-run-actions history-run-primary-actions';
+  actions.append(
+    _historyRunActionButton('Use command', 'use-command'),
+    _historyRunActionButton('Restore output', 'restore'),
+  );
+  body.appendChild(actions);
+}
+
+function _renderHistoryRunOutput(body, run) {
+  const output = _historyRunOutputEntries(run);
+  if (!output.length && _historyRunModalState.loadingDetails) {
+    const loading = document.createElement('div');
+    loading.className = 'history-run-empty';
+    loading.textContent = 'Loading output preview...';
+    body.appendChild(loading);
+    return;
+  }
+  if (!output.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-run-empty';
+    empty.textContent = 'No saved output preview is available.';
+    body.appendChild(empty);
+    return;
+  }
+  const pre = document.createElement('pre');
+  pre.className = 'history-run-output';
+  pre.textContent = output.map(entry => entry.text).join('\n');
+  body.appendChild(pre);
+  if (run.preview_notice) {
+    const notice = document.createElement('div');
+    notice.className = 'history-run-notice';
+    notice.textContent = run.preview_notice;
+    body.appendChild(notice);
+  }
+}
+
+function _renderHistoryRunFindings(body) {
+  if (_historyRunModalState.loadingFindings && _historyRunModalState.findings == null) {
+    const loading = document.createElement('div');
+    loading.className = 'history-run-empty';
+    loading.textContent = 'Loading findings...';
+    body.appendChild(loading);
+    return;
+  }
+  const findings = Array.isArray(_historyRunModalState.findings) ? _historyRunModalState.findings : [];
+  if (!findings.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-run-empty';
+    empty.textContent = 'No structured findings recorded for this run.';
+    body.appendChild(empty);
+    return;
+  }
+  const list = document.createElement('div');
+  list.className = 'history-run-list';
+  findings.forEach((finding) => {
+    const item = document.createElement('div');
+    item.className = 'history-run-list-item';
+    const title = document.createElement('div');
+    title.className = 'history-run-list-title';
+    title.textContent = finding.title || finding.raw_line || 'Finding';
+    const meta = document.createElement('div');
+    meta.className = 'history-run-list-meta';
+    const parts = [
+      finding.severity ? `severity: ${finding.severity}` : '',
+      finding.review_state ? `review: ${finding.review_state}` : '',
+      Number.isFinite(Number(finding.line_number)) ? `line ${Number(finding.line_number) + 1}` : '',
+      finding.scope ? `scope: ${finding.scope}` : '',
+    ].filter(Boolean);
+    meta.textContent = parts.join(' · ');
+    item.append(title, meta);
+    if (finding.raw_line && finding.raw_line !== finding.title) {
+      const raw = document.createElement('code');
+      raw.className = 'history-run-finding-raw';
+      raw.textContent = finding.raw_line;
+      item.appendChild(raw);
+    }
+    list.appendChild(item);
+  });
+  body.appendChild(list);
+}
+
+function _renderHistoryRunArtifacts(body, run) {
+  const artifacts = Array.isArray(run.artifacts) ? run.artifacts : [];
+  if (_historyRunModalState.loadingDetails && !artifacts.length) {
+    const loading = document.createElement('div');
+    loading.className = 'history-run-empty';
+    loading.textContent = 'Loading artifacts...';
+    body.appendChild(loading);
+    return;
+  }
+  if (!artifacts.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-run-empty';
+    empty.textContent = 'No workspace artifacts recorded for this run.';
+    body.appendChild(empty);
+    return;
+  }
+  const list = document.createElement('div');
+  list.className = 'history-run-list';
+  artifacts.forEach((artifact) => {
+    const item = document.createElement('div');
+    item.className = 'history-run-list-item';
+    const title = document.createElement('div');
+    title.className = 'history-run-list-title';
+    title.textContent = artifact.display_name || artifact.workspace_path || 'artifact';
+    const meta = document.createElement('div');
+    meta.className = 'history-run-list-meta';
+    meta.textContent = [
+      artifact.kind || '',
+      artifact.workspace_path || '',
+      artifact.byte_size ? `${Number(artifact.byte_size).toLocaleString()} bytes` : '',
+    ].filter(Boolean).join(' · ');
+    item.append(title, meta);
+    list.appendChild(item);
+  });
+  body.appendChild(list);
+}
+
+function _renderHistoryRunModal() {
+  const overlay = _ensureHistoryRunOverlay();
+  const run = _historyRunPrimary();
+  const subtitle = overlay.querySelector('#history-run-subtitle');
+  if (subtitle) subtitle.textContent = _historyRunDisplay(run);
+  overlay.querySelectorAll('[data-history-run-tab]').forEach((tab) => {
+    const active = String(tab.dataset.historyRunTab || '') === _historyRunModalState.activeTab;
+    tab.classList.toggle('is-active', active);
+    tab.setAttribute('aria-selected', active ? 'true' : 'false');
+    tab.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  const findingsTab = overlay.querySelector('[data-history-run-tab="findings"]');
+  if (findingsTab) {
+    const count = Array.isArray(_historyRunModalState.findings)
+      ? _historyRunModalState.findings.length
+      : Number(run.finding_count || 0);
+    findingsTab.textContent = count ? `Findings (${count})` : 'Findings';
+  }
+  const artifactsTab = overlay.querySelector('[data-history-run-tab="artifacts"]');
+  if (artifactsTab) {
+    const count = Number(run.artifact_count || (Array.isArray(run.artifacts) ? run.artifacts.length : 0) || 0);
+    artifactsTab.textContent = count ? `Artifacts (${count})` : 'Artifacts';
+  }
+  const body = overlay.querySelector('#history-run-body');
+  if (!body) return;
+  body.replaceChildren();
+  if (_historyRunModalState.error) {
+    const error = document.createElement('div');
+    error.className = 'history-run-notice is-error';
+    error.textContent = _historyRunModalState.error;
+    body.appendChild(error);
+  }
+  if (_historyRunModalState.activeTab === 'output') _renderHistoryRunOutput(body, run);
+  else if (_historyRunModalState.activeTab === 'findings') _renderHistoryRunFindings(body);
+  else if (_historyRunModalState.activeTab === 'artifacts') _renderHistoryRunArtifacts(body, run);
+  else _renderHistoryRunSummary(body, run);
+}
+
+async function _loadHistoryRunDetails(runId, token) {
+  _historyRunModalState.loadingDetails = true;
+  _renderHistoryRunModal();
+  try {
+    const resp = await apiFetch(`/history/${encodeURIComponent(runId)}?json&preview=1`, { cache: 'no-store' });
+    if (resp.ok === false) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    if (token !== _historyRunModalToken) return;
+    _historyRunModalState.details = { ...(_historyRunModalState.run || {}), ...(data || {}) };
+  } catch (_) {
+    if (token === _historyRunModalToken) _historyRunModalState.error = 'Could not load run details.';
+  } finally {
+    if (token === _historyRunModalToken) {
+      _historyRunModalState.loadingDetails = false;
+      _renderHistoryRunModal();
+    }
+  }
+}
+
+async function _loadHistoryRunFindings(runId, token) {
+  _historyRunModalState.loadingFindings = true;
+  _renderHistoryRunModal();
+  try {
+    const resp = await apiFetch(`/entities/run/${encodeURIComponent(runId)}/findings`, { cache: 'no-store' });
+    if (resp.ok === false) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    if (token !== _historyRunModalToken) return;
+    _historyRunModalState.findings = Array.isArray(data.findings) ? data.findings : [];
+  } catch (_) {
+    if (token === _historyRunModalToken) {
+      _historyRunModalState.findings = [];
+      _historyRunModalState.error = 'Could not load run findings.';
+    }
+  } finally {
+    if (token === _historyRunModalToken) {
+      _historyRunModalState.loadingFindings = false;
+      _renderHistoryRunModal();
+    }
+  }
+}
+
+async function _loadHistoryRunProjectState(runId, token) {
+  _historyRunModalState.loadingProject = true;
+  _renderHistoryRunModal();
+  try {
+    const project = await _historyLoadActiveProject();
+    if (token !== _historyRunModalToken) return;
+    if (!project || !project.id) {
+      _historyRunModalState.projectState = { project: null, attached: false };
+      return;
+    }
+    const resp = await apiFetch(`/projects/${encodeURIComponent(project.id)}/summary`, { cache: 'no-store' });
+    if (resp.ok === false) throw new Error(`HTTP ${resp.status}`);
+    const summary = await resp.json();
+    const runs = Array.isArray(summary.runs) ? summary.runs : [];
+    _historyRunModalState.projectState = {
+      project,
+      attached: runs.some(item => String(item && item.id || '') === String(runId || '')),
+    };
+  } catch (_) {
+    if (token === _historyRunModalToken) _historyRunModalState.projectState = { project: null, attached: false };
+  } finally {
+    if (token === _historyRunModalToken) {
+      _historyRunModalState.loadingProject = false;
+      _renderHistoryRunModal();
+    }
+  }
+}
+
+function openHistoryRunDetails(run) {
+  if (!run || !run.id) return;
+  _historyRunModalToken += 1;
+  const token = _historyRunModalToken;
+  _historyRunModalState = {
+    run,
+    details: null,
+    findings: null,
+    projectState: null,
+    activeTab: 'summary',
+    loadingDetails: false,
+    loadingFindings: false,
+    loadingProject: false,
+    error: '',
+  };
+  _openHistoryRunOverlay();
+  _renderHistoryRunModal();
+  _loadHistoryRunDetails(run.id, token);
+  _loadHistoryRunFindings(run.id, token);
+  _loadHistoryRunProjectState(run.id, token);
+}
+
+async function _handleHistoryRunModalAction(action) {
+  const run = _historyRunPrimary();
+  if (!run || !run.id) return;
+  if (action === 'use-command') {
+    const cmd = run.command || '';
+    if (typeof setComposerValue === 'function') setComposerValue(cmd, cmd.length, cmd.length);
+    closeHistoryRunOverlay();
+    if (typeof hideHistoryPanel === 'function') hideHistoryPanel();
+    if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
+    resetCmdHistoryNav();
+  } else if (action === 'restore') {
+    closeHistoryRunOverlay();
+    const existing = _tabForHistoryRun(run);
+    const canUpgradeExisting = !!(existing && run.full_output_available && existing.previewTruncated);
+    if (existing && !canUpgradeExisting) {
+      activateTab(existing.id);
+      if (typeof hideHistoryPanel === 'function') hideHistoryPanel();
+      return;
+    }
+    _setHistoryLoadState(true);
+    restoreHistoryRunIntoTab(run, {
+      targetTabId: canUpgradeExisting ? existing.id : null,
+      hidePanelOnSuccess: true,
+    })
+      .catch(() => showToast('Failed to load run'))
+      .finally(() => _setHistoryLoadState(false));
+  } else if (action === 'edit-metadata') {
+    _historyEditEntityMetadata('run', run);
+  } else if (action === 'add-active-project') {
+    const projectState = _historyRunModalState.projectState;
+    const project = projectState && projectState.project;
+    if (!project || projectState.attached) return;
+    try {
+      await _historyLinkRunToProject(run, project);
+      _historyRunModalState.projectState = { project, attached: true };
+      _renderHistoryRunModal();
+      refreshHistoryPanel();
+    } catch (_) {
+      showToast('Failed to add run to active project', 'error');
+    }
+  }
 }
 
 function _historyCompareRunCard(run, label, extra = '') {
@@ -1448,6 +2329,73 @@ function _renderHistoryCompareChangedLines(lines) {
   return section;
 }
 
+function _historyCompareObjectText(item, kind) {
+  if (!item || typeof item !== 'object') return '';
+  if (kind === 'artifact') {
+    return item.workspace_path || item.display_name || item.id || '';
+  }
+  return item.title || item.raw_line || item.id || '';
+}
+
+function _historyCompareObjectMeta(item, kind) {
+  if (!item || typeof item !== 'object') return '';
+  if (kind === 'artifact') {
+    return [
+      item.kind || 'file',
+      item.byte_size !== undefined && item.byte_size !== null ? `${Number(item.byte_size).toLocaleString()} bytes` : '',
+      item.detected_by || '',
+    ].filter(Boolean).join(' · ');
+  }
+  return [
+    item.severity || '',
+    item.review_state || '',
+    item.line_number !== undefined && item.line_number !== null ? `line ${item.line_number}` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function _renderHistoryCompareObjectSection(title, items, kind, sign) {
+  const safeItems = Array.isArray(items) ? items : [];
+  const section = document.createElement('details');
+  section.className = 'history-compare-lines history-compare-object-section';
+  section.open = true;
+  const summary = document.createElement('summary');
+  summary.textContent = `${title} (${safeItems.length})`;
+  section.appendChild(summary);
+  if (!safeItems.length) {
+    const empty = document.createElement('div');
+    empty.className = 'history-compare-empty';
+    empty.textContent = `No ${title.toLowerCase()}.`;
+    section.appendChild(empty);
+    return section;
+  }
+  const list = document.createElement('div');
+  list.className = 'history-compare-line-list';
+  safeItems.forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'history-compare-line history-compare-object-row';
+    const mark = document.createElement('span');
+    mark.className = sign === '+' ? 'history-compare-line-added' : 'history-compare-line-removed';
+    mark.textContent = sign;
+    row.appendChild(mark);
+    const content = document.createElement('div');
+    content.className = 'history-compare-object-content';
+    const primary = document.createElement('code');
+    primary.textContent = _historyCompareObjectText(item, kind);
+    content.appendChild(primary);
+    const meta = _historyCompareObjectMeta(item, kind);
+    if (meta) {
+      const metaEl = document.createElement('div');
+      metaEl.className = 'history-compare-object-meta';
+      metaEl.textContent = meta;
+      content.appendChild(metaEl);
+    }
+    row.appendChild(content);
+    list.appendChild(row);
+  });
+  section.appendChild(list);
+  return section;
+}
+
 function _historyCompareHasTabCapacity(count) {
   const maxTabs = Number((typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.max_tabs) || 0);
   if (!maxTabs || maxTabs <= 0 || typeof tabs === 'undefined' || !Array.isArray(tabs)) return true;
@@ -1479,7 +2427,14 @@ function _renderHistoryComparison(data) {
   const subtitle = overlay.querySelector('#history-compare-subtitle');
   if (!body) return;
   body.replaceChildren();
-  subtitle.textContent = 'Changed output only';
+  const hasOutputSections = !!(data.sections && (
+    (data.sections.changed || []).length
+    || (data.sections.added || []).length
+    || (data.sections.removed || []).length
+    || data.sections.added_omitted
+    || data.sections.removed_omitted
+  ));
+  subtitle.textContent = hasOutputSections ? 'Changed output only' : 'Changed findings and artifacts';
 
   const runs = document.createElement('div');
   runs.className = 'history-compare-run-grid';
@@ -1490,16 +2445,65 @@ function _renderHistoryComparison(data) {
   const deltas = data.deltas || {};
   const metrics = document.createElement('div');
   metrics.className = 'history-compare-metrics';
-  metrics.appendChild(_compareMetricCell('Exit', deltas.exit_code_changed ? `${deltas.exit_code.left} -> ${deltas.exit_code.right}` : `unchanged · ${deltas.exit_code?.right ?? 'n/a'}`, deltas.exit_code_changed ? 'is-changed' : ''));
-  metrics.appendChild(_compareMetricCell('Duration', _compareFormatDelta((deltas.duration_seconds && deltas.duration_seconds.delta) || 0, 's')));
-  metrics.appendChild(_compareMetricCell('Lines', _compareFormatDelta((deltas.output_lines && deltas.output_lines.delta) || 0)));
-  metrics.appendChild(_compareMetricCell('Findings', _compareFormatDelta((deltas.findings && deltas.findings.delta) || 0)));
+  if (deltas.exit_code) {
+    metrics.appendChild(_compareMetricCell(
+      'Exit',
+      deltas.exit_code_changed ? `${deltas.exit_code.left} -> ${deltas.exit_code.right}` : `unchanged · ${deltas.exit_code?.right ?? 'n/a'}`,
+      deltas.exit_code_changed ? 'is-changed' : '',
+    ));
+  }
+  if (deltas.duration_seconds) {
+    metrics.appendChild(_compareMetricCell('Duration', _compareFormatDelta(deltas.duration_seconds.delta || 0, 's')));
+  }
+  if (deltas.output_lines) {
+    metrics.appendChild(_compareMetricCell('Lines', _compareFormatDelta(deltas.output_lines.delta || 0)));
+  }
+  if (deltas.findings) {
+    metrics.appendChild(_compareMetricCell('Findings', _compareFormatDelta(deltas.findings.delta || 0)));
+  }
+  if (data.left && data.right && (
+    Number.isFinite(Number(data.left.persisted_finding_count))
+    || Number.isFinite(Number(data.right.persisted_finding_count))
+  )) {
+    metrics.appendChild(_compareMetricCell(
+      'Stored findings',
+      _compareFormatDelta(Number(data.right.persisted_finding_count || 0) - Number(data.left.persisted_finding_count || 0)),
+    ));
+  }
+  if (data.left && data.right && (
+    Number.isFinite(Number(data.left.artifact_count))
+    || Number.isFinite(Number(data.right.artifact_count))
+  )) {
+    metrics.appendChild(_compareMetricCell(
+      'Artifacts',
+      _compareFormatDelta(Number(data.right.artifact_count || 0) - Number(data.left.artifact_count || 0)),
+    ));
+  }
   body.appendChild(metrics);
 
-  if (data.truncated && (data.truncated.left || data.truncated.right || data.truncated.changed_lines)) {
+  const findingsTruncated = !!(
+    data.truncated
+    && data.truncated.findings
+    && (data.truncated.findings.left || data.truncated.findings.right)
+  );
+  const artifactsTruncated = !!(
+    data.truncated
+    && data.truncated.artifacts
+    && (data.truncated.artifacts.left || data.truncated.artifacts.right)
+  );
+  if (data.truncated && (
+    data.truncated.left
+    || data.truncated.right
+    || data.truncated.changed_lines
+    || findingsTruncated
+    || artifactsTruncated
+  )) {
     const note = document.createElement('div');
     note.className = 'history-compare-truncation';
-    note.textContent = 'Comparison is partial because one or both outputs were truncated or the changed-line list hit its display limit.';
+    const limit = Number(data.truncated.item_limit || 0);
+    note.textContent = findingsTruncated || artifactsTruncated
+      ? `Comparison is partial because project findings or artifacts exceeded the per-run compare limit${limit ? ` of ${limit.toLocaleString()} items` : ''}.`
+      : 'Comparison is partial because one or both outputs were truncated or the changed-line list hit its display limit.';
     body.appendChild(note);
   }
 
@@ -1559,6 +2563,13 @@ function _renderHistoryComparison(data) {
   const removedLines = sections.removed || [];
   const addedOmitted = sections.added_omitted || 0;
   const removedOmitted = sections.removed_omitted || 0;
+  const objects = data.objects || {};
+  const findingObjects = objects.findings || {};
+  const artifactObjects = objects.artifacts || {};
+  const addedFindings = Array.isArray(findingObjects.added) ? findingObjects.added : [];
+  const removedFindings = Array.isArray(findingObjects.removed) ? findingObjects.removed : [];
+  const addedArtifacts = Array.isArray(artifactObjects.added) ? artifactObjects.added : [];
+  const removedArtifacts = Array.isArray(artifactObjects.removed) ? artifactObjects.removed : [];
   if (changedLines.length) {
     body.appendChild(_renderHistoryCompareChangedLines(changedLines));
   }
@@ -1568,16 +2579,24 @@ function _renderHistoryComparison(data) {
   if (removedLines.length || removedOmitted) {
     body.appendChild(_renderHistoryCompareLines('Removed lines', removedLines, removedOmitted, '-'));
   }
-  if (!changedLines.length && !addedLines.length && !removedLines.length && !addedOmitted && !removedOmitted) {
+  if (addedFindings.length) body.appendChild(_renderHistoryCompareObjectSection('Added findings', addedFindings, 'finding', '+'));
+  if (removedFindings.length) body.appendChild(_renderHistoryCompareObjectSection('Removed findings', removedFindings, 'finding', '-'));
+  if (addedArtifacts.length) body.appendChild(_renderHistoryCompareObjectSection('Added artifacts', addedArtifacts, 'artifact', '+'));
+  if (removedArtifacts.length) body.appendChild(_renderHistoryCompareObjectSection('Removed artifacts', removedArtifacts, 'artifact', '-'));
+  if (
+    !changedLines.length && !addedLines.length && !removedLines.length && !addedOmitted && !removedOmitted
+    && !addedFindings.length && !removedFindings.length && !addedArtifacts.length && !removedArtifacts.length
+  ) {
     const empty = document.createElement('div');
     empty.className = 'history-compare-empty';
-    empty.textContent = 'No changed output.';
+    empty.textContent = 'No changed output, findings, or artifacts.';
     body.appendChild(empty);
   }
 }
 
-function fetchAndRenderHistoryComparison(leftId, rightId) {
+function fetchAndRenderHistoryComparison(leftId, rightId, options = {}) {
   if (!leftId || !rightId) return;
+  _openHistoryCompareOverlay();
   const body = document.querySelector('#history-compare-body');
   if (body) {
     body.replaceChildren();
@@ -1586,14 +2605,15 @@ function fetchAndRenderHistoryComparison(leftId, rightId) {
     loading.textContent = 'Comparing runs...';
     body.appendChild(loading);
   }
-  apiFetch(`/history/compare?left=${encodeURIComponent(leftId)}&right=${encodeURIComponent(rightId)}`)
+  const url = options.url || `/history/compare?left=${encodeURIComponent(leftId)}&right=${encodeURIComponent(rightId)}`;
+  apiFetch(url)
     .then(resp => resp.json())
     .then(data => {
       if (data.error) throw new Error(data.error);
       _renderHistoryComparison(data);
     })
     .catch(() => {
-      _renderHistoryCompareLauncher();
+      if (_historyCompareState && _historyCompareState.source) _renderHistoryCompareLauncher();
       showToast('Failed to compare runs', 'error');
     });
 }
@@ -1706,7 +2726,37 @@ function _tabForHistoryRun(run) {
   )) || null;
 }
 
-function restoreHistoryRunIntoTab(run, { targetTabId = null, hidePanelOnSuccess = true } = {}) {
+function _highlightRestoredHistoryLine(tabId, { lineNumber = null, lineIndex = null } = {}) {
+  const out = typeof getOutput === 'function' ? getOutput(tabId) : null;
+  if (!out) return;
+  const cssEscape = value => (
+    typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function'
+      ? CSS.escape(String(value))
+      : String(value).replace(/"/g, '\\"')
+  );
+  const normalizedLineNumber = Number(lineNumber || 0);
+  const normalizedLineIndex = Number(lineIndex);
+  const selector = normalizedLineNumber > 0
+    ? `.line[data-line-number="${cssEscape(normalizedLineNumber)}"]`
+    : (Number.isInteger(normalizedLineIndex) ? `.line[data-line-index="${cssEscape(normalizedLineIndex)}"]` : '');
+  if (!selector) return;
+  const line = out.querySelector(selector);
+  if (!line) return;
+  out.querySelectorAll('.line.history-source-highlight').forEach(node => {
+    node.classList.remove('history-source-highlight');
+  });
+  line.classList.add('history-source-highlight');
+  if (typeof line.scrollIntoView === 'function') {
+    line.scrollIntoView({ block: 'center' });
+  }
+}
+
+function restoreHistoryRunIntoTab(run, {
+  targetTabId = null,
+  hidePanelOnSuccess = true,
+  highlightLineNumber = null,
+  highlightLineIndex = null,
+} = {}) {
   if (!run || !run.id) return Promise.reject(new Error('missing run id'));
   const existing = targetTabId ? getTab(targetTabId) : _tabForHistoryRun(run);
   const canUpgradeExisting = !!(existing && run.full_output_available && existing.previewTruncated);
@@ -1746,6 +2796,12 @@ function restoreHistoryRunIntoTab(run, { targetTabId = null, hidePanelOnSuccess 
       }
       if (typeof hideTabKillBtn === 'function') hideTabKillBtn(tabId);
       if (hidePanelOnSuccess) hideHistoryPanel();
+      if (highlightLineNumber || Number.isInteger(highlightLineIndex)) {
+        window.setTimeout(() => _highlightRestoredHistoryLine(tabId, {
+          lineNumber: highlightLineNumber,
+          lineIndex: highlightLineIndex,
+        }), 0);
+      }
       return tabId;
     });
 }
@@ -1762,10 +2818,14 @@ function restoreHistoryRun(runOrId, options = {}) {
 
 window.openHistoryWithFilters = openHistoryWithFilters;
 window.restoreHistoryRun = restoreHistoryRun;
+window.openHistoryRunDetails = openHistoryRunDetails;
+window.closeHistoryRunOverlay = closeHistoryRunOverlay;
+window.isHistoryRunOverlayOpen = isHistoryRunOverlayOpen;
 
 function refreshHistoryPanel() {
   // The panel is populated on demand so we always fetch the latest persisted
   // history instead of assuming the in-memory tab state is authoritative.
+  _ensureHistoryProjectFilterOptions().catch(() => {});
   _syncHistoryFilterControls();
   _renderHistoryActiveFilters();
   apiFetch(_buildHistoryRequestUrl()).then(r => r.json()).then(data => {
@@ -1815,6 +2875,12 @@ function refreshHistoryPanel() {
             if (!_historyActionKeepsPanelOpen('permalink')) hideHistoryPanel();
           },
         });
+        bindPressable(entry.querySelector('[data-action="edit-metadata"]'), {
+          refocusComposer: false,
+          onActivate: () => {
+            _historyEditEntityMetadata('snapshot', item);
+          },
+        });
         bindPressable(entry.querySelector('[data-action="delete"]'), {
           onActivate: () => {
             confirmHistAction('delete', item.id, item.label || 'snapshot', 'snapshot');
@@ -1828,20 +2894,12 @@ function refreshHistoryPanel() {
       const isStarred = starred.has(run.command);
       const entry = _createHistoryEntry(run, isStarred);
 
-      // Click anywhere on the entry (except buttons) to load the command into
-      // the composer for re-run. Full tab-restore is available via the
-      // dedicated `restore` action button.
+      // Click anywhere on the entry (except buttons) to inspect the run. The
+      // modal keeps restore and re-run affordances available without hiding
+      // structured findings behind project-only views.
       entry.addEventListener('click', e => {
         if (e.target.closest('[data-action]')) return;
-        const cmd = run.command || '';
-        if (typeof setComposerValue === 'function') {
-          setComposerValue(cmd, cmd.length, cmd.length);
-        }
-        hideHistoryPanel();
-        if (typeof refocusComposerAfterAction === 'function') {
-          refocusComposerAfterAction({ preventScroll: true });
-        }
-        resetCmdHistoryNav();
+        openHistoryRunDetails(run);
       });
 
       bindPressable(entry.querySelector('[data-action="star"]'), {
@@ -1854,6 +2912,15 @@ function refreshHistoryPanel() {
           if (!_historyActionKeepsPanelOpen('star')) hideHistoryPanel();
           refreshHistoryPanel();
           renderHistory();
+        },
+      });
+
+      bindPressable(entry.querySelector('[data-action="copy-command"]'), {
+        onActivate: () => {
+          _closeHistoryActionMenus();
+          copyTextToClipboard(run.command)
+            .then(() => showToast('Command copied'))
+            .catch(() => showToast('Failed to copy command', 'error'));
         },
       });
 
@@ -1881,22 +2948,68 @@ function refreshHistoryPanel() {
         },
       });
 
+      bindPressable(entry.querySelector('[data-action="history-menu"]'), {
+        refocusComposer: false,
+        onActivate: (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const wrap = entry.querySelector('.history-action-menu-wrap');
+          if (!wrap) return;
+          const open = !wrap.classList.contains('open');
+          _closeHistoryActionMenus(open ? wrap : null);
+          wrap.classList.toggle('open', open);
+          entry.querySelector('[data-action="history-menu"]')?.setAttribute('aria-expanded', open ? 'true' : 'false');
+          if (open) _positionHistoryActionMenu(wrap);
+          else _resetHistoryActionMenuPosition(wrap);
+        },
+      });
       bindPressable(entry.querySelector('[data-action="permalink"]'), {
         onActivate: () => {
+          _closeHistoryActionMenus();
           const url = `${location.origin}/history/${run.id}`;
           shareUrl(url).catch(() => showToast('Failed to copy link', 'error'));
           if (!_historyActionKeepsPanelOpen('permalink')) hideHistoryPanel();
         },
       });
+      bindPressable(entry.querySelector('[data-action="edit-metadata"]'), {
+        refocusComposer: false,
+        onActivate: () => {
+          _closeHistoryActionMenus();
+          _historyEditEntityMetadata('run', run);
+        },
+      });
       bindPressable(entry.querySelector('[data-action="compare"]'), {
         refocusComposer: false,
         onActivate: () => {
+          _closeHistoryActionMenus();
           openHistoryCompareLauncher(run);
           if (!_historyActionKeepsPanelOpen('compare')) hideHistoryPanel();
         },
       });
+      bindPressable(entry.querySelector('[data-action="add-active-project"]'), {
+        onActivate: () => {
+          _closeHistoryActionMenus();
+          _historyAddRunToActiveProject(run).catch(() => showToast('Failed to add run to active project', 'error'));
+        },
+      });
+      bindPressable(entry.querySelector('[data-action="add-project"]'), {
+        refocusComposer: false,
+        onActivate: () => {
+          _closeHistoryActionMenus();
+          _historyAddRunToProject(run).catch(() => showToast('Failed to add run to project', 'error'));
+        },
+      });
+      bindPressable(entry.querySelector('[data-action="copy-run-id"]'), {
+        onActivate: () => {
+          _closeHistoryActionMenus();
+          copyTextToClipboard(run.id)
+            .then(() => showToast('Run ID copied'))
+            .catch(() => showToast('Failed to copy run ID', 'error'));
+        },
+      });
       bindPressable(entry.querySelector('[data-action="delete"]'), {
         onActivate: () => {
+          _closeHistoryActionMenus();
           confirmHistAction('delete', run.id, run.command);
         },
       });
@@ -1914,6 +3027,20 @@ function refreshHistoryPanel() {
       });
     }
   });
+}
+
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  document.addEventListener('click', (event) => {
+    if (event.target && event.target.closest && event.target.closest('.history-action-menu-wrap')) return;
+    _closeHistoryActionMenus();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') _closeHistoryActionMenus();
+  });
+}
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('resize', () => _closeHistoryActionMenus());
+  window.addEventListener('scroll', () => _closeHistoryActionMenus(), true);
 }
 
 if (typeof historySearchInput !== 'undefined' && historySearchInput) {
@@ -1993,6 +3120,15 @@ if (typeof historyExitFilter !== 'undefined' && historyExitFilter) {
 if (typeof historyDateFilter !== 'undefined' && historyDateFilter) {
   historyDateFilter.addEventListener('change', e => {
     _setHistoryFilter('dateRange', e.target.value);
+  });
+}
+
+if (typeof historyProjectFilter !== 'undefined' && historyProjectFilter) {
+  historyProjectFilter.addEventListener('focus', () => {
+    _ensureHistoryProjectFilterOptions().catch(() => {});
+  });
+  historyProjectFilter.addEventListener('change', e => {
+    _setHistoryFilter('projectId', e.target.value);
   });
 }
 

@@ -1,12 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady, runCommand, makeTestIp } from './helpers.js'
+import { ensurePromptReady, runCommand } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
-const TEST_IP = makeTestIp(65)
 
 test.describe('output actions', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'clipboard', {
         value: { writeText: () => Promise.resolve() },
@@ -157,7 +155,6 @@ test.describe('output actions', () => {
 
 test.describe('output actions with no exportable output', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'clipboard', {
         value: { writeText: () => Promise.resolve() },
@@ -194,7 +191,6 @@ test.describe('output actions with no exportable output', () => {
 
 test.describe('output follow helper', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
     await ensurePromptReady(page, { cancelWelcome: true })
@@ -336,7 +332,6 @@ test.describe('output follow helper', () => {
 
 test.describe('output search scopes', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
     await ensurePromptReady(page, { cancelWelcome: true })

@@ -36,6 +36,7 @@ import process
 import pty_service
 import run_broker
 import database
+import project_workspace
 import app as shell_app
 import config as app_config
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
@@ -1081,6 +1082,35 @@ class TestDerivedCommandRegistry:
         assert "info" in context["commands"]["expects_value"]
         assert context["runs"]["flags"][-1]["value"] == "--json"
         assert context["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
+        assert [item["value"] for item in context["project"]["arg_hints"]["__positional__"][:4]] == [
+            "list",
+            "create",
+            "use",
+            "current",
+        ]
+        project_context = context["project"]
+        target_context = project_context["subcommands"]["target"]
+        target_add_context = target_context["subcommands"]["add"]
+        domain_add_context = target_add_context["subcommands"]["domain"]
+        assert [item["value"] for item in target_context["arg_hints"]["__positional__"]] == [
+            "list",
+            "add",
+            "quick-add",
+            "remove",
+        ]
+        assert [item["value"] for item in target_add_context["arg_hints"]["__positional__"]] == [
+            "domain",
+            "url",
+            "host",
+            "ip",
+            "cidr",
+        ]
+        assert domain_add_context["arg_hints"]["__positional__"][0]["value"] == "<domain>"
+        assert domain_add_context["arg_hints"]["__positional__"][0]["value_type"] == "domain"
+        assert project_context["subcommands"]["link"]["arg_hints"]["__positional__"][1]["value"] == "run"
+        assert project_context["subcommands"]["link"]["subcommands"]["run"]["arg_hints"]["__positional__"][0][
+            "value"
+        ] == "<run-id>"
         assert [item["value"] for item in context["var"]["arg_hints"]["__positional__"]] == [
             "list",
             "set",
@@ -4524,6 +4554,116 @@ class TestDatabaseInit:
         assert "snapshots" in tables
         assert "session_variables" in tables
 
+    def test_creates_project_workspace_tables(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            tables = {
+                row[0] for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            artifact_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('run_file_artifacts')").fetchall()
+            }
+            project_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('projects')").fetchall()
+            }
+            target_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info('project_targets')").fetchall()
+            }
+            conn.close()
+
+        assert {
+            "projects",
+            "project_links",
+            "run_file_artifacts",
+            "project_targets",
+            "findings",
+            "finding_targets",
+            "entity_labels",
+            "entity_notes",
+            "evidence_packages",
+        }.issubset(tables)
+        assert "notes" not in project_columns
+        assert "label" not in target_columns
+        assert "notes" not in target_columns
+        assert "content_sha256" in artifact_columns
+        assert {
+            "review_state",
+            "source",
+            "source_detail",
+            "seen_count",
+            "last_seen",
+            "dismissed_at",
+        }.issubset(target_columns)
+
+    def test_project_workspace_migration_backfills_finding_targets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            conn = sqlite3.connect(db_path)
+            conn.execute("""
+                CREATE TABLE findings (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    target_id TEXT NOT NULL DEFAULT '',
+                    scope TEXT NOT NULL,
+                    title TEXT NOT NULL DEFAULT '',
+                    raw_line TEXT NOT NULL,
+                    line_number INTEGER,
+                    severity TEXT NOT NULL DEFAULT '',
+                    fingerprint TEXT NOT NULL DEFAULT '',
+                    review_state TEXT NOT NULL DEFAULT 'new',
+                    created TEXT NOT NULL
+                )
+            """)
+            conn.execute(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, target_id, scope, title, raw_line, created) "
+                "VALUES ('fnd_legacy', 'sess_legacy', 'run_legacy', 'tgt_legacy', "
+                "'finding', 'open port 443', '443/tcp open https', '2026-05-08 00:00:00')"
+            )
+            conn.commit()
+            conn.close()
+
+            self._create_tables(db_path)
+
+            conn = sqlite3.connect(db_path)
+            rows = conn.execute(
+                "SELECT session_id, finding_id, target_id, run_id, source, confidence "
+                "FROM finding_targets"
+            ).fetchall()
+            conn.close()
+
+        assert rows == [(
+            "sess_legacy",
+            "fnd_legacy",
+            "tgt_legacy",
+            "run_legacy",
+            "legacy_primary",
+            1.0,
+        )]
+
+    def test_project_workspace_entity_and_link_source_constants_are_validated(self):
+        assert database.validate_project_entity_type("run") == "run"
+        assert database.validate_project_entity_type("workspace_file") == "workspace_file"
+        assert database.validate_project_link_source("manual") == "manual"
+        assert database.validate_project_link_source("active_project") == "active_project"
+
+        with pytest.raises(ValueError):
+            database.validate_project_entity_type("note")
+        with pytest.raises(ValueError):
+            database.validate_project_entity_type("ticket")
+        with pytest.raises(ValueError):
+            database.validate_project_link_source("guessed")
+
+        payload = {"type": "domain", "value": "darklab.sh", "notes": "legacy target note"}
+        with pytest.raises(project_workspace.ProjectWorkspaceError) as exc:
+            project_workspace._normalize_target_payload(payload)
+        assert "target labels and notes use entity metadata routes" in str(exc.value)
+
     def test_creates_session_indexes(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = self._fresh_db(tmp)
@@ -4545,6 +4685,41 @@ class TestDatabaseInit:
         assert "idx_snapshots_session" in snapshot_indexes
         assert "idx_snapshots_session_created" in snapshot_indexes
         assert "idx_user_workflows_session_updated_created" in workflow_indexes
+
+    def test_creates_project_workspace_indexes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            project_indexes = {row[1] for row in conn.execute("PRAGMA index_list('projects')").fetchall()}
+            link_indexes = {row[1] for row in conn.execute("PRAGMA index_list('project_links')").fetchall()}
+            artifact_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('run_file_artifacts')").fetchall()
+            }
+            target_indexes = {row[1] for row in conn.execute("PRAGMA index_list('project_targets')").fetchall()}
+            finding_indexes = {row[1] for row in conn.execute("PRAGMA index_list('findings')").fetchall()}
+            finding_target_indexes = {
+                row[1] for row in conn.execute("PRAGMA index_list('finding_targets')").fetchall()
+            }
+            label_indexes = {row[1] for row in conn.execute("PRAGMA index_list('entity_labels')").fetchall()}
+            note_indexes = {row[1] for row in conn.execute("PRAGMA index_list('entity_notes')").fetchall()}
+            package_indexes = {row[1] for row in conn.execute("PRAGMA index_list('evidence_packages')").fetchall()}
+            conn.close()
+
+        assert "idx_projects_session_status_updated" in project_indexes
+        assert "idx_project_links_project_entity_created" in link_indexes
+        assert "idx_project_links_entity_lookup" in link_indexes
+        assert "idx_run_file_artifacts_session_run_path" in artifact_indexes
+        assert "idx_project_targets_project_type_value" in target_indexes
+        assert "idx_findings_session_run_created" in finding_indexes
+        assert "idx_findings_target_created" in finding_indexes
+        assert "idx_finding_targets_finding" in finding_target_indexes
+        assert "idx_finding_targets_target_created" in finding_target_indexes
+        assert "idx_finding_targets_run" in finding_target_indexes
+        assert "idx_entity_labels_entity_created" in label_indexes
+        assert "idx_entity_notes_entity_updated" in note_indexes
+        assert "idx_evidence_packages_project_updated" in package_indexes
+        assert "idx_evidence_packages_session_project" in package_indexes
 
     def test_init_is_idempotent(self):
         # Calling db_init() twice on the same DB must not raise
@@ -4598,6 +4773,41 @@ class TestDatabaseInit:
             ).fetchone()[0]
             conn.close()
         assert count == 0
+
+    def test_retention_prunes_old_snapshot_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) "
+                "VALUES ('old-snap', 'sess', 'lbl', datetime('now', '-50 days'), '[]')"
+            )
+            conn.execute(
+                "INSERT INTO entity_labels "
+                "(id, session_id, entity_type, entity_id, label, source, created) "
+                "VALUES ('lbl-old-snap', 'sess', 'snapshot', 'old-snap', 'handoff', 'manual', datetime('now'))"
+            )
+            conn.execute(
+                "INSERT INTO entity_notes "
+                "(id, session_id, entity_type, entity_id, body, created, updated) "
+                "VALUES ('note-old-snap', 'sess', 'snapshot', 'old-snap', 'Snapshot note', datetime('now'), datetime('now'))"
+            )
+            conn.commit()
+            conn.close()
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 30}):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            label_count = conn.execute(
+                "SELECT COUNT(*) FROM entity_labels WHERE entity_type='snapshot' AND entity_id='old-snap'"
+            ).fetchone()[0]
+            note_count = conn.execute(
+                "SELECT COUNT(*) FROM entity_notes WHERE entity_type='snapshot' AND entity_id='old-snap'"
+            ).fetchone()[0]
+            conn.close()
+        assert label_count == 0
+        assert note_count == 0
 
     def test_zero_retention_does_not_prune(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -4668,6 +4878,11 @@ class TestDatabaseInit:
 
             conn = sqlite3.connect(db_path)
             columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
+            tables = {
+                row[0] for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
             session_id = conn.execute(
                 "SELECT session_id FROM runs WHERE id='legacy-run'"
             ).fetchone()[0]
@@ -4675,6 +4890,8 @@ class TestDatabaseInit:
 
         assert "session_id" in columns
         assert session_id == ""
+        assert "projects" in tables
+        assert "project_links" in tables
 
     def test_migrate_schema_ignores_existing_column_error(self):
         conn = mock.MagicMock()

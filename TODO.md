@@ -17,6 +17,48 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 
 ## Open TODOs
 
+- **Project Workspace code review follow-ups**
+  - **Keep terminal documentation aligned**
+    - Keep terminal `project` help aligned with actual shell-supported operations. Current shell commands intentionally stop at project CRUD/link/target operations.
+- **Future Project Workspace enhancements**
+  - **Security and lifecycle**
+    - Validate `workspace_file` entity ownership during session migration, or document that labels/notes on workspace-file paths can drift when a migrated token lands in a session with a different file at the same path.
+    - Add a terminal-native `project rename <name-or-id> <new-name>` command so CLI users can rename projects without opening the modal.
+    - Add parallel PATCH routes for partial project and target updates if the project workspace API ever becomes more than a trusted browser-only surface.
+  - **Code organization**
+    - Split `project_workspace.py` into focused modules once the surface settles. Natural boundaries are core project CRUD, entity metadata, findings, packages, and session migration.
+    - Move Projects modal rendering and event wiring out of `shell_chrome.js` into a dedicated project workspace browser module.
+    - Reduce repeated `projects.py` route boilerplate with small serialization/404 helpers.
+  - **Capture, tagging, and navigation**
+    - Expose `Add label`, `Add note`, `Open in project`, and `Add as project target` on transcript right-click or signal-tagged token long-press; this should replace the removed Projects-modal quick-add target flow.
+    - Add contextual quick-add target entry points from history rows and workspace file previews once the shared action-menu pattern exists.
+    - Consider a per-project current-target sub-state so `${target}` placeholder substitution can follow sustained work on a single host.
+    - Decide whether `host` remains a visible target type or is retained only as a backend compatibility value.
+    - Add a compact project switcher near the prompt with recently used projects and a Create New action.
+    - Show run, finding, artifact, and package counts on project-list rows so project scale is visible before opening each project.
+  - **Findings and comparison**
+    - Extend the Findings tab filters beyond target/run/review state to command root, severity, scope, labels, and note state.
+    - Add multi-select plus bulk review actions for high-volume finding review.
+    - Prefetch finding counts and severity distribution so tab labels can show useful state such as unreviewed/high counts without opening the tab.
+    - Extend the current Projects modal Compare Runs control with a row action for selecting a baseline and a diff view for changed severity, changed exit code, and richer artifact changes.
+    - Extend comparison beyond run-to-run finding/artifact diffs to snapshots and package artifacts.
+  - **Evidence packages**
+    - Materialize evidence package archives at creation time if byte-for-byte repeat downloads become important.
+    - Make package presets config-driven so new bundle profiles, such as internal review or external handoff, can be added without code changes.
+    - Add richer per-finding remediation or verification fields if findings evolve beyond raw output capture.
+    - Add richer target references in package exports, including derived relationships that are not directly visible in selected finding text.
+    - Add richer provenance metadata and round-trip import hints for labels, notes, targets, findings, and packages.
+    - Explore fuller direct template reuse for package run transcript pages without reintroducing app-hosted asset links.
+    - Add redacted text/JSON derivatives for safe artifact types before allowing raw artifact inclusion in redacted packages.
+    - Add richer redaction previews and per-item redaction warnings for package creation.
+    - Add async package build progress for large Full Archive exports so long builds do not feel like stalled requests.
+    - Add generated re-package names that preserve the original selection while incrementing the package label or timestamp.
+    - Move package HTML rendering toward shared Jinja autoescape paths so package output escaping is template-owned instead of manual per-call escaping.
+  - **Retention and mobile**
+    - Finish pruning/retention behavior for project-linked runs and run-scoped artifacts.
+    - Replace or supplement the desktop-style Projects modal with a mobile-friendly staged layout: pick project, pick tab, then detail view with back navigation.
+    - Add mobile gestures for target and finding rows, such as swipe to edit/remove targets and swipe to mark findings reviewed.
+
 - **Future interactive PTY enhancements**
   - **Current state:** `mtr --interactive <host>`, `ffuf --interactive ...`, and `masscan --interactive ...` have a guarded PTY path behind `interactive_pty_enabled`, use dedicated `/pty/runs` start/stream/input/resize routes, broker PTY events through Redis in multi-worker deployments, support bounded concurrent PTY runs per session with each live terminal scoped to its owning tab, require registry-owned input-safety profiles, render the live terminal in an xterm.js modal, and append completed PTY runs back into the normal terminal/history output path using server-side terminal capture. Redis PTY snapshots support cross-worker reattach, use bounded publish rates, and return specific failure statuses for missing, closed, stale, or not-yet-available runs.
   - **Future lifecycle and resilience**

@@ -134,7 +134,7 @@ Several ProjectDiscovery flags are also declared as workspace-aware paths so gen
 - `subfinder -oD`, resolver lists, config files, and provider config files
 - `naabu` host-list, exclude-list, ports-file, and output paths
 
-Security note: ProjectDiscovery provider/config files can contain API keys or other operator secrets. The Files view can show them to the current session owner, and current share/permalink export flows only package terminal output rather than workspace directories. Future share/export package work should keep treating generated config directories carefully and avoid publishing provider configs by default.
+Security note: ProjectDiscovery provider/config files can contain API keys or other operator secrets. The Files view can show them to the current session owner. Share and permalink exports remain transcript-only, but project evidence packages can include selected raw workspace artifacts when artifact inclusion is enabled; redacted packages exclude raw artifacts. Do not select provider/config files for evidence packages unless the operator intends to include those secrets in the archive.
 
 ---
 
