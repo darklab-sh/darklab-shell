@@ -1430,7 +1430,7 @@ if (historyPanel && typeof bindOutsideClickClose === 'function') {
     triggers: null,
     isOpen: isHistoryPanelOpen,
     onClose: hideHistoryPanel,
-    exemptSelectors: ['.hist-chip-overflow', '[data-action="history"]', '#history-compare-overlay'],
+    exemptSelectors: ['.hist-chip-overflow', '[data-action="history"]', '.modal-overlay', '#history-compare-overlay'],
   });
 }
 if (typeof bindOutsideClickClose === 'function' && typeof shellPromptWrap !== 'undefined' && shellPromptWrap) {

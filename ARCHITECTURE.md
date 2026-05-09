@@ -283,7 +283,6 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `DELETE` | `/projects/<project_id>/packages/<package_id>` | Deletes one draft evidence package manifest. |
 | `GET` | `/projects/<project_id>/artifacts/<artifact_id>/preview` | Returns text preview content for one project-linked run artifact. |
 | `GET` | `/projects/<project_id>/artifacts/<artifact_id>/download` | Downloads one available project-linked run artifact from the workspace. |
-| `POST` | `/projects/<project_id>/workflows/promote` | Creates a user workflow from selected project-linked run commands. |
 | `GET` | `/projects/<project_id>/findings` | Lists findings reached through project-linked runs, with project filters. |
 | `GET` | `/projects/<project_id>/compare` | Compares findings and workspace artifacts between two project-linked runs, optionally selecting a baseline by run label. |
 | `GET` | `/entities/run/<run_id>/findings` | Lists persisted findings captured for a current-session run. |
@@ -1210,12 +1209,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,545
+- behavior tests: 2,544
 - docs/inventory meta-tests: 30
-- `pytest`: 1281 (1251 behavior + 30 meta)
-- `vitest`: 1051
+- `pytest`: 1279 (1249 behavior + 30 meta)
+- `vitest`: 1052
 - `playwright`: 243
-- total: 2,575
+- total: 2,574
 
 ### Testing Architecture
 

@@ -535,7 +535,7 @@ function _projectTargetAutocompleteItems(ctx, allowedTypes = []) {
       description: [
         'Project target',
         target.type,
-        target.label,
+        ...(Array.isArray(target.labels) ? target.labels.map(label => label && label.label).filter(Boolean) : []),
       ].filter(Boolean).join(' · '),
       replaceStart: ctx.tokenStart,
       replaceEnd: ctx.tokenEnd,

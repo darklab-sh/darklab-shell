@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,545
+- behavior tests: 2,544
 - docs/inventory meta-tests: 30
-- `pytest`: 1281 (1251 behavior + 30 meta)
-- `vitest`: 1051
+- `pytest`: 1279 (1249 behavior + 30 meta)
+- `vitest`: 1052
 - `playwright`: 243
-- total: 2,575
+- total: 2,574
 
 This document is organized in two parts:
 
@@ -925,6 +925,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestHealthRoute.test_status_degraded_when_redis_ping_fails` | Checks that status degraded when Redis ping fails. |
 | `TestProjectRoutes.test_project_write_routes_are_rate_limited` | Verifies project workspace write routes are wrapped by the shared limiter. |
 | `TestProjectRoutes.test_create_list_get_update_archive_and_delete_project` | Verifies the current-session project CRUD and archive filtering route flow. |
+| `TestProjectRoutes.test_delete_project_reassigns_finding_primary_target_when_other_targets_remain` | Verifies project deletion repairs a finding's primary target when another live target relationship remains. |
 | `TestProjectRoutes.test_projects_are_session_scoped_and_slugs_are_unique_per_session` | Verifies project session isolation and per-session slug collision handling. |
 | `TestProjectRoutes.test_sets_gets_and_clears_active_project` | Verifies active project context can be saved, read, and cleared for the current session. |
 | `TestProjectRoutes.test_active_project_rejects_cross_session_and_clears_stale_projects` | Verifies active project context rejects cross-session projects and clears archived or deleted projects. |
@@ -935,9 +936,6 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestProjectRoutes.test_redacted_evidence_package_redacts_manifest_and_transcripts` | Verifies redacted evidence packages redact manifests, static pages, and run transcripts while excluding raw artifacts. |
 | `TestProjectRoutes.test_project_workspace_write_quotas_return_conflict` | Verifies project workspace quotas return conflict responses without blocking idempotent writes. |
 | `TestProjectRoutes.test_evidence_package_download_enforces_size_limit` | Verifies evidence package downloads refuse archives that exceed the configured size cap. |
-| `TestProjectRoutes.test_project_workflow_promotion_replaces_exact_target_tokens_only` | Verifies workflow promotion only templates standalone project target values. |
-| `TestProjectRoutes.test_project_workflow_promotion_reports_truncation_metadata` | Verifies workflow promotion caps automatic run selection and returns metadata that reports omitted runs. |
-| `TestProjectRoutes.test_project_workflow_promotion_requires_explicit_target_when_multiple_match` | Verifies workflow promotion rejects ambiguous target templating unless an explicit project target is selected. |
 | `TestProjectRoutes.test_rejects_cross_session_or_unsupported_project_links` | Verifies project links reject cross-session source records and unsupported entity types. |
 | `TestClientLogRoute.test_accepts_client_error_payload` | Checks that the client log route accepts browser error reports without colliding with reserved logging fields. |
 | `TestStatusRoute.test_returns_200_even_when_db_fails` | `/status` is HUD polling and must never return 503; a DB failure degrades fields, not the response code. |
@@ -1491,6 +1489,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | Test | Description |
 | --- | --- |
 | `binds focus traps for project workspace modal surfaces at startup` | Verifies that project workspace modal surfaces bind focus traps during startup. |
+| `does not let history outside-click dismissal close behind modal overlays` | Verifies that History drawer outside-click dismissal exempts modal overlays so stacked editors keep focus. |
 | `applies the saved theme at startup` | Verifies that applies the saved theme at startup. |
 | `applies saved timestamp, line number, and HUD clock preferences from cookies at startup` | Verifies that applies saved timestamp, line number, and HUD clock preferences from cookies at startup. |
 | `applies saved session preferences on startup over stale local cookies` | Verifies that session-scoped preferences loaded from `/session/preferences` override stale browser-local cookies during boot. |

@@ -1934,10 +1934,29 @@ function _renderHistoryComparison(data) {
   }
   body.appendChild(metrics);
 
-  if (data.truncated && (data.truncated.left || data.truncated.right || data.truncated.changed_lines)) {
+  const findingsTruncated = !!(
+    data.truncated
+    && data.truncated.findings
+    && (data.truncated.findings.left || data.truncated.findings.right)
+  );
+  const artifactsTruncated = !!(
+    data.truncated
+    && data.truncated.artifacts
+    && (data.truncated.artifacts.left || data.truncated.artifacts.right)
+  );
+  if (data.truncated && (
+    data.truncated.left
+    || data.truncated.right
+    || data.truncated.changed_lines
+    || findingsTruncated
+    || artifactsTruncated
+  )) {
     const note = document.createElement('div');
     note.className = 'history-compare-truncation';
-    note.textContent = 'Comparison is partial because one or both outputs were truncated or the changed-line list hit its display limit.';
+    const limit = Number(data.truncated.item_limit || 0);
+    note.textContent = findingsTruncated || artifactsTruncated
+      ? `Comparison is partial because project findings or artifacts exceeded the per-run compare limit${limit ? ` of ${limit.toLocaleString()} items` : ''}.`
+      : 'Comparison is partial because one or both outputs were truncated or the changed-line list hit its display limit.';
     body.appendChild(note);
   }
 

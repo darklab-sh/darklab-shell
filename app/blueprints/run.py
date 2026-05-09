@@ -407,6 +407,8 @@ def _save_completed_run(
                 "count": len(recorded_findings),
             })
         if recorded_targets:
+            if active_project_link:
+                active_project_link["discovered_target_count"] = len(recorded_targets)
             log.info("PROJECT_TARGETS_DISCOVERED", extra={
                 "run_id": run_id,
                 "session": get_log_session_id(session_id),
@@ -1375,6 +1377,16 @@ def _brokered_real_run_worker(
                 "project_name": project_name,
                 "project_linked": True,
             })
+            discovered_target_count = int(active_project_link.get("discovered_target_count") or 0)
+            if discovered_target_count:
+                target_label = "target" if discovered_target_count == 1 else "targets"
+                publish_run_event(run_id, "notice", {
+                    "text": f"[project] discovered {discovered_target_count} {target_label} for {project_name}",
+                    "project_id": active_project_link.get("project_id"),
+                    "project_name": project_name,
+                    "project_targets_discovered": True,
+                    "target_count": discovered_target_count,
+                })
         publish_run_event(run_id, "exit", {
             "code": exit_code,
             "elapsed": elapsed,

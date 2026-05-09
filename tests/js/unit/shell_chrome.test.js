@@ -16,6 +16,7 @@ const PRESSABLE_PRIMITIVE_CLASSES = new Set([
   'close-btn',
   'toggle-btn',
   'kb-key',
+  'chip',
   'dropdown-item',
   'control-row',
   'hud-action-cell',
@@ -74,7 +75,9 @@ function loadShellChrome({
           <span id="rail-workflows-count"></span>
         </section>
       </div>
-      <nav id="rail-nav"></nav>
+      <nav id="rail-nav">
+        <button class="rail-nav-item nav-item" data-action="projects" type="button"><span class="rail-nav-glyph">◇</span></button>
+      </nav>
     </aside>
     <footer id="hud">
       <button id="hud-status-cell"></button>
@@ -128,7 +131,7 @@ function loadShellChrome({
             <small id="project-target-value-help"></small>
             <div id="project-target-value-error" class="u-hidden"></div>
             <input id="project-target-label">
-            <textarea id="project-target-notes" maxlength="2000"></textarea>
+            <textarea id="project-target-notes" maxlength="20000"></textarea>
             <button class="project-target-editor-cancel" type="button"></button>
             <button id="project-target-submit" type="submit"></button>
           </form>
@@ -789,8 +792,6 @@ describe('shell chrome project workspace', () => {
       body: JSON.stringify({
         type: 'host',
         value: 'www.darklab.sh',
-        label: '',
-        notes: '',
       }),
     }))
   })
@@ -841,7 +842,7 @@ describe('shell chrome project workspace', () => {
     const notesInput = document.getElementById('project-target-notes')
     const valueError = document.getElementById('project-target-value-error')
     const form = document.getElementById('project-target-create-form')
-    expect(notesInput.maxLength).toBe(2000)
+    expect(notesInput.maxLength).toBe(20000)
 
     valueInput.value = 'https://darklab.sh'
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
@@ -865,14 +866,6 @@ describe('shell chrome project workspace', () => {
     expect(apiFetch.mock.calls.some(([url, options]) => url === '/projects/project-1/targets' && options?.method === 'POST')).toBe(false)
 
     valueInput.value = '80,443,8000-8080'
-    notesInput.value = 'x'.repeat(2001)
-    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
-    await tick()
-    expect(valueInput.getAttribute('aria-invalid')).toBe('false')
-    expect(notesInput.getAttribute('aria-invalid')).toBe('true')
-    expect(valueError.textContent).toContain('Target notes must be 2,000 characters or fewer.')
-    expect(apiFetch.mock.calls.some(([url, options]) => url === '/projects/project-1/targets' && options?.method === 'POST')).toBe(false)
-
     notesInput.value = 'Scope notes'
     notesInput.dispatchEvent(new Event('input', { bubbles: true }))
     expect(notesInput.getAttribute('aria-invalid')).toBe('false')
@@ -885,9 +878,11 @@ describe('shell chrome project workspace', () => {
       body: JSON.stringify({
         type: 'port_set',
         value: '80,443,8000-8080',
-        label: '',
-        notes: 'Scope notes',
       }),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/entities/target/target-1/note', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ body: 'Scope notes' }),
     }))
   })
 
@@ -977,13 +972,26 @@ describe('shell chrome project workspace', () => {
       if (url === '/projects/active') {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ project: { id: 'project-1', name: 'darklab.sh', notes: 'Initial notes' } }),
+          json: () => Promise.resolve({
+            project: {
+              id: 'project-1',
+              name: 'darklab.sh',
+              note: { body: 'Initial notes' },
+            },
+          }),
         })
       }
       if (url === '/projects?include_archived=1') {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ projects: [{ id: 'project-1', name: 'darklab.sh', status: 'active', notes: 'Initial notes' }] }),
+          json: () => Promise.resolve({
+            projects: [{
+              id: 'project-1',
+              name: 'darklab.sh',
+              status: 'active',
+              note: { body: 'Initial notes' },
+            }],
+          }),
         })
       }
       if (url === '/projects/project-1/summary') {
@@ -1002,7 +1010,12 @@ describe('shell chrome project workspace', () => {
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
-            project: { id: 'project-1', name: 'darklab.sh', status: 'active', notes: JSON.parse(options.body).notes },
+            project: {
+              id: 'project-1',
+              name: 'darklab.sh',
+              status: 'active',
+              note: { body: JSON.parse(options.body).notes },
+            },
           }),
         })
       }
@@ -1194,6 +1207,12 @@ describe('shell chrome project workspace', () => {
     const dismissibles = []
     const bindDismissible = vi.fn((el, options) => {
       dismissibles.push({ el, options })
+      const closeButtons = Array.isArray(options.closeButtons) ? options.closeButtons : [options.closeButtons]
+      closeButtons.filter(Boolean).forEach((btn) => {
+        btn.addEventListener('click', () => {
+          if (options.isOpen()) options.onClose()
+        })
+      })
       return { dispose: vi.fn() }
     })
     let targetStates = [
@@ -1201,22 +1220,16 @@ describe('shell chrome project workspace', () => {
         id: 'target-1',
         type: 'domain',
         value: 'darklab.sh',
-        label: 'Primary domain',
-        notes: 'Scope approved',
       },
       {
         id: 'target-2',
         type: 'host',
         value: 'api.darklab.sh',
-        label: 'API host',
-        notes: 'Secondary scope',
       },
       {
         id: 'target-3',
         type: 'port_set',
         value: '80,443',
-        label: 'Web ports',
-        notes: 'Common web exposure',
       },
     ]
     let projectRuns = [
@@ -1287,12 +1300,18 @@ describe('shell chrome project workspace', () => {
     const entityLabels = new Map([
       ['run:run-1', ['baseline']],
       ['finding:finding-1', ['old-label']],
+      ['target:target-1', ['Primary domain']],
+      ['target:target-2', ['API host']],
+      ['target:target-3', ['Web ports']],
       ['run_file_artifact:artifact-1', []],
       ['package:pkg-1', ['handoff']],
     ])
     const entityNotes = new Map([
       ['run:run-1', 'Run note'],
       ['finding:finding-1', 'Old finding note'],
+      ['target:target-1', 'Scope approved'],
+      ['target:target-2', 'Secondary scope'],
+      ['target:target-3', 'Common web exposure'],
       ['package:pkg-1', 'Initial package note'],
     ])
     const metadataKey = (entityType, entityId) => `${entityType}:${entityId}`
@@ -1348,7 +1367,11 @@ describe('shell chrome project workspace', () => {
               labels: labelObjects('run', run.id),
               note: noteObject('run', run.id),
             })),
-            targets: targetStates,
+            targets: targetStates.map(target => ({
+              ...target,
+              labels: labelObjects('target', target.id),
+              note: noteObject('target', target.id),
+            })),
             artifacts: projectArtifacts.map(artifact => ({
               ...artifact,
               labels: labelObjects('run_file_artifact', artifact.id),
@@ -1386,7 +1409,19 @@ describe('shell chrome project workspace', () => {
           json: () => Promise.resolve({ ok: true }),
         })
       }
-      if (url === '/projects/project-1/findings') {
+      if (String(url).startsWith('/projects/project-1/findings')) {
+        const params = new URL(`https://example.test${url}`).searchParams
+        const matchesAny = (itemValue, values) => !values.length || values.includes(String(itemValue || ''))
+        const matchesLabels = (finding, labels) => {
+          if (!labels.length) return true
+          const findingLabels = entityLabels.get(`finding:${finding.id}`) || []
+          return findingLabels.some(label => labels.includes(label))
+        }
+        const matchesNoteState = (finding, noteState) => {
+          if (!noteState) return true
+          const noted = !!(entityNotes.get(`finding:${finding.id}`) || '')
+          return noteState === 'noted' ? noted : !noted
+        }
         return Promise.resolve({
           ok: true,
           json: () => Promise.resolve({
@@ -1426,7 +1461,16 @@ describe('shell chrome project workspace', () => {
                 target_ids: ['target-1', 'target-3'],
                 review_state: 'important',
               },
-            ].map(finding => ({
+            ].filter(finding => matchesAny(finding.run_id, params.getAll('run_id')))
+              .filter(finding => matchesAny(finding.review_state, params.getAll('review_state')))
+              .filter((finding) => {
+                const targetIds = [finding.target_id, ...(finding.target_ids || [])].filter(Boolean).map(String)
+                const filters = params.getAll('target_id')
+                return !filters.length || targetIds.some(targetId => filters.includes(targetId))
+              })
+              .filter(finding => matchesLabels(finding, params.getAll('label')))
+              .filter(finding => matchesNoteState(finding, params.get('note_state')))
+              .map(finding => ({
               ...finding,
               labels: labelObjects('finding', finding.id),
               note: noteObject('finding', finding.id),
@@ -1572,8 +1616,18 @@ describe('shell chrome project workspace', () => {
     })
     const showWorkspaceViewer = vi.fn()
     const fetchAndRenderHistoryComparison = vi.fn()
-    globalThis.URL.createObjectURL = vi.fn(() => 'blob:project-artifact')
+    let objectUrlCount = 0
+    globalThis.URL.createObjectURL = vi.fn(() => `blob:project-${objectUrlCount += 1}`)
     globalThis.URL.revokeObjectURL = vi.fn()
+    const delayedRevokes = []
+    const originalSetTimeout = window.setTimeout.bind(window)
+    const setTimeoutSpy = vi.spyOn(window, 'setTimeout').mockImplementation((callback, delay, ...args) => {
+      if (delay === 2000) {
+        delayedRevokes.push(() => callback(...args))
+        return delayedRevokes.length
+      }
+      return originalSetTimeout(callback, delay, ...args)
+    })
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     const shell = loadShellChrome({
       apiFetch,
@@ -1584,8 +1638,11 @@ describe('shell chrome project workspace', () => {
       bindDismissible,
     })
 
+    document.dispatchEvent(new CustomEvent('app:project-target-discovered', { detail: { project_id: 'project-1', count: 2 } }))
+    expect(document.querySelector('[data-action="projects"]')?.classList.contains('has-project-target-discovery')).toBe(true)
     await shell.openProjectWorkspace()
     expect(document.querySelector('.project-target-row')?.textContent).toContain('Primary domain')
+    expect(document.querySelector('.project-explorer-meta-row')?.classList.contains('panel-row')).toBe(true)
     expect(Array.from(document.querySelectorAll('.project-explorer-section-heading'))
       .some(heading => heading.textContent.includes('New'))).toBe(true)
     expect(bindDismissible).toHaveBeenCalledWith(
@@ -1595,6 +1652,13 @@ describe('shell chrome project workspace', () => {
     expect(bindDismissible).toHaveBeenCalledWith(
       document.getElementById('project-package-wizard-overlay'),
       expect.objectContaining({ level: 'modal' }),
+    )
+    expect(bindDismissible).toHaveBeenCalledWith(
+      document.getElementById('project-package-manifest-overlay'),
+      expect.objectContaining({
+        level: 'modal',
+        closeButtons: [document.querySelector('.project-package-manifest-close')],
+      }),
     )
     expectProjectPressablesBound([
       '.project-workspace-row',
@@ -1618,9 +1682,19 @@ describe('shell chrome project workspace', () => {
       body: JSON.stringify({
         type: 'domain',
         value: 'darklab.io',
-        label: 'Updated target',
-        notes: 'Retest scope',
       }),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/entities/target/target-1/labels', expect.objectContaining({
+      method: 'DELETE',
+      body: JSON.stringify({ label: 'Primary domain' }),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/entities/target/target-1/labels', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ label: 'Updated target' }),
+    }))
+    expect(apiFetch).toHaveBeenCalledWith('/entities/target/target-1/note', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ body: 'Retest scope' }),
     }))
     expect(document.querySelector('.project-target-row')?.textContent).toContain('darklab.io')
     expect(document.getElementById('project-workspace-message').textContent).toContain('Target updated.')
@@ -1667,16 +1741,76 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-explorer-body').textContent).toContain('retest')
     expect(document.getElementById('project-explorer-body').textContent).not.toContain('old-label')
 
+    const sharedFilterMenu = document.querySelector('.project-shared-filter-menu')
+    expect(sharedFilterMenu?.tagName).toBe('DIV')
+    expect(sharedFilterMenu.querySelector('summary')).toBeNull()
+    const filterTrigger = sharedFilterMenu.querySelector('.project-target-filter-trigger')
+    const filterSurface = sharedFilterMenu.querySelector('.project-target-filter-options')
+    expect(filterTrigger?.dataset.pressableBound).toBe('1')
+    expect(filterTrigger?.classList.contains('control-row')).toBe(true)
+    expect(filterTrigger?.classList.contains('btn')).toBe(false)
+    expect(filterTrigger?.getAttribute('aria-expanded')).toBe('false')
+    expect(filterTrigger?.getAttribute('aria-haspopup')).toBe('menu')
+    expect(filterSurface?.classList.contains('dropdown-surface')).toBe(true)
+    expect(filterSurface?.getAttribute('role')).toBe('menu')
+    expect(filterSurface?.hidden).toBe(true)
+    filterTrigger.click()
+    await tick()
+    expect(sharedFilterMenu.classList.contains('is-open')).toBe(true)
+    expect(filterTrigger.getAttribute('aria-expanded')).toBe('true')
+    expect(filterSurface.hidden).toBe(false)
+    expect(sharedFilterMenu.querySelector('.project-target-filter-option.dropdown-item.dropdown-item-compact')).not.toBeNull()
+    document.body.click()
+    await tick()
+    expect(sharedFilterMenu.classList.contains('is-open')).toBe(false)
+    expect(filterSurface.hidden).toBe(true)
+
+    const retestFilter = document.querySelector('[data-project-finding-label-filter-option][value="retest"]')
+    expect(retestFilter).not.toBeNull()
+    retestFilter.checked = true
+    retestFilter.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    await tick()
+    expect(apiFetch.mock.calls.some(([url]) => (
+      String(url).startsWith('/projects/project-1/findings?')
+      && String(url).includes('label=retest')
+    ))).toBe(true)
+    expect(document.querySelector('[data-project-tab="findings"]')?.textContent).toBe('Findings (1/3)')
+    expect(document.querySelector('.project-target-filter-chip')?.textContent).toContain('label: retest')
+    expect(document.querySelector('.project-target-filter-chip')?.classList.contains('chip-removable')).toBe(true)
+    expect(document.querySelector('.project-target-filter-chip')?.classList.contains('btn')).toBe(false)
+    expect(document.querySelector('.project-explorer-item')?.classList.contains('panel-row')).toBe(true)
+    expect(document.getElementById('project-explorer-body').textContent).toContain('missing security header')
+    expect(document.getElementById('project-explorer-body').textContent).not.toContain('web port responded')
+
+    const noteStateFilter = document.querySelector('[data-project-finding-note-state]')
+    expect(noteStateFilter).not.toBeNull()
+    noteStateFilter.value = 'noted'
+    noteStateFilter.dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    await tick()
+    expect(apiFetch.mock.calls.some(([url]) => (
+      String(url).startsWith('/projects/project-1/findings?')
+      && String(url).includes('label=retest')
+      && String(url).includes('note_state=noted')
+    ))).toBe(true)
+    expect(document.querySelector('.project-explorer-filter-chips')?.textContent).toContain('notes: With notes')
+    document.querySelector('[data-project-filter-clear-all]').click()
+    await tick()
+    expect(document.querySelector('[data-project-tab="findings"]')?.textContent).toBe('Findings (3)')
+
     const importantFilter = document.querySelector('[data-project-finding-status-filter-option][value="important"]')
     expect(importantFilter).not.toBeNull()
     importantFilter.checked = true
     importantFilter.dispatchEvent(new Event('change', { bubbles: true }))
     await tick()
+    expect(document.querySelector('[data-project-tab="findings"]')?.textContent).toBe('Findings (1/3)')
     expect(document.querySelector('.project-explorer-filter-chips .project-target-filter-chip')?.textContent).toContain('status: Important')
     expect(document.getElementById('project-explorer-body').textContent).toContain('web port responded')
     expect(document.getElementById('project-explorer-body').textContent).not.toContain('missing security header')
     expect(document.getElementById('project-explorer-body').textContent).not.toContain('api host responded')
     expectProjectPressablesBound([
+      '.project-target-filter-trigger',
       '.project-explorer-group-toggle',
       '.project-explorer-item-click-target',
       '.project-target-filter-chip',
@@ -1728,7 +1862,10 @@ describe('shell chrome project workspace', () => {
     await tick()
     expect(document.getElementById('project-explorer-body').textContent).toContain('baseline')
     expect(document.getElementById('project-explorer-body').textContent).toContain('note')
-    expectProjectPressablesBound(['.project-run-compare-controls .btn'])
+    expect(document.querySelector('[data-project-finding-label-filter-option][value="retest"]')).not.toBeNull()
+    expect(document.querySelector('[data-project-finding-note-state]')).not.toBeNull()
+    expect(document.querySelector('[data-project-finding-sort]')).toBeNull()
+    expectProjectPressablesBound(['.project-runs-toolbar-actions .btn'])
     document.querySelector('[data-project-action="edit-run-metadata"][data-run-id="run-1"]').click()
     await tick()
     expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(true)
@@ -1754,6 +1891,12 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(false)
     expect(document.getElementById('project-explorer-body').textContent).toContain('reviewed')
 
+    expect(document.querySelector('[data-project-compare-mode]')?.value).toBe('run')
+    expect(document.querySelector('[data-project-compare-mode-value="run"]')?.getAttribute('aria-pressed')).toBe('true')
+    expect(document.querySelector('[data-project-compare-baseline-label]')).toBeNull()
+    expect(document.querySelector('[data-project-compare-target]')?.value).toBe('run-2')
+    expect(document.querySelector('.project-runs-toolbar-divider')).not.toBeNull()
+    expect(document.querySelector('[data-project-action="compare-runs"]')?.title).toBe('Compare selected project runs.')
     document.querySelector('[data-project-action="compare-runs"]').click()
     await tick()
     expect(fetchAndRenderHistoryComparison).toHaveBeenCalledWith(
@@ -1761,6 +1904,33 @@ describe('shell chrome project workspace', () => {
       'run-2',
       {
         url: '/projects/project-1/compare?left_run_id=run-1&right_run_id=run-2',
+      },
+    )
+    fetchAndRenderHistoryComparison.mockClear()
+    shell.syncAppSelect.mockClear()
+    document.querySelector('[data-project-compare-mode-value="baseline"]').click()
+    await tick()
+    expect(document.querySelector('[data-project-compare-mode]')?.value).toBe('baseline')
+    expect(document.querySelector('[data-project-compare-mode-value="baseline"]')?.getAttribute('aria-pressed')).toBe('true')
+    expect(document.querySelector('[data-project-compare-run="left"]')?.value).toBe('run-2')
+    expect(document.querySelector('[data-project-compare-target]')?.value).toBe('baseline')
+    expect(shell.syncAppSelect).toHaveBeenCalledWith(document.querySelector('[data-project-compare-run="left"]'))
+    expect(shell.syncAppSelect).toHaveBeenCalledWith(document.querySelector('[data-project-compare-target]'))
+    expect([...document.querySelector('[data-project-compare-target]')?.options || []].map(option => option.value)).toEqual([
+      'baseline',
+      'reviewed',
+    ])
+    document.querySelector('[data-project-compare-run="left"]').value = 'run-1'
+    document.querySelector('[data-project-compare-run="left"]').dispatchEvent(new Event('change', { bubbles: true }))
+    await tick()
+    expect(document.querySelector('[data-project-compare-run="left"]')?.value).toBe('run-2')
+    document.querySelector('[data-project-action="compare-runs"]').click()
+    await tick()
+    expect(fetchAndRenderHistoryComparison).toHaveBeenCalledWith(
+      'run-2',
+      'baseline:baseline',
+      {
+        url: '/projects/project-1/compare?left_run_id=run-2&baseline_label=baseline',
       },
     )
     expect(document.querySelector('[data-project-action="filter-run"][data-run-id="run-1"]')).not.toBeNull()
@@ -1819,6 +1989,10 @@ describe('shell chrome project workspace', () => {
       { cache: 'no-store' },
     )
     expect(globalThis.URL.createObjectURL).toHaveBeenCalled()
+    expect(delayedRevokes).toHaveLength(1)
+    delayedRevokes[0]()
+    expect(globalThis.URL.revokeObjectURL).toHaveBeenCalledWith('blob:project-1')
+    globalThis.URL.revokeObjectURL.mockClear()
     expect(document.querySelector('[data-project-action="artifact-preview"][data-artifact-id="artifact-2"]').disabled)
       .toBe(true)
     globalThis.URL.createObjectURL.mockClear()
@@ -1830,6 +2004,9 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-explorer-body').textContent).toContain('2 runs · 3 findings · 2 artifacts')
     expect(document.getElementById('project-explorer-body').textContent).toContain('handoff')
     expect(document.getElementById('project-explorer-body').textContent).toContain('note')
+    const packageDeleteAction = document.querySelector('[data-project-action="package-delete"][data-package-id="pkg-1"]')
+    expect(packageDeleteAction?.classList.contains('btn-secondary')).toBe(true)
+    expect(packageDeleteAction?.classList.contains('btn-danger')).toBe(true)
     document.querySelector('[data-project-action="package-edit"][data-package-id="pkg-1"]').click()
     await tick()
     expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(true)
@@ -1864,9 +2041,12 @@ describe('shell chrome project workspace', () => {
     )
     expect(document.getElementById('project-package-manifest-overlay').classList.contains('open')).toBe(true)
     expect(document.getElementById('project-package-manifest-json').textContent).toContain('"package_format_version": 1')
+    const manifestDismissible = dismissibles.find(item => item.el === document.getElementById('project-package-manifest-overlay'))
+    expect(manifestDismissible?.options.isOpen()).toBe(true)
     document.querySelector('.project-package-manifest-close').click()
     await tick()
     expect(document.getElementById('project-package-manifest-overlay').classList.contains('open')).toBe(false)
+    expect(manifestDismissible.options.isOpen()).toBe(false)
 
     const packageDownloadButton = document.querySelector('[data-project-action="package-download"][data-package-id="pkg-1"]')
     packageDownloadButton.click()
@@ -1890,8 +2070,12 @@ describe('shell chrome project workspace', () => {
     expect(packageDownloadButton.getAttribute('aria-busy')).toBeNull()
     expect(packageDownloadButton.textContent).toBe('Download')
     expect(globalThis.URL.revokeObjectURL).not.toHaveBeenCalled()
+    expect(delayedRevokes).toHaveLength(2)
+    delayedRevokes[1]()
+    expect(globalThis.URL.revokeObjectURL).toHaveBeenCalledWith('blob:project-2')
+    globalThis.URL.revokeObjectURL.mockClear()
     window.dispatchEvent(new Event('pagehide'))
-    expect(globalThis.URL.revokeObjectURL).toHaveBeenCalledWith('blob:project-artifact')
+    expect(globalThis.URL.revokeObjectURL).not.toHaveBeenCalled()
 
     document.querySelector('[data-project-action="package-repackage"][data-package-id="pkg-1"]').click()
     await tick()
@@ -2044,6 +2228,9 @@ describe('shell chrome project workspace', () => {
     document.querySelector('[data-project-action="filter-run-findings"][data-run-id="run-1"]').click()
     await tick()
     expect(document.querySelector('[data-project-tab="findings"]').classList.contains('is-active')).toBe(true)
+    expect(document.querySelector('[data-project-tab="runs"]')?.textContent).toBe('Runs (1/2)')
+    expect(document.querySelector('[data-project-tab="findings"]')?.textContent).toBe('Findings (2/3)')
+    expect(document.querySelector('[data-project-tab="artifacts"]')?.textContent).toBe('Artifacts (1/2)')
     expect(document.querySelector('[data-project-run-filter-clear="run-1"]')?.textContent).toContain('run: nuclei https:/ ...')
     expect(document.getElementById('project-explorer-body').textContent).toContain('missing security header')
     expect(document.getElementById('project-explorer-body').textContent).not.toContain('api host responded')
@@ -2103,6 +2290,10 @@ describe('shell chrome project workspace', () => {
       body: JSON.stringify({ entity_type: 'run', entity_id: 'run-2' }),
     }))
     expect(document.querySelector('[data-project-action="open-run"][data-run-id="run-2"]')).toBeNull()
+    const disabledCompare = document.querySelector('[data-project-action="compare-runs"]')
+    expect(disabledCompare?.disabled).toBe(true)
+    expect(disabledCompare?.title).toBe('Link two runs to compare.')
+    expect(disabledCompare?.getAttribute('aria-disabled')).toBe('true')
 
     restoreHistoryRunIntoTab.mockClear()
     document.querySelector('[data-project-tab="artifacts"]').click()
@@ -2178,6 +2369,7 @@ describe('shell chrome project workspace', () => {
     }))
     expect(document.querySelector('[data-project-action="edit-target"][data-target-id="target-1"]')).toBeNull()
     expect(document.querySelector('.project-target-row')?.textContent).toContain('api.darklab.sh')
+    setTimeoutSpy.mockRestore()
   })
 
   it('reorders project findings when the sort control changes', async () => {
@@ -2270,6 +2462,11 @@ describe('shell chrome project workspace', () => {
     expect(titles()).toEqual(['Low issue', 'High issue', 'Critical issue'])
 
     let sortControl = document.querySelector('[data-project-finding-sort]')
+    await tick()
+    const sortWrap = sortControl.closest('.project-finding-source-order-control')
+    expect(document.querySelector('.project-filter-sort-divider')).toBeNull()
+    expect(sortWrap?.classList.contains('has-sort-divider')).toBe(true)
+    expect(sortControl.closest('.project-explorer-filter-controls')?.lastElementChild).toBe(sortWrap)
     sortControl.value = 'severity'
     sortControl.dispatchEvent(new Event('change', { bubbles: true }))
     await tick()

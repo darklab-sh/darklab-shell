@@ -220,8 +220,6 @@ def _create_project_workspace_schema(conn):
             project_id    TEXT NOT NULL,
             type          TEXT NOT NULL,
             value         TEXT NOT NULL,
-            label         TEXT NOT NULL DEFAULT '',
-            notes         TEXT NOT NULL DEFAULT '',
             source_run_id TEXT NOT NULL DEFAULT '',
             confidence    REAL NOT NULL DEFAULT 1.0,
             review_state  TEXT NOT NULL DEFAULT 'confirmed',

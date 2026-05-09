@@ -98,7 +98,7 @@
     { value: 'url', label: 'url' },
     { value: 'port_set', label: 'port set' },
   ];
-  const PROJECT_TARGET_NOTES_MAX_LENGTH = 2000;
+  const PROJECT_TARGET_NOTES_MAX_LENGTH = 20000;
   const PROJECT_DOMAIN_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
   const PROJECT_HOST_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(?:\.(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?))*\.?$/i;
   const PROJECT_IPV4_RE = /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
@@ -162,16 +162,20 @@
   let projectWorkspaceRows = [];
   let projectWorkspaceSummaries = new Map();
   let projectWorkspaceFindings = new Map();
+  let projectWorkspaceFilteredFindings = new Map();
   let projectWorkspaceLoading = false;
   let projectWorkspaceSelectedId = '';
   let projectWorkspaceTab = 'details';
   let projectWorkspaceFindingsLoadingId = '';
+  let projectWorkspaceFilteredFindingsLoadingKey = '';
   let projectWorkspaceEditingTargetId = '';
   let projectWorkspaceEditingEntity = null;
   let projectWorkspaceLastTargetType = 'domain';
   let projectWorkspaceTargetFilters = new Map();
   let projectWorkspaceRunFilters = new Map();
   let projectWorkspaceFindingStatusFilters = new Map();
+  let projectWorkspaceFindingLabelFilters = new Map();
+  let projectWorkspaceFindingNoteStateFilters = new Map();
   let projectWorkspaceCollapsedFindingGroups = new Set();
   let projectWorkspaceCollapsedArtifactGroups = new Set();
   let projectPackageWizard = null;
@@ -180,6 +184,8 @@
   let projectNotesSavedDelayTimer = null;
   let projectNotesSavedHideTimer = null;
   let projectLabelsSavedHideTimer = null;
+  let projectFilterSortDividerSyncScheduled = false;
+  let projectFilterSortDividerSyncRoot = null;
   const PROJECT_NOTES_AUTOSAVE_DELAY_MS = 450;
   const FIELD_SAVED_INDICATOR_DELAY_MS = 200;
   const FIELD_SAVED_INDICATOR_VISIBLE_MS = 1600;
@@ -192,6 +198,11 @@
     { value: 'review', label: 'Review state' },
     { value: 'target', label: 'Target' },
     { value: 'newest', label: 'Newest run' },
+  ];
+  const PROJECT_FINDING_NOTE_STATE_OPTIONS = [
+    { value: 'all', label: 'All notes' },
+    { value: 'noted', label: 'With notes' },
+    { value: 'unnoted', label: 'Without notes' },
   ];
   const PROJECT_FINDING_SEVERITY_RANK = {
     critical: 0,
@@ -524,9 +535,9 @@
     return btn;
   }
 
-  function _bindProjectRuntimePressable(el) {
+  function _bindProjectRuntimePressable(el, options = {}) {
     if (el && typeof bindPressable === 'function') {
-      bindPressable(el, { onActivate: () => {}, refocusComposer: false });
+      bindPressable(el, { onActivate: () => {}, refocusComposer: false, ...options });
     }
     return el;
   }
@@ -842,6 +853,33 @@
     projectWorkspaceMessage.classList.toggle('is-error', !!error);
   }
 
+  async function _projectResponseError(resp, fallback) {
+    let message = fallback;
+    try {
+      const data = await resp.json();
+      if (data && data.error) message = data.error;
+    } catch (_) {}
+    return new Error(message || fallback);
+  }
+
+  function _projectTargetDiscoveryMessage(count) {
+    const total = Number(count || 0);
+    if (total === 1) return '1 project target discovered.';
+    return `${total.toLocaleString()} project targets discovered.`;
+  }
+
+  function _pulseProjectNavTargets() {
+    const controls = [];
+    railNav?.querySelectorAll('[data-action="projects"]').forEach(control => controls.push(control));
+    if (mobileProjectRow) controls.push(mobileProjectRow);
+    controls.forEach((control) => {
+      control.classList.add('has-project-target-discovery');
+      window.setTimeout(() => {
+        control.classList.remove('has-project-target-discovery');
+      }, 5000);
+    });
+  }
+
   function _selectedProject() {
     const selectedId = String(projectWorkspaceSelectedId || '');
     if (!selectedId) return null;
@@ -976,6 +1014,45 @@
 
   function _projectFindingStatusFilterActive(projectId = projectWorkspaceSelectedId) {
     return _projectFindingStatusFilterValues(projectId).length > 0;
+  }
+
+  function _projectFindingLabelFilterSet(projectId = projectWorkspaceSelectedId) {
+    const normalized = String(projectId || '');
+    if (!normalized) return new Set();
+    if (!projectWorkspaceFindingLabelFilters.has(normalized)) {
+      projectWorkspaceFindingLabelFilters.set(normalized, new Set());
+    }
+    return projectWorkspaceFindingLabelFilters.get(normalized);
+  }
+
+  function _projectFindingLabelOptions(projectId = projectWorkspaceSelectedId) {
+    const labels = new Set();
+    _projectFindingItems(projectId).forEach((finding) => {
+      _entityLabelValues(finding).forEach(label => labels.add(label));
+    });
+    return [...labels].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }));
+  }
+
+  function _projectFindingLabelFilterValues(projectId = projectWorkspaceSelectedId) {
+    const available = new Set(_projectFindingLabelOptions(projectId));
+    const filters = _projectFindingLabelFilterSet(projectId);
+    [...filters].forEach((label) => {
+      if (!available.has(label)) filters.delete(label);
+    });
+    return [...filters];
+  }
+
+  function _projectFindingLabelFilterActive(projectId = projectWorkspaceSelectedId) {
+    return _projectFindingLabelFilterValues(projectId).length > 0;
+  }
+
+  function _projectFindingNoteStateValue(projectId = projectWorkspaceSelectedId) {
+    const value = String(projectWorkspaceFindingNoteStateFilters.get(String(projectId || '')) || 'all');
+    return PROJECT_FINDING_NOTE_STATE_OPTIONS.some(option => option.value === value) ? value : 'all';
+  }
+
+  function _projectFindingNoteStateFilterActive(projectId = projectWorkspaceSelectedId) {
+    return _projectFindingNoteStateValue(projectId) !== 'all';
   }
 
   function _projectFindingSortValue(projectId = projectWorkspaceSelectedId) {
@@ -1251,8 +1328,29 @@
 
   function _revokeObjectUrlOnPagehide(url) {
     if (!url || typeof URL === 'undefined' || typeof URL.revokeObjectURL !== 'function') return;
+    let revoked = false;
+    const revoke = () => {
+      if (revoked) return;
+      revoked = true;
+      URL.revokeObjectURL(url);
+    };
+    if (typeof window !== 'undefined' && typeof window.setTimeout === 'function') {
+      window.setTimeout(revoke, 2000);
+    }
     if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
-    window.addEventListener('pagehide', () => URL.revokeObjectURL(url), { once: true });
+    window.addEventListener('pagehide', revoke, { once: true });
+  }
+
+  function _downloadBlobAsAttachment(blob, filename, successMessage = '') {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    _revokeObjectUrlOnPagehide(url);
+    if (successMessage) _setProjectWorkspaceMessage(successMessage);
   }
 
   function _closeProjectPackageManifest() {
@@ -1261,6 +1359,10 @@
     projectPackageManifestOverlay.classList.remove('open');
     projectPackageManifestOverlay.setAttribute('aria-hidden', 'true');
     if (projectPackageManifestJson) projectPackageManifestJson.textContent = '';
+  }
+
+  function isProjectPackageManifestOpen() {
+    return !!(projectPackageManifestOverlay && projectPackageManifestOverlay.classList.contains('open'));
   }
 
   function _openProjectPackageManifest(pkg) {
@@ -1310,15 +1412,11 @@
       throw new Error(data.error || 'Unable to download artifact.');
     }
     const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = _projectArtifactDownloadName(artifactPath, artifactId || 'artifact');
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    _revokeObjectUrlOnPagehide(url);
-    _setProjectWorkspaceMessage('Artifact download started.');
+    _downloadBlobAsAttachment(
+      blob,
+      _projectArtifactDownloadName(artifactPath, artifactId || 'artifact'),
+      'Artifact download started.',
+    );
   }
 
   function _projectPackageItems(summary) {
@@ -1580,15 +1678,15 @@
       ['package-manifest', 'View manifest'],
       ['package-delete', 'Delete'],
     ].forEach(([actionName, label]) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'btn btn-secondary btn-compact project-package-action'
-        + (actionName === 'package-delete' ? ' btn-danger' : '');
-      btn.dataset.projectAction = actionName;
-      btn.dataset.projectId = String(projectId || '');
+      const btn = _makeProjectButton(
+        label,
+        actionName,
+        String(projectId || ''),
+        'secondary',
+        actionName === 'package-delete' ? 'danger' : '',
+      );
+      btn.classList.add('project-package-action');
       btn.dataset.packageId = String(pkg.id || '');
-      btn.textContent = label;
-      _bindProjectRuntimePressable(btn);
       actions.appendChild(btn);
     });
     wrap.appendChild(actions);
@@ -1992,7 +2090,7 @@
       return;
     }
     const sections = [
-      ['Targets', 'target', _projectTargetItems(summary), item => _projectTargetFilterLabel(item), item => item.notes || ''],
+      ['Targets', 'target', _projectTargetItems(summary), item => _projectTargetFilterLabel(item), item => _entityNoteBody(item)],
     ];
     const runSection = document.createElement('section');
     runSection.className = 'project-package-selection-section';
@@ -2334,15 +2432,7 @@
       throw new Error(data.error || 'Unable to download package.');
     }
     const blob = await resp.blob();
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = _projectPackageDownloadName(pkg);
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    _revokeObjectUrlOnPagehide(url);
-    _setProjectWorkspaceMessage('Package download started.');
+    _downloadBlobAsAttachment(blob, _projectPackageDownloadName(pkg), 'Package download started.');
   }
 
   function _projectFindingItems(projectId = projectWorkspaceSelectedId) {
@@ -2353,12 +2443,58 @@
     return projectWorkspaceFindings.has(String(projectId || ''));
   }
 
+  function _projectFindingServerFilterParams(projectId, summary = _projectSummary(projectId)) {
+    const params = new URLSearchParams();
+    _projectTargetFilterIds(projectId, summary).forEach(targetId => params.append('target_id', targetId));
+    _projectRunFilterIds(projectId, summary).forEach(runId => params.append('run_id', runId));
+    _projectFindingStatusFilterValues(projectId).forEach(status => params.append('review_state', status));
+    _projectFindingLabelFilterValues(projectId).forEach(label => params.append('label', label));
+    const noteState = _projectFindingNoteStateValue(projectId);
+    if (noteState !== 'all') params.set('note_state', noteState);
+    return params;
+  }
+
+  function _projectFindingServerFiltersActive(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
+    return _projectFindingServerFilterParams(projectId, summary).toString() !== '';
+  }
+
+  function _projectFindingFilteredKey(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
+    const normalized = String(projectId || '');
+    const query = _projectFindingServerFilterParams(normalized, summary).toString();
+    return query ? `${normalized}::${query}` : '';
+  }
+
+  function _projectFilteredFindingItems(projectId = projectWorkspaceSelectedId, summary = _projectSummary(projectId)) {
+    const key = _projectFindingFilteredKey(projectId, summary);
+    return key && projectWorkspaceFilteredFindings.has(key)
+      ? projectWorkspaceFilteredFindings.get(key)
+      : _projectFindingItems(projectId);
+  }
+
+  function _invalidateProjectFilteredFindings(projectId = '') {
+    const normalized = String(projectId || '');
+    if (!normalized) {
+      projectWorkspaceFilteredFindings = new Map();
+      projectWorkspaceFilteredFindingsLoadingKey = '';
+      return;
+    }
+    const prefix = `${normalized}::`;
+    [...projectWorkspaceFilteredFindings.keys()].forEach((key) => {
+      if (String(key).startsWith(prefix)) projectWorkspaceFilteredFindings.delete(key);
+    });
+    if (projectWorkspaceFilteredFindingsLoadingKey.startsWith(prefix)) {
+      projectWorkspaceFilteredFindingsLoadingKey = '';
+    }
+  }
+
   function _invalidateProjectFindings(projectId = '') {
     const normalized = String(projectId || '');
     if (normalized) {
       projectWorkspaceFindings.delete(normalized);
+      _invalidateProjectFilteredFindings(normalized);
     } else {
       projectWorkspaceFindings = new Map();
+      _invalidateProjectFilteredFindings();
     }
   }
 
@@ -2401,7 +2537,7 @@
 
   function _projectMetaRow(label, value) {
     const row = document.createElement('div');
-    row.className = 'project-explorer-meta-row';
+    row.className = 'project-explorer-meta-row panel-row';
     const key = document.createElement('span');
     key.textContent = label;
     const val = document.createElement('span');
@@ -2412,7 +2548,7 @@
 
   function _projectItemRow({ title, meta = '', detail = '', badge = '', chips = [], action = null, accessory = null }) {
     const row = document.createElement(action && !accessory ? 'button' : 'article');
-    row.className = 'project-explorer-item';
+    row.className = 'project-explorer-item panel-row' + (action && !accessory ? ' panel-row-clickable' : '');
     let contentHost = row;
     if (action) {
       if (row.tagName === 'BUTTON') {
@@ -2632,8 +2768,13 @@
     return {
       type: String(projectTargetTypeSelect?.value || 'domain').trim() || 'domain',
       value: String(projectTargetValueInput?.value || '').trim(),
-      label: String(projectTargetLabelInput?.value || '').trim(),
-      notes: String(projectTargetNotesInput?.value || '').trim(),
+    };
+  }
+
+  function _projectTargetEditorMetadata() {
+    return {
+      labels: _parseEntityLabelInput(projectTargetLabelInput?.value || ''),
+      noteBody: String(projectTargetNotesInput?.value || '').trim(),
     };
   }
 
@@ -2649,9 +2790,9 @@
     projectTargetCreateForm.dataset.targetId = projectWorkspaceEditingTargetId;
     _setProjectTargetTypeValue(isEdit ? target.type : projectWorkspaceLastTargetType);
     if (projectTargetValueInput) projectTargetValueInput.value = isEdit ? String(target.value || '') : '';
-    if (projectTargetLabelInput) projectTargetLabelInput.value = isEdit ? String(target.label || '') : '';
+    if (projectTargetLabelInput) projectTargetLabelInput.value = isEdit ? _entityLabelValues(target).join(', ') : '';
     if (projectTargetNotesInput) {
-      projectTargetNotesInput.value = isEdit ? String(target.notes || '') : '';
+      projectTargetNotesInput.value = isEdit ? _entityNoteBody(target) : '';
       projectTargetNotesInput.setAttribute('aria-invalid', 'false');
     }
     if (projectTargetEditorTitle) projectTargetEditorTitle.textContent = isEdit ? 'EDIT TARGET' : 'NEW TARGET';
@@ -2711,10 +2852,7 @@
     }
     main.appendChild(heading);
 
-    const chips = [];
-    const targetLabel = String(target.label || '').trim();
-    if (targetLabel) chips.push({ label: targetLabel, kind: 'label' });
-    if (String(target.notes || '').trim()) chips.push({ label: 'note', kind: 'note' });
+    const chips = _entityMetadataChips(target);
     if (chips.length) {
       const chipWrap = document.createElement('div');
       chipWrap.className = 'project-explorer-item-chips project-target-metadata-chips';
@@ -2798,28 +2936,169 @@
     return wrap;
   }
 
-  function _renderProjectRunCompareControls(projectId, runs) {
+  function _projectRunBaselineLabelOptions(runs) {
+    const labels = new Set();
+    (Array.isArray(runs) ? runs : []).forEach((run) => {
+      _entityLabelValues(run).forEach(label => labels.add(label));
+    });
+    return [...labels].sort((left, right) => {
+      if (left === 'baseline') return -1;
+      if (right === 'baseline') return 1;
+      return left.localeCompare(right, undefined, { sensitivity: 'base' });
+    });
+  }
+
+  function _projectRunCompareOptionText(run) {
+    const command = String(run && (run.command || run.id) || 'run');
+    const labels = _entityLabelValues(run);
+    return labels.length ? `${command} · ${labels.join(', ')}` : command;
+  }
+
+  function _projectRunCompareDatasetOptions(container, key) {
+    try {
+      const parsed = JSON.parse(String(container?.dataset?.[key] || '[]'));
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function _replaceProjectRunCompareOptions(select, options, selectedValue = '') {
+    if (!select) return;
+    select.replaceChildren();
+    (Array.isArray(options) ? options : []).forEach((item) => {
+      const option = document.createElement('option');
+      option.value = String(item && item.value || '');
+      option.textContent = String(item && item.label || item && item.value || '');
+      select.appendChild(option);
+    });
+    const normalizedSelected = String(selectedValue || '');
+    if (normalizedSelected && [...select.options].some(option => option.value === normalizedSelected)) {
+      select.value = normalizedSelected;
+    } else if (select.options.length) {
+      select.value = select.options[0].value;
+    }
+  }
+
+  function _projectRunCompareOptionLabels(option) {
+    return Array.isArray(option && option.labels)
+      ? option.labels.map(label => String(label || '').trim()).filter(Boolean)
+      : [];
+  }
+
+  function _avoidProjectRunCompareLabelSelfTarget(container, label) {
+    const leftSelect = container?.querySelector?.('[data-project-compare-run="left"]');
+    if (!leftSelect || !label) return;
+    const runOptions = _projectRunCompareDatasetOptions(container, 'projectCompareRunOptions');
+    const selected = runOptions.find(option => String(option && option.value || '') === String(leftSelect.value || ''));
+    if (!selected || !_projectRunCompareOptionLabels(selected).includes(label)) return;
+    const fallback = runOptions.find(option => !_projectRunCompareOptionLabels(option).includes(label));
+    if (!fallback) return;
+    leftSelect.value = String(fallback.value || '');
+    if (typeof global.syncAppSelect === 'function') {
+      global.syncAppSelect(leftSelect);
+    }
+  }
+
+  function _syncProjectRunCompareMode(wrap) {
+    const container = wrap || projectExplorerBody?.querySelector('.project-run-compare-controls');
+    if (!container) return;
+    const mode = String(container.querySelector('[data-project-compare-mode]')?.value || 'run');
+    const targetSelect = container.querySelector('[data-project-compare-target]');
+    if (!targetSelect) return;
+    const previousMode = String(targetSelect.dataset.projectCompareTargetMode || '');
+    if (previousMode === 'run') targetSelect.dataset.projectCompareRunValue = targetSelect.value;
+    if (previousMode === 'baseline') targetSelect.dataset.projectCompareBaselineValue = targetSelect.value;
+    const options = mode === 'baseline'
+      ? _projectRunCompareDatasetOptions(container, 'projectCompareLabelOptions')
+      : _projectRunCompareDatasetOptions(container, 'projectCompareRunOptions');
+    const savedValue = mode === 'baseline'
+      ? targetSelect.dataset.projectCompareBaselineValue
+      : targetSelect.dataset.projectCompareRunValue;
+    _replaceProjectRunCompareOptions(targetSelect, options, savedValue);
+    targetSelect.dataset.projectCompareTargetMode = mode;
+    targetSelect.setAttribute('aria-label', mode === 'baseline' ? 'Baseline label' : 'Run baseline');
+    if (mode === 'baseline') {
+      _avoidProjectRunCompareLabelSelfTarget(container, String(targetSelect.value || ''));
+    }
+    if (typeof global.syncAppSelect === 'function') {
+      global.syncAppSelect(targetSelect);
+    }
+    container.querySelectorAll('[data-project-compare-mode-value]').forEach((btn) => {
+      const active = String(btn.dataset.projectCompareModeValue || '') === mode;
+      btn.classList.toggle('is-active', active);
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+  }
+
+  function _setProjectRunCompareMode(modeButton, event = null) {
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    const controls = modeButton?.closest?.('.project-run-compare-controls');
+    const modeInput = controls?.querySelector('[data-project-compare-mode]');
+    if (!controls || !modeInput) return;
+    modeInput.value = String(modeButton.dataset.projectCompareModeValue || 'run');
+    _syncProjectRunCompareMode(controls);
+  }
+
+  function _renderProjectRunCompareControls(runs) {
     const wrap = document.createElement('div');
     wrap.className = 'project-run-compare-controls';
     const leftSelect = document.createElement('select');
     leftSelect.className = 'form-select form-control-compact project-run-compare-select';
     leftSelect.dataset.projectCompareRun = 'left';
-    const rightSelect = document.createElement('select');
-    rightSelect.className = 'form-select form-control-compact project-run-compare-select';
-    rightSelect.dataset.projectCompareRun = 'right';
+    leftSelect.setAttribute('aria-label', 'Run to compare');
+    const modeInput = document.createElement('input');
+    modeInput.type = 'hidden';
+    modeInput.dataset.projectCompareMode = '1';
+    modeInput.value = 'run';
+    const targetSelect = document.createElement('select');
+    targetSelect.className = 'form-select form-control-compact project-run-compare-select';
+    targetSelect.dataset.projectCompareTarget = '1';
+    targetSelect.setAttribute('aria-label', 'Run baseline');
+    const runOptions = [];
     runs.forEach((run, index) => {
-      [leftSelect, rightSelect].forEach((select) => {
+      [leftSelect].forEach((select) => {
         const option = document.createElement('option');
         option.value = String(run.id || '');
-        option.textContent = String(run.command || run.id || 'run');
+        option.textContent = _projectRunCompareOptionText(run);
         select.appendChild(option);
       });
+      runOptions.push({
+        value: String(run.id || ''),
+        label: _projectRunCompareOptionText(run),
+        labels: _entityLabelValues(run),
+      });
       if (index === 0) leftSelect.value = String(run.id || '');
-      if (index === 1) rightSelect.value = String(run.id || '');
+      if (index === 1) targetSelect.dataset.projectCompareRunValue = String(run.id || '');
     });
-    const compare = _makeProjectButton('Compare runs', 'compare-runs', projectId, runs.length >= 2 ? 'secondary' : 'ghost');
-    compare.disabled = runs.length < 2;
-    wrap.append(leftSelect, rightSelect, compare);
+    const baselineLabels = _projectRunBaselineLabelOptions(runs);
+    const baselineOptions = baselineLabels.map(label => ({ value: label, label }));
+    targetSelect.dataset.projectCompareBaselineValue = baselineLabels.includes('baseline') ? 'baseline' : (baselineLabels[0] || '');
+    wrap.dataset.projectCompareRunOptions = JSON.stringify(runOptions);
+    wrap.dataset.projectCompareLabelOptions = JSON.stringify(baselineOptions);
+    const modeGroup = document.createElement('div');
+    modeGroup.className = 'project-run-compare-mode-group';
+    modeGroup.setAttribute('role', 'group');
+    modeGroup.setAttribute('aria-label', 'Compare against');
+    modeGroup.hidden = !baselineLabels.length;
+    [
+      ['run', 'Run'],
+      ['baseline', 'Label'],
+    ].forEach(([value, label]) => {
+      if (value === 'baseline' && !baselineLabels.length) return;
+      const modeBtn = document.createElement('button');
+      modeBtn.type = 'button';
+      modeBtn.className = 'project-run-compare-mode-button';
+      modeBtn.dataset.projectCompareModeValue = value;
+      modeBtn.setAttribute('aria-pressed', value === modeInput.value ? 'true' : 'false');
+      modeBtn.textContent = label;
+      modeBtn.addEventListener('click', event => _setProjectRunCompareMode(modeBtn, event));
+      _bindProjectRuntimePressable(modeBtn);
+      modeGroup.appendChild(modeBtn);
+    });
+    wrap.append(leftSelect, modeInput, modeGroup, targetSelect);
+    _syncProjectRunCompareMode(wrap);
     return wrap;
   }
 
@@ -2833,149 +3112,21 @@
     return list;
   }
 
-  function _renderProjectTargetFilterControls(container, projectId, summary) {
-    if (!_targetFilterableProjectTab()) return;
-    const targets = _projectTargetItems(summary);
-    if (!targets.length) return;
-    const selectedIds = new Set(_projectTargetFilterIds(projectId, summary));
-    const wrap = document.createElement('div');
-    wrap.className = 'project-target-filter-bar';
-
-    const dropdown = document.createElement('details');
-    dropdown.className = 'project-target-filter-menu';
-    const summaryEl = document.createElement('summary');
-    summaryEl.className = 'btn btn-secondary btn-compact project-target-filter-trigger';
-    summaryEl.textContent = selectedIds.size ? `Filter by target (${selectedIds.size})` : 'Filter by target';
-    dropdown.appendChild(summaryEl);
-
-    const menu = document.createElement('div');
-    menu.className = 'project-target-filter-options';
-    targets.forEach((target) => {
-      const targetId = String(target && target.id || '');
-      if (!targetId) return;
-      const label = document.createElement('label');
-      label.className = 'project-target-filter-option';
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.value = targetId;
-      input.checked = selectedIds.has(targetId);
-      input.dataset.projectTargetFilterOption = '1';
-      input.dataset.projectId = projectId;
-      const mark = document.createElement('span');
-      mark.className = 'project-target-filter-check';
-      mark.setAttribute('aria-hidden', 'true');
-      mark.textContent = '✓';
-      const text = document.createElement('span');
-      text.className = 'project-target-filter-option-label';
-      text.textContent = _projectTargetFilterLabel(target);
-      label.append(input, mark, text);
-      menu.appendChild(label);
-    });
-    dropdown.appendChild(menu);
-    wrap.appendChild(dropdown);
-
-    if (selectedIds.size) {
-      const chips = document.createElement('div');
-      chips.className = 'project-target-filter-chips';
-      selectedIds.forEach((targetId) => {
-        const target = _projectTargetById(summary, targetId);
-        const chip = document.createElement('button');
-        chip.type = 'button';
-        chip.className = 'btn btn-ghost btn-compact project-target-filter-chip';
-        chip.dataset.projectTargetFilterClear = targetId;
-        chip.dataset.projectId = projectId;
-        chip.textContent = `${_projectTargetFilterLabel(target)} ×`;
-        _bindProjectRuntimePressable(chip);
-        chips.appendChild(chip);
-      });
-      const clearAll = document.createElement('button');
-      clearAll.type = 'button';
-      clearAll.className = 'btn btn-ghost btn-compact project-target-filter-clear';
-      clearAll.dataset.projectTargetFilterClear = 'all';
-      clearAll.dataset.projectId = projectId;
-      clearAll.textContent = 'Clear all';
-      _bindProjectRuntimePressable(clearAll);
-      chips.appendChild(clearAll);
-      wrap.appendChild(chips);
-    }
-
-    container.appendChild(wrap);
-  }
-
-  function _renderProjectFindingStatusFilterControls(container, projectId) {
-    if (projectWorkspaceTab !== 'findings') return;
-    const selected = new Set(_projectFindingStatusFilterValues(projectId));
-    const wrap = document.createElement('div');
-    wrap.className = 'project-target-filter-bar project-finding-status-filter-bar';
-
-    const dropdown = document.createElement('details');
-    dropdown.className = 'project-target-filter-menu project-finding-status-filter-menu';
-    const summaryEl = document.createElement('summary');
-    summaryEl.className = 'btn btn-secondary btn-compact project-target-filter-trigger';
-    summaryEl.textContent = selected.size ? `Filter by status (${selected.size})` : 'Filter by status';
-    dropdown.appendChild(summaryEl);
-
-    const menu = document.createElement('div');
-    menu.className = 'project-target-filter-options';
-    FINDING_REVIEW_STATES.forEach(({ value, label: labelText }) => {
-      const label = document.createElement('label');
-      label.className = 'project-target-filter-option';
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.value = value;
-      input.checked = selected.has(value);
-      input.dataset.projectFindingStatusFilterOption = '1';
-      input.dataset.projectId = projectId;
-      const mark = document.createElement('span');
-      mark.className = 'project-target-filter-check';
-      mark.setAttribute('aria-hidden', 'true');
-      mark.textContent = '✓';
-      const text = document.createElement('span');
-      text.className = 'project-target-filter-option-label';
-      text.textContent = labelText;
-      label.append(input, mark, text);
-      menu.appendChild(label);
-    });
-    dropdown.appendChild(menu);
-    wrap.appendChild(dropdown);
-
-    if (selected.size) {
-      const chips = document.createElement('div');
-      chips.className = 'project-target-filter-chips';
-      selected.forEach((status) => {
-        const chip = document.createElement('button');
-        chip.type = 'button';
-        chip.className = 'btn btn-ghost btn-compact project-target-filter-chip';
-        chip.dataset.projectFindingStatusFilterClear = status;
-        chip.dataset.projectId = projectId;
-        chip.textContent = `${_findingReviewStateLabel(status)} ×`;
-        _bindProjectRuntimePressable(chip);
-        chips.appendChild(chip);
-      });
-      const clearAll = document.createElement('button');
-      clearAll.type = 'button';
-      clearAll.className = 'btn btn-ghost btn-compact project-target-filter-clear';
-      clearAll.dataset.projectFindingStatusFilterClear = 'all';
-      clearAll.dataset.projectId = projectId;
-      clearAll.textContent = 'Clear statuses';
-      _bindProjectRuntimePressable(clearAll);
-      chips.appendChild(clearAll);
-      wrap.appendChild(chips);
-    }
-
-    container.appendChild(wrap);
-  }
-
   function _projectFilterDropdown(label, count, optionNodes) {
-    const dropdown = document.createElement('details');
+    const dropdown = document.createElement('div');
     dropdown.className = 'project-target-filter-menu project-shared-filter-menu';
-    const summaryEl = document.createElement('summary');
-    summaryEl.className = 'btn btn-secondary btn-compact project-target-filter-trigger';
-    summaryEl.textContent = count ? `${label} (${count})` : label;
-    dropdown.appendChild(summaryEl);
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'control-row form-control-compact project-target-filter-trigger';
+    trigger.setAttribute('aria-haspopup', 'menu');
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.textContent = count ? `${label} (${count})` : label;
+    dropdown.appendChild(trigger);
 
     const menu = document.createElement('div');
-    menu.className = 'project-target-filter-options';
+    menu.className = 'project-target-filter-options dropdown-surface';
+    menu.setAttribute('role', 'menu');
+    menu.hidden = true;
     if (optionNodes.length) {
       optionNodes.forEach(node => menu.appendChild(node));
     } else {
@@ -2985,20 +3136,38 @@
       menu.appendChild(empty);
     }
     dropdown.appendChild(menu);
+    _bindProjectRuntimePressable(trigger, {
+      onActivate: (event) => {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        const open = !dropdown.classList.contains('is-open');
+        _closeProjectFilterMenus(open ? dropdown : null);
+        _setProjectFilterMenuOpen(dropdown, open);
+      },
+    });
     return dropdown;
+  }
+
+  function _setProjectFilterMenuOpen(menu, open) {
+    if (!menu) return;
+    menu.classList.toggle('is-open', !!open);
+    const trigger = menu.querySelector('.project-target-filter-trigger');
+    if (trigger) trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    const panel = menu.querySelector('.project-target-filter-options');
+    if (panel) panel.hidden = !open;
   }
 
   function _closeProjectFilterMenus(exceptMenu = null) {
     if (!projectWorkspaceModal) return;
-    projectWorkspaceModal.querySelectorAll('.project-target-filter-menu[open]').forEach((menu) => {
+    projectWorkspaceModal.querySelectorAll('.project-target-filter-menu.is-open').forEach((menu) => {
       if (exceptMenu && menu === exceptMenu) return;
-      menu.removeAttribute('open');
+      _setProjectFilterMenuOpen(menu, false);
     });
   }
 
   function _projectFilterOption({ labelText, value, checked, dataset }) {
     const label = document.createElement('label');
-    label.className = 'project-target-filter-option';
+    label.className = 'project-target-filter-option dropdown-item dropdown-item-compact';
     const input = document.createElement('input');
     input.type = 'checkbox';
     input.value = value;
@@ -3020,7 +3189,7 @@
   function _projectFilterChip({ projectId, label, value, clearAttr }) {
     const chip = document.createElement('button');
     chip.type = 'button';
-    chip.className = 'btn btn-ghost btn-compact project-target-filter-chip';
+    chip.className = 'chip chip-removable project-target-filter-chip';
     chip.dataset.projectId = projectId;
     chip.dataset[clearAttr] = value;
     chip.textContent = `${label} ×`;
@@ -3060,6 +3229,8 @@
     controls.appendChild(_projectFilterDropdown('Filter by run', selectedRuns.size, runOptions));
 
     const selectedStatuses = new Set(_projectFindingStatusFilterValues(projectId));
+    const selectedLabels = new Set(_projectFindingLabelFilterValues(projectId));
+    let sortControl = null;
     if (projectWorkspaceTab === 'findings') {
       const statusOptions = FINDING_REVIEW_STATES.map(({ value, label: labelText }) => _projectFilterOption({
         labelText,
@@ -3070,7 +3241,7 @@
       controls.appendChild(_projectFilterDropdown('Filter by status', selectedStatuses.size, statusOptions));
 
       const sortWrap = document.createElement('label');
-      sortWrap.className = 'project-finding-sort-control';
+      sortWrap.className = 'project-finding-sort-control project-finding-source-order-control';
       const sortSelect = document.createElement('select');
       sortSelect.className = 'form-select project-finding-sort-select';
       sortSelect.dataset.projectFindingSort = '1';
@@ -3085,8 +3256,35 @@
         sortSelect.appendChild(option);
       });
       sortWrap.appendChild(sortSelect);
-      controls.appendChild(sortWrap);
+      sortControl = sortWrap;
     }
+
+    const labelOptions = _projectFindingLabelOptions(projectId).map(labelText => _projectFilterOption({
+      labelText,
+      value: labelText,
+      checked: selectedLabels.has(labelText),
+      dataset: { projectFindingLabelFilterOption: '1', projectId },
+    }));
+    controls.appendChild(_projectFilterDropdown('Filter by label', selectedLabels.size, labelOptions));
+
+    const noteWrap = document.createElement('label');
+    noteWrap.className = 'project-finding-sort-control project-finding-note-state-control';
+    const noteSelect = document.createElement('select');
+    noteSelect.className = 'form-select project-finding-note-state-select';
+    noteSelect.dataset.projectFindingNoteState = '1';
+    noteSelect.dataset.projectId = projectId;
+    noteSelect.setAttribute('aria-label', 'Filter findings by notes');
+    const currentNoteState = _projectFindingNoteStateValue(projectId);
+    PROJECT_FINDING_NOTE_STATE_OPTIONS.forEach(({ value, label: labelText }) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = labelText;
+      option.selected = value === currentNoteState;
+      noteSelect.appendChild(option);
+    });
+    noteWrap.appendChild(noteSelect);
+    controls.appendChild(noteWrap);
+    if (sortControl) controls.appendChild(sortControl);
     wrap.appendChild(controls);
 
     const chips = document.createElement('div');
@@ -3116,7 +3314,26 @@
         clearAttr: 'projectFindingStatusFilterClear',
       }));
     });
-    const hasFilters = selectedTargets.size || selectedRuns.size || selectedStatuses.size;
+    selectedLabels.forEach((labelValue) => {
+      chips.appendChild(_projectFilterChip({
+        projectId,
+        label: `label: ${labelValue}`,
+        value: labelValue,
+        clearAttr: 'projectFindingLabelFilterClear',
+      }));
+    });
+    const noteState = _projectFindingNoteStateValue(projectId);
+    if (noteState !== 'all') {
+      const option = PROJECT_FINDING_NOTE_STATE_OPTIONS.find(item => item.value === noteState);
+      chips.appendChild(_projectFilterChip({
+        projectId,
+        label: `notes: ${option ? option.label : noteState}`,
+        value: noteState,
+        clearAttr: 'projectFindingNoteStateClear',
+      }));
+    }
+    const hasFilters = selectedTargets.size || selectedRuns.size || selectedStatuses.size
+      || selectedLabels.size || noteState !== 'all';
     if (hasFilters) {
       const clearAll = document.createElement('button');
       clearAll.type = 'button';
@@ -3134,6 +3351,51 @@
     }
     wrap.appendChild(chips);
     return wrap;
+  }
+
+  function _projectFilterControlsRoot(root) {
+    if (!root) return null;
+    if (root.matches?.('.project-explorer-filter-controls')) return root;
+    return root.querySelector?.('.project-explorer-filter-controls') || null;
+  }
+
+  function _projectFilterControlsShareRow(left, right) {
+    if (!left || !right) return false;
+    const leftRect = left.getBoundingClientRect();
+    const rightRect = right.getBoundingClientRect();
+    const tolerance = Math.max(2, Math.min(leftRect.height || 0, rightRect.height || 0) * 0.25);
+    return Math.abs(leftRect.top - rightRect.top) <= tolerance;
+  }
+
+  function _syncProjectFilterSortDivider(root) {
+    const controls = _projectFilterControlsRoot(root || projectExplorerBody);
+    if (!controls) return;
+    const noteControl = controls.querySelector('.project-finding-note-state-control');
+    const sortControl = controls.querySelector('.project-finding-source-order-control');
+    if (!sortControl) return;
+    sortControl.classList.remove('has-sort-divider');
+    if (!noteControl) return;
+    if (_projectFilterControlsShareRow(noteControl, sortControl)) {
+      sortControl.classList.add('has-sort-divider');
+      if (!_projectFilterControlsShareRow(noteControl, sortControl)) {
+        sortControl.classList.remove('has-sort-divider');
+      }
+    }
+  }
+
+  function _scheduleProjectFilterSortDividerSync(root) {
+    projectFilterSortDividerSyncRoot = root || projectExplorerBody;
+    if (projectFilterSortDividerSyncScheduled) return;
+    projectFilterSortDividerSyncScheduled = true;
+    const schedule = typeof global.requestAnimationFrame === 'function'
+      ? global.requestAnimationFrame.bind(global)
+      : (typeof window.requestAnimationFrame === 'function'
+        ? window.requestAnimationFrame.bind(window)
+        : window.setTimeout.bind(window));
+    schedule(() => {
+      projectFilterSortDividerSyncScheduled = false;
+      _syncProjectFilterSortDivider(projectFilterSortDividerSyncRoot || projectExplorerBody);
+    });
   }
 
   function _projectRunDirectTargetIds(run) {
@@ -3197,18 +3459,27 @@
   }
 
   function _filteredProjectFindings(projectId, summary) {
-    let findings = _projectFindingItems(projectId);
-    const filterIds = new Set(_projectTargetFilterIds(projectId, summary));
-    if (filterIds.size) {
-      findings = findings.filter(finding => [..._projectFindingTargetIds(finding)].some(targetId => filterIds.has(targetId)));
-    }
-    const runFilters = new Set(_projectRunFilterIds(projectId, summary));
-    if (runFilters.size) {
-      findings = findings.filter(finding => runFilters.has(String(finding && finding.run_id || '')));
-    }
-    const statusFilters = new Set(_projectFindingStatusFilterValues(projectId));
-    if (statusFilters.size) {
-      findings = findings.filter(finding => statusFilters.has(String(finding && finding.review_state || 'new')));
+    let findings = _projectFilteredFindingItems(projectId, summary);
+    if (!projectWorkspaceFilteredFindings.has(_projectFindingFilteredKey(projectId, summary))) {
+      const filterIds = new Set(_projectTargetFilterIds(projectId, summary));
+      if (filterIds.size) {
+        findings = findings.filter(finding => [..._projectFindingTargetIds(finding)].some(targetId => filterIds.has(targetId)));
+      }
+      const runFilters = new Set(_projectRunFilterIds(projectId, summary));
+      if (runFilters.size) {
+        findings = findings.filter(finding => runFilters.has(String(finding && finding.run_id || '')));
+      }
+      const statusFilters = new Set(_projectFindingStatusFilterValues(projectId));
+      if (statusFilters.size) {
+        findings = findings.filter(finding => statusFilters.has(String(finding && finding.review_state || 'new')));
+      }
+      const labelFilters = new Set(_projectFindingLabelFilterValues(projectId));
+      if (labelFilters.size) {
+        findings = findings.filter(finding => _entityLabelValues(finding).some(label => labelFilters.has(label)));
+      }
+      const noteState = _projectFindingNoteStateValue(projectId);
+      if (noteState === 'noted') findings = findings.filter(finding => !!_entityNoteBody(finding));
+      else if (noteState === 'unnoted') findings = findings.filter(finding => !_entityNoteBody(finding));
     }
     return _sortProjectFindings(findings, projectId, summary);
   }
@@ -3249,15 +3520,44 @@
     _renderProjectExplorer();
     try {
       const resp = await apiFetch(`/projects/${encodeURIComponent(normalized)}/findings`, { cache: 'no-store' });
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.ok) throw await _projectResponseError(resp, 'Could not load project findings.');
       const data = await resp.json();
       projectWorkspaceFindings.set(normalized, Array.isArray(data.findings) ? data.findings : []);
     } catch (err) {
       projectWorkspaceFindings.set(normalized, []);
-      _setProjectWorkspaceMessage('Could not load project findings.', { error: true });
+      _setProjectWorkspaceMessage(err && err.message ? err.message : 'Could not load project findings.', { error: true });
       if (typeof logClientError === 'function') logClientError('failed to load project findings', err);
     } finally {
       projectWorkspaceFindingsLoadingId = '';
+      _renderProjectExplorer();
+    }
+  }
+
+  async function _loadProjectFilteredFindings(projectId, summary = _projectSummary(projectId)) {
+    const normalized = String(projectId || '');
+    const key = _projectFindingFilteredKey(normalized, summary);
+    if (!normalized || !key || projectWorkspaceFilteredFindings.has(key) || projectWorkspaceFilteredFindingsLoadingKey === key) return;
+    const params = _projectFindingServerFilterParams(normalized, summary);
+    projectWorkspaceFilteredFindingsLoadingKey = key;
+    try {
+      const query = params.toString();
+      const url = `/projects/${encodeURIComponent(normalized)}/findings${query ? `?${query}` : ''}`;
+      const resp = await apiFetch(url, { cache: 'no-store' });
+      if (!resp.ok) throw await _projectResponseError(resp, 'Could not load filtered project findings.');
+      const data = await resp.json();
+      projectWorkspaceFilteredFindings.set(
+        key,
+        Array.isArray(data.findings) ? data.findings : _filteredProjectFindings(normalized, summary),
+      );
+    } catch (err) {
+      projectWorkspaceFilteredFindings.set(key, _filteredProjectFindings(normalized, summary));
+      _setProjectWorkspaceMessage(
+        err && err.message ? err.message : 'Could not load filtered project findings.',
+        { error: true },
+      );
+      if (typeof logClientError === 'function') logClientError('failed to load filtered project findings', err);
+    } finally {
+      if (projectWorkspaceFilteredFindingsLoadingKey === key) projectWorkspaceFilteredFindingsLoadingKey = '';
       _renderProjectExplorer();
     }
   }
@@ -3280,7 +3580,7 @@
         : 'Select a project to edit labels';
     }
     if (projectNotesInput && document.activeElement !== projectNotesInput) {
-      projectNotesInput.value = hasProject ? String(project.notes || '') : '';
+      projectNotesInput.value = hasProject ? _entityNoteBody(project) : '';
       projectNotesInput.dataset.projectId = hasProject ? String(project.id || '') : '';
       projectNotesInput.dataset.savedNotes = projectNotesInput.value;
       projectNotesInput.placeholder = hasProject
@@ -3451,10 +3751,12 @@
     return _saveProjectNotesNow();
   }
 
-  function _makeProjectButton(label, action, projectId, tone = 'secondary') {
+  function _makeProjectButton(label, action, projectId, role = 'secondary', tone = '') {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = `btn btn-${tone} btn-compact`;
+    const classes = ['btn', `btn-${role || 'secondary'}`, 'btn-compact'];
+    if (tone) classes.push(`btn-${tone}`);
+    btn.className = classes.join(' ');
     btn.textContent = label;
     btn.dataset.projectAction = action;
     if (projectId) btn.dataset.projectId = projectId;
@@ -3558,6 +3860,33 @@
     }
   }
 
+  function _projectTabCountText(projectId, summary, tabId, total) {
+    const totalCount = Number(total || 0);
+    const targetFiltersActive = _projectTargetFilterActive(projectId, summary);
+    const runFiltersActive = _projectRunFilterActive(projectId, summary);
+
+    if (tabId === 'findings') {
+      if (!_projectFindingServerFiltersActive(projectId, summary) || !_projectFindingsLoaded(projectId)) {
+        return String(totalCount);
+      }
+      return `${_filteredProjectFindings(projectId, summary).length}/${totalCount}`;
+    }
+
+    if (tabId === 'runs') {
+      if (!targetFiltersActive && !runFiltersActive) return String(totalCount);
+      if (targetFiltersActive && !_projectFindingsLoaded(projectId)) return String(totalCount);
+      return `${_filteredProjectRuns(projectId, summary).length}/${totalCount}`;
+    }
+
+    if (tabId === 'artifacts') {
+      if (!targetFiltersActive && !runFiltersActive) return String(totalCount);
+      if (targetFiltersActive && !_projectFindingsLoaded(projectId)) return String(totalCount);
+      return `${_filteredProjectArtifacts(projectId, summary).length}/${totalCount}`;
+    }
+
+    return String(totalCount);
+  }
+
   function _renderProjectHeader(project, summary) {
     const header = document.createElement('div');
     header.className = 'project-explorer-header';
@@ -3595,11 +3924,12 @@
     const tabs = document.createElement('div');
     tabs.className = 'project-explorer-tabs';
     const tabCounts = _projectCounts(summary);
+    const projectId = String(project.id || '');
     const tabItems = [
       { id: 'details', label: 'Details' },
-      { id: 'runs', label: 'Runs', count: tabCounts.runs },
-      { id: 'findings', label: 'Findings', count: tabCounts.findings },
-      { id: 'artifacts', label: 'Artifacts', count: tabCounts.artifacts },
+      { id: 'runs', label: 'Runs', count: _projectTabCountText(projectId, summary, 'runs', tabCounts.runs) },
+      { id: 'findings', label: 'Findings', count: _projectTabCountText(projectId, summary, 'findings', tabCounts.findings) },
+      { id: 'artifacts', label: 'Artifacts', count: _projectTabCountText(projectId, summary, 'artifacts', tabCounts.artifacts) },
       { id: 'packages', label: 'Packages', count: tabCounts.packages },
     ];
     tabItems.forEach(({ id, label, count }) => {
@@ -3607,7 +3937,7 @@
       btn.type = 'button';
       btn.className = 'nav-item project-explorer-tab' + (projectWorkspaceTab === id ? ' is-active' : '');
       btn.dataset.projectTab = id;
-      btn.textContent = count === undefined ? label : `${label} (${Number(count || 0)})`;
+      btn.textContent = count === undefined ? label : `${label} (${count})`;
       _bindProjectRuntimePressable(btn);
       tabs.appendChild(btn);
     });
@@ -3666,8 +3996,23 @@
     const filterActive = _projectTargetFilterActive(projectId, summary);
     const toolbar = document.createElement('div');
     toolbar.className = 'project-runs-toolbar';
-    toolbar.appendChild(_renderProjectRunCompareControls(projectId, comparableRuns));
-    toolbar.appendChild(_makeProjectButton('Link last run', 'link-last-run', projectId));
+    toolbar.appendChild(_renderProjectRunCompareControls(comparableRuns));
+    const toolbarActions = document.createElement('div');
+    toolbarActions.className = 'project-runs-toolbar-actions';
+    const compare = _makeProjectButton('Compare runs', 'compare-runs', projectId, comparableRuns.length >= 2 ? 'secondary' : 'ghost');
+    compare.disabled = comparableRuns.length < 2;
+    if (compare.disabled) {
+      compare.title = 'Link two runs to compare.';
+      compare.setAttribute('aria-disabled', 'true');
+    } else {
+      compare.title = 'Compare selected project runs.';
+      compare.removeAttribute('aria-disabled');
+    }
+    const actionDivider = document.createElement('span');
+    actionDivider.className = 'project-runs-toolbar-divider';
+    actionDivider.setAttribute('aria-hidden', 'true');
+    toolbarActions.append(compare, actionDivider, _makeProjectButton('Link last run', 'link-last-run', projectId));
+    toolbar.appendChild(toolbarActions);
     container.appendChild(toolbar);
     if (filterActive && !_projectFindingsLoaded(projectId)) {
       container.appendChild(_emptyProjectPanel('Loading target associations...'));
@@ -3715,7 +4060,7 @@
       return;
     }
     if (!findings.length) {
-      const message = _projectTargetFilterActive(projectId, summary) || _projectFindingStatusFilterActive(projectId)
+      const message = _projectFindingServerFiltersActive(projectId, summary)
         ? 'No findings match the selected filters.'
         : 'No persisted findings for linked runs yet.';
       container.appendChild(_emptyProjectPanel(message));
@@ -3901,13 +4246,23 @@
       global.enhanceAppSelects(content);
       global.enhanceAppSelects(filterBar);
     }
+    _syncProjectFilterSortDivider(filterBar);
+    _scheduleProjectFilterSortDividerSync(filterBar);
     if (
       projectWorkspaceTab === 'findings'
       || ['runs', 'artifacts'].includes(projectWorkspaceTab)
       || _projectPackageWizardActive(projectId)
       || _projectTargetFilterActive(projectId, summary)
+      || !_projectFindingsLoaded(projectId)
     ) {
       _loadProjectFindings(projectId).catch(() => {});
+    }
+    if (
+      projectWorkspaceTab === 'findings'
+      && _projectFindingsLoaded(projectId)
+      && _projectFindingServerFiltersActive(projectId, summary)
+    ) {
+      _loadProjectFilteredFindings(projectId, summary).catch(() => {});
     }
   }
 
@@ -3990,6 +4345,19 @@
         localStorage.setItem(PROJECT_WORKSPACE_BROADCAST_KEY, JSON.stringify(payload));
       }
     } catch (_) {}
+  }
+
+  if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('app:project-target-discovered', (event) => {
+      const detail = event && event.detail && typeof event.detail === 'object' ? event.detail : {};
+      const count = Number(detail.count || detail.target_count || 0);
+      if (!Number.isFinite(count) || count <= 0) return;
+      _pulseProjectNavTargets();
+      if (typeof showToast === 'function') showToast(_projectTargetDiscoveryMessage(count));
+      if (isProjectWorkspaceOpen()) {
+        refreshProjectWorkspace().catch(() => {});
+      }
+    });
   }
 
   async function openProjectWorkspace() {
@@ -4100,7 +4468,10 @@
         await onSaved({ entityType, entityId, labels, noteBody });
       } else {
         await refreshProjectWorkspace();
-        if (entityType === 'finding' && projectId) await _loadProjectFindings(projectId);
+        if (entityType === 'finding' && projectId) {
+          _invalidateProjectFindings(projectId);
+          await _loadProjectFindings(projectId);
+        }
         _renderProjectExplorer();
         const label = _entityEditorLabelForType(entityType).toLocaleLowerCase();
         _setProjectWorkspaceMessage(`${label.charAt(0).toLocaleUpperCase()}${label.slice(1)} metadata saved.`);
@@ -4135,95 +4506,59 @@
     _setProjectWorkspaceMessage('Last run linked to this project.');
   }
 
-  async function _confirmProjectTargetDelete(targetValue) {
+  async function _confirmProjectDestructive({ body, actionLabel, actionId, note }) {
+    const confirmFn = typeof showConfirm === 'function'
+      ? showConfirm
+      : (global && typeof global.showConfirm === 'function' ? global.showConfirm : null);
+    if (!confirmFn) {
+      throw new Error('Project destructive confirmations require showConfirm.');
+    }
+    const choice = await confirmFn({
+      body: note ? { text: body, note } : body,
+      tone: 'danger',
+      actions: [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: actionId, label: actionLabel, role: 'destructive' },
+      ],
+    });
+    return choice === actionId;
+  }
+
+  function _confirmProjectTargetDelete(targetValue) {
     const label = String(targetValue || 'this target');
-    const confirmFn = typeof showConfirm === 'function'
-      ? showConfirm
-      : (global && typeof global.showConfirm === 'function' ? global.showConfirm : null);
-    if (confirmFn) {
-      const choice = await confirmFn({
-        body: `Remove target ${label}?`,
-        tone: 'danger',
-        actions: [
-          { id: 'cancel', label: 'Cancel', role: 'cancel' },
-          { id: 'remove', label: 'Remove', role: 'destructive' },
-        ],
-      });
-      return choice === 'remove';
-    }
-    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
-      return window.confirm(`Remove target ${label}?`);
-    }
-    return false;
+    return _confirmProjectDestructive({
+      body: `Remove target ${label}?`,
+      actionLabel: 'Remove',
+      actionId: 'remove',
+    });
   }
 
-  async function _confirmProjectRunUnlink(runCommand) {
+  function _confirmProjectRunUnlink(runCommand) {
     const label = String(runCommand || 'this run');
-    const confirmFn = typeof showConfirm === 'function'
-      ? showConfirm
-      : (global && typeof global.showConfirm === 'function' ? global.showConfirm : null);
-    if (confirmFn) {
-      const choice = await confirmFn({
-        body: `Remove run from project: ${label}?`,
-        tone: 'danger',
-        actions: [
-          { id: 'cancel', label: 'Cancel', role: 'cancel' },
-          { id: 'remove', label: 'Remove', role: 'destructive' },
-        ],
-      });
-      return choice === 'remove';
-    }
-    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
-      return window.confirm(`Remove run from project: ${label}?`);
-    }
-    return false;
+    return _confirmProjectDestructive({
+      body: `Remove run from project: ${label}?`,
+      actionLabel: 'Remove',
+      actionId: 'remove',
+    });
   }
 
-  async function _confirmProjectPackageDelete(packageName) {
+  function _confirmProjectPackageDelete(packageName) {
     const label = String(packageName || 'this package');
-    const confirmFn = typeof showConfirm === 'function'
-      ? showConfirm
-      : (global && typeof global.showConfirm === 'function' ? global.showConfirm : null);
-    if (confirmFn) {
-      const choice = await confirmFn({
-        body: `Delete package: ${label}?`,
-        tone: 'danger',
-        actions: [
-          { id: 'cancel', label: 'Cancel', role: 'cancel' },
-          { id: 'delete', label: 'Delete', role: 'destructive' },
-        ],
-      });
-      return choice === 'delete';
-    }
-    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
-      return window.confirm(`Delete package: ${label}?`);
-    }
-    return false;
+    return _confirmProjectDestructive({
+      body: `Delete package: ${label}?`,
+      actionLabel: 'Delete',
+      actionId: 'delete',
+    });
   }
 
-  async function _confirmProjectDelete(projectName) {
+  function _confirmProjectDelete(projectName) {
     const label = String(projectName || 'this project');
-    const confirmFn = typeof showConfirm === 'function'
-      ? showConfirm
-      : (global && typeof global.showConfirm === 'function' ? global.showConfirm : null);
-    if (confirmFn) {
-      const choice = await confirmFn({
-        body: {
-          text: `Delete project: ${label}?`,
-          note: 'This removes the project, its targets, packages, and project links. Source runs and saved history remain.',
-        },
-        tone: 'danger',
-        actions: [
-          { id: 'cancel', label: 'Cancel', role: 'cancel' },
-          { id: 'delete', label: 'Delete', role: 'destructive' },
-        ],
-      });
-      return choice === 'delete';
-    }
-    if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
-      return window.confirm(`Delete project: ${label}?`);
-    }
-    return false;
+    return _confirmProjectDestructive({
+      body: `Delete project: ${label}?`,
+      note: 'This removes the project, its targets, packages, and project links. Source runs and saved history remain.',
+      actionLabel: 'Delete',
+      actionId: 'delete',
+    });
   }
 
   projectWorkspaceCreateForm?.addEventListener('submit', async (event) => {
@@ -4293,13 +4628,21 @@
       return;
     }
     try {
+      const metadata = _projectTargetEditorMetadata();
       const url = targetId
         ? `/projects/${encodeURIComponent(projectId)}/targets/${encodeURIComponent(targetId)}`
         : `/projects/${encodeURIComponent(projectId)}/targets`;
-      await _projectWorkspaceRequest(url, {
+      const resp = await _projectWorkspaceRequest(url, {
         method: targetId ? 'PUT' : 'POST',
         body: JSON.stringify(payload),
       });
+      const data = await resp.json().catch(() => ({}));
+      const savedTargetId = targetId || String(data && data.target && data.target.id || '');
+      if (!savedTargetId) {
+        throw new Error('Target saved without an identifier.');
+      }
+      await _syncEntityLabels('target', savedTargetId, metadata.labels);
+      await _syncEntityNote('target', savedTargetId, metadata.noteBody);
       projectWorkspaceLastTargetType = payload.type || projectWorkspaceLastTargetType;
       _closeProjectTargetEditor();
       await refreshProjectWorkspace();
@@ -4379,6 +4722,7 @@
       if (String(finding && finding.id || '') !== normalizedFindingId) return finding;
       return { ...finding, review_state: reviewState };
     }));
+    _invalidateProjectFilteredFindings(normalizedProjectId);
   }
 
   function _handleProjectPackageWizardChange(event) {
@@ -4451,6 +4795,20 @@
 
   projectWorkspaceModal?.addEventListener('change', async (event) => {
     if (_handleProjectPackageWizardChange(event)) return;
+    const compareModeControl = event.target.closest?.('[data-project-compare-mode]');
+    if (compareModeControl) {
+      event.stopPropagation();
+      _syncProjectRunCompareMode(compareModeControl.closest('.project-run-compare-controls'));
+      return;
+    }
+    const compareControl = event.target.closest?.('[data-project-compare-target], [data-project-compare-run="left"]');
+    if (compareControl) {
+      const controls = compareControl.closest('.project-run-compare-controls');
+      if (String(controls?.querySelector('[data-project-compare-mode]')?.value || 'run') === 'baseline') {
+        _avoidProjectRunCompareLabelSelfTarget(controls, String(controls?.querySelector('[data-project-compare-target]')?.value || ''));
+      }
+      return;
+    }
     const sortControl = event.target.closest?.('[data-project-finding-sort]');
     if (sortControl) {
       event.stopPropagation();
@@ -4493,6 +4851,29 @@
       const filters = _projectFindingStatusFilterSet(projectId);
       if (statusFilterControl.checked) filters.add(status);
       else filters.delete(status);
+      _renderProjectExplorer();
+      return;
+    }
+    const labelFilterControl = event.target.closest?.('[data-project-finding-label-filter-option]');
+    if (labelFilterControl) {
+      event.stopPropagation();
+      const projectId = String(labelFilterControl.dataset.projectId || projectWorkspaceSelectedId || '');
+      const labelValue = String(labelFilterControl.value || '').trim();
+      if (!projectId || !labelValue) return;
+      const filters = _projectFindingLabelFilterSet(projectId);
+      if (labelFilterControl.checked) filters.add(labelValue);
+      else filters.delete(labelValue);
+      _renderProjectExplorer();
+      return;
+    }
+    const noteStateControl = event.target.closest?.('[data-project-finding-note-state]');
+    if (noteStateControl) {
+      event.stopPropagation();
+      const projectId = String(noteStateControl.dataset.projectId || projectWorkspaceSelectedId || '');
+      if (!projectId) return;
+      const value = String(noteStateControl.value || 'all');
+      if (value === 'all') projectWorkspaceFindingNoteStateFilters.delete(projectId);
+      else projectWorkspaceFindingNoteStateFilters.set(projectId, value);
       _renderProjectExplorer();
       return;
     }
@@ -4572,6 +4953,11 @@
 
   projectWorkspaceModal?.addEventListener('click', async (event) => {
     if (event.target.closest?.('[data-project-review-state]')) return;
+    const compareModeButton = event.target.closest?.('[data-project-compare-mode-value]');
+    if (compareModeButton) {
+      _setProjectRunCompareMode(compareModeButton, event);
+      return;
+    }
     const messageDismiss = event.target.closest?.('[data-project-message-dismiss]');
     if (messageDismiss) {
       event.preventDefault();
@@ -4645,6 +5031,27 @@
       _renderProjectExplorer();
       return;
     }
+    const labelFilterClear = event.target.closest?.('[data-project-finding-label-filter-clear]');
+    if (labelFilterClear) {
+      event.preventDefault();
+      event.stopPropagation();
+      const projectId = String(labelFilterClear.dataset.projectId || projectWorkspaceSelectedId || '');
+      const labelValue = String(labelFilterClear.dataset.projectFindingLabelFilterClear || '');
+      const filters = _projectFindingLabelFilterSet(projectId);
+      if (labelValue === 'all') filters.clear();
+      else if (labelValue) filters.delete(labelValue);
+      _renderProjectExplorer();
+      return;
+    }
+    const noteStateClear = event.target.closest?.('[data-project-finding-note-state-clear]');
+    if (noteStateClear) {
+      event.preventDefault();
+      event.stopPropagation();
+      const projectId = String(noteStateClear.dataset.projectId || projectWorkspaceSelectedId || '');
+      if (projectId) projectWorkspaceFindingNoteStateFilters.delete(projectId);
+      _renderProjectExplorer();
+      return;
+    }
     const allFilterClear = event.target.closest?.('[data-project-filter-clear-all]');
     if (allFilterClear) {
       event.preventDefault();
@@ -4653,6 +5060,8 @@
       _projectTargetFilterSet(projectId).clear();
       _projectRunFilterSet(projectId).clear();
       _projectFindingStatusFilterSet(projectId).clear();
+      _projectFindingLabelFilterSet(projectId).clear();
+      projectWorkspaceFindingNoteStateFilters.delete(projectId);
       _renderProjectExplorer();
       return;
     }
@@ -4795,21 +5204,27 @@
         _renderProjectExplorer();
         return;
       } else if (action === 'compare-runs') {
+        const controls = projectExplorerBody?.querySelector('.project-run-compare-controls');
+        const mode = String(projectExplorerBody?.querySelector('[data-project-compare-mode]')?.value || 'run');
+        const targetValue = String(projectExplorerBody?.querySelector('[data-project-compare-target]')?.value || '').trim();
+        if (mode === 'baseline') {
+          _avoidProjectRunCompareLabelSelfTarget(controls, targetValue);
+        }
         const leftId = String(projectExplorerBody?.querySelector('[data-project-compare-run="left"]')?.value || '');
-        const rightId = String(projectExplorerBody?.querySelector('[data-project-compare-run="right"]')?.value || '');
-        if (!projectId || !leftId || !rightId) throw new Error('Choose two project runs to compare.');
-        if (leftId === rightId) throw new Error('Choose two different project runs to compare.');
+        if (!projectId || !leftId) throw new Error('Choose a project run to compare.');
+        if (mode === 'run' && !targetValue) throw new Error('Choose two project runs to compare.');
+        if (mode === 'run' && leftId === targetValue) throw new Error('Choose two different project runs to compare.');
+        if (mode === 'baseline' && !targetValue) throw new Error('Choose a baseline label to compare.');
         const compareFn = global && typeof global.fetchAndRenderHistoryComparison === 'function'
           ? global.fetchAndRenderHistoryComparison
           : (typeof window !== 'undefined' && typeof window.fetchAndRenderHistoryComparison === 'function'
               ? window.fetchAndRenderHistoryComparison
               : null);
         if (!compareFn) throw new Error('Run comparison is not available.');
-        const params = new URLSearchParams({
-          left_run_id: leftId,
-          right_run_id: rightId,
-        });
-        compareFn(leftId, rightId, {
+        const params = new URLSearchParams({ left_run_id: leftId });
+        if (mode === 'baseline') params.set('baseline_label', targetValue);
+        else params.set('right_run_id', targetValue);
+        compareFn(leftId, mode === 'baseline' ? `baseline:${targetValue}` : targetValue, {
           url: `/projects/${encodeURIComponent(projectId)}/compare?${params.toString()}`,
         });
         return;
@@ -4947,10 +5362,6 @@
     _closeProjectEntityEditor();
   });
 
-  projectPackageManifestOverlay?.querySelector('.project-package-manifest-close')?.addEventListener('click', () => {
-    _closeProjectPackageManifest();
-  });
-
   projectPackageWizardOverlay?.addEventListener('input', (event) => {
     _handleProjectPackageWizardInput(event);
   });
@@ -4991,13 +5402,6 @@
     }
   });
 
-  projectPackageManifestOverlay?.addEventListener('keydown', (event) => {
-    if (event.key !== 'Escape') return;
-    event.preventDefault();
-    event.stopPropagation();
-    _closeProjectPackageManifest();
-  });
-
   const bindDismissibleFn = global && typeof global.bindDismissible === 'function'
     ? global.bindDismissible
     : (typeof bindDismissible === 'function' ? bindDismissible : null);
@@ -5023,6 +5427,14 @@
       isOpen: isProjectPackageWizardOpen,
       onClose: () => _closeProjectPackageWizard(),
       closeButtons: null,
+    });
+  }
+  if (bindDismissibleFn && projectPackageManifestOverlay) {
+    bindDismissibleFn(projectPackageManifestOverlay, {
+      level: 'modal',
+      isOpen: isProjectPackageManifestOpen,
+      onClose: () => _closeProjectPackageManifest(),
+      closeButtons: [projectPackageManifestOverlay.querySelector('.project-package-manifest-close')],
     });
   }
 
@@ -5145,6 +5557,9 @@
   document.addEventListener('visibilitychange', () => {
     _startHudStatusPoll({ pollNow: document.visibilityState === 'visible' });
   });
+  window.addEventListener('resize', () => {
+    _scheduleProjectFilterSortDividerSync(projectExplorerBody);
+  });
 
   if (typeof onUiEvent === 'function') {
     onUiEvent('app:history-rendered', () => {
@@ -5224,6 +5639,7 @@
   global.isProjectWorkspaceOpen = isProjectWorkspaceOpen;
   global.closeProjectTargetEditor = _closeProjectTargetEditor;
   global.isProjectTargetEditorOpen = isProjectTargetEditorOpen;
+  global.isProjectPackageManifestOpen = isProjectPackageManifestOpen;
   global.refreshProjectWorkspace = refreshProjectWorkspace;
   global.notifyProjectWorkspaceChanged = _notifyProjectWorkspaceChanged;
 

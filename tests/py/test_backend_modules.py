@@ -4587,6 +4587,8 @@ class TestDatabaseInit:
             "evidence_packages",
         }.issubset(tables)
         assert "notes" not in project_columns
+        assert "label" not in target_columns
+        assert "notes" not in target_columns
         assert "content_sha256" in artifact_columns
         assert {
             "review_state",
@@ -4657,10 +4659,10 @@ class TestDatabaseInit:
         with pytest.raises(ValueError):
             database.validate_project_link_source("guessed")
 
-        payload = {"type": "domain", "value": "darklab.sh", "notes": "x" * 2001}
+        payload = {"type": "domain", "value": "darklab.sh", "notes": "legacy target note"}
         with pytest.raises(project_workspace.ProjectWorkspaceError) as exc:
             project_workspace._normalize_target_payload(payload)
-        assert "target notes must be 2000 characters or fewer" in str(exc.value)
+        assert "target labels and notes use entity metadata routes" in str(exc.value)
 
     def test_creates_session_indexes(self):
         with tempfile.TemporaryDirectory() as tmp:

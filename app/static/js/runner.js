@@ -771,8 +771,25 @@ function _handleRunStreamMessage(msg, tabId) {
     _markTabRunStarted(tabId, msg.run_id);
   } else if (msg.type === 'notice') {
     _appendStreamLine(msg.text, 'notice', tabId, msg);
-    if (msg.project_linked && typeof globalThis.notifyProjectWorkspaceChanged === 'function') {
-      globalThis.notifyProjectWorkspaceChanged('run-linked', msg.project_id || '');
+    const notifyProjectChange = typeof globalThis.notifyProjectWorkspaceChanged === 'function'
+      ? globalThis.notifyProjectWorkspaceChanged
+      : (typeof notifyProjectWorkspaceChanged === 'function' ? notifyProjectWorkspaceChanged : null);
+    if (msg.project_linked && notifyProjectChange) {
+      notifyProjectChange('run-linked', msg.project_id || '');
+    }
+    if (msg.project_targets_discovered) {
+      const rawCount = Number(msg.target_count || msg.count || 0);
+      const count = Number.isFinite(rawCount) ? rawCount : 0;
+      if (notifyProjectChange) {
+        notifyProjectChange('target-discovered', msg.project_id || '');
+      }
+      if (typeof emitUiEvent === 'function') {
+        emitUiEvent('app:project-target-discovered', {
+          project_id: msg.project_id || '',
+          project_name: msg.project_name || '',
+          count,
+        });
+      }
     }
   } else if (msg.type === 'owner') {
     _handleRunOwnerChanged(msg, tabId);

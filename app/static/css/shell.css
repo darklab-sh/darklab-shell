@@ -2780,33 +2780,27 @@ body.mobile-terminal-mode .output-follow-btn {
 .project-finding-sort-control .form-select,
 .project-finding-sort-control .app-select {
   width: auto;
-  min-width: 118px;
-  font-size: 10px;
+  min-width: 148px;
+  font-size: 11px;
 }
 
 .project-finding-sort-control .form-select {
-  min-height: 22px;
-  padding: 3px 24px 3px 9px;
-  border-color: var(--theme-button-secondary-border);
-  background-color: var(--theme-button-secondary-bg);
-  color: var(--theme-button-secondary-text);
+  min-height: 28px;
+  padding: 7px 24px 7px 9px;
 }
 
 .project-finding-sort-control .app-select-trigger {
-  min-height: 22px;
-  padding: 3px 9px;
-  border-color: var(--theme-button-secondary-border);
-  background: var(--theme-button-secondary-bg);
-  color: var(--theme-button-secondary-text);
-  font-size: 10px;
+  justify-content: space-between;
+  min-height: 28px;
+  padding: 7px 9px;
+  font-size: 11px;
   gap: 4px;
 }
 
-.project-finding-sort-control .form-select:hover,
-.project-finding-sort-control .app-select-trigger:hover {
-  border-color: var(--theme-button-secondary-hover-border);
-  background: var(--theme-button-secondary-hover-bg);
-  color: var(--text);
+.project-finding-source-order-control.has-sort-divider {
+  margin-left: 2px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
 }
 
 .project-explorer-filter-chips {
@@ -2827,6 +2821,7 @@ body.mobile-terminal-mode .output-follow-btn {
 .project-explorer-tab-panel {
   display: grid;
   gap: 14px;
+  container: project-tab-panel / inline-size;
   min-height: 0;
 }
 
@@ -2840,17 +2835,11 @@ body.mobile-terminal-mode .output-follow-btn {
   gap: 8px;
 }
 
-.project-explorer-meta-row,
-.project-explorer-item {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--theme-chrome-row-bg);
-}
-
 .project-explorer-meta-row {
   display: grid;
   gap: 4px;
   padding: 10px;
+  background: var(--theme-chrome-row-bg);
 }
 
 .project-explorer-meta-row span:first-child {
@@ -3012,7 +3001,9 @@ body.mobile-terminal-mode .output-follow-btn {
 .project-target-filter-trigger {
   display: inline-flex;
   align-items: center;
+  justify-content: space-between;
   gap: 4px;
+  min-width: 148px;
   list-style: none;
   cursor: pointer;
   user-select: none;
@@ -3027,17 +3018,13 @@ body.mobile-terminal-mode .output-follow-btn {
   transition: color 0.12s ease, transform 0.12s ease;
 }
 
-.project-target-filter-menu[open] > .project-target-filter-trigger::after {
+.project-target-filter-menu.is-open > .project-target-filter-trigger::after {
   transform: rotate(180deg);
 }
 
 .project-target-filter-trigger:hover::after,
 .project-target-filter-trigger:focus-visible::after {
   color: var(--text);
-}
-
-.project-target-filter-trigger::-webkit-details-marker {
-  display: none;
 }
 
 .project-target-filter-options {
@@ -3052,11 +3039,13 @@ body.mobile-terminal-mode .output-follow-btn {
   max-width: min(360px, calc(100vw - 48px));
   max-height: 260px;
   padding: 8px;
-  border: 1px solid var(--border-bright);
   border-radius: 6px;
-  background: var(--surface);
-  box-shadow: 0 14px 32px var(--theme-dropdown-shadow);
+  overflow-x: hidden;
   overflow-y: auto;
+}
+
+.project-target-filter-options[hidden] {
+  display: none;
 }
 
 .project-target-filter-option {
@@ -3068,14 +3057,8 @@ body.mobile-terminal-mode .output-follow-btn {
   min-height: 30px;
   padding: 5px 7px;
   border-radius: 4px;
-  color: var(--text);
   white-space: nowrap;
   cursor: pointer;
-}
-
-.project-target-filter-option:hover,
-.project-target-filter-option:focus-within {
-  background: var(--theme-chrome-row-hover-bg);
 }
 
 .project-target-filter-option input {
@@ -3120,7 +3103,6 @@ body.mobile-terminal-mode .output-follow-btn {
   min-width: 0;
 }
 
-.project-target-filter-chip,
 .project-target-filter-clear {
   min-height: 28px;
   border: 1px solid var(--border);
@@ -3134,6 +3116,8 @@ body.mobile-terminal-mode .output-follow-btn {
 
 .project-target-filter-chip {
   padding: 4px 9px;
+  min-height: 28px;
+  font-size: 11px;
 }
 
 .project-target-filter-clear {
@@ -3142,8 +3126,6 @@ body.mobile-terminal-mode .output-follow-btn {
   background: transparent;
 }
 
-.project-target-filter-chip:hover,
-.project-target-filter-chip:focus-visible,
 .project-target-filter-clear:hover,
 .project-target-filter-clear:focus-visible {
   border-color: var(--green-dim);
@@ -3170,25 +3152,117 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 .project-runs-toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  flex-wrap: wrap;
-  justify-content: flex-end;
   gap: 8px;
 }
 
 .project-run-compare-controls {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr);
   align-items: center;
-  flex: 1 1 480px;
-  flex-wrap: wrap;
   gap: 8px;
-  min-width: min(100%, 320px);
+  min-width: 0;
 }
 
-.project-run-compare-select {
+.project-run-compare-controls [data-project-compare-run="left"],
+.project-run-compare-controls [data-project-compare-target] {
   flex: 1 1 180px;
-  min-width: 0;
+  width: auto;
+  min-width: 180px;
+}
+
+.project-run-compare-controls > .app-select {
+  width: 100%;
+  min-width: 180px;
+}
+
+.project-run-compare-mode-group {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border-bright);
+  border-radius: 4px;
+  background: var(--theme-chrome-control-bg);
+}
+
+.project-run-compare-mode-group[hidden] {
+  display: none;
+}
+
+.project-run-compare-mode-button {
+  appearance: none;
+  -webkit-appearance: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1;
+  padding: 10px 11px;
+}
+
+.project-run-compare-mode-button + .project-run-compare-mode-button {
+  border-left: 1px solid var(--border);
+}
+
+.project-run-compare-mode-button:hover,
+.project-run-compare-mode-button:focus-visible {
+  color: var(--text);
+}
+
+.project-run-compare-mode-button.is-active {
+  background: var(--green-glow);
+  color: var(--green);
+}
+
+.project-runs-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+}
+
+.project-runs-toolbar-divider {
+  width: 1px;
+  min-height: 32px;
+  background: var(--border);
+}
+
+@container project-tab-panel (max-width: 760px) {
+  .project-runs-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .project-runs-toolbar-actions {
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+
+  .project-runs-toolbar-divider {
+    display: none;
+  }
+}
+
+@container project-tab-panel (max-width: 620px) {
+  .project-run-compare-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .project-run-compare-mode-group {
+    justify-self: start;
+  }
+
+  .project-run-compare-controls [data-project-compare-run="left"],
+  .project-run-compare-controls [data-project-compare-target],
+  .project-run-compare-controls > .app-select {
+    width: 100%;
+    min-width: 0;
+  }
 }
 
 .project-run-count-chip[disabled] {
@@ -3233,6 +3307,7 @@ body.mobile-terminal-mode .output-follow-btn {
   justify-content: space-between;
   gap: 12px;
   padding: 11px 12px;
+  background: var(--theme-chrome-row-bg);
 }
 
 button.project-explorer-item {

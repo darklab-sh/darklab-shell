@@ -441,7 +441,7 @@ test.describe('project workspace modal', () => {
     await expect.poll(async () => page.evaluate(async (id) => {
       const resp = await apiFetch(`/projects/${encodeURIComponent(id)}`, { cache: 'no-store' })
       const data = await resp.json()
-      return data.project?.notes || ''
+      return data.project?.note?.body || ''
     }, projectId)).toBe('Project notes from Playwright')
 
     await page.locator('[data-project-tab="details"]').click()
@@ -504,7 +504,7 @@ test.describe('project workspace modal', () => {
         summaryResp.json(),
       ])
       return {
-        notes: projectData.project?.notes,
+        notes: projectData.project?.note?.body,
         labels: (labelsData.labels || []).map((label) => label.label),
         targets: summaryData.targets || [],
         runs: summaryData.runs || [],

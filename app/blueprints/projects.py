@@ -17,7 +17,6 @@ from project_workspace import (
     add_entity_label,
     add_project_target,
     build_evidence_package_archive,
-    build_project_workflow_payload,
     clear_active_project,
     compare_project_runs,
     create_evidence_package,
@@ -50,7 +49,6 @@ from project_workspace import (
     update_project,
     update_project_target,
 )
-from user_workflows import UserWorkflowError, create_user_workflow
 from workspace import (
     InvalidWorkspacePath,
     WorkspaceBinaryFile,
@@ -510,41 +508,17 @@ def projects_artifacts_download(project_id, artifact_id):
     )
 
 
-@projects_bp.route("/projects/<project_id>/workflows/promote", methods=["POST"])
-@limiter.limit(_project_write_limit)
-def projects_workflows_promote(project_id):
-    session_id = get_session_id()
-    try:
-        promotion_payload = build_project_workflow_payload(session_id, project_id, request.get_json(silent=True) or {})
-        if promotion_payload is None:
-            return jsonify({"error": "project not found"}), 404
-        workflow = create_user_workflow(session_id, promotion_payload["workflow"])
-    except ProjectWorkspaceError as exc:
-        return _project_error_response(exc)
-    except UserWorkflowError as exc:
-        return jsonify({"error": str(exc)}), 400
-    log.info("PROJECT_WORKFLOW_PROMOTED", extra={
-        "ip": get_client_ip(),
-        "session": get_log_session_id(session_id),
-        "project_id": project_id,
-        "workflow_id": workflow["id"] if workflow else "",
-        "step_count": len(workflow["steps"]) if workflow else 0,
-        "truncated_runs": promotion_payload["promotion"]["truncated_runs"],
-    })
-    return jsonify({"ok": True, "workflow": workflow, "promotion": promotion_payload["promotion"]}), 201
-
-
 @projects_bp.route("/projects/<project_id>/findings")
 def projects_findings_list(project_id):
     session_id = get_session_id()
     filters = {
-        "run_id": request.args.get("run_id"),
-        "target_id": request.args.get("target_id"),
-        "review_state": request.args.get("review_state"),
+        "run_id": request.args.getlist("run_id"),
+        "target_id": request.args.getlist("target_id"),
+        "review_state": request.args.getlist("review_state"),
         "scope": request.args.get("scope"),
         "severity": request.args.get("severity"),
         "command_root": request.args.get("command_root"),
-        "label": request.args.get("label"),
+        "label": request.args.getlist("label"),
         "note_state": request.args.get("note_state"),
     }
     try:

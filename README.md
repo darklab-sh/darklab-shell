@@ -87,7 +87,7 @@ Before you begin, make sure you have:
 - Linux host or macOS (uses `os.setsid` for process group management; `sudo kill` for cross-user process termination)
 - (Optional) Redis 6.2+ (for `GETDEL` support). If not configured or available, the app falls back to in-process mode
 
-Other dependencies (Flask ≥ 2.0, PyYAML, Flask-Limiter[redis], redis-py, psutil) are installed automatically by the steps below.
+Other dependencies (Flask ≥ 2.0, PyYAML, Flask-Limiter[redis], redis-py, psutil, gunicorn, and pyte for server-side PTY terminal capture) are installed automatically by the steps below.
 
 The easiest path is to run:
 

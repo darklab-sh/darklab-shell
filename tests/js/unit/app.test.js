@@ -243,6 +243,17 @@ describe('app helpers', () => {
     })
   })
 
+  it('does not let history outside-click dismissal close behind modal overlays', async () => {
+    const bindOutsideClickClose = vi.fn()
+    await loadAppFns({ bindOutsideClickClose })
+
+    const historyCall = bindOutsideClickClose.mock.calls.find(([panel]) => panel?.id === 'history-panel')
+    expect(historyCall?.[1].exemptSelectors).toEqual(expect.arrayContaining([
+      '.modal-overlay',
+      '#history-compare-overlay',
+    ]))
+  })
+
   it('applies the saved theme at startup', async () => {
     await loadAppFns({
       theme: 'theme_light_blue',

@@ -862,7 +862,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Limits:** projects are session-scoped and do not copy source history. Deleting a project removes its project metadata, targets, packages, and links, but not the underlying run history or workspace files. Entity notes are intentionally one note per supported entity rather than comment threads.
 
-**Configuration:** `max_projects_per_session`, `max_project_links_per_project`, `max_targets_per_project`, `max_findings_per_project`, `max_evidence_packages_per_project`, `max_entity_labels_per_session`, `max_entity_labels_per_entity`, `max_entity_notes_per_session`, `evidence_package_max_mb`, `evidence_package_max_artifacts`, and evidence-package download rate limits in `conf/config.yaml`.
+**Configuration:** `max_projects_per_session`, `max_project_links_per_project`, `max_project_targets_per_project`, `max_evidence_packages_per_project`, `max_entity_labels_per_session`, `max_entity_labels_per_entity`, `max_entity_notes_per_session`, `evidence_package_max_mb`, `evidence_package_max_artifacts`, `evidence_package_download_rate_limit_per_minute`, and `evidence_package_download_rate_limit_per_second` in `conf/config.yaml`.
 
 **Related files:** `app/project_workspace.py` (project relationship, metadata, and package helpers), `app/blueprints/projects.py` (project routes), `app/static/js/shell_chrome.js` (Projects modal), `app/static/js/history.js` (history project filters and metadata actions), `app/static/js/workspace.js` (workspace file metadata), and `app/database.py` (project workspace schema).
 
