@@ -8,7 +8,6 @@ import math
 import re
 import sqlite3
 import uuid
-from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from typing import Any
@@ -47,12 +46,7 @@ COMPARE_LINE_DISPLAY_TRUNCATE = 4_000
 COMPARE_LAZY_EQUAL_PAGE_LIMIT = 5_000
 COMPARE_LAZY_EQUAL_BYTE_LIMIT = 512_000
 COMPARE_REPLACE_PAIR_MIN_RATIO = 0.5
-COMPARE_CHANGED_LINE_SIMILARITY = 0.72
-COMPARE_CHANGED_LINE_MAX_PAIR_LENGTH = 4_000
-COMPARE_CHANGED_LINE_INDEX_WINDOW = 40
-COMPARE_CHANGED_LINE_QUICK_RATIO = 0.6
-COMPARE_CHANGED_LINE_CANDIDATES_PER_LINE = 5
-COMPARE_CHANGED_LINE_MAX_CANDIDATES = 5_000
+COMPARE_REPLACE_PAIR_CANDIDATES = 32
 
 
 def _normalize_history_filter_text(value):
@@ -990,42 +984,15 @@ def _compare_object_items(left_items, right_items):
     }
 
 
-def _bounded_multiset_line_diff(left_entries, right_entries):
-    left_counts = Counter(entry["text"] for entry in left_entries)
-    right_counts = Counter(entry["text"] for entry in right_entries)
-    added_remaining = right_counts - left_counts
-    removed_remaining = left_counts - right_counts
-
-    def _collect(source_entries, remaining):
-        rows = []
-        omitted = 0
-        seen = Counter()
-        for entry in source_entries:
-            text = entry["text"]
-            if remaining[text] <= seen[text]:
-                continue
-            seen[text] += 1
-            if len(rows) >= COMPARE_MAX_CHANGED_LINES:
-                omitted += 1
-                continue
-            rows.append({
-                "text": text,
-                "line_index": entry.get("line_index"),
-                "count": 1,
-            })
-        return rows, omitted
-
-    added, added_omitted = _collect(right_entries, added_remaining)
-    removed, removed_omitted = _collect(left_entries, removed_remaining)
-    changed, added, removed = _pair_similar_changed_lines(added, removed)
+def _compare_line_payload(entry):
     return {
-        "changed": changed,
-        "added": added,
-        "removed": removed,
-        "added_omitted": added_omitted,
-        "removed_omitted": removed_omitted,
-        "max_changed_lines": COMPARE_MAX_CHANGED_LINES,
+        "text": str(entry.get("text") or ""),
+        "line_index": entry.get("line_index"),
     }
+
+
+def _compare_line_payloads(entries, start, end):
+    return [_compare_line_payload(entry) for entry in entries[start:end]]
 
 
 def _changed_line_segments(left_text, right_text):
@@ -1043,85 +1010,305 @@ def _changed_line_segments(left_text, right_text):
     return left_segments, right_segments
 
 
-def _paired_line_similarity(added_text, removed_text):
-    if not added_text or not removed_text:
-        return 0
-    if added_text == removed_text:
-        return 1
-    return SequenceMatcher(None, added_text, removed_text, autojunk=False).ratio()
+def _compare_equal_hunk(left_entries, right_entries, left_start, left_end, right_start, right_end, inline_context):
+    hunk = {
+        "op": "equal",
+        "left": {"start": left_start, "end": left_end},
+        "right": {"start": right_start, "end": right_end},
+    }
+    line_count = left_end - left_start
+    if line_count < 2 * inline_context:
+        hunk["left"]["lines"] = _compare_line_payloads(left_entries, left_start, left_end)
+        hunk["right"]["lines"] = _compare_line_payloads(right_entries, right_start, right_end)
+        return hunk
+    left_leading_end = min(left_end, left_start + inline_context)
+    right_leading_end = min(right_end, right_start + inline_context)
+    left_trailing_start = max(left_leading_end, left_end - inline_context)
+    right_trailing_start = max(right_leading_end, right_end - inline_context)
+    hunk["context"] = {
+        "leading": {
+            "left": _compare_line_payloads(left_entries, left_start, left_leading_end),
+            "right": _compare_line_payloads(right_entries, right_start, right_leading_end),
+        },
+        "trailing": {
+            "left": _compare_line_payloads(left_entries, left_trailing_start, left_end),
+            "right": _compare_line_payloads(right_entries, right_trailing_start, right_end),
+        },
+        "omitted": max(0, line_count - (2 * inline_context)),
+    }
+    return hunk
 
 
-def _changed_line_pair_prefilter(added_text, removed_text, added_index, removed_index):
-    if abs(added_index - removed_index) > COMPARE_CHANGED_LINE_INDEX_WINDOW:
-        return False
-    longest = max(len(added_text), len(removed_text))
-    shortest = min(len(added_text), len(removed_text))
-    if longest > COMPARE_CHANGED_LINE_MAX_PAIR_LENGTH:
-        return False
-    if longest and shortest / longest < 0.5:
-        return False
-    if added_text == removed_text:
-        return True
-    return SequenceMatcher(None, added_text, removed_text, autojunk=False).quick_ratio() >= COMPARE_CHANGED_LINE_QUICK_RATIO
+def _replace_pair_candidate_indexes(left_index, left_count, right_indexes):
+    if not right_indexes:
+        return []
+    if left_count <= 1:
+        target = 0
+    else:
+        target = round(left_index * (len(right_indexes) - 1) / (left_count - 1))
+    return sorted(
+        right_indexes,
+        key=lambda right_index: (abs(right_index - target), right_index),
+    )[:COMPARE_REPLACE_PAIR_CANDIDATES]
 
 
-def _pair_similar_changed_lines(added, removed):
-    if not added or not removed:
-        return [], added, removed
+def _compare_replace_hunk(left_entries, right_entries, left_start, left_end, right_start, right_end):
+    left_lines = _compare_line_payloads(left_entries, left_start, left_end)
+    right_lines = _compare_line_payloads(right_entries, right_start, right_end)
+    hunk = {
+        "op": "replace",
+        "left": {"start": left_start, "end": left_end, "lines": left_lines},
+        "right": {"start": right_start, "end": right_end, "lines": right_lines},
+        "changed_pairs": [],
+        "left_unpaired": [],
+        "right_unpaired": [],
+    }
+    unmatched_right = set(range(len(right_lines)))
+    if len(left_lines) == 1 and len(right_lines) == 1:
+        left_text = str(left_lines[0].get("text") or "")
+        right_text = str(right_lines[0].get("text") or "")
+        if max(len(left_text), len(right_text)) <= COMPARE_LINE_DISPLAY_TRUNCATE:
+            left_segments, right_segments = _changed_line_segments(left_text, right_text)
+            hunk["changed_pairs"].append({
+                "left_index": 0,
+                "right_index": 0,
+                "similarity": round(SequenceMatcher(None, left_text, right_text, autojunk=False).ratio(), 3),
+                "segments": {"left": left_segments, "right": right_segments},
+            })
+            return hunk
 
-    unmatched_added = set(range(len(added)))
-    unmatched_removed = set(range(len(removed)))
-    candidates = []
-    for removed_index, removed_line in enumerate(removed):
-        removed_text = str(removed_line.get("text") or "")
-        line_candidates = []
-        for added_index, added_line in enumerate(added):
-            added_text = str(added_line.get("text") or "")
-            if not _changed_line_pair_prefilter(added_text, removed_text, added_index, removed_index):
-                continue
-            similarity = _paired_line_similarity(added_text, removed_text)
-            if similarity < COMPARE_CHANGED_LINE_SIMILARITY:
-                continue
-            distance_penalty = abs(added_index - removed_index) * 0.001
-            line_candidates.append((similarity - distance_penalty, similarity, removed_index, added_index))
-        candidates.extend(sorted(line_candidates, reverse=True)[:COMPARE_CHANGED_LINE_CANDIDATES_PER_LINE])
-        if len(candidates) >= COMPARE_CHANGED_LINE_MAX_CANDIDATES:
-            candidates = candidates[:COMPARE_CHANGED_LINE_MAX_CANDIDATES]
-            break
-
-    changed = []
-    for _, similarity, removed_index, added_index in sorted(candidates, reverse=True):
-        if removed_index not in unmatched_removed or added_index not in unmatched_added:
+    for left_index, left_line in enumerate(left_lines):
+        left_text = str(left_line.get("text") or "")
+        if len(left_text) > COMPARE_LINE_DISPLAY_TRUNCATE:
+            hunk["left_unpaired"].append(left_index)
             continue
-        unmatched_removed.remove(removed_index)
-        unmatched_added.remove(added_index)
-        removed_line = removed[removed_index]
-        added_line = added[added_index]
-        removed_segments, added_segments = _changed_line_segments(
-            str(removed_line.get("text") or ""),
-            str(added_line.get("text") or ""),
-        )
-        changed.append({
-            "removed": {
-                **removed_line,
-                "segments": removed_segments,
-            },
-            "added": {
-                **added_line,
-                "segments": added_segments,
-            },
+        best = None
+        for right_index in _replace_pair_candidate_indexes(left_index, len(left_lines), unmatched_right):
+            right_text = str(right_lines[right_index].get("text") or "")
+            if len(right_text) > COMPARE_LINE_DISPLAY_TRUNCATE:
+                continue
+            similarity = SequenceMatcher(None, left_text, right_text, autojunk=False).ratio()
+            if similarity < COMPARE_REPLACE_PAIR_MIN_RATIO:
+                continue
+            score = (similarity, -abs(right_index - left_index), -right_index)
+            if best is None or score > best[0]:
+                best = (score, similarity, right_index)
+        if best is None:
+            hunk["left_unpaired"].append(left_index)
+            continue
+        _, similarity, right_index = best
+        unmatched_right.remove(right_index)
+        right_text = str(right_lines[right_index].get("text") or "")
+        left_segments, right_segments = _changed_line_segments(left_text, right_text)
+        hunk["changed_pairs"].append({
+            "left_index": left_index,
+            "right_index": right_index,
             "similarity": round(similarity, 3),
+            "segments": {"left": left_segments, "right": right_segments},
         })
 
-    changed.sort(key=lambda item: (
-        item["removed"].get("line_index") is None,
-        item["removed"].get("line_index") if item["removed"].get("line_index") is not None else 0,
-    ))
-    return (
-        changed,
-        [line for index, line in enumerate(added) if index in unmatched_added],
-        [line for index, line in enumerate(removed) if index in unmatched_removed],
-    )
+    hunk["right_unpaired"] = sorted(unmatched_right)
+    hunk["changed_pairs"].sort(key=lambda item: item["left_index"])
+    return hunk
+
+
+def _change_hunk_units(hunk):
+    if hunk["op"] == "insert":
+        return len(hunk["right"].get("lines", []))
+    if hunk["op"] == "delete":
+        return len(hunk["left"].get("lines", []))
+    if hunk["op"] == "replace":
+        return (
+            2 * len(hunk.get("changed_pairs", []))
+            + len(hunk.get("left_unpaired", []))
+            + len(hunk.get("right_unpaired", []))
+        )
+    return 0
+
+
+def _trim_change_hunk_to_budget(hunk, remaining_units):
+    if remaining_units <= 0:
+        return None, 0, {"left": 0, "right": 0, "total": 0}
+    units = _change_hunk_units(hunk)
+    if units <= remaining_units:
+        return hunk, units, {"left": 0, "right": 0, "total": 0}
+
+    omitted = {"left": 0, "right": 0, "total": 0}
+
+    def _omit(side):
+        omitted[side] += 1
+        omitted["total"] += 1
+
+    if hunk["op"] == "insert":
+        keep = max(0, remaining_units)
+        lines = hunk["right"].get("lines", [])
+        omitted_count = max(0, len(lines) - keep)
+        hunk["right"]["lines"] = lines[:keep]
+        omitted["right"] = omitted_count
+        omitted["total"] = omitted_count
+        if omitted_count:
+            hunk["lines_omitted"] = omitted
+        return hunk if keep else None, keep, omitted
+    if hunk["op"] == "delete":
+        keep = max(0, remaining_units)
+        lines = hunk["left"].get("lines", [])
+        omitted_count = max(0, len(lines) - keep)
+        hunk["left"]["lines"] = lines[:keep]
+        omitted["left"] = omitted_count
+        omitted["total"] = omitted_count
+        if omitted_count:
+            hunk["lines_omitted"] = omitted
+        return hunk if keep else None, keep, omitted
+
+    while _change_hunk_units(hunk) > remaining_units and hunk.get("left_unpaired"):
+        hunk["left_unpaired"].pop()
+        _omit("left")
+    while _change_hunk_units(hunk) > remaining_units and hunk.get("right_unpaired"):
+        hunk["right_unpaired"].pop()
+        _omit("right")
+    while _change_hunk_units(hunk) > remaining_units and hunk.get("changed_pairs"):
+        hunk["changed_pairs"].pop()
+        _omit("left")
+        _omit("right")
+    if omitted["total"]:
+        hunk["lines_omitted"] = omitted
+    units = _change_hunk_units(hunk)
+    return hunk if units else None, units, omitted
+
+
+def _hunk_line_diff(
+    left_entries,
+    right_entries,
+    *,
+    max_changed_lines=COMPARE_MAX_CHANGED_LINES,
+    max_hunks=COMPARE_MAX_HUNKS,
+    inline_context=COMPARE_INLINE_EQUAL_CONTEXT,
+):
+    left_texts = [str(entry.get("text") or "") for entry in left_entries]
+    right_texts = [str(entry.get("text") or "") for entry in right_entries]
+    matcher = SequenceMatcher(None, left_texts, right_texts, autojunk=False)
+    hunks = []
+    totals = {
+        "left_total_lines": len(left_entries),
+        "right_total_lines": len(right_entries),
+        "equal_line_count": 0,
+        "changed_line_count": 0,
+        "added_line_count": 0,
+        "removed_line_count": 0,
+    }
+    lines_omitted = {"left": 0, "right": 0, "total": 0}
+    hunks_omitted = 0
+    emitted_change_units = 0
+    emitted_change_hunks = 0
+
+    for tag, left_start, left_end, right_start, right_end in matcher.get_opcodes():
+        if tag == "equal":
+            totals["equal_line_count"] += left_end - left_start
+            hunks.append(_compare_equal_hunk(
+                left_entries,
+                right_entries,
+                left_start,
+                left_end,
+                right_start,
+                right_end,
+                inline_context,
+            ))
+            continue
+
+        if tag == "insert":
+            hunk = {
+                "op": "insert",
+                "left": {"start": left_start, "end": left_end},
+                "right": {
+                    "start": right_start,
+                    "end": right_end,
+                    "lines": _compare_line_payloads(right_entries, right_start, right_end),
+                },
+            }
+            totals["added_line_count"] += right_end - right_start
+        elif tag == "delete":
+            hunk = {
+                "op": "delete",
+                "left": {
+                    "start": left_start,
+                    "end": left_end,
+                    "lines": _compare_line_payloads(left_entries, left_start, left_end),
+                },
+                "right": {"start": right_start, "end": right_end},
+            }
+            totals["removed_line_count"] += left_end - left_start
+        else:
+            hunk = _compare_replace_hunk(left_entries, right_entries, left_start, left_end, right_start, right_end)
+            totals["changed_line_count"] += len(hunk["changed_pairs"])
+            totals["removed_line_count"] += len(hunk["left_unpaired"])
+            totals["added_line_count"] += len(hunk["right_unpaired"])
+
+        if emitted_change_hunks >= max_hunks or emitted_change_units >= max_changed_lines:
+            hunks_omitted += 1
+            continue
+        remaining_units = max_changed_lines - emitted_change_units
+        hunk, used_units, omitted = _trim_change_hunk_to_budget(hunk, remaining_units)
+        if hunk is None:
+            hunks_omitted += 1
+            lines_omitted["left"] += omitted["left"]
+            lines_omitted["right"] += omitted["right"]
+            lines_omitted["total"] += omitted["total"]
+            continue
+        lines_omitted["left"] += omitted["left"]
+        lines_omitted["right"] += omitted["right"]
+        lines_omitted["total"] += omitted["total"]
+        hunks.append(hunk)
+        emitted_change_hunks += 1
+        emitted_change_units += used_units
+
+    return {
+        "hunks": hunks,
+        "totals": totals,
+        "truncated": {
+            "hunks_omitted": hunks_omitted,
+            "lines_omitted": lines_omitted,
+        },
+    }
+
+
+def _legacy_sections_from_hunks(hunks, hunk_truncated):
+    changed = []
+    added = []
+    removed = []
+    for hunk in hunks:
+        if hunk["op"] == "insert":
+            added.extend(hunk.get("right", {}).get("lines", []))
+        elif hunk["op"] == "delete":
+            removed.extend(hunk.get("left", {}).get("lines", []))
+        elif hunk["op"] == "replace":
+            left_lines = hunk.get("left", {}).get("lines", [])
+            right_lines = hunk.get("right", {}).get("lines", [])
+            for pair in hunk.get("changed_pairs", []):
+                left_line = left_lines[pair["left_index"]]
+                right_line = right_lines[pair["right_index"]]
+                segments = pair.get("segments", {})
+                changed.append({
+                    "removed": {
+                        **left_line,
+                        "segments": segments.get("left", []),
+                    },
+                    "added": {
+                        **right_line,
+                        "segments": segments.get("right", []),
+                    },
+                    "similarity": pair.get("similarity"),
+                })
+            removed.extend(left_lines[index] for index in hunk.get("left_unpaired", []))
+            added.extend(right_lines[index] for index in hunk.get("right_unpaired", []))
+    lines_omitted = hunk_truncated.get("lines_omitted", {})
+    return {
+        "changed": changed,
+        "added": added,
+        "removed": removed,
+        "added_omitted": int(lines_omitted.get("right") or 0),
+        "removed_omitted": int(lines_omitted.get("left") or 0),
+        "max_changed_lines": COMPARE_MAX_CHANGED_LINES,
+    }
 
 
 def _compare_deltas(left_run, right_run, left_finding_count, right_finding_count):
@@ -1508,7 +1695,8 @@ def compare_history_runs():
     right_entries, right_output = _compare_entries_for_diff(right_run)
     left_finding_count = _finding_count_for_entries(left_run, left_entries)
     right_finding_count = _finding_count_for_entries(right_run, right_entries)
-    diff = _bounded_multiset_line_diff(left_entries, right_entries)
+    diff = _hunk_line_diff(left_entries, right_entries)
+    legacy_sections = _legacy_sections_from_hunks(diff["hunks"], diff["truncated"])
     project_truncated = project_comparison.get("truncated", {}) if project_comparison else {}
     if project_comparison:
         finding_objects = project_comparison.get("objects", {}).get("findings", {})
@@ -1533,7 +1721,12 @@ def compare_history_runs():
     truncated = {
         "left": bool(left_output["partial"] or project_truncated.get("left")),
         "right": bool(right_output["partial"] or project_truncated.get("right")),
-        "changed_lines": bool(diff["added_omitted"] or diff["removed_omitted"]),
+        "changed_lines": bool(
+            diff["truncated"]["hunks_omitted"]
+            or diff["truncated"]["lines_omitted"]["total"]
+        ),
+        "hunks_omitted": diff["truncated"]["hunks_omitted"],
+        "lines_omitted": diff["truncated"]["lines_omitted"],
     }
     for key in ("findings", "artifacts", "item_limit"):
         if key in project_truncated:
@@ -1562,14 +1755,9 @@ def compare_history_runs():
         },
         "findings": finding_objects,
         "artifacts": artifact_objects,
-        "sections": {
-            "changed": diff["changed"],
-            "added": diff["added"],
-            "removed": diff["removed"],
-            "added_omitted": diff["added_omitted"],
-            "removed_omitted": diff["removed_omitted"],
-            "max_changed_lines": diff["max_changed_lines"],
-        },
+        "hunks": diff["hunks"],
+        "totals": diff["totals"],
+        "sections": legacy_sections,
         "truncated": truncated,
         "limits": {
             "max_changed_lines": COMPARE_MAX_CHANGED_LINES,

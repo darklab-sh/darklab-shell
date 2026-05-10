@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,562
+- behavior tests: 2,567
 - docs/inventory meta-tests: 30
-- `pytest`: 1285 (1255 behavior + 30 meta)
+- `pytest`: 1290 (1260 behavior + 30 meta)
 - `vitest`: 1063
 - `playwright`: 245
-- total: 2,593
+- total: 2,598
 
 This document is organized in two parts:
 
@@ -1130,6 +1130,11 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestHistoryRoute.test_history_filters_by_exit_code_and_recent_date_range` | Checks that `/history` exit-code and recent-date filters can be combined. |
 | `TestHistoryRoute.test_active_history_returns_running_runs_for_this_session` | Checks that `/history/active` returns the current session's in-flight run metadata. |
 | `TestHistoryRoute.test_compare_candidates_rank_exact_command_before_same_target` | Verifies that run comparison candidates prefer exact command matches before same-target and same-command-only matches. |
+| `TestHistoryRoute.test_hunk_line_diff_handles_insert_delete_and_equal_context` | Verifies that run comparison hunks cover insertions, modified lines, and folded equal context. |
+| `TestHistoryRoute.test_hunk_line_diff_handles_uneven_replace_pairing` | Verifies that uneven replace hunks pair similar lines while preserving left-only rows. |
+| `TestHistoryRoute.test_hunk_line_diff_keeps_unrelated_and_long_replace_lines_unpaired` | Verifies that unrelated replace blocks and very long lines stay in unpaired buckets. |
+| `TestHistoryRoute.test_hunk_line_diff_preserves_one_to_one_replace_pairing_below_threshold` | Verifies that one-line replace blocks still render as paired changes even below the normal similarity threshold. |
+| `TestHistoryRoute.test_hunk_line_diff_reports_budget_exhaustion` | Verifies changed-line and hunk-count budget exhaustion are reported in the hunk diff payload. |
 | `TestHistoryRoute.test_compare_history_runs_returns_metadata_and_changed_lines` | Verifies that run comparison returns metadata deltas, changed-line pairs, and added/removed output while ignoring terminal chrome. |
 | `TestHistoryRoute.test_compare_history_runs_leaves_very_long_lines_unpaired` | Verifies that run comparison avoids expensive similar-line pairing for very long changed lines. |
 | `TestShareRoute.test_post_creates_snapshot` | Checks post creates snapshot handling. |

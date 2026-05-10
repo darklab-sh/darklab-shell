@@ -25,6 +25,7 @@ import unittest.mock as mock
 
 import app as shell_app
 import blueprints.assets as shell_assets
+import blueprints.history as history_routes
 import blueprints.projects as project_routes
 import config
 from builtin_commands import execute_builtin_command
@@ -853,7 +854,13 @@ class TestProjectRoutes:
         payload = json.loads(resp.data)
         assert payload["findings"] == {"added": [], "removed": [], "unchanged_count": 0}
         assert payload["artifacts"] == {"added": [], "removed": [], "unchanged_count": 0}
-        assert payload["truncated"] == {"left": False, "right": False, "changed_lines": False}
+        assert payload["truncated"] == {
+            "left": False,
+            "right": False,
+            "changed_lines": False,
+            "hunks_omitted": 0,
+            "lines_omitted": {"left": 0, "right": 0, "total": 0},
+        }
 
         with sqlite3.connect(DB_PATH) as conn:
             for line_number, raw_line in enumerate([
@@ -936,6 +943,8 @@ class TestProjectRoutes:
             "left": True,
             "right": True,
             "changed_lines": False,
+            "hunks_omitted": 0,
+            "lines_omitted": {"left": 0, "right": 0, "total": 0},
             "findings": {"left": True, "right": True},
             "artifacts": {"left": True, "right": True},
             "item_limit": 0,
@@ -5411,6 +5420,141 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
+    def test_hunk_line_diff_handles_insert_delete_and_equal_context(self):
+        entries = lambda values: [  # noqa: E731 - compact test fixture builder
+            {"text": value, "line_index": index} for index, value in enumerate(values)
+        ]
+        diff = history_routes._hunk_line_diff(
+            entries(["same", "service old"]),
+            entries(["same", "service new", "extra"]),
+            inline_context=1,
+        )
+
+        assert diff["totals"] == {
+            "left_total_lines": 2,
+            "right_total_lines": 3,
+            "equal_line_count": 1,
+            "changed_line_count": 1,
+            "added_line_count": 1,
+            "removed_line_count": 0,
+        }
+        assert [hunk["op"] for hunk in diff["hunks"]] == ["equal", "replace"]
+        assert diff["hunks"][0]["left"]["lines"][0]["text"] == "same"
+        assert diff["hunks"][1]["right"]["lines"][diff["hunks"][1]["right_unpaired"][0]]["text"] == "extra"
+
+        long_equal = history_routes._hunk_line_diff(
+            entries(["a", "b", "c", "d", "e", "old"]),
+            entries(["a", "b", "c", "d", "e", "new"]),
+            inline_context=2,
+        )
+        equal_hunk = long_equal["hunks"][0]
+        assert equal_hunk["op"] == "equal"
+        assert "lines" not in equal_hunk["left"]
+        assert [item["text"] for item in equal_hunk["context"]["leading"]["left"]] == ["a", "b"]
+        assert [item["text"] for item in equal_hunk["context"]["trailing"]["right"]] == ["d", "e"]
+        assert equal_hunk["context"]["omitted"] == 1
+
+    def test_hunk_line_diff_handles_uneven_replace_pairing(self):
+        entries = lambda values: [  # noqa: E731 - compact test fixture builder
+            {"text": value, "line_index": index} for index, value in enumerate(values)
+        ]
+        diff = history_routes._hunk_line_diff(
+            entries([
+                "alpha service open",
+                "beta service open",
+                "left-only value",
+            ]),
+            entries([
+                "alpha service closed",
+                "beta service closed",
+            ]),
+        )
+
+        hunk = diff["hunks"][0]
+        assert hunk["op"] == "replace"
+        assert [(item["left_index"], item["right_index"]) for item in hunk["changed_pairs"]] == [(0, 0), (1, 1)]
+        assert hunk["left_unpaired"] == [2]
+        assert hunk["right_unpaired"] == []
+        assert diff["totals"]["changed_line_count"] == 2
+        assert diff["totals"]["removed_line_count"] == 1
+        assert any(
+            segment["changed"]
+            for segment in hunk["changed_pairs"][0]["segments"]["left"]
+        )
+
+    def test_hunk_line_diff_keeps_unrelated_and_long_replace_lines_unpaired(self):
+        unrelated = history_routes._hunk_line_diff(
+            [
+                {"text": "left aaa", "line_index": 0},
+                {"text": "left bbb", "line_index": 1},
+            ],
+            [
+                {"text": "right yyy", "line_index": 0},
+                {"text": "right zzz", "line_index": 1},
+            ],
+            max_changed_lines=10,
+        )
+        unrelated_hunk = unrelated["hunks"][0]
+        assert unrelated_hunk["changed_pairs"] == []
+        assert unrelated_hunk["left_unpaired"] == [0, 1]
+        assert unrelated_hunk["right_unpaired"] == [0, 1]
+
+        long_left = "scanner " + ("a" * history_routes.COMPARE_LINE_DISPLAY_TRUNCATE) + " old"
+        long_right = "scanner " + ("a" * history_routes.COMPARE_LINE_DISPLAY_TRUNCATE) + " new"
+        long_diff = history_routes._hunk_line_diff(
+            [{"text": long_left, "line_index": 0}],
+            [{"text": long_right, "line_index": 0}],
+        )
+        long_hunk = long_diff["hunks"][0]
+        assert long_hunk["changed_pairs"] == []
+        assert long_hunk["left_unpaired"] == [0]
+        assert long_hunk["right_unpaired"] == [0]
+
+    def test_hunk_line_diff_preserves_one_to_one_replace_pairing_below_threshold(self):
+        diff = history_routes._hunk_line_diff(
+            [{"text": "abcde", "line_index": 0}],
+            [{"text": "vwxyz", "line_index": 0}],
+        )
+
+        hunk = diff["hunks"][0]
+        assert hunk["op"] == "replace"
+        assert [(item["left_index"], item["right_index"]) for item in hunk["changed_pairs"]] == [(0, 0)]
+        assert hunk["left_unpaired"] == []
+        assert hunk["right_unpaired"] == []
+
+    def test_hunk_line_diff_reports_budget_exhaustion(self):
+        entries = lambda prefix, count: [  # noqa: E731 - compact test fixture builder
+            {"text": f"{prefix}-{index}", "line_index": index} for index in range(count)
+        ]
+        line_limited = history_routes._hunk_line_diff(
+            entries("left", 4),
+            entries("right", 4),
+            max_changed_lines=3,
+            max_hunks=10,
+        )
+
+        assert line_limited["truncated"]["lines_omitted"]["total"] == 5
+        assert line_limited["truncated"]["hunks_omitted"] == 0
+        hunk = line_limited["hunks"][0]
+        assert hunk["lines_omitted"]["total"] == 5
+        assert history_routes._change_hunk_units(hunk) == 3
+
+        hunk_limited = history_routes._hunk_line_diff(
+            [
+                {"text": "a", "line_index": 0},
+                {"text": "same", "line_index": 1},
+                {"text": "b", "line_index": 2},
+            ],
+            [
+                {"text": "c", "line_index": 0},
+                {"text": "same", "line_index": 1},
+                {"text": "d", "line_index": 2},
+            ],
+            max_changed_lines=10,
+            max_hunks=1,
+        )
+        assert hunk_limited["truncated"]["hunks_omitted"] == 1
+
     def test_compare_history_runs_returns_metadata_and_changed_lines(self):
         client = get_client()
         session = "compare-runs-" + uuid.uuid4().hex[:8]
@@ -5496,14 +5640,26 @@ class TestHistoryRoute:
             assert data["right"]["duration_seconds"] == 5
             assert data["deltas"]["duration_seconds"]["delta"] == 3
             assert data["deltas"]["findings"]["delta"] == 0
-            assert len(data["sections"]["changed"]) == 1
+            assert data["totals"] == {
+                "left_total_lines": 3,
+                "right_total_lines": 3,
+                "equal_line_count": 1,
+                "changed_line_count": 2,
+                "added_line_count": 0,
+                "removed_line_count": 0,
+            }
+            assert [hunk["op"] for hunk in data["hunks"]] == ["replace", "equal", "replace"]
+            assert data["limits"]["max_changed_lines"] == 2000
+            assert len(data["sections"]["changed"]) == 2
             changed = data["sections"]["changed"][0]
             assert changed["removed"]["text"].endswith("23:22 UTC")
             assert changed["added"]["text"].endswith("23:21 UTC")
             assert any(segment["changed"] for segment in changed["removed"]["segments"])
             assert any(segment["changed"] for segment in changed["added"]["segments"])
-            assert [line["text"] for line in data["sections"]["added"]] == ["443/tcp open https"]
-            assert [line["text"] for line in data["sections"]["removed"]] == ["8080/tcp open http-proxy"]
+            assert data["sections"]["changed"][1]["removed"]["text"] == "8080/tcp open http-proxy"
+            assert data["sections"]["changed"][1]["added"]["text"] == "443/tcp open https"
+            assert data["sections"]["added"] == []
+            assert data["sections"]["removed"] == []
             assert all("process exited" not in line["text"] for line in data["sections"]["added"])
             assert [item["raw_line"] for item in data["objects"]["findings"]["added"]] == ["443/tcp open https"]
             assert [item["raw_line"] for item in data["objects"]["findings"]["removed"]] == ["8080/tcp open http-proxy"]
@@ -5560,6 +5716,10 @@ class TestHistoryRoute:
             data = json.loads(resp.data)
 
             assert resp.status_code == 200
+            assert data["hunks"][0]["op"] == "replace"
+            assert data["hunks"][0]["changed_pairs"] == []
+            assert data["hunks"][0]["left_unpaired"] == [0]
+            assert data["hunks"][0]["right_unpaired"] == [0]
             assert data["sections"]["changed"] == []
             assert [line["text"] for line in data["sections"]["removed"]] == [left_line]
             assert [line["text"] for line in data["sections"]["added"]] == [right_line]

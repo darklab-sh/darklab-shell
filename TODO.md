@@ -121,7 +121,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
         - Both history and project compare callers can use `/history/compare`.
         - No browser code calls `/projects/<id>/compare`.
         - Focused backend route tests pass.
-    - **Phase 2: Hunk diff engine and response shape**
+    - **Phase 2: Hunk diff engine and response shape** — complete
       - Goal: replace changed/added/removed line buckets with ordered hunks while keeping run cards, metrics, and object sections stable.
       - Files: `app/blueprints/history.py`, focused backend tests under `tests/py/`.
       - Add `_hunk_line_diff(left_entries, right_entries, *, max_changed_lines=COMPARE_MAX_CHANGED_LINES, max_hunks=COMPARE_MAX_HUNKS, inline_context=COMPARE_INLINE_EQUAL_CONTEXT)`.
