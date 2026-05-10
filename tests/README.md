@@ -25,9 +25,9 @@ Current totals:
 - behavior tests: 2,559
 - docs/inventory meta-tests: 30
 - `pytest`: 1284 (1254 behavior + 30 meta)
-- `vitest`: 1062
+- `vitest`: 1063
 - `playwright`: 243
-- total: 2,589
+- total: 2,590
 
 This document is organized in two parts:
 
@@ -2266,6 +2266,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `creates projects from the mobile create sheet` | Verifies that the mobile Projects create entry point opens its sheet, creates a project, selects it as active, and returns to the list. |
 | `drills into mobile project detail tabs and returns to the list` | Verifies that mobile Projects drill into the detail shell, clamp tab counts, hide Artifacts when Files are disabled, switch tabs, and return to the list. |
 | `renders mobile project tab content with mobile row actions` | Verifies that mobile Projects detail tabs render summary metadata, targets, runs, findings, artifacts, packages, and mobile row action affordances. |
+| `opens the mobile project compare stepper and runs a baseline label comparison` | Verifies that the mobile Projects run-compare stepper can compare a selected run against a baseline label using the project compare endpoint. |
 | `opens projects from the active project HUD chip` | Verifies that clicking the active project HUD chip opens the Projects modal. |
 | `hides project detail inputs when no projects exist` | Verifies that project label and note controls stay hidden until a project exists. |
 | `separates current and archived projects when archived projects exist` | Verifies that the Projects modal groups current and archived projects only when archived projects are present. |

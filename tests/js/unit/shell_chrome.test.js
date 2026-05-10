@@ -589,6 +589,17 @@ describe('shell chrome project workspace', () => {
       await tick()
       expect(document.getElementById('project-mobile-body').textContent).toContain('zulu.test')
 
+      document.querySelector('[data-project-mobile-action="project-menu"][data-project-id="project-1"]').click()
+      await tick()
+      const actionSheet = document.getElementById('project-mobile-action-sheet-overlay')
+      expect(actionSheet.classList.contains('open')).toBe(true)
+      expect(actionSheet.textContent).toContain('Edit metadata')
+      actionSheet.querySelector('[data-project-action="edit-project-metadata"]').click()
+      await tick()
+      expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(true)
+      document.querySelector('.project-entity-editor-cancel').click()
+      await tick()
+
       document.querySelector('.project-mobile-row[data-project-id="project-2"]').click()
       await tick()
       expect(document.getElementById('project-mobile-detail-view').classList.contains('u-hidden')).toBe(false)
@@ -840,12 +851,17 @@ describe('shell chrome project workspace', () => {
       expect(detailBody.textContent).toContain('nmap darklab.sh')
       expect(detailBody.textContent).toContain('1 finding')
       expect(detailBody.textContent).toContain('2 artifacts')
-      expect(detailBody.querySelector('[data-project-action="edit-run-metadata"]')).not.toBeNull()
-      const runMenu = detailBody.querySelector('.project-mobile-row-menu')
-      runMenu.open = true
-      detailBody.querySelector('.project-mobile-content-main').click()
+      const runMenu = detailBody.querySelector('.project-mobile-row-menu-trigger')
+      runMenu.click()
       await tick()
-      expect(runMenu.open).toBe(false)
+      const actionSheet = document.getElementById('project-mobile-action-sheet-overlay')
+      expect(actionSheet.classList.contains('open')).toBe(true)
+      expect(actionSheet.querySelector('[data-project-action="edit-run-metadata"]')).not.toBeNull()
+      expect(actionSheet.querySelector('[data-project-action="open-run"]')).not.toBeNull()
+      expect(actionSheet.querySelector('[data-project-action="unlink-run"]')).not.toBeNull()
+      actionSheet.click()
+      await tick()
+      expect(actionSheet.classList.contains('open')).toBe(false)
       expect(shell.restoreHistoryRunIntoTab).not.toHaveBeenCalled()
 
       document.querySelector('[data-project-mobile-detail-tab="findings"]').click()
@@ -854,7 +870,11 @@ describe('shell chrome project workspace', () => {
       expect(detailBody.textContent).toContain('443 open')
       expect(detailBody.textContent).toContain('443/tcp open https')
       expect(detailBody.querySelector('[data-project-action="open-finding"]')).not.toBeNull()
-      expect(detailBody.querySelector('[data-project-review-state]')).not.toBeNull()
+      detailBody.querySelector('.project-mobile-row-menu-trigger').click()
+      await tick()
+      expect(actionSheet.querySelector('[data-project-review-state]')).not.toBeNull()
+      actionSheet.click()
+      await tick()
       expect(shell.enhanceAppSelects).toHaveBeenCalledWith(detailBody)
       detailBody.querySelector('[data-project-finding-group-toggle]').click()
       await tick()
@@ -869,7 +889,11 @@ describe('shell chrome project workspace', () => {
       expect(detailBody.textContent).toContain('available')
       expect(detailBody.textContent).toContain('missing')
       expect(detailBody.querySelector('.project-mobile-row-badge.is-missing')?.textContent).toBe('missing')
-      expect(detailBody.querySelector('[data-project-action="artifact-preview"]')).not.toBeNull()
+      detailBody.querySelector('.project-mobile-row-menu-trigger').click()
+      await tick()
+      expect(actionSheet.querySelector('[data-project-action="artifact-preview"]')).not.toBeNull()
+      actionSheet.click()
+      await tick()
       detailBody.querySelector('[data-project-artifact-group-toggle]').click()
       await tick()
       expect(detailBody.querySelector('.project-artifacts-group .project-mobile-group-body').hidden).toBe(true)
@@ -879,7 +903,89 @@ describe('shell chrome project workspace', () => {
       expect(detailBody.textContent).toContain('Evidence Package')
       expect(detailBody.textContent).toContain('1 run')
       expect(detailBody.querySelector('[data-project-action="package-wizard-open"]')).not.toBeNull()
-      expect(detailBody.querySelector('[data-project-action="package-manifest"]')).not.toBeNull()
+      detailBody.querySelector('.project-mobile-row-menu-trigger').click()
+      await tick()
+      expect(actionSheet.querySelector('[data-project-action="package-manifest"]')).not.toBeNull()
+    } finally {
+      document.body.classList.remove('mobile-terminal-mode')
+    }
+  })
+
+  it('opens the mobile project compare stepper and runs a baseline label comparison', async () => {
+    document.body.classList.add('mobile-terminal-mode')
+    const fetchAndRenderHistoryComparison = vi.fn()
+    const project = { id: 'project-1', name: 'darklab.sh', status: 'active' }
+    const summary = {
+      project,
+      counts: { runs: 2, findings: 0, artifacts: 0, packages: 0, targets: 0 },
+      runs: [{
+        id: 'run-left',
+        command: 'nmap darklab.sh',
+        started: '2026-05-09T12:00:00Z',
+        created: '2026-05-09T12:01:00Z',
+        exit_code: 0,
+        output_line_count: 8,
+      }, {
+        id: 'run-base',
+        command: 'nmap darklab.sh --top-ports 100',
+        started: '2026-05-09T12:03:00Z',
+        created: '2026-05-09T12:04:00Z',
+        exit_code: 0,
+        output_line_count: 6,
+        labels: [{ label: 'baseline' }],
+      }],
+    }
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ project }) })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects: [project] }) })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(summary) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+
+    try {
+      const shell = loadShellChrome({ apiFetch, fetchAndRenderHistoryComparison })
+      await shell.openProjectWorkspace()
+      await tick()
+      await tick()
+
+      document.querySelector('[data-project-mobile-action="open-project"][data-project-id="project-1"]').click()
+      await tick()
+      await tick()
+      document.querySelector('[data-project-mobile-detail-tab="runs"]').click()
+      await tick()
+
+      document.querySelector('[data-project-action="mobile-compare-runs"]').click()
+      await tick()
+      const overlay = document.getElementById('project-mobile-compare-overlay')
+      expect(overlay.classList.contains('open')).toBe(true)
+      expect(overlay.textContent).toContain('Left run')
+      expect(overlay.querySelector('.project-mobile-compare-option.is-active')?.textContent).toContain('nmap darklab.sh')
+      overlay.querySelector('.project-mobile-compare-footer .btn-primary').click()
+      await tick()
+      expect(overlay.textContent).toContain('Compare against')
+      expect(overlay.querySelector('.project-mobile-compare-option.is-active')?.textContent).toBe('Against run')
+      Array.from(overlay.querySelectorAll('.project-mobile-compare-option'))
+        .find(btn => btn.textContent === 'Against label')
+        .click()
+      await tick()
+      expect(overlay.querySelector('.project-mobile-compare-option.is-active')?.textContent).toBe('Against label')
+      overlay.querySelector('.project-mobile-compare-footer .btn-primary').click()
+      await tick()
+      expect(overlay.textContent).toContain('Choose a baseline label')
+      expect(overlay.querySelector('.project-mobile-compare-option.is-active')?.textContent).toBe('baseline')
+      overlay.querySelector('.project-mobile-compare-footer .btn-primary').click()
+      await tick()
+
+      expect(fetchAndRenderHistoryComparison).toHaveBeenCalledWith('run-left', 'baseline:baseline', {
+        url: '/projects/project-1/compare?left_run_id=run-left&baseline_label=baseline',
+      })
+      expect(overlay.classList.contains('open')).toBe(false)
     } finally {
       document.body.classList.remove('mobile-terminal-mode')
     }

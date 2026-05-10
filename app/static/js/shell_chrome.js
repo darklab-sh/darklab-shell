@@ -184,6 +184,18 @@
   let projectMobileCreateOpen = false;
   let projectMobileView = 'list';
   let projectMobileArchivedOpen = false;
+  let projectMobileActionSheetOverlay = null;
+  let projectMobileActionSheet = null;
+  let projectMobileActionSheetTitle = null;
+  let projectMobileActionSheetItems = null;
+  let projectMobileActionSheetReturnFocus = null;
+  let projectMobileCompareOverlay = null;
+  let projectMobileCompareSheet = null;
+  let projectMobileCompareTitle = null;
+  let projectMobileCompareBody = null;
+  let projectMobileCompareFooter = null;
+  let projectMobileCompareReturnFocus = null;
+  let projectMobileCompareState = null;
   let projectWorkspaceFindingsLoadingId = '';
   let projectWorkspaceFindingsLoadingPromise = null;
   let projectWorkspaceFilteredFindingsLoadingKey = '';
@@ -1315,6 +1327,9 @@
   }
 
   function _entityTitleForEditor(entityType, entity) {
+    if (entityType === 'project') {
+      return String(entity && (entity.name || entity.slug || entity.id) || 'Project');
+    }
     if (entityType === 'finding') {
       return String(entity && (entity.title || entity.raw_line || entity.id) || 'Finding');
     }
@@ -3089,6 +3104,32 @@
     _syncProjectRunCompareMode(controls);
   }
 
+  function _compareProjectRuns(projectId, leftId, mode, targetValue, controls = null) {
+    const normalizedProjectId = String(projectId || '').trim();
+    const normalizedLeftId = String(leftId || '').trim();
+    const normalizedMode = String(mode || 'run') === 'baseline' ? 'baseline' : 'run';
+    const normalizedTarget = String(targetValue || '').trim();
+    if (normalizedMode === 'baseline') {
+      _avoidProjectRunCompareLabelSelfTarget(controls, normalizedTarget);
+    }
+    if (!normalizedProjectId || !normalizedLeftId) throw new Error('Choose a project run to compare.');
+    if (normalizedMode === 'run' && !normalizedTarget) throw new Error('Choose two project runs to compare.');
+    if (normalizedMode === 'run' && normalizedLeftId === normalizedTarget) throw new Error('Choose two different project runs to compare.');
+    if (normalizedMode === 'baseline' && !normalizedTarget) throw new Error('Choose a baseline label to compare.');
+    const compareFn = global && typeof global.fetchAndRenderHistoryComparison === 'function'
+      ? global.fetchAndRenderHistoryComparison
+      : (typeof window !== 'undefined' && typeof window.fetchAndRenderHistoryComparison === 'function'
+          ? window.fetchAndRenderHistoryComparison
+          : null);
+    if (!compareFn) throw new Error('Run comparison is not available.');
+    const params = new URLSearchParams({ left_run_id: normalizedLeftId });
+    if (normalizedMode === 'baseline') params.set('baseline_label', normalizedTarget);
+    else params.set('right_run_id', normalizedTarget);
+    compareFn(normalizedLeftId, normalizedMode === 'baseline' ? `baseline:${normalizedTarget}` : normalizedTarget, {
+      url: `/projects/${encodeURIComponent(normalizedProjectId)}/compare?${params.toString()}`,
+    });
+  }
+
   function _renderProjectRunCompareControls(runs) {
     const wrap = document.createElement('div');
     wrap.className = 'project-run-compare-controls';
@@ -4112,6 +4153,24 @@
     _renderProjectWorkspace();
   }
 
+  function _projectMobileProjectActions(project) {
+    const projectId = String(project && project.id || '');
+    if (!projectId) return [];
+    const activeId = activeProject && activeProject.id ? String(activeProject.id) : '';
+    const actions = [];
+    if (projectId === activeId) {
+      actions.push({ label: 'Unmark active', action: 'clear' });
+    } else if (!_projectIsArchived(project)) {
+      actions.push({ label: 'Mark active', action: 'use' });
+    }
+    actions.push({ label: 'Edit metadata', action: 'edit-project-metadata' });
+    actions.push(_projectIsArchived(project)
+      ? { label: 'Unarchive', action: 'unarchive' }
+      : { label: 'Archive', action: 'archive' });
+    actions.push({ label: 'Delete', action: 'delete', tone: 'danger' });
+    return actions;
+  }
+
   function _renderProjectMobileDetailTopbar(project, activeId) {
     if (!projectMobileDetailTopbar) return;
     projectMobileDetailTopbar.replaceChildren();
@@ -4249,67 +4308,374 @@
   function _projectMobileActionMenu(projectId, label, actions = []) {
     const filteredActions = actions.filter(Boolean);
     if (!filteredActions.length) return null;
-    const details = document.createElement('details');
-    details.className = 'project-mobile-row-menu';
-    const summary = document.createElement('summary');
-    summary.className = 'btn btn-ghost btn-compact project-mobile-row-menu-trigger';
-    summary.setAttribute('aria-label', label || 'Row actions');
-    summary.textContent = '⋮';
-    _bindProjectRuntimePressable(summary);
-    details.appendChild(summary);
-    const menu = document.createElement('div');
-    menu.className = 'project-mobile-row-menu-panel';
-    filteredActions.forEach((item) => {
-      if (item.node) {
-        menu.appendChild(item.node);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-ghost btn-compact project-mobile-row-menu-trigger';
+    btn.setAttribute('aria-label', label || 'Row actions');
+    btn.dataset.projectMobileAction = 'action-sheet';
+    btn.dataset.projectId = String(projectId || '');
+    btn.textContent = '⋮';
+    btn._projectMobileActionSheetLabel = label || 'Actions';
+    btn._projectMobileActionSheetItems = filteredActions;
+    _bindProjectRuntimePressable(btn);
+    return btn;
+  }
+
+  function _ensureProjectMobileActionSheet() {
+    if (projectMobileActionSheetOverlay && projectMobileActionSheet && projectMobileActionSheetItems) {
+      return projectMobileActionSheetOverlay;
+    }
+    const overlay = document.createElement('div');
+    overlay.id = 'project-mobile-action-sheet-overlay';
+    overlay.className = 'modal-overlay mobile-sheet-overlay project-mobile-action-sheet-overlay u-hidden';
+    overlay.setAttribute('aria-hidden', 'true');
+    const sheet = document.createElement('section');
+    sheet.id = 'project-mobile-action-sheet';
+    sheet.className = 'modal-card mobile-sheet-surface project-mobile-action-sheet';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-modal', 'true');
+    sheet.setAttribute('aria-labelledby', 'project-mobile-action-sheet-title');
+    const header = document.createElement('div');
+    header.className = 'project-mobile-action-sheet-header';
+    const title = document.createElement('h2');
+    title.id = 'project-mobile-action-sheet-title';
+    title.textContent = 'Actions';
+    header.appendChild(title);
+    const items = document.createElement('div');
+    items.className = 'project-mobile-action-sheet-items';
+    sheet.append(header, items);
+    overlay.appendChild(sheet);
+    (projectWorkspaceModal || document.body).appendChild(overlay);
+
+    projectMobileActionSheetOverlay = overlay;
+    projectMobileActionSheet = sheet;
+    projectMobileActionSheetTitle = title;
+    projectMobileActionSheetItems = items;
+
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) _closeProjectMobileActionSheet();
+    });
+    items.addEventListener('click', (event) => {
+      if (event.target.closest?.('[data-project-action]')) {
+        _closeProjectMobileActionSheet({ restoreFocus: false });
+      }
+    });
+    const bindDismissibleFn = global && typeof global.bindDismissible === 'function'
+      ? global.bindDismissible
+      : (typeof bindDismissible === 'function' ? bindDismissible : null);
+    if (bindDismissibleFn) {
+      bindDismissibleFn(overlay, {
+        level: 'sheet',
+        isOpen: () => !!(projectMobileActionSheetOverlay && projectMobileActionSheetOverlay.classList.contains('open')),
+        onClose: () => _closeProjectMobileActionSheet(),
+        backdropEl: overlay,
+      });
+    }
+    const bindMobileSheetFn = global && typeof global.bindMobileSheet === 'function'
+      ? global.bindMobileSheet
+      : (typeof bindMobileSheet === 'function' ? bindMobileSheet : null);
+    if (bindMobileSheetFn) bindMobileSheetFn(sheet, { onClose: () => _closeProjectMobileActionSheet() });
+    return overlay;
+  }
+
+  function _closeProjectMobileActionSheet({ restoreFocus = true } = {}) {
+    if (!projectMobileActionSheetOverlay) return;
+    projectMobileActionSheetOverlay.classList.add('u-hidden');
+    projectMobileActionSheetOverlay.classList.remove('open');
+    projectMobileActionSheetOverlay.setAttribute('aria-hidden', 'true');
+    if (projectMobileActionSheetItems) projectMobileActionSheetItems.replaceChildren();
+    if (
+      restoreFocus
+      && projectMobileActionSheetReturnFocus
+      && projectMobileActionSheetReturnFocus.isConnected
+      && typeof projectMobileActionSheetReturnFocus.focus === 'function'
+    ) {
+      const focusTarget = projectMobileActionSheetReturnFocus;
+      window.setTimeout(() => focusTarget.focus(), 0);
+    }
+    projectMobileActionSheetReturnFocus = null;
+  }
+
+  function _projectMobileActionSheetItem(projectId, item) {
+    if (item.node) {
+      const wrap = document.createElement('div');
+      wrap.className = 'project-mobile-action-sheet-field';
+      wrap.appendChild(item.node);
+      return wrap;
+    }
+    const btn = _makeProjectButton(
+      item.label,
+      item.action,
+      String(projectId || ''),
+      item.variant || 'ghost',
+      item.tone || '',
+    );
+    btn.classList.add('project-mobile-action-sheet-item');
+    if (item.tone === 'danger' || item.variant === 'destructive') btn.classList.add('is-danger');
+    if (item.disabled) btn.disabled = true;
+    if (item.title) btn.title = item.title;
+    Object.entries(item.dataset || {}).forEach(([key, value]) => {
+      btn.dataset[key] = String(value || '');
+    });
+    return btn;
+  }
+
+  function _openProjectMobileActionSheet(projectId, label, actions = [], returnFocus = null) {
+    const filteredActions = actions.filter(Boolean);
+    if (!filteredActions.length) return;
+    _ensureProjectMobileActionSheet();
+    if (!projectMobileActionSheetOverlay || !projectMobileActionSheetItems) return;
+    projectMobileActionSheetReturnFocus = returnFocus || document.activeElement || null;
+    if (projectMobileActionSheetTitle) projectMobileActionSheetTitle.textContent = label || 'Actions';
+    projectMobileActionSheetItems.replaceChildren();
+    filteredActions.forEach(item => {
+      projectMobileActionSheetItems.appendChild(_projectMobileActionSheetItem(projectId, item));
+    });
+    projectMobileActionSheetOverlay.classList.remove('u-hidden');
+    projectMobileActionSheetOverlay.classList.add('open');
+    projectMobileActionSheetOverlay.setAttribute('aria-hidden', 'false');
+    window.setTimeout(() => {
+      projectMobileActionSheetItems.querySelector('button, select, input, textarea')?.focus();
+    }, 0);
+  }
+
+  function _projectMobileCompareRuns(projectId) {
+    const summary = projectWorkspaceSummaries.get(String(projectId || ''));
+    return _projectComparableRuns(summary);
+  }
+
+  function _projectMobileCompareTargetOptions(state, runs) {
+    if (state.mode === 'baseline') {
+      return _projectRunBaselineLabelOptions(runs).map(label => ({ value: label, label }));
+    }
+    return runs.map(run => ({
+      value: String(run.id || ''),
+      label: _projectRunCompareOptionText(run),
+    }));
+  }
+
+  function _projectMobileCompareEnsureTarget(state, runs) {
+    const options = _projectMobileCompareTargetOptions(state, runs);
+    const hasSelectedTarget = options.some(item => item.value === state.targetValue);
+    if (!hasSelectedTarget || (state.mode === 'run' && state.targetValue === state.leftRunId)) {
+      const fallback = options.find(item => state.mode === 'baseline' || item.value !== state.leftRunId) || options[0] || null;
+      state.targetValue = fallback ? fallback.value : '';
+    }
+    if (state.mode === 'baseline' && state.targetValue) {
+      const left = runs.find(run => String(run.id || '') === state.leftRunId);
+      if (left && _entityLabelValues(left).includes(state.targetValue)) {
+        const leftFallback = runs.find(run => !_entityLabelValues(run).includes(state.targetValue));
+        if (leftFallback) state.leftRunId = String(leftFallback.id || '');
+      }
+    }
+  }
+
+  function _projectMobileCompareSelectionList(label, options, selectedValue, onSelect) {
+    const wrap = document.createElement('div');
+    wrap.className = 'project-mobile-compare-options';
+    const heading = document.createElement('h3');
+    heading.textContent = label;
+    wrap.appendChild(heading);
+    options.forEach((item) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-ghost project-mobile-compare-option';
+      btn.classList.toggle('is-active', String(item.value || '') === String(selectedValue || ''));
+      btn.setAttribute('aria-pressed', String(item.value || '') === String(selectedValue || '') ? 'true' : 'false');
+      btn.textContent = item.label || item.value;
+      btn.addEventListener('click', () => onSelect(String(item.value || '')));
+      _bindProjectRuntimePressable(btn);
+      wrap.appendChild(btn);
+    });
+    return wrap;
+  }
+
+  function _ensureProjectMobileCompareSheet() {
+    if (projectMobileCompareOverlay && projectMobileCompareSheet && projectMobileCompareBody && projectMobileCompareFooter) {
+      return projectMobileCompareOverlay;
+    }
+    const overlay = document.createElement('div');
+    overlay.id = 'project-mobile-compare-overlay';
+    overlay.className = 'modal-overlay mobile-sheet-overlay project-mobile-compare-overlay u-hidden';
+    overlay.setAttribute('aria-hidden', 'true');
+    const sheet = document.createElement('section');
+    sheet.id = 'project-mobile-compare-sheet';
+    sheet.className = 'modal-card mobile-sheet-surface project-mobile-compare-sheet';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-modal', 'true');
+    sheet.setAttribute('aria-labelledby', 'project-mobile-compare-title');
+    const header = document.createElement('div');
+    header.className = 'project-mobile-compare-header';
+    const title = document.createElement('h2');
+    title.id = 'project-mobile-compare-title';
+    title.textContent = 'Compare runs';
+    header.appendChild(title);
+    const body = document.createElement('div');
+    body.className = 'project-mobile-compare-body nice-scroll';
+    const footer = document.createElement('div');
+    footer.className = 'project-mobile-compare-footer';
+    sheet.append(header, body, footer);
+    overlay.appendChild(sheet);
+    (projectWorkspaceModal || document.body).appendChild(overlay);
+
+    projectMobileCompareOverlay = overlay;
+    projectMobileCompareSheet = sheet;
+    projectMobileCompareTitle = title;
+    projectMobileCompareBody = body;
+    projectMobileCompareFooter = footer;
+
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) _closeProjectMobileCompareSheet();
+    });
+    const bindDismissibleFn = global && typeof global.bindDismissible === 'function'
+      ? global.bindDismissible
+      : (typeof bindDismissible === 'function' ? bindDismissible : null);
+    if (bindDismissibleFn) {
+      bindDismissibleFn(overlay, {
+        level: 'sheet',
+        isOpen: () => !!(projectMobileCompareOverlay && projectMobileCompareOverlay.classList.contains('open')),
+        onClose: () => _closeProjectMobileCompareSheet(),
+        backdropEl: overlay,
+      });
+    }
+    const bindMobileSheetFn = global && typeof global.bindMobileSheet === 'function'
+      ? global.bindMobileSheet
+      : (typeof bindMobileSheet === 'function' ? bindMobileSheet : null);
+    if (bindMobileSheetFn) bindMobileSheetFn(sheet, { onClose: () => _closeProjectMobileCompareSheet() });
+    return overlay;
+  }
+
+  function _closeProjectMobileCompareSheet({ restoreFocus = true } = {}) {
+    if (!projectMobileCompareOverlay) return;
+    projectMobileCompareOverlay.classList.add('u-hidden');
+    projectMobileCompareOverlay.classList.remove('open');
+    projectMobileCompareOverlay.setAttribute('aria-hidden', 'true');
+    projectMobileCompareState = null;
+    if (projectMobileCompareBody) projectMobileCompareBody.replaceChildren();
+    if (projectMobileCompareFooter) projectMobileCompareFooter.replaceChildren();
+    if (
+      restoreFocus
+      && projectMobileCompareReturnFocus
+      && projectMobileCompareReturnFocus.isConnected
+      && typeof projectMobileCompareReturnFocus.focus === 'function'
+    ) {
+      const focusTarget = projectMobileCompareReturnFocus;
+      window.setTimeout(() => focusTarget.focus(), 0);
+    }
+    projectMobileCompareReturnFocus = null;
+  }
+
+  function _renderProjectMobileCompareSheet() {
+    const state = projectMobileCompareState;
+    if (!state || !projectMobileCompareBody || !projectMobileCompareFooter) return;
+    const runs = _projectMobileCompareRuns(state.projectId);
+    _projectMobileCompareEnsureTarget(state, runs);
+    const stepLabels = ['Left run', 'Mode', state.mode === 'baseline' ? 'Label' : 'Right run'];
+    if (projectMobileCompareTitle) projectMobileCompareTitle.textContent = `Compare runs: ${stepLabels[state.step]}`;
+    projectMobileCompareBody.replaceChildren();
+    projectMobileCompareFooter.replaceChildren();
+    const stepper = document.createElement('div');
+    stepper.className = 'project-mobile-compare-stepper';
+    stepLabels.forEach((label, index) => {
+      const item = document.createElement('span');
+      item.className = 'project-mobile-compare-step';
+      item.classList.toggle('is-active', index === state.step);
+      item.textContent = label;
+      stepper.appendChild(item);
+    });
+    projectMobileCompareBody.appendChild(stepper);
+    if (state.step === 0) {
+      projectMobileCompareBody.appendChild(_projectMobileCompareSelectionList(
+        'Choose the run to compare',
+        runs.map(run => ({ value: String(run.id || ''), label: _projectRunCompareOptionText(run) })),
+        state.leftRunId,
+        (value) => {
+          state.leftRunId = value;
+          if (state.mode === 'run' && state.targetValue === value) _projectMobileCompareEnsureTarget(state, runs);
+          _renderProjectMobileCompareSheet();
+        },
+      ));
+    } else if (state.step === 1) {
+      const modeOptions = [
+        { value: 'run', label: 'Against run' },
+        ...(_projectRunBaselineLabelOptions(runs).length ? [{ value: 'baseline', label: 'Against label' }] : []),
+      ];
+      projectMobileCompareBody.appendChild(_projectMobileCompareSelectionList(
+        'Compare against',
+        modeOptions,
+        state.mode,
+        (value) => {
+          state.mode = value === 'baseline' ? 'baseline' : 'run';
+          state.targetValue = '';
+          _projectMobileCompareEnsureTarget(state, runs);
+          _renderProjectMobileCompareSheet();
+        },
+      ));
+    } else {
+      projectMobileCompareBody.appendChild(_projectMobileCompareSelectionList(
+        state.mode === 'baseline' ? 'Choose a baseline label' : 'Choose the baseline run',
+        _projectMobileCompareTargetOptions(state, runs),
+        state.targetValue,
+        (value) => {
+          state.targetValue = value;
+          _renderProjectMobileCompareSheet();
+        },
+      ));
+    }
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'btn btn-ghost btn-compact';
+    back.textContent = state.step === 0 ? 'Cancel' : 'Back';
+    back.addEventListener('click', () => {
+      if (state.step === 0) {
+        _closeProjectMobileCompareSheet();
+      } else {
+        state.step -= 1;
+        _renderProjectMobileCompareSheet();
+      }
+    });
+    _bindProjectRuntimePressable(back);
+    const next = document.createElement('button');
+    next.type = 'button';
+    next.className = 'btn btn-primary btn-compact';
+    next.textContent = state.step >= 2 ? 'Compare' : 'Next';
+    next.addEventListener('click', () => {
+      if (state.step < 2) {
+        state.step += 1;
+        _renderProjectMobileCompareSheet();
         return;
       }
-      const btn = _makeProjectButton(
-        item.label,
-        item.action,
-        String(projectId || ''),
-        item.variant || 'ghost',
-        item.tone || '',
-      );
-      btn.classList.add('project-mobile-row-menu-item');
-      if (item.disabled) btn.disabled = true;
-      if (item.title) btn.title = item.title;
-      Object.entries(item.dataset || {}).forEach(([key, value]) => {
-        btn.dataset[key] = String(value || '');
-      });
-      menu.appendChild(btn);
+      _compareProjectRuns(state.projectId, state.leftRunId, state.mode, state.targetValue);
+      _closeProjectMobileCompareSheet({ restoreFocus: false });
     });
-    details.appendChild(menu);
-    return details;
+    _bindProjectRuntimePressable(next);
+    projectMobileCompareFooter.append(back, next);
   }
 
-  function _closeProjectMobileRowMenus(exceptMenu = null) {
-    if (!projectWorkspaceModal) return 0;
-    let closed = 0;
-    projectWorkspaceModal.querySelectorAll('.project-mobile-row-menu[open]').forEach((menu) => {
-      if (exceptMenu && menu === exceptMenu) return;
-      menu.open = false;
-      closed += 1;
-    });
-    return closed;
-  }
-
-  function _handleProjectMobileRowMenuOutsideClick(event) {
-    if (!projectWorkspaceModal) return false;
-    const openMenus = projectWorkspaceModal.querySelectorAll('.project-mobile-row-menu[open]');
-    if (!openMenus.length) return false;
-    const clickedMenu = event.target.closest?.('.project-mobile-row-menu');
-    if (clickedMenu) {
-      _closeProjectMobileRowMenus(clickedMenu);
-      return false;
+  function _openProjectMobileCompareSheet(projectId, returnFocus = null) {
+    const runs = _projectMobileCompareRuns(projectId);
+    if (runs.length < 2) {
+      _setProjectWorkspaceMessage('Link two runs to compare.');
+      return;
     }
-    _closeProjectMobileRowMenus();
-    if (event.target.closest?.('.project-mobile-content-row')) {
-      event.preventDefault();
-      event.stopPropagation();
-      return true;
-    }
-    return false;
+    projectMobileCompareState = {
+      projectId: String(projectId || ''),
+      step: 0,
+      leftRunId: String(runs[0]?.id || ''),
+      mode: 'run',
+      targetValue: '',
+    };
+    _projectMobileCompareEnsureTarget(projectMobileCompareState, runs);
+    _ensureProjectMobileCompareSheet();
+    if (!projectMobileCompareOverlay) return;
+    projectMobileCompareReturnFocus = returnFocus || document.activeElement || null;
+    _renderProjectMobileCompareSheet();
+    projectMobileCompareOverlay.classList.remove('u-hidden');
+    projectMobileCompareOverlay.classList.add('open');
+    projectMobileCompareOverlay.setAttribute('aria-hidden', 'false');
+    window.setTimeout(() => {
+      projectMobileCompareBody?.querySelector('button, select, input, textarea')?.focus();
+    }, 0);
   }
 
   function _projectMobileContentRow({
@@ -4465,10 +4831,14 @@
 
   function _renderProjectMobileRunsTab(projectId, summary) {
     const fragment = document.createDocumentFragment();
+    const comparableRuns = _projectComparableRuns(summary);
+    const compareRuns = _makeProjectButton('Compare', 'mobile-compare-runs', projectId, comparableRuns.length >= 2 ? 'secondary' : 'ghost');
+    compareRuns.disabled = comparableRuns.length < 2;
+    if (compareRuns.disabled) compareRuns.setAttribute('aria-disabled', 'true');
     const linkLastRun = _makeProjectButton('Link last run', 'link-last-run', projectId, 'primary');
     const toolbar = document.createElement('div');
     toolbar.className = 'project-mobile-tab-toolbar';
-    toolbar.appendChild(linkLastRun);
+    toolbar.append(compareRuns, linkLastRun);
     fragment.appendChild(toolbar);
 
     const allRuns = _projectRunItems(summary);
@@ -5391,6 +5761,8 @@
     _closeProjectEntityEditor();
     _closeProjectPackageManifest();
     _closeProjectPackageWizard({ render: false });
+    _closeProjectMobileActionSheet({ restoreFocus: false });
+    _closeProjectMobileCompareSheet({ restoreFocus: false });
     _hideProjectWorkspaceOverlay();
     _setProjectWorkspaceMessage('');
     if (refocus && typeof refocusComposerAfterAction === 'function') {
@@ -5939,7 +6311,6 @@
 
   projectWorkspaceModal?.addEventListener('click', async (event) => {
     if (event.target.closest?.('[data-project-review-state]')) return;
-    if (_handleProjectMobileRowMenuOutsideClick(event)) return;
     const mobileDetailTab = event.target.closest?.('[data-project-mobile-detail-tab]');
     if (mobileDetailTab) {
       event.preventDefault();
@@ -6000,6 +6371,25 @@
         return;
       }
       if (action === 'project-menu') {
+        const project = projectWorkspaceRows.find(item => String(item.id || '') === mobileProjectId)
+          || _projectSummary(mobileProjectId)?.project
+          || null;
+        if (!project) return;
+        _openProjectMobileActionSheet(
+          mobileProjectId,
+          `Project actions for ${_projectDisplayName(project)}`,
+          _projectMobileProjectActions(project),
+          mobileAction,
+        );
+        return;
+      }
+      if (action === 'action-sheet') {
+        _openProjectMobileActionSheet(
+          mobileProjectId,
+          mobileAction._projectMobileActionSheetLabel || 'Actions',
+          mobileAction._projectMobileActionSheetItems || [],
+          mobileAction,
+        );
         return;
       }
     }
@@ -6179,6 +6569,15 @@
         await refreshProjectWorkspace();
         _setProjectWorkspaceMessage('Project deleted.');
         return;
+      } else if (action === 'edit-project-metadata') {
+        const summary = projectWorkspaceSummaries.get(String(projectId || ''));
+        const project = (summary && summary.project && typeof summary.project === 'object')
+          ? summary.project
+          : projectWorkspaceRows.find(item => String(item.id || '') === projectId);
+        if (!project) throw new Error('Project is missing its details.');
+        _setProjectWorkspaceMessage('');
+        _openProjectEntityEditor(projectId, 'project', project);
+        return;
       } else if (action === 'new-target') {
         _setProjectWorkspaceMessage('');
         _openProjectTargetEditor(projectId);
@@ -6255,30 +6654,15 @@
         if (action === 'filter-run-artifacts') projectWorkspaceTab = 'artifacts';
         _renderProjectExplorer();
         return;
+      } else if (action === 'mobile-compare-runs') {
+        _openProjectMobileCompareSheet(projectId, btn);
+        return;
       } else if (action === 'compare-runs') {
         const controls = projectExplorerBody?.querySelector('.project-run-compare-controls');
         const mode = String(projectExplorerBody?.querySelector('[data-project-compare-mode]')?.value || 'run');
         const targetValue = String(projectExplorerBody?.querySelector('[data-project-compare-target]')?.value || '').trim();
-        if (mode === 'baseline') {
-          _avoidProjectRunCompareLabelSelfTarget(controls, targetValue);
-        }
         const leftId = String(projectExplorerBody?.querySelector('[data-project-compare-run="left"]')?.value || '');
-        if (!projectId || !leftId) throw new Error('Choose a project run to compare.');
-        if (mode === 'run' && !targetValue) throw new Error('Choose two project runs to compare.');
-        if (mode === 'run' && leftId === targetValue) throw new Error('Choose two different project runs to compare.');
-        if (mode === 'baseline' && !targetValue) throw new Error('Choose a baseline label to compare.');
-        const compareFn = global && typeof global.fetchAndRenderHistoryComparison === 'function'
-          ? global.fetchAndRenderHistoryComparison
-          : (typeof window !== 'undefined' && typeof window.fetchAndRenderHistoryComparison === 'function'
-              ? window.fetchAndRenderHistoryComparison
-              : null);
-        if (!compareFn) throw new Error('Run comparison is not available.');
-        const params = new URLSearchParams({ left_run_id: leftId });
-        if (mode === 'baseline') params.set('baseline_label', targetValue);
-        else params.set('right_run_id', targetValue);
-        compareFn(leftId, mode === 'baseline' ? `baseline:${targetValue}` : targetValue, {
-          url: `/projects/${encodeURIComponent(projectId)}/compare?${params.toString()}`,
-        });
+        _compareProjectRuns(projectId, leftId, mode, targetValue, controls);
         return;
       } else if (action === 'link-last-run') {
         await _linkLastRunToProject(projectId, projectWorkspaceSummaries.get(String(projectId || '')));
@@ -6492,6 +6876,31 @@
       onClose: () => _closeProjectPackageManifest(),
       closeButtons: [projectPackageManifestOverlay.querySelector('.project-package-manifest-close')],
     });
+  }
+  const bindMobileSheetFn = global && typeof global.bindMobileSheet === 'function'
+    ? global.bindMobileSheet
+    : (typeof bindMobileSheet === 'function' ? bindMobileSheet : null);
+  if (bindMobileSheetFn) {
+    if (projectTargetEditorOverlay) {
+      bindMobileSheetFn(projectTargetEditorOverlay.querySelector('#project-target-editor-modal'), {
+        onClose: () => _closeProjectTargetEditor(),
+      });
+    }
+    if (projectEntityEditorOverlay) {
+      bindMobileSheetFn(projectEntityEditorOverlay.querySelector('#project-entity-editor-modal'), {
+        onClose: () => _closeProjectEntityEditor(),
+      });
+    }
+    if (projectPackageManifestOverlay) {
+      bindMobileSheetFn(projectPackageManifestOverlay.querySelector('#project-package-manifest-modal'), {
+        onClose: () => _closeProjectPackageManifest(),
+      });
+    }
+    if (projectPackageWizardOverlay) {
+      bindMobileSheetFn(projectPackageWizardOverlay.querySelector('#project-package-wizard-modal'), {
+        onClose: () => _closeProjectPackageWizard(),
+      });
+    }
   }
 
   function _renderUptime() {
