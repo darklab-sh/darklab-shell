@@ -1297,46 +1297,6 @@ def _hunk_line_diff(
     }
 
 
-def _legacy_sections_from_hunks(hunks, hunk_truncated):
-    changed = []
-    added = []
-    removed = []
-    for hunk in hunks:
-        if hunk["op"] == "insert":
-            added.extend(hunk.get("right", {}).get("lines", []))
-        elif hunk["op"] == "delete":
-            removed.extend(hunk.get("left", {}).get("lines", []))
-        elif hunk["op"] == "replace":
-            left_lines = hunk.get("left", {}).get("lines", [])
-            right_lines = hunk.get("right", {}).get("lines", [])
-            for pair in hunk.get("changed_pairs", []):
-                left_line = left_lines[pair["left_index"]]
-                right_line = right_lines[pair["right_index"]]
-                segments = pair.get("segments", {})
-                changed.append({
-                    "removed": {
-                        **left_line,
-                        "segments": segments.get("left", []),
-                    },
-                    "added": {
-                        **right_line,
-                        "segments": segments.get("right", []),
-                    },
-                    "similarity": pair.get("similarity"),
-                })
-            removed.extend(left_lines[index] for index in hunk.get("left_unpaired", []))
-            added.extend(right_lines[index] for index in hunk.get("right_unpaired", []))
-    lines_omitted = hunk_truncated.get("lines_omitted", {})
-    return {
-        "changed": changed,
-        "added": added,
-        "removed": removed,
-        "added_omitted": int(lines_omitted.get("right") or 0),
-        "removed_omitted": int(lines_omitted.get("left") or 0),
-        "max_changed_lines": COMPARE_MAX_CHANGED_LINES,
-    }
-
-
 def _resolve_compare_request(session_id, left_id, right_id, project_id="", baseline_label=""):
     project_comparison = None
     if project_id:
@@ -1748,7 +1708,6 @@ def compare_history_runs():
     left_finding_count = _finding_count_for_entries(left_run, left_entries)
     right_finding_count = _finding_count_for_entries(right_run, right_entries)
     diff = _hunk_line_diff(left_entries, right_entries)
-    legacy_sections = _legacy_sections_from_hunks(diff["hunks"], diff["truncated"])
     project_truncated = project_comparison.get("truncated", {}) if project_comparison else {}
     if project_comparison:
         finding_objects = project_comparison.get("objects", {}).get("findings", {})
@@ -1809,7 +1768,6 @@ def compare_history_runs():
         "artifacts": artifact_objects,
         "hunks": diff["hunks"],
         "totals": diff["totals"],
-        "sections": legacy_sections,
         "truncated": truncated,
         "limits": {
             "max_changed_lines": COMPARE_MAX_CHANGED_LINES,

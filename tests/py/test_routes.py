@@ -831,11 +831,6 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         )
         assert missing_project.status_code == 404
-        removed_project_route = client.get(
-            f"/projects/{project['id']}/compare?left_run_id={left_run_id}&right_run_id={right_run_id}",
-            headers={"X-Session-ID": session_id},
-        )
-        assert removed_project_route.status_code == 404
 
     def test_project_compare_returns_empty_diffs_for_matching_empty_runs(self):
         client = get_client()
@@ -5821,17 +5816,30 @@ class TestHistoryRoute:
             }
             assert [hunk["op"] for hunk in data["hunks"]] == ["replace", "equal", "replace"]
             assert data["limits"]["max_changed_lines"] == 2000
-            assert len(data["sections"]["changed"]) == 2
-            changed = data["sections"]["changed"][0]
-            assert changed["removed"]["text"].endswith("23:22 UTC")
-            assert changed["added"]["text"].endswith("23:21 UTC")
-            assert any(segment["changed"] for segment in changed["removed"]["segments"])
-            assert any(segment["changed"] for segment in changed["added"]["segments"])
-            assert data["sections"]["changed"][1]["removed"]["text"] == "8080/tcp open http-proxy"
-            assert data["sections"]["changed"][1]["added"]["text"] == "443/tcp open https"
-            assert data["sections"]["added"] == []
-            assert data["sections"]["removed"] == []
-            assert all("process exited" not in line["text"] for line in data["sections"]["added"])
+            assert "sections" not in data
+            first_hunk = data["hunks"][0]
+            first_pair = first_hunk["changed_pairs"][0]
+            first_left = first_hunk["left"]["lines"][first_pair["left_index"]]
+            first_right = first_hunk["right"]["lines"][first_pair["right_index"]]
+            assert first_left["text"].endswith("23:22 UTC")
+            assert first_right["text"].endswith("23:21 UTC")
+            assert any(segment["changed"] for segment in first_pair["segments"]["left"])
+            assert any(segment["changed"] for segment in first_pair["segments"]["right"])
+            final_hunk = data["hunks"][2]
+            final_pair = final_hunk["changed_pairs"][0]
+            final_left = final_hunk["left"]["lines"][final_pair["left_index"]]
+            final_right = final_hunk["right"]["lines"][final_pair["right_index"]]
+            assert final_left["text"] == "8080/tcp open http-proxy"
+            assert final_right["text"] == "443/tcp open https"
+            hunk_texts = []
+            for hunk in data["hunks"]:
+                hunk_texts.extend(
+                    line["text"] for line in hunk.get("left", {}).get("lines", [])
+                )
+                hunk_texts.extend(
+                    line["text"] for line in hunk.get("right", {}).get("lines", [])
+                )
+            assert all("process exited" not in text for text in hunk_texts)
             assert [item["raw_line"] for item in data["objects"]["findings"]["added"]] == ["443/tcp open https"]
             assert [item["raw_line"] for item in data["objects"]["findings"]["removed"]] == ["8080/tcp open http-proxy"]
             assert [item["workspace_path"] for item in data["objects"]["artifacts"]["added"]] == ["reports/right.txt"]
@@ -5967,9 +5975,17 @@ class TestHistoryRoute:
             assert data["hunks"][0]["changed_pairs"] == []
             assert data["hunks"][0]["left_unpaired"] == [0]
             assert data["hunks"][0]["right_unpaired"] == [0]
-            assert data["sections"]["changed"] == []
-            assert [line["text"] for line in data["sections"]["removed"]] == [left_line]
-            assert [line["text"] for line in data["sections"]["added"]] == [right_line]
+            assert "sections" not in data
+            left_unpaired = [
+                data["hunks"][0]["left"]["lines"][index]["text"]
+                for index in data["hunks"][0]["left_unpaired"]
+            ]
+            right_unpaired = [
+                data["hunks"][0]["right"]["lines"][index]["text"]
+                for index in data["hunks"][0]["right_unpaired"]
+            ]
+            assert left_unpaired == [left_line]
+            assert right_unpaired == [right_line]
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))

@@ -232,6 +232,14 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/share/<share_id>` | Serves a styled snapshot permalink, or raw JSON with `?json`. |
 | `DELETE` | `/share/<share_id>` | Deletes one current-session snapshot permalink. |
 
+Run comparison applies bounded transcript-diff caps before returning hunk payloads:
+`COMPARE_MAX_CHANGED_LINES` limits emitted changed-line units to 2,000,
+`COMPARE_MAX_HUNKS` limits emitted change blocks to 3,000,
+`COMPARE_INLINE_EQUAL_CONTEXT` inlines three equal context lines on each side of a change,
+`COMPARE_LINE_DISPLAY_TRUNCATE` caps displayed line text at 4,000 characters with client-side expansion,
+`COMPARE_LAZY_EQUAL_PAGE_LIMIT` pages folded equal regions at 5,000 lines, and
+`COMPARE_LAZY_EQUAL_BYTE_LIMIT` caps each lazy equal-region page at 512,000 UTF-8 bytes.
+
 ### Session Routes
 
 | Method | Endpoint | Description |

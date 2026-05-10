@@ -1322,30 +1322,6 @@ describe('history panel actions', () => {
                 output_lines: { delta: 0 },
                 findings: { delta: 0 },
               },
-              sections: {
-                changed: [
-                  {
-                    removed: {
-                      text: 'Starting Nmap at 2026-04-30 23:22 UTC',
-                      segments: [
-                        { text: 'Starting Nmap at 2026-04-30 23:' },
-                        { text: '22', changed: true },
-                        { text: ' UTC' },
-                      ],
-                    },
-                    added: {
-                      text: 'Starting Nmap at 2026-04-30 23:21 UTC',
-                      segments: [
-                        { text: 'Starting Nmap at 2026-04-30 23:' },
-                        { text: '21', changed: true },
-                        { text: ' UTC' },
-                      ],
-                    },
-                  },
-                ],
-                added: [{ text: '443/tcp open https' }],
-                removed: [{ text: '8080/tcp open http-proxy' }],
-              },
               totals: {
                 left_total_lines: 2,
                 right_total_lines: 2,
