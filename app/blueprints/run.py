@@ -24,6 +24,7 @@ from typing import cast
 from flask import Blueprint, Response, jsonify, request
 
 from commands import (
+    AMASS_DEFAULT_WORKSPACE_DIR,
     CommandValidationResult,
     command_project_target_inputs,
     command_root,
@@ -143,6 +144,10 @@ CLIENT_SIDE_RUN_ROOTS = {
     "wc",
 }
 
+APP_MANAGED_WORKSPACE_ARTIFACT_PREFIXES = (
+    AMASS_DEFAULT_WORKSPACE_DIR.strip("/"),
+)
+
 
 def _variable_notice_line(expanded_command: str, used_names: tuple[str, ...]) -> str:
     variables = ", ".join(f"${name}" for name in used_names)
@@ -237,6 +242,8 @@ def _workspace_artifacts_from_validation(validation: CommandValidationResult, se
     ordered_paths = reads + [path for path in writes if path not in read_set]
     artifacts = []
     for workspace_path in ordered_paths:
+        if _is_app_managed_workspace_artifact_path(workspace_path):
+            continue
         if workspace_path in read_set and workspace_path in write_set:
             kind = "read_write"
         elif workspace_path in write_set:
@@ -250,6 +257,17 @@ def _workspace_artifacts_from_validation(validation: CommandValidationResult, se
             "detected_by": "workspace_flag",
         })
     return artifacts
+
+
+def _is_app_managed_workspace_artifact_path(workspace_path: str) -> bool:
+    normalized = str(workspace_path or "").strip().replace("\\", "/").strip("/")
+    if not normalized:
+        return False
+    return any(
+        normalized == prefix or normalized.startswith(f"{prefix}/")
+        for prefix in APP_MANAGED_WORKSPACE_ARTIFACT_PREFIXES
+        if prefix
+    )
 
 
 def _workspace_artifacts_with_sizes(session_id: str, artifacts) -> list[dict]:

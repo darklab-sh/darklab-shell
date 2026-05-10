@@ -596,6 +596,26 @@ class TestIsCommandAllowedEdges:
             assert result.workspace_writes == writes
             assert str(tmp) in result.exec_command
 
+    def test_workspace_artifact_capture_skips_app_managed_amass_database(self):
+        from blueprints.run import _workspace_artifacts_from_validation
+
+        validation = commands.CommandValidationResult(
+            True,
+            workspace_reads=["domains.txt"],
+            workspace_writes=[
+                "tools/amass",
+                "amass-subdomains.txt",
+                "tools/amass/asset.db",
+            ],
+        )
+
+        artifacts = _workspace_artifacts_from_validation(validation, "session-1")
+
+        assert [(item["workspace_path"], item["kind"]) for item in artifacts] == [
+            ("domains.txt", "input"),
+            ("amass-subdomains.txt", "output"),
+        ]
+
     def test_restricted_command_input_cidrs_block_inline_literal_targets(self):
         registry = {
             "commands": [

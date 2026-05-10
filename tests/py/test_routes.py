@@ -841,20 +841,45 @@ class TestProjectRoutes:
         assert "truncated" not in payload
 
         with sqlite3.connect(DB_PATH) as conn:
-            for prefix, run_id in (("left", left_run_id), ("right", right_run_id)):
+            for line_number, raw_line in enumerate([
+                "one.darklab.sh",
+                "two.darklab.sh",
+                "old.darklab.sh",
+            ]):
                 conn.execute(
                     "INSERT INTO findings "
                     "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
-                    "VALUES (?, ?, ?, 'finding', ?, ?, 0, ?, datetime('now'))",
+                    "VALUES (?, ?, ?, 'finding', ?, ?, ?, ?, datetime('now'))",
                     (
-                        f"fnd_compare_cap_{prefix}_{uuid.uuid4().hex[:8]}",
+                        f"fnd_compare_left_{line_number}_{uuid.uuid4().hex[:8]}",
                         session_id,
-                        run_id,
-                        f"{prefix} finding",
-                        f"{prefix} raw line",
-                        f"fp-{prefix}-{run_id}",
+                        left_run_id,
+                        raw_line,
+                        raw_line,
+                        line_number,
+                        f"fp-left-{line_number}-{left_run_id}",
                     ),
                 )
+            for line_number, raw_line in enumerate([
+                "two.darklab.sh",
+                "one.darklab.sh",
+                "new.darklab.sh",
+            ]):
+                conn.execute(
+                    "INSERT INTO findings "
+                    "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                    "VALUES (?, ?, ?, 'finding', ?, ?, ?, ?, datetime('now'))",
+                    (
+                        f"fnd_compare_right_{line_number}_{uuid.uuid4().hex[:8]}",
+                        session_id,
+                        right_run_id,
+                        raw_line,
+                        raw_line,
+                        line_number,
+                        f"fp-right-{line_number}-{right_run_id}",
+                    ),
+                )
+            for prefix, run_id in (("left", left_run_id), ("right", right_run_id)):
                 conn.execute(
                     "INSERT INTO run_file_artifacts "
                     "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, detected_by, created) "
@@ -869,6 +894,16 @@ class TestProjectRoutes:
                 )
             conn.commit()
 
+        diff_resp = client.get(
+            f"/projects/{project['id']}/compare?left_run_id={left_run_id}&right_run_id={right_run_id}",
+            headers={"X-Session-ID": session_id},
+        )
+        assert diff_resp.status_code == 200
+        diff_payload = json.loads(diff_resp.data)
+        assert [item["raw_line"] for item in diff_payload["findings"]["added"]] == ["new.darklab.sh"]
+        assert [item["raw_line"] for item in diff_payload["findings"]["removed"]] == ["old.darklab.sh"]
+        assert diff_payload["findings"]["unchanged_count"] == 2
+
         with mock.patch("project_workspace.MAX_PROJECT_COMPARE_ITEMS_PER_SIDE", 0):
             capped_resp = client.get(
                 f"/projects/{project['id']}/compare?left_run_id={left_run_id}&right_run_id={right_run_id}",
@@ -876,8 +911,8 @@ class TestProjectRoutes:
             )
         assert capped_resp.status_code == 200
         capped = json.loads(capped_resp.data)
-        assert capped["left"]["persisted_finding_count"] == 1
-        assert capped["right"]["persisted_finding_count"] == 1
+        assert capped["left"]["persisted_finding_count"] == 3
+        assert capped["right"]["persisted_finding_count"] == 3
         assert capped["left"]["artifact_count"] == 1
         assert capped["right"]["artifact_count"] == 1
         assert capped["findings"] == {"added": [], "removed": [], "unchanged_count": 0}
