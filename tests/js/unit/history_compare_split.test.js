@@ -273,6 +273,176 @@ describe('history compare split renderer', () => {
     expect(apiFetch).toHaveBeenCalledTimes(4)
   })
 
+  it('continues lazy fold pagination across byte-limited pages', async () => {
+    const apiFetch = vi.fn((url) => {
+      const parsed = new URL(url, 'https://example.test')
+      const side = parsed.searchParams.get('side')
+      const start = Number(parsed.searchParams.get('start'))
+      const label = side === 'a' ? 'left' : 'right'
+      return Promise.resolve({
+        json: () => Promise.resolve({
+          lines: [{ text: `${label} byte page ${start}`, line_index: start }],
+          start,
+          end: start + 1,
+          truncated: start < 2,
+          byte_limit: 16,
+        }),
+      })
+    })
+    const { _renderHistoryComparison } = loadCompareHelpers({ apiFetchImpl: apiFetch })
+    _renderHistoryComparison(compareData({
+      limits: {
+        line_display_truncate: 200,
+        lazy_equal_page_limit: 2,
+        lazy_equal_byte_limit: 16,
+      },
+      hunks: [{
+        op: 'equal',
+        left: { start: 0, end: 4 },
+        right: { start: 0, end: 4 },
+        context: {
+          leading: {
+            left: [{ text: 'left lead', line_index: 0 }],
+            right: [{ text: 'right lead', line_index: 0 }],
+          },
+          trailing: {
+            left: [{ text: 'left tail', line_index: 3 }],
+            right: [{ text: 'right tail', line_index: 3 }],
+          },
+          omitted: 2,
+        },
+      }],
+    }))
+
+    document.querySelector('.history-compare-fold').click()
+    await flushPromises()
+    await flushPromises()
+    await flushPromises()
+    expect(document.querySelector('[data-side="a"]')?.textContent).toContain('left byte page 2')
+    expect(document.querySelector('[data-side="b"]')?.textContent).toContain('right byte page 2')
+    expect(apiFetch).toHaveBeenCalledTimes(4)
+    expect(apiFetch.mock.calls.map(call => new URL(call[0], 'https://example.test').searchParams.get('start')))
+      .toEqual(['1', '1', '2', '2'])
+  })
+
+  it('expands a single oversized lazy line without requiring another page', async () => {
+    const oversized = 'x'.repeat(120)
+    const apiFetch = vi.fn(url => {
+      const parsed = new URL(url, 'https://example.test')
+      const side = parsed.searchParams.get('side')
+      return Promise.resolve({
+        json: () => Promise.resolve({
+          lines: [{ text: `${side}:${oversized}`, line_index: 1 }],
+          start: 1,
+          end: 2,
+          truncated: false,
+          byte_limit: 16,
+        }),
+      })
+    })
+    const { _renderHistoryComparison } = loadCompareHelpers({ apiFetchImpl: apiFetch })
+    _renderHistoryComparison(compareData({
+      limits: {
+        line_display_truncate: 200,
+        lazy_equal_page_limit: 2,
+        lazy_equal_byte_limit: 16,
+      },
+      hunks: [{
+        op: 'equal',
+        left: { start: 0, end: 3 },
+        right: { start: 0, end: 3 },
+        context: {
+          leading: {
+            left: [{ text: 'left lead', line_index: 0 }],
+            right: [{ text: 'right lead', line_index: 0 }],
+          },
+          trailing: {
+            left: [{ text: 'left tail', line_index: 2 }],
+            right: [{ text: 'right tail', line_index: 2 }],
+          },
+          omitted: 1,
+        },
+      }],
+    }))
+
+    document.querySelector('.history-compare-fold').click()
+    await flushPromises()
+    await flushPromises()
+    expect(document.querySelector('[data-side="a"]')?.textContent).toContain(`a:${oversized}`)
+    expect(document.querySelector('[data-side="b"]')?.textContent).toContain(`b:${oversized}`)
+    expect(apiFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('stops lazy fold pagination when the backend clamps a stale range', async () => {
+    const apiFetch = vi.fn(url => {
+      const parsed = new URL(url, 'http://localhost')
+      const side = parsed.searchParams.get('side')
+      return Promise.resolve({
+        json: () => Promise.resolve({
+          lines: [{ text: `${side} folded`, line_index: 1 }],
+          start: 1,
+          end: 2,
+          truncated: true,
+          range_clamped: true,
+        }),
+      })
+    })
+    const { _renderHistoryComparison } = loadCompareHelpers({ apiFetchImpl: apiFetch })
+    _renderHistoryComparison(compareData({
+      hunks: [{
+        op: 'equal',
+        left: { start: 0, end: 5 },
+        right: { start: 0, end: 5 },
+        context: {
+          leading: {
+            left: [{ text: 'left lead', line_index: 0 }],
+            right: [{ text: 'right lead', line_index: 0 }],
+          },
+          trailing: {
+            left: [{ text: 'left tail', line_index: 4 }],
+            right: [{ text: 'right tail', line_index: 4 }],
+          },
+          omitted: 3,
+        },
+      }],
+    }))
+
+    document.querySelector('.history-compare-fold').click()
+    await flushPromises()
+    await flushPromises()
+    expect(document.querySelector('[data-side="a"]')?.textContent).toContain('a folded')
+    expect(document.querySelector('[data-side="b"]')?.textContent).toContain('b folded')
+    expect(apiFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('expands empty folded equal ranges without a lazy fetch', async () => {
+    const apiFetch = vi.fn()
+    const { _renderHistoryComparison } = loadCompareHelpers({ apiFetchImpl: apiFetch })
+    _renderHistoryComparison(compareData({
+      hunks: [{
+        op: 'equal',
+        left: { start: 0, end: 2 },
+        right: { start: 0, end: 2 },
+        context: {
+          leading: {
+            left: [{ text: 'left lead', line_index: 0 }],
+            right: [{ text: 'right lead', line_index: 0 }],
+          },
+          trailing: {
+            left: [{ text: 'left tail', line_index: 1 }],
+            right: [{ text: 'right tail', line_index: 1 }],
+          },
+          omitted: 1,
+        },
+      }],
+    }))
+
+    document.querySelector('.history-compare-fold').click()
+    await flushPromises()
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(document.querySelector('.history-compare-fold')?.textContent).toBe('Hide unchanged lines')
+  })
+
   it('expands long line text in place', () => {
     const { _renderHistoryComparison } = loadCompareHelpers()
     _renderHistoryComparison(compareData({

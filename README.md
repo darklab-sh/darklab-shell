@@ -628,6 +628,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── builtin_autocomplete.yaml # App-owned built-in command autocomplete grammar (not operator config)
 │   ├── builtin_commands.py     # App-owned built-in shell helpers handled before external process spawn
 │   ├── commands.py             # Command loading, validation (is_command_allowed), and registry-driven rewrites
+│   ├── compare_objects.py      # Shared unordered finding/artifact comparison helpers for run compare APIs
 │   ├── conf/                   # Operator-configurable files — edit these to customize the deployment
 │   │   ├── app_hints.txt           # Rotating footer hints for the welcome animation (optional)
 │   │   ├── app_hints_mobile.txt    # Mobile rotating footer hints for the welcome animation (optional)

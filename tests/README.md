@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,582
+- behavior tests: 2,589
 - docs/inventory meta-tests: 30
-- `pytest`: 1295 (1265 behavior + 30 meta)
-- `vitest`: 1071
+- `pytest`: 1298 (1268 behavior + 30 meta)
+- `vitest`: 1075
 - `playwright`: 246
-- total: 2,612
+- total: 2,619
 
 This document is organized in two parts:
 
@@ -937,6 +937,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestProjectRoutes.test_entity_note_routes_enforce_session_and_payload_boundaries` | Verifies entity note routes reject cross-session access and invalid note payloads while preserving the owner note. |
 | `TestProjectRoutes.test_project_compare_rejects_unlinked_cross_session_and_invalid_pairs` | Verifies project run comparison rejects one-run, same-run, unlinked, cross-session, missing-baseline, and missing-project requests. |
 | `TestProjectRoutes.test_project_compare_returns_empty_diffs_for_matching_empty_runs` | Verifies project run comparison returns empty added/removed diffs for linked runs with no findings or artifacts. |
+| `TestProjectRoutes.test_project_and_history_compare_match_artifacts_by_content_hash` | Verifies project and history run comparisons both treat same-content artifacts as unchanged even when workspace paths differ. |
 | `TestProjectRoutes.test_project_scoped_compare_lines_requires_linked_project_runs` | Verifies project-scoped compare-line expansion requires project-owned linked runs. |
 | `TestProjectRoutes.test_links_run_and_unlinks_without_duplicate_rows` | Verifies project run link creation is idempotent and links can be removed. |
 | `TestProjectRoutes.test_redacted_evidence_package_redacts_manifest_and_transcripts` | Verifies redacted evidence packages redact manifests, static pages, and run transcripts while excluding raw artifacts. |
@@ -1134,12 +1135,14 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestHistoryRoute.test_hunk_line_diff_handles_insert_delete_and_equal_context` | Verifies that run comparison hunks cover insertions, modified lines, and folded equal context. |
 | `TestHistoryRoute.test_hunk_line_diff_handles_uneven_replace_pairing` | Verifies that uneven replace hunks pair similar lines while preserving left-only rows. |
 | `TestHistoryRoute.test_hunk_line_diff_keeps_unrelated_and_long_replace_lines_unpaired` | Verifies that unrelated replace blocks and very long lines stay in unpaired buckets. |
+| `TestHistoryRoute.test_replace_pairing_uses_quick_ratio_before_full_ratio` | Verifies replace pairing skips expensive full similarity checks when cheap quick-ratio filtering already rejects a candidate. |
 | `TestHistoryRoute.test_hunk_line_diff_preserves_one_to_one_replace_pairing_below_threshold` | Verifies that one-line replace blocks still render as paired changes even below the normal similarity threshold. |
 | `TestHistoryRoute.test_hunk_line_diff_reports_budget_exhaustion` | Verifies changed-line and hunk-count budget exhaustion are reported in the hunk diff payload. |
 | `TestHistoryRoute.test_compare_history_lines_returns_filtered_output_slices` | Verifies compare-line lazy expansion slices filtered output entries after terminal chrome is removed. |
-| `TestHistoryRoute.test_compare_history_lines_rejects_invalid_ranges_and_cross_session_runs` | Verifies compare-line lazy expansion rejects invalid ranges and cross-session run access. |
+| `TestHistoryRoute.test_compare_history_lines_rejects_invalid_ranges_and_clamps_stale_ranges` | Verifies compare-line lazy expansion rejects invalid controls, clamps stale end ranges, and still rejects cross-session run access. |
 | `TestHistoryRoute.test_compare_history_lines_paginates_by_line_and_byte_limits` | Verifies compare-line lazy expansion enforces line and byte page caps. |
 | `TestHistoryRoute.test_compare_history_runs_returns_metadata_and_changed_lines` | Verifies that run comparison returns metadata deltas, changed-line pairs, and added/removed output while ignoring terminal chrome. |
+| `TestHistoryRoute.test_compare_history_runs_handles_invalid_requests_and_identical_runs` | Verifies run comparison rejects invalid request combinations and returns a no-change payload for identical completed runs. |
 | `TestHistoryRoute.test_compare_history_runs_matches_findings_by_normalized_text_not_order_or_fingerprint` | Verifies that run comparison treats matching finding text as unchanged even when findings are recorded in different order with different run-scoped fingerprints. |
 | `TestHistoryRoute.test_compare_history_runs_leaves_very_long_lines_unpaired` | Verifies that run comparison avoids expensive similar-line pairing for very long changed lines. |
 | `TestShareRoute.test_post_creates_snapshot` | Checks post creates snapshot handling. |
@@ -1928,6 +1931,10 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `keeps right-only replace lines before later paired right lines` | Verifies that a right-side inserted service line renders before a later paired summary line when that was the original B-side order. |
 | `renders per-hunk and surplus truncation placeholders` | Verifies that per-hunk line omissions and surplus hunk omissions are visible in the split-pane output. |
 | `expands folded equal hunks through paginated lazy fetches and reuses cached lines` | Verifies folded unchanged ranges load both sides through `/history/compare/lines`, follow pagination, and reuse cached lines after collapse/re-expand. |
+| `continues lazy fold pagination across byte-limited pages` | Verifies folded unchanged ranges continue lazy loading when the backend page boundary is caused by byte limits. |
+| `expands a single oversized lazy line without requiring another page` | Verifies a single oversized lazy line renders from one backend page without forcing another request. |
+| `stops lazy fold pagination when the backend clamps a stale range` | Verifies folded unchanged ranges stop requesting additional pages when the backend reports that the requested range was clamped. |
+| `expands empty folded equal ranges without a lazy fetch` | Verifies folded unchanged ranges with no hidden backend slice expand without calling `/history/compare/lines`. |
 | `expands long line text in place` | Verifies long compare rows render a compact expander and reveal the full line without rerendering the comparison. |
 | `uses totals for copy summary output` | Verifies that Copy summary reads changed, added, removed, and unchanged counts from the hunk totals contract. |
 | `does not sync split pane scroll positions in mobile terminal mode` | Verifies that mobile terminal viewport mode uses the stacked comparison fallback without desktop pane scroll syncing. |

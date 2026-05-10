@@ -239,6 +239,13 @@ Run comparison applies bounded transcript-diff caps before returning hunk payloa
 `COMPARE_LINE_DISPLAY_TRUNCATE` caps displayed line text at 4,000 characters with client-side expansion,
 `COMPARE_LAZY_EQUAL_PAGE_LIMIT` pages folded equal regions at 5,000 lines, and
 `COMPARE_LAZY_EQUAL_BYTE_LIMIT` caps each lazy equal-region page at 512,000 UTF-8 bytes.
+Replace-line pairing is bounded by `COMPARE_REPLACE_PAIR_CANDIDATES` (32 nearest candidate lines)
+and accepts pairs at `COMPARE_REPLACE_PAIR_MIN_RATIO` (0.5), with a matching
+`COMPARE_REPLACE_PAIR_QUICK_RATIO` prefilter to avoid expensive full similarity checks when the
+cheap upper bound is already below the threshold. Transcript hunks preserve source output order.
+Finding and artifact object diffs are intentionally order-insensitive: finding keys normalize
+stored `raw_line` / `title` text with fingerprint fallback, while artifact keys prefer
+`content_sha256`, then workspace path, then artifact id.
 
 ### Session Routes
 
@@ -1223,10 +1230,10 @@ Current totals:
 
 - behavior tests: 2,582
 - docs/inventory meta-tests: 30
-- `pytest`: 1295 (1265 behavior + 30 meta)
-- `vitest`: 1071
+- `pytest`: 1298 (1268 behavior + 30 meta)
+- `vitest`: 1075
 - `playwright`: 246
-- total: 2,612
+- total: 2,619
 
 ### Testing Architecture
 

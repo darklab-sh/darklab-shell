@@ -804,6 +804,11 @@ class TestProjectRoutes:
             headers={"X-Session-ID": session_id},
         )
         assert one_linked.status_code == 400
+        removed_project_route = client.get(
+            f"/projects/{project['id']}/compare?left_run_id={left_run_id}&right_run_id={right_run_id}",
+            headers={"X-Session-ID": session_id},
+        )
+        assert removed_project_route.status_code == 404
 
         self._link_run(client, session_id, project["id"], right_run_id)
         same_run = client.get(
@@ -847,8 +852,10 @@ class TestProjectRoutes:
         )
         assert resp.status_code == 200
         payload = json.loads(resp.data)
-        assert payload["findings"] == {"added": [], "removed": [], "unchanged_count": 0}
-        assert payload["artifacts"] == {"added": [], "removed": [], "unchanged_count": 0}
+        assert "findings" not in payload
+        assert "artifacts" not in payload
+        assert payload["objects"]["findings"] == {"added": [], "removed": [], "unchanged_count": 0}
+        assert payload["objects"]["artifacts"] == {"added": [], "removed": [], "unchanged_count": 0}
         assert payload["truncated"] == {
             "left": False,
             "right": False,
@@ -917,11 +924,11 @@ class TestProjectRoutes:
         )
         assert diff_resp.status_code == 200
         diff_payload = json.loads(diff_resp.data)
-        assert [item["raw_line"] for item in diff_payload["findings"]["added"]] == ["new.darklab.sh"]
-        assert [item["raw_line"] for item in diff_payload["findings"]["removed"]] == ["old.darklab.sh"]
-        assert diff_payload["findings"]["unchanged_count"] == 2
+        assert [item["raw_line"] for item in diff_payload["objects"]["findings"]["added"]] == ["new.darklab.sh"]
+        assert [item["raw_line"] for item in diff_payload["objects"]["findings"]["removed"]] == ["old.darklab.sh"]
+        assert diff_payload["objects"]["findings"]["unchanged_count"] == 2
 
-        with mock.patch("project_workspace.MAX_PROJECT_COMPARE_ITEMS_PER_SIDE", 0):
+        with mock.patch("compare_objects.MAX_COMPARE_ITEMS_PER_SIDE", 0):
             capped_resp = client.get(
                 self._project_compare_url(project["id"], left=left_run_id, right=right_run_id),
                 headers={"X-Session-ID": session_id},
@@ -932,8 +939,10 @@ class TestProjectRoutes:
         assert capped["right"]["persisted_finding_count"] == 3
         assert capped["left"]["artifact_count"] == 1
         assert capped["right"]["artifact_count"] == 1
-        assert capped["findings"] == {"added": [], "removed": [], "unchanged_count": 0}
-        assert capped["artifacts"] == {"added": [], "removed": [], "unchanged_count": 0}
+        assert "findings" not in capped
+        assert "artifacts" not in capped
+        assert capped["objects"]["findings"] == {"added": [], "removed": [], "unchanged_count": 0}
+        assert capped["objects"]["artifacts"] == {"added": [], "removed": [], "unchanged_count": 0}
         assert capped["truncated"] == {
             "left": True,
             "right": True,
@@ -944,6 +953,49 @@ class TestProjectRoutes:
             "artifacts": {"left": True, "right": True},
             "item_limit": 0,
         }
+
+    def test_project_and_history_compare_match_artifacts_by_content_hash(self):
+        client = get_client()
+        session_id = self._session_id("compare-artifact-hash")
+        project = self._create_project(client, session_id)
+        left_run_id = self._seed_run(session_id, "nmap darklab.sh")
+        right_run_id = self._seed_run(session_id, "nmap darklab.sh")
+        self._link_run(client, session_id, project["id"], left_run_id)
+        self._link_run(client, session_id, project["id"], right_run_id)
+        artifact_hash = hashlib.sha256(b"same artifact bytes").hexdigest()
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+                "detected_by, content_sha256, created) "
+                "VALUES (?, ?, ?, 'reports/left.txt', 'left.txt', 'output', 19, "
+                "'workspace_flag', ?, datetime('now'))",
+                (f"rfa_left_{uuid.uuid4().hex[:8]}", session_id, left_run_id, artifact_hash),
+            )
+            conn.execute(
+                "INSERT INTO run_file_artifacts "
+                "(id, session_id, run_id, workspace_path, display_name, kind, byte_size, "
+                "detected_by, content_sha256, created) "
+                "VALUES (?, ?, ?, 'reports/right.txt', 'right.txt', 'output', 19, "
+                "'workspace_flag', ?, datetime('now'))",
+                (f"rfa_right_{uuid.uuid4().hex[:8]}", session_id, right_run_id, artifact_hash),
+            )
+            conn.commit()
+
+        history_resp = client.get(
+            f"/history/compare?left={left_run_id}&right={right_run_id}",
+            headers={"X-Session-ID": session_id},
+        )
+        project_resp = client.get(
+            self._project_compare_url(project["id"], left=left_run_id, right=right_run_id),
+            headers={"X-Session-ID": session_id},
+        )
+        assert history_resp.status_code == 200
+        assert project_resp.status_code == 200
+        history_artifacts = json.loads(history_resp.data)["objects"]["artifacts"]
+        project_artifacts = json.loads(project_resp.data)["objects"]["artifacts"]
+        assert history_artifacts == {"added": [], "removed": [], "unchanged_count": 1}
+        assert project_artifacts == history_artifacts
 
     def test_project_scoped_compare_lines_requires_linked_project_runs(self):
         client = get_client()
@@ -1236,10 +1288,10 @@ class TestProjectRoutes:
             self._project_compare_url(project["id"], left=run_id, right=baseline_run_id),
             headers={"X-Session-ID": session_id},
         ).data)
-        assert [item["raw_line"] for item in comparison["findings"]["added"]] == ["80/tcp open http"]
-        assert [item["raw_line"] for item in comparison["findings"]["removed"]] == ["443/tcp open https"]
-        assert [item["workspace_path"] for item in comparison["artifacts"]["added"]] == ["reports/old.txt"]
-        assert [item["workspace_path"] for item in comparison["artifacts"]["removed"]] == ["reports/run.txt"]
+        assert [item["raw_line"] for item in comparison["objects"]["findings"]["added"]] == ["80/tcp open http"]
+        assert [item["raw_line"] for item in comparison["objects"]["findings"]["removed"]] == ["443/tcp open https"]
+        assert [item["workspace_path"] for item in comparison["objects"]["artifacts"]["added"]] == ["reports/old.txt"]
+        assert [item["workspace_path"] for item in comparison["objects"]["artifacts"]["removed"]] == ["reports/run.txt"]
         baseline_label = client.post(
             f"/entities/run/{baseline_run_id}/labels",
             json={"label": "baseline"},
@@ -5538,6 +5590,43 @@ class TestHistoryRoute:
         assert long_hunk["left_unpaired"] == [0]
         assert long_hunk["right_unpaired"] == [0]
 
+    def test_replace_pairing_uses_quick_ratio_before_full_ratio(self, monkeypatch):
+        calls = {"quick_ratio": 0, "ratio": 0}
+
+        class CheapRejectMatcher:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def quick_ratio(self):
+                calls["quick_ratio"] += 1
+                return 0.1
+
+            def ratio(self):
+                calls["ratio"] += 1
+                return 1.0
+
+        monkeypatch.setattr(history_routes, "SequenceMatcher", CheapRejectMatcher)
+        hunk = history_routes._compare_replace_hunk(
+            [
+                {"text": "left alpha", "line_index": 0},
+                {"text": "left beta", "line_index": 1},
+            ],
+            [
+                {"text": "right gamma", "line_index": 0},
+                {"text": "right delta", "line_index": 1},
+            ],
+            0,
+            2,
+            0,
+            2,
+        )
+
+        assert hunk["changed_pairs"] == []
+        assert hunk["left_unpaired"] == [0, 1]
+        assert hunk["right_unpaired"] == [0, 1]
+        assert calls["quick_ratio"] > 0
+        assert calls["ratio"] == 0
+
     def test_hunk_line_diff_preserves_one_to_one_replace_pairing_below_threshold(self):
         diff = history_routes._hunk_line_diff(
             [{"text": "abcde", "line_index": 0}],
@@ -5566,6 +5655,9 @@ class TestHistoryRoute:
         hunk = line_limited["hunks"][0]
         assert hunk["lines_omitted"]["total"] == 5
         assert history_routes._change_hunk_units(hunk) == 3
+        assert line_limited["totals"]["changed_line_count"] == len(hunk["changed_pairs"])
+        assert line_limited["totals"]["removed_line_count"] == len(hunk["left_unpaired"])
+        assert line_limited["totals"]["added_line_count"] == len(hunk["right_unpaired"])
 
         hunk_limited = history_routes._hunk_line_diff(
             [
@@ -5582,6 +5674,38 @@ class TestHistoryRoute:
             max_hunks=1,
         )
         assert hunk_limited["truncated"]["hunks_omitted"] == 1
+        assert hunk_limited["truncated"]["lines_omitted"] == {
+            "left": 1,
+            "right": 1,
+            "total": 2,
+        }
+        assert hunk_limited["totals"]["changed_line_count"] == 1
+        assert hunk_limited["totals"]["removed_line_count"] == 0
+        assert hunk_limited["totals"]["added_line_count"] == 0
+
+        line_cap_exhausted = history_routes._hunk_line_diff(
+            [
+                {"text": "a", "line_index": 0},
+                {"text": "same", "line_index": 1},
+                {"text": "b", "line_index": 2},
+            ],
+            [
+                {"text": "c", "line_index": 0},
+                {"text": "same", "line_index": 1},
+                {"text": "d", "line_index": 2},
+            ],
+            max_changed_lines=2,
+            max_hunks=10,
+        )
+        assert line_cap_exhausted["truncated"]["hunks_omitted"] == 1
+        assert line_cap_exhausted["truncated"]["lines_omitted"] == {
+            "left": 1,
+            "right": 1,
+            "total": 2,
+        }
+        assert line_cap_exhausted["totals"]["changed_line_count"] == 1
+        assert line_cap_exhausted["totals"]["removed_line_count"] == 0
+        assert line_cap_exhausted["totals"]["added_line_count"] == 0
 
     def test_compare_history_lines_returns_filtered_output_slices(self):
         client = get_client()
@@ -5625,7 +5749,7 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
-    def test_compare_history_lines_rejects_invalid_ranges_and_cross_session_runs(self):
+    def test_compare_history_lines_rejects_invalid_ranges_and_clamps_stale_ranges(self):
         client = get_client()
         session = "compare-lines-invalid-" + uuid.uuid4().hex[:8]
         other_session = "compare-lines-other-" + uuid.uuid4().hex[:8]
@@ -5654,6 +5778,11 @@ class TestHistoryRoute:
                 "&side=a&start=0&end=2",
                 headers={"X-Session-ID": session},
             )
+            stale_start = client.get(
+                "/history/compare/lines?left=cmp-lines-invalid-left&right=cmp-lines-invalid-right"
+                "&side=a&start=2&end=4",
+                headers={"X-Session-ID": session},
+            )
             cross_session = client.get(
                 "/history/compare/lines?left=cmp-lines-invalid-left&right=cmp-lines-invalid-other"
                 "&side=a&start=0&end=1",
@@ -5661,7 +5790,20 @@ class TestHistoryRoute:
             )
 
             assert invalid_side.status_code == 400
-            assert out_of_range.status_code == 400
+            assert out_of_range.status_code == 200
+            out_of_range_payload = json.loads(out_of_range.data)
+            assert [item["text"] for item in out_of_range_payload["lines"]] == ["alpha"]
+            assert out_of_range_payload["end"] == 1
+            assert out_of_range_payload["truncated"] is True
+            assert out_of_range_payload["range_clamped"] is True
+            assert "requested range exceeded" in out_of_range_payload["note"]
+            assert stale_start.status_code == 200
+            stale_start_payload = json.loads(stale_start.data)
+            assert stale_start_payload["lines"] == []
+            assert stale_start_payload["start"] == 1
+            assert stale_start_payload["end"] == 1
+            assert stale_start_payload["truncated"] is True
+            assert stale_start_payload["range_clamped"] is True
             assert cross_session.status_code == 404
         finally:
             conn = sqlite3.connect(DB_PATH)
@@ -5715,6 +5857,19 @@ class TestHistoryRoute:
             assert byte_data["end"] == 1
             assert byte_data["truncated"] is True
             assert byte_data["byte_limit"] == 5
+
+            with mock.patch("blueprints.history.COMPARE_LAZY_EQUAL_BYTE_LIMIT", 3):
+                oversized_line = client.get(
+                    "/history/compare/lines?left=cmp-lines-limit-left&right=cmp-lines-limit-right"
+                    "&side=a&start=0&end=3",
+                    headers={"X-Session-ID": session},
+                )
+            oversized_data = json.loads(oversized_line.data)
+            assert oversized_line.status_code == 200
+            assert [item["text"] for item in oversized_data["lines"]] == ["aaaa"]
+            assert oversized_data["end"] == 1
+            assert oversized_data["truncated"] is True
+            assert oversized_data["byte_limit"] == 3
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
@@ -5844,10 +5999,112 @@ class TestHistoryRoute:
             assert [item["raw_line"] for item in data["objects"]["findings"]["removed"]] == ["8080/tcp open http-proxy"]
             assert [item["workspace_path"] for item in data["objects"]["artifacts"]["added"]] == ["reports/right.txt"]
             assert [item["workspace_path"] for item in data["objects"]["artifacts"]["removed"]] == ["reports/left.txt"]
+
+            with mock.patch("compare_objects.MAX_COMPARE_ITEMS_PER_SIDE", 0):
+                capped_resp = client.get(
+                    "/history/compare?left=cmp-left&right=cmp-right",
+                    headers={"X-Session-ID": session},
+                )
+            capped = json.loads(capped_resp.data)
+            assert capped_resp.status_code == 200
+            assert capped["left"]["persisted_finding_count"] == 1
+            assert capped["right"]["persisted_finding_count"] == 1
+            assert capped["left"]["artifact_count"] == 1
+            assert capped["right"]["artifact_count"] == 1
+            assert capped["objects"]["findings"] == {"added": [], "removed": [], "unchanged_count": 0}
+            assert capped["objects"]["artifacts"] == {"added": [], "removed": [], "unchanged_count": 0}
+            assert capped["truncated"]["findings"] == {"left": True, "right": True}
+            assert capped["truncated"]["artifacts"] == {"left": True, "right": True}
+            assert capped["truncated"]["item_limit"] == 0
+
+            with mock.patch("blueprints.history.COMPARE_MAX_CHANGED_LINES", 2):
+                line_limited_resp = client.get(
+                    "/history/compare?left=cmp-left&right=cmp-right",
+                    headers={"X-Session-ID": session},
+                )
+            line_limited = json.loads(line_limited_resp.data)
+            assert line_limited_resp.status_code == 200
+            assert line_limited["truncated"]["changed_lines"] is True
+            assert line_limited["truncated"]["hunks_omitted"] == 1
+            assert line_limited["truncated"]["lines_omitted"] == {
+                "left": 1,
+                "right": 1,
+                "total": 2,
+            }
+            assert line_limited["totals"]["changed_line_count"] == 1
+            assert line_limited["totals"]["added_line_count"] == 0
+            assert line_limited["totals"]["removed_line_count"] == 0
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.execute("DELETE FROM findings WHERE session_id = ?", (session,))
             conn.execute("DELETE FROM run_file_artifacts WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
+
+    def test_compare_history_runs_handles_invalid_requests_and_identical_runs(self):
+        client = get_client()
+        session = "compare-errors-" + uuid.uuid4().hex[:8]
+        output = json.dumps([
+            {"text": "same header", "cls": "", "line_index": 0},
+            {"text": "80/tcp open http", "cls": "", "line_index": 1},
+        ])
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+                "output_preview, output_line_count) VALUES (?, ?, 'nmap darklab.sh', ?, ?, 0, ?, 2)",
+                [
+                    ("cmp-errors-left", session, "2026-01-01T00:00:01", "2026-01-01T00:00:03", output),
+                    ("cmp-errors-right", session, "2026-01-01T00:00:04", "2026-01-01T00:00:06", output),
+                ],
+            )
+            conn.commit()
+            conn.close()
+
+            missing_left = client.get(
+                "/history/compare?right=cmp-errors-right",
+                headers={"X-Session-ID": session},
+            )
+            missing_right = client.get(
+                "/history/compare?left=cmp-errors-left",
+                headers={"X-Session-ID": session},
+            )
+            same_run = client.get(
+                "/history/compare?left=cmp-errors-left&right=cmp-errors-left",
+                headers={"X-Session-ID": session},
+            )
+            missing_run = client.get(
+                "/history/compare?left=cmp-errors-left&right=missing-run",
+                headers={"X-Session-ID": session},
+            )
+            identical = client.get(
+                "/history/compare?left=cmp-errors-left&right=cmp-errors-right",
+                headers={"X-Session-ID": session},
+            )
+
+            assert missing_left.status_code == 400
+            assert missing_right.status_code == 400
+            assert same_run.status_code == 400
+            assert missing_run.status_code == 404
+            assert identical.status_code == 200
+            identical_payload = json.loads(identical.data)
+            assert identical_payload["totals"]["changed_line_count"] == 0
+            assert identical_payload["totals"]["added_line_count"] == 0
+            assert identical_payload["totals"]["removed_line_count"] == 0
+            assert identical_payload["objects"]["findings"] == {
+                "added": [],
+                "removed": [],
+                "unchanged_count": 0,
+            }
+            assert identical_payload["objects"]["artifacts"] == {
+                "added": [],
+                "removed": [],
+                "unchanged_count": 0,
+            }
+            assert identical_payload["truncated"]["changed_lines"] is False
+        finally:
+            conn = sqlite3.connect(DB_PATH)
             conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
             conn.commit()
             conn.close()

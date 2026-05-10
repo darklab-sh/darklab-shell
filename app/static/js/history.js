@@ -2233,44 +2233,6 @@ function _compareMetricCell(label, value, tone = '') {
   return cell;
 }
 
-function _renderHistoryCompareLines(title, lines, omitted, sign) {
-  const section = document.createElement('details');
-  section.className = 'history-compare-lines';
-  section.open = true;
-  const summary = document.createElement('summary');
-  summary.textContent = `${title} (${lines.length}${omitted ? `+${omitted}` : ''})`;
-  section.appendChild(summary);
-  if (!lines.length) {
-    const empty = document.createElement('div');
-    empty.className = 'history-compare-empty';
-    empty.textContent = `No ${title.toLowerCase()}.`;
-    section.appendChild(empty);
-    return section;
-  }
-  const list = document.createElement('div');
-  list.className = 'history-compare-line-list';
-  lines.forEach(line => {
-    const row = document.createElement('div');
-    row.className = 'history-compare-line';
-    const mark = document.createElement('span');
-    mark.className = sign === '+' ? 'history-compare-line-added' : 'history-compare-line-removed';
-    mark.textContent = sign;
-    row.appendChild(mark);
-    const text = document.createElement('code');
-    text.textContent = line.text || '';
-    row.appendChild(text);
-    list.appendChild(row);
-  });
-  section.appendChild(list);
-  if (omitted) {
-    const note = document.createElement('div');
-    note.className = 'history-compare-truncation';
-    note.textContent = `${omitted.toLocaleString()} additional changed line(s) omitted.`;
-    section.appendChild(note);
-  }
-  return section;
-}
-
 function _appendHistoryCompareSegments(parent, segments, fallbackText) {
   const safeSegments = Array.isArray(segments) ? segments : [];
   if (!safeSegments.length) {
@@ -2283,50 +2245,6 @@ function _appendHistoryCompareSegments(parent, segments, fallbackText) {
     if (segment && segment.changed) span.className = 'history-compare-line-delta';
     parent.appendChild(span);
   });
-}
-
-function _renderHistoryCompareChangedLines(lines) {
-  const section = document.createElement('details');
-  section.className = 'history-compare-lines history-compare-changed-lines';
-  section.open = true;
-  const summary = document.createElement('summary');
-  summary.textContent = `Changed lines (${lines.length})`;
-  section.appendChild(summary);
-  if (!lines.length) {
-    const empty = document.createElement('div');
-    empty.className = 'history-compare-empty';
-    empty.textContent = 'No changed lines.';
-    section.appendChild(empty);
-    return section;
-  }
-  const list = document.createElement('div');
-  list.className = 'history-compare-line-list history-compare-changed-list';
-  lines.forEach(line => {
-    const pair = document.createElement('div');
-    pair.className = 'history-compare-changed-pair';
-
-    const removed = line && line.removed ? line.removed : {};
-    const added = line && line.added ? line.added : {};
-    [
-      { label: 'A', cls: 'history-compare-line-removed', line: removed },
-      { label: 'B', cls: 'history-compare-line-added', line: added },
-    ].forEach(item => {
-      const row = document.createElement('div');
-      row.className = 'history-compare-line';
-      const mark = document.createElement('span');
-      mark.className = item.cls;
-      mark.textContent = item.label;
-      row.appendChild(mark);
-      const text = document.createElement('code');
-      _appendHistoryCompareSegments(text, item.line.segments, item.line.text || '');
-      row.appendChild(text);
-      pair.appendChild(row);
-    });
-
-    list.appendChild(pair);
-  });
-  section.appendChild(list);
-  return section;
 }
 
 function _historyCompareTotalChangedLines(totals = {}) {
@@ -2486,6 +2404,7 @@ function _historyCompareLineUrl(data, side, start, end) {
 
 function _fetchHistoryCompareFoldSide(data, hunk, side) {
   const range = _historyCompareFoldRange(hunk, side);
+  if (range.start >= range.end) return Promise.resolve([]);
   const collected = [];
   const loadPage = start => apiFetch(_historyCompareLineUrl(data, side, start, range.end))
     .then(resp => resp.json())
@@ -2494,7 +2413,13 @@ function _fetchHistoryCompareFoldSide(data, hunk, side) {
       const lines = Array.isArray(payload.lines) ? payload.lines : [];
       collected.push(...lines);
       const nextStart = Number(payload.end);
-      if (payload.truncated && Number.isFinite(nextStart) && nextStart > start && nextStart < range.end) {
+      if (
+        payload.truncated
+        && !payload.range_clamped
+        && Number.isFinite(nextStart)
+        && nextStart > start
+        && nextStart < range.end
+      ) {
         return loadPage(nextStart);
       }
       return collected;

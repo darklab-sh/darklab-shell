@@ -17,11 +17,11 @@ import sqlite3
 import tempfile
 import time
 import zipfile
-from collections import Counter
 from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from urllib.parse import urlparse
 
+import compare_objects
 import config as _config
 from database import (
     db_connect,
@@ -51,7 +51,7 @@ MAX_TARGET_VALUE_LEN = 512
 MAX_FINDING_TITLE_LEN = 240
 MAX_PACKAGE_NAME_LEN = 120
 MAX_PACKAGE_DESCRIPTION_LEN = 1000
-MAX_PROJECT_COMPARE_ITEMS_PER_SIDE = 5000
+MAX_PROJECT_COMPARE_ITEMS_PER_SIDE = compare_objects.MAX_COMPARE_ITEMS_PER_SIDE
 MAX_PROJECT_TARGET_DISCOVERY_PER_RUN = 100
 MAX_PROJECT_TARGET_DISCOVERY_FILE_BYTES = 256 * 1024
 MAX_PROJECT_TARGET_DISCOVERY_FILE_LINES = 2000
@@ -3456,94 +3456,6 @@ def _project_labeled_run_id(conn, session_id, project_id, label, excluded_run_id
     return row["id"] if row else ""
 
 
-def _compare_item_limit(limit=None):
-    if limit is None:
-        limit = MAX_PROJECT_COMPARE_ITEMS_PER_SIDE
-    try:
-        return max(0, int(limit))
-    except (TypeError, ValueError):
-        return MAX_PROJECT_COMPARE_ITEMS_PER_SIDE
-
-
-def _run_finding_compare_items(conn, session_id, run_id):
-    limit = _compare_item_limit()
-    total = conn.execute(
-        "SELECT COUNT(*) AS count FROM findings WHERE session_id = ? AND run_id = ?",
-        (session_id, run_id),
-    ).fetchone()["count"]
-    rows = conn.execute(
-        "SELECT id, raw_line, title, severity, fingerprint, review_state, created "
-        "FROM findings WHERE session_id = ? AND run_id = ? ORDER BY created ASC, id ASC LIMIT ?",
-        (session_id, run_id, limit),
-    ).fetchall()
-    items = []
-    for row in rows:
-        key = _finding_compare_key(row)
-        items.append({
-            "key": key,
-            "id": row["id"],
-            "title": row["title"],
-            "raw_line": row["raw_line"],
-            "severity": row["severity"],
-            "review_state": row["review_state"],
-        })
-    return items, int(total or 0), int(total or 0) > len(items)
-
-
-def _finding_compare_key(row):
-    for value in (row["raw_line"], row["title"]):
-        normalized = re.sub(r"\s+", " ", strip_ansi_codes(str(value or ""))).strip()
-        if normalized:
-            return normalized
-    return row["fingerprint"] or ""
-
-
-def _run_artifact_compare_items(conn, session_id, run_id):
-    limit = _compare_item_limit()
-    total = conn.execute(
-        "SELECT COUNT(*) AS count FROM run_file_artifacts WHERE session_id = ? AND run_id = ?",
-        (session_id, run_id),
-    ).fetchone()["count"]
-    rows = conn.execute(
-        "SELECT id, workspace_path, kind, byte_size, detected_by, created "
-        "FROM run_file_artifacts WHERE session_id = ? AND run_id = ? ORDER BY created ASC, id ASC LIMIT ?",
-        (session_id, run_id, limit),
-    ).fetchall()
-    items = [{
-        "key": row["workspace_path"],
-        "id": row["id"],
-        "workspace_path": row["workspace_path"],
-        "kind": row["kind"],
-        "byte_size": row["byte_size"],
-        "detected_by": row["detected_by"],
-    } for row in rows]
-    return items, int(total or 0), int(total or 0) > len(items)
-
-
-def _compare_items(left_items, right_items):
-    left_counts = Counter(item["key"] for item in left_items if item.get("key"))
-    right_counts = Counter(item["key"] for item in right_items if item.get("key"))
-    added_remaining = right_counts - left_counts
-    removed_remaining = left_counts - right_counts
-
-    def _collect(source_items, remaining):
-        rows = []
-        seen = Counter()
-        for item in source_items:
-            key = item.get("key")
-            if not key or remaining[key] <= seen[key]:
-                continue
-            seen[key] += 1
-            rows.append(item)
-        return rows
-
-    return {
-        "added": _collect(right_items, added_remaining),
-        "removed": _collect(left_items, removed_remaining),
-        "unchanged_count": sum((left_counts & right_counts).values()),
-    }
-
-
 def _run_compare_summary(row):
     if not row:
         return {}
@@ -3603,20 +3515,20 @@ def compare_project_runs(session_id, project_id, filters=None):
         runs_by_id = {str(row["id"]): row for row in run_rows}
         if left_run_id not in runs_by_id or right_run_id not in runs_by_id:
             raise ProjectWorkspaceError("comparison runs must both be linked to this project")
-        left_findings, left_finding_count, left_findings_truncated = _run_finding_compare_items(
+        left_findings, left_finding_count, left_findings_truncated = compare_objects.run_finding_compare_items(
             conn, session_id, left_run_id
         )
-        right_findings, right_finding_count, right_findings_truncated = _run_finding_compare_items(
+        right_findings, right_finding_count, right_findings_truncated = compare_objects.run_finding_compare_items(
             conn, session_id, right_run_id
         )
-        left_artifacts, left_artifact_count, left_artifacts_truncated = _run_artifact_compare_items(
+        left_artifacts, left_artifact_count, left_artifacts_truncated = compare_objects.run_artifact_compare_items(
             conn, session_id, left_run_id
         )
-        right_artifacts, right_artifact_count, right_artifacts_truncated = _run_artifact_compare_items(
+        right_artifacts, right_artifact_count, right_artifacts_truncated = compare_objects.run_artifact_compare_items(
             conn, session_id, right_run_id
         )
-    finding_diff = _compare_items(left_findings, right_findings)
-    artifact_diff = _compare_items(left_artifacts, right_artifacts)
+    finding_diff = compare_objects.compare_items(left_findings, right_findings)
+    artifact_diff = compare_objects.compare_items(left_artifacts, right_artifacts)
     response = {
         "left_run_id": left_run_id,
         "right_run_id": right_run_id,
@@ -3635,8 +3547,6 @@ def compare_project_runs(session_id, project_id, filters=None):
             "findings": finding_diff,
             "artifacts": artifact_diff,
         },
-        "findings": finding_diff,
-        "artifacts": artifact_diff,
     }
     if any((
         left_findings_truncated,
@@ -3655,7 +3565,7 @@ def compare_project_runs(session_id, project_id, filters=None):
                 "left": bool(left_artifacts_truncated),
                 "right": bool(right_artifacts_truncated),
             },
-            "item_limit": _compare_item_limit(),
+            "item_limit": compare_objects.compare_item_limit(),
         }
     return response
 

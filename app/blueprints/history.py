@@ -8,7 +8,6 @@ import math
 import re
 import sqlite3
 import uuid
-from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from typing import Any
@@ -16,6 +15,7 @@ from typing import Any
 from flask import Blueprint, jsonify, request
 
 import config as _config
+import compare_objects
 from database import db_connect, delete_run_artifacts, delete_snapshot_metadata
 from helpers import (
     GRACEFUL_TERMINATION_EXIT_CODE,
@@ -28,7 +28,6 @@ from output_signals import (
     classify_line,
     command_root as output_command_root,
     extract_target,
-    strip_ansi_codes,
 )
 from permalinks import _format_duration, _permalink_error_page, _permalink_page
 from process import active_runs_for_session
@@ -52,6 +51,7 @@ COMPARE_LINE_DISPLAY_TRUNCATE = 4_000
 COMPARE_LAZY_EQUAL_PAGE_LIMIT = 5_000
 COMPARE_LAZY_EQUAL_BYTE_LIMIT = 512_000
 COMPARE_REPLACE_PAIR_MIN_RATIO = 0.5
+COMPARE_REPLACE_PAIR_QUICK_RATIO = COMPARE_REPLACE_PAIR_MIN_RATIO
 COMPARE_REPLACE_PAIR_CANDIDATES = 32
 
 
@@ -937,79 +937,6 @@ def _finding_count_for_entries(run, entries):
     return count
 
 
-def _run_finding_compare_items(conn, session_id, run_id):
-    rows = conn.execute(
-        "SELECT id, raw_line, title, severity, fingerprint, review_state, line_number, created "
-        "FROM findings WHERE session_id = ? AND run_id = ? ORDER BY created ASC, id ASC",
-        (session_id, run_id),
-    ).fetchall()
-    items = []
-    for row in rows:
-        key = _finding_compare_key(row)
-        items.append({
-            "key": key,
-            "id": row["id"],
-            "title": row["title"] or "",
-            "raw_line": row["raw_line"] or "",
-            "severity": row["severity"] or "",
-            "review_state": row["review_state"] or "",
-            "line_number": row["line_number"],
-            "created": row["created"],
-        })
-    return items
-
-
-def _finding_compare_key(row):
-    for value in (row["raw_line"], row["title"]):
-        normalized = re.sub(r"\s+", " ", strip_ansi_codes(str(value or ""))).strip()
-        if normalized:
-            return normalized
-    return row["fingerprint"] or ""
-
-
-def _run_artifact_compare_items(conn, session_id, run_id):
-    rows = conn.execute(
-        "SELECT id, workspace_path, display_name, kind, byte_size, detected_by, content_sha256, created "
-        "FROM run_file_artifacts WHERE session_id = ? AND run_id = ? ORDER BY created ASC, id ASC",
-        (session_id, run_id),
-    ).fetchall()
-    return [{
-        "key": row["content_sha256"] or row["workspace_path"] or row["id"],
-        "id": row["id"],
-        "workspace_path": row["workspace_path"] or "",
-        "display_name": row["display_name"] or "",
-        "kind": row["kind"] or "",
-        "byte_size": row["byte_size"],
-        "detected_by": row["detected_by"] or "",
-        "content_sha256": row["content_sha256"] or "",
-        "created": row["created"],
-    } for row in rows]
-
-
-def _compare_object_items(left_items, right_items):
-    left_counts = Counter(item["key"] for item in left_items if item.get("key"))
-    right_counts = Counter(item["key"] for item in right_items if item.get("key"))
-    added_remaining = right_counts - left_counts
-    removed_remaining = left_counts - right_counts
-
-    def _collect(source_items, remaining):
-        rows = []
-        seen = Counter()
-        for item in source_items:
-            key = item.get("key")
-            if not key or remaining[key] <= seen[key]:
-                continue
-            seen[key] += 1
-            rows.append(item)
-        return rows
-
-    return {
-        "added": _collect(right_items, added_remaining),
-        "removed": _collect(left_items, removed_remaining),
-        "unchanged_count": sum((left_counts & right_counts).values()),
-    }
-
-
 def _compare_line_payload(entry):
     return {
         "text": str(entry.get("text") or ""),
@@ -1078,6 +1005,16 @@ def _replace_pair_candidate_indexes(left_index, left_count, right_indexes):
     )[:COMPARE_REPLACE_PAIR_CANDIDATES]
 
 
+def _compare_replace_similarity(left_text, right_text):
+    matcher = SequenceMatcher(None, left_text, right_text, autojunk=False)
+    if matcher.quick_ratio() < COMPARE_REPLACE_PAIR_QUICK_RATIO:
+        return None
+    similarity = matcher.ratio()
+    if similarity < COMPARE_REPLACE_PAIR_MIN_RATIO:
+        return None
+    return similarity
+
+
 def _compare_replace_hunk(left_entries, right_entries, left_start, left_end, right_start, right_end):
     left_lines = _compare_line_payloads(left_entries, left_start, left_end)
     right_lines = _compare_line_payloads(right_entries, right_start, right_end)
@@ -1113,8 +1050,8 @@ def _compare_replace_hunk(left_entries, right_entries, left_start, left_end, rig
             right_text = str(right_lines[right_index].get("text") or "")
             if len(right_text) > COMPARE_LINE_DISPLAY_TRUNCATE:
                 continue
-            similarity = SequenceMatcher(None, left_text, right_text, autojunk=False).ratio()
-            if similarity < COMPARE_REPLACE_PAIR_MIN_RATIO:
+            similarity = _compare_replace_similarity(left_text, right_text)
+            if similarity is None:
                 continue
             score = (similarity, -abs(right_index - left_index), -right_index)
             if best is None or score > best[0]:
@@ -1152,9 +1089,33 @@ def _change_hunk_units(hunk):
     return 0
 
 
+def _change_hunk_line_counts(hunk):
+    if hunk["op"] == "insert":
+        right = len(hunk["right"].get("lines", []))
+        return {"left": 0, "right": right, "total": right}
+    if hunk["op"] == "delete":
+        left = len(hunk["left"].get("lines", []))
+        return {"left": left, "right": 0, "total": left}
+    if hunk["op"] == "replace":
+        paired = len(hunk.get("changed_pairs", []))
+        left = paired + len(hunk.get("left_unpaired", []))
+        right = paired + len(hunk.get("right_unpaired", []))
+        return {"left": left, "right": right, "total": left + right}
+    return {"left": 0, "right": 0, "total": 0}
+
+
+def _add_change_hunk_totals(totals, hunk):
+    if hunk["op"] == "insert":
+        totals["added_line_count"] += len(hunk["right"].get("lines", []))
+    elif hunk["op"] == "delete":
+        totals["removed_line_count"] += len(hunk["left"].get("lines", []))
+    elif hunk["op"] == "replace":
+        totals["changed_line_count"] += len(hunk.get("changed_pairs", []))
+        totals["removed_line_count"] += len(hunk.get("left_unpaired", []))
+        totals["added_line_count"] += len(hunk.get("right_unpaired", []))
+
+
 def _trim_change_hunk_to_budget(hunk, remaining_units):
-    if remaining_units <= 0:
-        return None, 0, {"left": 0, "right": 0, "total": 0}
     units = _change_hunk_units(hunk)
     if units <= remaining_units:
         return hunk, units, {"left": 0, "right": 0, "total": 0}
@@ -1251,7 +1212,6 @@ def _hunk_line_diff(
                     "lines": _compare_line_payloads(right_entries, right_start, right_end),
                 },
             }
-            totals["added_line_count"] += right_end - right_start
         elif tag == "delete":
             hunk = {
                 "op": "delete",
@@ -1262,15 +1222,15 @@ def _hunk_line_diff(
                 },
                 "right": {"start": right_start, "end": right_end},
             }
-            totals["removed_line_count"] += left_end - left_start
         else:
             hunk = _compare_replace_hunk(left_entries, right_entries, left_start, left_end, right_start, right_end)
-            totals["changed_line_count"] += len(hunk["changed_pairs"])
-            totals["removed_line_count"] += len(hunk["left_unpaired"])
-            totals["added_line_count"] += len(hunk["right_unpaired"])
 
         if emitted_change_hunks >= max_hunks or emitted_change_units >= max_changed_lines:
             hunks_omitted += 1
+            omitted = _change_hunk_line_counts(hunk)
+            lines_omitted["left"] += omitted["left"]
+            lines_omitted["right"] += omitted["right"]
+            lines_omitted["total"] += omitted["total"]
             continue
         remaining_units = max_changed_lines - emitted_change_units
         hunk, used_units, omitted = _trim_change_hunk_to_budget(hunk, remaining_units)
@@ -1283,6 +1243,7 @@ def _hunk_line_diff(
         lines_omitted["left"] += omitted["left"]
         lines_omitted["right"] += omitted["right"]
         lines_omitted["total"] += omitted["total"]
+        _add_change_hunk_totals(totals, hunk)
         hunks.append(hunk)
         emitted_change_hunks += 1
         emitted_change_units += used_units
@@ -1707,7 +1668,13 @@ def compare_history_runs():
     right_entries, right_output = _compare_entries_for_diff(right_run)
     left_finding_count = _finding_count_for_entries(left_run, left_entries)
     right_finding_count = _finding_count_for_entries(right_run, right_entries)
-    diff = _hunk_line_diff(left_entries, right_entries)
+    diff = _hunk_line_diff(
+        left_entries,
+        right_entries,
+        max_changed_lines=COMPARE_MAX_CHANGED_LINES,
+        max_hunks=COMPARE_MAX_HUNKS,
+        inline_context=COMPARE_INLINE_EQUAL_CONTEXT,
+    )
     project_truncated = project_comparison.get("truncated", {}) if project_comparison else {}
     if project_comparison:
         finding_objects = project_comparison.get("objects", {}).get("findings", {})
@@ -1718,16 +1685,63 @@ def compare_history_runs():
         right_artifact_count = int(project_comparison.get("right", {}).get("artifact_count") or 0)
     else:
         with db_connect() as conn:
-            left_findings = _run_finding_compare_items(conn, session_id, left_id)
-            right_findings = _run_finding_compare_items(conn, session_id, right_id)
-            left_artifacts = _run_artifact_compare_items(conn, session_id, left_id)
-            right_artifacts = _run_artifact_compare_items(conn, session_id, right_id)
-        finding_objects = _compare_object_items(left_findings, right_findings)
-        artifact_objects = _compare_object_items(left_artifacts, right_artifacts)
-        left_persisted_finding_count = len(left_findings)
-        right_persisted_finding_count = len(right_findings)
-        left_artifact_count = len(left_artifacts)
-        right_artifact_count = len(right_artifacts)
+            left_findings, left_persisted_finding_count, left_findings_truncated = (
+                compare_objects.run_finding_compare_items(
+                    conn,
+                    session_id,
+                    left_id,
+                    include_line_number=True,
+                    include_created=True,
+                )
+            )
+            right_findings, right_persisted_finding_count, right_findings_truncated = (
+                compare_objects.run_finding_compare_items(
+                    conn,
+                    session_id,
+                    right_id,
+                    include_line_number=True,
+                    include_created=True,
+                )
+            )
+            left_artifacts, left_artifact_count, left_artifacts_truncated = (
+                compare_objects.run_artifact_compare_items(
+                    conn,
+                    session_id,
+                    left_id,
+                    include_display_name=True,
+                    include_created=True,
+                )
+            )
+            right_artifacts, right_artifact_count, right_artifacts_truncated = (
+                compare_objects.run_artifact_compare_items(
+                    conn,
+                    session_id,
+                    right_id,
+                    include_display_name=True,
+                    include_created=True,
+                )
+            )
+        finding_objects = compare_objects.compare_items(left_findings, right_findings)
+        artifact_objects = compare_objects.compare_items(left_artifacts, right_artifacts)
+        if any((
+            left_findings_truncated,
+            right_findings_truncated,
+            left_artifacts_truncated,
+            right_artifacts_truncated,
+        )):
+            project_truncated = {
+                "left": bool(left_findings_truncated or left_artifacts_truncated),
+                "right": bool(right_findings_truncated or right_artifacts_truncated),
+                "findings": {
+                    "left": bool(left_findings_truncated),
+                    "right": bool(right_findings_truncated),
+                },
+                "artifacts": {
+                    "left": bool(left_artifacts_truncated),
+                    "right": bool(right_artifacts_truncated),
+                },
+                "item_limit": compare_objects.compare_item_limit(),
+            }
 
     truncated = {
         "left": bool(left_output["partial"] or project_truncated.get("left")),
@@ -1764,8 +1778,6 @@ def compare_history_runs():
             "findings": finding_objects,
             "artifacts": artifact_objects,
         },
-        "findings": finding_objects,
-        "artifacts": artifact_objects,
         "hunks": diff["hunks"],
         "totals": diff["totals"],
         "truncated": truncated,
@@ -1814,8 +1826,12 @@ def compare_history_lines():
         return jsonify({"error": "Run not found"}), 404
     selected_run = left_run if side == "a" else right_run
     entries, _ = _compare_entries_for_diff(selected_run)
-    if end > len(entries):
-        return jsonify({"error": "range outside compared output"}), 400
+    available_end = len(entries)
+    range_clamped = end > available_end
+    if start > available_end:
+        start = available_end
+    if range_clamped:
+        end = available_end
 
     lines = []
     byte_count = 0
@@ -1824,11 +1840,15 @@ def compare_history_lines():
         entry = entries[cursor]
         payload = _compare_line_payload(entry)
         encoded_len = len(payload["text"].encode("utf-8", errors="replace"))
-        if lines and byte_count + encoded_len > COMPARE_LAZY_EQUAL_BYTE_LIMIT:
+        next_byte_count = byte_count + encoded_len
+        would_exceed_byte_limit = next_byte_count > COMPARE_LAZY_EQUAL_BYTE_LIMIT
+        if lines and would_exceed_byte_limit:
             break
         lines.append(payload)
-        byte_count += encoded_len
+        byte_count = next_byte_count
         cursor += 1
+        # Always return at least one line, even when that single line exceeds the
+        # byte cap, then stop before appending more.
         if byte_count >= COMPARE_LAZY_EQUAL_BYTE_LIMIT:
             break
 
@@ -1836,9 +1856,11 @@ def compare_history_lines():
         "lines": lines,
         "start": start,
         "end": cursor,
-        "truncated": cursor < end,
+        "truncated": bool(cursor < end or range_clamped),
+        "range_clamped": range_clamped,
         "page_limit": COMPARE_LAZY_EQUAL_PAGE_LIMIT,
         "byte_limit": COMPARE_LAZY_EQUAL_BYTE_LIMIT,
+        **({"note": "requested range exceeded available compared output"} if range_clamped else {}),
     })
 
 

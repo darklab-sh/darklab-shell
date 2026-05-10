@@ -1749,20 +1749,6 @@ body #history-panel { background: var(--theme-chrome-bg); }
   line-height: 1.35;
 }
 
-.history-compare-changed-list {
-  gap: 8px;
-}
-
-.history-compare-changed-pair {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  border: 1px solid color-mix(in srgb, var(--amber) 22%, var(--border));
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--amber) 4%, transparent);
-  padding: 7px 8px;
-}
-
 .history-compare-line-delta {
   border-radius: 3px;
   background: color-mix(in srgb, var(--amber) 48%, transparent);
