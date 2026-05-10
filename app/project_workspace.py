@@ -21,8 +21,8 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from urllib.parse import urlparse
 
-import compare_objects
 import config as _config
+import run_comparison
 from database import (
     db_connect,
     validate_project_entity_type,
@@ -51,7 +51,7 @@ MAX_TARGET_VALUE_LEN = 512
 MAX_FINDING_TITLE_LEN = 240
 MAX_PACKAGE_NAME_LEN = 120
 MAX_PACKAGE_DESCRIPTION_LEN = 1000
-MAX_PROJECT_COMPARE_ITEMS_PER_SIDE = compare_objects.MAX_COMPARE_ITEMS_PER_SIDE
+MAX_PROJECT_COMPARE_ITEMS_PER_SIDE = run_comparison.MAX_COMPARE_ITEMS_PER_SIDE
 MAX_PROJECT_TARGET_DISCOVERY_PER_RUN = 100
 MAX_PROJECT_TARGET_DISCOVERY_FILE_BYTES = 256 * 1024
 MAX_PROJECT_TARGET_DISCOVERY_FILE_LINES = 2000
@@ -3515,20 +3515,20 @@ def compare_project_runs(session_id, project_id, filters=None):
         runs_by_id = {str(row["id"]): row for row in run_rows}
         if left_run_id not in runs_by_id or right_run_id not in runs_by_id:
             raise ProjectWorkspaceError("comparison runs must both be linked to this project")
-        left_findings, left_finding_count, left_findings_truncated = compare_objects.run_finding_compare_items(
+        left_findings, left_finding_count, left_findings_truncated = run_comparison.run_finding_compare_items(
             conn, session_id, left_run_id
         )
-        right_findings, right_finding_count, right_findings_truncated = compare_objects.run_finding_compare_items(
+        right_findings, right_finding_count, right_findings_truncated = run_comparison.run_finding_compare_items(
             conn, session_id, right_run_id
         )
-        left_artifacts, left_artifact_count, left_artifacts_truncated = compare_objects.run_artifact_compare_items(
+        left_artifacts, left_artifact_count, left_artifacts_truncated = run_comparison.run_artifact_compare_items(
             conn, session_id, left_run_id
         )
-        right_artifacts, right_artifact_count, right_artifacts_truncated = compare_objects.run_artifact_compare_items(
+        right_artifacts, right_artifact_count, right_artifacts_truncated = run_comparison.run_artifact_compare_items(
             conn, session_id, right_run_id
         )
-    finding_diff = compare_objects.compare_items(left_findings, right_findings)
-    artifact_diff = compare_objects.compare_items(left_artifacts, right_artifacts)
+    finding_diff = run_comparison.compare_items(left_findings, right_findings)
+    artifact_diff = run_comparison.compare_items(left_artifacts, right_artifacts)
     response = {
         "left_run_id": left_run_id,
         "right_run_id": right_run_id,
@@ -3565,7 +3565,7 @@ def compare_project_runs(session_id, project_id, filters=None):
                 "left": bool(left_artifacts_truncated),
                 "right": bool(right_artifacts_truncated),
             },
-            "item_limit": compare_objects.compare_item_limit(),
+            "item_limit": run_comparison.compare_item_limit(),
         }
     return response
 

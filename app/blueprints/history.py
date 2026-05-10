@@ -9,13 +9,12 @@ import re
 import sqlite3
 import uuid
 from datetime import date, datetime, timedelta, timezone
-from difflib import SequenceMatcher
 from typing import Any
 
 from flask import Blueprint, jsonify, request
 
 import config as _config
-import compare_objects
+import run_comparison
 from database import db_connect, delete_run_artifacts, delete_snapshot_metadata
 from helpers import (
     GRACEFUL_TERMINATION_EXIT_CODE,
@@ -24,11 +23,7 @@ from helpers import (
     get_session_id,
     is_failed_exit_code,
 )
-from output_signals import (
-    classify_line,
-    command_root as output_command_root,
-    extract_target,
-)
+from output_signals import command_root as output_command_root
 from permalinks import _format_duration, _permalink_error_page, _permalink_page
 from process import active_runs_for_session
 from project_workspace import ProjectWorkspaceError, compare_project_runs
@@ -41,18 +36,6 @@ CFG = _config.CFG
 log = logging.getLogger("shell")
 
 history_bp = Blueprint("history", __name__)
-
-COMPARE_MAX_LINES = 20_000
-COMPARE_MAX_BYTES = 3 * 1024 * 1024
-COMPARE_MAX_CHANGED_LINES = 2_000
-COMPARE_MAX_HUNKS = 3_000
-COMPARE_INLINE_EQUAL_CONTEXT = 3
-COMPARE_LINE_DISPLAY_TRUNCATE = 4_000
-COMPARE_LAZY_EQUAL_PAGE_LIMIT = 5_000
-COMPARE_LAZY_EQUAL_BYTE_LIMIT = 512_000
-COMPARE_REPLACE_PAIR_MIN_RATIO = 0.5
-COMPARE_REPLACE_PAIR_QUICK_RATIO = COMPARE_REPLACE_PAIR_MIN_RATIO
-COMPARE_REPLACE_PAIR_CANDIDATES = 32
 
 
 def _normalize_history_filter_text(value):
@@ -334,6 +317,10 @@ def _history_run_root(command: str) -> str:
     return output_command_root(command) or str(command or "").strip().split(maxsplit=1)[0].lower() or "unknown"
 
 
+def _parse_iso_datetime(value):
+    return run_comparison.parse_iso_datetime(value)
+
+
 def _history_run_elapsed_seconds(row) -> float | None:
     started = _parse_iso_datetime(row["started"])
     finished = _parse_iso_datetime(row["finished"])
@@ -551,35 +538,7 @@ def _history_insights(conn, session_id: str, *, days: int | None = None) -> dict
 # ── Preview output helpers ────────────────────────────────────────────────────
 
 def _preview_output_entries_from_run(run):
-    # Prefer the saved full-output artifact when present, otherwise reconstruct a
-    # preview from the inline DB columns used by older rows.
-    raw = run.get("output_preview")
-    if raw is None:
-        raw = run.get("output")
-    loaded = json.loads(raw) if raw else []
-    if loaded and isinstance(loaded[0], str):
-        return [{"text": line, "cls": "", "tsC": "", "tsE": ""} for line in loaded]
-    entries = []
-    for item in loaded:
-        if isinstance(item, dict) and isinstance(item.get("text"), str):
-            entry = {
-                "text": item["text"],
-                "cls": str(item.get("cls", "")),
-                "tsC": str(item.get("tsC", "")),
-                "tsE": str(item.get("tsE", "")),
-            }
-            if isinstance(item.get("signals"), list):
-                entry["signals"] = [str(signal) for signal in item["signals"] if str(signal)]
-            if isinstance(item.get("line_index"), int):
-                entry["line_index"] = item["line_index"]
-            if isinstance(item.get("command_root"), str):
-                entry["command_root"] = item["command_root"]
-            if isinstance(item.get("target"), str):
-                entry["target"] = item["target"]
-            entries.append(entry)
-        elif isinstance(item, str):
-            entries.append({"text": item, "cls": "", "tsC": "", "tsE": ""})
-    return entries
+    return run_comparison.preview_output_entries_from_run(run)
 
 
 def _preview_output_from_run(run):
@@ -785,479 +744,6 @@ def _run_findings_by_run(conn, run_ids):
     return grouped
 
 
-# ── Run comparison helpers ────────────────────────────────────────────────────
-
-def _normalize_compare_command(command):
-    return re.sub(r"\s+", " ", str(command or "").strip())
-
-
-def _parse_iso_datetime(value):
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
-def _run_duration_seconds(run):
-    started = _parse_iso_datetime(run.get("started"))
-    finished = _parse_iso_datetime(run.get("finished"))
-    if not started or not finished:
-        return None
-    return max(0.0, (finished - started).total_seconds())
-
-
-def _compare_run_root(run):
-    return output_command_root(str(run.get("command") or ""))
-
-
-def _compare_run_target(run):
-    target = extract_target(str(run.get("command") or ""))
-    return target or ""
-
-
-def _compare_run_summary(run):
-    duration = _run_duration_seconds(run)
-    command = str(run.get("command") or "")
-    root = _compare_run_root(run)
-    target = _compare_run_target(run)
-    return {
-        "id": run.get("id"),
-        "command": command,
-        "command_root": root,
-        "target": target,
-        "started": run.get("started"),
-        "finished": run.get("finished"),
-        "exit_code": run.get("exit_code"),
-        "duration_seconds": duration,
-        "output_line_count": int(run.get("output_line_count") or 0),
-        "preview_truncated": bool(run.get("preview_truncated")),
-        "full_output_available": bool(run.get("full_output_available")),
-        "full_output_truncated": bool(run.get("full_output_truncated")),
-    }
-
-
-def _candidate_confidence(source, candidate):
-    source_command = _normalize_compare_command(source.get("command")).lower()
-    candidate_command = _normalize_compare_command(candidate.get("command")).lower()
-    if source_command and source_command == candidate_command:
-        return 3, "exact_command", "Exact command"
-    source_root = _compare_run_root(source)
-    candidate_root = _compare_run_root(candidate)
-    source_target = _compare_run_target(source)
-    candidate_target = _compare_run_target(candidate)
-    if source_root and source_root == candidate_root and source_target and source_target == candidate_target:
-        return 2, "same_target", "Same target"
-    if source_root and source_root == candidate_root:
-        return 1, "same_command", "Same command only"
-    return 0, "", ""
-
-
-def _run_candidate_payload(row, source):
-    run = dict(row)
-    score, confidence, label = _candidate_confidence(source, run)
-    payload = _compare_run_summary(run)
-    payload.update({
-        "confidence": confidence,
-        "confidence_label": label,
-        "score": score,
-    })
-    return payload
-
-
-def _compare_full_output_entries(run):
-    if run.get("full_output_available") and run.get("rel_path"):
-        return load_full_output_entries(run["rel_path"]), "full", bool(run.get("full_output_truncated"))
-    return _preview_output_entries_from_run(run), "preview", bool(run.get("preview_truncated"))
-
-
-def _is_compare_chrome_line(entry, text):
-    cls = str(entry.get("cls", "")) if isinstance(entry, dict) else ""
-    stripped = str(text or "").strip()
-    if not stripped:
-        return True
-    if cls == "prompt-echo":
-        return True
-    if re.match(r"^\[(?:process exited with code|history\s+—\s+exit)\b", stripped, re.I):
-        return True
-    return False
-
-
-def _line_entry_text(entry):
-    if isinstance(entry, dict):
-        return str(entry.get("text", ""))
-    return str(entry or "")
-
-
-def _compare_entries_for_diff(run):
-    entries, source, partial = _compare_full_output_entries(run)
-    compared = []
-    byte_count = 0
-    truncated_by_limit = False
-    for entry in entries:
-        text = _line_entry_text(entry).rstrip("\n")
-        if _is_compare_chrome_line(entry, text):
-            continue
-        encoded_len = len(text.encode("utf-8", errors="replace"))
-        if len(compared) >= COMPARE_MAX_LINES or byte_count + encoded_len > COMPARE_MAX_BYTES:
-            truncated_by_limit = True
-            break
-        compared.append({
-            "text": text,
-            "line_index": entry.get("line_index") if isinstance(entry, dict) else None,
-            "signals": entry.get("signals", []) if isinstance(entry, dict) else [],
-        })
-        byte_count += encoded_len
-    return compared, {
-        "source": source,
-        "partial": partial or truncated_by_limit,
-        "truncated_by_limit": truncated_by_limit,
-        "compared_lines": len(compared),
-        "max_lines": COMPARE_MAX_LINES,
-        "max_bytes": COMPARE_MAX_BYTES,
-    }
-
-
-def _finding_count_for_entries(run, entries):
-    root = _compare_run_root(run)
-    command = str(run.get("command") or "")
-    count = 0
-    previous_text = ""
-    for entry in entries:
-        text = str(entry.get("text") or "")
-        signals = entry.get("signals")
-        if isinstance(signals, list):
-            scopes = [str(signal) for signal in signals]
-        else:
-            scopes = classify_line(text, command=command, root=root, previous_text=previous_text)
-        if "findings" in scopes:
-            count += 1
-        previous_text = text.strip()
-    return count
-
-
-def _compare_line_payload(entry):
-    return {
-        "text": str(entry.get("text") or ""),
-        "line_index": entry.get("line_index"),
-    }
-
-
-def _compare_line_payloads(entries, start, end):
-    return [_compare_line_payload(entry) for entry in entries[start:end]]
-
-
-def _changed_line_segments(left_text, right_text):
-    matcher = SequenceMatcher(None, left_text, right_text, autojunk=False)
-    left_segments = []
-    right_segments = []
-    for tag, left_start, left_end, right_start, right_end in matcher.get_opcodes():
-        left_chunk = left_text[left_start:left_end]
-        right_chunk = right_text[right_start:right_end]
-        changed = tag != "equal"
-        if left_chunk:
-            left_segments.append({"text": left_chunk, "changed": changed})
-        if right_chunk:
-            right_segments.append({"text": right_chunk, "changed": changed})
-    return left_segments, right_segments
-
-
-def _compare_equal_hunk(left_entries, right_entries, left_start, left_end, right_start, right_end, inline_context):
-    hunk = {
-        "op": "equal",
-        "left": {"start": left_start, "end": left_end},
-        "right": {"start": right_start, "end": right_end},
-    }
-    line_count = left_end - left_start
-    if line_count < 2 * inline_context:
-        hunk["left"]["lines"] = _compare_line_payloads(left_entries, left_start, left_end)
-        hunk["right"]["lines"] = _compare_line_payloads(right_entries, right_start, right_end)
-        return hunk
-    left_leading_end = min(left_end, left_start + inline_context)
-    right_leading_end = min(right_end, right_start + inline_context)
-    left_trailing_start = max(left_leading_end, left_end - inline_context)
-    right_trailing_start = max(right_leading_end, right_end - inline_context)
-    hunk["context"] = {
-        "leading": {
-            "left": _compare_line_payloads(left_entries, left_start, left_leading_end),
-            "right": _compare_line_payloads(right_entries, right_start, right_leading_end),
-        },
-        "trailing": {
-            "left": _compare_line_payloads(left_entries, left_trailing_start, left_end),
-            "right": _compare_line_payloads(right_entries, right_trailing_start, right_end),
-        },
-        "omitted": max(0, line_count - (2 * inline_context)),
-    }
-    return hunk
-
-
-def _replace_pair_candidate_indexes(left_index, left_count, right_indexes):
-    if not right_indexes:
-        return []
-    if left_count <= 1:
-        target = 0
-    else:
-        target = round(left_index * (len(right_indexes) - 1) / (left_count - 1))
-    return sorted(
-        right_indexes,
-        key=lambda right_index: (abs(right_index - target), right_index),
-    )[:COMPARE_REPLACE_PAIR_CANDIDATES]
-
-
-def _compare_replace_similarity(left_text, right_text):
-    matcher = SequenceMatcher(None, left_text, right_text, autojunk=False)
-    if matcher.quick_ratio() < COMPARE_REPLACE_PAIR_QUICK_RATIO:
-        return None
-    similarity = matcher.ratio()
-    if similarity < COMPARE_REPLACE_PAIR_MIN_RATIO:
-        return None
-    return similarity
-
-
-def _compare_replace_hunk(left_entries, right_entries, left_start, left_end, right_start, right_end):
-    left_lines = _compare_line_payloads(left_entries, left_start, left_end)
-    right_lines = _compare_line_payloads(right_entries, right_start, right_end)
-    hunk = {
-        "op": "replace",
-        "left": {"start": left_start, "end": left_end, "lines": left_lines},
-        "right": {"start": right_start, "end": right_end, "lines": right_lines},
-        "changed_pairs": [],
-        "left_unpaired": [],
-        "right_unpaired": [],
-    }
-    unmatched_right = set(range(len(right_lines)))
-    if len(left_lines) == 1 and len(right_lines) == 1:
-        left_text = str(left_lines[0].get("text") or "")
-        right_text = str(right_lines[0].get("text") or "")
-        if max(len(left_text), len(right_text)) <= COMPARE_LINE_DISPLAY_TRUNCATE:
-            left_segments, right_segments = _changed_line_segments(left_text, right_text)
-            hunk["changed_pairs"].append({
-                "left_index": 0,
-                "right_index": 0,
-                "similarity": round(SequenceMatcher(None, left_text, right_text, autojunk=False).ratio(), 3),
-                "segments": {"left": left_segments, "right": right_segments},
-            })
-            return hunk
-
-    for left_index, left_line in enumerate(left_lines):
-        left_text = str(left_line.get("text") or "")
-        if len(left_text) > COMPARE_LINE_DISPLAY_TRUNCATE:
-            hunk["left_unpaired"].append(left_index)
-            continue
-        best = None
-        for right_index in _replace_pair_candidate_indexes(left_index, len(left_lines), unmatched_right):
-            right_text = str(right_lines[right_index].get("text") or "")
-            if len(right_text) > COMPARE_LINE_DISPLAY_TRUNCATE:
-                continue
-            similarity = _compare_replace_similarity(left_text, right_text)
-            if similarity is None:
-                continue
-            score = (similarity, -abs(right_index - left_index), -right_index)
-            if best is None or score > best[0]:
-                best = (score, similarity, right_index)
-        if best is None:
-            hunk["left_unpaired"].append(left_index)
-            continue
-        _, similarity, right_index = best
-        unmatched_right.remove(right_index)
-        right_text = str(right_lines[right_index].get("text") or "")
-        left_segments, right_segments = _changed_line_segments(left_text, right_text)
-        hunk["changed_pairs"].append({
-            "left_index": left_index,
-            "right_index": right_index,
-            "similarity": round(similarity, 3),
-            "segments": {"left": left_segments, "right": right_segments},
-        })
-
-    hunk["right_unpaired"] = sorted(unmatched_right)
-    hunk["changed_pairs"].sort(key=lambda item: item["left_index"])
-    return hunk
-
-
-def _change_hunk_units(hunk):
-    if hunk["op"] == "insert":
-        return len(hunk["right"].get("lines", []))
-    if hunk["op"] == "delete":
-        return len(hunk["left"].get("lines", []))
-    if hunk["op"] == "replace":
-        return (
-            2 * len(hunk.get("changed_pairs", []))
-            + len(hunk.get("left_unpaired", []))
-            + len(hunk.get("right_unpaired", []))
-        )
-    return 0
-
-
-def _change_hunk_line_counts(hunk):
-    if hunk["op"] == "insert":
-        right = len(hunk["right"].get("lines", []))
-        return {"left": 0, "right": right, "total": right}
-    if hunk["op"] == "delete":
-        left = len(hunk["left"].get("lines", []))
-        return {"left": left, "right": 0, "total": left}
-    if hunk["op"] == "replace":
-        paired = len(hunk.get("changed_pairs", []))
-        left = paired + len(hunk.get("left_unpaired", []))
-        right = paired + len(hunk.get("right_unpaired", []))
-        return {"left": left, "right": right, "total": left + right}
-    return {"left": 0, "right": 0, "total": 0}
-
-
-def _add_change_hunk_totals(totals, hunk):
-    if hunk["op"] == "insert":
-        totals["added_line_count"] += len(hunk["right"].get("lines", []))
-    elif hunk["op"] == "delete":
-        totals["removed_line_count"] += len(hunk["left"].get("lines", []))
-    elif hunk["op"] == "replace":
-        totals["changed_line_count"] += len(hunk.get("changed_pairs", []))
-        totals["removed_line_count"] += len(hunk.get("left_unpaired", []))
-        totals["added_line_count"] += len(hunk.get("right_unpaired", []))
-
-
-def _trim_change_hunk_to_budget(hunk, remaining_units):
-    units = _change_hunk_units(hunk)
-    if units <= remaining_units:
-        return hunk, units, {"left": 0, "right": 0, "total": 0}
-
-    omitted = {"left": 0, "right": 0, "total": 0}
-
-    def _omit(side):
-        omitted[side] += 1
-        omitted["total"] += 1
-
-    if hunk["op"] == "insert":
-        keep = max(0, remaining_units)
-        lines = hunk["right"].get("lines", [])
-        omitted_count = max(0, len(lines) - keep)
-        hunk["right"]["lines"] = lines[:keep]
-        omitted["right"] = omitted_count
-        omitted["total"] = omitted_count
-        if omitted_count:
-            hunk["lines_omitted"] = omitted
-        return hunk if keep else None, keep, omitted
-    if hunk["op"] == "delete":
-        keep = max(0, remaining_units)
-        lines = hunk["left"].get("lines", [])
-        omitted_count = max(0, len(lines) - keep)
-        hunk["left"]["lines"] = lines[:keep]
-        omitted["left"] = omitted_count
-        omitted["total"] = omitted_count
-        if omitted_count:
-            hunk["lines_omitted"] = omitted
-        return hunk if keep else None, keep, omitted
-
-    while _change_hunk_units(hunk) > remaining_units and hunk.get("left_unpaired"):
-        hunk["left_unpaired"].pop()
-        _omit("left")
-    while _change_hunk_units(hunk) > remaining_units and hunk.get("right_unpaired"):
-        hunk["right_unpaired"].pop()
-        _omit("right")
-    while _change_hunk_units(hunk) > remaining_units and hunk.get("changed_pairs"):
-        hunk["changed_pairs"].pop()
-        _omit("left")
-        _omit("right")
-    if omitted["total"]:
-        hunk["lines_omitted"] = omitted
-    units = _change_hunk_units(hunk)
-    return hunk if units else None, units, omitted
-
-
-def _hunk_line_diff(
-    left_entries,
-    right_entries,
-    *,
-    max_changed_lines=COMPARE_MAX_CHANGED_LINES,
-    max_hunks=COMPARE_MAX_HUNKS,
-    inline_context=COMPARE_INLINE_EQUAL_CONTEXT,
-):
-    left_texts = [str(entry.get("text") or "") for entry in left_entries]
-    right_texts = [str(entry.get("text") or "") for entry in right_entries]
-    matcher = SequenceMatcher(None, left_texts, right_texts, autojunk=False)
-    hunks = []
-    totals = {
-        "left_total_lines": len(left_entries),
-        "right_total_lines": len(right_entries),
-        "equal_line_count": 0,
-        "changed_line_count": 0,
-        "added_line_count": 0,
-        "removed_line_count": 0,
-    }
-    lines_omitted = {"left": 0, "right": 0, "total": 0}
-    hunks_omitted = 0
-    emitted_change_units = 0
-    emitted_change_hunks = 0
-
-    for tag, left_start, left_end, right_start, right_end in matcher.get_opcodes():
-        if tag == "equal":
-            totals["equal_line_count"] += left_end - left_start
-            hunks.append(_compare_equal_hunk(
-                left_entries,
-                right_entries,
-                left_start,
-                left_end,
-                right_start,
-                right_end,
-                inline_context,
-            ))
-            continue
-
-        if tag == "insert":
-            hunk = {
-                "op": "insert",
-                "left": {"start": left_start, "end": left_end},
-                "right": {
-                    "start": right_start,
-                    "end": right_end,
-                    "lines": _compare_line_payloads(right_entries, right_start, right_end),
-                },
-            }
-        elif tag == "delete":
-            hunk = {
-                "op": "delete",
-                "left": {
-                    "start": left_start,
-                    "end": left_end,
-                    "lines": _compare_line_payloads(left_entries, left_start, left_end),
-                },
-                "right": {"start": right_start, "end": right_end},
-            }
-        else:
-            hunk = _compare_replace_hunk(left_entries, right_entries, left_start, left_end, right_start, right_end)
-
-        if emitted_change_hunks >= max_hunks or emitted_change_units >= max_changed_lines:
-            hunks_omitted += 1
-            omitted = _change_hunk_line_counts(hunk)
-            lines_omitted["left"] += omitted["left"]
-            lines_omitted["right"] += omitted["right"]
-            lines_omitted["total"] += omitted["total"]
-            continue
-        remaining_units = max_changed_lines - emitted_change_units
-        hunk, used_units, omitted = _trim_change_hunk_to_budget(hunk, remaining_units)
-        if hunk is None:
-            hunks_omitted += 1
-            lines_omitted["left"] += omitted["left"]
-            lines_omitted["right"] += omitted["right"]
-            lines_omitted["total"] += omitted["total"]
-            continue
-        lines_omitted["left"] += omitted["left"]
-        lines_omitted["right"] += omitted["right"]
-        lines_omitted["total"] += omitted["total"]
-        _add_change_hunk_totals(totals, hunk)
-        hunks.append(hunk)
-        emitted_change_hunks += 1
-        emitted_change_units += used_units
-
-    return {
-        "hunks": hunks,
-        "totals": totals,
-        "truncated": {
-            "hunks_omitted": hunks_omitted,
-            "lines_omitted": lines_omitted,
-        },
-    }
-
-
 def _resolve_compare_request(session_id, left_id, right_id, project_id="", baseline_label=""):
     project_comparison = None
     if project_id:
@@ -1300,32 +786,6 @@ def _parse_compare_range_value(name):
         return int(raw)
     except ValueError:
         return None
-
-
-def _compare_deltas(left_run, right_run, left_finding_count, right_finding_count):
-    left_duration = _run_duration_seconds(left_run)
-    right_duration = _run_duration_seconds(right_run)
-    left_lines = int(left_run.get("output_line_count") or 0)
-    right_lines = int(right_run.get("output_line_count") or 0)
-    return {
-        "exit_code_changed": left_run.get("exit_code") != right_run.get("exit_code"),
-        "exit_code": {"left": left_run.get("exit_code"), "right": right_run.get("exit_code")},
-        "duration_seconds": {
-            "left": left_duration,
-            "right": right_duration,
-            "delta": None if left_duration is None or right_duration is None else right_duration - left_duration,
-        },
-        "output_lines": {
-            "left": left_lines,
-            "right": right_lines,
-            "delta": right_lines - left_lines,
-        },
-        "findings": {
-            "left": left_finding_count,
-            "right": right_finding_count,
-            "delta": right_finding_count - left_finding_count,
-        },
-    }
 
 
 # Routes
@@ -1630,13 +1090,13 @@ def get_run_compare_candidates(run_id):
 
     candidates = []
     for row in rows:
-        payload = _run_candidate_payload(row, source)
+        payload = run_comparison.run_candidate_payload(row, source)
         if payload["score"] > 0:
             candidates.append(payload)
     candidates.sort(key=lambda item: (int(item["score"]), str(item.get("started") or "")), reverse=True)
     candidates = candidates[:limit]
     return jsonify({
-        "source": _compare_run_summary(source),
+        "source": run_comparison.compare_run_summary(source),
         "candidates": candidates,
         "suggested": candidates[0] if candidates else None,
     })
@@ -1664,16 +1124,16 @@ def compare_history_runs():
     if not left_run or not right_run:
         return jsonify({"error": "Run not found"}), 404
 
-    left_entries, left_output = _compare_entries_for_diff(left_run)
-    right_entries, right_output = _compare_entries_for_diff(right_run)
-    left_finding_count = _finding_count_for_entries(left_run, left_entries)
-    right_finding_count = _finding_count_for_entries(right_run, right_entries)
-    diff = _hunk_line_diff(
+    left_entries, left_output = run_comparison.compare_entries_for_diff(left_run)
+    right_entries, right_output = run_comparison.compare_entries_for_diff(right_run)
+    left_finding_count = run_comparison.finding_count_for_entries(left_run, left_entries)
+    right_finding_count = run_comparison.finding_count_for_entries(right_run, right_entries)
+    diff = run_comparison.hunk_line_diff(
         left_entries,
         right_entries,
-        max_changed_lines=COMPARE_MAX_CHANGED_LINES,
-        max_hunks=COMPARE_MAX_HUNKS,
-        inline_context=COMPARE_INLINE_EQUAL_CONTEXT,
+        max_changed_lines=run_comparison.COMPARE_MAX_CHANGED_LINES,
+        max_hunks=run_comparison.COMPARE_MAX_HUNKS,
+        inline_context=run_comparison.COMPARE_INLINE_EQUAL_CONTEXT,
     )
     project_truncated = project_comparison.get("truncated", {}) if project_comparison else {}
     if project_comparison:
@@ -1686,7 +1146,7 @@ def compare_history_runs():
     else:
         with db_connect() as conn:
             left_findings, left_persisted_finding_count, left_findings_truncated = (
-                compare_objects.run_finding_compare_items(
+                run_comparison.run_finding_compare_items(
                     conn,
                     session_id,
                     left_id,
@@ -1695,7 +1155,7 @@ def compare_history_runs():
                 )
             )
             right_findings, right_persisted_finding_count, right_findings_truncated = (
-                compare_objects.run_finding_compare_items(
+                run_comparison.run_finding_compare_items(
                     conn,
                     session_id,
                     right_id,
@@ -1704,7 +1164,7 @@ def compare_history_runs():
                 )
             )
             left_artifacts, left_artifact_count, left_artifacts_truncated = (
-                compare_objects.run_artifact_compare_items(
+                run_comparison.run_artifact_compare_items(
                     conn,
                     session_id,
                     left_id,
@@ -1713,7 +1173,7 @@ def compare_history_runs():
                 )
             )
             right_artifacts, right_artifact_count, right_artifacts_truncated = (
-                compare_objects.run_artifact_compare_items(
+                run_comparison.run_artifact_compare_items(
                     conn,
                     session_id,
                     right_id,
@@ -1721,8 +1181,8 @@ def compare_history_runs():
                     include_created=True,
                 )
             )
-        finding_objects = compare_objects.compare_items(left_findings, right_findings)
-        artifact_objects = compare_objects.compare_items(left_artifacts, right_artifacts)
+        finding_objects = run_comparison.compare_items(left_findings, right_findings)
+        artifact_objects = run_comparison.compare_items(left_artifacts, right_artifacts)
         if any((
             left_findings_truncated,
             right_findings_truncated,
@@ -1740,7 +1200,7 @@ def compare_history_runs():
                     "left": bool(left_artifacts_truncated),
                     "right": bool(right_artifacts_truncated),
                 },
-                "item_limit": compare_objects.compare_item_limit(),
+                "item_limit": run_comparison.compare_item_limit(),
             }
 
     truncated = {
@@ -1760,20 +1220,20 @@ def compare_history_runs():
         "left_run_id": left_id,
         "right_run_id": right_id,
         "left": {
-            **_compare_run_summary(left_run),
+            **run_comparison.compare_run_summary(left_run),
             "finding_count": left_finding_count,
             "persisted_finding_count": left_persisted_finding_count,
             "artifact_count": left_artifact_count,
             "output_source": left_output,
         },
         "right": {
-            **_compare_run_summary(right_run),
+            **run_comparison.compare_run_summary(right_run),
             "finding_count": right_finding_count,
             "persisted_finding_count": right_persisted_finding_count,
             "artifact_count": right_artifact_count,
             "output_source": right_output,
         },
-        "deltas": _compare_deltas(left_run, right_run, left_finding_count, right_finding_count),
+        "deltas": run_comparison.compare_deltas(left_run, right_run, left_finding_count, right_finding_count),
         "objects": {
             "findings": finding_objects,
             "artifacts": artifact_objects,
@@ -1782,12 +1242,12 @@ def compare_history_runs():
         "totals": diff["totals"],
         "truncated": truncated,
         "limits": {
-            "max_changed_lines": COMPARE_MAX_CHANGED_LINES,
-            "max_hunks": COMPARE_MAX_HUNKS,
-            "inline_equal_context": COMPARE_INLINE_EQUAL_CONTEXT,
-            "line_display_truncate": COMPARE_LINE_DISPLAY_TRUNCATE,
-            "lazy_equal_page_limit": COMPARE_LAZY_EQUAL_PAGE_LIMIT,
-            "lazy_equal_byte_limit": COMPARE_LAZY_EQUAL_BYTE_LIMIT,
+            "max_changed_lines": run_comparison.COMPARE_MAX_CHANGED_LINES,
+            "max_hunks": run_comparison.COMPARE_MAX_HUNKS,
+            "inline_equal_context": run_comparison.COMPARE_INLINE_EQUAL_CONTEXT,
+            "line_display_truncate": run_comparison.COMPARE_LINE_DISPLAY_TRUNCATE,
+            "lazy_equal_page_limit": run_comparison.COMPARE_LAZY_EQUAL_PAGE_LIMIT,
+            "lazy_equal_byte_limit": run_comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT,
         },
     }
     if project_comparison:
@@ -1825,7 +1285,7 @@ def compare_history_lines():
     if not left_run or not right_run:
         return jsonify({"error": "Run not found"}), 404
     selected_run = left_run if side == "a" else right_run
-    entries, _ = _compare_entries_for_diff(selected_run)
+    entries, _ = run_comparison.compare_entries_for_diff(selected_run)
     available_end = len(entries)
     range_clamped = end > available_end
     if start > available_end:
@@ -1836,12 +1296,12 @@ def compare_history_lines():
     lines = []
     byte_count = 0
     cursor = start
-    while cursor < end and len(lines) < COMPARE_LAZY_EQUAL_PAGE_LIMIT:
+    while cursor < end and len(lines) < run_comparison.COMPARE_LAZY_EQUAL_PAGE_LIMIT:
         entry = entries[cursor]
-        payload = _compare_line_payload(entry)
+        payload = run_comparison.compare_line_payload(entry)
         encoded_len = len(payload["text"].encode("utf-8", errors="replace"))
         next_byte_count = byte_count + encoded_len
-        would_exceed_byte_limit = next_byte_count > COMPARE_LAZY_EQUAL_BYTE_LIMIT
+        would_exceed_byte_limit = next_byte_count > run_comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT
         if lines and would_exceed_byte_limit:
             break
         lines.append(payload)
@@ -1849,7 +1309,7 @@ def compare_history_lines():
         cursor += 1
         # Always return at least one line, even when that single line exceeds the
         # byte cap, then stop before appending more.
-        if byte_count >= COMPARE_LAZY_EQUAL_BYTE_LIMIT:
+        if byte_count >= run_comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT:
             break
 
     return jsonify({
@@ -1858,8 +1318,8 @@ def compare_history_lines():
         "end": cursor,
         "truncated": bool(cursor < end or range_clamped),
         "range_clamped": range_clamped,
-        "page_limit": COMPARE_LAZY_EQUAL_PAGE_LIMIT,
-        "byte_limit": COMPARE_LAZY_EQUAL_BYTE_LIMIT,
+        "page_limit": run_comparison.COMPARE_LAZY_EQUAL_PAGE_LIMIT,
+        "byte_limit": run_comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT,
         **({"note": "requested range exceeded available compared output"} if range_clamped else {}),
     })
 

@@ -81,34 +81,53 @@ This file tracks open work, known issues, technical debt, and product ideas for 
 - **Run comparison follow-ups**
   - v1 split-pane comparison is shipped through canonical `/history/compare`; future work should build on the hunk model instead of reintroducing route- or modal-specific compare paths.
   - Keep the diff scope split intact: transcript output remains ordered and hunk-based, while finding/artifact object comparison remains key-based and order-insensitive so reordered findings do not register as added/removed.
-  - Consolidate run comparison backend logic into a dedicated service module, likely `app/run_comparison.py`, instead of letting `app/blueprints/history.py` continue to own feature-level comparison behavior. Keep Flask request parsing, `jsonify`, and route registration in the history blueprint; keep project-scoped run resolution and linked-run validation in `app/project_workspace.py`; move compare limits, run summary normalization, full-output loading/filtering, chrome-line stripping, hunk generation/truncation, lazy line slices, object compare helpers, and shared payload assembly into the service module. Because `app/compare_objects.py` is new and uncommitted, prefer folding it into this broader module rather than keeping two parallel comparison helper homes.
-  - **v2 — minimap rail, finding/artifact anchors, view-mode toggle**
-    - **Backend changes** (`app/blueprints/history.py`, `app/project_workspace.py`)
-      - Add `density_buckets: [{equal, added, removed, changed}, ...]` to the comparison response. Fixed length via a backend constant `COMPARE_MINIMAP_BUCKETS = 256` so payload shape stays stable across runs of any size; the frontend interpolates to actual rail height. Computed in a single pass over the same `hunks` walk so no extra diff cost.
-      - Populate `output_line_index` on each finding/artifact for both sides where derivable. `_run_finding_compare_items` joins `findings.line_number` to the run's persisted line offsets; if the source output is no longer available, the field is omitted and the frontend falls back to non-anchored display.
-      - No new endpoints; the consolidated `/history/compare` route gains the new fields and they flow through both entry points (history-drawer and project compare control) automatically.
-    - **Frontend additions** (`app/static/js/history.js`, `app/static/css/components.css`, `app/static/js/state.js`)
-      - Add `_renderHistoryCompareMinimap(buckets, totals)` rendered as a thin `<div class="history-compare-minimap">` rail anchored to the right edge of the split-pane container. Each bucket is a 2px-tall `<div>` whose background-color is the dominant op tone — `--green` (added), `--red` (removed), `--amber` (changed), low-opacity `--muted` (equal). Click on a bucket scrolls both panes to the corresponding line range through the existing sync-scroll binding. Hidden under `@media (max-width: 760px)` so unified mobile keeps the simpler layout.
-      - Wire finding/artifact anchors: on `_renderHistoryCompareObjectSection` row click, find the matching pane row by `data-line-index` and scroll it into view in both panes; pulse a `.history-compare-line-pulse` class (`animation: pulse 800ms ease-out`) for visual confirmation. Emit `emitUiEvent('app:compare-anchor-scroll', {side, line_index})` so future modules can subscribe through the existing cross-module event bus.
-      - Render a finding marker in each pane's left gutter at any line carrying an `output_line_index` match. Marker uses `.history-compare-finding-marker` with severity tone (`--red` high/critical, `--amber` medium, `--muted` info). Click on the marker scrolls the linked finding row in the findings section into view.
+  - **v2 — minimap rail, finding/artifact anchors, view-mode toggle, ±N context**
+    - **Phase 2 — Backend payload additions: density buckets + `compare_line_index`**
+      - Add `density_buckets: [{start, end, equal, added, removed, changed}, ...]` to the `/history/compare` response. Fixed length via a backend constant `COMPARE_MINIMAP_BUCKETS = 256` so payload shape stays stable across runs of any size; the frontend interpolates to actual rail height. Computed in a single pass over the same `hunks` walk so no extra diff cost.
+      - Empty comparisons still emit exactly `COMPARE_MINIMAP_BUCKETS` zero-count buckets with `start: 0` and `end: 0`; the frontend disables or hides the rail from zero totals without branching on a missing field or empty array.
+      - Bucket tone priority is deterministic for mixed buckets: `changed > added/removed > equal`. For add/remove-only buckets, use whichever count is higher; ties default to removed/red. Bucket clicks use the explicit `start` / `end` compare-entry range from the payload rather than re-deriving index math in the client.
+      - Populate `compare_line_index` on finding compare items for both sides where derivable. `compare_line_index` is zero-based against the filtered compare-entry stream after chrome-line removal; keep the existing original `line_number` for display when present. If the source output is no longer available, omit `compare_line_index` and let the frontend fall back to non-anchored display.
+      - Artifact anchors are best-effort only. Most artifacts do not have a durable transcript source line, so artifact compare rows should still render normally without an anchor unless the backend can derive a trustworthy `compare_line_index`.
+      - No new endpoints; both entry points (history-drawer and project compare control) inherit the new fields automatically.
+      - Tests: backend unit coverage for bucket aggregation (constant bucket count regardless of input size, sum of bucket counts equals total line count, deterministic mixed-bucket priority, add/remove count and tie handling, off-by-one at the final bucket) and `compare_line_index` population/omission for findings plus artifact best-effort omission.
+      - Docs: `CHANGELOG.md` entry; refresh test counts.
+
+    - **Phase 3 — Preferences scaffolding in `state.js` + Options modal**
+      - Add `pref_compare_view_mode` and `pref_compare_context` (default `'3'`) to the shared preference core, persisted through the same per-session-token preference path used by the rest of the shell.
+      - `pref_compare_view_mode` defaults to `auto`, which resolves to `Unified` below 760px and `Side-by-side` at and above 760px. Persist explicit user choices separately from `auto` so opening compare on mobile does not permanently force desktop into unified mode.
+      - Surface both controls in the Options modal so explicit choices survive reload.
+      - No visible change inside the compare modal yet; this phase exists so Phases 4 and 5 can read from a stable preference surface.
+      - Tests: Vitest round-trip coverage for both preferences through `state.js` and the Options modal.
+      - Docs: `CHANGELOG.md` entry; add `pref_compare_view_mode`, `pref_compare_context`, and the `±N context` default to `ARCHITECTURE.md § Browser State Model` if it enumerates persisted preferences; refresh test counts.
+
+    - **Phase 4 — Minimap rail + finding/artifact anchors + gutter markers** (`app/static/js/history.js`, `app/static/css/components.css`)
+      - Add `_renderHistoryCompareMinimap(buckets, totals)` rendered as a thin `<div class="history-compare-minimap">` rail anchored to the right edge of the split-pane container. Each bucket is a 2px-tall visual child whose background-color follows the deterministic bucket priority — `--amber` (changed), `--green` / `--red` (added/removed), low-opacity `--muted` (equal). Hidden under `@media (max-width: 760px)` so unified mobile keeps the simpler layout.
+      - Treat the minimap rail as a pointer navigation surface, not 256 individual tab stops. Pointer clicks on visual bucket children scroll both panes to the bucket's explicit `start` / `end` range through the existing sync-scroll binding.
+      - Add `Prev change` and `Next change` header buttons that share the same bucket-walk code as the minimap and skip equal-only buckets. These buttons provide the keyboard-accessible minimap navigation path and remain available on all viewports, including mobile where the visual minimap rail is hidden.
+      - Wire finding anchors: on `_renderHistoryCompareObjectSection` finding-row click, find the matching pane row by `data-compare-line-index` and scroll it into view in both panes; pulse a `.history-compare-line-pulse` class (`animation: pulse 800ms ease-out`) for visual confirmation. Emit `emitUiEvent('app:compare-anchor-scroll', {side, compare_line_index})` so future modules can subscribe through the existing cross-module event bus.
+      - Wire artifact anchors only when the row has a backend-provided `compare_line_index`; otherwise the artifact row remains a normal compare object row with no jump affordance.
+      - Render a finding marker in each pane's left gutter at any line carrying a `compare_line_index` match. Marker uses `.history-compare-finding-marker` with severity tone (`--red` high/critical, `--amber` medium, `--muted` info). Click on the marker scrolls the linked finding row in the findings section into view and does not emit `app:compare-anchor-scroll`, keeping anchor events one-way and avoiding scroll ping-pong.
+      - All new interactive surfaces route through `bindPressable` / `bindDisclosure` where they are actual controls, so they pick up the existing button-primitive allowlist, focus-trap, refocus-composer, and outside-click contracts without local wiring.
+      - Tests: Vitest coverage for minimap bucket-to-DOM density mapping and rail click navigation, `Prev change` / `Next change` bucket-walk behavior, finding-row click → pane scroll → `.history-compare-line-pulse` lifecycle, gutter marker → finding-row scroll, and artifact rows without anchors remaining non-jumping. Update `tests/js/unit/button_primitives_allowlist.test.js` only if a new pressable surface lands outside the allowed primitive families.
+      - Docs: `CHANGELOG.md` entry; refresh test counts.
+
+    - **Phase 5 — View-mode toggle + ±N context chips** (both reshape the lines-region renderer, so they ship together)
       - Add a view-mode toggle in the compare-modal header. Implement as a hidden `<select>` enhanced through `enhanceAppSelects()` per the App-native Select Primitive contract so it composes the `.dropdown-surface` / `.dropdown-item-touch` family and inherits keyboard / outside-click / `aria-expanded` behavior automatically. Modes:
-        - `Side-by-side` (default at ≥ 760px) — v1 split layout.
-        - `Unified` (default below 760px) — v1 unified layout.
+        - `Side-by-side` — v1 split layout.
+        - `Unified` — v1 unified layout.
         - `Changes only` — collapses every `equal` hunk to a single zero-context fold and skips equal lines entirely. Equivalent to the pre-v1 view but riding on the same hunk model.
         - `Findings only` — hides the split pane entirely, leaving the run cards, metrics row, counts banner, and findings/artifacts sections.
-      - Persist the chosen mode in `state.js` as `comparisonViewMode` and add it to the Options modal so the choice survives reload through the same per-session-token preference path used by the rest of the shell. Mobile-first defaults still apply on first load.
-      - Add a `±N context` chip row above the split pane composing `.chip` + `.chip-action` with options `±3 / ±10 / All`. Selection updates a frontend-only state and re-renders the lines region without re-fetching.
-      - All new pressable surfaces route through `bindPressable`/`bindDisclosure`/`enhanceAppSelects` so they pick up the existing button-primitive allowlist, focus-trap, refocus-composer, and outside-click contracts without local wiring.
-    - **Tests**
-      - Backend: unit coverage for bucket aggregation (constant bucket count regardless of input size, sum of bucket counts equals total line count, off-by-one at the final bucket, finding `output_line_index` populated when persisted offsets are present and omitted when not).
-      - Frontend: Vitest coverage for minimap bucket-to-DOM density mapping, finding-row click → pane scroll → pulse class lifecycle, view-mode toggle preference round-trip through `state.js`, `±N context` chip selection re-rendering folds without re-fetching.
-      - E2E: extend the v1 Playwright spec with mode-toggle steps (verify each mode's row counts), minimap-click navigation, and finding-row click anchoring across both panes.
-      - Update `tests/js/unit/button_primitives_allowlist.test.js` only if a new pressable surface lands outside the allowed primitive families (the `±N context` chips and the view-mode toggle should both inherit existing primitives).
-    - **Docs**
-      - Update the `Findings and comparison` sub-list to remove items now covered by v2.
-      - If `ARCHITECTURE.md § Browser State Model` enumerates persisted preferences, add `comparisonViewMode` and the `±N context` default to that list.
-      - `CHANGELOG.md` entry for v2 mirroring the v1 format.
-      - Refresh the test-count locations once new tests land.
+      - `auto` remains a hidden default preference value, not a visible dropdown option. Ship a small `Reset to default` action that writes `pref_compare_view_mode = auto` so users can return from an explicit mode to viewport-based behavior.
+      - Read/write the chosen mode through the `pref_compare_view_mode` preference added in Phase 3.
+      - Add a `±N context` chip row above the split pane composing `.chip` + `.chip-action` with options `±3 / ±10 / All`. Hide the chip row in `Changes only` and `Findings only` modes because equal-line context is intentionally absent there. Selection writes through to `pref_compare_context` and re-renders the lines region without re-running compare; expanded fold ranges fetch lazy equal-line pages on demand and still honor `COMPARE_LAZY_EQUAL_PAGE_LIMIT` / `COMPARE_LAZY_EQUAL_BYTE_LIMIT`.
+      - Both controls funnel through the same lines-region render path so the renderer changes once for mode and context together.
+      - Tests: Vitest for mode preference application (per-mode row counts, hidden `auto` viewport resolution, and `Reset to default` behavior), `±N context` chip selection re-rendering folds without re-running compare, chip-row hiding in `Changes only` / `Findings only`, lazy fetch behavior for expanded context, and renderer-path coverage so adding another mode later does not regress the others. Update `button_primitives_allowlist.test.js` only if new pressables fall outside allowed families.
+      - Docs: `CHANGELOG.md` entry; refresh test counts.
+
+    - **Phase 6 — E2E + docs polish**
+      - Add focused Playwright coverage without overloading the already-large UI spec: one happy-path compare flow covering mode toggles, minimap-click navigation, finding-row anchoring across both panes, gutter-marker → finding-row scroll, and ±N context chip switching. Keep detailed row-count and renderer permutations in Vitest.
+      - Final `CHANGELOG.md` polish pass covering all v2 phases as a coherent feature.
+      - Refresh the test-count locations across all five files once the final E2E suite lands.
 
 ## Research
 

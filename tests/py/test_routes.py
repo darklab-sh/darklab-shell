@@ -25,9 +25,9 @@ import unittest.mock as mock
 
 import app as shell_app
 import blueprints.assets as shell_assets
-import blueprints.history as history_routes
 import blueprints.projects as project_routes
 import config
+import run_comparison
 from builtin_commands import execute_builtin_command
 from database import DB_PATH
 from workspace import resolve_workspace_path
@@ -928,7 +928,7 @@ class TestProjectRoutes:
         assert [item["raw_line"] for item in diff_payload["objects"]["findings"]["removed"]] == ["old.darklab.sh"]
         assert diff_payload["objects"]["findings"]["unchanged_count"] == 2
 
-        with mock.patch("compare_objects.MAX_COMPARE_ITEMS_PER_SIDE", 0):
+        with mock.patch("run_comparison.MAX_COMPARE_ITEMS_PER_SIDE", 0):
             capped_resp = client.get(
                 self._project_compare_url(project["id"], left=left_run_id, right=right_run_id),
                 headers={"X-Session-ID": session_id},
@@ -5504,7 +5504,7 @@ class TestHistoryRoute:
         entries = lambda values: [  # noqa: E731 - compact test fixture builder
             {"text": value, "line_index": index} for index, value in enumerate(values)
         ]
-        diff = history_routes._hunk_line_diff(
+        diff = run_comparison.hunk_line_diff(
             entries(["same", "service old"]),
             entries(["same", "service new", "extra"]),
             inline_context=1,
@@ -5522,7 +5522,7 @@ class TestHistoryRoute:
         assert diff["hunks"][0]["left"]["lines"][0]["text"] == "same"
         assert diff["hunks"][1]["right"]["lines"][diff["hunks"][1]["right_unpaired"][0]]["text"] == "extra"
 
-        long_equal = history_routes._hunk_line_diff(
+        long_equal = run_comparison.hunk_line_diff(
             entries(["a", "b", "c", "d", "e", "old"]),
             entries(["a", "b", "c", "d", "e", "new"]),
             inline_context=2,
@@ -5538,7 +5538,7 @@ class TestHistoryRoute:
         entries = lambda values: [  # noqa: E731 - compact test fixture builder
             {"text": value, "line_index": index} for index, value in enumerate(values)
         ]
-        diff = history_routes._hunk_line_diff(
+        diff = run_comparison.hunk_line_diff(
             entries([
                 "alpha service open",
                 "beta service open",
@@ -5563,7 +5563,7 @@ class TestHistoryRoute:
         )
 
     def test_hunk_line_diff_keeps_unrelated_and_long_replace_lines_unpaired(self):
-        unrelated = history_routes._hunk_line_diff(
+        unrelated = run_comparison.hunk_line_diff(
             [
                 {"text": "left aaa", "line_index": 0},
                 {"text": "left bbb", "line_index": 1},
@@ -5579,9 +5579,9 @@ class TestHistoryRoute:
         assert unrelated_hunk["left_unpaired"] == [0, 1]
         assert unrelated_hunk["right_unpaired"] == [0, 1]
 
-        long_left = "scanner " + ("a" * history_routes.COMPARE_LINE_DISPLAY_TRUNCATE) + " old"
-        long_right = "scanner " + ("a" * history_routes.COMPARE_LINE_DISPLAY_TRUNCATE) + " new"
-        long_diff = history_routes._hunk_line_diff(
+        long_left = "scanner " + ("a" * run_comparison.COMPARE_LINE_DISPLAY_TRUNCATE) + " old"
+        long_right = "scanner " + ("a" * run_comparison.COMPARE_LINE_DISPLAY_TRUNCATE) + " new"
+        long_diff = run_comparison.hunk_line_diff(
             [{"text": long_left, "line_index": 0}],
             [{"text": long_right, "line_index": 0}],
         )
@@ -5605,8 +5605,8 @@ class TestHistoryRoute:
                 calls["ratio"] += 1
                 return 1.0
 
-        monkeypatch.setattr(history_routes, "SequenceMatcher", CheapRejectMatcher)
-        hunk = history_routes._compare_replace_hunk(
+        monkeypatch.setattr(run_comparison, "SequenceMatcher", CheapRejectMatcher)
+        hunk = run_comparison.compare_replace_hunk(
             [
                 {"text": "left alpha", "line_index": 0},
                 {"text": "left beta", "line_index": 1},
@@ -5628,7 +5628,7 @@ class TestHistoryRoute:
         assert calls["ratio"] == 0
 
     def test_hunk_line_diff_preserves_one_to_one_replace_pairing_below_threshold(self):
-        diff = history_routes._hunk_line_diff(
+        diff = run_comparison.hunk_line_diff(
             [{"text": "abcde", "line_index": 0}],
             [{"text": "vwxyz", "line_index": 0}],
         )
@@ -5643,7 +5643,7 @@ class TestHistoryRoute:
         entries = lambda prefix, count: [  # noqa: E731 - compact test fixture builder
             {"text": f"{prefix}-{index}", "line_index": index} for index in range(count)
         ]
-        line_limited = history_routes._hunk_line_diff(
+        line_limited = run_comparison.hunk_line_diff(
             entries("left", 4),
             entries("right", 4),
             max_changed_lines=3,
@@ -5654,12 +5654,12 @@ class TestHistoryRoute:
         assert line_limited["truncated"]["hunks_omitted"] == 0
         hunk = line_limited["hunks"][0]
         assert hunk["lines_omitted"]["total"] == 5
-        assert history_routes._change_hunk_units(hunk) == 3
+        assert run_comparison.change_hunk_units(hunk) == 3
         assert line_limited["totals"]["changed_line_count"] == len(hunk["changed_pairs"])
         assert line_limited["totals"]["removed_line_count"] == len(hunk["left_unpaired"])
         assert line_limited["totals"]["added_line_count"] == len(hunk["right_unpaired"])
 
-        hunk_limited = history_routes._hunk_line_diff(
+        hunk_limited = run_comparison.hunk_line_diff(
             [
                 {"text": "a", "line_index": 0},
                 {"text": "same", "line_index": 1},
@@ -5683,7 +5683,7 @@ class TestHistoryRoute:
         assert hunk_limited["totals"]["removed_line_count"] == 0
         assert hunk_limited["totals"]["added_line_count"] == 0
 
-        line_cap_exhausted = history_routes._hunk_line_diff(
+        line_cap_exhausted = run_comparison.hunk_line_diff(
             [
                 {"text": "a", "line_index": 0},
                 {"text": "same", "line_index": 1},
@@ -5832,7 +5832,7 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
-            with mock.patch("blueprints.history.COMPARE_LAZY_EQUAL_PAGE_LIMIT", 2):
+            with mock.patch("run_comparison.COMPARE_LAZY_EQUAL_PAGE_LIMIT", 2):
                 line_limited = client.get(
                     "/history/compare/lines?left=cmp-lines-limit-left&right=cmp-lines-limit-right"
                     "&side=a&start=0&end=3",
@@ -5845,7 +5845,7 @@ class TestHistoryRoute:
             assert line_data["truncated"] is True
             assert line_data["page_limit"] == 2
 
-            with mock.patch("blueprints.history.COMPARE_LAZY_EQUAL_BYTE_LIMIT", 5):
+            with mock.patch("run_comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT", 5):
                 byte_limited = client.get(
                     "/history/compare/lines?left=cmp-lines-limit-left&right=cmp-lines-limit-right"
                     "&side=a&start=0&end=3",
@@ -5858,7 +5858,7 @@ class TestHistoryRoute:
             assert byte_data["truncated"] is True
             assert byte_data["byte_limit"] == 5
 
-            with mock.patch("blueprints.history.COMPARE_LAZY_EQUAL_BYTE_LIMIT", 3):
+            with mock.patch("run_comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT", 3):
                 oversized_line = client.get(
                     "/history/compare/lines?left=cmp-lines-limit-left&right=cmp-lines-limit-right"
                     "&side=a&start=0&end=3",
@@ -6000,7 +6000,7 @@ class TestHistoryRoute:
             assert [item["workspace_path"] for item in data["objects"]["artifacts"]["added"]] == ["reports/right.txt"]
             assert [item["workspace_path"] for item in data["objects"]["artifacts"]["removed"]] == ["reports/left.txt"]
 
-            with mock.patch("compare_objects.MAX_COMPARE_ITEMS_PER_SIDE", 0):
+            with mock.patch("run_comparison.MAX_COMPARE_ITEMS_PER_SIDE", 0):
                 capped_resp = client.get(
                     "/history/compare?left=cmp-left&right=cmp-right",
                     headers={"X-Session-ID": session},
@@ -6017,7 +6017,7 @@ class TestHistoryRoute:
             assert capped["truncated"]["artifacts"] == {"left": True, "right": True}
             assert capped["truncated"]["item_limit"] == 0
 
-            with mock.patch("blueprints.history.COMPARE_MAX_CHANGED_LINES", 2):
+            with mock.patch("run_comparison.COMPARE_MAX_CHANGED_LINES", 2):
                 line_limited_resp = client.get(
                     "/history/compare?left=cmp-left&right=cmp-right",
                     headers={"X-Session-ID": session},
