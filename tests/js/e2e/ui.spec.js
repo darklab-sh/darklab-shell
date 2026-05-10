@@ -535,7 +535,7 @@ test.describe('project workspace modal', () => {
     }, projectId)).toBe('Project notes from Playwright')
 
     await page.locator('[data-project-tab="details"]').click()
-    await page.locator('[data-project-action="new-target"]').click()
+    await page.locator('#project-explorer-body [data-project-action="new-target"]').click()
     await expectProjectTargetEditorReady(page, 'Add Target')
     await fillProjectTargetEditor(page, {
       value: 'playwright.example',

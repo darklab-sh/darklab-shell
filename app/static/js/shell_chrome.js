@@ -35,8 +35,6 @@
   const hudClockEl        = document.getElementById('hud-clock');
   const hudDbEl           = document.getElementById('hud-db');
   const hudRedisEl        = document.getElementById('hud-redis');
-  const mobileProjectRow  = document.getElementById('mobile-menu-project-row');
-  const mobileProjectName = document.getElementById('mobile-menu-project-name');
   const projectWorkspaceOverlay = document.getElementById('project-workspace-overlay');
   const projectWorkspaceModal = document.getElementById('project-workspace-modal');
   const projectWorkspaceBody = document.getElementById('project-workspace-body');
@@ -44,6 +42,16 @@
   const projectWorkspaceSubtitle = document.getElementById('project-workspace-subtitle');
   const projectWorkspaceCreateForm = document.getElementById('project-workspace-create-form');
   const projectWorkspaceNameInput = document.getElementById('project-workspace-name');
+  const projectMobileRoot = document.getElementById('project-mobile-root');
+  const projectMobileListView = document.getElementById('project-mobile-list-view');
+  const projectMobileBody = document.getElementById('project-mobile-body');
+  const projectMobileSummary = document.getElementById('project-mobile-summary');
+  const projectMobileCreateForm = document.getElementById('project-mobile-create-form');
+  const projectMobileNameInput = document.getElementById('project-mobile-name');
+  const projectMobileDetailView = document.getElementById('project-mobile-detail-view');
+  const projectMobileDetailTopbar = document.getElementById('project-mobile-detail-topbar');
+  const projectMobileTabs = document.getElementById('project-mobile-tabs');
+  const projectMobileDetailBody = document.getElementById('project-mobile-detail-body');
   const projectTargetEditorOverlay = document.getElementById('project-target-editor-overlay');
   const projectTargetEditorTitle = document.getElementById('project-target-editor-title');
   const projectTargetCreateForm = document.getElementById('project-target-create-form');
@@ -173,6 +181,22 @@
   let projectWorkspaceLoading = false;
   let projectWorkspaceSelectedId = '';
   let projectWorkspaceTab = 'details';
+  let projectMobileCreateOpen = false;
+  let projectMobileView = 'list';
+  let projectMobileArchivedOpen = false;
+  let projectMobileActionSheetOverlay = null;
+  let projectMobileActionSheet = null;
+  let projectMobileActionSheetTitle = null;
+  let projectMobileActionSheetItems = null;
+  let projectMobileActionSheetReturnFocus = null;
+  let projectMobileCompareOverlay = null;
+  let projectMobileCompareSheet = null;
+  let projectMobileCompareTitle = null;
+  let projectMobileCompareBody = null;
+  let projectMobileCompareFooter = null;
+  let projectMobileCompareReturnFocus = null;
+  let projectMobileCompareState = null;
+  let projectMobileKeyboardGuardBound = false;
   let projectWorkspaceFindingsLoadingId = '';
   let projectWorkspaceFindingsLoadingPromise = null;
   let projectWorkspaceFilteredFindingsLoadingKey = '';
@@ -199,6 +223,7 @@
   const FIELD_SAVED_INDICATOR_VISIBLE_MS = 1600;
   const PROJECT_LABELS_SAVED_VISIBLE_MS = 2000;
   const PROJECT_WORKSPACE_BROADCAST_KEY = 'darklab_project_workspace_changed';
+  const PROJECT_MOBILE_NOTE_PREVIEW_LIMIT = 100;
   const PROJECT_FINDING_SORT_OPTIONS = [
     { value: 'source', label: 'Source order' },
     { value: 'run', label: 'Run' },
@@ -797,11 +822,6 @@
       hudProjectEl.title = visible ? `Active project: ${name}` : 'No active project';
       _setValueColor(hudProjectEl, visible ? null : 'hud-muted');
     }
-    if (mobileProjectRow) mobileProjectRow.classList.toggle('u-hidden', !visible);
-    if (mobileProjectName) {
-      mobileProjectName.textContent = visible ? name : '';
-      mobileProjectName.title = visible ? `Active project: ${name}` : '';
-    }
   }
 
   async function loadActiveProjectContext() {
@@ -894,7 +914,8 @@
   function _pulseProjectNavTargets() {
     const controls = [];
     railNav?.querySelectorAll('[data-action="projects"]').forEach(control => controls.push(control));
-    if (mobileProjectRow) controls.push(mobileProjectRow);
+    const mobileProjectsButton = document.querySelector('#mobile-menu-sheet [data-menu-action="projects"]');
+    if (mobileProjectsButton) controls.push(mobileProjectsButton);
     controls.forEach((control) => {
       control.classList.add('has-project-target-discovery');
       window.setTimeout(() => {
@@ -1287,7 +1308,30 @@
     parent.appendChild(wrap);
   }
 
+  function _appendProjectMobileLabelChips(parent, project) {
+    const chips = _projectLabelChips(project);
+    if (!parent || !chips.length) return;
+    const wrap = document.createElement('span');
+    wrap.className = 'project-mobile-label-chips';
+    chips.slice(0, 3).forEach((chip) => {
+      const node = document.createElement('span');
+      node.className = _entityMetadataChipClass(chip.kind);
+      node.textContent = chip.label;
+      wrap.appendChild(node);
+    });
+    if (chips.length > 3) {
+      const overflow = document.createElement('span');
+      overflow.className = _entityMetadataChipClass('label');
+      overflow.textContent = `+${chips.length - 3}`;
+      wrap.appendChild(overflow);
+    }
+    parent.appendChild(wrap);
+  }
+
   function _entityTitleForEditor(entityType, entity) {
+    if (entityType === 'project') {
+      return String(entity && (entity.name || entity.slug || entity.id) || 'Project');
+    }
     if (entityType === 'finding') {
       return String(entity && (entity.title || entity.raw_line || entity.id) || 'Finding');
     }
@@ -1336,6 +1380,27 @@
     return parts.filter(Boolean).join(' · ');
   }
 
+  function _projectArtifactDetailLines(artifact) {
+    const status = _projectArtifactStatus(artifact);
+    const statusDetail = String(artifact && artifact.file_status_detail || '').trim();
+    const firstLine = [
+      artifact && artifact.kind || 'file',
+      artifact && artifact.content_type || 'unknown type',
+    ].filter(Boolean).join(' · ');
+    const lines = [
+      firstLine,
+      _formatProjectDate(artifact && artifact.created),
+    ].filter(Boolean);
+    if (status === 'changed') {
+      lines.push(`current ${_formatProjectBytes(artifact.current_byte_size)}`);
+    } else if (status === 'missing') {
+      lines.push(statusDetail || 'workspace file is missing');
+    } else if (status === 'disabled') {
+      lines.push(statusDetail || 'Files are disabled on this instance');
+    }
+    return lines;
+  }
+
   function _projectArtifactDownloadName(artifactPath = '', fallback = 'artifact') {
     const name = String(artifactPath || '').split('/').filter(Boolean).pop();
     return name || fallback;
@@ -1352,12 +1417,91 @@
     if (successMessage) _setProjectWorkspaceMessage(successMessage);
   }
 
+  function _projectMobileModeActive() {
+    return !!(
+      document.body.classList.contains('mobile-terminal-mode')
+      || (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode())
+    );
+  }
+
+  function _projectNestedSheetOpen() {
+    return !!(
+      isProjectTargetEditorOpen()
+      || isProjectEntityEditorOpen()
+      || isProjectPackageManifestOpen()
+      || isProjectPackageWizardOpen()
+    );
+  }
+
+  function _syncProjectWorkspaceNestedSuppression() {
+    if (!projectWorkspaceModal) return;
+    const suppressed = _projectNestedSheetOpen();
+    projectWorkspaceModal.classList.toggle('is-backgrounded-by-project-sheet', suppressed);
+    if ('inert' in projectWorkspaceModal) {
+      projectWorkspaceModal.inert = suppressed;
+    }
+    projectWorkspaceModal.setAttribute('aria-hidden', suppressed ? 'true' : 'false');
+  }
+
+  function _projectSheetFocusTarget(overlay, preferred = null) {
+    if (!overlay) return preferred;
+    if (_projectMobileModeActive()) {
+      return overlay.querySelector('.sheet-grab.gesture-handle') || preferred;
+    }
+    return preferred || overlay.querySelector('button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
+  }
+
+  function _focusProjectNestedSheet(overlay, preferred = null) {
+    const target = _projectSheetFocusTarget(overlay, preferred);
+    window.setTimeout(() => {
+      if (target && target.isConnected && typeof target.focus === 'function') {
+        try { target.focus({ preventScroll: true }); } catch (_) { target.focus(); }
+      }
+      _syncProjectWorkspaceNestedSuppression();
+      _syncProjectMobileFocusedField();
+    }, 0);
+  }
+
+  function _projectOpenKeyboardSheet() {
+    if (isProjectTargetEditorOpen()) return projectTargetEditorOverlay?.querySelector('#project-target-editor-modal');
+    if (isProjectEntityEditorOpen()) return projectEntityEditorOverlay?.querySelector('#project-entity-editor-modal');
+    if (isProjectPackageWizardOpen()) return projectPackageWizardOverlay?.querySelector('#project-package-wizard-modal');
+    return null;
+  }
+
+  function _syncProjectMobileFocusedField() {
+    if (!_projectMobileModeActive()) return;
+    const sheet = _projectOpenKeyboardSheet();
+    if (!sheet) return;
+    const active = document.activeElement;
+    if (!active || !sheet.contains(active)) return;
+    if (!active.matches?.('input, textarea, select, [contenteditable="true"]')) return;
+    [0, 90, 220].forEach((delay) => {
+      window.setTimeout(() => {
+        if (!active.isConnected || !_projectOpenKeyboardSheet()?.contains(active)) return;
+        active.scrollIntoView?.({ block: 'center', inline: 'nearest' });
+      }, delay);
+    });
+  }
+
+  function _installProjectMobileKeyboardGuards() {
+    if (projectMobileKeyboardGuardBound) return;
+    projectMobileKeyboardGuardBound = true;
+    [projectTargetEditorOverlay, projectEntityEditorOverlay, projectPackageWizardOverlay].forEach((overlay) => {
+      overlay?.addEventListener('focusin', () => _syncProjectMobileFocusedField());
+    });
+    if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
+      window.visualViewport.addEventListener('resize', () => _syncProjectMobileFocusedField());
+    }
+  }
+
   function _closeProjectPackageManifest() {
     if (!projectPackageManifestOverlay) return;
     projectPackageManifestOverlay.classList.add('u-hidden');
     projectPackageManifestOverlay.classList.remove('open');
     projectPackageManifestOverlay.setAttribute('aria-hidden', 'true');
     if (projectPackageManifestJson) projectPackageManifestJson.textContent = '';
+    _syncProjectWorkspaceNestedSuppression();
   }
 
   function isProjectPackageManifestOpen() {
@@ -1375,9 +1519,10 @@
     projectPackageManifestOverlay.classList.remove('u-hidden');
     projectPackageManifestOverlay.classList.add('open');
     projectPackageManifestOverlay.setAttribute('aria-hidden', 'false');
-    window.setTimeout(() => {
-      projectPackageManifestOverlay.querySelector('.project-package-manifest-close')?.focus();
-    }, 0);
+    _focusProjectNestedSheet(
+      projectPackageManifestOverlay,
+      projectPackageManifestOverlay.querySelector('.project-package-manifest-close'),
+    );
   }
 
   async function _previewProjectArtifact(projectId, artifactId) {
@@ -1422,6 +1567,10 @@
     return summary && Array.isArray(summary.packages) ? summary.packages : [];
   }
 
+  function _projectPackageSelectableArtifactItems(summary) {
+    return _projectArtifactItems(summary).filter(artifact => _projectArtifactStatus(artifact) === 'available');
+  }
+
   function _projectPackagePresetDefaults(preset, summary, findings) {
     const normalizedPreset = String(preset || 'evidence').trim() || 'evidence';
     const runs = _projectRunItems(summary);
@@ -1453,7 +1602,11 @@
         runIds: new Set(runIds),
         transcriptRunIds: new Set(selectedTranscriptRunIds),
         findingIds: new Set(selectedFindings.map(finding => String(finding.id || '')).filter(Boolean)),
-        artifactIds: new Set(includeArtifacts ? artifacts.map(artifact => String(artifact.id || '')).filter(Boolean) : []),
+        artifactIds: new Set(
+          includeArtifacts
+            ? _projectPackageSelectableArtifactItems(summary).map(artifact => String(artifact.id || '')).filter(Boolean)
+            : [],
+        ),
         targetIds: new Set(targets.map(target => String(target.id || '')).filter(Boolean)),
       },
     };
@@ -1482,6 +1635,7 @@
       projectEntityEditorForm.dataset.entityType = '';
       projectEntityEditorForm.dataset.entityId = '';
     }
+    _syncProjectWorkspaceNestedSuppression();
   }
 
   function _openProjectEntityEditor(projectId, entityType, entity, options = {}) {
@@ -1511,7 +1665,8 @@
     projectEntityEditorOverlay.classList.remove('u-hidden');
     projectEntityEditorOverlay.classList.add('open');
     projectEntityEditorOverlay.setAttribute('aria-hidden', 'false');
-    window.setTimeout(() => projectEntityLabelsInput.focus(), 0);
+    _installProjectMobileKeyboardGuards();
+    _focusProjectNestedSheet(projectEntityEditorOverlay, projectEntityLabelsInput);
   }
 
   global.openEntityMetadataEditor = function openEntityMetadataEditor(entityType, entity, options = {}) {
@@ -1527,6 +1682,7 @@
     projectPackageWizardOverlay.classList.remove('open');
     projectPackageWizardOverlay.setAttribute('aria-hidden', 'true');
     if (projectPackageWizardBody) projectPackageWizardBody.replaceChildren();
+    _syncProjectWorkspaceNestedSuppression();
   }
 
   function _renderProjectPackageWizardModal({ focus = false, scrollTop = null } = {}) {
@@ -1544,6 +1700,7 @@
     projectPackageWizardOverlay.classList.remove('u-hidden');
     projectPackageWizardOverlay.classList.add('open');
     projectPackageWizardOverlay.setAttribute('aria-hidden', 'false');
+    _installProjectMobileKeyboardGuards();
     if (typeof global.enhanceAppSelects === 'function') {
       global.enhanceAppSelects(projectPackageWizardBody);
     }
@@ -1552,9 +1709,12 @@
       if (scrollBody) scrollBody.scrollTop = Number(scrollTop);
     }
     if (focus) {
-      window.setTimeout(() => {
-        projectPackageWizardBody.querySelector('[data-project-action="package-wizard-cancel"]')?.focus();
-      }, 0);
+      _focusProjectNestedSheet(
+        projectPackageWizardOverlay,
+        projectPackageWizardBody.querySelector('[data-project-action="package-wizard-cancel"]'),
+      );
+    } else {
+      _syncProjectWorkspaceNestedSuppression();
     }
   }
 
@@ -1771,13 +1931,18 @@
 
   function _packageWizardRunChildIds(runId, projectId, summary) {
     const normalizedRunId = String(runId || '');
+    const runArtifacts = _projectArtifactItems(summary)
+      .filter(artifact => String(artifact && artifact.run_id || '') === normalizedRunId);
     return {
       findingIds: _projectFindingItems(projectId)
         .filter(finding => String(finding && finding.run_id || '') === normalizedRunId)
         .map(finding => String(finding && finding.id || ''))
         .filter(Boolean),
-      artifactIds: _projectArtifactItems(summary)
-        .filter(artifact => String(artifact && artifact.run_id || '') === normalizedRunId)
+      artifactIds: runArtifacts
+        .map(artifact => String(artifact && artifact.id || ''))
+        .filter(Boolean),
+      selectableArtifactIds: runArtifacts
+        .filter(artifact => _projectArtifactStatus(artifact) === 'available')
         .map(artifact => String(artifact && artifact.id || ''))
         .filter(Boolean),
     };
@@ -2806,7 +2971,8 @@
     projectTargetEditorOverlay.classList.remove('u-hidden');
     projectTargetEditorOverlay.classList.add('open');
     projectTargetEditorOverlay.setAttribute('aria-hidden', 'false');
-    window.setTimeout(() => projectTargetValueInput?.focus(), 0);
+    _installProjectMobileKeyboardGuards();
+    _focusProjectNestedSheet(projectTargetEditorOverlay, projectTargetValueInput);
   }
 
   function _closeProjectTargetEditor({ clear = true } = {}) {
@@ -2815,6 +2981,7 @@
       projectTargetEditorOverlay.classList.remove('open');
       projectTargetEditorOverlay.setAttribute('aria-hidden', 'true');
     }
+    _syncProjectWorkspaceNestedSuppression();
     if (clear) {
       projectWorkspaceEditingTargetId = '';
       if (projectTargetCreateForm) {
@@ -3047,6 +3214,32 @@
     if (!controls || !modeInput) return;
     modeInput.value = String(modeButton.dataset.projectCompareModeValue || 'run');
     _syncProjectRunCompareMode(controls);
+  }
+
+  function _compareProjectRuns(projectId, leftId, mode, targetValue, controls = null) {
+    const normalizedProjectId = String(projectId || '').trim();
+    const normalizedLeftId = String(leftId || '').trim();
+    const normalizedMode = String(mode || 'run') === 'baseline' ? 'baseline' : 'run';
+    const normalizedTarget = String(targetValue || '').trim();
+    if (normalizedMode === 'baseline') {
+      _avoidProjectRunCompareLabelSelfTarget(controls, normalizedTarget);
+    }
+    if (!normalizedProjectId || !normalizedLeftId) throw new Error('Choose a project run to compare.');
+    if (normalizedMode === 'run' && !normalizedTarget) throw new Error('Choose two project runs to compare.');
+    if (normalizedMode === 'run' && normalizedLeftId === normalizedTarget) throw new Error('Choose two different project runs to compare.');
+    if (normalizedMode === 'baseline' && !normalizedTarget) throw new Error('Choose a baseline label to compare.');
+    const compareFn = global && typeof global.fetchAndRenderHistoryComparison === 'function'
+      ? global.fetchAndRenderHistoryComparison
+      : (typeof window !== 'undefined' && typeof window.fetchAndRenderHistoryComparison === 'function'
+          ? window.fetchAndRenderHistoryComparison
+          : null);
+    if (!compareFn) throw new Error('Run comparison is not available.');
+    const params = new URLSearchParams({ left_run_id: normalizedLeftId });
+    if (normalizedMode === 'baseline') params.set('baseline_label', normalizedTarget);
+    else params.set('right_run_id', normalizedTarget);
+    compareFn(normalizedLeftId, normalizedMode === 'baseline' ? `baseline:${normalizedTarget}` : normalizedTarget, {
+      url: `/projects/${encodeURIComponent(normalizedProjectId)}/compare?${params.toString()}`,
+    });
   }
 
   function _renderProjectRunCompareControls(runs) {
@@ -3530,6 +3723,9 @@
     projectWorkspaceFindingsLoadingId = normalized;
     projectWorkspaceFindingsLoadingPromise = Promise.resolve().then(async () => {
       _renderProjectExplorer();
+      if (projectMobileView === 'detail' && String(projectWorkspaceSelectedId || '') === normalized) {
+        _renderProjectMobileDetail();
+      }
       try {
         const resp = await apiFetch(`/projects/${encodeURIComponent(normalized)}/findings`, { cache: 'no-store' });
         if (!resp.ok) throw await _projectResponseError(resp, 'Could not load project findings.');
@@ -3545,6 +3741,9 @@
           projectWorkspaceFindingsLoadingPromise = null;
         }
         _renderProjectExplorer();
+        if (projectMobileView === 'detail' && String(projectWorkspaceSelectedId || '') === normalized) {
+          _renderProjectMobileDetail();
+        }
         if (_projectPackageWizardActive(normalized)) {
           _renderProjectPackageWizardModal();
         }
@@ -3579,6 +3778,9 @@
     } finally {
       if (projectWorkspaceFilteredFindingsLoadingKey === key) projectWorkspaceFilteredFindingsLoadingKey = '';
       _renderProjectExplorer();
+      if (projectMobileView === 'detail' && String(projectWorkspaceSelectedId || '') === normalized) {
+        _renderProjectMobileDetail();
+      }
     }
   }
 
@@ -3879,6 +4081,1291 @@
       _orderedProjectRows('', archivedProjects).forEach(project => {
         projectWorkspaceBody.appendChild(_renderProjectListRow(project, activeId));
       });
+    }
+  }
+
+  function _projectMobileCountEntries(summary) {
+    return _projectCountEntries(summary)
+      .filter(item => item.id !== 'artifacts' || _projectArtifactsVisible())
+      .filter(item => ['runs', 'findings', 'artifacts', 'targets', 'packages'].includes(item.id));
+  }
+
+  function _projectMobileTabItems(projectId, summary) {
+    const counts = _projectCounts(summary);
+    const clamp = (value) => {
+      const count = Number(value || 0);
+      if (!Number.isFinite(count) || count <= 0) return '0';
+      return count > 999 ? '999+' : String(count);
+    };
+    return [
+      { id: 'details', label: 'Details' },
+      { id: 'runs', label: 'Runs', count: clamp(counts.runs) },
+      { id: 'findings', label: 'Findings', count: clamp(counts.findings) },
+      _projectArtifactsVisible()
+        ? { id: 'artifacts', label: 'Artifacts', count: clamp(counts.artifacts) }
+        : null,
+      { id: 'packages', label: 'Packages', count: clamp(counts.packages) },
+    ].filter(Boolean);
+  }
+
+  function _syncProjectMobileActiveTabScroll() {
+    if (!projectMobileTabs) return;
+    const active = projectMobileTabs.querySelector('.is-active');
+    if (!active) {
+      _syncProjectMobileTabEdges();
+      return;
+    }
+    window.setTimeout(() => {
+      const targetLeft = active.offsetLeft - Math.max(0, (projectMobileTabs.clientWidth - active.offsetWidth) / 2);
+      projectMobileTabs.scrollLeft = Math.max(0, targetLeft);
+      _syncProjectMobileTabEdges();
+    }, 0);
+  }
+
+  function _syncProjectMobileTabEdges() {
+    if (!projectMobileTabs) return;
+    const wrap = projectMobileTabs.closest?.('.project-mobile-tabs-wrap');
+    if (!wrap) return;
+    const maxScroll = Math.max(0, projectMobileTabs.scrollWidth - projectMobileTabs.clientWidth);
+    const scrollLeft = Math.max(0, projectMobileTabs.scrollLeft || 0);
+    wrap.classList.toggle('has-left-overflow', scrollLeft > 2);
+    wrap.classList.toggle('has-right-overflow', scrollLeft < maxScroll - 2);
+  }
+
+  function _renderProjectMobileListRow(project, activeId) {
+    const projectId = String(project.id || '');
+    const summary = _projectSummary(projectId);
+    const row = document.createElement('article');
+    row.className = 'panel-row project-mobile-row'
+      + (projectId === activeId ? ' is-active' : '')
+      + (projectId === projectWorkspaceSelectedId ? ' is-selected' : '');
+    row.dataset.projectId = projectId;
+
+    const main = document.createElement('button');
+    main.type = 'button';
+    main.className = 'control-row project-mobile-row-main';
+    main.dataset.projectMobileAction = 'open-project';
+    main.dataset.projectId = projectId;
+    main.setAttribute('aria-label', `Open ${_projectDisplayName(project)}`);
+    _bindProjectRuntimePressable(main);
+
+    const title = document.createElement('span');
+    title.className = 'project-mobile-title-row';
+    const titleButton = document.createElement('span');
+    titleButton.className = 'project-mobile-title-target';
+    const name = document.createElement('span');
+    name.className = 'project-mobile-name';
+    name.textContent = String(project.name || project.slug || projectId);
+    titleButton.appendChild(name);
+    title.appendChild(titleButton);
+    const statusText = projectId === activeId
+      ? 'active'
+      : (_projectIsArchived(project) ? 'archived' : '');
+    if (statusText) {
+      const status = document.createElement('span');
+      status.className = 'project-workspace-status' + (projectId === activeId ? ' is-active' : '');
+      status.textContent = statusText;
+      title.appendChild(status);
+    }
+
+    const chips = document.createElement('div');
+    chips.className = 'project-mobile-counts';
+    const countEntries = _projectMobileCountEntries(summary).filter(item => Number(item.value || 0) > 0);
+    if (!countEntries.length) {
+      const empty = document.createElement('span');
+      empty.className = 'project-mobile-empty-hint';
+      empty.textContent = 'No linked runs yet';
+      chips.appendChild(empty);
+    }
+    countEntries.forEach((item) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'btn btn-ghost btn-compact project-mobile-count-chip';
+      chip.dataset.projectMobileTab = item.tab || 'details';
+      chip.dataset.projectId = projectId;
+      chip.textContent = `${item.value} ${item.label}`;
+      chip.setAttribute('aria-label', `Open ${item.label} for ${_projectDisplayName(project)}`);
+      _bindProjectRuntimePressable(chip);
+      chips.appendChild(chip);
+    });
+
+    main.appendChild(title);
+    _appendProjectMobileLabelChips(main, project);
+
+    const affordances = document.createElement('div');
+    affordances.className = 'project-mobile-affordances';
+    const menu = document.createElement('button');
+    menu.type = 'button';
+    menu.className = 'btn btn-ghost btn-compact project-mobile-menu-btn';
+    menu.dataset.projectMobileAction = 'project-menu';
+    menu.dataset.projectId = projectId;
+    menu.setAttribute('aria-label', `Project actions for ${_projectDisplayName(project)}`);
+    menu.textContent = '☰';
+    _bindProjectRuntimePressable(menu);
+    const chevron = document.createElement('span');
+    chevron.className = 'project-mobile-chevron';
+    chevron.setAttribute('aria-hidden', 'true');
+    chevron.textContent = '›';
+    affordances.append(menu, chevron);
+
+    row.append(main, chips, affordances);
+    return row;
+  }
+
+  function _projectMobileSection(label, count, { open = true } = {}) {
+    const wrap = document.createElement('div');
+    wrap.className = 'project-mobile-section-heading';
+    const text = document.createElement('span');
+    text.textContent = `${label}${count ? ` (${count})` : ''}`;
+    wrap.appendChild(text);
+    if (label === 'Archived') {
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'btn btn-ghost btn-compact';
+      toggle.dataset.projectMobileAction = 'toggle-archived';
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      toggle.textContent = open ? 'Hide' : 'Show';
+      _bindProjectRuntimePressable(toggle);
+      wrap.appendChild(toggle);
+    }
+    return wrap;
+  }
+
+  function _setProjectMobileCreateOpen(open, { focus = false } = {}) {
+    projectMobileCreateOpen = !!open;
+    if (projectMobileCreateOpen) projectMobileView = 'create';
+    else if (projectMobileView === 'create') projectMobileView = 'list';
+    if (projectMobileListView) projectMobileListView.classList.toggle('u-hidden', projectMobileView !== 'list');
+    if (projectMobileCreateForm) projectMobileCreateForm.classList.toggle('u-hidden', projectMobileView !== 'create');
+    if (projectMobileDetailView) projectMobileDetailView.classList.toggle('u-hidden', projectMobileView !== 'detail');
+    if (focus && projectMobileCreateOpen && projectMobileNameInput) {
+      window.setTimeout(() => projectMobileNameInput.focus(), 0);
+    }
+  }
+
+  function _setProjectMobileView(view) {
+    const normalized = ['list', 'create', 'detail'].includes(view) ? view : 'list';
+    projectMobileView = normalized;
+    projectMobileCreateOpen = normalized === 'create';
+    if (projectMobileListView) projectMobileListView.classList.toggle('u-hidden', normalized !== 'list');
+    if (projectMobileCreateForm) projectMobileCreateForm.classList.toggle('u-hidden', normalized !== 'create');
+    if (projectMobileDetailView) projectMobileDetailView.classList.toggle('u-hidden', normalized !== 'detail');
+  }
+
+  function _selectProjectFromMobile(projectId, tab = '') {
+    const nextProjectId = String(projectId || '').trim();
+    if (!nextProjectId) return;
+    const sameProject = nextProjectId === String(projectWorkspaceSelectedId || '');
+    projectWorkspaceSelectedId = nextProjectId;
+    if (tab) projectWorkspaceTab = tab;
+    else if (!sameProject) projectWorkspaceTab = 'details';
+    _closeProjectTargetEditor();
+    _closeProjectEntityEditor();
+    _setProjectWorkspaceMessage('');
+    _setProjectMobileView('detail');
+    _renderProjectWorkspace();
+  }
+
+  function _projectMobileProjectActions(project) {
+    const projectId = String(project && project.id || '');
+    if (!projectId) return [];
+    const activeId = activeProject && activeProject.id ? String(activeProject.id) : '';
+    const actions = [];
+    if (projectId === activeId) {
+      actions.push({ label: 'Unmark active', action: 'clear' });
+    } else if (!_projectIsArchived(project)) {
+      actions.push({ label: 'Mark active', action: 'use' });
+    }
+    actions.push({ label: 'Edit metadata', action: 'edit-project-metadata' });
+    actions.push(_projectIsArchived(project)
+      ? { label: 'Unarchive', action: 'unarchive' }
+      : { label: 'Archive', action: 'archive' });
+    actions.push({ label: 'Delete', action: 'delete', tone: 'danger' });
+    return actions;
+  }
+
+  function _renderProjectMobileDetailTopbar(project, activeId) {
+    if (!projectMobileDetailTopbar) return;
+    projectMobileDetailTopbar.replaceChildren();
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'btn btn-ghost btn-compact project-mobile-back-btn';
+    back.dataset.projectMobileAction = 'back-to-list';
+    back.setAttribute('aria-label', 'Back to project list');
+    back.textContent = '‹ Back';
+    _bindProjectRuntimePressable(back);
+
+    const titleWrap = document.createElement('div');
+    titleWrap.className = 'project-mobile-detail-title-wrap';
+    const title = document.createElement('div');
+    title.className = 'project-mobile-detail-title';
+    title.textContent = project ? _projectDisplayName(project) : 'Project';
+    titleWrap.appendChild(title);
+    const statusText = project && String(project.id || '') === activeId
+      ? 'active'
+      : (project && _projectIsArchived(project) ? 'archived' : '');
+    const statusSlot = document.createElement('div');
+    statusSlot.className = 'project-mobile-detail-status-slot';
+    if (statusText) {
+      const status = document.createElement('span');
+      status.className = 'project-workspace-status' + (statusText === 'active' ? ' is-active' : '');
+      status.textContent = statusText;
+      statusSlot.appendChild(status);
+    }
+
+    projectMobileDetailTopbar.append(back, titleWrap, statusSlot);
+  }
+
+  function _renderProjectMobileTabs(projectId, summary) {
+    if (!projectMobileTabs) return;
+    projectMobileTabs.replaceChildren();
+    const items = _projectMobileTabItems(projectId, summary);
+    if (!items.some(item => item.id === projectWorkspaceTab)) projectWorkspaceTab = 'details';
+    items.forEach((item) => {
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = 'nav-item project-mobile-tab' + (projectWorkspaceTab === item.id ? ' is-active' : '');
+      tab.dataset.projectMobileDetailTab = item.id;
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-selected', projectWorkspaceTab === item.id ? 'true' : 'false');
+      const label = document.createElement('span');
+      label.className = 'project-mobile-tab-label';
+      label.textContent = item.label;
+      tab.appendChild(label);
+      if (item.count !== undefined) {
+        const count = document.createElement('span');
+        count.className = 'project-mobile-tab-count';
+        count.textContent = item.count;
+        tab.appendChild(count);
+      }
+      _bindProjectRuntimePressable(tab);
+      projectMobileTabs.appendChild(tab);
+    });
+    _syncProjectMobileActiveTabScroll();
+  }
+
+  function _projectMobileNotePreviewNode(note) {
+    const fullNote = String(note || '');
+    const preview = fullNote.length > PROJECT_MOBILE_NOTE_PREVIEW_LIMIT
+      ? `${fullNote.slice(0, PROJECT_MOBILE_NOTE_PREVIEW_LIMIT).trimEnd()}...`
+      : fullNote;
+    const wrap = document.createElement('div');
+    wrap.className = 'project-mobile-note-preview';
+    const text = document.createElement('span');
+    text.className = 'project-mobile-note-preview-text';
+    text.textContent = preview;
+    wrap.appendChild(text);
+    if (fullNote.length > PROJECT_MOBILE_NOTE_PREVIEW_LIMIT) {
+      let expanded = false;
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'btn btn-ghost btn-compact project-mobile-note-toggle';
+      toggle.dataset.projectMobileNoteToggle = '1';
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.textContent = 'Expand';
+      toggle.addEventListener('click', () => {
+        expanded = !expanded;
+        text.textContent = expanded ? fullNote : preview;
+        toggle.textContent = expanded ? 'Collapse' : 'Expand';
+        toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      });
+      _bindProjectRuntimePressable(toggle);
+      wrap.appendChild(toggle);
+    }
+    return wrap;
+  }
+
+  function _projectMobileSummaryPanel(project, summary) {
+    const panel = document.createElement('section');
+    panel.className = 'project-mobile-detail-panel';
+    const heading = document.createElement('h3');
+    heading.textContent = 'Summary';
+    panel.appendChild(heading);
+    const projectId = String(project && project.id || '');
+    if (projectId) {
+      const menu = document.createElement('button');
+      menu.type = 'button';
+      menu.className = 'btn btn-ghost btn-compact project-mobile-summary-menu-btn';
+      menu.dataset.projectMobileAction = 'project-menu';
+      menu.dataset.projectId = projectId;
+      menu.setAttribute('aria-label', `Project actions for ${_projectDisplayName(project)}`);
+      menu.textContent = '☰';
+      _bindProjectRuntimePressable(menu);
+      panel.appendChild(menu);
+    }
+    const meta = document.createElement('div');
+    meta.className = 'project-mobile-summary-grid';
+    [
+      ['Status', project.status || 'active'],
+      ['Created', _formatProjectDate(project.created)],
+      ['Updated', _formatProjectDate(project.updated)],
+      ['Targets', String(Number(_projectCounts(summary).targets || 0))],
+    ].forEach(([label, value]) => {
+      const item = document.createElement('div');
+      item.className = 'project-mobile-summary-item';
+      const key = document.createElement('span');
+      key.textContent = label;
+      const body = document.createElement('strong');
+      body.textContent = value;
+      item.append(key, body);
+      meta.appendChild(item);
+    });
+    panel.appendChild(meta);
+    const labels = _entityLabelValues(project);
+    if (labels.length) {
+      const chips = document.createElement('div');
+      chips.className = 'project-mobile-label-chips';
+      labels.forEach((label) => {
+        const chip = document.createElement('span');
+        chip.className = _entityMetadataChipClass('label');
+        chip.textContent = label;
+        chips.appendChild(chip);
+      });
+      panel.appendChild(chips);
+    }
+    const note = _entityNoteBody(project);
+    if (note) {
+      panel.appendChild(_projectMobileNotePreviewNode(note));
+    }
+    return panel;
+  }
+
+  function _projectMobilePanel(titleText, { className = '' } = {}) {
+    const panel = document.createElement('section');
+    panel.className = `project-mobile-detail-panel${className ? ` ${className}` : ''}`;
+    if (titleText) {
+      const heading = document.createElement('h3');
+      heading.textContent = titleText;
+      panel.appendChild(heading);
+    }
+    return panel;
+  }
+
+  function _projectMobileSectionHeader(titleText, action = null) {
+    const header = document.createElement('div');
+    header.className = 'project-mobile-section-header';
+    const title = document.createElement('h3');
+    title.textContent = titleText;
+    header.appendChild(title);
+    if (action) header.appendChild(action);
+    return header;
+  }
+
+  function _projectMobileActionMenu(projectId, label, actions = []) {
+    const filteredActions = actions.filter(Boolean);
+    if (!filteredActions.length) return null;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-ghost btn-compact project-mobile-row-menu-trigger';
+    btn.setAttribute('aria-label', label || 'Row actions');
+    btn.dataset.projectMobileAction = 'action-sheet';
+    btn.dataset.projectId = String(projectId || '');
+    btn.textContent = '☰';
+    btn._projectMobileActionSheetLabel = label || 'Actions';
+    btn._projectMobileActionSheetItems = filteredActions;
+    _bindProjectRuntimePressable(btn);
+    return btn;
+  }
+
+  function _ensureProjectMobileActionSheet() {
+    if (projectMobileActionSheetOverlay && projectMobileActionSheet && projectMobileActionSheetItems) {
+      return projectMobileActionSheetOverlay;
+    }
+    const overlay = document.createElement('div');
+    overlay.id = 'project-mobile-action-sheet-overlay';
+    overlay.className = 'modal-overlay mobile-sheet-overlay project-mobile-action-sheet-overlay u-hidden';
+    overlay.setAttribute('aria-hidden', 'true');
+    const sheet = document.createElement('section');
+    sheet.id = 'project-mobile-action-sheet';
+    sheet.className = 'modal-card mobile-sheet-surface project-mobile-action-sheet';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-modal', 'true');
+    sheet.setAttribute('aria-labelledby', 'project-mobile-action-sheet-title');
+    const grab = document.createElement('div');
+    grab.className = 'sheet-grab gesture-handle';
+    grab.setAttribute('role', 'button');
+    grab.tabIndex = 0;
+    grab.setAttribute('aria-label', 'Close project action sheet');
+    const header = document.createElement('div');
+    header.className = 'project-mobile-action-sheet-header';
+    const title = document.createElement('h2');
+    title.id = 'project-mobile-action-sheet-title';
+    title.textContent = 'Actions';
+    header.appendChild(title);
+    const items = document.createElement('div');
+    items.className = 'project-mobile-action-sheet-items bottom-sheet-body nice-scroll';
+    sheet.append(grab, header, items);
+    overlay.appendChild(sheet);
+    (projectWorkspaceModal || document.body).appendChild(overlay);
+
+    projectMobileActionSheetOverlay = overlay;
+    projectMobileActionSheet = sheet;
+    projectMobileActionSheetTitle = title;
+    projectMobileActionSheetItems = items;
+
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) _closeProjectMobileActionSheet();
+    });
+    items.addEventListener('click', (event) => {
+      if (event.target.closest?.('[data-project-action]')) {
+        _closeProjectMobileActionSheet({ restoreFocus: false });
+      }
+    });
+    const bindDismissibleFn = global && typeof global.bindDismissible === 'function'
+      ? global.bindDismissible
+      : (typeof bindDismissible === 'function' ? bindDismissible : null);
+    if (bindDismissibleFn) {
+      bindDismissibleFn(overlay, {
+        level: 'sheet',
+        isOpen: () => !!(projectMobileActionSheetOverlay && projectMobileActionSheetOverlay.classList.contains('open')),
+        onClose: () => _closeProjectMobileActionSheet(),
+        backdropEl: overlay,
+      });
+    }
+    const bindMobileSheetFn = global && typeof global.bindMobileSheet === 'function'
+      ? global.bindMobileSheet
+      : (typeof bindMobileSheet === 'function' ? bindMobileSheet : null);
+    if (bindMobileSheetFn) bindMobileSheetFn(sheet, { onClose: () => _closeProjectMobileActionSheet() });
+    return overlay;
+  }
+
+  function _closeProjectMobileActionSheet({ restoreFocus = true } = {}) {
+    if (!projectMobileActionSheetOverlay) return;
+    projectMobileActionSheetOverlay.classList.add('u-hidden');
+    projectMobileActionSheetOverlay.classList.remove('open');
+    projectMobileActionSheetOverlay.setAttribute('aria-hidden', 'true');
+    if (projectMobileActionSheetItems) projectMobileActionSheetItems.replaceChildren();
+    if (
+      restoreFocus
+      && projectMobileActionSheetReturnFocus
+      && projectMobileActionSheetReturnFocus.isConnected
+      && typeof projectMobileActionSheetReturnFocus.focus === 'function'
+    ) {
+      const focusTarget = projectMobileActionSheetReturnFocus;
+      window.setTimeout(() => focusTarget.focus(), 0);
+    }
+    projectMobileActionSheetReturnFocus = null;
+  }
+
+  function _projectMobileActionSheetItem(projectId, item) {
+    if (item.node) {
+      const wrap = document.createElement('div');
+      wrap.className = 'project-mobile-action-sheet-field';
+      wrap.appendChild(item.node);
+      return wrap;
+    }
+    const btn = _makeProjectButton(
+      item.label,
+      item.action,
+      String(projectId || ''),
+      item.variant || 'ghost',
+      item.tone || '',
+    );
+    btn.classList.add('project-mobile-action-sheet-item');
+    if (item.tone === 'danger' || item.variant === 'destructive') btn.classList.add('is-danger');
+    if (item.disabled) btn.disabled = true;
+    if (item.title) btn.title = item.title;
+    Object.entries(item.dataset || {}).forEach(([key, value]) => {
+      btn.dataset[key] = String(value || '');
+    });
+    return btn;
+  }
+
+  function _openProjectMobileActionSheet(projectId, label, actions = [], returnFocus = null) {
+    const filteredActions = actions.filter(Boolean);
+    if (!filteredActions.length) return;
+    _ensureProjectMobileActionSheet();
+    if (!projectMobileActionSheetOverlay || !projectMobileActionSheetItems) return;
+    projectMobileActionSheetReturnFocus = returnFocus || document.activeElement || null;
+    if (projectMobileActionSheetTitle) projectMobileActionSheetTitle.textContent = label || 'Actions';
+    projectMobileActionSheetItems.replaceChildren();
+    projectMobileActionSheetItems.scrollTop = 0;
+    filteredActions.forEach(item => {
+      projectMobileActionSheetItems.appendChild(_projectMobileActionSheetItem(projectId, item));
+    });
+    if (typeof global.enhanceAppSelects === 'function') {
+      global.enhanceAppSelects(projectMobileActionSheetItems);
+    }
+    projectMobileActionSheetOverlay.classList.remove('u-hidden');
+    projectMobileActionSheetOverlay.classList.add('open');
+    projectMobileActionSheetOverlay.setAttribute('aria-hidden', 'false');
+    window.setTimeout(() => {
+      projectMobileActionSheetItems.querySelector('button, select, input, textarea')?.focus();
+    }, 0);
+  }
+
+  function _projectMobileCompareRuns(projectId) {
+    const summary = projectWorkspaceSummaries.get(String(projectId || ''));
+    return _projectComparableRuns(summary);
+  }
+
+  function _projectMobileCompareTargetOptions(state, runs) {
+    if (state.mode === 'baseline') {
+      return _projectRunBaselineLabelOptions(runs).map(label => ({ value: label, label }));
+    }
+    return runs.map(run => ({
+      value: String(run.id || ''),
+      label: _projectRunCompareOptionText(run),
+    }));
+  }
+
+  function _projectMobileCompareEnsureTarget(state, runs) {
+    const options = _projectMobileCompareTargetOptions(state, runs);
+    const hasSelectedTarget = options.some(item => item.value === state.targetValue);
+    if (!hasSelectedTarget || (state.mode === 'run' && state.targetValue === state.leftRunId)) {
+      const fallback = options.find(item => state.mode === 'baseline' || item.value !== state.leftRunId) || options[0] || null;
+      state.targetValue = fallback ? fallback.value : '';
+    }
+    if (state.mode === 'baseline' && state.targetValue) {
+      const left = runs.find(run => String(run.id || '') === state.leftRunId);
+      if (left && _entityLabelValues(left).includes(state.targetValue)) {
+        const leftFallback = runs.find(run => !_entityLabelValues(run).includes(state.targetValue));
+        if (leftFallback) state.leftRunId = String(leftFallback.id || '');
+      }
+    }
+  }
+
+  function _projectMobileCompareSelectionList(label, options, selectedValue, onSelect) {
+    const wrap = document.createElement('div');
+    wrap.className = 'project-mobile-compare-options';
+    const heading = document.createElement('h3');
+    heading.textContent = label;
+    wrap.appendChild(heading);
+    options.forEach((item) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-ghost project-mobile-compare-option';
+      btn.classList.toggle('is-active', String(item.value || '') === String(selectedValue || ''));
+      btn.setAttribute('aria-pressed', String(item.value || '') === String(selectedValue || '') ? 'true' : 'false');
+      btn.textContent = item.label || item.value;
+      btn.addEventListener('click', () => onSelect(String(item.value || '')));
+      _bindProjectRuntimePressable(btn);
+      wrap.appendChild(btn);
+    });
+    return wrap;
+  }
+
+  function _ensureProjectMobileCompareSheet() {
+    if (projectMobileCompareOverlay && projectMobileCompareSheet && projectMobileCompareBody && projectMobileCompareFooter) {
+      return projectMobileCompareOverlay;
+    }
+    const overlay = document.createElement('div');
+    overlay.id = 'project-mobile-compare-overlay';
+    overlay.className = 'modal-overlay mobile-sheet-overlay project-mobile-compare-overlay u-hidden';
+    overlay.setAttribute('aria-hidden', 'true');
+    const sheet = document.createElement('section');
+    sheet.id = 'project-mobile-compare-sheet';
+    sheet.className = 'modal-card mobile-sheet-surface project-mobile-compare-sheet';
+    sheet.setAttribute('role', 'dialog');
+    sheet.setAttribute('aria-modal', 'true');
+    sheet.setAttribute('aria-labelledby', 'project-mobile-compare-title');
+    const grab = document.createElement('div');
+    grab.className = 'sheet-grab gesture-handle';
+    grab.setAttribute('role', 'button');
+    grab.tabIndex = 0;
+    grab.setAttribute('aria-label', 'Close run comparison');
+    const header = document.createElement('div');
+    header.className = 'project-mobile-compare-header';
+    const title = document.createElement('h2');
+    title.id = 'project-mobile-compare-title';
+    title.textContent = 'Compare runs';
+    header.appendChild(title);
+    const body = document.createElement('div');
+    body.className = 'project-mobile-compare-body nice-scroll';
+    const footer = document.createElement('div');
+    footer.className = 'project-mobile-compare-footer';
+    sheet.append(grab, header, body, footer);
+    overlay.appendChild(sheet);
+    (projectWorkspaceModal || document.body).appendChild(overlay);
+
+    projectMobileCompareOverlay = overlay;
+    projectMobileCompareSheet = sheet;
+    projectMobileCompareTitle = title;
+    projectMobileCompareBody = body;
+    projectMobileCompareFooter = footer;
+
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) _closeProjectMobileCompareSheet();
+    });
+    const bindDismissibleFn = global && typeof global.bindDismissible === 'function'
+      ? global.bindDismissible
+      : (typeof bindDismissible === 'function' ? bindDismissible : null);
+    if (bindDismissibleFn) {
+      bindDismissibleFn(overlay, {
+        level: 'sheet',
+        isOpen: () => !!(projectMobileCompareOverlay && projectMobileCompareOverlay.classList.contains('open')),
+        onClose: () => _closeProjectMobileCompareSheet(),
+        backdropEl: overlay,
+      });
+    }
+    const bindMobileSheetFn = global && typeof global.bindMobileSheet === 'function'
+      ? global.bindMobileSheet
+      : (typeof bindMobileSheet === 'function' ? bindMobileSheet : null);
+    if (bindMobileSheetFn) bindMobileSheetFn(sheet, { onClose: () => _closeProjectMobileCompareSheet() });
+    return overlay;
+  }
+
+  function _closeProjectMobileCompareSheet({ restoreFocus = true } = {}) {
+    if (!projectMobileCompareOverlay) return;
+    projectMobileCompareOverlay.classList.add('u-hidden');
+    projectMobileCompareOverlay.classList.remove('open');
+    projectMobileCompareOverlay.setAttribute('aria-hidden', 'true');
+    projectMobileCompareState = null;
+    if (projectMobileCompareBody) projectMobileCompareBody.replaceChildren();
+    if (projectMobileCompareFooter) projectMobileCompareFooter.replaceChildren();
+    if (
+      restoreFocus
+      && projectMobileCompareReturnFocus
+      && projectMobileCompareReturnFocus.isConnected
+      && typeof projectMobileCompareReturnFocus.focus === 'function'
+    ) {
+      const focusTarget = projectMobileCompareReturnFocus;
+      window.setTimeout(() => focusTarget.focus(), 0);
+    }
+    projectMobileCompareReturnFocus = null;
+  }
+
+  function _renderProjectMobileCompareSheet() {
+    const state = projectMobileCompareState;
+    if (!state || !projectMobileCompareBody || !projectMobileCompareFooter) return;
+    const runs = _projectMobileCompareRuns(state.projectId);
+    _projectMobileCompareEnsureTarget(state, runs);
+    const stepLabels = ['Left run', 'Mode', state.mode === 'baseline' ? 'Label' : 'Right run'];
+    if (projectMobileCompareTitle) projectMobileCompareTitle.textContent = `Compare runs: ${stepLabels[state.step]}`;
+    projectMobileCompareBody.replaceChildren();
+    projectMobileCompareFooter.replaceChildren();
+    const stepper = document.createElement('div');
+    stepper.className = 'project-mobile-compare-stepper';
+    stepLabels.forEach((label, index) => {
+      const item = document.createElement('span');
+      item.className = 'project-mobile-compare-step';
+      item.classList.toggle('is-active', index === state.step);
+      item.textContent = label;
+      stepper.appendChild(item);
+    });
+    projectMobileCompareBody.appendChild(stepper);
+    if (state.step === 0) {
+      projectMobileCompareBody.appendChild(_projectMobileCompareSelectionList(
+        'Choose the run to compare',
+        runs.map(run => ({ value: String(run.id || ''), label: _projectRunCompareOptionText(run) })),
+        state.leftRunId,
+        (value) => {
+          state.leftRunId = value;
+          if (state.mode === 'run' && state.targetValue === value) _projectMobileCompareEnsureTarget(state, runs);
+          _renderProjectMobileCompareSheet();
+        },
+      ));
+    } else if (state.step === 1) {
+      const modeOptions = [
+        { value: 'run', label: 'Against run' },
+        ...(_projectRunBaselineLabelOptions(runs).length ? [{ value: 'baseline', label: 'Against label' }] : []),
+      ];
+      projectMobileCompareBody.appendChild(_projectMobileCompareSelectionList(
+        'Compare against',
+        modeOptions,
+        state.mode,
+        (value) => {
+          state.mode = value === 'baseline' ? 'baseline' : 'run';
+          state.targetValue = '';
+          _projectMobileCompareEnsureTarget(state, runs);
+          _renderProjectMobileCompareSheet();
+        },
+      ));
+    } else {
+      projectMobileCompareBody.appendChild(_projectMobileCompareSelectionList(
+        state.mode === 'baseline' ? 'Choose a baseline label' : 'Choose the baseline run',
+        _projectMobileCompareTargetOptions(state, runs),
+        state.targetValue,
+        (value) => {
+          state.targetValue = value;
+          _renderProjectMobileCompareSheet();
+        },
+      ));
+    }
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'btn btn-ghost btn-compact';
+    back.textContent = state.step === 0 ? 'Cancel' : 'Back';
+    back.addEventListener('click', () => {
+      if (state.step === 0) {
+        _closeProjectMobileCompareSheet();
+      } else {
+        state.step -= 1;
+        _renderProjectMobileCompareSheet();
+      }
+    });
+    _bindProjectRuntimePressable(back);
+    const next = document.createElement('button');
+    next.type = 'button';
+    next.className = 'btn btn-primary btn-compact';
+    next.textContent = state.step >= 2 ? 'Compare' : 'Next';
+    next.addEventListener('click', () => {
+      if (state.step < 2) {
+        state.step += 1;
+        _renderProjectMobileCompareSheet();
+        return;
+      }
+      _compareProjectRuns(state.projectId, state.leftRunId, state.mode, state.targetValue);
+      _closeProjectMobileCompareSheet({ restoreFocus: false });
+    });
+    _bindProjectRuntimePressable(next);
+    projectMobileCompareFooter.append(back, next);
+  }
+
+  function _openProjectMobileCompareSheet(projectId, returnFocus = null) {
+    const runs = _projectMobileCompareRuns(projectId);
+    if (runs.length < 2) {
+      _setProjectWorkspaceMessage('Link two runs to compare.');
+      return;
+    }
+    projectMobileCompareState = {
+      projectId: String(projectId || ''),
+      step: 0,
+      leftRunId: String(runs[0]?.id || ''),
+      mode: 'run',
+      targetValue: '',
+    };
+    _projectMobileCompareEnsureTarget(projectMobileCompareState, runs);
+    _ensureProjectMobileCompareSheet();
+    if (!projectMobileCompareOverlay) return;
+    projectMobileCompareReturnFocus = returnFocus || document.activeElement || null;
+    _renderProjectMobileCompareSheet();
+    projectMobileCompareOverlay.classList.remove('u-hidden');
+    projectMobileCompareOverlay.classList.add('open');
+    projectMobileCompareOverlay.setAttribute('aria-hidden', 'false');
+    window.setTimeout(() => {
+      projectMobileCompareBody?.querySelector('button, select, input, textarea')?.focus();
+    }, 0);
+  }
+
+  function _projectMobileContentRow({
+    title,
+    meta = '',
+    detail = '',
+    badge = '',
+    chips = [],
+    action = null,
+    accessory = null,
+    className = '',
+  }) {
+    const row = document.createElement('article');
+    row.className = `project-mobile-content-row${className ? ` ${className}` : ''}`;
+    const main = document.createElement(action ? 'button' : 'div');
+    main.className = `project-mobile-content-main${action ? ' control-row' : ''}`;
+    if (action) {
+      main.type = 'button';
+      main.dataset.projectAction = action.action;
+      Object.entries(action.dataset || {}).forEach(([key, value]) => {
+        main.dataset[key] = String(value || '');
+      });
+      _bindProjectRuntimePressable(main);
+    }
+    const titleEl = document.createElement('div');
+    titleEl.className = 'project-mobile-content-title';
+    titleEl.textContent = String(title || '');
+    main.appendChild(titleEl);
+    if (meta) {
+      const metaEl = document.createElement('div');
+      metaEl.className = 'project-mobile-content-meta';
+      metaEl.textContent = String(meta || '');
+      main.appendChild(metaEl);
+    }
+    const detailLines = Array.isArray(detail) ? detail : (detail ? [detail] : []);
+    detailLines.filter(line => String(line || '').trim()).forEach((line) => {
+      const detailEl = document.createElement('div');
+      detailEl.className = 'project-mobile-content-detail';
+      detailEl.textContent = String(line || '');
+      main.appendChild(detailEl);
+    });
+    if (Array.isArray(chips) && chips.length) {
+      const chipWrap = document.createElement('div');
+      chipWrap.className = 'project-mobile-row-chips';
+      chips.forEach((chip) => {
+        const chipEl = document.createElement('span');
+        chipEl.className = _entityMetadataChipClass(chip.kind);
+        chipEl.textContent = String(chip.label || '');
+        chipWrap.appendChild(chipEl);
+      });
+      main.appendChild(chipWrap);
+    }
+    row.appendChild(main);
+    if (accessory && badge) {
+      const accessoryWrap = document.createElement('div');
+      accessoryWrap.className = 'project-mobile-row-accessory';
+      const badgeEl = document.createElement('span');
+      badgeEl.className = `project-mobile-row-badge is-${String(badge || '').trim().toLowerCase()}`;
+      badgeEl.textContent = String(badge || '');
+      accessoryWrap.append(accessory, badgeEl);
+      row.appendChild(accessoryWrap);
+    } else if (accessory) row.appendChild(accessory);
+    else if (badge) {
+      const badgeEl = document.createElement('span');
+      badgeEl.className = `project-mobile-row-badge is-${String(badge || '').trim().toLowerCase()}`;
+      badgeEl.textContent = String(badge || '');
+      row.appendChild(badgeEl);
+    }
+    return row;
+  }
+
+  function _projectMobileEmptyPanel(text, actions = []) {
+    const panel = _emptyProjectPanel(text);
+    const filteredActions = actions.filter(Boolean);
+    if (filteredActions.length) {
+      const actionWrap = document.createElement('div');
+      actionWrap.className = 'project-mobile-empty-actions';
+      filteredActions.forEach(action => actionWrap.appendChild(action));
+      panel.appendChild(actionWrap);
+    }
+    return panel;
+  }
+
+  function _renderProjectMobileDetailsTab(project, summary) {
+    const fragment = document.createDocumentFragment();
+    fragment.appendChild(_projectMobileSummaryPanel(project, summary));
+
+    const targets = _projectTargetItems(summary);
+    const projectId = String(project.id || '');
+    const addTarget = _makeProjectButton('Add Target', 'new-target', projectId, 'primary');
+    addTarget.classList.add('project-mobile-section-action');
+    const targetPanel = _projectMobilePanel('', { className: 'project-mobile-targets-panel' });
+    targetPanel.appendChild(_projectMobileSectionHeader('Targets', addTarget));
+    if (!targets.length) {
+      targetPanel.appendChild(_emptyProjectPanel('No project targets yet.'));
+    } else {
+      const list = document.createElement('div');
+      list.className = 'project-mobile-content-list';
+      targets.forEach((target) => {
+        const targetId = String(target.id || '');
+        const actions = [];
+        if (String(target.review_state || '') === 'pending') {
+          actions.push({ label: 'Confirm', action: 'confirm-target', dataset: { targetId, targetValue: target.value } });
+          actions.push({ label: 'Dismiss', action: 'dismiss-target', dataset: { targetId, targetValue: target.value } });
+        }
+        actions.push(
+          { label: 'Edit', action: 'edit-target', dataset: { targetId, targetValue: target.value } },
+          { label: 'Remove', action: 'delete-target', tone: 'danger', dataset: { targetId, targetValue: target.value } },
+        );
+        const chips = _entityMetadataChips(target);
+        if (String(target.review_state || '') === 'pending') chips.unshift({ label: 'auto', kind: 'label' });
+        list.appendChild(_projectMobileContentRow({
+          title: target.value || 'Target',
+          meta: target.type || 'target',
+          detail: target.source_run_id ? `source run ${_shortProjectRunId(target.source_run_id)}` : '',
+          chips,
+          accessory: _projectMobileActionMenu(projectId, `Target actions for ${target.value || targetId}`, actions),
+        }));
+      });
+      targetPanel.appendChild(list);
+    }
+    fragment.appendChild(targetPanel);
+    return fragment;
+  }
+
+  function _renderProjectMobileRunsTab(projectId, summary) {
+    const fragment = document.createDocumentFragment();
+    const comparableRuns = _projectComparableRuns(summary);
+    const compareRuns = _makeProjectButton('Compare', 'mobile-compare-runs', projectId, comparableRuns.length >= 2 ? 'secondary' : 'ghost');
+    compareRuns.disabled = comparableRuns.length < 2;
+    if (compareRuns.disabled) compareRuns.setAttribute('aria-disabled', 'true');
+    const linkLastRun = _makeProjectButton('Link last run', 'link-last-run', projectId, 'primary');
+    const toolbar = document.createElement('div');
+    toolbar.className = 'project-mobile-tab-toolbar';
+    toolbar.append(compareRuns, linkLastRun);
+    fragment.appendChild(toolbar);
+
+    const allRuns = _projectRunItems(summary);
+    const filterActive = _projectTargetFilterActive(projectId, summary);
+    if (filterActive && !_projectFindingsLoaded(projectId)) {
+      fragment.appendChild(_emptyProjectPanel('Loading target associations...'));
+      return fragment;
+    }
+    const runs = _filteredProjectRuns(projectId, summary);
+    if (!allRuns.length) {
+      fragment.appendChild(_projectMobileEmptyPanel('No linked runs yet.', [
+        _makeProjectButton('Link last run', 'link-last-run', projectId, 'primary'),
+      ]));
+      return fragment;
+    }
+    if (!runs.length) {
+      fragment.appendChild(_emptyProjectPanel('No linked runs match the selected filters.'));
+      return fragment;
+    }
+    const list = document.createElement('div');
+    list.className = 'project-mobile-content-list';
+    runs.forEach((run) => {
+      const runId = String(run.id || '');
+      const exit = run.exit_code === null || run.exit_code === undefined ? 'running' : `exit ${run.exit_code}`;
+      const findingCount = _projectRunFindingCount(projectId, runId);
+      const artifactCount = _projectRunArtifactCount(summary, runId);
+      const countParts = [`${findingCount} finding${findingCount === 1 ? '' : 's'}`];
+      if (_projectArtifactsVisible()) countParts.push(`${artifactCount} artifact${artifactCount === 1 ? '' : 's'}`);
+      const runDetailLines = [
+        `${exit} · ${Number(run.output_line_count || 0)} output lines`,
+        countParts.join(' · '),
+      ];
+      const actions = [
+        { label: 'Edit metadata', action: 'edit-run-metadata', dataset: { runId, runCommand: run.command } },
+        { label: 'Restore', action: 'open-run', dataset: { runId, runCommand: run.command } },
+        { label: 'Remove', action: 'unlink-run', tone: 'danger', dataset: { runId, runCommand: run.command } },
+      ];
+      list.appendChild(_projectMobileContentRow({
+        title: run.command || runId || 'Run',
+        meta: _formatProjectDate(run.started),
+        detail: runDetailLines,
+        chips: _entityMetadataChips(run),
+        className: 'project-mobile-run-row',
+        action: runId ? {
+          action: 'open-run',
+          dataset: { projectId, runId, runCommand: String(run.command || '') },
+        } : null,
+        accessory: runId ? _projectMobileActionMenu(projectId, `Run actions for ${run.command || runId}`, actions) : null,
+      }));
+    });
+    fragment.appendChild(list);
+    return fragment;
+  }
+
+  function _projectMobileFindingReviewNode(finding, projectId) {
+    const wrap = document.createElement('label');
+    wrap.className = 'project-mobile-menu-field';
+    const text = document.createElement('span');
+    text.textContent = 'Review state';
+    const select = _findingReviewControl(finding, projectId);
+    wrap.append(text, select);
+    return wrap;
+  }
+
+  function _renderProjectMobileFindingsTab(projectId, summary) {
+    const fragment = document.createDocumentFragment();
+    if (projectWorkspaceFindingsLoadingId === projectId && !projectWorkspaceFindings.has(projectId)) {
+      fragment.appendChild(_emptyProjectPanel('Loading findings...'));
+      return fragment;
+    }
+    const allFindings = _projectFindingItems(projectId);
+    const findings = _filteredProjectFindings(projectId, summary);
+    const linkedRuns = _projectRunItems(summary);
+    if (!linkedRuns.length) {
+      fragment.appendChild(_projectMobileEmptyPanel('No linked runs yet. Open Runs to link a run.', [
+        _makeProjectButton('Link last run', 'link-last-run', projectId, 'primary'),
+      ]));
+      return fragment;
+    }
+    if (!allFindings.length) {
+      fragment.appendChild(_emptyProjectPanel('No findings captured for linked runs yet.'));
+      return fragment;
+    }
+    if (!findings.length) {
+      fragment.appendChild(_emptyProjectPanel('No findings match selected filters.'));
+      return fragment;
+    }
+    _groupBy(findings, finding => finding.run_command || finding.run_id).forEach((items, runLabel) => {
+      const group = document.createElement('section');
+      group.className = 'project-mobile-group project-findings-group';
+      const collapsed = _projectFindingGroupCollapsed(projectId, runLabel);
+      group.classList.toggle('is-collapsed', collapsed);
+      const title = document.createElement('button');
+      title.type = 'button';
+      title.className = 'toggle-btn project-mobile-group-toggle';
+      title.dataset.projectFindingGroupToggle = '1';
+      title.setAttribute('data-project-finding-group-toggle', '1');
+      title.dataset.projectId = projectId;
+      title.dataset.projectFindingGroup = runLabel;
+      title.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      _bindProjectRuntimePressable(title);
+      const caret = document.createElement('span');
+      caret.className = 'project-explorer-group-caret';
+      caret.setAttribute('aria-hidden', 'true');
+      caret.textContent = '▾';
+      const label = document.createElement('span');
+      label.className = 'project-mobile-group-title';
+      label.textContent = runLabel;
+      const count = document.createElement('span');
+      count.className = 'project-mobile-group-count';
+      count.textContent = `${items.length} finding${items.length === 1 ? '' : 's'}`;
+      title.append(caret, label, count);
+      group.appendChild(title);
+      const body = document.createElement('div');
+      body.className = 'project-mobile-group-body';
+      body.hidden = collapsed;
+      items.forEach((finding) => {
+        const lineIndex = Number(finding.line_number);
+        const findingId = String(finding.id || '');
+        const metaParts = [
+          finding.scope || 'finding',
+          _projectFindingTargetText(summary, finding) || _projectTargetLabel(summary, finding.target_id),
+          `line ${finding.line_number || 0}`,
+        ].filter(Boolean);
+        body.appendChild(_projectMobileContentRow({
+          title: finding.title || finding.raw_line || 'Finding',
+          meta: metaParts.join(' · '),
+          detail: finding.raw_line || '',
+          badge: finding.review_state || finding.severity || '',
+          chips: _entityMetadataChips(finding),
+          action: finding.run_id ? {
+            action: 'open-finding',
+            dataset: {
+              projectId,
+              runId: String(finding.run_id || ''),
+              runCommand: String(finding.run_command || ''),
+              lineIndex: Number.isInteger(lineIndex) ? String(lineIndex) : '',
+            },
+          } : null,
+          accessory: findingId ? _projectMobileActionMenu(projectId, `Finding actions for ${finding.title || findingId}`, [
+            { node: _projectMobileFindingReviewNode(finding, projectId) },
+            { label: 'Edit metadata', action: 'edit-finding-metadata', dataset: { findingId } },
+          ]) : null,
+        }));
+      });
+      group.appendChild(body);
+      fragment.appendChild(group);
+    });
+    return fragment;
+  }
+
+  function _renderProjectMobileArtifactsTab(projectId, summary) {
+    const fragment = document.createDocumentFragment();
+    const allArtifacts = _projectArtifactItems(summary);
+    const filterActive = _projectTargetFilterActive(projectId, summary);
+    if (filterActive && !_projectFindingsLoaded(projectId)) {
+      fragment.appendChild(_emptyProjectPanel('Loading target associations...'));
+      return fragment;
+    }
+    const artifacts = _filteredProjectArtifacts(projectId, summary);
+    if (!allArtifacts.length) {
+      fragment.appendChild(_emptyProjectPanel('No run artifacts have been captured for this project yet.'));
+      return fragment;
+    }
+    if (!artifacts.length) {
+      fragment.appendChild(_emptyProjectPanel('No artifacts match the selected targets.'));
+      return fragment;
+    }
+    _groupBy(artifacts, artifact => artifact.run_id).forEach((items, runId) => {
+      const group = document.createElement('section');
+      group.className = 'project-mobile-group project-artifacts-group';
+      const run = _projectRunById(summary, runId);
+      const command = String(run?.command || '').trim();
+      const shortId = _shortProjectRunId(runId);
+      const collapsed = _projectArtifactGroupCollapsed(projectId, runId);
+      group.classList.toggle('is-collapsed', collapsed);
+      const title = document.createElement('button');
+      title.type = 'button';
+      title.className = 'toggle-btn project-mobile-group-toggle';
+      title.dataset.projectArtifactGroupToggle = '1';
+      title.setAttribute('data-project-artifact-group-toggle', '1');
+      title.dataset.projectId = projectId;
+      title.dataset.projectArtifactGroup = String(runId || '');
+      title.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      _bindProjectRuntimePressable(title);
+      const caret = document.createElement('span');
+      caret.className = 'project-explorer-group-caret';
+      caret.setAttribute('aria-hidden', 'true');
+      caret.textContent = '▾';
+      const label = document.createElement('span');
+      label.className = 'project-mobile-group-title';
+      label.textContent = `${command || 'Run'}${shortId ? ` (${shortId})` : ''}`;
+      const count = document.createElement('span');
+      count.className = 'project-mobile-group-count';
+      count.textContent = `${items.length} artifact${items.length === 1 ? '' : 's'}`;
+      title.append(caret, label, count);
+      group.appendChild(title);
+      const body = document.createElement('div');
+      body.className = 'project-mobile-group-body';
+      body.hidden = collapsed;
+      items.forEach((artifact) => {
+        const artifactId = String(artifact.id || '');
+        const status = _projectArtifactStatus(artifact);
+        const available = status !== 'missing' && status !== 'disabled';
+        body.appendChild(_projectMobileContentRow({
+          title: artifact.display_name || artifact.workspace_path || 'Artifact',
+          meta: artifact.workspace_path || '',
+          detail: _projectArtifactDetailLines(artifact),
+          badge: _projectArtifactStatusLabel(artifact),
+          chips: _entityMetadataChips(artifact),
+          action: available && artifactId ? {
+            action: 'artifact-preview',
+            dataset: { projectId, artifactId, artifactPath: String(artifact.workspace_path || '') },
+          } : null,
+          accessory: artifactId ? _projectMobileActionMenu(projectId, `Artifact actions for ${artifact.display_name || artifactId}`, [
+            { label: 'Edit metadata', action: 'edit-artifact-metadata', dataset: { artifactId } },
+            {
+              label: 'Preview',
+              action: 'artifact-preview',
+              disabled: !available,
+              title: available ? 'Preview' : (artifact.file_status_detail || 'Workspace file is unavailable'),
+              dataset: { artifactId, artifactPath: artifact.workspace_path },
+            },
+            {
+              label: 'Download',
+              action: 'artifact-download',
+              disabled: !available,
+              title: available ? 'Download' : (artifact.file_status_detail || 'Workspace file is unavailable'),
+              dataset: { artifactId, artifactPath: artifact.workspace_path },
+            },
+          ]) : null,
+        }));
+      });
+      group.appendChild(body);
+      fragment.appendChild(group);
+    });
+    return fragment;
+  }
+
+  function _renderProjectMobilePackagesTab(projectId, summary) {
+    const fragment = document.createDocumentFragment();
+    const newPackage = _makeProjectButton('Build Package', 'package-wizard-open', projectId, 'primary');
+    const toolbar = document.createElement('div');
+    toolbar.className = 'project-mobile-tab-toolbar';
+    toolbar.appendChild(newPackage);
+    fragment.appendChild(toolbar);
+    const packages = _projectPackageItems(summary);
+    if (!packages.length) {
+      fragment.appendChild(_projectMobileEmptyPanel('No evidence packages yet.', [
+        _makeProjectButton('Build Package', 'package-wizard-open', projectId, 'primary'),
+      ]));
+      return fragment;
+    }
+    const list = document.createElement('div');
+    list.className = 'project-mobile-content-list';
+    packages.forEach((pkg) => {
+      const packageId = String(pkg.id || '');
+      const counts = _projectPackageCountsText(pkg);
+      const updated = _formatProjectDate(pkg.updated);
+      const countLine = [pkg.description || '', counts].filter(Boolean).join(' · ');
+      const detail = [countLine, updated ? `Updated ${updated}` : ''].filter(Boolean);
+      list.appendChild(_projectMobileContentRow({
+        title: pkg.name || packageId || 'Package',
+        meta: _projectPackageMetaText(pkg),
+        detail,
+        chips: _entityMetadataChips(pkg),
+        accessory: packageId ? _projectMobileActionMenu(projectId, `Package actions for ${pkg.name || packageId}`, [
+          { label: 'Edit metadata', action: 'package-edit', dataset: { packageId } },
+          { label: 'Download', action: 'package-download', dataset: { packageId } },
+          { label: 'Re-package', action: 'package-repackage', dataset: { packageId } },
+          { label: 'View manifest', action: 'package-manifest', dataset: { packageId } },
+          { label: 'Delete', action: 'package-delete', tone: 'danger', dataset: { packageId } },
+        ]) : null,
+      }));
+    });
+    fragment.appendChild(list);
+    return fragment;
+  }
+
+  function _renderProjectMobileTabBody(project, summary) {
+    if (!projectMobileDetailBody) return;
+    projectMobileDetailBody.replaceChildren();
+    if (!summary) {
+      const panel = _emptyProjectPanel('Could not load this project. It may have been deleted.');
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'btn btn-secondary btn-compact';
+      retry.dataset.projectMobileAction = 'retry';
+      retry.textContent = 'Retry';
+      _bindProjectRuntimePressable(retry);
+      panel.appendChild(retry);
+      projectMobileDetailBody.appendChild(panel);
+      return;
+    }
+    if (projectWorkspaceTab === 'details') {
+      projectMobileDetailBody.appendChild(_renderProjectMobileDetailsTab(project, summary));
+      return;
+    }
+    const projectId = String(project.id || projectWorkspaceSelectedId || '');
+    if (projectWorkspaceTab === 'runs') projectMobileDetailBody.appendChild(_renderProjectMobileRunsTab(projectId, summary));
+    else if (projectWorkspaceTab === 'findings') projectMobileDetailBody.appendChild(_renderProjectMobileFindingsTab(projectId, summary));
+    else if (projectWorkspaceTab === 'artifacts') projectMobileDetailBody.appendChild(_renderProjectMobileArtifactsTab(projectId, summary));
+    else if (projectWorkspaceTab === 'packages') projectMobileDetailBody.appendChild(_renderProjectMobilePackagesTab(projectId, summary));
+  }
+
+  function _renderProjectMobileDetail() {
+    if (!projectMobileDetailView || !projectMobileDetailBody) return;
+    const selectedId = String(projectWorkspaceSelectedId || '');
+    if (!selectedId) {
+      _setProjectMobileView('list');
+      return;
+    }
+    const activeId = activeProject && activeProject.id ? String(activeProject.id) : '';
+    const summary = _projectSummary(selectedId);
+    const project = summary && summary.project && typeof summary.project === 'object'
+      ? summary.project
+      : projectWorkspaceRows.find(item => String(item.id || '') === selectedId);
+    if (projectWorkspaceLoading) {
+      _renderProjectMobileDetailTopbar(project || null, activeId);
+      if (projectMobileTabs) projectMobileTabs.replaceChildren();
+      projectMobileDetailBody.replaceChildren(_emptyProjectPanel('Loading project...'));
+      return;
+    }
+    if (!project) {
+      _setProjectMobileView('list');
+      projectWorkspaceSelectedId = '';
+      return;
+    }
+    _renderProjectMobileDetailTopbar(project, activeId);
+    _renderProjectMobileTabs(selectedId, summary);
+    _renderProjectMobileTabBody(project, summary);
+    if (typeof global.enhanceAppSelects === 'function') {
+      global.enhanceAppSelects(projectMobileDetailBody);
+    }
+    if (
+      summary
+      && (
+        projectWorkspaceTab === 'findings'
+        || projectWorkspaceTab === 'runs'
+        || projectWorkspaceTab === 'artifacts'
+        || _projectTargetFilterActive(selectedId, summary)
+        || !_projectFindingsLoaded(selectedId)
+      )
+    ) {
+      _loadProjectFindings(selectedId).catch(() => {});
+    }
+    if (
+      summary
+      && projectWorkspaceTab === 'findings'
+      && _projectFindingsLoaded(selectedId)
+      && _projectFindingServerFiltersActive(selectedId, summary)
+    ) {
+      _loadProjectFilteredFindings(selectedId, summary).catch(() => {});
+    }
+  }
+
+  function _renderProjectMobile() {
+    if (!projectMobileRoot || !projectMobileBody) return;
+    if (projectMobileSummary) {
+      const count = projectWorkspaceRows.length;
+      projectMobileSummary.textContent = count
+        ? `${count} project${count === 1 ? '' : 's'} in this session`
+        : 'Create a project to group related work';
+    }
+    if (projectMobileView === 'detail' && !projectWorkspaceSelectedId) projectMobileView = 'list';
+    _setProjectMobileView(projectMobileView);
+    projectMobileBody.replaceChildren();
+    _renderProjectMobileDetail();
+    if (projectWorkspaceLoading) {
+      projectMobileBody.appendChild(_emptyProjectPanel('Loading projects...'));
+      return;
+    }
+    if (!projectWorkspaceRows.length) {
+      projectMobileArchivedOpen = false;
+      projectMobileBody.appendChild(_emptyProjectPanel('No projects yet. Create one to start grouping related work.'));
+      return;
+    }
+
+    const activeId = activeProject && activeProject.id ? String(activeProject.id) : '';
+    const currentProjects = projectWorkspaceRows.filter(project => !_projectIsArchived(project));
+    const archivedProjects = projectWorkspaceRows.filter(project => _projectIsArchived(project));
+    const hasArchived = archivedProjects.length > 0;
+    if (hasArchived && currentProjects.length) {
+      projectMobileBody.appendChild(_projectMobileSection('Current', currentProjects.length));
+    }
+    _orderedProjectRows(activeId, currentProjects).forEach(project => {
+      projectMobileBody.appendChild(_renderProjectMobileListRow(project, activeId));
+    });
+    if (hasArchived) {
+      projectMobileBody.appendChild(_projectMobileSection('Archived', archivedProjects.length, { open: projectMobileArchivedOpen }));
+      if (projectMobileArchivedOpen) {
+        _orderedProjectRows('', archivedProjects).forEach(project => {
+          projectMobileBody.appendChild(_renderProjectMobileListRow(project, activeId));
+        });
+      }
     }
   }
 
@@ -4301,6 +5788,7 @@
         : 'Select a project to review its targets, runs, findings, artifacts, and packages.';
     }
     _renderProjectList();
+    _renderProjectMobile();
     _renderProjectExplorer();
     _renderProjectPackageWizardModal();
   }
@@ -4408,6 +5896,8 @@
     _closeProjectEntityEditor();
     _closeProjectPackageManifest();
     _closeProjectPackageWizard({ render: false });
+    _closeProjectMobileActionSheet({ restoreFocus: false });
+    _closeProjectMobileCompareSheet({ restoreFocus: false });
     _hideProjectWorkspaceOverlay();
     _setProjectWorkspaceMessage('');
     if (refocus && typeof refocusComposerAfterAction === 'function') {
@@ -4540,6 +6030,32 @@
     });
   }
 
+  async function _createProjectFromName(name, input) {
+    const normalizedName = String(name || '').trim();
+    if (!normalizedName) {
+      _setProjectWorkspaceMessage('Project name is required.', { error: true });
+      return;
+    }
+    const resp = await _projectWorkspaceRequest('/projects', {
+      method: 'POST',
+      body: JSON.stringify({ name: normalizedName }),
+    });
+    const data = await resp.json();
+    const projectId = data && data.project ? data.project.id : '';
+    if (projectId) {
+      await _projectWorkspaceRequest('/projects/active', {
+        method: 'POST',
+        body: JSON.stringify({ project_id: projectId }),
+      });
+    }
+    if (projectId) projectWorkspaceSelectedId = String(projectId);
+    projectWorkspaceTab = 'details';
+    if (input) input.value = '';
+    _setProjectMobileCreateOpen(false);
+    _setProjectWorkspaceMessage('Project created and selected.');
+    await refreshProjectWorkspace();
+  }
+
   projectWorkspaceCreateForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const name = String(projectWorkspaceNameInput?.value || '').trim();
@@ -4548,23 +6064,21 @@
       return;
     }
     try {
-      const resp = await _projectWorkspaceRequest('/projects', {
-        method: 'POST',
-        body: JSON.stringify({ name }),
-      });
-      const data = await resp.json();
-      const projectId = data && data.project ? data.project.id : '';
-      if (projectId) {
-        await _projectWorkspaceRequest('/projects/active', {
-          method: 'POST',
-          body: JSON.stringify({ project_id: projectId }),
-        });
-      }
-      if (projectId) projectWorkspaceSelectedId = String(projectId);
-      projectWorkspaceTab = 'details';
-      if (projectWorkspaceNameInput) projectWorkspaceNameInput.value = '';
-      _setProjectWorkspaceMessage('Project created and selected.');
-      await refreshProjectWorkspace();
+      await _createProjectFromName(name, projectWorkspaceNameInput);
+    } catch (err) {
+      _setProjectWorkspaceMessage(err.message || 'Could not create project.', { error: true });
+    }
+  });
+
+  projectMobileCreateForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const name = String(projectMobileNameInput?.value || '').trim();
+    if (!name) {
+      _setProjectWorkspaceMessage('Project name is required.', { error: true });
+      return;
+    }
+    try {
+      await _createProjectFromName(name, projectMobileNameInput);
     } catch (err) {
       _setProjectWorkspaceMessage(err.message || 'Could not create project.', { error: true });
     }
@@ -4733,7 +6247,7 @@
         if (packageSelection.checked) {
           transcriptRuns.add(value);
           childIds.findingIds.forEach(id => findingIds.add(id));
-          childIds.artifactIds.forEach(id => artifactIds.add(id));
+          childIds.selectableArtifactIds.forEach(id => artifactIds.add(id));
         } else {
           transcriptRuns.delete(value);
           childIds.findingIds.forEach(id => findingIds.delete(id));
@@ -4867,14 +6381,21 @@
     _setProjectWorkspaceMessage('');
     _setCachedFindingReviewState(projectId, findingId, reviewState);
     _renderProjectExplorer();
+    if (projectMobileView === 'detail' && projectWorkspaceTab === 'findings' && String(projectWorkspaceSelectedId || '') === projectId) {
+      _renderProjectMobileDetail();
+    }
     try {
       await _projectWorkspaceRequest(`/findings/${encodeURIComponent(findingId)}/review`, {
         method: 'PUT',
         body: JSON.stringify({ review_state: reviewState }),
       });
+      control.dataset.previousReviewState = reviewState;
     } catch (err) {
       _setCachedFindingReviewState(projectId, findingId, previousReviewState);
       _renderProjectExplorer();
+      if (projectMobileView === 'detail' && projectWorkspaceTab === 'findings' && String(projectWorkspaceSelectedId || '') === projectId) {
+        _renderProjectMobileDetail();
+      }
       _setProjectWorkspaceMessage(err.message || 'Could not update finding review state.', { error: true });
     }
   });
@@ -4932,6 +6453,88 @@
 
   projectWorkspaceModal?.addEventListener('click', async (event) => {
     if (event.target.closest?.('[data-project-review-state]')) return;
+    const mobileDetailTab = event.target.closest?.('[data-project-mobile-detail-tab]');
+    if (mobileDetailTab) {
+      event.preventDefault();
+      event.stopPropagation();
+      await _flushProjectNotesAutosave();
+      const nextTab = String(mobileDetailTab.dataset.projectMobileDetailTab || 'details');
+      if (projectWorkspaceTab !== nextTab && projectMobileDetailBody) projectMobileDetailBody.scrollTop = 0;
+      projectWorkspaceTab = nextTab;
+      _closeProjectTargetEditor();
+      _closeProjectEntityEditor();
+      _setProjectWorkspaceMessage('');
+      _renderProjectMobileDetail();
+      return;
+    }
+    const mobileTab = event.target.closest?.('[data-project-mobile-tab]');
+    if (mobileTab) {
+      event.preventDefault();
+      event.stopPropagation();
+      await _flushProjectNotesAutosave();
+      _selectProjectFromMobile(mobileTab.dataset.projectId || '', mobileTab.dataset.projectMobileTab || 'details');
+      return;
+    }
+    const mobileAction = event.target.closest?.('[data-project-mobile-action]');
+    if (mobileAction) {
+      event.preventDefault();
+      event.stopPropagation();
+      const mobileProjectId = String(mobileAction.dataset.projectId || '');
+      const action = String(mobileAction.dataset.projectMobileAction || '');
+      if (action === 'new-project') {
+        _setProjectWorkspaceMessage('');
+        _setProjectMobileCreateOpen(true, { focus: true });
+        return;
+      }
+      if (action === 'cancel-create') {
+        _setProjectWorkspaceMessage('');
+        _setProjectMobileCreateOpen(false);
+        return;
+      }
+      if (action === 'back-to-list') {
+        await _flushProjectNotesAutosave();
+        _setProjectWorkspaceMessage('');
+        _setProjectMobileView('list');
+        _renderProjectMobile();
+        return;
+      }
+      if (action === 'retry') {
+        refreshProjectWorkspace().catch(() => {});
+        return;
+      }
+      if (action === 'toggle-archived') {
+        projectMobileArchivedOpen = !projectMobileArchivedOpen;
+        _renderProjectMobile();
+        return;
+      }
+      if (action === 'open-project') {
+        await _flushProjectNotesAutosave();
+        _selectProjectFromMobile(mobileProjectId);
+        return;
+      }
+      if (action === 'project-menu') {
+        const project = projectWorkspaceRows.find(item => String(item.id || '') === mobileProjectId)
+          || _projectSummary(mobileProjectId)?.project
+          || null;
+        if (!project) return;
+        _openProjectMobileActionSheet(
+          mobileProjectId,
+          `Project actions for ${_projectDisplayName(project)}`,
+          _projectMobileProjectActions(project),
+          mobileAction,
+        );
+        return;
+      }
+      if (action === 'action-sheet') {
+        _openProjectMobileActionSheet(
+          mobileProjectId,
+          mobileAction._projectMobileActionSheetLabel || 'Actions',
+          mobileAction._projectMobileActionSheetItems || [],
+          mobileAction,
+        );
+        return;
+      }
+    }
     const compareModeButton = event.target.closest?.('[data-project-compare-mode-value]');
     if (compareModeButton) {
       _setProjectRunCompareMode(compareModeButton, event);
@@ -4956,7 +6559,8 @@
       } else {
         projectWorkspaceCollapsedFindingGroups.add(key);
       }
-      _renderProjectExplorer();
+      if (projectMobileView === 'detail') _renderProjectMobileDetail();
+      else _renderProjectExplorer();
       return;
     }
     const artifactGroupToggle = event.target.closest?.('[data-project-artifact-group-toggle]');
@@ -4971,7 +6575,8 @@
       } else {
         projectWorkspaceCollapsedArtifactGroups.add(key);
       }
-      _renderProjectExplorer();
+      if (projectMobileView === 'detail') _renderProjectMobileDetail();
+      else _renderProjectExplorer();
       return;
     }
     const targetFilterClear = event.target.closest?.('[data-project-target-filter-clear]');
@@ -5106,6 +6711,15 @@
         await refreshProjectWorkspace();
         _setProjectWorkspaceMessage('Project deleted.');
         return;
+      } else if (action === 'edit-project-metadata') {
+        const summary = projectWorkspaceSummaries.get(String(projectId || ''));
+        const project = (summary && summary.project && typeof summary.project === 'object')
+          ? summary.project
+          : projectWorkspaceRows.find(item => String(item.id || '') === projectId);
+        if (!project) throw new Error('Project is missing its details.');
+        _setProjectWorkspaceMessage('');
+        _openProjectEntityEditor(projectId, 'project', project);
+        return;
       } else if (action === 'new-target') {
         _setProjectWorkspaceMessage('');
         _openProjectTargetEditor(projectId);
@@ -5182,30 +6796,15 @@
         if (action === 'filter-run-artifacts') projectWorkspaceTab = 'artifacts';
         _renderProjectExplorer();
         return;
+      } else if (action === 'mobile-compare-runs') {
+        _openProjectMobileCompareSheet(projectId, btn);
+        return;
       } else if (action === 'compare-runs') {
         const controls = projectExplorerBody?.querySelector('.project-run-compare-controls');
         const mode = String(projectExplorerBody?.querySelector('[data-project-compare-mode]')?.value || 'run');
         const targetValue = String(projectExplorerBody?.querySelector('[data-project-compare-target]')?.value || '').trim();
-        if (mode === 'baseline') {
-          _avoidProjectRunCompareLabelSelfTarget(controls, targetValue);
-        }
         const leftId = String(projectExplorerBody?.querySelector('[data-project-compare-run="left"]')?.value || '');
-        if (!projectId || !leftId) throw new Error('Choose a project run to compare.');
-        if (mode === 'run' && !targetValue) throw new Error('Choose two project runs to compare.');
-        if (mode === 'run' && leftId === targetValue) throw new Error('Choose two different project runs to compare.');
-        if (mode === 'baseline' && !targetValue) throw new Error('Choose a baseline label to compare.');
-        const compareFn = global && typeof global.fetchAndRenderHistoryComparison === 'function'
-          ? global.fetchAndRenderHistoryComparison
-          : (typeof window !== 'undefined' && typeof window.fetchAndRenderHistoryComparison === 'function'
-              ? window.fetchAndRenderHistoryComparison
-              : null);
-        if (!compareFn) throw new Error('Run comparison is not available.');
-        const params = new URLSearchParams({ left_run_id: leftId });
-        if (mode === 'baseline') params.set('baseline_label', targetValue);
-        else params.set('right_run_id', targetValue);
-        compareFn(leftId, mode === 'baseline' ? `baseline:${targetValue}` : targetValue, {
-          url: `/projects/${encodeURIComponent(projectId)}/compare?${params.toString()}`,
-        });
+        _compareProjectRuns(projectId, leftId, mode, targetValue, controls);
         return;
       } else if (action === 'link-last-run') {
         await _linkLastRunToProject(projectId, projectWorkspaceSummaries.get(String(projectId || '')));
@@ -5321,6 +6920,10 @@
     }
   });
 
+  projectMobileTabs?.addEventListener('scroll', () => {
+    _syncProjectMobileTabEdges();
+  }, { passive: true });
+
   projectWorkspaceOverlay?.querySelector('.project-workspace-close')?.addEventListener('click', () => {
     closeProjectWorkspace();
   });
@@ -5415,6 +7018,31 @@
       onClose: () => _closeProjectPackageManifest(),
       closeButtons: [projectPackageManifestOverlay.querySelector('.project-package-manifest-close')],
     });
+  }
+  const bindMobileSheetFn = global && typeof global.bindMobileSheet === 'function'
+    ? global.bindMobileSheet
+    : (typeof bindMobileSheet === 'function' ? bindMobileSheet : null);
+  if (bindMobileSheetFn) {
+    if (projectTargetEditorOverlay) {
+      bindMobileSheetFn(projectTargetEditorOverlay.querySelector('#project-target-editor-modal'), {
+        onClose: () => _closeProjectTargetEditor(),
+      });
+    }
+    if (projectEntityEditorOverlay) {
+      bindMobileSheetFn(projectEntityEditorOverlay.querySelector('#project-entity-editor-modal'), {
+        onClose: () => _closeProjectEntityEditor(),
+      });
+    }
+    if (projectPackageManifestOverlay) {
+      bindMobileSheetFn(projectPackageManifestOverlay.querySelector('#project-package-manifest-modal'), {
+        onClose: () => _closeProjectPackageManifest(),
+      });
+    }
+    if (projectPackageWizardOverlay) {
+      bindMobileSheetFn(projectPackageWizardOverlay.querySelector('#project-package-wizard-modal'), {
+        onClose: () => _closeProjectPackageWizard(),
+      });
+    }
   }
 
   function _renderUptime() {

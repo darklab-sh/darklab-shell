@@ -324,6 +324,35 @@ describe('mobile running-state indicator', () => {
     vi.useRealTimers()
   })
 
+  it('does not show the Status Monitor peek hold for restored history tabs', () => {
+    vi.useFakeTimers()
+    ctx = mountModule({
+      includePeek: true,
+      recentPreviewHistory: ['hostname'],
+      tabs: [
+        {
+          id: 'tab-a',
+          st: 'ok',
+          command: 'hostname',
+          suppressStatusMonitorPeekHold: true,
+        },
+      ],
+      activeTabId: 'tab-a',
+    })
+
+    document.dispatchEvent(new CustomEvent('app:tab-status-changed', {
+      detail: { id: 'tab-a', status: 'ok', activeTabId: 'tab-a' },
+    }))
+
+    expect(document.getElementById('mobile-recent-peek').dataset.peekMode).toBe('recents')
+    expect(document.querySelector('.recent-peek-label').textContent).toBe('Recent')
+
+    vi.advanceTimersByTime(2600)
+
+    expect(document.getElementById('mobile-recent-peek').dataset.peekMode).toBe('recents')
+    vi.useRealTimers()
+  })
+
   it('activates the edge glow when a running non-active tab is only partially clipped off-screen', () => {
     ctx = mountModule({
       tabs: [

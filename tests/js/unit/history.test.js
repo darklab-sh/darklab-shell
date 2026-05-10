@@ -671,6 +671,7 @@ describe('history panel actions', () => {
           cmdInput,
           tabs,
           getTab: id => tabs.find(t => t.id === id),
+          getOutput: id => document.getElementById(`output-${id}`),
           activateTab,
           createTab,
           appendLine,
@@ -706,6 +707,7 @@ describe('history panel actions', () => {
         _historySetPage,
         _historyRelativeTime,
         _restoreBothHistoryCompareRuns,
+        _highlightRestoredHistoryLine,
         resetHistoryMobileFilters,
         toggleHistoryMobileFilters,
         _saveStarred,
@@ -728,6 +730,28 @@ describe('history panel actions', () => {
       openMetadataEditor: openMetadataEditorImpl,
     }
   }
+
+  it('centers restored finding highlights in the terminal output container', () => {
+    const { _highlightRestoredHistoryLine, tabs } = loadHistoryPanel()
+    const out = document.createElement('div')
+    out.id = 'output-tab-1'
+    out.scrollTop = 500
+    Object.defineProperty(out, 'clientHeight', { value: 200, configurable: true })
+    out.getBoundingClientRect = () => ({ top: 100, height: 200 })
+
+    const line = document.createElement('span')
+    line.className = 'line'
+    line.dataset.lineIndex = '42'
+    line.getBoundingClientRect = () => ({ top: 260, height: 20 })
+    out.appendChild(line)
+    document.body.appendChild(out)
+
+    _highlightRestoredHistoryLine('tab-1', { lineIndex: 42 })
+
+    expect(line.classList.contains('history-source-highlight')).toBe(true)
+    expect(out.scrollTop).toBe(570)
+    expect(tabs[0].followOutput).toBe(false)
+  })
 
   it('refreshHistoryPanel permalink action falls back to execCommand when clipboard writes reject', async () => {
     const clipboard = {

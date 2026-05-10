@@ -35,6 +35,7 @@
   const menuTsState           = document.getElementById('mobile-menu-ts-state');
   const menuWorkflowsCount    = document.getElementById('mobile-menu-workflows-count');
   const menuHistoryCount      = document.getElementById('mobile-menu-history-count');
+  const menuProjectHint       = document.getElementById('mobile-menu-project-hint');
   const menuThemeHint         = document.getElementById('mobile-menu-theme-hint');
   const kbHelper              = document.getElementById('mobile-kb-helper');
 
@@ -334,10 +335,57 @@
     const list = Array.isArray(items) ? items : [];
     menuWorkflowsCount.textContent = list.length ? `${list.length} saved` : '';
   }
+  let historyCountRequestSeq = 0;
+  function setMenuHistoryCount(count) {
+    const total = Number(count || 0);
+    menuHistoryCount.textContent = total > 0 ? `${total}` : '';
+  }
+  function _recentsTotalCountFromCache() {
+    if (!_recentsLoaded) return null;
+    const total = Number(_recentsPaging.totalCount || 0);
+    return Number.isFinite(total) ? Math.max(0, total) : 0;
+  }
   function refreshHistoryCount() {
     if (!menuHistoryCount) return;
     const runs = readCmdHistory();
-    menuHistoryCount.textContent = runs.length ? `${runs.length}` : '';
+    setMenuHistoryCount(runs.length);
+    const requestSeq = ++historyCountRequestSeq;
+    const cachedTotal = _recentsTotalCountFromCache();
+    if (cachedTotal !== null) {
+      setMenuHistoryCount(cachedTotal);
+      return;
+    }
+    _recentsPrefetch()
+      .then(() => {
+        if (requestSeq !== historyCountRequestSeq) return;
+        const total = _recentsTotalCountFromCache();
+        if (total !== null) setMenuHistoryCount(total);
+      })
+      .catch(() => {});
+  }
+  function _projectHintName(project) {
+    if (!project || typeof project !== 'object') return '';
+    return String(project.name || project.slug || project.id || '').trim();
+  }
+  function refreshProjectHint(project) {
+    if (!menuProjectHint) return;
+    const current = project || (
+      typeof global.getActiveProjectContext === 'function'
+        ? global.getActiveProjectContext()
+        : null
+    );
+    const name = _projectHintName(current);
+    menuProjectHint.textContent = name;
+    menuProjectHint.title = name ? `Active project: ${name}` : '';
+  }
+  function refreshProjectHintFromServer() {
+    refreshProjectHint();
+    if (typeof global.refreshActiveProjectContext !== 'function') return;
+    global.refreshActiveProjectContext()
+      .then(project => refreshProjectHint(project))
+      .catch((err) => {
+        if (typeof logClientError === 'function') logClientError('failed to load active project for mobile menu', err);
+      });
   }
   function refreshThemeHint() {
     if (!menuThemeHint) return;
@@ -360,6 +408,7 @@
     refreshMenuStateHints();
     refreshThemeHint();
     refreshHistoryCount();
+    refreshProjectHintFromServer();
     tsDisclosure?.close();
     show(menuSheetScrim);
     show(menuSheet);
@@ -1192,17 +1241,27 @@
   if (typeof onUiEvent === 'function') {
     onUiEvent('app:history-rendered', () => {
       try { renderRecentPeek(); } catch (_) { /* non-critical */ }
+      if (isMenuSheetOpen()) {
+        try { refreshHistoryCount(); } catch (_) { /* non-critical */ }
+      }
     });
     onUiEvent('app:tab-status-changed', (e) => {
       const activeId = typeof global.getActiveTabId === 'function' ? global.getActiveTabId() : null;
+      const activeTab = typeof global.getActiveTab === 'function' ? global.getActiveTab() : null;
       const detail = e && e.detail ? e.detail : {};
-      if (detail.id === activeId && detail.status && detail.status !== 'running') {
+      const suppressStatusMonitorHold = !!(activeTab && activeTab.suppressStatusMonitorPeekHold);
+      if (detail.id === activeId && detail.status && detail.status !== 'running' && suppressStatusMonitorHold) {
+        _statusMonitorPeekHoldUntil = 0;
+      } else if (detail.id === activeId && detail.status && detail.status !== 'running') {
         _statusMonitorPeekHoldUntil = Date.now() + 2500;
         window.setTimeout(() => {
           try { renderRecentPeek(); } catch (_) { /* non-critical */ }
         }, 2550);
       }
       try { renderRecentPeek(); } catch (_) { /* non-critical */ }
+      if (isMenuSheetOpen()) {
+        try { refreshHistoryCount(); } catch (_) { /* non-critical */ }
+      }
     });
     onUiEvent('app:tab-activated', () => {
       _statusMonitorPeekHoldUntil = 0;
@@ -1216,6 +1275,9 @@
   if (typeof onUiEvent === 'function') {
     onUiEvent('app:workflows-rendered', (e) => {
       try { refreshWorkflowsCount(e.detail && e.detail.items); } catch (_) { /* non-critical */ }
+    });
+    onUiEvent('app:active-project-changed', (e) => {
+      try { refreshProjectHint(e.detail && e.detail.project); } catch (_) { /* non-critical */ }
     });
   }
 

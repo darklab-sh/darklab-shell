@@ -54,6 +54,24 @@ async function openMobileKeyboard(page) {
   await simulateMobileKeyboard(page)
 }
 
+async function openMobileProjects(page) {
+  await page.locator('#hamburger-btn').click()
+  await page.locator('#mobile-menu-sheet [data-menu-action="projects"]').click()
+  await expect(page.locator('#project-workspace-overlay')).toHaveClass(/\bopen\b/)
+  await expect(page.locator('#project-mobile-root')).toBeVisible()
+  await expect(page.locator('#project-mobile-body')).not.toContainText('Loading projects...')
+}
+
+async function createMobileProject(page, name) {
+  await page.locator('#project-mobile-new-btn').click()
+  await expect(page.locator('#project-mobile-create-form')).toBeVisible()
+  await page.locator('#project-mobile-name').fill(name)
+  await page.locator('#project-mobile-create-form button[type="submit"]').click()
+  const row = page.locator('.project-mobile-row').filter({ hasText: name }).first()
+  await expect(row).toBeVisible({ timeout: 15_000 })
+  return row
+}
+
 // The e2e server (run_e2e_server.sh) writes a test config.local.yaml that adds
 // 127.0.0.0/8 to diagnostics_allowed_cidrs, so Playwright's loopback connection
 // reaches /diag without any extra header manipulation.
@@ -670,6 +688,94 @@ test.beforeEach(async ({ page }) => {
     // The sheet renders roughly 88svh tall; it must occupy the majority of
     // the viewport, not collapse to a sliver at the bottom.
     expect(box.height).toBeGreaterThan(viewport.height * 0.5)
+  })
+
+  test('mobile Projects creates, links, drills by count chip, and opens row actions', async ({ page }) => {
+    test.setTimeout(60_000)
+    await runCommandMobile(page, 'hostname')
+    await waitForHistoryRuns(page, 1)
+
+    await openMobileProjects(page)
+    const projectName = `Mobile Project ${Date.now()}`
+    let projectRow = await createMobileProject(page, projectName)
+
+    await projectRow.locator('[data-project-mobile-action="open-project"]').click()
+    await expect(page.locator('#project-mobile-detail-view')).toBeVisible()
+    await expect(page.locator('#project-mobile-detail-topbar')).toContainText(projectName)
+
+    await page.locator('[data-project-mobile-detail-tab="runs"]').click()
+    await page.locator('#project-mobile-detail-body [data-project-action="link-last-run"]').first().click()
+    await expect(page.locator('#permalink-toast')).toContainText('Last run linked to this project.')
+    await expect(page.locator('#project-mobile-detail-body .project-mobile-run-row')).toContainText('hostname')
+
+    await page.locator('[data-project-mobile-action="back-to-list"]').click()
+    await expect(page.locator('#project-mobile-list-view')).toBeVisible()
+    projectRow = page.locator('.project-mobile-row').filter({ hasText: projectName }).first()
+    const runsChip = projectRow.locator('[data-project-mobile-tab="runs"]').filter({ hasText: /1 run/ })
+    await expect(runsChip).toBeVisible({ timeout: 15_000 })
+    await runsChip.click()
+
+    await expect(page.locator('#project-mobile-detail-view')).toBeVisible()
+    await expect(page.locator('[data-project-mobile-detail-tab="runs"]')).toHaveClass(/\bis-active\b/)
+    await expect(page.locator('#project-mobile-detail-body .project-mobile-run-row')).toContainText('hostname')
+
+    await page.locator('#project-mobile-detail-body .project-mobile-run-row .project-mobile-row-menu-trigger').click()
+    const actionSheet = page.locator('#project-mobile-action-sheet-overlay')
+    await expect(actionSheet).toHaveClass(/\bopen\b/)
+    await expect(actionSheet.locator('.sheet-grab.gesture-handle')).toBeVisible()
+    await expect(actionSheet.locator('[data-project-action="edit-run-metadata"]')).toBeVisible()
+    await expect(actionSheet.locator('[data-project-action="open-run"]')).toBeVisible()
+    await expect(actionSheet.locator('[data-project-action="unlink-run"]')).toBeVisible()
+    await actionSheet.click({ position: { x: 10, y: 10 } })
+    await expect(actionSheet).not.toHaveClass(/\bopen\b/)
+
+    await page.locator('[data-project-mobile-detail-tab="packages"]').click()
+    await page.locator('#project-mobile-detail-body [data-project-action="package-wizard-open"]').first().click()
+    await expect(page.locator('#project-package-wizard-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#project-package-wizard-modal > .sheet-grab.gesture-handle')).toBeVisible()
+    const wizardFooter = page.locator('#project-package-wizard-overlay .project-package-wizard-footer')
+    await expect(wizardFooter).toBeVisible()
+    await page.evaluate(() => {
+      const vv = window.visualViewport
+      if (!vv) return
+      try {
+        Object.defineProperty(vv, 'height', {
+          configurable: true,
+          value: 500,
+        })
+      } catch (_) {}
+      vv.dispatchEvent(new Event('resize'))
+    })
+    await expect(wizardFooter).toBeVisible()
+  })
+
+  test('mobile Projects shows retryable project summary errors', async ({ page }) => {
+    await openMobileProjects(page)
+    const projectName = `Mobile Retry ${Date.now()}`
+    let failSummary = true
+    await page.route('**/projects/*/summary', async (route) => {
+      if (!failSummary) {
+        await route.continue()
+        return
+      }
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'forced mobile summary failure' }),
+      })
+    })
+    const projectRow = await createMobileProject(page, projectName)
+
+    await projectRow.locator('[data-project-mobile-action="open-project"]').click()
+    await expect(page.locator('#project-mobile-detail-body')).toContainText(
+      'Could not load this project. It may have been deleted.',
+    )
+    await expect(page.locator('#project-mobile-detail-body [data-project-mobile-action="retry"]')).toBeVisible()
+
+    failSummary = false
+    await page.locator('#project-mobile-detail-body [data-project-mobile-action="retry"]').click()
+    await expect(page.locator('#project-mobile-detail-body')).toContainText('Summary', { timeout: 15_000 })
+    await expect(page.locator('#project-mobile-detail-topbar')).toContainText(projectName)
   })
 
   test('workflows sheet starts collapsed and wraps commands inside cards', async ({ page }) => {

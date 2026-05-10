@@ -475,7 +475,19 @@ body.mobile-terminal-mode {
   .menu-sheet {
     position: fixed; left: 0; right: 0; bottom: 0;
     z-index: 101;
+    max-height: 86dvh;
+    min-height: 0;
+    overflow: hidden;
+    overscroll-behavior: contain;
     animation: shell-m-sheet-in 240ms ease;
+  }
+  .menu-sheet .menu-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
   .menu-sheet .menu-title-label {
     color: var(--green);
@@ -553,13 +565,8 @@ body.mobile-terminal-mode {
   .menu-sheet .menu-item-hint {
     color: var(--muted);
     font-size: 11px;
+    max-width: 46%;
     opacity: 0.8;
-  }
-  .menu-sheet .menu-project-context {
-    cursor: default;
-  }
-  .menu-sheet .menu-project-context .menu-item-hint {
-    max-width: 56%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

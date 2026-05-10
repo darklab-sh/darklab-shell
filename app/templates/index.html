@@ -137,111 +137,109 @@
         <span class="menu-title-label">Menu</span>
       </div>
 
-      <div class="menu-group">
-        <button type="button" class="menu-item nav-item" data-menu-action="search">
-          <span class="menu-item-icon" aria-hidden="true">⌕</span>
-          <span class="menu-item-label">search</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="clear">
-          <span class="menu-item-icon" aria-hidden="true">⌫</span>
-          <span class="menu-item-label">clear</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="ln" aria-pressed="false">
-          <span class="menu-item-icon" aria-hidden="true">#</span>
-          <span class="menu-item-label">line numbers</span>
-          <span class="menu-item-toggle" id="mobile-menu-ln-state">off</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="ts-toggle" aria-expanded="false" aria-controls="mobile-menu-ts-submenu">
-          <span class="menu-item-icon" aria-hidden="true">◷</span>
-          <span class="menu-item-label">timestamps</span>
-          <span class="menu-item-toggle" id="mobile-menu-ts-state">off</span>
-          <span class="disclosure-chev" aria-hidden="true">▸</span>
-        </button>
-        <div class="menu-submenu u-hidden" id="mobile-menu-ts-submenu" role="group" aria-label="Timestamps mode">
-          <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="off">
-            <span class="menu-subitem-radio" aria-hidden="true"></span>
-            <span class="menu-subitem-label">off</span>
+      <div class="menu-scroll bottom-sheet-body nice-scroll">
+        <div class="menu-group">
+          <button type="button" class="menu-item nav-item" data-menu-action="search">
+            <span class="menu-item-icon" aria-hidden="true">⌕</span>
+            <span class="menu-item-label">search</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
-          <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="elapsed">
-            <span class="menu-subitem-radio" aria-hidden="true"></span>
-            <span class="menu-subitem-label">elapsed</span>
-            <span class="menu-subitem-hint">+1.2s</span>
+          <button type="button" class="menu-item nav-item" data-menu-action="clear">
+            <span class="menu-item-icon" aria-hidden="true">⌫</span>
+            <span class="menu-item-label">clear</span>
           </button>
-          <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="clock">
-            <span class="menu-subitem-radio" aria-hidden="true"></span>
-            <span class="menu-subitem-label">clock</span>
-            <span class="menu-subitem-hint">14:03:27</span>
+          <button type="button" class="menu-item nav-item" data-menu-action="ln" aria-pressed="false">
+            <span class="menu-item-icon" aria-hidden="true">#</span>
+            <span class="menu-item-label">line numbers</span>
+            <span class="menu-item-toggle" id="mobile-menu-ln-state">off</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="ts-toggle" aria-expanded="false" aria-controls="mobile-menu-ts-submenu">
+            <span class="menu-item-icon" aria-hidden="true">◷</span>
+            <span class="menu-item-label">timestamps</span>
+            <span class="menu-item-toggle" id="mobile-menu-ts-state">off</span>
+            <span class="disclosure-chev" aria-hidden="true">▸</span>
+          </button>
+          <div class="menu-submenu u-hidden" id="mobile-menu-ts-submenu" role="group" aria-label="Timestamps mode">
+            <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="off">
+              <span class="menu-subitem-radio" aria-hidden="true"></span>
+              <span class="menu-subitem-label">off</span>
+            </button>
+            <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="elapsed">
+              <span class="menu-subitem-radio" aria-hidden="true"></span>
+              <span class="menu-subitem-label">elapsed</span>
+              <span class="menu-subitem-hint">+1.2s</span>
+            </button>
+            <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="clock">
+              <span class="menu-subitem-radio" aria-hidden="true"></span>
+              <span class="menu-subitem-label">clock</span>
+              <span class="menu-subitem-hint">14:03:27</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="menu-group-divider" aria-hidden="true"></div>
+
+        <div class="menu-group">
+          <button type="button" class="menu-item nav-item" data-menu-action="options">
+            <span class="menu-item-icon" aria-hidden="true">≡</span>
+            <span class="menu-item-label">options</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="projects">
+            <span class="menu-item-icon" aria-hidden="true">◇</span>
+            <span class="menu-item-label">projects</span>
+            <span class="menu-item-hint" id="mobile-menu-project-hint"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="history">
+            <span class="menu-item-icon" aria-hidden="true">⧖</span>
+            <span class="menu-item-label">history</span>
+            <span class="menu-item-hint" id="mobile-menu-history-count"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="status-monitor">
+            <span class="menu-item-icon" aria-hidden="true">◉</span>
+            <span class="menu-item-label">status</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="command-registry">
+            <span class="menu-item-icon" aria-hidden="true">⌘</span>
+            <span class="menu-item-label">commands</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="workflows">
+            <span class="menu-item-icon" aria-hidden="true">⚙</span>
+            <span class="menu-item-label">workflows</span>
+            <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          {% if workspace_enabled %}
+          <button type="button" class="menu-item nav-item" data-menu-action="workspace">
+            <span class="menu-item-icon" aria-hidden="true">▣</span>
+            <span class="menu-item-label">files</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          {% endif %}
+          <button type="button" class="menu-item nav-item" data-menu-action="theme">
+            <span class="menu-item-icon" aria-hidden="true">◐</span>
+            <span class="menu-item-label">theme</span>
+            <span class="menu-item-hint" id="mobile-menu-theme-hint"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="faq">
+            <span class="menu-item-icon" aria-hidden="true">?</span>
+            <span class="menu-item-label">FAQ</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item{% if not frontend_config.diag_enabled %} u-hidden{% endif %}" data-menu-action="diag">
+            <span class="menu-item-icon" aria-hidden="true">◇</span>
+            <span class="menu-item-label">diag</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
         </div>
+
+        <a class="menu-footer bottom-sheet-footer" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
       </div>
-
-      <div class="menu-group-divider" aria-hidden="true"></div>
-
-      <div class="menu-group">
-        <button type="button" class="menu-item nav-item" data-menu-action="options">
-          <span class="menu-item-icon" aria-hidden="true">≡</span>
-          <span class="menu-item-label">options</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="projects">
-          <span class="menu-item-icon" aria-hidden="true">◇</span>
-          <span class="menu-item-label">projects</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <div class="menu-item menu-project-context u-hidden" id="mobile-menu-project-row" aria-live="polite">
-          <span class="menu-item-icon" aria-hidden="true">◇</span>
-          <span class="menu-item-label">project</span>
-          <span class="menu-item-hint" id="mobile-menu-project-name"></span>
-        </div>
-        <button type="button" class="menu-item nav-item" data-menu-action="history">
-          <span class="menu-item-icon" aria-hidden="true">⧖</span>
-          <span class="menu-item-label">history</span>
-          <span class="menu-item-hint" id="mobile-menu-history-count"></span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="status-monitor">
-          <span class="menu-item-icon" aria-hidden="true">◉</span>
-          <span class="menu-item-label">status</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="command-registry">
-          <span class="menu-item-icon" aria-hidden="true">⌘</span>
-          <span class="menu-item-label">commands</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="workflows">
-          <span class="menu-item-icon" aria-hidden="true">⚙</span>
-          <span class="menu-item-label">workflows</span>
-          <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        {% if workspace_enabled %}
-        <button type="button" class="menu-item nav-item" data-menu-action="workspace">
-          <span class="menu-item-icon" aria-hidden="true">▣</span>
-          <span class="menu-item-label">files</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        {% endif %}
-        <button type="button" class="menu-item nav-item" data-menu-action="theme">
-          <span class="menu-item-icon" aria-hidden="true">◐</span>
-          <span class="menu-item-label">theme</span>
-          <span class="menu-item-hint" id="mobile-menu-theme-hint"></span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="faq">
-          <span class="menu-item-icon" aria-hidden="true">?</span>
-          <span class="menu-item-label">FAQ</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item{% if not frontend_config.diag_enabled %} u-hidden{% endif %}" data-menu-action="diag">
-          <span class="menu-item-icon" aria-hidden="true">◇</span>
-          <span class="menu-item-label">diag</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-      </div>
-
-      <a class="menu-footer bottom-sheet-footer" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
     </div>
   </div>
 </div>
@@ -678,6 +676,40 @@
       <span class="project-workspace-message-text"></span>
       <button type="button" class="btn btn-ghost btn-compact project-workspace-message-dismiss" data-project-message-dismiss aria-label="Dismiss project message">✕</button>
     </div>
+    <section id="project-mobile-root" class="project-mobile-root" aria-label="Mobile projects">
+      <div id="project-mobile-list-view" class="project-mobile-list-view">
+        <div class="project-mobile-header">
+          <div class="project-mobile-heading">
+            <span id="project-mobile-summary" class="project-mobile-summary">No projects loaded</span>
+          </div>
+          <button type="button" id="project-mobile-new-btn" class="btn btn-secondary btn-compact" data-project-mobile-action="new-project">New Project</button>
+        </div>
+        <div id="project-mobile-body" class="project-mobile-body nice-scroll" aria-live="polite"></div>
+      </div>
+      <form id="project-mobile-create-form" class="project-mobile-create-sheet u-hidden" aria-label="Create project">
+        <div class="project-mobile-create-header">
+          <div class="project-mobile-heading">
+            <span class="project-mobile-kicker">New Project</span>
+            <span class="project-mobile-summary">Name the project to start grouping related work.</span>
+          </div>
+          <button type="button" class="btn btn-ghost btn-compact" data-project-mobile-action="cancel-create">Back</button>
+        </div>
+        <label class="project-mobile-create-field">
+          <span>Name</span>
+          <input id="project-mobile-name" class="form-control form-control-compact" type="text" maxlength="120" placeholder="New project name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="New project name">
+        </label>
+        <div class="project-mobile-create-actions">
+          <button type="submit" class="btn btn-secondary btn-compact">Create project</button>
+        </div>
+      </form>
+      <div id="project-mobile-detail-view" class="project-mobile-detail-view u-hidden">
+        <div id="project-mobile-detail-topbar" class="project-mobile-detail-topbar"></div>
+        <div class="project-mobile-tabs-wrap">
+          <div id="project-mobile-tabs" class="project-mobile-tabs" role="tablist" aria-label="Project sections"></div>
+        </div>
+        <div id="project-mobile-detail-body" class="project-mobile-detail-body nice-scroll" aria-live="polite"></div>
+      </div>
+    </section>
     <div class="project-workspace-layout">
       <aside class="project-workspace-sidebar" aria-label="Project list">
         <form id="project-workspace-create-form" class="project-workspace-create">
@@ -700,8 +732,9 @@
       <div id="project-labels-save-status" class="field-save-status u-hidden" role="status" aria-live="polite">saved</div>
     </form>
   </div>
-  <div id="project-target-editor-overlay" class="modal-overlay project-target-editor-overlay u-hidden" aria-hidden="true">
-    <div id="project-target-editor-modal" class="modal-card modal-card-compact project-target-editor-modal" role="dialog" aria-modal="true" aria-labelledby="project-target-editor-title">
+  <div id="project-target-editor-overlay" class="modal-overlay mobile-sheet-overlay project-target-editor-overlay u-hidden" aria-hidden="true">
+    <div id="project-target-editor-modal" class="modal-card modal-card-compact mobile-sheet-surface project-target-editor-modal" role="dialog" aria-modal="true" aria-labelledby="project-target-editor-title">
+      <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close target editor"></div>
       <div class="faq-header">
         <span class="faq-title" id="project-target-editor-title">NEW TARGET</span>
         <button type="button" class="close-btn project-target-editor-close" aria-label="Close target editor">✕</button>
@@ -739,8 +772,9 @@
       </form>
     </div>
   </div>
-  <div id="project-package-manifest-overlay" class="modal-overlay project-package-manifest-overlay u-hidden" aria-hidden="true">
-    <div id="project-package-manifest-modal" class="modal-card modal-card-compact project-package-manifest-modal" role="dialog" aria-modal="true" aria-labelledby="project-package-manifest-title">
+  <div id="project-package-manifest-overlay" class="modal-overlay mobile-sheet-overlay project-package-manifest-overlay u-hidden" aria-hidden="true">
+    <div id="project-package-manifest-modal" class="modal-card modal-card-compact mobile-sheet-surface project-package-manifest-modal" role="dialog" aria-modal="true" aria-labelledby="project-package-manifest-title">
+      <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close package manifest"></div>
       <div class="faq-header">
         <span class="faq-title" id="project-package-manifest-title">PACKAGE MANIFEST</span>
         <button type="button" class="close-btn project-package-manifest-close" aria-label="Close package manifest">✕</button>
@@ -748,15 +782,17 @@
       <pre id="project-package-manifest-json" class="project-package-manifest-json nice-scroll"></pre>
     </div>
   </div>
-  <div id="project-package-wizard-overlay" class="modal-overlay project-package-wizard-overlay u-hidden" aria-hidden="true">
-    <div id="project-package-wizard-modal" class="modal-card project-package-wizard-modal" role="dialog" aria-modal="true" aria-labelledby="project-package-wizard-title">
+  <div id="project-package-wizard-overlay" class="modal-overlay mobile-sheet-overlay project-package-wizard-overlay u-hidden" aria-hidden="true">
+    <div id="project-package-wizard-modal" class="modal-card mobile-sheet-surface project-package-wizard-modal" role="dialog" aria-modal="true" aria-labelledby="project-package-wizard-title">
+      <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close package wizard"></div>
       <div id="project-package-wizard-body"></div>
     </div>
   </div>
 </div>
 
-<div id="project-entity-editor-overlay" class="modal-overlay project-entity-editor-overlay u-hidden" aria-hidden="true">
-  <div id="project-entity-editor-modal" class="modal-card modal-card-compact project-entity-editor-modal" role="dialog" aria-modal="true" aria-labelledby="project-entity-editor-title">
+<div id="project-entity-editor-overlay" class="modal-overlay mobile-sheet-overlay project-entity-editor-overlay u-hidden" aria-hidden="true">
+  <div id="project-entity-editor-modal" class="modal-card modal-card-compact mobile-sheet-surface project-entity-editor-modal" role="dialog" aria-modal="true" aria-labelledby="project-entity-editor-title">
+    <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close metadata editor"></div>
     <div class="faq-header">
       <div>
         <span class="faq-title" id="project-entity-editor-title">EDIT METADATA</span>
