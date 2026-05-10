@@ -932,9 +932,9 @@
     font-weight: 700;
   }
   body.mobile-terminal-mode .project-mobile-row-menu-trigger.btn {
-    width: 42px;
-    min-width: 42px;
-    min-height: 42px;
+    width: 44px;
+    min-width: 44px;
+    min-height: 44px;
     margin-top: -9px;
     margin-right: -9px;
     font-size: 30px;

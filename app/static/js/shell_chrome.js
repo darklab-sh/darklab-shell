@@ -1311,7 +1311,7 @@
   function _appendProjectMobileLabelChips(parent, project) {
     const chips = _projectLabelChips(project);
     if (!parent || !chips.length) return;
-    const wrap = document.createElement('div');
+    const wrap = document.createElement('span');
     wrap.className = 'project-mobile-label-chips';
     chips.slice(0, 3).forEach((chip) => {
       const node = document.createElement('span');
@@ -4136,22 +4136,23 @@
     const projectId = String(project.id || '');
     const summary = _projectSummary(projectId);
     const row = document.createElement('article');
-    row.className = 'project-mobile-row'
+    row.className = 'panel-row project-mobile-row'
       + (projectId === activeId ? ' is-active' : '')
       + (projectId === projectWorkspaceSelectedId ? ' is-selected' : '');
-    row.setAttribute('role', 'button');
-    row.tabIndex = 0;
-    row.dataset.projectMobileAction = 'open-project';
     row.dataset.projectId = projectId;
-    _bindProjectRuntimePressable(row);
 
-    const main = document.createElement('div');
-    main.className = 'project-mobile-row-main';
+    const main = document.createElement('button');
+    main.type = 'button';
+    main.className = 'control-row project-mobile-row-main';
+    main.dataset.projectMobileAction = 'open-project';
+    main.dataset.projectId = projectId;
+    main.setAttribute('aria-label', `Open ${_projectDisplayName(project)}`);
+    _bindProjectRuntimePressable(main);
 
-    const title = document.createElement('div');
+    const title = document.createElement('span');
     title.className = 'project-mobile-title-row';
     const titleButton = document.createElement('span');
-    titleButton.className = 'control-row project-mobile-title-target';
+    titleButton.className = 'project-mobile-title-target';
     const name = document.createElement('span');
     name.className = 'project-mobile-name';
     name.textContent = String(project.name || project.slug || projectId);
@@ -4492,7 +4493,7 @@
     title.textContent = 'Actions';
     header.appendChild(title);
     const items = document.createElement('div');
-    items.className = 'project-mobile-action-sheet-items';
+    items.className = 'project-mobile-action-sheet-items bottom-sheet-body nice-scroll';
     sheet.append(grab, header, items);
     overlay.appendChild(sheet);
     (projectWorkspaceModal || document.body).appendChild(overlay);

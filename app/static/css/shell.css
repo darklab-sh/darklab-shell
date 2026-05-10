@@ -2482,7 +2482,6 @@ body.mobile-terminal-mode .output-follow-btn {
   border-radius: 6px;
   background: var(--theme-chrome-row-bg);
   color: var(--text);
-  cursor: pointer;
 }
 
 .project-mobile-row-main {
@@ -2494,8 +2493,12 @@ body.mobile-terminal-mode .output-follow-btn {
   min-width: 0;
   max-width: 100%;
   padding: 0;
+  border: 0;
   background: transparent;
   color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .project-mobile-row:hover {
@@ -2717,7 +2720,7 @@ body.mobile-terminal-mode .output-follow-btn {
   align-items: center;
   gap: 6px;
   width: auto;
-  min-height: 40px;
+  min-height: 44px;
   max-width: 148px;
   margin-bottom: -1px;
   padding: 9px 12px;
@@ -3030,9 +3033,9 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 .project-mobile-row-menu-trigger {
-  width: 36px;
-  min-width: 36px;
-  min-height: 36px;
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
   margin-top: -6px;
   margin-right: -6px;
   padding: 0;

@@ -519,6 +519,14 @@ describe('shell chrome project workspace', () => {
 
   it('renders the mobile project list with active-first rows and collapsed archived projects', async () => {
     document.body.classList.add('mobile-terminal-mode')
+    const inertDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'inert')
+    if (!('inert' in HTMLElement.prototype)) {
+      Object.defineProperty(HTMLElement.prototype, 'inert', {
+        configurable: true,
+        get() { return this.__testInert === true },
+        set(value) { this.__testInert = value === true },
+      })
+    }
     const projects = [
       {
         id: 'project-3',
@@ -576,8 +584,17 @@ describe('shell chrome project workspace', () => {
       await tick()
       await tick()
 
-      const mobileRows = [...document.querySelectorAll('.project-mobile-row[data-project-mobile-action="open-project"]')]
+      const mobileRows = [...document.querySelectorAll('.project-mobile-row')]
       expect(mobileRows.map(row => row.dataset.projectId)).toEqual(['project-2', 'project-1'])
+      expect(mobileRows.every(row => row.classList.contains('panel-row'))).toBe(true)
+      expect(mobileRows.every(row => !row.hasAttribute('role'))).toBe(true)
+      expect(mobileRows.every(row => row.tabIndex < 0)).toBe(true)
+      expect(mobileRows.every(row => !row.dataset.projectMobileAction)).toBe(true)
+      const firstProjectTarget = mobileRows[0].querySelector('.project-mobile-row-main')
+      expect(firstProjectTarget.tagName).toBe('BUTTON')
+      expect(firstProjectTarget.classList.contains('control-row')).toBe(true)
+      expect(firstProjectTarget.dataset.projectMobileAction).toBe('open-project')
+      expect(firstProjectTarget.dataset.pressableBound).toBe('1')
       expect(document.getElementById('project-mobile-body').textContent).toContain('Archived (1)')
       expect(document.getElementById('project-mobile-body').textContent).not.toContain('zulu.test')
       expect(document.querySelector('[data-project-id="project-1"]').closest('.project-mobile-row').textContent).toContain('+1')
@@ -598,13 +615,20 @@ describe('shell chrome project workspace', () => {
       const actionSheet = document.getElementById('project-mobile-action-sheet-overlay')
       expect(actionSheet.classList.contains('open')).toBe(true)
       expect(actionSheet.textContent).toContain('Edit metadata')
+      const actionSheetItems = actionSheet.querySelector('.project-mobile-action-sheet-items')
+      expect(actionSheetItems.classList.contains('bottom-sheet-body')).toBe(true)
+      expect(actionSheetItems.classList.contains('nice-scroll')).toBe(true)
       actionSheet.querySelector('[data-project-action="edit-project-metadata"]').click()
       await tick()
       expect(document.getElementById('project-entity-editor-overlay').classList.contains('open')).toBe(true)
+      expect(document.getElementById('project-workspace-modal').inert).toBe(true)
+      expect(document.getElementById('project-workspace-modal').getAttribute('aria-hidden')).toBe('true')
       document.querySelector('.project-entity-editor-cancel').click()
       await tick()
+      expect(document.getElementById('project-workspace-modal').inert).toBe(false)
+      expect(document.getElementById('project-workspace-modal').getAttribute('aria-hidden')).toBe('false')
 
-      document.querySelector('.project-mobile-row[data-project-id="project-2"]').click()
+      document.querySelector('.project-mobile-row[data-project-id="project-2"] .project-mobile-row-main').click()
       await tick()
       expect(document.getElementById('project-mobile-detail-view').classList.contains('u-hidden')).toBe(false)
       expect(document.getElementById('project-mobile-detail-topbar').textContent).toContain('darklab.sh')
@@ -613,6 +637,11 @@ describe('shell chrome project workspace', () => {
       expect(summaryMenu.textContent).toBe('☰')
     } finally {
       document.body.classList.remove('mobile-terminal-mode')
+      if (inertDescriptor) {
+        Object.defineProperty(HTMLElement.prototype, 'inert', inertDescriptor)
+      } else {
+        delete HTMLElement.prototype.inert
+      }
     }
   })
 
@@ -911,7 +940,10 @@ describe('shell chrome project workspace', () => {
       await tick()
       const reviewSelect = actionSheet.querySelector('[data-project-review-state]')
       expect(reviewSelect).not.toBeNull()
-      expect(shell.enhanceAppSelects).toHaveBeenCalledWith(actionSheet.querySelector('.project-mobile-action-sheet-items'))
+      const actionSheetItems = actionSheet.querySelector('.project-mobile-action-sheet-items')
+      expect(actionSheetItems.classList.contains('bottom-sheet-body')).toBe(true)
+      expect(actionSheetItems.classList.contains('nice-scroll')).toBe(true)
+      expect(shell.enhanceAppSelects).toHaveBeenCalledWith(actionSheetItems)
       expect(detailBody.querySelector('.project-mobile-row-badge')?.textContent).toBe('triaged')
       reviewSelect.value = 'reviewed'
       reviewSelect.dispatchEvent(new Event('change', { bubbles: true }))
@@ -931,9 +963,29 @@ describe('shell chrome project workspace', () => {
       detailBody.querySelector('[data-project-finding-group-toggle]').click()
       await tick()
       expect(detailBody.querySelector('.project-findings-group .project-mobile-group-body').hidden).toBe(false)
+      shell.restoreHistoryRunIntoTab.mockClear()
+      detailBody.querySelector('[data-project-action="open-finding"]').click()
+      await tick()
+      expect(shell.restoreHistoryRunIntoTab).toHaveBeenCalledWith(
+        {
+          id: 'run-1',
+          command: 'nmap darklab.sh',
+          full_output_available: true,
+        },
+        {
+          hidePanelOnSuccess: false,
+          highlightLineIndex: 4,
+        },
+      )
+      expect(document.getElementById('project-workspace-overlay').classList.contains('open')).toBe(false)
 
+      await shell.openProjectWorkspace()
+      document.querySelector('[data-project-mobile-action="open-project"][data-project-id="project-1"]').click()
+      await tick()
+      await tick()
       document.querySelector('[data-project-mobile-detail-tab="artifacts"]').click()
       await tick()
+
       expect(detailBody.textContent).toContain('run.txt')
       expect(detailBody.textContent).toContain('available')
       expect(detailBody.textContent).toContain('missing')

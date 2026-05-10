@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,559
+- behavior tests: 2,561
 - docs/inventory meta-tests: 30
 - `pytest`: 1284 (1254 behavior + 30 meta)
 - `vitest`: 1063
-- `playwright`: 243
-- total: 2,590
+- `playwright`: 245
+- total: 2,592
 
 This document is organized in two parts:
 
@@ -2843,6 +2843,8 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `clicking outside the menu closes it` | Verifies that clicking outside the menu closes it. |
 | `tapping the sticky header dismisses the mobile menu sheet` | Verifies that tapping inside the mobile-terminal sticky header (`page.mouse.click(40, 10)`) while the menu sheet is open lands on the scrim and dismisses the sheet — guards the scrim z-index lift above the header. |
 | `workflows sheet reopens at full height after an interrupted drag` | Verifies that the workflows mobile sheet reopens at full viewport-relative height after a synthetic drag is externally closed via the backdrop — guards the `bindMobileSheet` visibility-observer cleanup that scrubs leaked `transform: translateY(...)` inline styles. |
+| `mobile Projects creates, links, drills by count chip, and opens row actions` | Verifies the real mobile Projects browser flow for creating a project, linking the last run, using a count chip to drill into Runs, and opening row actions in a mobile action sheet. |
+| `mobile Projects shows retryable project summary errors` | Verifies that mobile Projects renders a retryable inline error when a project summary fetch fails and recovers after tapping Retry. |
 | `workflows sheet starts collapsed and wraps commands inside cards` | Verifies that mobile workflow cards start collapsed, expand on tap, and keep wrapped command chips inside the sheet width. |
 | `mobile recent peek summarizes recent runs and opens the recents sheet on tap` | Verifies that the idle peek row between the transcript and the composer shows the recent-command count plus a one-line preview, and that tapping it opens the full mobile recents pull-up sheet. |
 | `mobile recents sheet injects the tapped command into the composer and closes` | Verifies that tapping a row in the mobile recents sheet populates `#mobile-cmd` with the selected command and dismisses the sheet — the primary tap path is now composer-injection, not tab-restore. |
