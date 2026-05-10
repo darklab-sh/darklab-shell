@@ -137,111 +137,109 @@
         <span class="menu-title-label">Menu</span>
       </div>
 
-      <div class="menu-group">
-        <button type="button" class="menu-item nav-item" data-menu-action="search">
-          <span class="menu-item-icon" aria-hidden="true">⌕</span>
-          <span class="menu-item-label">search</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="clear">
-          <span class="menu-item-icon" aria-hidden="true">⌫</span>
-          <span class="menu-item-label">clear</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="ln" aria-pressed="false">
-          <span class="menu-item-icon" aria-hidden="true">#</span>
-          <span class="menu-item-label">line numbers</span>
-          <span class="menu-item-toggle" id="mobile-menu-ln-state">off</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="ts-toggle" aria-expanded="false" aria-controls="mobile-menu-ts-submenu">
-          <span class="menu-item-icon" aria-hidden="true">◷</span>
-          <span class="menu-item-label">timestamps</span>
-          <span class="menu-item-toggle" id="mobile-menu-ts-state">off</span>
-          <span class="disclosure-chev" aria-hidden="true">▸</span>
-        </button>
-        <div class="menu-submenu u-hidden" id="mobile-menu-ts-submenu" role="group" aria-label="Timestamps mode">
-          <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="off">
-            <span class="menu-subitem-radio" aria-hidden="true"></span>
-            <span class="menu-subitem-label">off</span>
+      <div class="menu-scroll bottom-sheet-body nice-scroll">
+        <div class="menu-group">
+          <button type="button" class="menu-item nav-item" data-menu-action="search">
+            <span class="menu-item-icon" aria-hidden="true">⌕</span>
+            <span class="menu-item-label">search</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
-          <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="elapsed">
-            <span class="menu-subitem-radio" aria-hidden="true"></span>
-            <span class="menu-subitem-label">elapsed</span>
-            <span class="menu-subitem-hint">+1.2s</span>
+          <button type="button" class="menu-item nav-item" data-menu-action="clear">
+            <span class="menu-item-icon" aria-hidden="true">⌫</span>
+            <span class="menu-item-label">clear</span>
           </button>
-          <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="clock">
-            <span class="menu-subitem-radio" aria-hidden="true"></span>
-            <span class="menu-subitem-label">clock</span>
-            <span class="menu-subitem-hint">14:03:27</span>
+          <button type="button" class="menu-item nav-item" data-menu-action="ln" aria-pressed="false">
+            <span class="menu-item-icon" aria-hidden="true">#</span>
+            <span class="menu-item-label">line numbers</span>
+            <span class="menu-item-toggle" id="mobile-menu-ln-state">off</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="ts-toggle" aria-expanded="false" aria-controls="mobile-menu-ts-submenu">
+            <span class="menu-item-icon" aria-hidden="true">◷</span>
+            <span class="menu-item-label">timestamps</span>
+            <span class="menu-item-toggle" id="mobile-menu-ts-state">off</span>
+            <span class="disclosure-chev" aria-hidden="true">▸</span>
+          </button>
+          <div class="menu-submenu u-hidden" id="mobile-menu-ts-submenu" role="group" aria-label="Timestamps mode">
+            <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="off">
+              <span class="menu-subitem-radio" aria-hidden="true"></span>
+              <span class="menu-subitem-label">off</span>
+            </button>
+            <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="elapsed">
+              <span class="menu-subitem-radio" aria-hidden="true"></span>
+              <span class="menu-subitem-label">elapsed</span>
+              <span class="menu-subitem-hint">+1.2s</span>
+            </button>
+            <button type="button" class="menu-subitem nav-item" data-menu-action="ts-set" data-ts-mode="clock">
+              <span class="menu-subitem-radio" aria-hidden="true"></span>
+              <span class="menu-subitem-label">clock</span>
+              <span class="menu-subitem-hint">14:03:27</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="menu-group-divider" aria-hidden="true"></div>
+
+        <div class="menu-group">
+          <button type="button" class="menu-item nav-item" data-menu-action="options">
+            <span class="menu-item-icon" aria-hidden="true">≡</span>
+            <span class="menu-item-label">options</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="projects">
+            <span class="menu-item-icon" aria-hidden="true">◇</span>
+            <span class="menu-item-label">projects</span>
+            <span class="menu-item-hint" id="mobile-menu-project-hint"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="history">
+            <span class="menu-item-icon" aria-hidden="true">⧖</span>
+            <span class="menu-item-label">history</span>
+            <span class="menu-item-hint" id="mobile-menu-history-count"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="status-monitor">
+            <span class="menu-item-icon" aria-hidden="true">◉</span>
+            <span class="menu-item-label">status</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="command-registry">
+            <span class="menu-item-icon" aria-hidden="true">⌘</span>
+            <span class="menu-item-label">commands</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="workflows">
+            <span class="menu-item-icon" aria-hidden="true">⚙</span>
+            <span class="menu-item-label">workflows</span>
+            <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          {% if workspace_enabled %}
+          <button type="button" class="menu-item nav-item" data-menu-action="workspace">
+            <span class="menu-item-icon" aria-hidden="true">▣</span>
+            <span class="menu-item-label">files</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          {% endif %}
+          <button type="button" class="menu-item nav-item" data-menu-action="theme">
+            <span class="menu-item-icon" aria-hidden="true">◐</span>
+            <span class="menu-item-label">theme</span>
+            <span class="menu-item-hint" id="mobile-menu-theme-hint"></span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item" data-menu-action="faq">
+            <span class="menu-item-icon" aria-hidden="true">?</span>
+            <span class="menu-item-label">FAQ</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+          </button>
+          <button type="button" class="menu-item nav-item{% if not frontend_config.diag_enabled %} u-hidden{% endif %}" data-menu-action="diag">
+            <span class="menu-item-icon" aria-hidden="true">◇</span>
+            <span class="menu-item-label">diag</span>
+            <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
           </button>
         </div>
+
+        <a class="menu-footer bottom-sheet-footer" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
       </div>
-
-      <div class="menu-group-divider" aria-hidden="true"></div>
-
-      <div class="menu-group">
-        <button type="button" class="menu-item nav-item" data-menu-action="options">
-          <span class="menu-item-icon" aria-hidden="true">≡</span>
-          <span class="menu-item-label">options</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="projects">
-          <span class="menu-item-icon" aria-hidden="true">◇</span>
-          <span class="menu-item-label">projects</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <div class="menu-item menu-project-context u-hidden" id="mobile-menu-project-row" aria-live="polite">
-          <span class="menu-item-icon" aria-hidden="true">◇</span>
-          <span class="menu-item-label">project</span>
-          <span class="menu-item-hint" id="mobile-menu-project-name"></span>
-        </div>
-        <button type="button" class="menu-item nav-item" data-menu-action="history">
-          <span class="menu-item-icon" aria-hidden="true">⧖</span>
-          <span class="menu-item-label">history</span>
-          <span class="menu-item-hint" id="mobile-menu-history-count"></span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="status-monitor">
-          <span class="menu-item-icon" aria-hidden="true">◉</span>
-          <span class="menu-item-label">status</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="command-registry">
-          <span class="menu-item-icon" aria-hidden="true">⌘</span>
-          <span class="menu-item-label">commands</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="workflows">
-          <span class="menu-item-icon" aria-hidden="true">⚙</span>
-          <span class="menu-item-label">workflows</span>
-          <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        {% if workspace_enabled %}
-        <button type="button" class="menu-item nav-item" data-menu-action="workspace">
-          <span class="menu-item-icon" aria-hidden="true">▣</span>
-          <span class="menu-item-label">files</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        {% endif %}
-        <button type="button" class="menu-item nav-item" data-menu-action="theme">
-          <span class="menu-item-icon" aria-hidden="true">◐</span>
-          <span class="menu-item-label">theme</span>
-          <span class="menu-item-hint" id="mobile-menu-theme-hint"></span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item" data-menu-action="faq">
-          <span class="menu-item-icon" aria-hidden="true">?</span>
-          <span class="menu-item-label">FAQ</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item nav-item{% if not frontend_config.diag_enabled %} u-hidden{% endif %}" data-menu-action="diag">
-          <span class="menu-item-icon" aria-hidden="true">◇</span>
-          <span class="menu-item-label">diag</span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-      </div>
-
-      <a class="menu-footer bottom-sheet-footer" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
     </div>
   </div>
 </div>

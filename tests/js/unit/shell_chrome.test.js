@@ -707,12 +707,179 @@ describe('shell chrome project workspace', () => {
 
       document.querySelector('[data-project-mobile-detail-tab="packages"]').click()
       await tick()
-      expect(document.getElementById('project-mobile-detail-body').textContent).toContain('2 packages')
+      expect(document.getElementById('project-mobile-detail-body').textContent).toContain('No evidence packages yet')
+      expect(document.getElementById('project-mobile-detail-body').querySelector('[data-project-action="package-wizard-open"]')).not.toBeNull()
 
       document.querySelector('[data-project-mobile-action="back-to-list"]').click()
       await tick()
       expect(document.getElementById('project-mobile-list-view').classList.contains('u-hidden')).toBe(false)
       expect(document.getElementById('project-mobile-detail-view').classList.contains('u-hidden')).toBe(true)
+    } finally {
+      document.body.classList.remove('mobile-terminal-mode')
+    }
+  })
+
+  it('renders mobile project tab content with mobile row actions', async () => {
+    document.body.classList.add('mobile-terminal-mode')
+    const project = {
+      id: 'project-1',
+      name: 'darklab.sh',
+      status: 'active',
+      labels: [{ label: 'client' }, { label: 'handoff' }],
+      note: { body: 'Project note from mobile test' },
+    }
+    const summary = {
+      project,
+      counts: { runs: 1, findings: 1, artifacts: 2, packages: 1, targets: 1, notes: 4 },
+      runs: [{
+        id: 'run-1',
+        command: 'nmap darklab.sh',
+        started: '2026-05-09T12:00:00Z',
+        created: '2026-05-09T12:01:00Z',
+        exit_code: 0,
+        output_line_count: 8,
+        labels: [{ label: 'reviewed' }],
+        note: { body: 'Run note' },
+      }],
+      targets: [{
+        id: 'target-1',
+        type: 'domain',
+        value: 'darklab.sh',
+        review_state: 'confirmed',
+        labels: [{ label: 'prod' }],
+        note: { body: 'Target note' },
+      }],
+      artifacts: [{
+        id: 'artifact-1',
+        run_id: 'run-1',
+        workspace_path: 'reports/run.txt',
+        display_name: 'run.txt',
+        kind: 'output',
+        content_type: 'text/plain',
+        byte_size: 24,
+        file_status: 'available',
+        file_available: true,
+        labels: [{ label: 'evidence' }],
+        note: { body: 'Artifact note' },
+      }, {
+        id: 'artifact-2',
+        run_id: 'run-1',
+        workspace_path: 'reports/missing.txt',
+        display_name: 'missing.txt',
+        kind: 'output',
+        content_type: 'text/plain',
+        byte_size: 12,
+        file_status: 'missing',
+        file_available: false,
+        file_status_detail: 'workspace file is missing',
+      }],
+      packages: [{
+        id: 'package-1',
+        name: 'Evidence Package',
+        description: 'Ready for handoff',
+        redaction_mode: 'raw',
+        include_artifacts: true,
+        labels: [{ label: 'handoff' }],
+        note: { body: 'Package note' },
+        manifest: {
+          preset: 'evidence',
+          counts: { runs: 1, findings: 1, artifacts: 1, targets: 1 },
+          estimated_archive: { estimated_uncompressed_bytes: 24 },
+        },
+      }],
+    }
+    const apiFetch = vi.fn((url) => {
+      if (url === '/projects/active') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ project }) })
+      }
+      if (url === '/projects?include_archived=1') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ projects: [project] }) })
+      }
+      if (url === '/projects/project-1/summary') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(summary) })
+      }
+      if (url === '/projects/project-1/findings') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            findings: [{
+              id: 'finding-1',
+              run_id: 'run-1',
+              run_command: 'nmap darklab.sh',
+              title: '443 open',
+              raw_line: '443/tcp open https',
+              line_number: 4,
+              scope: 'finding',
+              review_state: 'triaged',
+              labels: [{ label: 'important' }],
+              note: { body: 'Finding note' },
+            }],
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+
+    try {
+      const shell = loadShellChrome({ apiFetch })
+      await shell.openProjectWorkspace()
+      await tick()
+      await tick()
+
+      document.querySelector('[data-project-mobile-action="open-project"][data-project-id="project-1"]').click()
+      await tick()
+      await tick()
+
+      const detailBody = document.getElementById('project-mobile-detail-body')
+      expect(detailBody.textContent).toContain('Project note from mobile test')
+      expect(detailBody.textContent).toContain('darklab.sh')
+      expect(detailBody.querySelector('[data-project-action="new-target"]')).not.toBeNull()
+
+      document.querySelector('[data-project-mobile-detail-tab="runs"]').click()
+      await tick()
+      expect(detailBody.textContent).toContain('nmap darklab.sh')
+      expect(detailBody.textContent).toContain('1 finding')
+      expect(detailBody.textContent).toContain('2 artifacts')
+      expect(detailBody.querySelector('[data-project-action="edit-run-metadata"]')).not.toBeNull()
+      const runMenu = detailBody.querySelector('.project-mobile-row-menu')
+      runMenu.open = true
+      detailBody.querySelector('.project-mobile-content-main').click()
+      await tick()
+      expect(runMenu.open).toBe(false)
+      expect(shell.restoreHistoryRunIntoTab).not.toHaveBeenCalled()
+
+      document.querySelector('[data-project-mobile-detail-tab="findings"]').click()
+      await tick()
+      await tick()
+      expect(detailBody.textContent).toContain('443 open')
+      expect(detailBody.textContent).toContain('443/tcp open https')
+      expect(detailBody.querySelector('[data-project-action="open-finding"]')).not.toBeNull()
+      expect(detailBody.querySelector('[data-project-review-state]')).not.toBeNull()
+      expect(shell.enhanceAppSelects).toHaveBeenCalledWith(detailBody)
+      detailBody.querySelector('[data-project-finding-group-toggle]').click()
+      await tick()
+      expect(detailBody.querySelector('.project-findings-group .project-mobile-group-body').hidden).toBe(true)
+      detailBody.querySelector('[data-project-finding-group-toggle]').click()
+      await tick()
+      expect(detailBody.querySelector('.project-findings-group .project-mobile-group-body').hidden).toBe(false)
+
+      document.querySelector('[data-project-mobile-detail-tab="artifacts"]').click()
+      await tick()
+      expect(detailBody.textContent).toContain('run.txt')
+      expect(detailBody.textContent).toContain('available')
+      expect(detailBody.textContent).toContain('missing')
+      expect(detailBody.querySelector('.project-mobile-row-badge.is-missing')?.textContent).toBe('missing')
+      expect(detailBody.querySelector('[data-project-action="artifact-preview"]')).not.toBeNull()
+      detailBody.querySelector('[data-project-artifact-group-toggle]').click()
+      await tick()
+      expect(detailBody.querySelector('.project-artifacts-group .project-mobile-group-body').hidden).toBe(true)
+
+      document.querySelector('[data-project-mobile-detail-tab="packages"]').click()
+      await tick()
+      expect(detailBody.textContent).toContain('Evidence Package')
+      expect(detailBody.textContent).toContain('1 run')
+      expect(detailBody.querySelector('[data-project-action="package-wizard-open"]')).not.toBeNull()
+      expect(detailBody.querySelector('[data-project-action="package-manifest"]')).not.toBeNull()
     } finally {
       document.body.classList.remove('mobile-terminal-mode')
     }
@@ -2496,6 +2663,7 @@ describe('shell chrome project workspace', () => {
     expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Findings (2)')
     expect(document.getElementById('project-package-wizard-overlay').textContent).toContain('Artifacts (1)')
     expectProjectPressablesBound(['.project-package-run-toggle'])
+    expect(document.querySelector('[data-project-package-selection="artifact"][value="artifact-2"]').checked).toBe(false)
     let run2Group = document.querySelector('[data-project-package-selection="run"][value="run-2"]')
       .closest('.project-package-run-selection')
     let run2Toggle = run2Group.querySelector('[data-project-package-run-toggle]')
@@ -2520,7 +2688,7 @@ describe('shell chrome project workspace', () => {
     expect(document.querySelector('[data-project-package-selection="transcript"][value="run-2"]').checked).toBe(true)
     expect(document.querySelector('[data-project-package-selection="transcript"][value="run-2"]').disabled).toBe(false)
     expect(document.querySelector('[data-project-package-selection="finding"][value="finding-2"]').checked).toBe(true)
-    expect(document.querySelector('[data-project-package-selection="artifact"][value="artifact-2"]').checked).toBe(true)
+    expect(document.querySelector('[data-project-package-selection="artifact"][value="artifact-2"]').checked).toBe(false)
     document.querySelector('[data-project-package-selection="run"][value="run-2"]').checked = false
     document.querySelector('[data-project-package-selection="run"][value="run-2"]')
       .dispatchEvent(new Event('change', { bubbles: true }))

@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,556
+- behavior tests: 2,559
 - docs/inventory meta-tests: 30
 - `pytest`: 1284 (1254 behavior + 30 meta)
-- `vitest`: 1059
+- `vitest`: 1062
 - `playwright`: 243
-- total: 2,586
+- total: 2,589
 
 This document is organized in two parts:
 
@@ -1841,6 +1841,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `resetCmdHistoryNav clears navigation state after the user types` | Verifies that resetCmdHistoryNav clears navigation state after the user types. |
 | `limits visible recent chips on mobile and appends an overflow chip` | Verifies that limits visible recent chips on mobile and appends an overflow chip. |
 | `drops one more desktop chip if the overflow chip itself wraps` | Verifies that drops one more desktop chip if the overflow chip itself wraps. |
+| `centers restored finding highlights in the terminal output container` | Verifies that restored finding highlights are centered in the terminal output container. |
 | `refreshHistoryPanel permalink action falls back to execCommand when clipboard writes reject` | Verifies the history drawer permalink action falls back to execCommand when clipboard writeText rejects. |
 | `clicking a history entry row opens run details without closing the panel` | Verifies row click opens the Run Details modal while keeping the History drawer in context and leaving the composer untouched. |
 | `loads structured run findings into the run details findings tab` | Verifies the Run Details modal consumes `/entities/run/<id>/findings` and renders structured findings in the Findings tab. |
@@ -1923,6 +1924,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `shows elapsed time for the active mobile Status Monitor peek when runStart is known` | Verifies that the mobile Status Monitor peek shows elapsed time when the active run has a start timestamp. |
 | `suppresses the mobile Status Monitor peek wiggle for reduced motion` | Verifies that the mobile Status Monitor peek does not animate when reduced motion is requested. |
 | `returns the peek to recents after the active run finalization hold expires` | Verifies that the mobile peek briefly holds Status Monitor state after completion, then returns to recents. |
+| `does not show the Status Monitor peek hold for restored history tabs` | Verifies that restored history tabs keep the mobile peek on recents instead of briefly showing Status Monitor. |
 | `activates the edge glow when a running non-active tab is only partially clipped off-screen` | Checks that activates the edge glow when a running non-active tab is only partially clipped off-screen. |
 | `chip tap activates the next running non-active tab in tab-row order` | Checks that chip tap activates the next running non-active tab in tab-row order. |
 | `chip tap cycles through the running set and wraps around` | Checks that chip tap cycles through the running set and wraps around. |
@@ -2263,6 +2265,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `renders the mobile project list with active-first rows and collapsed archived projects` | Verifies that the mobile Projects list pins the active project first, truncates label chips, keeps archived projects collapsed, and lets count chips select the matching project tab. |
 | `creates projects from the mobile create sheet` | Verifies that the mobile Projects create entry point opens its sheet, creates a project, selects it as active, and returns to the list. |
 | `drills into mobile project detail tabs and returns to the list` | Verifies that mobile Projects drill into the detail shell, clamp tab counts, hide Artifacts when Files are disabled, switch tabs, and return to the list. |
+| `renders mobile project tab content with mobile row actions` | Verifies that mobile Projects detail tabs render summary metadata, targets, runs, findings, artifacts, packages, and mobile row action affordances. |
 | `opens projects from the active project HUD chip` | Verifies that clicking the active project HUD chip opens the Projects modal. |
 | `hides project detail inputs when no projects exist` | Verifies that project label and note controls stay hidden until a project exists. |
 | `separates current and archived projects when archived projects exist` | Verifies that the Projects modal groups current and archived projects only when archived projects are present. |

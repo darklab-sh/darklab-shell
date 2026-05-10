@@ -576,6 +576,29 @@
     font-size: 16px;
     line-height: 1.35;
   }
+  body.mobile-terminal-mode #workspace-viewer-overlay {
+    box-sizing: border-box;
+    padding-bottom: max(8px, env(safe-area-inset-bottom, 0));
+  }
+  body.mobile-terminal-mode #workspace-viewer {
+    border-bottom: 1px solid var(--theme-panel-border) !important;
+    box-sizing: border-box;
+    height: min(88svh, calc(100dvh - 16px - env(safe-area-inset-bottom, 0)));
+    max-height: calc(100dvh - 16px - env(safe-area-inset-bottom, 0)) !important;
+    min-height: 0 !important;
+    overflow: hidden;
+    padding-bottom: 12px;
+  }
+  body.mobile-terminal-mode #workspace-viewer .workspace-viewer-header,
+  body.mobile-terminal-mode #workspace-viewer-controls {
+    flex: 0 0 auto;
+  }
+  body.mobile-terminal-mode #workspace-viewer-text {
+    box-sizing: border-box;
+    flex: 1 1 auto;
+    max-height: none;
+    min-height: 0;
+  }
   body.mobile-terminal-mode #theme-modal {
     align-self: stretch;
     width: 100vw;
@@ -641,6 +664,27 @@
     display: none !important;
   }
   body.mobile-terminal-mode #project-mobile-name {
+    font-size: 16px;
+    line-height: 1.35;
+  }
+  body.mobile-terminal-mode .project-package-preset-metadata .form-control,
+  body.mobile-terminal-mode .project-package-metadata-form .form-control,
+  body.mobile-terminal-mode .project-package-metadata-form .form-select,
+  body.mobile-terminal-mode .project-package-metadata-form .app-select {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    font-size: 16px;
+    line-height: 1.35;
+  }
+  body.mobile-terminal-mode .project-entity-editor-form .form-control,
+  body.mobile-terminal-mode .project-target-editor-form .form-control,
+  body.mobile-terminal-mode .project-target-editor-form .form-select {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     font-size: 16px;
     line-height: 1.35;
   }
