@@ -196,6 +196,7 @@
   let projectMobileCompareFooter = null;
   let projectMobileCompareReturnFocus = null;
   let projectMobileCompareState = null;
+  let projectMobileKeyboardGuardBound = false;
   let projectWorkspaceFindingsLoadingId = '';
   let projectWorkspaceFindingsLoadingPromise = null;
   let projectWorkspaceFilteredFindingsLoadingKey = '';
@@ -222,6 +223,7 @@
   const FIELD_SAVED_INDICATOR_VISIBLE_MS = 1600;
   const PROJECT_LABELS_SAVED_VISIBLE_MS = 2000;
   const PROJECT_WORKSPACE_BROADCAST_KEY = 'darklab_project_workspace_changed';
+  const PROJECT_MOBILE_NOTE_PREVIEW_LIMIT = 100;
   const PROJECT_FINDING_SORT_OPTIONS = [
     { value: 'source', label: 'Source order' },
     { value: 'run', label: 'Run' },
@@ -1378,6 +1380,27 @@
     return parts.filter(Boolean).join(' · ');
   }
 
+  function _projectArtifactDetailLines(artifact) {
+    const status = _projectArtifactStatus(artifact);
+    const statusDetail = String(artifact && artifact.file_status_detail || '').trim();
+    const firstLine = [
+      artifact && artifact.kind || 'file',
+      artifact && artifact.content_type || 'unknown type',
+    ].filter(Boolean).join(' · ');
+    const lines = [
+      firstLine,
+      _formatProjectDate(artifact && artifact.created),
+    ].filter(Boolean);
+    if (status === 'changed') {
+      lines.push(`current ${_formatProjectBytes(artifact.current_byte_size)}`);
+    } else if (status === 'missing') {
+      lines.push(statusDetail || 'workspace file is missing');
+    } else if (status === 'disabled') {
+      lines.push(statusDetail || 'Files are disabled on this instance');
+    }
+    return lines;
+  }
+
   function _projectArtifactDownloadName(artifactPath = '', fallback = 'artifact') {
     const name = String(artifactPath || '').split('/').filter(Boolean).pop();
     return name || fallback;
@@ -1394,12 +1417,91 @@
     if (successMessage) _setProjectWorkspaceMessage(successMessage);
   }
 
+  function _projectMobileModeActive() {
+    return !!(
+      document.body.classList.contains('mobile-terminal-mode')
+      || (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode())
+    );
+  }
+
+  function _projectNestedSheetOpen() {
+    return !!(
+      isProjectTargetEditorOpen()
+      || isProjectEntityEditorOpen()
+      || isProjectPackageManifestOpen()
+      || isProjectPackageWizardOpen()
+    );
+  }
+
+  function _syncProjectWorkspaceNestedSuppression() {
+    if (!projectWorkspaceModal) return;
+    const suppressed = _projectNestedSheetOpen();
+    projectWorkspaceModal.classList.toggle('is-backgrounded-by-project-sheet', suppressed);
+    if ('inert' in projectWorkspaceModal) {
+      projectWorkspaceModal.inert = suppressed;
+    }
+    projectWorkspaceModal.setAttribute('aria-hidden', suppressed ? 'true' : 'false');
+  }
+
+  function _projectSheetFocusTarget(overlay, preferred = null) {
+    if (!overlay) return preferred;
+    if (_projectMobileModeActive()) {
+      return overlay.querySelector('.sheet-grab.gesture-handle') || preferred;
+    }
+    return preferred || overlay.querySelector('button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
+  }
+
+  function _focusProjectNestedSheet(overlay, preferred = null) {
+    const target = _projectSheetFocusTarget(overlay, preferred);
+    window.setTimeout(() => {
+      if (target && target.isConnected && typeof target.focus === 'function') {
+        try { target.focus({ preventScroll: true }); } catch (_) { target.focus(); }
+      }
+      _syncProjectWorkspaceNestedSuppression();
+      _syncProjectMobileFocusedField();
+    }, 0);
+  }
+
+  function _projectOpenKeyboardSheet() {
+    if (isProjectTargetEditorOpen()) return projectTargetEditorOverlay?.querySelector('#project-target-editor-modal');
+    if (isProjectEntityEditorOpen()) return projectEntityEditorOverlay?.querySelector('#project-entity-editor-modal');
+    if (isProjectPackageWizardOpen()) return projectPackageWizardOverlay?.querySelector('#project-package-wizard-modal');
+    return null;
+  }
+
+  function _syncProjectMobileFocusedField() {
+    if (!_projectMobileModeActive()) return;
+    const sheet = _projectOpenKeyboardSheet();
+    if (!sheet) return;
+    const active = document.activeElement;
+    if (!active || !sheet.contains(active)) return;
+    if (!active.matches?.('input, textarea, select, [contenteditable="true"]')) return;
+    [0, 90, 220].forEach((delay) => {
+      window.setTimeout(() => {
+        if (!active.isConnected || !_projectOpenKeyboardSheet()?.contains(active)) return;
+        active.scrollIntoView?.({ block: 'center', inline: 'nearest' });
+      }, delay);
+    });
+  }
+
+  function _installProjectMobileKeyboardGuards() {
+    if (projectMobileKeyboardGuardBound) return;
+    projectMobileKeyboardGuardBound = true;
+    [projectTargetEditorOverlay, projectEntityEditorOverlay, projectPackageWizardOverlay].forEach((overlay) => {
+      overlay?.addEventListener('focusin', () => _syncProjectMobileFocusedField());
+    });
+    if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
+      window.visualViewport.addEventListener('resize', () => _syncProjectMobileFocusedField());
+    }
+  }
+
   function _closeProjectPackageManifest() {
     if (!projectPackageManifestOverlay) return;
     projectPackageManifestOverlay.classList.add('u-hidden');
     projectPackageManifestOverlay.classList.remove('open');
     projectPackageManifestOverlay.setAttribute('aria-hidden', 'true');
     if (projectPackageManifestJson) projectPackageManifestJson.textContent = '';
+    _syncProjectWorkspaceNestedSuppression();
   }
 
   function isProjectPackageManifestOpen() {
@@ -1417,9 +1519,10 @@
     projectPackageManifestOverlay.classList.remove('u-hidden');
     projectPackageManifestOverlay.classList.add('open');
     projectPackageManifestOverlay.setAttribute('aria-hidden', 'false');
-    window.setTimeout(() => {
-      projectPackageManifestOverlay.querySelector('.project-package-manifest-close')?.focus();
-    }, 0);
+    _focusProjectNestedSheet(
+      projectPackageManifestOverlay,
+      projectPackageManifestOverlay.querySelector('.project-package-manifest-close'),
+    );
   }
 
   async function _previewProjectArtifact(projectId, artifactId) {
@@ -1532,6 +1635,7 @@
       projectEntityEditorForm.dataset.entityType = '';
       projectEntityEditorForm.dataset.entityId = '';
     }
+    _syncProjectWorkspaceNestedSuppression();
   }
 
   function _openProjectEntityEditor(projectId, entityType, entity, options = {}) {
@@ -1561,7 +1665,8 @@
     projectEntityEditorOverlay.classList.remove('u-hidden');
     projectEntityEditorOverlay.classList.add('open');
     projectEntityEditorOverlay.setAttribute('aria-hidden', 'false');
-    window.setTimeout(() => projectEntityLabelsInput.focus(), 0);
+    _installProjectMobileKeyboardGuards();
+    _focusProjectNestedSheet(projectEntityEditorOverlay, projectEntityLabelsInput);
   }
 
   global.openEntityMetadataEditor = function openEntityMetadataEditor(entityType, entity, options = {}) {
@@ -1577,6 +1682,7 @@
     projectPackageWizardOverlay.classList.remove('open');
     projectPackageWizardOverlay.setAttribute('aria-hidden', 'true');
     if (projectPackageWizardBody) projectPackageWizardBody.replaceChildren();
+    _syncProjectWorkspaceNestedSuppression();
   }
 
   function _renderProjectPackageWizardModal({ focus = false, scrollTop = null } = {}) {
@@ -1594,6 +1700,7 @@
     projectPackageWizardOverlay.classList.remove('u-hidden');
     projectPackageWizardOverlay.classList.add('open');
     projectPackageWizardOverlay.setAttribute('aria-hidden', 'false');
+    _installProjectMobileKeyboardGuards();
     if (typeof global.enhanceAppSelects === 'function') {
       global.enhanceAppSelects(projectPackageWizardBody);
     }
@@ -1602,9 +1709,12 @@
       if (scrollBody) scrollBody.scrollTop = Number(scrollTop);
     }
     if (focus) {
-      window.setTimeout(() => {
-        projectPackageWizardBody.querySelector('[data-project-action="package-wizard-cancel"]')?.focus();
-      }, 0);
+      _focusProjectNestedSheet(
+        projectPackageWizardOverlay,
+        projectPackageWizardBody.querySelector('[data-project-action="package-wizard-cancel"]'),
+      );
+    } else {
+      _syncProjectWorkspaceNestedSuppression();
     }
   }
 
@@ -2861,7 +2971,8 @@
     projectTargetEditorOverlay.classList.remove('u-hidden');
     projectTargetEditorOverlay.classList.add('open');
     projectTargetEditorOverlay.setAttribute('aria-hidden', 'false');
-    window.setTimeout(() => projectTargetValueInput?.focus(), 0);
+    _installProjectMobileKeyboardGuards();
+    _focusProjectNestedSheet(projectTargetEditorOverlay, projectTargetValueInput);
   }
 
   function _closeProjectTargetEditor({ clear = true } = {}) {
@@ -2870,6 +2981,7 @@
       projectTargetEditorOverlay.classList.remove('open');
       projectTargetEditorOverlay.setAttribute('aria-hidden', 'true');
     }
+    _syncProjectWorkspaceNestedSuppression();
     if (clear) {
       projectWorkspaceEditingTargetId = '';
       if (projectTargetCreateForm) {
@@ -4087,7 +4199,7 @@
     menu.dataset.projectMobileAction = 'project-menu';
     menu.dataset.projectId = projectId;
     menu.setAttribute('aria-label', `Project actions for ${_projectDisplayName(project)}`);
-    menu.textContent = '⋮';
+    menu.textContent = '☰';
     _bindProjectRuntimePressable(menu);
     const chevron = document.createElement('span');
     chevron.className = 'project-mobile-chevron';
@@ -4191,23 +4303,16 @@
     const statusText = project && String(project.id || '') === activeId
       ? 'active'
       : (project && _projectIsArchived(project) ? 'archived' : '');
+    const statusSlot = document.createElement('div');
+    statusSlot.className = 'project-mobile-detail-status-slot';
     if (statusText) {
       const status = document.createElement('span');
       status.className = 'project-workspace-status' + (statusText === 'active' ? ' is-active' : '');
       status.textContent = statusText;
-      titleWrap.appendChild(status);
+      statusSlot.appendChild(status);
     }
 
-    const menu = document.createElement('button');
-    menu.type = 'button';
-    menu.className = 'btn btn-ghost btn-compact project-mobile-menu-btn';
-    menu.dataset.projectMobileAction = 'project-menu';
-    if (project && project.id) menu.dataset.projectId = String(project.id);
-    menu.setAttribute('aria-label', project ? `Project actions for ${_projectDisplayName(project)}` : 'Project actions');
-    menu.textContent = '⋮';
-    _bindProjectRuntimePressable(menu);
-
-    projectMobileDetailTopbar.append(back, titleWrap, menu);
+    projectMobileDetailTopbar.append(back, titleWrap, statusSlot);
   }
 
   function _renderProjectMobileTabs(projectId, summary) {
@@ -4238,12 +4343,55 @@
     _syncProjectMobileActiveTabScroll();
   }
 
+  function _projectMobileNotePreviewNode(note) {
+    const fullNote = String(note || '');
+    const preview = fullNote.length > PROJECT_MOBILE_NOTE_PREVIEW_LIMIT
+      ? `${fullNote.slice(0, PROJECT_MOBILE_NOTE_PREVIEW_LIMIT).trimEnd()}...`
+      : fullNote;
+    const wrap = document.createElement('div');
+    wrap.className = 'project-mobile-note-preview';
+    const text = document.createElement('span');
+    text.className = 'project-mobile-note-preview-text';
+    text.textContent = preview;
+    wrap.appendChild(text);
+    if (fullNote.length > PROJECT_MOBILE_NOTE_PREVIEW_LIMIT) {
+      let expanded = false;
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'btn btn-ghost btn-compact project-mobile-note-toggle';
+      toggle.dataset.projectMobileNoteToggle = '1';
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.textContent = 'Expand';
+      toggle.addEventListener('click', () => {
+        expanded = !expanded;
+        text.textContent = expanded ? fullNote : preview;
+        toggle.textContent = expanded ? 'Collapse' : 'Expand';
+        toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+      });
+      _bindProjectRuntimePressable(toggle);
+      wrap.appendChild(toggle);
+    }
+    return wrap;
+  }
+
   function _projectMobileSummaryPanel(project, summary) {
     const panel = document.createElement('section');
     panel.className = 'project-mobile-detail-panel';
     const heading = document.createElement('h3');
     heading.textContent = 'Summary';
     panel.appendChild(heading);
+    const projectId = String(project && project.id || '');
+    if (projectId) {
+      const menu = document.createElement('button');
+      menu.type = 'button';
+      menu.className = 'btn btn-ghost btn-compact project-mobile-summary-menu-btn';
+      menu.dataset.projectMobileAction = 'project-menu';
+      menu.dataset.projectId = projectId;
+      menu.setAttribute('aria-label', `Project actions for ${_projectDisplayName(project)}`);
+      menu.textContent = '☰';
+      _bindProjectRuntimePressable(menu);
+      panel.appendChild(menu);
+    }
     const meta = document.createElement('div');
     meta.className = 'project-mobile-summary-grid';
     [
@@ -4276,10 +4424,7 @@
     }
     const note = _entityNoteBody(project);
     if (note) {
-      const noteEl = document.createElement('p');
-      noteEl.className = 'project-mobile-note-preview';
-      noteEl.textContent = note;
-      panel.appendChild(noteEl);
+      panel.appendChild(_projectMobileNotePreviewNode(note));
     }
     return panel;
   }
@@ -4314,7 +4459,7 @@
     btn.setAttribute('aria-label', label || 'Row actions');
     btn.dataset.projectMobileAction = 'action-sheet';
     btn.dataset.projectId = String(projectId || '');
-    btn.textContent = '⋮';
+    btn.textContent = '☰';
     btn._projectMobileActionSheetLabel = label || 'Actions';
     btn._projectMobileActionSheetItems = filteredActions;
     _bindProjectRuntimePressable(btn);
@@ -4335,6 +4480,11 @@
     sheet.setAttribute('role', 'dialog');
     sheet.setAttribute('aria-modal', 'true');
     sheet.setAttribute('aria-labelledby', 'project-mobile-action-sheet-title');
+    const grab = document.createElement('div');
+    grab.className = 'sheet-grab gesture-handle';
+    grab.setAttribute('role', 'button');
+    grab.tabIndex = 0;
+    grab.setAttribute('aria-label', 'Close project action sheet');
     const header = document.createElement('div');
     header.className = 'project-mobile-action-sheet-header';
     const title = document.createElement('h2');
@@ -4343,7 +4493,7 @@
     header.appendChild(title);
     const items = document.createElement('div');
     items.className = 'project-mobile-action-sheet-items';
-    sheet.append(header, items);
+    sheet.append(grab, header, items);
     overlay.appendChild(sheet);
     (projectWorkspaceModal || document.body).appendChild(overlay);
 
@@ -4428,9 +4578,13 @@
     projectMobileActionSheetReturnFocus = returnFocus || document.activeElement || null;
     if (projectMobileActionSheetTitle) projectMobileActionSheetTitle.textContent = label || 'Actions';
     projectMobileActionSheetItems.replaceChildren();
+    projectMobileActionSheetItems.scrollTop = 0;
     filteredActions.forEach(item => {
       projectMobileActionSheetItems.appendChild(_projectMobileActionSheetItem(projectId, item));
     });
+    if (typeof global.enhanceAppSelects === 'function') {
+      global.enhanceAppSelects(projectMobileActionSheetItems);
+    }
     projectMobileActionSheetOverlay.classList.remove('u-hidden');
     projectMobileActionSheetOverlay.classList.add('open');
     projectMobileActionSheetOverlay.setAttribute('aria-hidden', 'false');
@@ -4504,6 +4658,11 @@
     sheet.setAttribute('role', 'dialog');
     sheet.setAttribute('aria-modal', 'true');
     sheet.setAttribute('aria-labelledby', 'project-mobile-compare-title');
+    const grab = document.createElement('div');
+    grab.className = 'sheet-grab gesture-handle';
+    grab.setAttribute('role', 'button');
+    grab.tabIndex = 0;
+    grab.setAttribute('aria-label', 'Close run comparison');
     const header = document.createElement('div');
     header.className = 'project-mobile-compare-header';
     const title = document.createElement('h2');
@@ -4514,7 +4673,7 @@
     body.className = 'project-mobile-compare-body nice-scroll';
     const footer = document.createElement('div');
     footer.className = 'project-mobile-compare-footer';
-    sheet.append(header, body, footer);
+    sheet.append(grab, header, body, footer);
     overlay.appendChild(sheet);
     (projectWorkspaceModal || document.body).appendChild(overlay);
 
@@ -4710,12 +4869,13 @@
       metaEl.textContent = String(meta || '');
       main.appendChild(metaEl);
     }
-    if (detail) {
+    const detailLines = Array.isArray(detail) ? detail : (detail ? [detail] : []);
+    detailLines.filter(line => String(line || '').trim()).forEach((line) => {
       const detailEl = document.createElement('div');
       detailEl.className = 'project-mobile-content-detail';
-      detailEl.textContent = String(detail || '');
+      detailEl.textContent = String(line || '');
       main.appendChild(detailEl);
-    }
+    });
     if (Array.isArray(chips) && chips.length) {
       const chipWrap = document.createElement('div');
       chipWrap.className = 'project-mobile-row-chips';
@@ -4734,7 +4894,7 @@
       const badgeEl = document.createElement('span');
       badgeEl.className = `project-mobile-row-badge is-${String(badge || '').trim().toLowerCase()}`;
       badgeEl.textContent = String(badge || '');
-      accessoryWrap.append(badgeEl, accessory);
+      accessoryWrap.append(accessory, badgeEl);
       row.appendChild(accessoryWrap);
     } else if (accessory) row.appendChild(accessory);
     else if (badge) {
@@ -4761,35 +4921,6 @@
   function _renderProjectMobileDetailsTab(project, summary) {
     const fragment = document.createDocumentFragment();
     fragment.appendChild(_projectMobileSummaryPanel(project, summary));
-
-    const labels = _entityLabelValues(project);
-    const labelsPanel = _projectMobilePanel('Labels');
-    if (labels.length) {
-      const chips = document.createElement('div');
-      chips.className = 'project-mobile-label-chips';
-      labels.forEach((label) => {
-        const chip = document.createElement('span');
-        chip.className = _entityMetadataChipClass('label');
-        chip.textContent = label;
-        chips.appendChild(chip);
-      });
-      labelsPanel.appendChild(chips);
-    } else {
-      labelsPanel.appendChild(_emptyProjectPanel('No project labels yet.'));
-    }
-    fragment.appendChild(labelsPanel);
-
-    const notesPanel = _projectMobilePanel('Notes');
-    const note = _entityNoteBody(project);
-    if (note) {
-      const noteEl = document.createElement('p');
-      noteEl.className = 'project-mobile-note-preview';
-      noteEl.textContent = note;
-      notesPanel.appendChild(noteEl);
-    } else {
-      notesPanel.appendChild(_emptyProjectPanel('No project notes yet.'));
-    }
-    fragment.appendChild(notesPanel);
 
     const targets = _projectTargetItems(summary);
     const projectId = String(project.id || '');
@@ -4867,6 +4998,10 @@
       const artifactCount = _projectRunArtifactCount(summary, runId);
       const countParts = [`${findingCount} finding${findingCount === 1 ? '' : 's'}`];
       if (_projectArtifactsVisible()) countParts.push(`${artifactCount} artifact${artifactCount === 1 ? '' : 's'}`);
+      const runDetailLines = [
+        `${exit} · ${Number(run.output_line_count || 0)} output lines`,
+        countParts.join(' · '),
+      ];
       const actions = [
         { label: 'Edit metadata', action: 'edit-run-metadata', dataset: { runId, runCommand: run.command } },
         { label: 'Restore', action: 'open-run', dataset: { runId, runCommand: run.command } },
@@ -4875,7 +5010,7 @@
       list.appendChild(_projectMobileContentRow({
         title: run.command || runId || 'Run',
         meta: _formatProjectDate(run.started),
-        detail: `${exit} · ${Number(run.output_line_count || 0)} output lines · ${countParts.join(' · ')}`,
+        detail: runDetailLines,
         chips: _entityMetadataChips(run),
         className: 'project-mobile-run-row',
         action: runId ? {
@@ -4975,8 +5110,8 @@
             },
           } : null,
           accessory: findingId ? _projectMobileActionMenu(projectId, `Finding actions for ${finding.title || findingId}`, [
-            { label: 'Edit metadata', action: 'edit-finding-metadata', dataset: { findingId } },
             { node: _projectMobileFindingReviewNode(finding, projectId) },
+            { label: 'Edit metadata', action: 'edit-finding-metadata', dataset: { findingId } },
           ]) : null,
         }));
       });
@@ -5042,7 +5177,7 @@
         body.appendChild(_projectMobileContentRow({
           title: artifact.display_name || artifact.workspace_path || 'Artifact',
           meta: artifact.workspace_path || '',
-          detail: _projectArtifactDetail(artifact),
+          detail: _projectArtifactDetailLines(artifact),
           badge: _projectArtifactStatusLabel(artifact),
           chips: _entityMetadataChips(artifact),
           action: available && artifactId ? {
@@ -5094,9 +5229,8 @@
       const packageId = String(pkg.id || '');
       const counts = _projectPackageCountsText(pkg);
       const updated = _formatProjectDate(pkg.updated);
-      const detail = [pkg.description || '', counts, updated ? `Updated ${updated}` : '']
-        .filter(Boolean)
-        .join(' · ');
+      const countLine = [pkg.description || '', counts].filter(Boolean).join(' · ');
+      const detail = [countLine, updated ? `Updated ${updated}` : ''].filter(Boolean);
       list.appendChild(_projectMobileContentRow({
         title: pkg.name || packageId || 'Package',
         meta: _projectPackageMetaText(pkg),
@@ -6246,14 +6380,21 @@
     _setProjectWorkspaceMessage('');
     _setCachedFindingReviewState(projectId, findingId, reviewState);
     _renderProjectExplorer();
+    if (projectMobileView === 'detail' && projectWorkspaceTab === 'findings' && String(projectWorkspaceSelectedId || '') === projectId) {
+      _renderProjectMobileDetail();
+    }
     try {
       await _projectWorkspaceRequest(`/findings/${encodeURIComponent(findingId)}/review`, {
         method: 'PUT',
         body: JSON.stringify({ review_state: reviewState }),
       });
+      control.dataset.previousReviewState = reviewState;
     } catch (err) {
       _setCachedFindingReviewState(projectId, findingId, previousReviewState);
       _renderProjectExplorer();
+      if (projectMobileView === 'detail' && projectWorkspaceTab === 'findings' && String(projectWorkspaceSelectedId || '') === projectId) {
+        _renderProjectMobileDetail();
+      }
       _setProjectWorkspaceMessage(err.message || 'Could not update finding review state.', { error: true });
     }
   });

@@ -2569,17 +2569,36 @@ body.mobile-terminal-mode .output-follow-btn {
 .project-mobile-affordances {
   display: flex;
   grid-area: affordances;
+  flex-direction: column;
   align-items: center;
   gap: 4px;
   align-self: stretch;
+  justify-content: flex-start;
 }
 
+.project-mobile-summary-menu-btn,
 .project-mobile-menu-btn {
-  width: 34px;
-  min-width: 34px;
-  padding-inline: 0;
-  font-size: 18px;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  min-width: 42px;
+  min-height: 42px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  font-size: 28px;
+  font-weight: 700;
   line-height: 1;
+}
+
+.project-mobile-summary-menu-btn:hover:not([aria-disabled="true"]):not(:disabled),
+.project-mobile-menu-btn:hover:not([aria-disabled="true"]):not(:disabled),
+.project-mobile-row-menu-trigger:hover:not([aria-disabled="true"]):not(:disabled),
+.project-mobile-summary-menu-btn:active:not([aria-disabled="true"]):not(:disabled),
+.project-mobile-menu-btn:active:not([aria-disabled="true"]):not(:disabled),
+.project-mobile-row-menu-trigger:active:not([aria-disabled="true"]):not(:disabled) {
+  border-color: transparent;
+  background: transparent;
 }
 
 .project-mobile-chevron {
@@ -2606,7 +2625,7 @@ body.mobile-terminal-mode .output-follow-btn {
 
 .project-mobile-detail-topbar {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
@@ -2617,6 +2636,18 @@ body.mobile-terminal-mode .output-follow-btn {
   display: flex;
   align-items: baseline;
   gap: 8px;
+  justify-self: center;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.project-mobile-back-btn {
+  justify-self: start;
+}
+
+.project-mobile-detail-status-slot {
+  display: flex;
+  justify-self: end;
   min-width: 0;
 }
 
@@ -2771,6 +2802,7 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 .project-mobile-detail-panel {
+  position: relative;
   display: grid;
   gap: 10px;
   padding: 12px;
@@ -2822,6 +2854,23 @@ body.mobile-terminal-mode .output-follow-btn {
   margin: 0;
   color: var(--muted);
   overflow-wrap: anywhere;
+}
+
+.project-mobile-note-preview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.project-mobile-note-preview-text {
+  min-width: 0;
+}
+
+.project-mobile-note-toggle {
+  min-height: 22px;
+  padding: 2px 7px;
+  font-size: 10px;
 }
 
 .project-mobile-tab-toolbar,
@@ -2966,9 +3015,13 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 .project-mobile-row-accessory {
-  display: grid;
-  justify-items: end;
-  gap: 6px;
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  align-items: flex-end;
+  align-content: start;
+  justify-content: space-between;
+  gap: 5px;
 }
 
 .project-mobile-row-menu {
@@ -2977,10 +3030,16 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 .project-mobile-row-menu-trigger {
-  width: 34px;
-  min-width: 34px;
-  padding-inline: 0;
-  font-size: 18px;
+  width: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  margin-top: -6px;
+  margin-right: -6px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  font-size: 24px;
+  font-weight: 700;
   line-height: 1;
   list-style: none;
 }
@@ -3060,6 +3119,18 @@ body.mobile-terminal-mode .output-follow-btn {
   gap: 5px;
   color: var(--muted);
   font-size: 11px;
+}
+
+.project-mobile-menu-field .app-select {
+  width: 100%;
+  max-width: 100%;
+}
+
+.project-mobile-action-sheet .app-select-menu {
+  position: static;
+  max-height: min(220px, 38svh);
+  margin-top: 6px;
+  overflow-y: auto;
 }
 
 .project-mobile-group {

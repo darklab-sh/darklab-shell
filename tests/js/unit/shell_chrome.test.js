@@ -49,6 +49,7 @@ function loadShellChrome({
   appConfig = { workspace_enabled: true },
   fetchAndRenderHistoryComparison = vi.fn(),
   bindDismissible = null,
+  bindMobileSheet = null,
   bindPressable = (el, options = {}) => {
     if (el?.dataset) el.dataset.pressableBound = '1'
     if (typeof options.onActivate === 'function') {
@@ -205,6 +206,7 @@ function loadShellChrome({
     showToast,
     fetchAndRenderHistoryComparison,
     bindDismissible,
+    bindMobileSheet,
     enhanceAppSelects,
     syncAppSelect,
   }
@@ -341,6 +343,7 @@ function loadShellChrome({
     showConfirm,
     showToast,
     bindDismissible,
+    bindMobileSheet,
     openProjectWorkspace: global.openProjectWorkspace,
     refreshProjectWorkspace: global.refreshProjectWorkspace,
     enhanceAppSelects,
@@ -578,6 +581,7 @@ describe('shell chrome project workspace', () => {
       expect(document.getElementById('project-mobile-body').textContent).toContain('Archived (1)')
       expect(document.getElementById('project-mobile-body').textContent).not.toContain('zulu.test')
       expect(document.querySelector('[data-project-id="project-1"]').closest('.project-mobile-row').textContent).toContain('+1')
+      expect(document.querySelector('[data-project-mobile-action="project-menu"][data-project-id="project-1"]').textContent).toBe('☰')
 
       const findingsChip = document.querySelector('[data-project-id="project-1"][data-project-mobile-tab="findings"]')
       findingsChip.click()
@@ -604,6 +608,9 @@ describe('shell chrome project workspace', () => {
       await tick()
       expect(document.getElementById('project-mobile-detail-view').classList.contains('u-hidden')).toBe(false)
       expect(document.getElementById('project-mobile-detail-topbar').textContent).toContain('darklab.sh')
+      const summaryMenu = document.querySelector('.project-mobile-summary-menu-btn')
+      expect(summaryMenu.dataset.projectId).toBe('project-2')
+      expect(summaryMenu.textContent).toBe('☰')
     } finally {
       document.body.classList.remove('mobile-terminal-mode')
     }
@@ -713,6 +720,7 @@ describe('shell chrome project workspace', () => {
       expect(document.getElementById('project-mobile-list-view').classList.contains('u-hidden')).toBe(true)
       expect(document.getElementById('project-mobile-detail-view').classList.contains('u-hidden')).toBe(false)
       expect(document.getElementById('project-mobile-detail-topbar').textContent).toContain('darklab.sh')
+      expect(document.querySelector('.project-mobile-summary-menu-btn')?.dataset.projectId).toBe('project-1')
       expect(document.getElementById('project-mobile-tabs').textContent).toContain('999+')
       expect(document.getElementById('project-mobile-tabs').textContent).not.toContain('Artifacts')
 
@@ -732,12 +740,13 @@ describe('shell chrome project workspace', () => {
 
   it('renders mobile project tab content with mobile row actions', async () => {
     document.body.classList.add('mobile-terminal-mode')
+    const projectNote = 'Project note from mobile test with extra handoff context, timeline notes, owner follow-up, and validation details.'
     const project = {
       id: 'project-1',
       name: 'darklab.sh',
       status: 'active',
       labels: [{ label: 'client' }, { label: 'handoff' }],
-      note: { body: 'Project note from mobile test' },
+      note: { body: projectNote },
     }
     const summary = {
       project,
@@ -768,6 +777,7 @@ describe('shell chrome project workspace', () => {
         kind: 'output',
         content_type: 'text/plain',
         byte_size: 24,
+        created: '2026-05-09T12:02:00Z',
         file_status: 'available',
         file_available: true,
         labels: [{ label: 'evidence' }],
@@ -780,6 +790,7 @@ describe('shell chrome project workspace', () => {
         kind: 'output',
         content_type: 'text/plain',
         byte_size: 12,
+        created: '2026-05-09T12:03:00Z',
         file_status: 'missing',
         file_available: false,
         file_status_detail: 'workspace file is missing',
@@ -790,6 +801,7 @@ describe('shell chrome project workspace', () => {
         description: 'Ready for handoff',
         redaction_mode: 'raw',
         include_artifacts: true,
+        updated: '2026-05-09T12:04:00Z',
         labels: [{ label: 'handoff' }],
         note: { body: 'Package note' },
         manifest: {
@@ -842,7 +854,27 @@ describe('shell chrome project workspace', () => {
       await tick()
 
       const detailBody = document.getElementById('project-mobile-detail-body')
-      expect(detailBody.textContent).toContain('Project note from mobile test')
+      const summaryPanel = detailBody.querySelector('.project-mobile-detail-panel')
+      const summaryMenu = summaryPanel.querySelector('.project-mobile-summary-menu-btn')
+      expect(summaryMenu.dataset.projectId).toBe('project-1')
+      expect(summaryMenu.textContent).toBe('☰')
+      const summaryNote = summaryPanel.querySelector('.project-mobile-note-preview')
+      const summaryNoteToggle = summaryPanel.querySelector('[data-project-mobile-note-toggle]')
+      expect(summaryNote.textContent).toContain(`${projectNote.slice(0, 100).trimEnd()}...`)
+      expect(summaryNote.textContent).not.toContain('validation details')
+      expect(summaryNoteToggle.textContent).toBe('Expand')
+      expect(summaryNoteToggle.getAttribute('aria-expanded')).toBe('false')
+      summaryNoteToggle.click()
+      expect(summaryNote.textContent).toContain(projectNote)
+      expect(summaryNoteToggle.textContent).toBe('Collapse')
+      expect(summaryNoteToggle.getAttribute('aria-expanded')).toBe('true')
+      summaryNoteToggle.click()
+      expect(summaryNote.textContent).not.toContain('validation details')
+      const detailPanelHeadings = [...detailBody.querySelectorAll('.project-mobile-detail-panel > h3')]
+        .map(item => item.textContent)
+      expect(detailPanelHeadings).not.toContain('Labels')
+      expect(detailPanelHeadings).not.toContain('Notes')
+      expect(detailBody.querySelectorAll('.project-mobile-note-preview')).toHaveLength(1)
       expect(detailBody.textContent).toContain('darklab.sh')
       expect(detailBody.querySelector('[data-project-action="new-target"]')).not.toBeNull()
 
@@ -851,7 +883,12 @@ describe('shell chrome project workspace', () => {
       expect(detailBody.textContent).toContain('nmap darklab.sh')
       expect(detailBody.textContent).toContain('1 finding')
       expect(detailBody.textContent).toContain('2 artifacts')
+      const runDetailLines = [...detailBody.querySelectorAll('.project-mobile-run-row .project-mobile-content-detail')]
+        .map(item => item.textContent)
+      expect(runDetailLines).toContain('exit 0 · 8 output lines')
+      expect(runDetailLines).toContain('1 finding · 2 artifacts')
       const runMenu = detailBody.querySelector('.project-mobile-row-menu-trigger')
+      expect(runMenu.textContent).toBe('☰')
       runMenu.click()
       await tick()
       const actionSheet = document.getElementById('project-mobile-action-sheet-overlay')
@@ -872,7 +909,19 @@ describe('shell chrome project workspace', () => {
       expect(detailBody.querySelector('[data-project-action="open-finding"]')).not.toBeNull()
       detailBody.querySelector('.project-mobile-row-menu-trigger').click()
       await tick()
-      expect(actionSheet.querySelector('[data-project-review-state]')).not.toBeNull()
+      const reviewSelect = actionSheet.querySelector('[data-project-review-state]')
+      expect(reviewSelect).not.toBeNull()
+      expect(shell.enhanceAppSelects).toHaveBeenCalledWith(actionSheet.querySelector('.project-mobile-action-sheet-items'))
+      expect(detailBody.querySelector('.project-mobile-row-badge')?.textContent).toBe('triaged')
+      reviewSelect.value = 'reviewed'
+      reviewSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      await tick()
+      await tick()
+      expect(apiFetch).toHaveBeenCalledWith('/findings/finding-1/review', expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ review_state: 'reviewed' }),
+      }))
+      expect(detailBody.querySelector('.project-mobile-row-badge')?.textContent).toBe('reviewed')
       actionSheet.click()
       await tick()
       expect(shell.enhanceAppSelects).toHaveBeenCalledWith(detailBody)
@@ -889,6 +938,10 @@ describe('shell chrome project workspace', () => {
       expect(detailBody.textContent).toContain('available')
       expect(detailBody.textContent).toContain('missing')
       expect(detailBody.querySelector('.project-mobile-row-badge.is-missing')?.textContent).toBe('missing')
+      const artifactDetailLines = [...detailBody.querySelectorAll('.project-mobile-content-detail')]
+        .map(item => item.textContent)
+      expect(artifactDetailLines).toContain('output · text/plain')
+      expect(artifactDetailLines).toContain('workspace file is missing')
       detailBody.querySelector('.project-mobile-row-menu-trigger').click()
       await tick()
       expect(actionSheet.querySelector('[data-project-action="artifact-preview"]')).not.toBeNull()
@@ -902,6 +955,11 @@ describe('shell chrome project workspace', () => {
       await tick()
       expect(detailBody.textContent).toContain('Evidence Package')
       expect(detailBody.textContent).toContain('1 run')
+      const packageDetailLines = [...detailBody.querySelectorAll('.project-mobile-content-detail')]
+        .map(item => item.textContent)
+      expect(packageDetailLines).toContain('Ready for handoff · 1 run · 1 finding · 1 artifact · 1 target')
+      expect(packageDetailLines.some(text => text.startsWith('Updated '))).toBe(true)
+      expect(packageDetailLines.some(text => text.includes('· Updated '))).toBe(false)
       expect(detailBody.querySelector('[data-project-action="package-wizard-open"]')).not.toBeNull()
       detailBody.querySelector('.project-mobile-row-menu-trigger').click()
       await tick()
@@ -2236,6 +2294,7 @@ describe('shell chrome project workspace', () => {
     })
     const showWorkspaceViewer = vi.fn()
     const fetchAndRenderHistoryComparison = vi.fn()
+    const bindMobileSheet = vi.fn()
     let objectUrlCount = 0
     globalThis.URL.createObjectURL = vi.fn(() => `blob:project-${objectUrlCount += 1}`)
     globalThis.URL.revokeObjectURL = vi.fn()
@@ -2256,6 +2315,7 @@ describe('shell chrome project workspace', () => {
       showConfirm,
       fetchAndRenderHistoryComparison,
       bindDismissible,
+      bindMobileSheet,
     })
 
     document.dispatchEvent(new CustomEvent('app:project-target-discovered', { detail: { project_id: 'project-1', count: 2 } }))
@@ -2280,6 +2340,15 @@ describe('shell chrome project workspace', () => {
         closeButtons: [document.querySelector('.project-package-manifest-close')],
       }),
     )
+    ;[
+      'project-target-editor-modal',
+      'project-package-wizard-modal',
+      'project-package-manifest-modal',
+      'project-entity-editor-modal',
+    ].forEach((id) => {
+      const modal = document.getElementById(id)
+      expect(bindMobileSheet).toHaveBeenCalledWith(modal, expect.objectContaining({ onClose: expect.any(Function) }))
+    })
     expectProjectPressablesBound([
       '.project-workspace-row',
       '.project-explorer-tab',
