@@ -224,7 +224,7 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/history/insights` | Returns compact visual history data for Status Monitor constellation, heatmap, ticker, and command mix widgets. |
 | `GET` | `/history/active` | Returns active-run metadata and telemetry for reload recovery and the Status Monitor. |
 | `GET` | `/history/<run_id>/compare-candidates` | Returns ranked previous current-session runs for the History drawer's compare launcher. |
-| `GET` | `/history/compare` | Compares two current-session runs and returns metadata deltas plus bounded added/removed output lines. |
+| `GET` | `/history/compare` | Compares two current-session runs, optionally scoped by `project_id` / `baseline_label`, and returns metadata deltas, bounded added/removed output lines, and finding/artifact object diffs. |
 | `GET` | `/history/<run_id>` | Serves an implicit-bearer styled run permalink, or raw JSON with `?json`; uses full-output artifacts when available unless `?preview=1` is set. |
 | `DELETE` | `/history/<run_id>` | Deletes one current-session run and its matching full-output artifact. |
 | `POST` | `/share` | Saves a tab snapshot, optionally applies share redaction, and returns a snapshot permalink URL. |
@@ -283,7 +283,6 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/projects/<project_id>/artifacts/<artifact_id>/preview` | Returns text preview content for one project-linked run artifact. |
 | `GET` | `/projects/<project_id>/artifacts/<artifact_id>/download` | Downloads one available project-linked run artifact from the workspace. |
 | `GET` | `/projects/<project_id>/findings` | Lists findings reached through project-linked runs, with project filters. |
-| `GET` | `/projects/<project_id>/compare` | Compares findings and workspace artifacts between two project-linked runs, optionally selecting a baseline by run label. Each side is capped at 5,000 findings and 5,000 artifacts; capped responses include `truncated` with side/type flags and `item_limit`. |
 | `GET` | `/entities/run/<run_id>/findings` | Lists persisted findings captured for a current-session run. |
 | `PUT` | `/findings/<finding_id>/review` | Updates the review state for one current-session finding. |
 | `GET` | `/entities/<entity_type>/<path:entity_id>/labels` | Lists current-session labels for a supported entity. |

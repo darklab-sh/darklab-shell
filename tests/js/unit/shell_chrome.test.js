@@ -1093,7 +1093,7 @@ describe('shell chrome project workspace', () => {
       await tick()
 
       expect(fetchAndRenderHistoryComparison).toHaveBeenCalledWith('run-left', 'baseline:baseline', {
-        url: '/projects/project-1/compare?left_run_id=run-left&baseline_label=baseline',
+        url: '/history/compare?left=run-left&project_id=project-1&baseline_label=baseline',
       })
       expect(overlay.classList.contains('open')).toBe(false)
     } finally {
@@ -2649,7 +2649,7 @@ describe('shell chrome project workspace', () => {
       'run-1',
       'run-2',
       {
-        url: '/projects/project-1/compare?left_run_id=run-1&right_run_id=run-2',
+        url: '/history/compare?left=run-1&project_id=project-1&right=run-2',
       },
     )
     fetchAndRenderHistoryComparison.mockClear()
@@ -2676,7 +2676,7 @@ describe('shell chrome project workspace', () => {
       'run-2',
       'baseline:baseline',
       {
-        url: '/projects/project-1/compare?left_run_id=run-2&baseline_label=baseline',
+        url: '/history/compare?left=run-2&project_id=project-1&baseline_label=baseline',
       },
     )
     expect(document.querySelector('[data-project-action="filter-run"][data-run-id="run-1"]')).not.toBeNull()

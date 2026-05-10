@@ -87,93 +87,191 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - `/projects/<id>/compare` is removed in v1 (no deprecation window — it is browser-only and trusted, with no third-party consumers per the existing TODO note about partial PATCH routes). `compare_project_runs()` in `app/project_workspace.py` shrinks to a thin helper that the unified route calls when `project_id` is present, and `app/blueprints/projects.py:520-533` deletes the route handler.
     - Frontend convergence: `_renderProjectRunCompareControls` (`shell_chrome.js:3245-3304`) calls the same `fetchAndRenderHistoryComparison(leftId, rightId, options)` entry point used by the history drawer, passing `options.url = '/history/compare?...&project_id=…&baseline_label=…'`. The compare overlay (`#history-compare-overlay`) is the single rendered surface for both flows. The "history-" naming on the overlay/CSS classes stays — renaming `history-compare-*` → `compare-*` is out of scope and would touch every CSS rule, JS helper, and test fixture for no behavior gain.
     - The lazy equal-line endpoint follows the same rule: only `/history/compare/lines` exists, with optional `project_id` for parity. There is no `/projects/<id>/compare/lines`.
-  - **v1 — hunk-based backend, split-pane diff, folded context, counts banner**
-    - **Display caps and lazy-load strategy.** Existing input caps stay (20,000 non-chrome lines / 3 MiB UTF-8 per side, 4,000-char per-line pairing guardrail, 5,000 findings + 5,000 artifacts per side). The split-pane redesign adds three new display caps tuned so the modal stays comfortable up to ~3,000–4,000 rendered DOM rows on mid-range hardware:
-      - `COMPARE_MAX_CHANGED_LINES = 2000` — single budget across `replace`/`insert`/`delete` hunks (replaces the prior 500/section cap); `equal` lines never count against it. Sized so a maximally-changed 20K-line input still surfaces 10% of changes before truncation, which is enough to draw a useful conclusion before the omission notice.
-      - `COMPARE_MAX_HUNKS = 3000` — caps the count of distinct change blocks so noisy scanner outputs (`nuclei`, `ffuf`, `masscan`) cannot create thousands of single-line `replace` containers in the DOM. Surplus hunks roll up into a single trailing `… N more change hunks omitted` placeholder rendered by the frontend.
-      - `COMPARE_INLINE_EQUAL_CONTEXT = 3` — fixed ±3 inline equal-line context window above and below each change hunk. Equal runs shorter than `2 * COMPARE_INLINE_EQUAL_CONTEXT` (i.e., < 6 lines) inline fully; longer runs collapse to a fold and lazy-load on expand.
-      - `COMPARE_LINE_DISPLAY_TRUNCATE = 4000` — soft truncation matching the existing pairing guardrail. Lines beyond 4,000 chars render with a `… +N chars` chip and click-to-expand affordance across `equal`/`replace`/`insert`/`delete` so behavior is uniform.
-      - `COMPARE_LAZY_EQUAL_PAGE_LIMIT = 5000` — per-request cap on the lazy equal-line endpoint so a full-expand on a giant equal run cannot blow the browser.
-      - `COMPARE_LAZY_EQUAL_BYTE_LIMIT = 512000` — per-request byte cap on the lazy equal-line endpoint, applied alongside `COMPARE_LAZY_EQUAL_PAGE_LIMIT` so long-line equal regions cannot return oversized expansion payloads.
-      - `COMPARE_REPLACE_PAIR_MIN_RATIO = 0.5` — `SequenceMatcher.ratio()` floor for treating a left/right line pair as the "same line, modified" inside a `replace` hunk; pairs below the floor fall through to the unpaired buckets and render as delete-then-insert rows within the same hunk (see "Replace-hunk pairing" below).
-      - All seven constants live next to `COMPARE_MAX_CHANGED_LINES` (`history.py:42`) and are exposed in the response under a `limits` key for parity with the existing `truncated.item_limit` pattern.
-    - **Backend changes** (`app/blueprints/history.py`, `app/project_workspace.py`, `app/blueprints/projects.py`)
-      - Add `_hunk_line_diff(left_entries, right_entries, *, max_changed_lines=COMPARE_MAX_CHANGED_LINES, max_hunks=COMPARE_MAX_HUNKS, inline_context=COMPARE_INLINE_EQUAL_CONTEXT)` in `app/blueprints/history.py` that walks `difflib.SequenceMatcher(None, left_texts, right_texts, autojunk=False).get_opcodes()` and emits ordered hunks of shape `{op: "equal"|"replace"|"insert"|"delete", left: {start, end}, right: {start, end}}`. Change hunks (`replace`/`insert`/`delete`) embed their `lines: [{text, line_index}]` directly. `equal` hunks omit `lines` from the initial payload (lazy-loaded; see lazy endpoint below) but always include a sliced `context: {leading: [...], trailing: [...]}` field carrying up to `inline_context` lines from each end so the immediate ±3 window renders without a fetch. Short equal runs (length < `2 * inline_context`) inline fully under `lines` since there is no fold to lazy-load against.
-      - **Replace-hunk pairing** (handles uneven left/right lengths). `difflib` regularly emits `replace` opcodes where `j - i ≠ l - k` (e.g., 5 left lines replaced by 3 right lines). The hunk model represents this as one `replace` block carrying both paired and unpaired rows so the surface stays a single user-evident "this region was modified" event:
-        - Hunk shape for `replace`: `{op: "replace", left: {start, end, lines: [...]}, right: {start, end, lines: [...]}, changed_pairs: [{left_index, right_index, segments}], left_unpaired: [left_index, ...], right_unpaired: [right_index, ...]}`. `left_index` / `right_index` are absolute indices into `left.lines` / `right.lines` so the frontend can render rows in the recorded order without a second sort.
-        - Pairing pass (replaces the current `_pair_similar_changed_lines`): for each left line in original order, walk a bounded right-side candidate window of unpaired lines (cap at the existing 32-candidate guardrail used by the current pairing code), compute `SequenceMatcher(None, left_text, right_text).ratio()`, take the highest-ratio match where `ratio ≥ COMPARE_REPLACE_PAIR_MIN_RATIO`. Skip any line longer than `COMPARE_LINE_DISPLAY_TRUNCATE` (4,000 chars) on either side — those bypass pairing and land directly in the unpaired buckets.
-        - 1×1 fast path: when `len(left) == 1 and len(right) == 1`, always pair regardless of ratio. The user-evident structure ("this one line changed to that one line") matches user expectation more than the threshold's purity.
-        - All-unpaired case: when no pair meets the threshold (e.g., a block of structurally unrelated lines was inserted next to deleted noise), `changed_pairs` is empty and every left/right line goes to its respective unpaired bucket. The hunk still renders as one `replace` block — the frontend visualizes it as a delete-row sequence followed by an insert-row sequence inside one hunk container.
-        - Pairing still respects the existing 4,000-char per-line guardrail; `_changed_line_segments` runs only on paired entries.
-      - Apply `max_changed_lines` as a single budget across `replace`/`insert`/`delete` hunks; `equal` lines never count against it. Inside a `replace` hunk a paired row counts as **2 budget units** (one render row per pane), and each unpaired row counts as **1 unit**. When the cap is reached mid-hunk, drop unpaired tails first (cheaper to truncate cleanly), then pair tails — emit `lines_omitted` on the hunk capturing the dropped row count from each side. Subsequent change hunks drop entirely into `hunks_omitted` on the response. Apply `max_hunks` as a separate cap on the count of change hunks before any line is emitted from a hunk; once exceeded, drop the surplus into `hunks_omitted` without rendering line text.
-      - Wire the consolidation: `compare_history_runs` (`history.py:1460`) accepts optional `project_id` / `baseline_label` query params and, when present, applies the existing project finding/artifact filters before calling `_hunk_line_diff` on the run pair. Replace the call to `_bounded_multiset_line_diff` at `history.py:1488` with `_hunk_line_diff`. Reduce `compare_project_runs` (`project_workspace.py:3563`) to a small helper that the unified route calls for project-scoped filter resolution, and delete the `/projects/<id>/compare` blueprint route at `app/blueprints/projects.py:520-533`. Delete `_bounded_multiset_line_diff` and `_pair_similar_changed_lines` once no callers remain.
-      - Add a single new `GET /history/compare/lines` endpoint that returns a bounded slice of one side's persisted output for lazy fold expansion: `?left=…&right=…&side=a|b&start=…&end=…&project_id=<optional>`. Re-uses `_compare_entries_for_diff` for entry resolution and `get_session_id()` for auth scoping; the optional `project_id` mirrors the parent route's scoping rules. `start` / `end` are indexes into the filtered compare-entry sequence after chrome-line removal, matching the hunk model's index space rather than raw persisted-output offsets. Caps the slice at `COMPARE_LAZY_EQUAL_PAGE_LIMIT` lines or `COMPARE_LAZY_EQUAL_BYTE_LIMIT` bytes per request, whichever comes first, and refuses ranges outside the source run's filtered compare entries. Response shape: `{lines: [{text, line_index}], start, end, truncated: bool, page_limit, byte_limit}`. The frontend re-issues the call to walk past `truncated: true`.
-      - Update the unified `/history/compare` response shape:
-        - Replace `sections.{changed, added, removed, *_omitted, max_changed_lines}` with `hunks: [...]` (ordered) and `totals: {left_total_lines, right_total_lines, equal_line_count, changed_line_count, added_line_count, removed_line_count}`.
-        - Move per-budget truncation flags into `truncated: {left, right, hunks_omitted, lines_omitted, item_limit, findings: {...}, artifacts: {...}}`.
-        - Add `limits: {max_changed_lines, max_hunks, inline_equal_context, line_display_truncate, lazy_equal_page_limit, lazy_equal_byte_limit}` so the frontend never hard-codes the numbers.
-        - Keep `left`, `right`, `deltas`, `objects` keys identical to today so the run cards, metrics row, and findings/artifact sections need no shape changes. Project-scoped responses populate the same keys (output diff, exit/duration deltas, findings/artifacts) so the rendered UI is identical regardless of entry point.
-      - Update the `COMPARE_MAX_CHANGED_LINES` docstring at `history.py:42` so it explicitly states the cap covers changed lines only, not equal context, and reference the sibling caps.
-      - Confirm `_run_finding_compare_items` already returns each finding's `line_number`; if a side's index is missing, derive it from the run's persisted output once during comparison so v2 anchoring is unblocked without a second pass. If derivation is non-trivial, defer to v2 — v1 does not depend on it.
-    - **Frontend redesign** (`app/static/js/history.js`, `app/static/js/shell_chrome.js`, `app/static/css/components.css`)
-      - Converge the project flow onto the history-flow renderer. `_renderProjectRunCompareControls` (`shell_chrome.js:3245-3304`) keeps its dropdown/baseline-label trigger UI but calls `fetchAndRenderHistoryComparison(leftId, rightId, {url: '/history/compare?...&project_id=…&baseline_label=…'})` instead of a project-specific endpoint. The history-drawer flow keeps its existing `fetchAndRenderHistoryComparison(leftId, rightId)` call. Both flows render through the same `_renderHistoryComparison` and the same `#history-compare-overlay` surface — there is no project-specific compare DOM after this change.
-      - Rewrite `_renderHistoryComparison` (`history.js:2424`) around the new hunk model. Keep `_historyCompareRunCard`, `_compareMetricCell`, and `_renderHistoryCompareObjectSection` unchanged so the run-card grid, metrics row, and findings/artifacts sections do not move. Only the lines region is replaced.
-      - Add `_renderHistoryCompareSplitPane(hunks, totals, truncated)` that emits a two-column flex container with left (`data-side="a"`) and right (`data-side="b"`) tracks. Each track is a `<div class="history-compare-pane nice-scroll">` so the scrollbar contract from `ARCHITECTURE.md § Scrollbar Styling Contract` holds.
-      - Render each hunk as a paired row block so left/right stay vertically aligned even when one side is empty:
-        - `equal` hunks: render `lines` inline when the backend included them (short equal runs). Longer equal runs arrive without `lines` but with a `context: {leading, trailing}` window — render the leading slice, then a fold placeholder `▸ N unchanged lines` for the gap, then the trailing slice. The placeholder is a `.btn-ghost` pressable wired through `bindDisclosure` from `ui_disclosure.js` (per the disclosure-affordance rule that `▸/▾` indicates expand-in-place state). Activating the placeholder fetches the missing range from `GET /history/compare/lines?…&side=a|b&start=…&end=…` (forwarding the parent overlay's `project_id` query param when set) for both sides, walking through `truncated: true` pages until `lazy_equal_page_limit` no longer caps the response. Cache fetched line arrays on the hunk node so a `▾ Collapse` reset / re-expand cycle does not re-fetch.
-        - `replace` hunks: render in three ordered groups inside the same hunk container so a structurally uneven replace stays one visual event:
-          1. `changed_pairs` first, sorted by `left_index`. Each pair is a paired row using `_appendHistoryCompareSegments` for char-level highlights — Side A `.history-compare-line-removed`, Side B `.history-compare-line-added`. Reuse the existing `--red`/`--green` semantic tokens — no new color tokens.
-          2. `left_unpaired` rows next, in `left_index` order. Render each as a left-only row with a sibling `.history-compare-row-spacer` on the right (mirrors the `delete` hunk render).
-          3. `right_unpaired` rows last, in `right_index` order. Render each as a right-only row with a left-side spacer (mirrors the `insert` hunk render).
-          - When `changed_pairs` is empty (all-unpaired case from the backend), the hunk renders as a delete sequence followed by an insert sequence inside one container, still bordered/grouped as a single replace block.
-          - When the hunk carries `lines_omitted`, append a single `.history-compare-truncation` row inside the hunk reading `… N rows omitted from this block` so users see the truncation locality rather than learning about it only from the modal-level banner.
-        - `insert` hunks: render only on the right pane; the left pane gets a sibling `.history-compare-row-spacer` row with `aria-hidden="true"` and a muted background so vertical alignment between panes survives. `delete` mirrors this on the left.
-      - Per-line render truncation: when a line's text length exceeds `limits.line_display_truncate`, render the first `limits.line_display_truncate` chars followed by a `.chip .chip-action` reading `… +N chars` that expands the row in place to its full text. Uniform across `equal`/`replace`/`insert`/`delete`. Pairing-derived `segments` for changed pairs are already capped by the 4,000-char pairing guardrail upstream so no extra logic is needed inside `_appendHistoryCompareSegments`.
-      - Surplus-hunks placeholder: when `truncated.hunks_omitted > 0`, render a single trailing row spanning both panes reading `… N more change hunks omitted` styled with `.history-compare-truncation`. No fetch — these were dropped at the budget cut.
-      - Add a sync-scroll binding: a single `scroll` listener on each pane mirrors `scrollTop` to its sibling, debounced via `requestAnimationFrame` and guarded with a `data-scroll-syncing` flag to avoid feedback loops. Skip the listener entirely when `useMobileTerminalViewportMode()` is true so mobile uses the unified-mode fallback.
-      - Add a unified-mode fallback for `@media (max-width: 760px)` and mobile: collapse `.history-compare-split` from `flex-direction: row` to `column`. `replace` hunks render as a top-bottom A/B pair; `insert`/`delete` render as single-side rows with a `+`/`−` gutter mark using the existing line-added/line-removed accents. Same hunk model drives both layouts — no parallel render path.
-      - Add `_renderHistoryCompareCountsBanner(totals, truncated)` placed above the split pane and below the metrics row. Render a flex strip of `.badge` pills using existing tone classes — `.badge` for the total-lines pill, `.badge-tone-green` for added, `.badge-tone-red` for removed, `.badge-tone-amber` for changed, `.badge-tone-muted` for unchanged. Append a `.history-compare-truncation` note when `truncated.hunks_omitted` or `truncated.lines_omitted` is non-zero.
-      - Update the empty-state branch at `history.js:2586-2594` so it triggers when `totals.changed_line_count + totals.added_line_count + totals.removed_line_count === 0` and no findings/artifacts changed; the message stays "No changed output, findings, or artifacts."
-      - Update the `Copy summary` action at `history.js:2543` to read counts from `totals` and emit `Hunks: N changed · M added · K removed · J unchanged context` so the clipboard summary reflects the new model.
-      - CSS additions in `app/static/css/components.css` (extend the existing `.history-compare-*` block at lines 1265+):
-        - `.history-compare-split` (flex container), `.history-compare-pane` (composes `.nice-scroll`), `.history-compare-row` (paired-row alignment), `.history-compare-row-spacer` (muted background, no text), `.history-compare-fold` (collapsed equal-region pill), `.history-compare-counts` (banner strip).
-        - Reuse the existing `.history-compare-line-added` / `.history-compare-line-removed` / `.history-compare-line-delta` accents — no new color tokens.
-        - Mobile rules under `@media (max-width: 760px)` swap `.history-compare-split` to column direction and toggle a `.is-unified` class on the overlay so layout-only differences do not require a separate render path.
-      - Run-card grid stays inside the modal header band as today — no structural changes to `_ensureHistoryCompareOverlay()` or `.history-compare-modal`.
-    - **Tests**
-      - Backend: extend the comparison test file under `tests/py/` (or add `tests/py/test_history_compare_hunks.py` if no focused file exists) with cases for:
-        - pure-insert hunk, pure-delete hunk, equal-only response.
-        - **Consolidation parity**: the same two run ids return identical `hunks` / `totals` / `deltas` / `objects` whether the route is called with no `project_id` (history-drawer flow) or with the project_id of a project that contains both runs (project flow). Project-scoped calls honor `baseline_label` when resolving the right-side run; object comparison then runs against the resolved pair.
-        - **Auth/scoping**: `/history/compare?project_id=<id>` rejects when the session does not own the project; `/history/compare` (no project_id) rejects when the session does not own one of the runs. Both rejection paths return the existing 403/404 shape so frontend error handling does not branch on entry point.
-        - **Removed route**: `GET /projects/<id>/compare` returns 404 (deleted). A regression test in `tests/py/test_routes.py` (or the existing project routes test) asserts the route is gone, so re-introducing it accidentally fails CI.
-        - **Object compare stays order-insensitive**: feed two runs with the same set of findings (and artifacts) emitted in different order; assert `objects.findings.added == []`, `objects.findings.removed == []`, and `objects.findings.unchanged_count == N`. Same for artifacts. Guards the scoping rule that `SequenceMatcher` is for line diffs only — re-ordering findings must not regress to "all findings changed."
-        - replace hunk with **even sides** (3 vs 3 lines, all paired, char-level segments populated).
-        - replace hunk with **left-heavy sides** (5 vs 3 lines, three pairs + two `left_unpaired` rows, verify pair selection picks the highest-ratio matches and unpaired entries point at the lowest-ratio left lines).
-        - replace hunk with **right-heavy sides** (3 vs 5 lines, mirror of above).
-        - replace hunk with **no pair above threshold** (e.g., totally unrelated lines on each side; assert `changed_pairs == []` and every line falls into the matching unpaired bucket).
-        - replace 1×1 fast path: ratio below the threshold but still paired because both sides have exactly one line.
-        - replace hunk where one or more lines exceed `COMPARE_LINE_DISPLAY_TRUNCATE` (verify those skip pairing and land directly in unpaired buckets).
-        - budget exhaustion: `COMPARE_MAX_CHANGED_LINES` exhausted mid-replace (verify unpaired tails drop first, then pair tails, with `lines_omitted` reflecting both sides; remaining change hunks drop into `hunks_omitted`). Verify the budget accounting (paired = 2 units, unpaired = 1 unit).
-        - `COMPARE_MAX_HUNKS` exhausted at the hunk-count layer (verify surplus hunks land in `hunks_omitted` without their lines being emitted).
-        - Inline equal context: short equal runs (length < 6) inline fully, long equal runs ship `context.leading` + `context.trailing` of `inline_context` lines and omit `lines`.
-        - `limits` block present in the response and matches the module constants.
-      - Backend: cover the new `GET /history/compare/lines` endpoint — happy path slice, range outside filtered compare entries (404/400), `COMPARE_LAZY_EQUAL_PAGE_LIMIT` and `COMPARE_LAZY_EQUAL_BYTE_LIMIT` paging behavior with `truncated: true`, session/auth scoping mirroring the parent compare route, and the optional `project_id` query param (project scoping rules apply, matches the parent `/history/compare` consolidation contract).
-      - Frontend: add Vitest coverage in `tests/js/unit/history_compare_split.test.js` for:
-        - hunk-to-DOM mapping (one assertion per `op`).
-        - replace-hunk render order: `changed_pairs` rows first (sorted by `left_index`), then `left_unpaired` rows (right-side spacer rendered, paired with `aria-hidden="true"`), then `right_unpaired` rows (left-side spacer). Cover even-sided, left-heavy, right-heavy, and all-unpaired hunk inputs.
-        - replace-hunk per-block truncation row appears when the hunk carries `lines_omitted`.
-        - folded-region disclosure toggle through `bindDisclosure` and the lazy fetch path (mock `apiFetch`, assert single fetch on first expand, no fetch on collapse/re-expand thanks to the cached line arrays, multi-page walk when the mock returns `truncated: true`).
-        - per-line display truncation: lines beyond `limits.line_display_truncate` render the `… +N chars` chip and expand inline on click.
-        - surplus-hunks placeholder rendered when `truncated.hunks_omitted > 0`.
-        - sync-scroll listener no-op when one pane lacks overflow, counts-banner badge-tone mapping, unified-mode fallback at narrow widths.
-      - E2E: extend `tests/js/e2e/visual_history_fixture.js` to seed two runs with deterministic line offsets, then add a Playwright spec that opens the compare overlay from the **history drawer flow**, verifies both panes scroll in sync, expands a folded equal region (asserting the network request), expands a long-line truncation chip, and asserts the counts banner text. Add a sibling spec that opens the same comparison from the **project compare control** (`_renderProjectRunCompareControls`) and asserts the rendered DOM is structurally identical to the history-drawer entry — same `#history-compare-overlay`, same `hunks`, same counts banner. This guards the consolidation contract.
-      - Update `tests/js/unit/button_primitives_allowlist.test.js` only if a new pressable surface lands without an existing primitive class — the new fold/expand controls inherit `.btn-ghost` and the long-line expander inherits `.chip-action`, so no allowlist change is expected.
-    - **Docs**
-      - Update the `Findings and comparison` sub-list under `Future Project Workspace enhancements` to drop the "Extend the current Projects modal Compare Runs control" bullet once v1 ships, since the redesign supersedes it.
-      - Add a `CHANGELOG.md` entry under the current branch's section describing the redesign and the new display caps.
-      - Update `ARCHITECTURE.md § HTTP Route Inventory`: add `/history/compare/lines` to `§ History And Share Routes`, refresh the `/history/compare` entry with the new `hunks` / `totals` / `limits` keys + the optional `project_id` / `baseline_label` query params, and remove `/projects/<id>/compare` from `§ Project Routes` (consolidation note in the section preamble pointing at `/history/compare?project_id=…`).
-      - Document the six new constants (`COMPARE_MAX_CHANGED_LINES`, `COMPARE_MAX_HUNKS`, `COMPARE_INLINE_EQUAL_CONTEXT`, `COMPARE_LINE_DISPLAY_TRUNCATE`, `COMPARE_LAZY_EQUAL_PAGE_LIMIT`, `COMPARE_LAZY_EQUAL_BYTE_LIMIT`) wherever the existing input caps (20K lines / 3 MiB / 4,000-char pairing / 5,000 findings / 5,000 artifacts per side) are listed so users see the full picture in one place.
-      - Refresh test counts in `tests/README.md`, `CONTRIBUTING.md`, and `ARCHITECTURE.md` once new tests land (per the standing rule that test counts stay in sync across the documented locations).
+  - **v1 implementation plan — hunk backend, split-pane diff, folded context, counts banner**
+    - **Phase 1: Backend compare contract and route consolidation** — complete
+      - Goal: make `/history/compare` the single canonical compare API before changing the visible UI.
+      - Files: `app/blueprints/history.py`, `app/project_workspace.py`, `app/blueprints/projects.py`.
+      - Add the v1 constants next to the existing compare constants:
+        - Keep existing input caps: 20,000 non-chrome lines / 3 MiB UTF-8 per side, 4,000-char per-line pairing guardrail, 5,000 findings + 5,000 artifacts per side.
+        - `COMPARE_MAX_CHANGED_LINES = 2000` — single changed-line budget across `replace`/`insert`/`delete`; equal lines do not count.
+        - `COMPARE_MAX_HUNKS = 3000` — caps distinct change blocks; surplus blocks become `truncated.hunks_omitted`.
+        - `COMPARE_INLINE_EQUAL_CONTEXT = 3` — fixed ±3 equal-line context around change hunks; short equal runs under 6 lines inline fully.
+        - `COMPARE_LINE_DISPLAY_TRUNCATE = 4000` — soft per-line display cap with expandable `… +N chars` UI later.
+        - `COMPARE_LAZY_EQUAL_PAGE_LIMIT = 5000` — max lines per lazy equal expansion request.
+        - `COMPARE_LAZY_EQUAL_BYTE_LIMIT = 512000` — max bytes per lazy equal expansion request.
+        - `COMPARE_REPLACE_PAIR_MIN_RATIO = 0.5` — threshold for treating replace-side lines as modified pairs.
+      - Extend `/history/compare` to accept optional `project_id=<id>` and `baseline_label=<label>`.
+        - Without `project_id`, preserve the current history-drawer behavior and session-owned run checks.
+        - With `project_id`, verify the session owns the project, verify both runs are linked to the project, and honor `baseline_label` when resolving the right-side run; object comparison then runs against the resolved pair.
+      - Reduce `compare_project_runs()` to a project-scoped helper for run-pair/object resolution, then delete the `/projects/<id>/compare` blueprint route.
+      - Preserve the unordered object-compare boundary:
+        - Transcript diff becomes ordered and hunk-based.
+        - Finding/artifact object comparison remains key-based and order-insensitive.
+        - Preserve newer project-style normalized finding keys for project-scoped comparison: normalized `raw_line`, then normalized `title`, with fingerprint/id fallback only when no textual identity exists.
+        - Keep artifact key semantics flow-compatible: `content_sha256 || workspace_path || id` for history comparisons, `workspace_path` for project-scoped comparisons.
+      - Response contract for this phase may still use old line `sections`, but it must already return canonical `left`, `right`, `deltas`, `objects`, `truncated`, and `limits` fields from `/history/compare` for both history and project entry points.
+      - Tests:
+        - history compare still works without `project_id`.
+        - project-scoped `/history/compare?project_id=...` returns the same canonical shape.
+        - `baseline_label` resolves the right-side run.
+        - cross-session project/run access is rejected.
+        - `GET /projects/<id>/compare` returns 404.
+        - object compare remains order-insensitive for findings and artifacts.
+      - Exit criteria:
+        - Both history and project compare callers can use `/history/compare`.
+        - No browser code calls `/projects/<id>/compare`.
+        - Focused backend route tests pass.
+    - **Phase 2: Hunk diff engine and response shape**
+      - Goal: replace changed/added/removed line buckets with ordered hunks while keeping run cards, metrics, and object sections stable.
+      - Files: `app/blueprints/history.py`, focused backend tests under `tests/py/`.
+      - Add `_hunk_line_diff(left_entries, right_entries, *, max_changed_lines=COMPARE_MAX_CHANGED_LINES, max_hunks=COMPARE_MAX_HUNKS, inline_context=COMPARE_INLINE_EQUAL_CONTEXT)`.
+        - Use `difflib.SequenceMatcher(None, left_texts, right_texts, autojunk=False).get_opcodes()`.
+        - Emit hunks of shape `{op: "equal"|"replace"|"insert"|"delete", left: {start, end}, right: {start, end}}`.
+        - Change hunks embed `lines: [{text, line_index}]` directly.
+        - Equal hunks omit `lines` when long, include `context: {leading, trailing}`, and inline fully only when shorter than `2 * inline_context`.
+      - Implement replace-hunk pairing for uneven left/right lengths.
+        - `replace` shape: `{op: "replace", left: {start, end, lines: [...]}, right: {start, end, lines: [...]}, changed_pairs: [{left_index, right_index, segments}], left_unpaired: [...], right_unpaired: [...]}`.
+        - Pair left lines to the best unpaired right-side candidate above `COMPARE_REPLACE_PAIR_MIN_RATIO`.
+        - Preserve the 1x1 fast path: a one-line replace always pairs even below threshold.
+        - Lines longer than `COMPARE_LINE_DISPLAY_TRUNCATE` skip pairing and land in unpaired buckets.
+        - `_changed_line_segments` runs only on paired rows.
+      - Apply budgets.
+        - `max_changed_lines` counts paired replace rows as 2 units and unpaired insert/delete rows as 1 unit.
+        - When the cap is reached mid-hunk, drop unpaired tails first, then pair tails; record per-hunk `lines_omitted`.
+        - Apply `max_hunks` before emitting line text for surplus change hunks; record response-level `hunks_omitted`.
+      - Replace `sections.{changed, added, removed, *_omitted, max_changed_lines}` with:
+        - `hunks: [...]`
+        - `totals: {left_total_lines, right_total_lines, equal_line_count, changed_line_count, added_line_count, removed_line_count}`
+        - `truncated: {left, right, hunks_omitted, lines_omitted, item_limit, findings: {...}, artifacts: {...}}`
+        - `limits: {max_changed_lines, max_hunks, inline_equal_context, line_display_truncate, lazy_equal_page_limit, lazy_equal_byte_limit}`
+      - Delete `_bounded_multiset_line_diff` and `_pair_similar_changed_lines` once no callers remain.
+      - Update compare constant comments/docstrings to describe changed-line, hunk, equal-context, long-line, and lazy-expansion caps.
+      - Confirm `_run_finding_compare_items` returns each finding's `line_number`; if missing, defer derivation to v2 because v1 does not depend on anchors.
+      - Tests:
+        - pure insert, pure delete, equal-only response.
+        - even-sided replace with char-level segments.
+        - left-heavy and right-heavy replace hunks with paired and unpaired rows.
+        - replace with no pair above threshold.
+        - replace 1x1 fast path.
+        - long-line replace rows skip pairing.
+        - changed-line budget exhaustion mid-replace.
+        - hunk-count budget exhaustion.
+        - short equal hunks inline; long equal hunks ship leading/trailing context only.
+        - `limits` matches module constants.
+      - Exit criteria:
+        - `/history/compare` returns the new hunk contract for both history and project-scoped calls.
+        - Backend tests cover the hunk model and truncation behavior.
+    - **Phase 3: Lazy equal-line expansion endpoint**
+      - Goal: make folded equal ranges expandable without shipping every equal line in the initial compare response.
+      - Files: `app/blueprints/history.py`, backend route tests.
+      - Add `GET /history/compare/lines`.
+        - Query shape: `?left=...&right=...&side=a|b&start=...&end=...&project_id=<optional>`.
+        - Reuse `_compare_entries_for_diff` so `start` / `end` index into filtered compare entries after chrome-line removal, matching the hunk model rather than raw persisted output offsets.
+        - Mirror parent `/history/compare` session/project scoping, including optional `project_id`.
+        - Cap each response at `COMPARE_LAZY_EQUAL_PAGE_LIMIT` lines or `COMPARE_LAZY_EQUAL_BYTE_LIMIT` bytes, whichever comes first.
+        - Reject ranges outside the filtered compare-entry sequence.
+        - Response shape: `{lines: [{text, line_index}], start, end, truncated: bool, page_limit, byte_limit}`.
+      - Tests:
+        - happy-path slice.
+        - range outside filtered compare entries.
+        - line-limit pagination with `truncated: true`.
+        - byte-limit pagination with `truncated: true`.
+        - session auth mirrors parent compare route.
+        - `project_id` scoping mirrors parent compare route.
+      - Exit criteria:
+        - Long equal hunks can be expanded page-by-page through the new route.
+        - Endpoint behavior is fully covered before frontend lazy loading depends on it.
+    - **Phase 4: Split-pane frontend renderer**
+      - Goal: replace the old line sections with a split-pane hunk viewer while preserving the existing compare modal shell.
+      - Files: `app/static/js/history.js`, `app/static/css/components.css`, `tests/js/unit/history_compare_split.test.js`.
+      - Rewrite `_renderHistoryComparison` around the hunk model.
+        - Keep `_historyCompareRunCard`, `_compareMetricCell`, and `_renderHistoryCompareObjectSection` unchanged.
+        - Keep run-card grid inside the existing modal header band; no structural rewrite of `_ensureHistoryCompareOverlay()` or `.history-compare-modal`.
+        - Update empty state to use `totals.changed_line_count + totals.added_line_count + totals.removed_line_count === 0` plus no object diffs.
+        - Update `Copy summary` to read from `totals`.
+      - Add `_renderHistoryCompareCountsBanner(totals, truncated)` below the metrics row.
+        - Use existing `.badge` tone classes for total, added, removed, changed, and unchanged counts.
+        - Show truncation copy when `truncated.hunks_omitted` or `truncated.lines_omitted` is non-zero.
+      - Add `_renderHistoryCompareSplitPane(hunks, totals, truncated)`.
+        - Render two `.history-compare-pane.nice-scroll` tracks with `data-side="a"` and `data-side="b"`.
+        - Render each hunk as paired row blocks so left/right stay vertically aligned.
+        - For `equal` hunks, render inline lines when present; otherwise render leading context, a `.btn-ghost` disclosure fold, then trailing context.
+        - Fold expansion fetches both sides through `/history/compare/lines`, walks pages while `truncated: true`, and caches fetched arrays on the hunk node so collapse/re-expand does not refetch.
+        - For `replace` hunks, render `changed_pairs` first, then `left_unpaired`, then `right_unpaired`, preserving backend indexes.
+        - Render per-hunk `lines_omitted` rows inside the hunk.
+        - For `insert`/`delete`, render one-sided rows plus `.history-compare-row-spacer` on the opposite pane.
+        - Render a trailing surplus-hunks placeholder when `truncated.hunks_omitted > 0`.
+      - Add per-line render truncation.
+        - Lines longer than `limits.line_display_truncate` render with a `.chip .chip-action` `... +N chars` expander.
+        - Behavior is uniform across equal, replace, insert, and delete rows.
+      - Add scroll/layout behavior.
+        - Desktop panes sync `scrollTop` through a `requestAnimationFrame`-guarded listener.
+        - Skip sync-scroll in mobile terminal viewport mode.
+        - Mobile/unified fallback uses the same hunk model with stacked A/B rows; no separate render path.
+      - CSS additions:
+        - `.history-compare-split`, `.history-compare-pane`, `.history-compare-row`, `.history-compare-row-spacer`, `.history-compare-fold`, `.history-compare-counts`.
+        - Reuse existing `.history-compare-line-added`, `.history-compare-line-removed`, and `.history-compare-line-delta` accents.
+        - Use `.nice-scroll` and existing semantic tokens; no new raw color literals.
+      - Vitest coverage:
+        - hunk-to-DOM mapping for each op.
+        - replace render order for even, left-heavy, right-heavy, and all-unpaired hunks.
+        - per-block truncation row.
+        - folded-region disclosure and lazy fetch, including no refetch after cache.
+        - multi-page lazy expansion.
+        - long-line display truncation expander.
+        - surplus-hunks placeholder.
+        - sync-scroll no-op when one pane lacks overflow.
+        - counts-banner tone mapping.
+        - unified-mode fallback at narrow widths.
+      - Exit criteria:
+        - Unit tests prove the hunk renderer without needing a browser server.
+        - The compare modal visually renders the new split-pane experience from mocked hunk data.
+    - **Phase 5: Flow integration and browser coverage**
+      - Goal: wire real history/project flows into the new renderer and verify behavior in a live browser.
+      - Files: `app/static/js/history.js`, `app/static/js/shell_chrome.js`, `tests/js/e2e/visual_history_fixture.js`, Playwright specs.
+      - Converge project controls onto the history renderer.
+        - `_renderProjectRunCompareControls` keeps its dropdown/baseline-label UI.
+        - It calls `fetchAndRenderHistoryComparison(leftId, rightId, {url: '/history/compare?...&project_id=...&baseline_label=...'})`.
+        - History drawer keeps `fetchAndRenderHistoryComparison(leftId, rightId)`.
+        - Both paths render through the same `#history-compare-overlay`; no project-specific compare DOM remains.
+      - Ensure `fetchAndRenderHistoryComparison` stores enough parent-query context for lazy equal expansion to forward `project_id` when needed.
+      - E2E coverage:
+        - seed two runs with deterministic line offsets.
+        - open compare from the history drawer.
+        - verify both panes render and scroll in sync.
+        - expand a folded equal region and assert the lazy network request.
+        - expand a long-line truncation chip.
+        - assert the counts banner text.
+        - open the same comparison from the project compare control.
+        - assert the rendered DOM is structurally identical: same overlay, same hunk content, same counts banner.
+      - Button primitive coverage:
+        - No allowlist change expected because fold controls use `.btn-ghost` and long-line expanders use `.chip-action`.
+        - Update `tests/js/unit/button_primitives_allowlist.test.js` only if the implementation introduces an uncovered pressable surface.
+      - Exit criteria:
+        - History and project entry points behave the same in Playwright.
+        - Browser coverage exercises lazy expansion and long-line expansion.
+    - **Phase 6: Docs, cleanup, and final verification**
+      - Goal: remove stale documentation/API references and bring test inventory back into sync.
+      - Docs:
+        - Update the `Findings and comparison` sub-list under `Future Project Workspace enhancements` to remove the compare-control item superseded by v1.
+        - Add a `CHANGELOG.md` entry describing the split-pane redesign and display caps.
+        - Update `ARCHITECTURE.md § HTTP Route Inventory`:
+          - add `/history/compare/lines` under History And Share Routes.
+          - refresh `/history/compare` with `hunks`, `totals`, `limits`, optional `project_id`, and optional `baseline_label`.
+          - remove `/projects/<id>/compare` from Project Routes and point project compare callers to `/history/compare?project_id=...`.
+        - Document the compare caps wherever the existing input caps are listed: `COMPARE_MAX_CHANGED_LINES`, `COMPARE_MAX_HUNKS`, `COMPARE_INLINE_EQUAL_CONTEXT`, `COMPARE_LINE_DISPLAY_TRUNCATE`, `COMPARE_LAZY_EQUAL_PAGE_LIMIT`, and `COMPARE_LAZY_EQUAL_BYTE_LIMIT`.
+        - Refresh test counts in `tests/README.md`, `CONTRIBUTING.md`, and `ARCHITECTURE.md`.
+      - Cleanup:
+        - Delete dead `sections` rendering helpers only after no tests or code paths use them.
+        - Confirm no `/projects/<id>/compare` references remain in JS, tests, docs, or route inventory.
+      - Verification:
+        - focused pytest for compare routes and hunk helpers.
+        - focused Vitest for history compare renderer.
+        - focused Playwright for compare history/project flows.
+        - docs drift tests after counts are refreshed.
+        - `git diff --check`.
+      - Exit criteria:
+        - v1 has no stale route docs, no stale tests, and no dead compare code from the old changed/added/removed line-section model.
   - **v2 — minimap rail, finding/artifact anchors, view-mode toggle**
     - **Backend changes** (`app/blueprints/history.py`, `app/project_workspace.py`)
       - Add `density_buckets: [{equal, added, removed, changed}, ...]` to the comparison response. Fixed length via a backend constant `COMPARE_MINIMAP_BUCKETS = 256` so payload shape stays stable across runs of any size; the frontend interpolates to actual rail height. Computed in a single pass over the same `hunks` walk so no extra diff cost.

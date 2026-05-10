@@ -3234,11 +3234,14 @@
           ? window.fetchAndRenderHistoryComparison
           : null);
     if (!compareFn) throw new Error('Run comparison is not available.');
-    const params = new URLSearchParams({ left_run_id: normalizedLeftId });
+    const params = new URLSearchParams({
+      left: normalizedLeftId,
+      project_id: normalizedProjectId,
+    });
     if (normalizedMode === 'baseline') params.set('baseline_label', normalizedTarget);
-    else params.set('right_run_id', normalizedTarget);
+    else params.set('right', normalizedTarget);
     compareFn(normalizedLeftId, normalizedMode === 'baseline' ? `baseline:${normalizedTarget}` : normalizedTarget, {
-      url: `/projects/${encodeURIComponent(normalizedProjectId)}/compare?${params.toString()}`,
+      url: `/history/compare?${params.toString()}`,
     });
   }
 

@@ -27,6 +27,7 @@ from helpers import (
 from output_signals import classify_line, command_root as output_command_root, extract_target
 from permalinks import _format_duration, _permalink_error_page, _permalink_page
 from process import active_runs_for_session
+from project_workspace import ProjectWorkspaceError, compare_project_runs
 from redaction import redact_line_entries
 from run_output_store import load_full_output_entries
 
@@ -39,7 +40,13 @@ history_bp = Blueprint("history", __name__)
 
 COMPARE_MAX_LINES = 20_000
 COMPARE_MAX_BYTES = 3 * 1024 * 1024
-COMPARE_MAX_CHANGED_LINES = 500
+COMPARE_MAX_CHANGED_LINES = 2_000
+COMPARE_MAX_HUNKS = 3_000
+COMPARE_INLINE_EQUAL_CONTEXT = 3
+COMPARE_LINE_DISPLAY_TRUNCATE = 4_000
+COMPARE_LAZY_EQUAL_PAGE_LIMIT = 5_000
+COMPARE_LAZY_EQUAL_BYTE_LIMIT = 512_000
+COMPARE_REPLACE_PAIR_MIN_RATIO = 0.5
 COMPARE_CHANGED_LINE_SIMILARITY = 0.72
 COMPARE_CHANGED_LINE_MAX_PAIR_LENGTH = 4_000
 COMPARE_CHANGED_LINE_INDEX_WINDOW = 40
@@ -1461,8 +1468,24 @@ def get_run_compare_candidates(run_id):
 def compare_history_runs():
     """Compare two completed runs from the current session."""
     session_id = get_session_id()
-    left_id = _normalize_history_filter_text(request.args.get("left"))
-    right_id = _normalize_history_filter_text(request.args.get("right"))
+    project_id = _normalize_history_filter_text(request.args.get("project_id"))
+    baseline_label = _normalize_history_filter_text(request.args.get("baseline_label"))
+    left_id = _normalize_history_filter_text(request.args.get("left") or request.args.get("left_run_id"))
+    right_id = _normalize_history_filter_text(request.args.get("right") or request.args.get("right_run_id"))
+    project_comparison = None
+    if project_id:
+        try:
+            project_comparison = compare_project_runs(session_id, project_id, {
+                "left_run_id": left_id,
+                "right_run_id": right_id,
+                "baseline_label": baseline_label,
+            })
+        except ProjectWorkspaceError as exc:
+            return jsonify({"error": str(exc)}), 400
+        if project_comparison is None:
+            return jsonify({"error": "project not found"}), 404
+        left_id = str(project_comparison.get("left_run_id") or "")
+        right_id = str(project_comparison.get("right_run_id") or "")
     if not left_id or not right_id:
         return jsonify({"error": "left and right run ids are required"}), 400
     if left_id == right_id:
@@ -1486,27 +1509,50 @@ def compare_history_runs():
     left_finding_count = _finding_count_for_entries(left_run, left_entries)
     right_finding_count = _finding_count_for_entries(right_run, right_entries)
     diff = _bounded_multiset_line_diff(left_entries, right_entries)
-    with db_connect() as conn:
-        left_findings = _run_finding_compare_items(conn, session_id, left_id)
-        right_findings = _run_finding_compare_items(conn, session_id, right_id)
-        left_artifacts = _run_artifact_compare_items(conn, session_id, left_id)
-        right_artifacts = _run_artifact_compare_items(conn, session_id, right_id)
-    finding_objects = _compare_object_items(left_findings, right_findings)
-    artifact_objects = _compare_object_items(left_artifacts, right_artifacts)
+    project_truncated = project_comparison.get("truncated", {}) if project_comparison else {}
+    if project_comparison:
+        finding_objects = project_comparison.get("objects", {}).get("findings", {})
+        artifact_objects = project_comparison.get("objects", {}).get("artifacts", {})
+        left_persisted_finding_count = int(project_comparison.get("left", {}).get("persisted_finding_count") or 0)
+        right_persisted_finding_count = int(project_comparison.get("right", {}).get("persisted_finding_count") or 0)
+        left_artifact_count = int(project_comparison.get("left", {}).get("artifact_count") or 0)
+        right_artifact_count = int(project_comparison.get("right", {}).get("artifact_count") or 0)
+    else:
+        with db_connect() as conn:
+            left_findings = _run_finding_compare_items(conn, session_id, left_id)
+            right_findings = _run_finding_compare_items(conn, session_id, right_id)
+            left_artifacts = _run_artifact_compare_items(conn, session_id, left_id)
+            right_artifacts = _run_artifact_compare_items(conn, session_id, right_id)
+        finding_objects = _compare_object_items(left_findings, right_findings)
+        artifact_objects = _compare_object_items(left_artifacts, right_artifacts)
+        left_persisted_finding_count = len(left_findings)
+        right_persisted_finding_count = len(right_findings)
+        left_artifact_count = len(left_artifacts)
+        right_artifact_count = len(right_artifacts)
 
-    return jsonify({
+    truncated = {
+        "left": bool(left_output["partial"] or project_truncated.get("left")),
+        "right": bool(right_output["partial"] or project_truncated.get("right")),
+        "changed_lines": bool(diff["added_omitted"] or diff["removed_omitted"]),
+    }
+    for key in ("findings", "artifacts", "item_limit"):
+        if key in project_truncated:
+            truncated[key] = project_truncated[key]
+    payload = {
+        "left_run_id": left_id,
+        "right_run_id": right_id,
         "left": {
             **_compare_run_summary(left_run),
             "finding_count": left_finding_count,
-            "persisted_finding_count": len(left_findings),
-            "artifact_count": len(left_artifacts),
+            "persisted_finding_count": left_persisted_finding_count,
+            "artifact_count": left_artifact_count,
             "output_source": left_output,
         },
         "right": {
             **_compare_run_summary(right_run),
             "finding_count": right_finding_count,
-            "persisted_finding_count": len(right_findings),
-            "artifact_count": len(right_artifacts),
+            "persisted_finding_count": right_persisted_finding_count,
+            "artifact_count": right_artifact_count,
             "output_source": right_output,
         },
         "deltas": _compare_deltas(left_run, right_run, left_finding_count, right_finding_count),
@@ -1514,6 +1560,8 @@ def compare_history_runs():
             "findings": finding_objects,
             "artifacts": artifact_objects,
         },
+        "findings": finding_objects,
+        "artifacts": artifact_objects,
         "sections": {
             "changed": diff["changed"],
             "added": diff["added"],
@@ -1522,12 +1570,20 @@ def compare_history_runs():
             "removed_omitted": diff["removed_omitted"],
             "max_changed_lines": diff["max_changed_lines"],
         },
-        "truncated": {
-            "left": bool(left_output["partial"]),
-            "right": bool(right_output["partial"]),
-            "changed_lines": bool(diff["added_omitted"] or diff["removed_omitted"]),
+        "truncated": truncated,
+        "limits": {
+            "max_changed_lines": COMPARE_MAX_CHANGED_LINES,
+            "max_hunks": COMPARE_MAX_HUNKS,
+            "inline_equal_context": COMPARE_INLINE_EQUAL_CONTEXT,
+            "line_display_truncate": COMPARE_LINE_DISPLAY_TRUNCATE,
+            "lazy_equal_page_limit": COMPARE_LAZY_EQUAL_PAGE_LIMIT,
+            "lazy_equal_byte_limit": COMPARE_LAZY_EQUAL_BYTE_LIMIT,
         },
-    })
+    }
+    if project_comparison:
+        payload["project_id"] = project_id
+        payload["baseline_label"] = project_comparison.get("baseline_label", baseline_label)
+    return jsonify(payload)
 
 
 @history_bp.route("/history/<run_id>")

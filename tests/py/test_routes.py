@@ -20,7 +20,7 @@ import zipfile
 import pytest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 import unittest.mock as mock
 
 import app as shell_app
@@ -210,6 +210,16 @@ class TestProjectRoutes:
         )
         assert resp.status_code == 201
         return json.loads(resp.data)["link"]
+
+    def _project_compare_url(self, project_id, *, left=None, right=None, baseline_label=None):
+        params = {"project_id": project_id}
+        if left is not None:
+            params["left"] = left
+        if right is not None:
+            params["right"] = right
+        if baseline_label is not None:
+            params["baseline_label"] = baseline_label
+        return f"/history/compare?{urlencode(params)}"
 
     def test_project_write_routes_are_rate_limited(self):
         for view in (
@@ -789,37 +799,42 @@ class TestProjectRoutes:
         self._link_run(client, session_id, project["id"], left_run_id)
 
         one_linked = client.get(
-            f"/projects/{project['id']}/compare",
+            self._project_compare_url(project["id"]),
             headers={"X-Session-ID": session_id},
         )
         assert one_linked.status_code == 400
 
         self._link_run(client, session_id, project["id"], right_run_id)
         same_run = client.get(
-            f"/projects/{project['id']}/compare?left_run_id={left_run_id}&right_run_id={left_run_id}",
+            self._project_compare_url(project["id"], left=left_run_id, right=left_run_id),
             headers={"X-Session-ID": session_id},
         )
         assert same_run.status_code == 400
         unlinked = client.get(
-            f"/projects/{project['id']}/compare?left_run_id={left_run_id}&right_run_id={unlinked_run_id}",
+            self._project_compare_url(project["id"], left=left_run_id, right=unlinked_run_id),
             headers={"X-Session-ID": session_id},
         )
         assert unlinked.status_code == 400
         cross_session = client.get(
-            f"/projects/{project['id']}/compare?left_run_id={left_run_id}&right_run_id={other_run_id}",
+            self._project_compare_url(project["id"], left=left_run_id, right=other_run_id),
             headers={"X-Session-ID": session_id},
         )
         assert cross_session.status_code == 400
         missing_baseline = client.get(
-            f"/projects/{project['id']}/compare?left_run_id={left_run_id}&baseline_label=missing",
+            self._project_compare_url(project["id"], left=left_run_id, baseline_label="missing"),
             headers={"X-Session-ID": session_id},
         )
         assert missing_baseline.status_code == 400
         missing_project = client.get(
-            f"/projects/missing-project/compare?left_run_id={left_run_id}&right_run_id={right_run_id}",
+            self._project_compare_url("missing-project", left=left_run_id, right=right_run_id),
             headers={"X-Session-ID": session_id},
         )
         assert missing_project.status_code == 404
+        removed_project_route = client.get(
+            f"/projects/{project['id']}/compare?left_run_id={left_run_id}&right_run_id={right_run_id}",
+            headers={"X-Session-ID": session_id},
+        )
+        assert removed_project_route.status_code == 404
 
     def test_project_compare_returns_empty_diffs_for_matching_empty_runs(self):
         client = get_client()
@@ -831,14 +846,14 @@ class TestProjectRoutes:
         self._link_run(client, session_id, project["id"], right_run_id)
 
         resp = client.get(
-            f"/projects/{project['id']}/compare?left_run_id={left_run_id}&right_run_id={right_run_id}",
+            self._project_compare_url(project["id"], left=left_run_id, right=right_run_id),
             headers={"X-Session-ID": session_id},
         )
         assert resp.status_code == 200
         payload = json.loads(resp.data)
         assert payload["findings"] == {"added": [], "removed": [], "unchanged_count": 0}
         assert payload["artifacts"] == {"added": [], "removed": [], "unchanged_count": 0}
-        assert "truncated" not in payload
+        assert payload["truncated"] == {"left": False, "right": False, "changed_lines": False}
 
         with sqlite3.connect(DB_PATH) as conn:
             for line_number, raw_line in enumerate([
@@ -895,7 +910,7 @@ class TestProjectRoutes:
             conn.commit()
 
         diff_resp = client.get(
-            f"/projects/{project['id']}/compare?left_run_id={left_run_id}&right_run_id={right_run_id}",
+            self._project_compare_url(project["id"], left=left_run_id, right=right_run_id),
             headers={"X-Session-ID": session_id},
         )
         assert diff_resp.status_code == 200
@@ -906,7 +921,7 @@ class TestProjectRoutes:
 
         with mock.patch("project_workspace.MAX_PROJECT_COMPARE_ITEMS_PER_SIDE", 0):
             capped_resp = client.get(
-                f"/projects/{project['id']}/compare?left_run_id={left_run_id}&right_run_id={right_run_id}",
+                self._project_compare_url(project["id"], left=left_run_id, right=right_run_id),
                 headers={"X-Session-ID": session_id},
             )
         assert capped_resp.status_code == 200
@@ -920,6 +935,7 @@ class TestProjectRoutes:
         assert capped["truncated"] == {
             "left": True,
             "right": True,
+            "changed_lines": False,
             "findings": {"left": True, "right": True},
             "artifacts": {"left": True, "right": True},
             "item_limit": 0,
@@ -1180,7 +1196,7 @@ class TestProjectRoutes:
         ).data)
         assert [item["run_id"] for item in unnoted_findings["findings"]] == [baseline_run_id]
         comparison = json.loads(client.get(
-            f"/projects/{project['id']}/compare?left_run_id={run_id}&right_run_id={baseline_run_id}",
+            self._project_compare_url(project["id"], left=run_id, right=baseline_run_id),
             headers={"X-Session-ID": session_id},
         ).data)
         assert [item["raw_line"] for item in comparison["findings"]["added"]] == ["80/tcp open http"]
@@ -1194,7 +1210,7 @@ class TestProjectRoutes:
         )
         assert baseline_label.status_code == 201
         baseline_comparison = json.loads(client.get(
-            f"/projects/{project['id']}/compare?left_run_id={run_id}&baseline_label=baseline",
+            self._project_compare_url(project["id"], left=run_id, baseline_label="baseline"),
             headers={"X-Session-ID": session_id},
         ).data)
         assert baseline_comparison["right_run_id"] == baseline_run_id

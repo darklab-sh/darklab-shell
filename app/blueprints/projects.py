@@ -19,7 +19,6 @@ from project_workspace import (
     add_project_target,
     build_evidence_package_archive,
     clear_active_project,
-    compare_project_runs,
     create_evidence_package,
     create_project,
     delete_evidence_package,
@@ -515,22 +514,6 @@ def projects_findings_list(project_id):
     if findings is None:
         return jsonify({"error": "project not found"}), 404
     return jsonify({"findings": findings})
-
-
-@projects_bp.route("/projects/<project_id>/compare")
-def projects_compare(project_id):
-    session_id = get_session_id()
-    try:
-        comparison = compare_project_runs(session_id, project_id, {
-            "left_run_id": request.args.get("left_run_id"),
-            "right_run_id": request.args.get("right_run_id"),
-            "baseline_label": request.args.get("baseline_label"),
-        })
-    except ProjectWorkspaceError as exc:
-        return jsonify({"error": str(exc)}), 400
-    if comparison is None:
-        return jsonify({"error": "project not found"}), 404
-    return jsonify(comparison)
 
 
 @projects_bp.route("/entities/run/<run_id>/findings")
