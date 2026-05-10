@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,567
+- behavior tests: 2,571
 - docs/inventory meta-tests: 30
-- `pytest`: 1290 (1260 behavior + 30 meta)
+- `pytest`: 1294 (1264 behavior + 30 meta)
 - `vitest`: 1063
 - `playwright`: 245
-- total: 2,598
+- total: 2,602
 
 This document is organized in two parts:
 
@@ -937,6 +937,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestProjectRoutes.test_entity_note_routes_enforce_session_and_payload_boundaries` | Verifies entity note routes reject cross-session access and invalid note payloads while preserving the owner note. |
 | `TestProjectRoutes.test_project_compare_rejects_unlinked_cross_session_and_invalid_pairs` | Verifies project run comparison rejects one-run, same-run, unlinked, cross-session, missing-baseline, and missing-project requests. |
 | `TestProjectRoutes.test_project_compare_returns_empty_diffs_for_matching_empty_runs` | Verifies project run comparison returns empty added/removed diffs for linked runs with no findings or artifacts. |
+| `TestProjectRoutes.test_project_scoped_compare_lines_requires_linked_project_runs` | Verifies project-scoped compare-line expansion requires project-owned linked runs. |
 | `TestProjectRoutes.test_links_run_and_unlinks_without_duplicate_rows` | Verifies project run link creation is idempotent and links can be removed. |
 | `TestProjectRoutes.test_redacted_evidence_package_redacts_manifest_and_transcripts` | Verifies redacted evidence packages redact manifests, static pages, and run transcripts while excluding raw artifacts. |
 | `TestProjectRoutes.test_project_workspace_write_quotas_return_conflict` | Verifies project workspace quotas return conflict responses without blocking idempotent writes. |
@@ -1135,6 +1136,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestHistoryRoute.test_hunk_line_diff_keeps_unrelated_and_long_replace_lines_unpaired` | Verifies that unrelated replace blocks and very long lines stay in unpaired buckets. |
 | `TestHistoryRoute.test_hunk_line_diff_preserves_one_to_one_replace_pairing_below_threshold` | Verifies that one-line replace blocks still render as paired changes even below the normal similarity threshold. |
 | `TestHistoryRoute.test_hunk_line_diff_reports_budget_exhaustion` | Verifies changed-line and hunk-count budget exhaustion are reported in the hunk diff payload. |
+| `TestHistoryRoute.test_compare_history_lines_returns_filtered_output_slices` | Verifies compare-line lazy expansion slices filtered output entries after terminal chrome is removed. |
+| `TestHistoryRoute.test_compare_history_lines_rejects_invalid_ranges_and_cross_session_runs` | Verifies compare-line lazy expansion rejects invalid ranges and cross-session run access. |
+| `TestHistoryRoute.test_compare_history_lines_paginates_by_line_and_byte_limits` | Verifies compare-line lazy expansion enforces line and byte page caps. |
 | `TestHistoryRoute.test_compare_history_runs_returns_metadata_and_changed_lines` | Verifies that run comparison returns metadata deltas, changed-line pairs, and added/removed output while ignoring terminal chrome. |
 | `TestHistoryRoute.test_compare_history_runs_leaves_very_long_lines_unpaired` | Verifies that run comparison avoids expensive similar-line pairing for very long changed lines. |
 | `TestShareRoute.test_post_creates_snapshot` | Checks post creates snapshot handling. |

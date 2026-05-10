@@ -161,7 +161,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
       - Exit criteria:
         - `/history/compare` returns the new hunk contract for both history and project-scoped calls.
         - Backend tests cover the hunk model and truncation behavior.
-    - **Phase 3: Lazy equal-line expansion endpoint**
+    - **Phase 3: Lazy equal-line expansion endpoint** — complete
       - Goal: make folded equal ranges expandable without shipping every equal line in the initial compare response.
       - Files: `app/blueprints/history.py`, backend route tests.
       - Add `GET /history/compare/lines`.

@@ -950,6 +950,39 @@ class TestProjectRoutes:
             "item_limit": 0,
         }
 
+    def test_project_scoped_compare_lines_requires_linked_project_runs(self):
+        client = get_client()
+        session_id = self._session_id("compare-lines")
+        other_session = self._session_id("compare-lines-other")
+        project = self._create_project(client, session_id)
+        left_run_id = self._seed_run(session_id, "nmap darklab.sh")
+        right_run_id = self._seed_run(session_id, "nmap darklab.sh")
+        unlinked_run_id = self._seed_run(session_id, "nmap unlinked.example")
+        self._link_run(client, session_id, project["id"], left_run_id)
+        self._link_run(client, session_id, project["id"], right_run_id)
+
+        linked = client.get(
+            f"/history/compare/lines?left={left_run_id}&right={right_run_id}"
+            f"&project_id={project['id']}&side=a&start=0&end=0",
+            headers={"X-Session-ID": session_id},
+        )
+        assert linked.status_code == 200
+        assert json.loads(linked.data)["lines"] == []
+
+        unlinked = client.get(
+            f"/history/compare/lines?left={left_run_id}&right={unlinked_run_id}"
+            f"&project_id={project['id']}&side=a&start=0&end=0",
+            headers={"X-Session-ID": session_id},
+        )
+        assert unlinked.status_code == 400
+
+        cross_session = client.get(
+            f"/history/compare/lines?left={left_run_id}&right={right_run_id}"
+            f"&project_id={project['id']}&side=a&start=0&end=0",
+            headers={"X-Session-ID": other_session},
+        )
+        assert cross_session.status_code == 404
+
     @mock.patch.dict(shell_app.CFG, {"workspace_enabled": True}, clear=False)
     def test_links_run_and_unlinks_without_duplicate_rows(self):
         client = get_client()
@@ -5554,6 +5587,144 @@ class TestHistoryRoute:
             max_hunks=1,
         )
         assert hunk_limited["truncated"]["hunks_omitted"] == 1
+
+    def test_compare_history_lines_returns_filtered_output_slices(self):
+        client = get_client()
+        session = "compare-lines-" + uuid.uuid4().hex[:8]
+        output = json.dumps([
+            {"text": "anon@darklab:/ $ nmap darklab.sh", "cls": "prompt-echo"},
+            {"text": "alpha", "cls": "", "line_index": 0},
+            {"text": "beta", "cls": "", "line_index": 1},
+            {"text": "gamma", "cls": "", "line_index": 2},
+            {"text": "[process exited with code 0]", "cls": "exit-ok"},
+        ])
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany(
+                "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, 'nmap darklab.sh', datetime('now'), ?, 3)",
+                [
+                    ("cmp-lines-left", session, output),
+                    ("cmp-lines-right", session, output),
+                ],
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                "/history/compare/lines?left=cmp-lines-left&right=cmp-lines-right"
+                "&side=a&start=1&end=3",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+
+            assert resp.status_code == 200
+            assert data["start"] == 1
+            assert data["end"] == 3
+            assert data["truncated"] is False
+            assert [item["text"] for item in data["lines"]] == ["beta", "gamma"]
+            assert data["lines"][0]["line_index"] == 1
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
+
+    def test_compare_history_lines_rejects_invalid_ranges_and_cross_session_runs(self):
+        client = get_client()
+        session = "compare-lines-invalid-" + uuid.uuid4().hex[:8]
+        other_session = "compare-lines-other-" + uuid.uuid4().hex[:8]
+        output = json.dumps([{"text": "alpha", "cls": "", "line_index": 0}])
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany(
+                "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, 'nmap darklab.sh', datetime('now'), ?, 1)",
+                [
+                    ("cmp-lines-invalid-left", session, output),
+                    ("cmp-lines-invalid-right", session, output),
+                    ("cmp-lines-invalid-other", other_session, output),
+                ],
+            )
+            conn.commit()
+            conn.close()
+
+            invalid_side = client.get(
+                "/history/compare/lines?left=cmp-lines-invalid-left&right=cmp-lines-invalid-right"
+                "&side=x&start=0&end=1",
+                headers={"X-Session-ID": session},
+            )
+            out_of_range = client.get(
+                "/history/compare/lines?left=cmp-lines-invalid-left&right=cmp-lines-invalid-right"
+                "&side=a&start=0&end=2",
+                headers={"X-Session-ID": session},
+            )
+            cross_session = client.get(
+                "/history/compare/lines?left=cmp-lines-invalid-left&right=cmp-lines-invalid-other"
+                "&side=a&start=0&end=1",
+                headers={"X-Session-ID": session},
+            )
+
+            assert invalid_side.status_code == 400
+            assert out_of_range.status_code == 400
+            assert cross_session.status_code == 404
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE session_id IN (?, ?)", (session, other_session))
+            conn.commit()
+            conn.close()
+
+    def test_compare_history_lines_paginates_by_line_and_byte_limits(self):
+        client = get_client()
+        session = "compare-lines-limit-" + uuid.uuid4().hex[:8]
+        output = json.dumps([
+            {"text": "aaaa", "cls": "", "line_index": 0},
+            {"text": "bbbb", "cls": "", "line_index": 1},
+            {"text": "cccc", "cls": "", "line_index": 2},
+        ])
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany(
+                "INSERT INTO runs (id, session_id, command, started, output_preview, output_line_count) "
+                "VALUES (?, ?, 'nmap darklab.sh', datetime('now'), ?, 3)",
+                [
+                    ("cmp-lines-limit-left", session, output),
+                    ("cmp-lines-limit-right", session, output),
+                ],
+            )
+            conn.commit()
+            conn.close()
+
+            with mock.patch("blueprints.history.COMPARE_LAZY_EQUAL_PAGE_LIMIT", 2):
+                line_limited = client.get(
+                    "/history/compare/lines?left=cmp-lines-limit-left&right=cmp-lines-limit-right"
+                    "&side=a&start=0&end=3",
+                    headers={"X-Session-ID": session},
+                )
+            line_data = json.loads(line_limited.data)
+            assert line_limited.status_code == 200
+            assert [item["text"] for item in line_data["lines"]] == ["aaaa", "bbbb"]
+            assert line_data["end"] == 2
+            assert line_data["truncated"] is True
+            assert line_data["page_limit"] == 2
+
+            with mock.patch("blueprints.history.COMPARE_LAZY_EQUAL_BYTE_LIMIT", 5):
+                byte_limited = client.get(
+                    "/history/compare/lines?left=cmp-lines-limit-left&right=cmp-lines-limit-right"
+                    "&side=a&start=0&end=3",
+                    headers={"X-Session-ID": session},
+                )
+            byte_data = json.loads(byte_limited.data)
+            assert byte_limited.status_code == 200
+            assert [item["text"] for item in byte_data["lines"]] == ["aaaa"]
+            assert byte_data["end"] == 1
+            assert byte_data["truncated"] is True
+            assert byte_data["byte_limit"] == 5
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
 
     def test_compare_history_runs_returns_metadata_and_changed_lines(self):
         client = get_client()

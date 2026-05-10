@@ -1311,6 +1311,50 @@ def _legacy_sections_from_hunks(hunks, hunk_truncated):
     }
 
 
+def _resolve_compare_request(session_id, left_id, right_id, project_id="", baseline_label=""):
+    project_comparison = None
+    if project_id:
+        try:
+            project_comparison = compare_project_runs(session_id, project_id, {
+                "left_run_id": left_id,
+                "right_run_id": right_id,
+                "baseline_label": baseline_label,
+            })
+        except ProjectWorkspaceError as exc:
+            return "", "", None, (jsonify({"error": str(exc)}), 400)
+        if project_comparison is None:
+            return "", "", None, (jsonify({"error": "project not found"}), 404)
+        left_id = str(project_comparison.get("left_run_id") or "")
+        right_id = str(project_comparison.get("right_run_id") or "")
+    if not left_id or not right_id:
+        return "", "", None, (jsonify({"error": "left and right run ids are required"}), 400)
+    if left_id == right_id:
+        return "", "", None, (jsonify({"error": "Choose two different runs to compare"}), 400)
+    return left_id, right_id, project_comparison, None
+
+
+def _compare_run_rows(session_id, left_id, right_id):
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT runs.*, art.rel_path "
+            "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
+            "WHERE runs.session_id = ? AND runs.id IN (?, ?)",
+            (session_id, left_id, right_id),
+        ).fetchall()
+    by_id = {str(row["id"]): dict(row) for row in rows}
+    return by_id.get(left_id), by_id.get(right_id)
+
+
+def _parse_compare_range_value(name):
+    raw = request.args.get(name)
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
 def _compare_deltas(left_run, right_run, left_finding_count, right_finding_count):
     left_duration = _run_duration_seconds(left_run)
     right_duration = _run_duration_seconds(right_run)
@@ -1659,35 +1703,17 @@ def compare_history_runs():
     baseline_label = _normalize_history_filter_text(request.args.get("baseline_label"))
     left_id = _normalize_history_filter_text(request.args.get("left") or request.args.get("left_run_id"))
     right_id = _normalize_history_filter_text(request.args.get("right") or request.args.get("right_run_id"))
-    project_comparison = None
-    if project_id:
-        try:
-            project_comparison = compare_project_runs(session_id, project_id, {
-                "left_run_id": left_id,
-                "right_run_id": right_id,
-                "baseline_label": baseline_label,
-            })
-        except ProjectWorkspaceError as exc:
-            return jsonify({"error": str(exc)}), 400
-        if project_comparison is None:
-            return jsonify({"error": "project not found"}), 404
-        left_id = str(project_comparison.get("left_run_id") or "")
-        right_id = str(project_comparison.get("right_run_id") or "")
-    if not left_id or not right_id:
-        return jsonify({"error": "left and right run ids are required"}), 400
-    if left_id == right_id:
-        return jsonify({"error": "Choose two different runs to compare"}), 400
+    left_id, right_id, project_comparison, error = _resolve_compare_request(
+        session_id,
+        left_id,
+        right_id,
+        project_id,
+        baseline_label,
+    )
+    if error:
+        return error
 
-    with db_connect() as conn:
-        rows = conn.execute(
-            "SELECT runs.*, art.rel_path "
-            "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
-            "WHERE runs.session_id = ? AND runs.id IN (?, ?)",
-            (session_id, left_id, right_id),
-        ).fetchall()
-    by_id = {str(row["id"]): dict(row) for row in rows}
-    left_run = by_id.get(left_id)
-    right_run = by_id.get(right_id)
+    left_run, right_run = _compare_run_rows(session_id, left_id, right_id)
     if not left_run or not right_run:
         return jsonify({"error": "Run not found"}), 404
 
@@ -1772,6 +1798,64 @@ def compare_history_runs():
         payload["project_id"] = project_id
         payload["baseline_label"] = project_comparison.get("baseline_label", baseline_label)
     return jsonify(payload)
+
+
+@history_bp.route("/history/compare/lines")
+def compare_history_lines():
+    """Return a bounded filtered-output slice for lazy compare hunk expansion."""
+    session_id = get_session_id()
+    project_id = _normalize_history_filter_text(request.args.get("project_id"))
+    baseline_label = _normalize_history_filter_text(request.args.get("baseline_label"))
+    left_id = _normalize_history_filter_text(request.args.get("left") or request.args.get("left_run_id"))
+    right_id = _normalize_history_filter_text(request.args.get("right") or request.args.get("right_run_id"))
+    side = _normalize_history_filter_text(request.args.get("side")).lower()
+    start = _parse_compare_range_value("start")
+    end = _parse_compare_range_value("end")
+    if side not in {"a", "b"}:
+        return jsonify({"error": "side must be a or b"}), 400
+    if start is None or end is None or start < 0 or end < start:
+        return jsonify({"error": "start and end must define a valid range"}), 400
+
+    left_id, right_id, _, error = _resolve_compare_request(
+        session_id,
+        left_id,
+        right_id,
+        project_id,
+        baseline_label,
+    )
+    if error:
+        return error
+    left_run, right_run = _compare_run_rows(session_id, left_id, right_id)
+    if not left_run or not right_run:
+        return jsonify({"error": "Run not found"}), 404
+    selected_run = left_run if side == "a" else right_run
+    entries, _ = _compare_entries_for_diff(selected_run)
+    if end > len(entries):
+        return jsonify({"error": "range outside compared output"}), 400
+
+    lines = []
+    byte_count = 0
+    cursor = start
+    while cursor < end and len(lines) < COMPARE_LAZY_EQUAL_PAGE_LIMIT:
+        entry = entries[cursor]
+        payload = _compare_line_payload(entry)
+        encoded_len = len(payload["text"].encode("utf-8", errors="replace"))
+        if lines and byte_count + encoded_len > COMPARE_LAZY_EQUAL_BYTE_LIMIT:
+            break
+        lines.append(payload)
+        byte_count += encoded_len
+        cursor += 1
+        if byte_count >= COMPARE_LAZY_EQUAL_BYTE_LIMIT:
+            break
+
+    return jsonify({
+        "lines": lines,
+        "start": start,
+        "end": cursor,
+        "truncated": cursor < end,
+        "page_limit": COMPARE_LAZY_EQUAL_PAGE_LIMIT,
+        "byte_limit": COMPARE_LAZY_EQUAL_BYTE_LIMIT,
+    })
 
 
 @history_bp.route("/history/<run_id>")

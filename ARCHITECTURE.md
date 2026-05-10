@@ -224,7 +224,8 @@ The `/static/<path:filename>` row is included even though Flask registers it aut
 | `GET` | `/history/insights` | Returns compact visual history data for Status Monitor constellation, heatmap, ticker, and command mix widgets. |
 | `GET` | `/history/active` | Returns active-run metadata and telemetry for reload recovery and the Status Monitor. |
 | `GET` | `/history/<run_id>/compare-candidates` | Returns ranked previous current-session runs for the History drawer's compare launcher. |
-| `GET` | `/history/compare` | Compares two current-session runs, optionally scoped by `project_id` / `baseline_label`, and returns metadata deltas, bounded added/removed output lines, and finding/artifact object diffs. |
+| `GET` | `/history/compare` | Compares two current-session runs, optionally scoped by `project_id` / `baseline_label`, and returns metadata deltas, bounded output hunks, totals, limits, and finding/artifact object diffs. |
+| `GET` | `/history/compare/lines` | Returns bounded filtered-output slices for lazy expansion of folded comparison hunks, using `left`/`right` run ids, `side`, `start`/`end`, and optional `project_id` scoping. |
 | `GET` | `/history/<run_id>` | Serves an implicit-bearer styled run permalink, or raw JSON with `?json`; uses full-output artifacts when available unless `?preview=1` is set. |
 | `DELETE` | `/history/<run_id>` | Deletes one current-session run and its matching full-output artifact. |
 | `POST` | `/share` | Saves a tab snapshot, optionally applies share redaction, and returns a snapshot permalink URL. |
@@ -1212,12 +1213,12 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- behavior tests: 2,567
+- behavior tests: 2,571
 - docs/inventory meta-tests: 30
-- `pytest`: 1290 (1260 behavior + 30 meta)
+- `pytest`: 1294 (1264 behavior + 30 meta)
 - `vitest`: 1063
 - `playwright`: 245
-- total: 2,598
+- total: 2,602
 
 ### Testing Architecture
 
