@@ -181,7 +181,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
       - Exit criteria:
         - Long equal hunks can be expanded page-by-page through the new route.
         - Endpoint behavior is fully covered before frontend lazy loading depends on it.
-    - **Phase 4: Split-pane frontend renderer**
+    - **Phase 4: Split-pane frontend renderer** — complete
       - Goal: replace the old line sections with a split-pane hunk viewer while preserving the existing compare modal shell.
       - Files: `app/static/js/history.js`, `app/static/css/components.css`, `tests/js/unit/history_compare_split.test.js`.
       - Rewrite `_renderHistoryComparison` around the hunk model.

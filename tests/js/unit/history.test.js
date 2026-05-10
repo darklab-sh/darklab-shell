@@ -1346,6 +1346,66 @@ describe('history panel actions', () => {
                 added: [{ text: '443/tcp open https' }],
                 removed: [{ text: '8080/tcp open http-proxy' }],
               },
+              totals: {
+                left_total_lines: 2,
+                right_total_lines: 2,
+                equal_line_count: 0,
+                changed_line_count: 1,
+                added_line_count: 1,
+                removed_line_count: 1,
+              },
+              limits: { line_display_truncate: 4000 },
+              hunks: [
+                {
+                  op: 'replace',
+                  left: {
+                    start: 0,
+                    end: 1,
+                    lines: [{ text: 'Starting Nmap at 2026-04-30 23:22 UTC' }],
+                  },
+                  right: {
+                    start: 0,
+                    end: 1,
+                    lines: [{ text: 'Starting Nmap at 2026-04-30 23:21 UTC' }],
+                  },
+                  changed_pairs: [{
+                    left_index: 0,
+                    right_index: 0,
+                    segments: {
+                      left: [
+                        { text: 'Starting Nmap at 2026-04-30 23:' },
+                        { text: '22', changed: true },
+                        { text: ' UTC' },
+                      ],
+                      right: [
+                        { text: 'Starting Nmap at 2026-04-30 23:' },
+                        { text: '21', changed: true },
+                        { text: ' UTC' },
+                      ],
+                    },
+                  }],
+                  left_unpaired: [],
+                  right_unpaired: [],
+                },
+                {
+                  op: 'insert',
+                  left: { start: 1, end: 1 },
+                  right: {
+                    start: 1,
+                    end: 2,
+                    lines: [{ text: '443/tcp open https' }],
+                  },
+                },
+                {
+                  op: 'delete',
+                  left: {
+                    start: 1,
+                    end: 2,
+                    lines: [{ text: '8080/tcp open http-proxy' }],
+                  },
+                  right: { start: 2, end: 2 },
+                },
+              ],
               objects: {
                 findings: {
                   added: [{ title: 'open port 443', raw_line: '443/tcp open https', severity: 'high' }],
@@ -1400,7 +1460,7 @@ describe('history panel actions', () => {
     await Promise.resolve()
     await new Promise((resolve) => setImmediate(resolve))
 
-    expect(document.querySelector('#history-compare-body')?.textContent).toContain('Changed lines (1)')
+    expect(document.querySelector('#history-compare-body')?.textContent).toContain('changed 1')
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('23:22 UTC')
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('23:21 UTC')
     expect(document.querySelectorAll('.history-compare-line-delta')).toHaveLength(2)

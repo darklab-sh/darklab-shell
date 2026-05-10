@@ -837,6 +837,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │       │   ├── session_harness.js # Shared session.js localStorage/fetch harness
     │       │   └── workspace_harness.js # Shared Files/workspace modal harness and response helpers
     │       ├── history.test.js     # starring, clipboard, delete/clear failures, mobile chip behavior, draft restore
+    │       ├── history_compare_split.test.js # split-pane run comparison renderer, lazy hunk expansion, and copy-summary coverage
     │       ├── mobile_running_indicator.test.js # mobile running-indicator chip + edge-glow contract — mount, ?ri=off/?ri=0 kill switch, chip count, active-tab exclusion, cycle-tap dispatch
     │       ├── output.test.js      # ANSI rendering, timestamp/line-number mode, HTML export
     │       ├── permalink.test.js   # Permalink page controller — render paths, toggles, save action delegation

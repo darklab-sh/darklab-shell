@@ -1099,6 +1099,14 @@
   body.mobile-terminal-mode .history-compare-metrics {
     grid-template-columns: 1fr;
   }
+  body.mobile-terminal-mode .history-compare-split {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+  body.mobile-terminal-mode .history-compare-pane {
+    max-height: none;
+    overflow: visible;
+  }
   body.mobile-terminal-mode .history-compare-subtitle {
     max-width: 74vw;
   }

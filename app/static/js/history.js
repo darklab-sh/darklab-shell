@@ -2329,6 +2329,381 @@ function _renderHistoryCompareChangedLines(lines) {
   return section;
 }
 
+function _historyCompareTotalChangedLines(totals = {}) {
+  return Number(totals.changed_line_count || 0)
+    + Number(totals.added_line_count || 0)
+    + Number(totals.removed_line_count || 0);
+}
+
+function _historyCompareOmittedTotal(truncated = {}) {
+  const lineOmitted = truncated && truncated.lines_omitted ? truncated.lines_omitted : {};
+  return Number(truncated.hunks_omitted || 0) + Number(lineOmitted.total || 0);
+}
+
+function _historyCompareLineLimit(limits = {}) {
+  const limit = Number(limits.line_display_truncate || 0);
+  return Number.isFinite(limit) && limit > 0 ? limit : 4000;
+}
+
+function _renderHistoryCompareLineText(line, segments = null, limits = {}) {
+  const code = document.createElement('code');
+  const rawText = String((line && line.text) || '');
+  const limit = _historyCompareLineLimit(limits);
+  const truncated = rawText.length > limit;
+  const visibleText = truncated ? rawText.slice(0, limit) : rawText;
+  const safeSegments = Array.isArray(segments) ? segments : [];
+  if (safeSegments.length && !truncated) {
+    _appendHistoryCompareSegments(code, safeSegments, rawText);
+  } else {
+    code.textContent = visibleText;
+  }
+  if (truncated) {
+    const expander = document.createElement('button');
+    expander.type = 'button';
+    expander.className = 'chip chip-action history-compare-line-expander';
+    expander.textContent = `... +${(rawText.length - limit).toLocaleString()} chars`;
+    expander.addEventListener('click', event => {
+      event.stopPropagation();
+      code.textContent = rawText;
+      expander.remove();
+    });
+    const wrap = document.createElement('span');
+    wrap.className = 'history-compare-line-text-wrap';
+    wrap.appendChild(code);
+    wrap.appendChild(expander);
+    return wrap;
+  }
+  return code;
+}
+
+function _renderHistoryComparePaneRow(line, {
+  sideLabel = '',
+  signClass = '',
+  rowClass = '',
+  segments = null,
+  limits = {},
+} = {}) {
+  const row = document.createElement('div');
+  row.className = `history-compare-row${rowClass ? ` ${rowClass}` : ''}`;
+  const mark = document.createElement('span');
+  mark.className = signClass;
+  mark.textContent = sideLabel;
+  row.appendChild(mark);
+  row.appendChild(_renderHistoryCompareLineText(line, segments, limits));
+  return row;
+}
+
+function _renderHistoryCompareSpacer(label = '') {
+  const row = document.createElement('div');
+  row.className = 'history-compare-row history-compare-row-spacer';
+  row.setAttribute('aria-hidden', 'true');
+  const mark = document.createElement('span');
+  mark.textContent = label;
+  row.appendChild(mark);
+  row.appendChild(document.createElement('span'));
+  return row;
+}
+
+function _appendHistoryCompareRowPair(leftPane, rightPane, leftRow, rightRow) {
+  leftPane.appendChild(leftRow);
+  rightPane.appendChild(rightRow);
+}
+
+function _historyCompareFoldRange(hunk, side) {
+  const context = hunk && hunk.context ? hunk.context : {};
+  const leading = context.leading && Array.isArray(context.leading[side]) ? context.leading[side] : [];
+  const trailing = context.trailing && Array.isArray(context.trailing[side]) ? context.trailing[side] : [];
+  const bounds = hunk && hunk[side] ? hunk[side] : {};
+  return {
+    start: Number(bounds.start || 0) + leading.length,
+    end: Math.max(Number(bounds.start || 0) + leading.length, Number(bounds.end || 0) - trailing.length),
+  };
+}
+
+function _historyCompareLineUrl(data, side, start, end) {
+  const params = new URLSearchParams();
+  params.set('left', data.left_run_id || data.left?.id || '');
+  params.set('right', data.right_run_id || data.right?.id || '');
+  params.set('side', side === 'left' ? 'a' : 'b');
+  params.set('start', String(start));
+  params.set('end', String(end));
+  if (data.project_id) params.set('project_id', data.project_id);
+  if (data.baseline_label) params.set('baseline_label', data.baseline_label);
+  return `/history/compare/lines?${params.toString()}`;
+}
+
+function _fetchHistoryCompareFoldSide(data, hunk, side) {
+  const range = _historyCompareFoldRange(hunk, side);
+  const collected = [];
+  const loadPage = start => apiFetch(_historyCompareLineUrl(data, side, start, range.end))
+    .then(resp => resp.json())
+    .then(payload => {
+      if (payload.error) throw new Error(payload.error);
+      const lines = Array.isArray(payload.lines) ? payload.lines : [];
+      collected.push(...lines);
+      const nextStart = Number(payload.end);
+      if (payload.truncated && Number.isFinite(nextStart) && nextStart > start && nextStart < range.end) {
+        return loadPage(nextStart);
+      }
+      return collected;
+    });
+  return loadPage(range.start);
+}
+
+function _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, rerender) {
+  const limits = data.limits || {};
+  const context = hunk.context || {};
+  const appendLines = (leftLines, rightLines) => {
+    const count = Math.max(leftLines.length, rightLines.length);
+    for (let index = 0; index < count; index += 1) {
+      _appendHistoryCompareRowPair(
+        leftPane,
+        rightPane,
+        leftLines[index]
+          ? _renderHistoryComparePaneRow(leftLines[index], { sideLabel: 'A', rowClass: 'is-equal', limits })
+          : _renderHistoryCompareSpacer('A'),
+        rightLines[index]
+          ? _renderHistoryComparePaneRow(rightLines[index], { sideLabel: 'B', rowClass: 'is-equal', limits })
+          : _renderHistoryCompareSpacer('B'),
+      );
+    }
+  };
+  if (Array.isArray(hunk.left?.lines) || Array.isArray(hunk.right?.lines)) {
+    appendLines(hunk.left?.lines || [], hunk.right?.lines || []);
+    return;
+  }
+  appendLines(context.leading?.left || [], context.leading?.right || []);
+  if (hunk._expanded) {
+    const collapse = document.createElement('button');
+    collapse.type = 'button';
+    collapse.className = 'btn btn-ghost btn-compact history-compare-fold';
+    collapse.textContent = 'Hide unchanged lines';
+    collapse.addEventListener('click', () => {
+      hunk._expanded = false;
+      rerender();
+    });
+    const collapseRow = document.createElement('div');
+    collapseRow.className = 'history-compare-row history-compare-row-fold';
+    collapseRow.appendChild(document.createElement('span'));
+    collapseRow.appendChild(collapse);
+    _appendHistoryCompareRowPair(leftPane, rightPane, collapseRow, _renderHistoryCompareSpacer());
+    appendLines(hunk._expandedLeft || [], hunk._expandedRight || []);
+  } else if (Number(context.omitted || 0) > 0) {
+    const fold = document.createElement('button');
+    fold.type = 'button';
+    fold.className = 'btn btn-ghost btn-compact history-compare-fold';
+    fold.textContent = `Show ${Number(context.omitted).toLocaleString()} unchanged line(s)`;
+    fold.addEventListener('click', () => {
+      if (hunk._loading) return;
+      hunk._loading = true;
+      fold.disabled = true;
+      fold.textContent = 'Loading unchanged lines...';
+      const leftPromise = hunk._expandedLeft
+        ? Promise.resolve(hunk._expandedLeft)
+        : _fetchHistoryCompareFoldSide(data, hunk, 'left');
+      const rightPromise = hunk._expandedRight
+        ? Promise.resolve(hunk._expandedRight)
+        : _fetchHistoryCompareFoldSide(data, hunk, 'right');
+      Promise.all([leftPromise, rightPromise])
+        .then(([leftLines, rightLines]) => {
+          hunk._expandedLeft = leftLines;
+          hunk._expandedRight = rightLines;
+          hunk._expanded = true;
+          hunk._loading = false;
+          rerender();
+        })
+        .catch(() => {
+          hunk._loading = false;
+          fold.disabled = false;
+          fold.textContent = `Show ${Number(context.omitted).toLocaleString()} unchanged line(s)`;
+          showToast('Failed to load unchanged lines', 'error');
+        });
+    });
+    const foldRow = document.createElement('div');
+    foldRow.className = 'history-compare-row history-compare-row-fold';
+    foldRow.appendChild(document.createElement('span'));
+    foldRow.appendChild(fold);
+    _appendHistoryCompareRowPair(leftPane, rightPane, foldRow, _renderHistoryCompareSpacer());
+  }
+  appendLines(context.trailing?.left || [], context.trailing?.right || []);
+}
+
+function _appendHistoryCompareReplaceHunk(leftPane, rightPane, hunk, data) {
+  const limits = data.limits || {};
+  const leftLines = hunk.left?.lines || [];
+  const rightLines = hunk.right?.lines || [];
+  (hunk.changed_pairs || []).forEach(pair => {
+    const leftLine = leftLines[pair.left_index] || {};
+    const rightLine = rightLines[pair.right_index] || {};
+    const segments = pair.segments || {};
+    _appendHistoryCompareRowPair(
+      leftPane,
+      rightPane,
+      _renderHistoryComparePaneRow(leftLine, {
+        sideLabel: 'A',
+        signClass: 'history-compare-line-removed',
+        rowClass: 'is-replace',
+        segments: segments.left,
+        limits,
+      }),
+      _renderHistoryComparePaneRow(rightLine, {
+        sideLabel: 'B',
+        signClass: 'history-compare-line-added',
+        rowClass: 'is-replace',
+        segments: segments.right,
+        limits,
+      }),
+    );
+  });
+  (hunk.left_unpaired || []).forEach(index => {
+    _appendHistoryCompareRowPair(
+      leftPane,
+      rightPane,
+      _renderHistoryComparePaneRow(leftLines[index] || {}, {
+        sideLabel: '-',
+        signClass: 'history-compare-line-removed',
+        rowClass: 'is-delete',
+        limits,
+      }),
+      _renderHistoryCompareSpacer(),
+    );
+  });
+  (hunk.right_unpaired || []).forEach(index => {
+    _appendHistoryCompareRowPair(
+      leftPane,
+      rightPane,
+      _renderHistoryCompareSpacer(),
+      _renderHistoryComparePaneRow(rightLines[index] || {}, {
+        sideLabel: '+',
+        signClass: 'history-compare-line-added',
+        rowClass: 'is-insert',
+        limits,
+      }),
+    );
+  });
+}
+
+function _appendHistoryCompareOneSidedHunk(leftPane, rightPane, hunk, data) {
+  const limits = data.limits || {};
+  const op = hunk.op;
+  const lines = op === 'insert' ? (hunk.right?.lines || []) : (hunk.left?.lines || []);
+  lines.forEach(line => {
+    _appendHistoryCompareRowPair(
+      leftPane,
+      rightPane,
+      op === 'delete'
+        ? _renderHistoryComparePaneRow(line, {
+            sideLabel: '-',
+            signClass: 'history-compare-line-removed',
+            rowClass: 'is-delete',
+            limits,
+          })
+        : _renderHistoryCompareSpacer(),
+      op === 'insert'
+        ? _renderHistoryComparePaneRow(line, {
+            sideLabel: '+',
+            signClass: 'history-compare-line-added',
+            rowClass: 'is-insert',
+            limits,
+          })
+        : _renderHistoryCompareSpacer(),
+    );
+  });
+}
+
+function _appendHistoryCompareOmittedRows(leftPane, rightPane, hunk) {
+  const omitted = hunk.lines_omitted || {};
+  if (!Number(omitted.total || 0)) return;
+  const row = document.createElement('div');
+  row.className = 'history-compare-row history-compare-row-omitted';
+  row.textContent = `${Number(omitted.total).toLocaleString()} changed line(s) omitted in this block.`;
+  leftPane.appendChild(row.cloneNode(true));
+  rightPane.appendChild(row);
+}
+
+function _renderHistoryCompareSplitPane(data) {
+  const wrap = document.createElement('div');
+  wrap.className = 'history-compare-split';
+  const leftPane = document.createElement('div');
+  leftPane.className = 'history-compare-pane nice-scroll';
+  leftPane.dataset.side = 'a';
+  const rightPane = document.createElement('div');
+  rightPane.className = 'history-compare-pane nice-scroll';
+  rightPane.dataset.side = 'b';
+  const renderPanes = () => {
+    leftPane.replaceChildren();
+    rightPane.replaceChildren();
+    const leftTitle = document.createElement('div');
+    leftTitle.className = 'history-compare-pane-title';
+    leftTitle.textContent = 'Run A';
+    const rightTitle = document.createElement('div');
+    rightTitle.className = 'history-compare-pane-title';
+    rightTitle.textContent = 'Run B';
+    leftPane.appendChild(leftTitle);
+    rightPane.appendChild(rightTitle);
+    (Array.isArray(data.hunks) ? data.hunks : []).forEach(hunk => {
+      if (!hunk || !hunk.op) return;
+      if (hunk.op === 'equal') _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, renderPanes);
+      else if (hunk.op === 'replace') _appendHistoryCompareReplaceHunk(leftPane, rightPane, hunk, data);
+      else if (hunk.op === 'insert' || hunk.op === 'delete') _appendHistoryCompareOneSidedHunk(leftPane, rightPane, hunk, data);
+      _appendHistoryCompareOmittedRows(leftPane, rightPane, hunk);
+    });
+    if (Number(data.truncated?.hunks_omitted || 0) > 0) {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'history-compare-row history-compare-row-omitted history-compare-surplus';
+      placeholder.textContent = `${Number(data.truncated.hunks_omitted).toLocaleString()} additional changed hunk(s) omitted.`;
+      leftPane.appendChild(placeholder.cloneNode(true));
+      rightPane.appendChild(placeholder);
+    }
+  };
+  renderPanes();
+  if (!(typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode())) {
+    let syncing = false;
+    const sync = (source, target) => {
+      if (syncing || !source || !target) return;
+      syncing = true;
+      const raf = typeof requestAnimationFrame === 'function'
+        ? requestAnimationFrame
+        : callback => setTimeout(callback, 0);
+      raf(() => {
+        target.scrollTop = source.scrollTop;
+        syncing = false;
+      });
+    };
+    leftPane.addEventListener('scroll', () => sync(leftPane, rightPane));
+    rightPane.addEventListener('scroll', () => sync(rightPane, leftPane));
+  }
+  wrap.appendChild(leftPane);
+  wrap.appendChild(rightPane);
+  return wrap;
+}
+
+function _renderHistoryCompareCountsBanner(totals = {}, truncated = {}) {
+  const banner = document.createElement('div');
+  banner.className = 'history-compare-counts';
+  const counts = [
+    ['total', Number(totals.left_total_lines || 0), 'badge-tone-muted'],
+    ['unchanged', Number(totals.equal_line_count || 0), 'badge-tone-muted'],
+    ['changed', Number(totals.changed_line_count || 0), 'badge-tone-cyan'],
+    ['added', Number(totals.added_line_count || 0), 'badge-tone-green'],
+    ['removed', Number(totals.removed_line_count || 0), 'badge-tone-muted'],
+  ];
+  counts.forEach(([label, value, tone]) => {
+    const badge = document.createElement('span');
+    badge.className = `badge ${tone} history-compare-count-badge`;
+    badge.textContent = `${label} ${Number(value).toLocaleString()}`;
+    banner.appendChild(badge);
+  });
+  const omitted = _historyCompareOmittedTotal(truncated);
+  if (omitted) {
+    const note = document.createElement('div');
+    note.className = 'history-compare-counts-note';
+    note.textContent = `${omitted.toLocaleString()} changed line(s) or hunk(s) omitted by compare limits.`;
+    banner.appendChild(note);
+  }
+  return banner;
+}
+
 function _historyCompareObjectText(item, kind) {
   if (!item || typeof item !== 'object') return '';
   if (kind === 'artifact') {
@@ -2427,14 +2802,9 @@ function _renderHistoryComparison(data) {
   const subtitle = overlay.querySelector('#history-compare-subtitle');
   if (!body) return;
   body.replaceChildren();
-  const hasOutputSections = !!(data.sections && (
-    (data.sections.changed || []).length
-    || (data.sections.added || []).length
-    || (data.sections.removed || []).length
-    || data.sections.added_omitted
-    || data.sections.removed_omitted
-  ));
-  subtitle.textContent = hasOutputSections ? 'Changed output only' : 'Changed findings and artifacts';
+  const totals = data.totals || {};
+  const changedOutputCount = _historyCompareTotalChangedLines(totals);
+  subtitle.textContent = changedOutputCount ? 'Split output comparison' : 'Changed findings and artifacts';
 
   const runs = document.createElement('div');
   runs.className = 'history-compare-run-grid';
@@ -2480,6 +2850,7 @@ function _renderHistoryComparison(data) {
     ));
   }
   body.appendChild(metrics);
+  body.appendChild(_renderHistoryCompareCountsBanner(totals, data.truncated || {}));
 
   const findingsTruncated = !!(
     data.truncated
@@ -2541,14 +2912,16 @@ function _renderHistoryComparison(data) {
   copy.className = 'btn btn-secondary btn-compact';
   copy.textContent = 'Copy summary';
   copy.addEventListener('click', () => {
+    const totalsForCopy = data.totals || {};
     const summary = [
       `Compare: ${data.left.command} -> ${data.right.command}`,
       `Exit: ${deltas.exit_code?.left ?? 'n/a'} -> ${deltas.exit_code?.right ?? 'n/a'}`,
       `Lines: ${_compareFormatDelta(deltas.output_lines?.delta || 0)}`,
       `Findings: ${_compareFormatDelta(deltas.findings?.delta || 0)}`,
-      `Changed: ${(data.sections?.changed || []).length}`,
-      `Added: ${(data.sections?.added || []).length}`,
-      `Removed: ${(data.sections?.removed || []).length}`,
+      `Changed: ${Number(totalsForCopy.changed_line_count || 0)}`,
+      `Added: ${Number(totalsForCopy.added_line_count || 0)}`,
+      `Removed: ${Number(totalsForCopy.removed_line_count || 0)}`,
+      `Unchanged: ${Number(totalsForCopy.equal_line_count || 0)}`,
     ].join('\n');
     copyTextToClipboard(summary)
       .then(() => showToast('Comparison summary copied'))
@@ -2557,12 +2930,8 @@ function _renderHistoryComparison(data) {
   actions.appendChild(copy);
   body.appendChild(actions);
 
-  const sections = data.sections || {};
-  const changedLines = sections.changed || [];
-  const addedLines = sections.added || [];
-  const removedLines = sections.removed || [];
-  const addedOmitted = sections.added_omitted || 0;
-  const removedOmitted = sections.removed_omitted || 0;
+  body.appendChild(_renderHistoryCompareSplitPane(data));
+
   const objects = data.objects || {};
   const findingObjects = objects.findings || {};
   const artifactObjects = objects.artifacts || {};
@@ -2570,21 +2939,12 @@ function _renderHistoryComparison(data) {
   const removedFindings = Array.isArray(findingObjects.removed) ? findingObjects.removed : [];
   const addedArtifacts = Array.isArray(artifactObjects.added) ? artifactObjects.added : [];
   const removedArtifacts = Array.isArray(artifactObjects.removed) ? artifactObjects.removed : [];
-  if (changedLines.length) {
-    body.appendChild(_renderHistoryCompareChangedLines(changedLines));
-  }
-  if (addedLines.length || addedOmitted) {
-    body.appendChild(_renderHistoryCompareLines('Added lines', addedLines, addedOmitted, '+'));
-  }
-  if (removedLines.length || removedOmitted) {
-    body.appendChild(_renderHistoryCompareLines('Removed lines', removedLines, removedOmitted, '-'));
-  }
   if (addedFindings.length) body.appendChild(_renderHistoryCompareObjectSection('Added findings', addedFindings, 'finding', '+'));
   if (removedFindings.length) body.appendChild(_renderHistoryCompareObjectSection('Removed findings', removedFindings, 'finding', '-'));
   if (addedArtifacts.length) body.appendChild(_renderHistoryCompareObjectSection('Added artifacts', addedArtifacts, 'artifact', '+'));
   if (removedArtifacts.length) body.appendChild(_renderHistoryCompareObjectSection('Removed artifacts', removedArtifacts, 'artifact', '-'));
   if (
-    !changedLines.length && !addedLines.length && !removedLines.length && !addedOmitted && !removedOmitted
+    !changedOutputCount
     && !addedFindings.length && !removedFindings.length && !addedArtifacts.length && !removedArtifacts.length
   ) {
     const empty = document.createElement('div');

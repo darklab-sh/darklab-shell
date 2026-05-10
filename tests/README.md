@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,571
+- behavior tests: 2,578
 - docs/inventory meta-tests: 30
 - `pytest`: 1294 (1264 behavior + 30 meta)
-- `vitest`: 1063
+- `vitest`: 1070
 - `playwright`: 245
-- total: 2,602
+- total: 2,609
 
 This document is organized in two parts:
 
@@ -1917,6 +1917,18 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `resetCmdHistoryNav exits hist search mode if active` | Verifies that resetCmdHistoryNav exits hist search mode if active. |
 | `dropdown keeps cmdHistory matches when server fetch returns empty` | Regression: typing a character used to show in-memory recents briefly, then the server response overwrote `_histSearchRuns = []` and the dropdown cleared. Client-side matches must not be dropped by an empty server response. |
 | `dropdown merges cmdHistory matches with unique server-only matches` | Verifies that server-surfaced older runs beyond the in-memory recents cap extend the dropdown list (deduped) rather than replacing the cmdHistory matches. |
+
+#### `history_compare_split.test.js`
+
+| Test | Description |
+| --- | --- |
+| `renders hunk counts and split-pane rows for equal, replace, insert, and delete hunks` | Verifies that the run comparison renderer maps the hunk model into paired split-pane rows and count badges. |
+| `renders replace blocks in pair, left-only, then right-only order` | Verifies that replace hunks preserve the backend's changed-pair, left-unpaired, and right-unpaired render order. |
+| `renders per-hunk and surplus truncation placeholders` | Verifies that per-hunk line omissions and surplus hunk omissions are visible in the split-pane output. |
+| `expands folded equal hunks through paginated lazy fetches and reuses cached lines` | Verifies folded unchanged ranges load both sides through `/history/compare/lines`, follow pagination, and reuse cached lines after collapse/re-expand. |
+| `expands long line text in place` | Verifies long compare rows render a compact expander and reveal the full line without rerendering the comparison. |
+| `uses totals for copy summary output` | Verifies that Copy summary reads changed, added, removed, and unchanged counts from the hunk totals contract. |
+| `does not sync split pane scroll positions in mobile terminal mode` | Verifies that mobile terminal viewport mode uses the stacked comparison fallback without desktop pane scroll syncing. |
 
 #### `mobile_running_indicator.test.js`
 
