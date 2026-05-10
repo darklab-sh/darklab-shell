@@ -3516,10 +3516,10 @@ def compare_project_runs(session_id, project_id, filters=None):
         if left_run_id not in runs_by_id or right_run_id not in runs_by_id:
             raise ProjectWorkspaceError("comparison runs must both be linked to this project")
         left_findings, left_finding_count, left_findings_truncated = run_comparison.run_finding_compare_items(
-            conn, session_id, left_run_id
+            conn, session_id, left_run_id, include_line_number=True
         )
         right_findings, right_finding_count, right_findings_truncated = run_comparison.run_finding_compare_items(
-            conn, session_id, right_run_id
+            conn, session_id, right_run_id, include_line_number=True
         )
         left_artifacts, left_artifact_count, left_artifacts_truncated = run_comparison.run_artifact_compare_items(
             conn, session_id, left_run_id

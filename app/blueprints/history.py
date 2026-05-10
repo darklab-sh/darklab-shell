@@ -1202,6 +1202,8 @@ def compare_history_runs():
                 },
                 "item_limit": run_comparison.compare_item_limit(),
             }
+    finding_objects = run_comparison.add_compare_line_indexes(finding_objects, left_entries, right_entries)
+    density_buckets = run_comparison.density_buckets_for_hunks(diff["hunks"])
 
     truncated = {
         "left": bool(left_output["partial"] or project_truncated.get("left")),
@@ -1239,6 +1241,7 @@ def compare_history_runs():
             "artifacts": artifact_objects,
         },
         "hunks": diff["hunks"],
+        "density_buckets": density_buckets,
         "totals": diff["totals"],
         "truncated": truncated,
         "limits": {
@@ -1248,6 +1251,7 @@ def compare_history_runs():
             "line_display_truncate": run_comparison.COMPARE_LINE_DISPLAY_TRUNCATE,
             "lazy_equal_page_limit": run_comparison.COMPARE_LAZY_EQUAL_PAGE_LIMIT,
             "lazy_equal_byte_limit": run_comparison.COMPARE_LAZY_EQUAL_BYTE_LIMIT,
+            "minimap_buckets": run_comparison.COMPARE_MINIMAP_BUCKETS,
         },
     }
     if project_comparison:

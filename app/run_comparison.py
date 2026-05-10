@@ -26,6 +26,7 @@ COMPARE_LAZY_EQUAL_BYTE_LIMIT = 512_000
 COMPARE_REPLACE_PAIR_MIN_RATIO = 0.5
 COMPARE_REPLACE_PAIR_QUICK_RATIO = COMPARE_REPLACE_PAIR_MIN_RATIO
 COMPARE_REPLACE_PAIR_CANDIDATES = 32
+COMPARE_MINIMAP_BUCKETS = 256
 
 
 def compare_item_limit(limit=None):
@@ -141,6 +142,38 @@ def compare_items(left_items, right_items):
         "added": _collect(right_items, added_remaining),
         "removed": _collect(left_items, removed_remaining),
         "unchanged_count": sum((left_counts & right_counts).values()),
+    }
+
+
+def compare_line_index_by_output_line(entries):
+    indexes = {}
+    for compare_index, entry in enumerate(entries):
+        line_index = entry.get("line_index")
+        if isinstance(line_index, int) and not isinstance(line_index, bool) and line_index not in indexes:
+            indexes[line_index] = compare_index
+    return indexes
+
+
+def _enrich_compare_line_indexes(items, index_by_output_line):
+    enriched = []
+    for item in items:
+        enriched_item = dict(item)
+        line_number = enriched_item.get("line_number")
+        if isinstance(line_number, int) and not isinstance(line_number, bool):
+            compare_line_index = index_by_output_line.get(line_number)
+            if compare_line_index is not None:
+                enriched_item["compare_line_index"] = compare_line_index
+        enriched.append(enriched_item)
+    return enriched
+
+
+def add_compare_line_indexes(finding_diff, left_entries, right_entries):
+    left_index_by_line = compare_line_index_by_output_line(left_entries)
+    right_index_by_line = compare_line_index_by_output_line(right_entries)
+    return {
+        **finding_diff,
+        "added": _enrich_compare_line_indexes(finding_diff.get("added", []), right_index_by_line),
+        "removed": _enrich_compare_line_indexes(finding_diff.get("removed", []), left_index_by_line),
     }
 
 
@@ -643,6 +676,64 @@ def hunk_line_diff(
             "lines_omitted": lines_omitted,
         },
     }
+
+
+def _hunk_density_counts(hunk):
+    if hunk["op"] == "equal":
+        return [("equal", max(0, int(hunk["left"]["end"]) - int(hunk["left"]["start"])))]
+    if hunk["op"] == "insert":
+        return [("added", len(hunk["right"].get("lines", [])))]
+    if hunk["op"] == "delete":
+        return [("removed", len(hunk["left"].get("lines", [])))]
+    if hunk["op"] == "replace":
+        return [
+            ("changed", len(hunk.get("changed_pairs", []))),
+            ("removed", len(hunk.get("left_unpaired", []))),
+            ("added", len(hunk.get("right_unpaired", []))),
+        ]
+    return []
+
+
+def density_bucket_tone(bucket):
+    changed = int(bucket.get("changed") or 0)
+    added = int(bucket.get("added") or 0)
+    removed = int(bucket.get("removed") or 0)
+    equal = int(bucket.get("equal") or 0)
+    if changed:
+        return "changed"
+    if added or removed:
+        if added > removed:
+            return "added"
+        return "removed"
+    if equal:
+        return "equal"
+    return ""
+
+
+def density_buckets_for_hunks(hunks, bucket_count=COMPARE_MINIMAP_BUCKETS):
+    bucket_count = max(1, int(bucket_count or COMPARE_MINIMAP_BUCKETS))
+    units = []
+    for hunk in hunks:
+        for category, count in _hunk_density_counts(hunk):
+            units.extend([category] * max(0, int(count or 0)))
+    total_units = len(units)
+    buckets = [
+        {
+            "start": (index * total_units) // bucket_count if total_units else 0,
+            "end": ((index + 1) * total_units) // bucket_count if total_units else 0,
+            "equal": 0,
+            "added": 0,
+            "removed": 0,
+            "changed": 0,
+        }
+        for index in range(bucket_count)
+    ]
+    if not total_units:
+        return buckets
+    for position, category in enumerate(units):
+        bucket_index = min(bucket_count - 1, (position * bucket_count) // total_units)
+        buckets[bucket_index][category] += 1
+    return buckets
 
 
 def compare_deltas(left_run, right_run, left_finding_count, right_finding_count):

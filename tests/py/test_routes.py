@@ -856,6 +856,11 @@ class TestProjectRoutes:
         assert "artifacts" not in payload
         assert payload["objects"]["findings"] == {"added": [], "removed": [], "unchanged_count": 0}
         assert payload["objects"]["artifacts"] == {"added": [], "removed": [], "unchanged_count": 0}
+        assert len(payload["density_buckets"]) == 256
+        assert payload["density_buckets"][0] == {
+            "start": 0, "end": 0, "equal": 0, "added": 0, "removed": 0, "changed": 0,
+        }
+        assert payload["limits"]["minimap_buckets"] == 256
         assert payload["truncated"] == {
             "left": False,
             "right": False,
@@ -926,6 +931,8 @@ class TestProjectRoutes:
         diff_payload = json.loads(diff_resp.data)
         assert [item["raw_line"] for item in diff_payload["objects"]["findings"]["added"]] == ["new.darklab.sh"]
         assert [item["raw_line"] for item in diff_payload["objects"]["findings"]["removed"]] == ["old.darklab.sh"]
+        assert "compare_line_index" not in diff_payload["objects"]["findings"]["added"][0]
+        assert diff_payload["objects"]["findings"]["added"][0]["line_number"] == 2
         assert diff_payload["objects"]["findings"]["unchanged_count"] == 2
 
         with mock.patch("run_comparison.MAX_COMPARE_ITEMS_PER_SIDE", 0):
@@ -5521,6 +5528,27 @@ class TestHistoryRoute:
         assert [hunk["op"] for hunk in diff["hunks"]] == ["equal", "replace"]
         assert diff["hunks"][0]["left"]["lines"][0]["text"] == "same"
         assert diff["hunks"][1]["right"]["lines"][diff["hunks"][1]["right_unpaired"][0]]["text"] == "extra"
+        buckets = run_comparison.density_buckets_for_hunks(diff["hunks"], bucket_count=4)
+        assert len(buckets) == 4
+        assert sum(
+            bucket["equal"] + bucket["added"] + bucket["removed"] + bucket["changed"]
+            for bucket in buckets
+        ) == 3
+        assert buckets[-1]["end"] == 3
+        assert run_comparison.density_bucket_tone({
+            "equal": 3, "added": 1, "removed": 0, "changed": 1,
+        }) == "changed"
+        assert run_comparison.density_bucket_tone({
+            "equal": 3, "added": 2, "removed": 1, "changed": 0,
+        }) == "added"
+        assert run_comparison.density_bucket_tone({
+            "equal": 3, "added": 2, "removed": 2, "changed": 0,
+        }) == "removed"
+        empty_buckets = run_comparison.density_buckets_for_hunks([], bucket_count=4)
+        assert len(empty_buckets) == 4
+        assert all(bucket == {
+            "start": 0, "end": 0, "equal": 0, "added": 0, "removed": 0, "changed": 0,
+        } for bucket in empty_buckets)
 
         long_equal = run_comparison.hunk_line_diff(
             entries(["a", "b", "c", "d", "e", "old"]),
@@ -5971,6 +5999,17 @@ class TestHistoryRoute:
             }
             assert [hunk["op"] for hunk in data["hunks"]] == ["replace", "equal", "replace"]
             assert data["limits"]["max_changed_lines"] == 2000
+            assert data["limits"]["minimap_buckets"] == 256
+            assert len(data["density_buckets"]) == 256
+            assert sum(
+                bucket["equal"] + bucket["added"] + bucket["removed"] + bucket["changed"]
+                for bucket in data["density_buckets"]
+            ) == (
+                data["totals"]["equal_line_count"]
+                + data["totals"]["changed_line_count"]
+                + data["totals"]["added_line_count"]
+                + data["totals"]["removed_line_count"]
+            )
             assert "sections" not in data
             first_hunk = data["hunks"][0]
             first_pair = first_hunk["changed_pairs"][0]
@@ -5997,8 +6036,13 @@ class TestHistoryRoute:
             assert all("process exited" not in text for text in hunk_texts)
             assert [item["raw_line"] for item in data["objects"]["findings"]["added"]] == ["443/tcp open https"]
             assert [item["raw_line"] for item in data["objects"]["findings"]["removed"]] == ["8080/tcp open http-proxy"]
+            assert data["objects"]["findings"]["added"][0]["line_number"] == 1
+            assert data["objects"]["findings"]["added"][0]["compare_line_index"] == 2
+            assert data["objects"]["findings"]["removed"][0]["line_number"] == 1
+            assert data["objects"]["findings"]["removed"][0]["compare_line_index"] == 2
             assert [item["workspace_path"] for item in data["objects"]["artifacts"]["added"]] == ["reports/right.txt"]
             assert [item["workspace_path"] for item in data["objects"]["artifacts"]["removed"]] == ["reports/left.txt"]
+            assert "compare_line_index" not in data["objects"]["artifacts"]["added"][0]
 
             with mock.patch("run_comparison.MAX_COMPARE_ITEMS_PER_SIDE", 0):
                 capped_resp = client.get(
