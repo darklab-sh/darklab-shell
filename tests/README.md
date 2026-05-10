@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,578
+- behavior tests: 2,582
 - docs/inventory meta-tests: 30
-- `pytest`: 1294 (1264 behavior + 30 meta)
-- `vitest`: 1070
-- `playwright`: 245
-- total: 2,609
+- `pytest`: 1295 (1265 behavior + 30 meta)
+- `vitest`: 1071
+- `playwright`: 246
+- total: 2,612
 
 This document is organized in two parts:
 
@@ -1140,6 +1140,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestHistoryRoute.test_compare_history_lines_rejects_invalid_ranges_and_cross_session_runs` | Verifies compare-line lazy expansion rejects invalid ranges and cross-session run access. |
 | `TestHistoryRoute.test_compare_history_lines_paginates_by_line_and_byte_limits` | Verifies compare-line lazy expansion enforces line and byte page caps. |
 | `TestHistoryRoute.test_compare_history_runs_returns_metadata_and_changed_lines` | Verifies that run comparison returns metadata deltas, changed-line pairs, and added/removed output while ignoring terminal chrome. |
+| `TestHistoryRoute.test_compare_history_runs_matches_findings_by_normalized_text_not_order_or_fingerprint` | Verifies that run comparison treats matching finding text as unchanged even when findings are recorded in different order with different run-scoped fingerprints. |
 | `TestHistoryRoute.test_compare_history_runs_leaves_very_long_lines_unpaired` | Verifies that run comparison avoids expensive similar-line pairing for very long changed lines. |
 | `TestShareRoute.test_post_creates_snapshot` | Checks post creates snapshot handling. |
 | `TestShareRoute.test_post_does_not_link_snapshot_to_source_run_project` | Verifies snapshots created from project-associated runs are not linked back to that project. |
@@ -1923,7 +1924,8 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | Test | Description |
 | --- | --- |
 | `renders hunk counts and split-pane rows for equal, replace, insert, and delete hunks` | Verifies that the run comparison renderer maps the hunk model into paired split-pane rows and count badges. |
-| `renders replace blocks in pair, left-only, then right-only order` | Verifies that replace hunks preserve the backend's changed-pair, left-unpaired, and right-unpaired render order. |
+| `renders replace blocks while preserving each side output order` | Verifies that replace hunks keep each pane's original transcript order while aligning changed pairs. |
+| `keeps right-only replace lines before later paired right lines` | Verifies that a right-side inserted service line renders before a later paired summary line when that was the original B-side order. |
 | `renders per-hunk and surplus truncation placeholders` | Verifies that per-hunk line omissions and surplus hunk omissions are visible in the split-pane output. |
 | `expands folded equal hunks through paginated lazy fetches and reuses cached lines` | Verifies folded unchanged ranges load both sides through `/history/compare/lines`, follow pagination, and reuse cached lines after collapse/re-expand. |
 | `expands long line text in place` | Verifies long compare rows render a compact expander and reveal the full line without rerendering the comparison. |
@@ -2794,6 +2796,7 @@ Desktop demo recording spec. Drives a README-first interaction sequence — ping
 | `starred commands are remembered across page reload` | Verifies that starred commands stored server-side are restored to the history panel after a page reload, confirming that loadStarredFromServer is called on boot. |
 | `loading a synthetic tail run from history restores the filtered transcript` | Verifies that a synthetic tail transcript survives the history restore path without reintroducing the trimmed lines. |
 | `history drawer can filter to snapshots and shows snapshot actions` | Verifies that the history drawer can switch to snapshot-only mode, render the `SNAPSHOT` row treatment, and expose the snapshot action set. |
+| `run comparison split view works from history and project entry points` | Verifies that seeded same-command runs render the split comparison from both the History drawer and Projects modal, including synced scrolling, lazy equal-line expansion, long-line expansion, counts, and project-scoped lazy fetches. |
 
 #### `interaction-contract.spec.js`
 

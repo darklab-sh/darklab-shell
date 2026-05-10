@@ -140,7 +140,7 @@ describe('history compare split renderer', () => {
     expect(document.querySelectorAll('.history-compare-line-delta')).toHaveLength(2)
   })
 
-  it('renders replace blocks in pair, left-only, then right-only order', () => {
+  it('renders replace blocks while preserving each side output order', () => {
     const { _renderHistoryComparison } = loadCompareHelpers()
     _renderHistoryComparison(compareData())
 
@@ -153,6 +153,56 @@ describe('history compare split renderer', () => {
     expect(leftText.indexOf('Aservice old')).toBeLessThan(leftText.indexOf('-left only'))
     expect(rightText.indexOf('Bservice new')).toBeLessThan(rightText.indexOf('+right only one'))
     expect(rightText.indexOf('+right only one')).toBeLessThan(rightText.indexOf('+right only two'))
+  })
+
+  it('keeps right-only replace lines before later paired right lines', () => {
+    const { _renderHistoryComparison } = loadCompareHelpers()
+    _renderHistoryComparison(compareData({
+      hunks: [{
+        op: 'replace',
+        left: {
+          start: 0,
+          end: 1,
+          lines: [{ text: 'Nmap done: 1 host scanned in 0.44 seconds', line_index: 0 }],
+        },
+        right: {
+          start: 0,
+          end: 2,
+          lines: [
+            { text: '6788/tcp open smc-http', line_index: 0 },
+            { text: 'Nmap done: 1 host scanned in 0.45 seconds', line_index: 1 },
+          ],
+        },
+        changed_pairs: [{
+          left_index: 0,
+          right_index: 1,
+          segments: {
+            left: [{ text: 'Nmap done: 1 host scanned in 0.4' }, { text: '4', changed: true }, { text: ' seconds' }],
+            right: [{ text: 'Nmap done: 1 host scanned in 0.4' }, { text: '5', changed: true }, { text: ' seconds' }],
+          },
+        }],
+        left_unpaired: [],
+        right_unpaired: [0],
+      }],
+      totals: {
+        left_total_lines: 1,
+        right_total_lines: 2,
+        equal_line_count: 0,
+        changed_line_count: 1,
+        added_line_count: 1,
+        removed_line_count: 0,
+      },
+      limits: {
+        line_display_truncate: 120,
+        lazy_equal_page_limit: 2,
+        lazy_equal_byte_limit: 1000,
+      },
+    }))
+
+    const rightRows = [...document.querySelectorAll('[data-side="b"] .history-compare-row')]
+      .map(row => row.textContent.trim())
+    expect(rightRows.findIndex(text => text.includes('6788/tcp open smc-http')))
+      .toBeLessThan(rightRows.findIndex(text => text.includes('Nmap done: 1 host scanned')))
   })
 
   it('renders per-hunk and surplus truncation placeholders', () => {

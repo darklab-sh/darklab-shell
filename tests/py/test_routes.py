@@ -5844,6 +5844,82 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
+    def test_compare_history_runs_matches_findings_by_normalized_text_not_order_or_fingerprint(self):
+        client = get_client()
+        session = "compare-findings-order-" + uuid.uuid4().hex[:8]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, "
+                "output_preview, output_line_count) VALUES (?, ?, ?, ?, ?, 0, '[]', 0)",
+                [
+                    ("cmp-findings-left", session, "nmap darklab.sh", "2026-01-01T00:00:01", "2026-01-01T00:00:03"),
+                    ("cmp-findings-right", session, "nmap darklab.sh", "2026-01-01T00:00:04", "2026-01-01T00:00:06"),
+                ],
+            )
+            conn.executemany(
+                "INSERT INTO findings "
+                "(id, session_id, run_id, scope, title, raw_line, line_number, fingerprint, created) "
+                "VALUES (?, ?, ?, 'finding', ?, ?, ?, ?, datetime('now'))",
+                [
+                    (
+                        "cmp-finding-left-80",
+                        session,
+                        "cmp-findings-left",
+                        "80/tcp open http",
+                        "80/tcp open http",
+                        0,
+                        "left-fingerprint-80",
+                    ),
+                    (
+                        "cmp-finding-left-443",
+                        session,
+                        "cmp-findings-left",
+                        "443/tcp open https",
+                        "443/tcp open https",
+                        1,
+                        "left-fingerprint-443",
+                    ),
+                    (
+                        "cmp-finding-right-443",
+                        session,
+                        "cmp-findings-right",
+                        "443/tcp open https",
+                        "\x1b[32m443/tcp   open   https\x1b[0m",
+                        0,
+                        "right-fingerprint-443",
+                    ),
+                    (
+                        "cmp-finding-right-80",
+                        session,
+                        "cmp-findings-right",
+                        "80/tcp open http",
+                        "80/tcp open http",
+                        1,
+                        "right-fingerprint-80",
+                    ),
+                ],
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                "/history/compare?left=cmp-findings-left&right=cmp-findings-right",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+
+            assert resp.status_code == 200
+            assert data["objects"]["findings"]["added"] == []
+            assert data["objects"]["findings"]["removed"] == []
+            assert data["objects"]["findings"]["unchanged_count"] == 2
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM findings WHERE session_id = ?", (session,))
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
+
     def test_compare_history_runs_leaves_very_long_lines_unpaired(self):
         client = get_client()
         session = "compare-long-lines-" + uuid.uuid4().hex[:8]

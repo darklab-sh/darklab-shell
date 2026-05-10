@@ -2409,6 +2409,58 @@ function _appendHistoryCompareRowPair(leftPane, rightPane, leftRow, rightRow) {
   rightPane.appendChild(rightRow);
 }
 
+function _historyCompareReplaceRenderEvents(hunk) {
+  const events = [];
+  (hunk.changed_pairs || []).forEach(pair => {
+    events.push({
+      type: 'pair',
+      leftIndex: Number(pair.left_index),
+      rightIndex: Number(pair.right_index),
+      pair,
+    });
+  });
+  (hunk.left_unpaired || []).forEach(index => {
+    events.push({ type: 'left', leftIndex: Number(index), rightIndex: null });
+  });
+  (hunk.right_unpaired || []).forEach(index => {
+    events.push({ type: 'right', leftIndex: null, rightIndex: Number(index) });
+  });
+
+  const pending = events.filter(event => (
+    (event.leftIndex === null || Number.isFinite(event.leftIndex))
+    && (event.rightIndex === null || Number.isFinite(event.rightIndex))
+  ));
+  const ordered = [];
+  const nextSideIndex = (side) => {
+    const key = side === 'left' ? 'leftIndex' : 'rightIndex';
+    const indexes = pending
+      .map(event => event[key])
+      .filter(index => Number.isFinite(index));
+    return indexes.length ? Math.min(...indexes) : null;
+  };
+  while (pending.length) {
+    const nextLeft = nextSideIndex('left');
+    const nextRight = nextSideIndex('right');
+    let index = pending.findIndex(event => (
+      (event.leftIndex === null || event.leftIndex === nextLeft)
+      && (event.rightIndex === null || event.rightIndex === nextRight)
+    ));
+    if (index < 0) {
+      index = pending
+        .map((event, eventIndex) => ({
+          eventIndex,
+          order: Math.max(
+            Number.isFinite(event.leftIndex) ? event.leftIndex : -1,
+            Number.isFinite(event.rightIndex) ? event.rightIndex : -1,
+          ),
+        }))
+        .sort((a, b) => a.order - b.order || a.eventIndex - b.eventIndex)[0].eventIndex;
+    }
+    ordered.push(pending.splice(index, 1)[0]);
+  }
+  return ordered;
+}
+
 function _historyCompareFoldRange(hunk, side) {
   const context = hunk && hunk.context ? hunk.context : {};
   const leading = context.leading && Array.isArray(context.leading[side]) ? context.leading[side] : [];
@@ -2532,54 +2584,55 @@ function _appendHistoryCompareReplaceHunk(leftPane, rightPane, hunk, data) {
   const limits = data.limits || {};
   const leftLines = hunk.left?.lines || [];
   const rightLines = hunk.right?.lines || [];
-  (hunk.changed_pairs || []).forEach(pair => {
-    const leftLine = leftLines[pair.left_index] || {};
-    const rightLine = rightLines[pair.right_index] || {};
-    const segments = pair.segments || {};
-    _appendHistoryCompareRowPair(
-      leftPane,
-      rightPane,
-      _renderHistoryComparePaneRow(leftLine, {
-        sideLabel: 'A',
-        signClass: 'history-compare-line-removed',
-        rowClass: 'is-replace',
-        segments: segments.left,
-        limits,
-      }),
-      _renderHistoryComparePaneRow(rightLine, {
-        sideLabel: 'B',
-        signClass: 'history-compare-line-added',
-        rowClass: 'is-replace',
-        segments: segments.right,
-        limits,
-      }),
-    );
-  });
-  (hunk.left_unpaired || []).forEach(index => {
-    _appendHistoryCompareRowPair(
-      leftPane,
-      rightPane,
-      _renderHistoryComparePaneRow(leftLines[index] || {}, {
-        sideLabel: '-',
-        signClass: 'history-compare-line-removed',
-        rowClass: 'is-delete',
-        limits,
-      }),
-      _renderHistoryCompareSpacer(),
-    );
-  });
-  (hunk.right_unpaired || []).forEach(index => {
-    _appendHistoryCompareRowPair(
-      leftPane,
-      rightPane,
-      _renderHistoryCompareSpacer(),
-      _renderHistoryComparePaneRow(rightLines[index] || {}, {
-        sideLabel: '+',
-        signClass: 'history-compare-line-added',
-        rowClass: 'is-insert',
-        limits,
-      }),
-    );
+  _historyCompareReplaceRenderEvents(hunk).forEach(event => {
+    if (event.type === 'pair') {
+      const pair = event.pair || {};
+      const leftLine = leftLines[pair.left_index] || {};
+      const rightLine = rightLines[pair.right_index] || {};
+      const segments = pair.segments || {};
+      _appendHistoryCompareRowPair(
+        leftPane,
+        rightPane,
+        _renderHistoryComparePaneRow(leftLine, {
+          sideLabel: 'A',
+          signClass: 'history-compare-line-removed',
+          rowClass: 'is-replace',
+          segments: segments.left,
+          limits,
+        }),
+        _renderHistoryComparePaneRow(rightLine, {
+          sideLabel: 'B',
+          signClass: 'history-compare-line-added',
+          rowClass: 'is-replace',
+          segments: segments.right,
+          limits,
+        }),
+      );
+    } else if (event.type === 'left') {
+      _appendHistoryCompareRowPair(
+        leftPane,
+        rightPane,
+        _renderHistoryComparePaneRow(leftLines[event.leftIndex] || {}, {
+          sideLabel: '-',
+          signClass: 'history-compare-line-removed',
+          rowClass: 'is-delete',
+          limits,
+        }),
+        _renderHistoryCompareSpacer(),
+      );
+    } else if (event.type === 'right') {
+      _appendHistoryCompareRowPair(
+        leftPane,
+        rightPane,
+        _renderHistoryCompareSpacer(),
+        _renderHistoryComparePaneRow(rightLines[event.rightIndex] || {}, {
+          sideLabel: '+',
+          signClass: 'history-compare-line-added',
+          rowClass: 'is-insert',
+          limits,
+        }),
+      );
+    }
   });
 }
 

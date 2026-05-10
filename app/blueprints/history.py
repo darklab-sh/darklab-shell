@@ -8,6 +8,7 @@ import math
 import re
 import sqlite3
 import uuid
+from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from typing import Any
@@ -23,7 +24,12 @@ from helpers import (
     get_session_id,
     is_failed_exit_code,
 )
-from output_signals import classify_line, command_root as output_command_root, extract_target
+from output_signals import (
+    classify_line,
+    command_root as output_command_root,
+    extract_target,
+    strip_ansi_codes,
+)
 from permalinks import _format_duration, _permalink_error_page, _permalink_page
 from process import active_runs_for_session
 from project_workspace import ProjectWorkspaceError, compare_project_runs
@@ -939,7 +945,7 @@ def _run_finding_compare_items(conn, session_id, run_id):
     ).fetchall()
     items = []
     for row in rows:
-        key = row["fingerprint"] or row["raw_line"] or row["title"] or row["id"]
+        key = _finding_compare_key(row)
         items.append({
             "key": key,
             "id": row["id"],
@@ -951,6 +957,14 @@ def _run_finding_compare_items(conn, session_id, run_id):
             "created": row["created"],
         })
     return items
+
+
+def _finding_compare_key(row):
+    for value in (row["raw_line"], row["title"]):
+        normalized = re.sub(r"\s+", " ", strip_ansi_codes(str(value or ""))).strip()
+        if normalized:
+            return normalized
+    return row["fingerprint"] or ""
 
 
 def _run_artifact_compare_items(conn, session_id, run_id):
@@ -973,14 +987,26 @@ def _run_artifact_compare_items(conn, session_id, run_id):
 
 
 def _compare_object_items(left_items, right_items):
-    left_by_key = {item["key"]: item for item in left_items if item.get("key")}
-    right_by_key = {item["key"]: item for item in right_items if item.get("key")}
-    left_keys = set(left_by_key)
-    right_keys = set(right_by_key)
+    left_counts = Counter(item["key"] for item in left_items if item.get("key"))
+    right_counts = Counter(item["key"] for item in right_items if item.get("key"))
+    added_remaining = right_counts - left_counts
+    removed_remaining = left_counts - right_counts
+
+    def _collect(source_items, remaining):
+        rows = []
+        seen = Counter()
+        for item in source_items:
+            key = item.get("key")
+            if not key or remaining[key] <= seen[key]:
+                continue
+            seen[key] += 1
+            rows.append(item)
+        return rows
+
     return {
-        "added": [right_by_key[key] for key in sorted(right_keys - left_keys)],
-        "removed": [left_by_key[key] for key in sorted(left_keys - right_keys)],
-        "unchanged_count": len(left_keys & right_keys),
+        "added": _collect(right_items, added_remaining),
+        "removed": _collect(left_items, removed_remaining),
+        "unchanged_count": sum((left_counts & right_counts).values()),
     }
 
 

@@ -226,7 +226,7 @@ This file tracks open work, known issues, technical debt, and product ideas for 
       - Exit criteria:
         - Unit tests prove the hunk renderer without needing a browser server.
         - The compare modal visually renders the new split-pane experience from mocked hunk data.
-    - **Phase 5: Flow integration and browser coverage**
+    - **Phase 5: Flow integration and browser coverage** — complete
       - Goal: wire real history/project flows into the new renderer and verify behavior in a live browser.
       - Files: `app/static/js/history.js`, `app/static/js/shell_chrome.js`, `tests/js/e2e/visual_history_fixture.js`, Playwright specs.
       - Converge project controls onto the history renderer.
