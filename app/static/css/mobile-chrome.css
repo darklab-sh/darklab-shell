@@ -451,6 +451,28 @@ body.mobile-terminal-mode {
     gap: 6px;
     padding-left: 23px;
   }
+  .recents-sheet .sheet-item-action-menu-wrap {
+    position: relative;
+    display: inline-flex;
+    flex: 1;
+    min-width: 0;
+  }
+  .recents-sheet .sheet-item-action-menu-wrap .sheet-item-action {
+    width: 100%;
+  }
+  .recents-sheet .sheet-item-action-menu-wrap .sheet-item-action-menu {
+    min-width: 190px;
+    z-index: 520;
+  }
+  .recents-sheet .sheet-item-action-menu-wrap.open .sheet-item-action-menu {
+    display: block;
+  }
+  .recents-sheet .sheet-item-action-menu .dropdown-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    white-space: nowrap;
+  }
   .recents-sheet .sheet-item-action {
     flex: 1;
     padding: 6px 4px;

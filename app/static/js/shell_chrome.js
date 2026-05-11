@@ -4809,7 +4809,7 @@
         return;
       }
       _compareProjectRuns(state.projectId, state.leftRunId, state.mode, state.targetValue);
-      _closeProjectMobileCompareSheet({ restoreFocus: false });
+      closeProjectWorkspace({ refocus: false });
     });
     _bindProjectRuntimePressable(next);
     projectMobileCompareFooter.append(back, next);
@@ -6537,6 +6537,19 @@
         );
         return;
       }
+    }
+    const mobileProjectRow = event.target.closest?.('.project-mobile-row[data-project-id]');
+    if (
+      mobileProjectRow
+      && projectMobileListView
+      && projectMobileListView.contains(mobileProjectRow)
+      && !event.target.closest?.('[data-project-mobile-action], [data-project-mobile-tab]')
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      await _flushProjectNotesAutosave();
+      _selectProjectFromMobile(mobileProjectRow.dataset.projectId || '');
+      return;
     }
     const compareModeButton = event.target.closest?.('[data-project-compare-mode-value]');
     if (compareModeButton) {

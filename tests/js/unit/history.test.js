@@ -605,6 +605,10 @@ describe('history panel actions', () => {
     const appendLine = vi.fn()
     const appendCommandEcho = vi.fn()
     const bindDismissible = vi.fn()
+    const bindPressable = vi.fn((el, opts = {}) => {
+      if (!el || typeof opts.onActivate !== 'function') return
+      el.addEventListener('click', (event) => opts.onActivate(event))
+    })
     const refocusComposerAfterAction = vi.fn(() => false)
     const setTabStatus = vi.fn((id, st) => {
       const tab = tabs.find((t) => t.id === id)
@@ -688,6 +692,7 @@ describe('history panel actions', () => {
             if (typeof cmdInput.focus === 'function') cmdInput.focus()
           }),
           emitUiEvent,
+          bindPressable,
           confirmHistAction: () => {},
           executeHistAction: () => {},
           bindDismissible,
@@ -727,6 +732,7 @@ describe('history panel actions', () => {
       showToast,
       tabs,
       bindDismissible,
+      bindPressable,
       refocusComposerAfterAction,
       showConfirm: showConfirmImpl,
       openMetadataEditor: openMetadataEditorImpl,
@@ -784,7 +790,8 @@ describe('history panel actions', () => {
   })
 
   it('clicking a history entry row opens run details without closing the panel', async () => {
-    const { refreshHistoryPanel } = loadHistoryPanel()
+    const clipboard = { writeText: vi.fn(() => Promise.resolve()) }
+    const { refreshHistoryPanel } = loadHistoryPanel({ clipboardImpl: clipboard })
     const historyPanel = document.getElementById('history-panel')
     const cmdInput = document.getElementById('cmd')
     historyPanel.classList.add('open')
@@ -801,6 +808,27 @@ describe('history panel actions', () => {
     expect(historyPanel.classList.contains('open')).toBe(true)
     expect(document.getElementById('history-run-overlay').classList.contains('open')).toBe(true)
     expect(document.getElementById('history-run-subtitle').textContent).toBe('ping darklab.sh')
+    expect([...document.querySelectorAll('.history-run-tab')].map(tab => tab.textContent)).toEqual([
+      'Summary',
+      'Output',
+      'Findings',
+      'Artifacts',
+    ])
+    const runActions = [...document.querySelector('.history-run-actions').children].map(el => el.textContent)
+    expect(runActions).toEqual([
+      'Restore',
+      'Delete',
+      'Permalink',
+      'Compare',
+      'ActionsCopy commandEdit metadataAdd to active projectAdd to projectCopy run ID',
+    ])
+    document.querySelector('.history-run-action-menu-trigger').click()
+    expect(document.querySelector('.history-run-action-menu-wrap').classList.contains('open')).toBe(true)
+    document
+      .querySelector('[data-history-run-action="copy-command"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    expect(clipboard.writeText).toHaveBeenCalledWith('ping darklab.sh')
   })
 
   it('loads structured run findings into the run details findings tab', async () => {
@@ -958,6 +986,36 @@ describe('history panel actions', () => {
     ])
   })
 
+  it('uses copy and restore as mobile history row primaries and moves the rest into the menu', async () => {
+    const { refreshHistoryPanel } = loadHistoryPanel({ mobileMode: true })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const entry = document.querySelector('#history-list .history-entry')
+    const visibleActions = [...entry.querySelector('.history-actions').children].map(el => el.textContent)
+    expect(visibleActions).toEqual([
+      'copy command',
+      'restore',
+      'moreeditpermalinkcompareadd to active projectadd to projectcopy run iddelete',
+    ])
+    const menuActions = [...entry.querySelectorAll('.history-action-menu [data-action]')].map(el => el.dataset.action)
+    expect(menuActions).toEqual([
+      'edit-metadata',
+      'permalink',
+      'compare',
+      'add-active-project',
+      'add-project',
+      'copy-run-id',
+      'delete',
+    ])
+
+    entry.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(document.getElementById('history-run-overlay').classList.contains('open')).toBe(true)
+  })
+
   it('copies the run id and links runs to active or selected projects from the history menu', async () => {
     const showConfirm = vi.fn(() => Promise.resolve('add'))
     const apiFetch = vi.fn((url, options = {}) => {
@@ -986,6 +1044,7 @@ describe('history panel actions', () => {
             projects: [
               { id: 'project-2', name: 'zulu.test', status: 'active' },
               { id: 'project-1', name: 'alpha.test', status: 'active' },
+              { id: 'project-active', name: 'zeta active', status: 'active' },
             ],
           }),
         })
@@ -1023,12 +1082,13 @@ describe('history panel actions', () => {
       body: JSON.stringify({ entity_type: 'run', entity_id: 'run-1', source: 'manual' }),
     }))
 
+    apiFetch.mockClear()
     entry.querySelector('[data-action="add-project"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await Promise.resolve()
     await Promise.resolve()
     await new Promise((resolve) => setImmediate(resolve))
     expect(showConfirm).toHaveBeenCalled()
-    expect(apiFetch).toHaveBeenCalledWith('/projects/project-1/links', expect.objectContaining({
+    expect(apiFetch).toHaveBeenCalledWith('/projects/project-active/links', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify({ entity_type: 'run', entity_id: 'run-1', source: 'manual' }),
     }))
@@ -1314,6 +1374,7 @@ describe('history panel actions', () => {
       }
       if (url === '/history/compare?left=run-new&right=run-old') {
         return Promise.resolve({
+          ok: true,
           json: () =>
             Promise.resolve({
               left: { id: 'run-new', command: 'nmap darklab.sh', exit_code: 0, output_line_count: 2 },
@@ -1493,7 +1554,8 @@ describe('history panel actions', () => {
     await Promise.resolve()
     await new Promise((resolve) => setImmediate(resolve))
 
-    expect(document.querySelector('#history-compare-body')?.textContent).toContain('changed 1')
+    expect(document.querySelector('#history-compare-subtitle')?.textContent)
+      .toBe('2 lines · 0 unchanged · 1 changed · 1 added · 1 removed')
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('23:22 UTC')
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('23:21 UTC')
     expect(document.querySelectorAll('.history-compare-line-delta')).toHaveLength(2)
@@ -1605,7 +1667,8 @@ describe('history panel actions', () => {
     document.querySelector('.history-compare-finding-marker.is-high').click()
     expect(emitUiEvent).not.toHaveBeenCalledWith('app:compare-anchor-scroll', expect.anything())
 
-    const restoreBoth = [...document.querySelectorAll('.history-compare-actions button')]
+    document.querySelector('.history-compare-actions-trigger').click()
+    const restoreBoth = [...document.querySelectorAll('.history-compare-actions-menu .dropdown-item')]
       .find(button => button.textContent === 'Restore Both')
     restoreBoth.click()
     await Promise.resolve()

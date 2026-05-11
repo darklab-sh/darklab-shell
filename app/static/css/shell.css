@@ -1833,6 +1833,11 @@ body.mobile-terminal-mode .output-follow-btn {
   border-radius: 6px;
 }
 
+.app-select-menu.dropdown-up {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+
 .app-select.open .app-select-menu {
   display: flex;
   flex-direction: column;

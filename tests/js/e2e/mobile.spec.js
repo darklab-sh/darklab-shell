@@ -750,6 +750,73 @@ test.beforeEach(async ({ page }) => {
     await expect(wizardFooter).toBeVisible()
   })
 
+  test('mobile Projects can launch run comparison from the runs tab', async ({ page }) => {
+    test.setTimeout(60_000)
+    await runCommandMobile(page, 'hostname')
+    await runCommandMobile(page, 'date')
+    const runs = await waitForHistoryRuns(page, 2)
+
+    await openMobileProjects(page)
+    const projectName = `Mobile Compare ${Date.now()}`
+    const projectRow = await createMobileProject(page, projectName)
+    const projectId = await projectRow.getAttribute('data-project-id')
+    const runIds = runs.slice(0, 2).map(run => run.id)
+    await page.evaluate(async ({ id, linkedRunIds }) => {
+      for (const runId of linkedRunIds) {
+        const resp = await apiFetch(`/projects/${encodeURIComponent(id)}/links`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ entity_type: 'run', entity_id: runId, source: 'manual' }),
+        })
+        if (!resp.ok) throw new Error(`Failed to link run: ${resp.status}`)
+      }
+    }, { id: projectId, linkedRunIds: runIds })
+    await page.evaluate(() => refreshProjectWorkspace())
+
+    await projectRow.locator('[data-project-mobile-action="open-project"]').click()
+    await page.locator('[data-project-mobile-detail-tab="runs"]').click()
+    await expect(page.locator('#project-mobile-detail-body .project-mobile-run-row')).toHaveCount(2)
+
+    await page.locator('#project-mobile-detail-body [data-project-action="mobile-compare-runs"]').click()
+    const compareSheet = page.locator('#project-mobile-compare-overlay')
+    await expect(compareSheet).toHaveClass(/\bopen\b/)
+    await compareSheet.locator('.project-mobile-compare-footer .btn-primary').click()
+    await expect(compareSheet).toContainText('Compare against')
+    await compareSheet.locator('.project-mobile-compare-footer .btn-primary').click()
+    await expect(compareSheet).toContainText('Choose the baseline run')
+    await compareSheet.locator('.project-mobile-compare-footer .btn-primary').click()
+
+    const compareOverlay = page.locator('#history-compare-overlay')
+    await expect(compareOverlay).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#project-workspace-overlay')).not.toHaveClass(/\bopen\b/)
+    await expect(compareOverlay.locator('#history-compare-subtitle')).toContainText('changed')
+    await expect(compareOverlay.locator('.history-compare-split')).toContainText('Run A')
+    await expect
+      .poll(() => compareOverlay.locator('.history-compare-split').evaluate((node) => node.getBoundingClientRect().height))
+      .toBeGreaterThan(60)
+    await expect
+      .poll(() => compareOverlay.locator('.history-compare-pane').first().evaluate((node) => {
+        const styles = getComputedStyle(node)
+        return `${['auto', 'scroll'].includes(styles.overflowY)}:${styles.maxHeight}`
+      }))
+      .toBe('false:none')
+    await expect
+      .poll(() => compareOverlay.locator('.history-compare-pane-title').first().evaluate((node) => {
+        return getComputedStyle(node).position
+      }))
+      .toBe('relative')
+    await compareOverlay.getByRole('button', { name: 'Run comparison view mode' }).click()
+    await expect
+      .poll(() => compareOverlay.evaluate((node) => {
+        const menu = node.querySelector('.history-compare-controls .app-select.open .app-select-menu')
+        const split = node.querySelector('.history-compare-split')
+        if (!menu || !split) return -999
+        return split.getBoundingClientRect().top - menu.getBoundingClientRect().bottom
+      }))
+      .toBeGreaterThanOrEqual(-1)
+    await expect(page.locator('#permalink-toast')).not.toContainText('Failed to compare runs')
+  })
+
   test('mobile Projects shows retryable project summary errors', async ({ page }) => {
     await openMobileProjects(page)
     const projectName = `Mobile Retry ${Date.now()}`
@@ -834,7 +901,7 @@ test.beforeEach(async ({ page }) => {
     await expect(items).toHaveCount(commands.length)
   })
 
-  test('mobile recents sheet injects the tapped command into the composer and closes', async ({ page }) => {
+  test('mobile recents sheet opens run details from row tap', async ({ page }) => {
     const commands = ['hostname', 'date', 'uptime']
 
     for (const command of commands) {
@@ -852,7 +919,9 @@ test.beforeEach(async ({ page }) => {
       .first()
       .click()
     await expect(page.locator('#mobile-recents-sheet')).not.toBeVisible()
-    await expect(page.locator('#mobile-cmd')).toHaveValue('hostname')
+    await expect(page.locator('#history-run-overlay')).toHaveClass(/open/)
+    await expect(page.locator('#history-run-subtitle')).toContainText('hostname')
+    await expect(page.locator('#mobile-cmd')).toHaveValue('')
   })
 
   test('mobile recents sheet restore action loads the run into the active tab', async ({
@@ -907,7 +976,8 @@ test.beforeEach(async ({ page }) => {
     await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
 
     const firstEntry = page.locator('#mobile-recents-list .sheet-item').first()
-    await firstEntry.locator('.sheet-item-action', { hasText: 'permalink' }).click()
+    await firstEntry.locator('.sheet-item-action-menu-trigger').click()
+    await firstEntry.locator('.sheet-item-action-menu .dropdown-item', { hasText: 'permalink' }).click()
     await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
     await expect(page.locator('#permalink-toast')).toContainText('Link copied to clipboard')
   })

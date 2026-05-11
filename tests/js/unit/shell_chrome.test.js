@@ -600,6 +600,16 @@ describe('shell chrome project workspace', () => {
       expect(document.querySelector('[data-project-id="project-1"]').closest('.project-mobile-row').textContent).toContain('+1')
       expect(document.querySelector('[data-project-mobile-action="project-menu"][data-project-id="project-1"]').textContent).toBe('☰')
 
+      document
+        .querySelector('.project-mobile-row[data-project-id="project-1"]')
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await tick()
+      expect(document.getElementById('project-mobile-list-view').classList.contains('u-hidden')).toBe(true)
+      expect(document.getElementById('project-mobile-detail-view').classList.contains('u-hidden')).toBe(false)
+      document.querySelector('[data-project-mobile-action="back-to-list"]').click()
+      await tick()
+      expect(document.getElementById('project-mobile-list-view').classList.contains('u-hidden')).toBe(false)
+
       const findingsChip = document.querySelector('[data-project-id="project-1"][data-project-mobile-tab="findings"]')
       findingsChip.click()
       await tick()

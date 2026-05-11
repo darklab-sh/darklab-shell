@@ -666,6 +666,102 @@
     });
     return btn;
   }
+  function _recentsCloseActionMenus(except = null) {
+    recentsSheetList?.querySelectorAll('.sheet-item-action-menu-wrap.open').forEach((wrap) => {
+      if (except && wrap === except) return;
+      wrap.classList.remove('open');
+      wrap.querySelector('.sheet-item-action-menu-trigger')?.setAttribute('aria-expanded', 'false');
+    });
+  }
+  function _recentsCopyCommand(run) {
+    const command = run?.command || '';
+    if (typeof global.copyTextToClipboard !== 'function') return;
+    global.copyTextToClipboard(command)
+      .then(() => global.showToast && global.showToast('Command copied'))
+      .catch(() => global.showToast && global.showToast('Failed to copy command', 'error'));
+  }
+  function _recentsRunActionMenu(run) {
+    const wrap = document.createElement('div');
+    wrap.className = 'sheet-item-action-menu-wrap save-menu-wrap save-menu-down';
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'sheet-item-action sheet-item-action-menu-trigger btn btn-secondary btn-compact';
+    trigger.textContent = 'more';
+    trigger.setAttribute('aria-label', 'More run actions');
+    trigger.setAttribute('aria-haspopup', 'menu');
+    trigger.setAttribute('aria-expanded', 'false');
+    const menu = document.createElement('div');
+    menu.className = 'sheet-item-action-menu save-menu dropdown-surface';
+    menu.setAttribute('role', 'menu');
+    const addItem = (label, handler) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'dropdown-item dropdown-item-compact';
+      item.setAttribute('role', 'menuitem');
+      item.textContent = label;
+      item.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        _recentsCloseActionMenus();
+        handler();
+      });
+      menu.appendChild(item);
+    };
+    addItem('permalink', () => {
+      if (!run.id) return;
+      const url = `${location.origin}/history/${run.id}`;
+      if (typeof global.shareUrl === 'function') {
+        global.shareUrl(url).catch(() => global.showToast && global.showToast('Share failed', 'error'));
+      }
+    });
+    addItem('compare', () => {
+      if (typeof global.openHistoryCompareLauncher === 'function') {
+        global.openHistoryCompareLauncher(run);
+        closeRecentsSheet();
+      }
+    });
+    addItem('edit', () => {
+      if (typeof global._historyEditEntityMetadata === 'function') global._historyEditEntityMetadata('run', run);
+    });
+    addItem('add to active project', () => {
+      if (typeof global._historyAddRunToActiveProject === 'function') {
+        global._historyAddRunToActiveProject(run)
+          .catch(() => global.showToast && global.showToast('Failed to add run to active project', 'error'));
+      }
+    });
+    addItem('add to project', () => {
+      if (typeof global._historyAddRunToProject === 'function') {
+        global._historyAddRunToProject(run)
+          .catch(() => global.showToast && global.showToast('Failed to add run to project', 'error'));
+      }
+    });
+    addItem('copy run id', () => {
+      if (typeof global.copyTextToClipboard === 'function') {
+        global.copyTextToClipboard(run.id)
+          .then(() => global.showToast && global.showToast('Run ID copied'))
+          .catch(() => global.showToast && global.showToast('Failed to copy run ID', 'error'));
+      }
+    });
+    addItem('delete', () => {
+      if (run.id && typeof global.confirmHistAction === 'function') {
+        global.confirmHistAction('delete', run.id, run.command, 'run');
+      }
+    });
+    bindPressable(trigger, {
+      refocusComposer: false,
+      clearPressStyle: true,
+      onActivate: (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const open = !wrap.classList.contains('open');
+        _recentsCloseActionMenus(open ? wrap : null);
+        wrap.classList.toggle('open', open);
+        trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+      },
+    });
+    wrap.append(trigger, menu);
+    return wrap;
+  }
   function _recentsMakeKindBadge(kind, label = kind.toUpperCase()) {
     const badge = document.createElement('span');
     const tone = kind === 'run' ? 'badge-tone-green' : 'badge-tone-muted';
@@ -787,6 +883,7 @@
       const actions = document.createElement('div');
       actions.className = 'sheet-item-actions';
       if (isRun) {
+        actions.appendChild(_recentsMakeAction('copy command', () => _recentsCopyCommand(run)));
         actions.appendChild(_recentsMakeAction('restore', () => {
           if (typeof global.restoreHistoryRunIntoTab !== 'function') return;
           const cmdEl2 = item.querySelector('.sheet-item-cmd');
@@ -798,13 +895,7 @@
               if (typeof global.showToast === 'function') global.showToast('Failed to load run');
             });
         }));
-        actions.appendChild(_recentsMakeAction('permalink', () => {
-          if (!run.id) return;
-          const url = `${location.origin}/history/${run.id}`;
-          if (typeof global.shareUrl === 'function') {
-            global.shareUrl(url).catch(() => global.showToast && global.showToast('Share failed', 'error'));
-          }
-        }));
+        actions.appendChild(_recentsRunActionMenu(run));
       } else {
         actions.appendChild(_recentsMakeAction('open', () => {
           _recentsOpenSnapshot(snapshot);
@@ -817,27 +908,33 @@
           }
         }));
       }
-      actions.appendChild(_recentsMakeAction('delete', () => {
-        if (!entryData.id) return;
-        if (typeof global.confirmHistAction === 'function') {
-          global.confirmHistAction('delete', entryData.id, isRun ? run.command : snapshot.label, isRun ? 'run' : 'snapshot');
-        }
-      }));
+      if (!isRun) {
+        actions.appendChild(_recentsMakeAction('delete', () => {
+          if (!entryData.id) return;
+          if (typeof global.confirmHistAction === 'function') {
+            global.confirmHistAction('delete', entryData.id, snapshot.label, 'snapshot');
+          }
+        }));
+      }
 
       item.appendChild(head);
       item.appendChild(meta);
       item.appendChild(actions);
 
       item.addEventListener('click', (e) => {
-        if (e.target.closest('.sheet-item-action, .sheet-item-star')) return;
+        if (e.target.closest('.sheet-item-action, .sheet-item-star, .sheet-item-action-menu-wrap')) return;
+        _recentsCloseActionMenus();
         if (!isRun) {
           _recentsOpenSnapshot(snapshot);
           closeRecentsSheet();
           return;
         }
-        if (typeof global.setComposerValue === 'function') {
-          global.setComposerValue(cmd, cmd.length, cmd.length);
+        if (typeof global.openHistoryRunDetails === 'function') {
+          global.openHistoryRunDetails(run);
+          closeRecentsSheet();
+          return;
         }
+        if (typeof global.setComposerValue === 'function') global.setComposerValue(cmd, cmd.length, cmd.length);
         closeRecentsSheet();
       });
 
@@ -921,6 +1018,7 @@
   }
   function closeRecentsSheet() {
     _closeRecentsDropdowns();
+    _recentsCloseActionMenus();
     hide(recentsSheet);
     hide(recentsSheetScrim);
   }

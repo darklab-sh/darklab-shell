@@ -1,11 +1,20 @@
 import { describe, expect, it, vi } from 'vitest'
 import { MemoryStorage, fromDomScripts } from './helpers/extract.js'
 
-function loadCompareHelpers({ apiFetchImpl, mobileMode = false, clipboardImpl } = {}) {
+function loadCompareHelpers({
+  apiFetchImpl,
+  mobileMode = false,
+  clipboardImpl,
+  compareViewMode = 'auto',
+  compareContext = '3',
+  useRealSelectEnhancer = false,
+} = {}) {
   document.body.innerHTML = '<input id="cmd" /><div id="permalink-toast"></div>'
   const apiFetch = apiFetchImpl || vi.fn(() => Promise.resolve({ json: () => Promise.resolve({}) }))
   const showToast = vi.fn()
   const clipboard = clipboardImpl || { writeText: vi.fn(() => Promise.resolve()) }
+  const applyCompareViewModePreference = vi.fn((mode) => { compareViewMode = mode })
+  const applyCompareContextPreference = vi.fn((mode) => { compareContext = mode })
   const fns = fromDomScripts(
     ['app/static/js/utils.js', 'app/static/js/history_core.js', 'app/static/js/history.js'],
     {
@@ -21,6 +30,11 @@ function loadCompareHelpers({ apiFetchImpl, mobileMode = false, clipboardImpl } 
       createTab: vi.fn(),
       activateTab: vi.fn(),
       useMobileTerminalViewportMode: () => mobileMode,
+      getCompareViewModePreference: () => compareViewMode,
+      getCompareContextPreference: () => compareContext,
+      applyCompareViewModePreference,
+      applyCompareContextPreference,
+      ...(useRealSelectEnhancer ? {} : { enhanceAppSelects: vi.fn() }),
       setTimeout,
       clearTimeout,
     },
@@ -30,7 +44,7 @@ function loadCompareHelpers({ apiFetchImpl, mobileMode = false, clipboardImpl } 
       fetchAndRenderHistoryComparison,
     })`,
   )
-  return { ...fns, apiFetch, showToast, clipboard }
+  return { ...fns, apiFetch, showToast, clipboard, applyCompareViewModePreference, applyCompareContextPreference }
 }
 
 function flushPromises() {
@@ -129,15 +143,154 @@ describe('history compare split renderer', () => {
     _renderHistoryComparison(compareData())
 
     const body = document.querySelector('#history-compare-body')
-    expect(body?.textContent).toContain('changed 1')
-    expect(body?.textContent).toContain('added 2')
-    expect(body?.textContent).toContain('removed 1')
+    expect(document.querySelector('#history-compare-subtitle')?.textContent)
+      .toBe('5 lines · 1 unchanged · 1 changed · 2 added · 1 removed')
+    expect(document.querySelector('.history-compare-count-badge')).toBeNull()
     expect(document.querySelectorAll('.history-compare-pane')).toHaveLength(2)
     expect(document.querySelector('[data-side="a"]')?.textContent).toContain('service old')
     expect(document.querySelector('[data-side="b"]')?.textContent).toContain('service new')
     expect(document.querySelector('[data-side="b"]')?.textContent).toContain('added line')
     expect(document.querySelector('[data-side="a"]')?.textContent).toContain('removed line')
     expect(document.querySelectorAll('.history-compare-line-delta')).toHaveLength(2)
+  })
+
+  it('resolves hidden auto mode from viewport and can reset explicit choices to default', () => {
+    const { _renderHistoryComparison, applyCompareViewModePreference } = loadCompareHelpers({
+      mobileMode: true,
+      compareViewMode: 'auto',
+    })
+    _renderHistoryComparison(compareData())
+
+    let select = document.querySelector('.history-compare-view-select')
+    expect(select.value).toBe('unified')
+    expect([...select.options].map(option => option.value)).toEqual([
+      'unified',
+      'changes_only',
+      'findings_only',
+    ])
+    expect(document.querySelector('.history-compare-reset-view').hidden).toBe(true)
+
+    _renderHistoryComparison(compareData({ _compareViewModeRaw: 'unified' }))
+    select = document.querySelector('.history-compare-view-select')
+    expect(document.querySelector('.history-compare-view-select').value).toBe('unified')
+    expect(document.querySelector('.history-compare-reset-view').hidden).toBe(true)
+
+    _renderHistoryComparison(compareData({ _compareViewModeRaw: 'side_by_side' }))
+    select = document.querySelector('.history-compare-view-select')
+    expect(select.value).toBe('unified')
+    expect([...select.options].map(option => option.value)).not.toContain('side_by_side')
+
+    select.value = 'changes_only'
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(applyCompareViewModePreference).toHaveBeenCalledWith('changes_only')
+    const reset = document.querySelector('.history-compare-reset-view')
+    expect(reset.hidden).toBe(false)
+    expect(reset.getAttribute('aria-label')).toBe('Reset comparison view to default')
+    expect(reset.textContent).toBe('↻')
+
+    reset.click()
+    expect(applyCompareViewModePreference).toHaveBeenCalledWith('auto')
+  })
+
+  it('renders a fetched comparison in mobile mode with the real select enhancer', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve(compareData()),
+    }))
+    const { fetchAndRenderHistoryComparison, showToast } = loadCompareHelpers({
+      apiFetchImpl: apiFetch,
+      mobileMode: true,
+      compareViewMode: 'auto',
+      useRealSelectEnhancer: true,
+    })
+
+    fetchAndRenderHistoryComparison('run-a', 'run-b')
+    await flushPromises()
+    await flushPromises()
+
+    expect(apiFetch).toHaveBeenCalledWith('/history/compare?left=run-a&right=run-b')
+    expect(showToast).not.toHaveBeenCalledWith('Failed to compare runs', 'error')
+    expect(document.getElementById('history-compare-overlay')?.classList.contains('open')).toBe(true)
+    expect(document.querySelector('.history-compare-split')?.dataset.compareViewMode).toBe('unified')
+    expect(document.querySelector('.history-compare-view-select')?.value).toBe('unified')
+    expect(document.querySelector('.history-compare-controls .app-select-menu')?.classList.contains('dropdown-up')).toBe(false)
+    expect(document.querySelector('.history-compare-actions-menu-wrap')?.classList.contains('save-menu-down')).toBe(true)
+    expect(document.querySelector('.history-compare-actions-menu')?.classList.contains('dropdown-up')).toBe(false)
+  })
+
+  it('surfaces backend compare errors instead of only the generic failure toast', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: false,
+      status: 400,
+      json: () => Promise.resolve({ error: 'Choose two different runs to compare' }),
+    }))
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { fetchAndRenderHistoryComparison, showToast } = loadCompareHelpers({ apiFetchImpl: apiFetch })
+
+    try {
+      fetchAndRenderHistoryComparison('run-a', 'run-a')
+      await flushPromises()
+      await flushPromises()
+      await flushPromises()
+    } finally {
+      consoleError.mockRestore()
+    }
+
+    expect(document.getElementById('permalink-toast')?.textContent)
+      .toContain('Failed to compare runs: Choose two different runs to compare')
+  })
+
+  it('hides equal-line context controls and rows in changes-only and findings-only modes', () => {
+    const data = compareData()
+    const { _renderHistoryComparison } = loadCompareHelpers({ compareViewMode: 'changes_only' })
+    _renderHistoryComparison(data)
+
+    expect(document.querySelector('.history-compare-context-select')).toBeNull()
+    expect(document.querySelector('.history-compare-row.is-equal')).toBeNull()
+    expect(document.querySelector('.history-compare-split')).not.toBeNull()
+
+    const { _renderHistoryComparison: renderFindingsOnly } = loadCompareHelpers({ compareViewMode: 'findings_only' })
+    renderFindingsOnly(compareData({
+      objects: {
+        findings: { added: [{ id: 'f1', title: 'new finding' }], removed: [] },
+        artifacts: { added: [], removed: [] },
+      },
+    }))
+    expect(document.querySelector('.history-compare-context-select')).toBeNull()
+    expect(document.querySelector('.history-compare-split')).toBeNull()
+    expect(document.querySelector('.history-compare-object-section')).not.toBeNull()
+  })
+
+  it('rerenders full equal hunks when context dropdown changes without refetching compare data', () => {
+    const apiFetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve({}) }))
+    const { _renderHistoryComparison, applyCompareContextPreference } = loadCompareHelpers({
+      apiFetchImpl: apiFetch,
+      compareContext: '3',
+    })
+    _renderHistoryComparison(compareData({
+      hunks: [{
+        op: 'equal',
+        left: {
+          start: 0,
+          end: 8,
+          lines: Array.from({ length: 8 }, (_, index) => ({ text: `left ${index}`, line_index: index })),
+        },
+        right: {
+          start: 0,
+          end: 8,
+          lines: Array.from({ length: 8 }, (_, index) => ({ text: `right ${index}`, line_index: index })),
+        },
+      }],
+    }))
+
+    expect(document.querySelector('[data-side="a"]')?.textContent).not.toContain('left 4')
+    const contextSelect = document.querySelector('.history-compare-context-select')
+    expect(contextSelect.value).toBe('3')
+    contextSelect.value = 'all'
+    contextSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    expect(applyCompareContextPreference).toHaveBeenCalledWith('all')
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(document.querySelector('[data-side="a"]')?.textContent).toContain('left 4')
   })
 
   it('renders replace blocks while preserving each side output order', () => {
@@ -468,11 +621,14 @@ describe('history compare split renderer', () => {
     const clipboard = { writeText: vi.fn(() => Promise.resolve()) }
     const { _renderHistoryComparison } = loadCompareHelpers({ clipboardImpl: clipboard })
     _renderHistoryComparison(compareData())
-    ;[...document.querySelectorAll('.history-compare-actions button')]
+    document.querySelector('.history-compare-actions-trigger').click()
+    expect(document.querySelector('.history-compare-actions-menu-wrap').classList.contains('open')).toBe(true)
+    ;[...document.querySelectorAll('.history-compare-actions-menu .dropdown-item')]
       .find(button => button.textContent === 'Copy summary')
       .click()
     await Promise.resolve()
 
+    expect(document.querySelector('.history-compare-actions-menu-wrap').classList.contains('open')).toBe(false)
     expect(clipboard.writeText.mock.calls[0][0]).toContain('Changed: 1')
     expect(clipboard.writeText.mock.calls[0][0]).toContain('Added: 2')
     expect(clipboard.writeText.mock.calls[0][0]).toContain('Removed: 1')

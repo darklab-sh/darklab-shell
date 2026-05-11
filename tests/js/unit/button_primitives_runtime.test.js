@@ -211,6 +211,8 @@ function mountMobileHarness() {
     shareUrl: vi.fn(() => Promise.resolve()),
     showToast: vi.fn(),
     _toggleStar: vi.fn(),
+    copyTextToClipboard: vi.fn(() => Promise.resolve()),
+    openHistoryRunDetails: vi.fn(),
   }
 
   window.apiFetch = apiFetch
@@ -218,6 +220,8 @@ function mountMobileHarness() {
   window.confirmHistAction = globals.confirmHistAction
   window.restoreHistoryRunIntoTab = globals.restoreHistoryRunIntoTab
   window.shareUrl = globals.shareUrl
+  window.copyTextToClipboard = globals.copyTextToClipboard
+  window.openHistoryRunDetails = globals.openHistoryRunDetails
   window.getTabs = globals.getTabs
   window.getActiveTabId = globals.getActiveTabId
   window.activateTab = globals.activateTab
@@ -230,7 +234,7 @@ function mountMobileHarness() {
     '{}',
   )
 
-  return { apiFetch, mobileMenuHistoryBtn: document.querySelector('[data-menu-action="history"]') }
+  return { ...globals, apiFetch, mobileMenuHistoryBtn: document.querySelector('[data-menu-action="history"]') }
 }
 
 describe('runtime button primitive contract', () => {
@@ -270,6 +274,18 @@ describe('runtime button primitive contract', () => {
   const exitEl = document.querySelector('#mobile-recents-list .sheet-item-exit')
   expect(exitEl?.textContent).toBe('terminated')
   expect(exitEl?.classList.contains('nonzero')).toBe(false)
+  const firstItem = document.querySelector('#mobile-recents-list .sheet-item')
+  expect([...firstItem.querySelectorAll('.sheet-item-actions > *')].map(el => el.textContent)).toEqual([
+    'copy command',
+    'restore',
+    'morepermalinkcompareeditadd to active projectadd to projectcopy run iddelete',
+  ])
+  firstItem.click()
+  expect(document.getElementById('mobile-cmd').value).toBe('')
+  expect(window.openHistoryRunDetails).toHaveBeenCalledWith(expect.objectContaining({
+    id: 'run-1',
+    command: 'ping darklab.sh',
+  }))
   expectButtonPrimitives(
     document.getElementById('mobile-recents-pagination-controls'),
     'mobile recents pagination',

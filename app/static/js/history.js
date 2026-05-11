@@ -105,6 +105,14 @@ function _closeHistoryActionMenus(except = null) {
   });
 }
 
+function _closeHistoryRunActionMenus(except = null) {
+  document.querySelectorAll('.history-run-action-menu-wrap.open').forEach((wrap) => {
+    if (except && wrap === except) return;
+    wrap.classList.remove('open');
+    wrap.querySelector('.history-run-action-menu-trigger')?.setAttribute('aria-expanded', 'false');
+  });
+}
+
 function _resetHistoryActionMenuPosition(wrap) {
   const menu = wrap?.querySelector?.('.history-action-menu');
   if (!menu) return;
@@ -980,6 +988,16 @@ async function _historyLoadProjects() {
     .sort((a, b) => _historyProjectDisplayName(a).localeCompare(_historyProjectDisplayName(b)));
 }
 
+function _historyOrderProjectsForPicker(projects, activeProject = null) {
+  const activeId = activeProject && activeProject.id ? String(activeProject.id) : '';
+  return (Array.isArray(projects) ? projects : []).slice().sort((a, b) => {
+    const aIsActive = activeId && String(a?.id || '') === activeId;
+    const bIsActive = activeId && String(b?.id || '') === activeId;
+    if (aIsActive !== bIsActive) return aIsActive ? -1 : 1;
+    return _historyProjectDisplayName(a).localeCompare(_historyProjectDisplayName(b));
+  });
+}
+
 async function _historyLinkRunToProject(run, project) {
   if (!run || !run.id) throw new Error('Run is missing its identifier.');
   if (!project || !project.id) throw new Error('Project is missing its identifier.');
@@ -1035,7 +1053,11 @@ function _historyProjectPickerContent(projects) {
 async function _historyAddRunToProject(run) {
   let projects;
   try {
-    projects = await _historyLoadProjects();
+    const [loadedProjects, activeProject] = await Promise.all([
+      _historyLoadProjects(),
+      _historyLoadActiveProject().catch(() => null),
+    ]);
+    projects = _historyOrderProjectsForPicker(loadedProjects, activeProject);
   } catch (_) {
     showToast('Failed to load projects', 'error');
     return;
@@ -1057,6 +1079,9 @@ async function _historyAddRunToProject(run) {
   });
   if (typeof enhanceAppSelects === 'function') {
     enhanceAppSelects(wrap);
+    if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) {
+      wrap.querySelector('.app-select-menu')?.classList.add('dropdown-up');
+    }
   }
   const choice = await choicePromise;
   if (choice !== 'add') return;
@@ -1068,7 +1093,7 @@ async function _historyAddRunToProject(run) {
   }
 }
 
-function _createHistoryActionMenu(run) {
+function _createHistoryActionMenu(run, { includeDelete = false } = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'history-action-menu-wrap save-menu-wrap save-menu-down';
   const trigger = document.createElement('button');
@@ -1080,14 +1105,16 @@ function _createHistoryActionMenu(run) {
   trigger.setAttribute('aria-expanded', 'false');
   const menu = document.createElement('div');
   menu.className = 'history-action-menu save-menu dropdown-surface';
-  [
+  const items = [
     ['edit-metadata', 'edit'],
     ['permalink', 'permalink'],
     ['compare', 'compare'],
     ['add-active-project', 'add to active project'],
     ['add-project', 'add to project'],
     ['copy-run-id', 'copy run id'],
-  ].forEach(([action, label]) => {
+  ];
+  if (includeDelete) items.push(['delete', 'delete']);
+  items.forEach(([action, label]) => {
     const item = document.createElement('button');
     item.type = 'button';
     item.className = 'dropdown-item dropdown-item-compact';
@@ -1170,6 +1197,7 @@ function _createHistoryEntry(run, isStarred) {
 
   const actions = document.createElement('div');
   actions.className = 'history-actions';
+  const isMobile = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
 
   const copyCommandBtn = document.createElement('button');
   copyCommandBtn.className = 'history-action-btn btn btn-secondary btn-compact';
@@ -1185,14 +1213,16 @@ function _createHistoryEntry(run, isStarred) {
   restoreBtn.textContent = 'restore';
   actions.appendChild(restoreBtn);
 
-  const deleteBtn = document.createElement('button');
-  deleteBtn.className = 'history-action-btn btn btn-secondary btn-compact';
-  deleteBtn.type = 'button';
-  deleteBtn.dataset.action = 'delete';
-  deleteBtn.textContent = 'delete';
-  actions.appendChild(deleteBtn);
+  if (!isMobile) {
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'history-action-btn btn btn-secondary btn-compact';
+    deleteBtn.type = 'button';
+    deleteBtn.dataset.action = 'delete';
+    deleteBtn.textContent = 'delete';
+    actions.appendChild(deleteBtn);
+  }
 
-  actions.appendChild(_createHistoryActionMenu(run));
+  actions.appendChild(_createHistoryActionMenu(run, { includeDelete: isMobile }));
 
   entry.appendChild(actions);
   return entry;
@@ -1406,14 +1436,28 @@ function _ensureHistoryRunOverlay() {
   document.body.appendChild(overlay);
   overlay.addEventListener('click', e => {
     if (e.target === overlay) closeHistoryRunOverlay();
+    const menuTrigger = e.target.closest?.('.history-run-action-menu-trigger');
+    if (menuTrigger) {
+      e.preventDefault();
+      e.stopPropagation();
+      const wrap = menuTrigger.closest('.history-run-action-menu-wrap');
+      if (!wrap) return;
+      const open = !wrap.classList.contains('open');
+      _closeHistoryRunActionMenus(open ? wrap : null);
+      wrap.classList.toggle('open', open);
+      menuTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+      return;
+    }
     const tab = e.target.closest?.('[data-history-run-tab]');
     if (tab) {
+      _closeHistoryRunActionMenus();
       _historyRunModalState.activeTab = String(tab.dataset.historyRunTab || 'summary');
       _renderHistoryRunModal();
       return;
     }
     const action = e.target.closest?.('[data-history-run-action]');
     if (action) {
+      _closeHistoryRunActionMenus();
       _handleHistoryRunModalAction(String(action.dataset.historyRunAction || ''));
     }
   });
@@ -1444,6 +1488,7 @@ function closeHistoryRunOverlay() {
   overlay.classList.add('u-hidden');
   overlay.setAttribute('aria-hidden', 'true');
   _historyRunModalToken += 1;
+  _closeHistoryRunActionMenus();
 }
 
 function _openHistoryRunOverlay() {
@@ -1501,6 +1546,37 @@ function _historyRunActionButton(label, action, { disabled = false, tone = 'seco
   btn.textContent = label;
   btn.disabled = !!disabled;
   return btn;
+}
+
+function _historyRunActionMenu() {
+  const wrap = document.createElement('div');
+  wrap.className = 'history-run-action-menu-wrap save-menu-wrap';
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'btn btn-secondary btn-compact history-run-action-menu-trigger';
+  trigger.textContent = 'Actions';
+  trigger.setAttribute('aria-haspopup', 'menu');
+  trigger.setAttribute('aria-expanded', 'false');
+  const menu = document.createElement('div');
+  menu.className = 'history-run-action-menu save-menu dropdown-surface';
+  menu.setAttribute('role', 'menu');
+  [
+    ['copy-command', 'Copy command'],
+    ['edit-metadata', 'Edit metadata'],
+    ['add-active-project', 'Add to active project'],
+    ['add-project', 'Add to project'],
+    ['copy-run-id', 'Copy run ID'],
+  ].forEach(([action, label]) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'dropdown-item dropdown-item-compact';
+    item.dataset.historyRunAction = action;
+    item.setAttribute('role', 'menuitem');
+    item.textContent = label;
+    menu.appendChild(item);
+  });
+  wrap.append(trigger, menu);
+  return wrap;
 }
 
 function _historyRunSectionHeader(title, action = null) {
@@ -1617,8 +1693,11 @@ function _renderHistoryRunSummary(body, run) {
   const actions = document.createElement('div');
   actions.className = 'history-run-actions history-run-primary-actions';
   actions.append(
-    _historyRunActionButton('Use command', 'use-command'),
-    _historyRunActionButton('Restore output', 'restore'),
+    _historyRunActionButton('Restore', 'restore'),
+    _historyRunActionButton('Delete', 'delete'),
+    _historyRunActionButton('Permalink', 'permalink'),
+    _historyRunActionButton('Compare', 'compare'),
+    _historyRunActionMenu(),
   );
   body.appendChild(actions);
 }
@@ -1888,6 +1967,19 @@ async function _handleHistoryRunModalAction(action) {
     })
       .catch(() => showToast('Failed to load run'))
       .finally(() => _setHistoryLoadState(false));
+  } else if (action === 'copy-command') {
+    copyTextToClipboard(run.command || '')
+      .then(() => showToast('Command copied'))
+      .catch(() => showToast('Failed to copy command', 'error'));
+  } else if (action === 'permalink') {
+    const url = `${location.origin}/history/${run.id}`;
+    shareUrl(url).catch(() => showToast('Failed to copy link', 'error'));
+  } else if (action === 'compare') {
+    closeHistoryRunOverlay();
+    openHistoryCompareLauncher(run);
+  } else if (action === 'delete') {
+    closeHistoryRunOverlay();
+    confirmHistAction('delete', run.id, run.command);
   } else if (action === 'edit-metadata') {
     _historyEditEntityMetadata('run', run);
   } else if (action === 'add-active-project') {
@@ -1902,6 +1994,17 @@ async function _handleHistoryRunModalAction(action) {
     } catch (_) {
       showToast('Failed to add run to active project', 'error');
     }
+  } else if (action === 'add-project') {
+    try {
+      await _historyAddRunToProject(run);
+      refreshHistoryPanel();
+    } catch (_) {
+      showToast('Failed to add run to project', 'error');
+    }
+  } else if (action === 'copy-run-id') {
+    copyTextToClipboard(run.id)
+      .then(() => showToast('Run ID copied'))
+      .catch(() => showToast('Failed to copy run ID', 'error'));
   }
 }
 
@@ -2267,6 +2370,78 @@ function _historyCompareLineLimit(limits = {}) {
   return Number.isFinite(limit) && limit > 0 ? limit : 4000;
 }
 
+function _historyComparePreferenceCore() {
+  return (typeof PreferenceCore !== 'undefined' && PreferenceCore)
+    || (typeof DarklabPreferenceCore !== 'undefined' && DarklabPreferenceCore)
+    || null;
+}
+
+function _historyCompareCoerceViewMode(value) {
+  const core = _historyComparePreferenceCore();
+  if (core && typeof core.coerceCompareViewMode === 'function') return core.coerceCompareViewMode(value);
+  return ['auto', 'side_by_side', 'unified', 'changes_only', 'findings_only'].includes(value) ? value : 'auto';
+}
+
+function _historyCompareCoerceContext(value) {
+  const core = _historyComparePreferenceCore();
+  if (core && typeof core.coerceCompareContextMode === 'function') return core.coerceCompareContextMode(value);
+  const normalized = String(value || '').trim().toLowerCase();
+  return ['3', '10', 'all'].includes(normalized) ? normalized : '3';
+}
+
+function _historyCompareStoredViewMode() {
+  if (typeof getCompareViewModePreference === 'function') return _historyCompareCoerceViewMode(getCompareViewModePreference());
+  if (typeof getPreference === 'function') return _historyCompareCoerceViewMode(getPreference('pref_compare_view_mode'));
+  return 'auto';
+}
+
+function _historyCompareStoredContext() {
+  if (typeof getCompareContextPreference === 'function') return _historyCompareCoerceContext(getCompareContextPreference());
+  if (typeof getPreference === 'function') return _historyCompareCoerceContext(getPreference('pref_compare_context'));
+  return '3';
+}
+
+function _historyCompareViewportMode() {
+  if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) return 'unified';
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    try {
+      if (window.matchMedia('(max-width: 760px)').matches) return 'unified';
+    } catch (_) {}
+  }
+  return 'side_by_side';
+}
+
+function _historyCompareUsesMobileLayout() {
+  return _historyCompareViewportMode() === 'unified';
+}
+
+function _historyCompareResolveViewMode(value = null) {
+  const mode = _historyCompareCoerceViewMode(value || _historyCompareStoredViewMode());
+  const viewportMode = _historyCompareViewportMode();
+  if (mode === 'auto') return viewportMode;
+  if (mode === 'side_by_side' && viewportMode === 'unified') return 'unified';
+  return mode;
+}
+
+function _historyCompareViewModeOptions() {
+  const options = [
+    ['side_by_side', 'Side-by-side'],
+    ['unified', 'Unified'],
+    ['changes_only', 'Changes only'],
+    ['findings_only', 'Findings only'],
+  ];
+  if (_historyCompareViewportMode() === 'unified') {
+    return options.filter(([value]) => value !== 'side_by_side');
+  }
+  return options;
+}
+
+function _historyCompareContextLimit(value = null) {
+  const context = _historyCompareCoerceContext(value || _historyCompareStoredContext());
+  if (context === 'all') return null;
+  return Number(context);
+}
+
 function _historyCompareNumber(value, fallback = null) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -2440,8 +2615,10 @@ function _renderHistoryCompareLineText(line, segments = null, limits = {}) {
     expander.textContent = `... +${(rawText.length - limit).toLocaleString()} chars`;
     expander.addEventListener('click', event => {
       event.stopPropagation();
+      const split = expander.closest?.('.history-compare-split');
       code.textContent = rawText;
       expander.remove();
+      _scheduleHistoryCompareRowPairHeightSync(split);
     });
     const wrap = document.createElement('span');
     wrap.className = 'history-compare-line-text-wrap';
@@ -2518,8 +2695,24 @@ function _historyCompareRowHeight(row) {
   return Math.ceil(Math.max(Number(rect?.height || 0), Number(row.offsetHeight || 0)));
 }
 
+function _historyCompareUsesStackedMobilePanes(wrap) {
+  const mobile = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
+  const stacked = wrap?.classList?.contains('is-unified') || wrap?.classList?.contains('is-changes-only');
+  return Boolean(mobile && stacked);
+}
+
+function _clearHistoryCompareRowPairHeights(wrap) {
+  wrap?.querySelectorAll?.('.history-compare-row[data-compare-pair]').forEach(row => {
+    row.style.minHeight = '';
+  });
+}
+
 function _syncHistoryCompareRowPairHeights(wrap) {
   if (!wrap || !wrap.isConnected) return;
+  if (_historyCompareUsesStackedMobilePanes(wrap)) {
+    _clearHistoryCompareRowPairHeights(wrap);
+    return;
+  }
   const pairs = new Map();
   wrap.querySelectorAll('.history-compare-row[data-compare-pair]').forEach(row => {
     row.style.minHeight = '';
@@ -2685,8 +2878,18 @@ function _fetchHistoryCompareFoldSide(data, hunk, side) {
   return loadPage(range.start);
 }
 
-function _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, rerender, anchorMap) {
+function _historyCompareSliceContextLines(lines, edge, contextLimit) {
+  const safeLines = Array.isArray(lines) ? lines : [];
+  if (contextLimit === null) return safeLines;
+  const limit = Math.max(0, Number(contextLimit || 0));
+  if (!limit) return [];
+  return edge === 'leading' ? safeLines.slice(-limit) : safeLines.slice(0, limit);
+}
+
+function _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, rerender, anchorMap, options = {}) {
   const limits = data.limits || {};
+  const contextLimit = Object.prototype.hasOwnProperty.call(options, 'contextLimit') ? options.contextLimit : 3;
+  const changesOnly = !!options.changesOnly;
   const context = hunk.context || {};
   const appendLines = (leftLines, rightLines, leftStart = 0, rightStart = 0) => {
     const count = Math.max(leftLines.length, rightLines.length);
@@ -2720,19 +2923,6 @@ function _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, rerende
       );
     }
   };
-  if (Array.isArray(hunk.left?.lines) || Array.isArray(hunk.right?.lines)) {
-    appendLines(
-      hunk.left?.lines || [],
-      hunk.right?.lines || [],
-      _historyCompareNumber(hunk.left?.start, 0),
-      _historyCompareNumber(hunk.right?.start, 0),
-    );
-    return;
-  }
-  const leftStart = _historyCompareNumber(hunk.left?.start, 0);
-  const rightStart = _historyCompareNumber(hunk.right?.start, 0);
-  const leadingLeft = context.leading?.left || [];
-  const leadingRight = context.leading?.right || [];
   const makeFoldRow = (button) => {
     const row = document.createElement('div');
     row.className = 'history-compare-row history-compare-row-fold';
@@ -2741,7 +2931,85 @@ function _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, rerende
     row.appendChild(button);
     return row;
   };
-  appendLines(leadingLeft, leadingRight, leftStart, rightStart);
+  const makeFoldButtonPair = (label, expand) => {
+    const foldButtons = [];
+    const setFoldButtons = (disabled, text) => {
+      foldButtons.forEach(button => {
+        button.disabled = disabled;
+        button.textContent = text;
+      });
+    };
+    const makeFoldButton = () => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn btn-secondary btn-compact history-compare-fold';
+      button.textContent = label;
+      button.addEventListener('click', () => expand(setFoldButtons));
+      foldButtons.push(button);
+      return button;
+    };
+    _appendHistoryCompareRowPair(leftPane, rightPane, makeFoldRow(makeFoldButton()), makeFoldRow(makeFoldButton()));
+  };
+  if (Array.isArray(hunk.left?.lines) || Array.isArray(hunk.right?.lines)) {
+    const leftLines = hunk.left?.lines || [];
+    const rightLines = hunk.right?.lines || [];
+    const leftStart = _historyCompareNumber(hunk.left?.start, 0);
+    const rightStart = _historyCompareNumber(hunk.right?.start, 0);
+    const total = Math.max(leftLines.length, rightLines.length);
+    if (changesOnly) {
+      _advanceHistoryCompareUnits(total);
+    } else if (contextLimit === null || total <= contextLimit * 2) {
+      appendLines(leftLines, rightLines, leftStart, rightStart);
+    } else {
+      const leadingCount = Math.max(0, contextLimit);
+      const trailingCount = Math.max(0, contextLimit);
+      appendLines(leftLines.slice(0, leadingCount), rightLines.slice(0, leadingCount), leftStart, rightStart);
+      const omitted = Math.max(0, total - leadingCount - trailingCount);
+      if (omitted > 0) {
+        if (hunk._expanded) {
+          makeFoldButtonPair('▾ Hide unchanged lines', () => {
+            hunk._expanded = false;
+            rerender();
+          });
+          appendLines(
+            leftLines.slice(leadingCount, total - trailingCount),
+            rightLines.slice(leadingCount, total - trailingCount),
+            leftStart + leadingCount,
+            rightStart + leadingCount,
+          );
+        } else {
+          makeFoldButtonPair(`▸ Show ${omitted.toLocaleString()} unchanged line(s)`, () => {
+            hunk._expanded = true;
+            rerender();
+          });
+          _advanceHistoryCompareUnits(omitted);
+        }
+      }
+      appendLines(
+        leftLines.slice(total - trailingCount),
+        rightLines.slice(total - trailingCount),
+        leftStart + Math.max(leadingCount, total - trailingCount),
+        rightStart + Math.max(leadingCount, total - trailingCount),
+      );
+    }
+    return;
+  }
+  const leftStart = _historyCompareNumber(hunk.left?.start, 0);
+  const rightStart = _historyCompareNumber(hunk.right?.start, 0);
+  const rawLeadingLeft = context.leading?.left || [];
+  const rawLeadingRight = context.leading?.right || [];
+  const rawTrailingLeft = context.trailing?.left || [];
+  const rawTrailingRight = context.trailing?.right || [];
+  const leadingLeft = changesOnly ? [] : _historyCompareSliceContextLines(rawLeadingLeft, 'leading', contextLimit);
+  const leadingRight = changesOnly ? [] : _historyCompareSliceContextLines(rawLeadingRight, 'leading', contextLimit);
+  const trailingLeft = changesOnly ? [] : _historyCompareSliceContextLines(rawTrailingLeft, 'trailing', contextLimit);
+  const trailingRight = changesOnly ? [] : _historyCompareSliceContextLines(rawTrailingRight, 'trailing', contextLimit);
+  appendLines(
+    leadingLeft,
+    leadingRight,
+    leftStart + Math.max(0, rawLeadingLeft.length - leadingLeft.length),
+    rightStart + Math.max(0, rawLeadingRight.length - leadingRight.length),
+  );
   if (hunk._expanded) {
     const collapse = () => {
       hunk._expanded = false;
@@ -2769,15 +3037,8 @@ function _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, rerende
       ),
     );
   } else if (Number(context.omitted || 0) > 0) {
-    const foldButtons = [];
-    const setFoldButtons = (disabled, text) => {
-      foldButtons.forEach(button => {
-        button.disabled = disabled;
-        button.textContent = text;
-      });
-    };
     const label = `▸ Show ${Number(context.omitted).toLocaleString()} unchanged line(s)`;
-    const expand = () => {
+    const expand = (setFoldButtons) => {
       if (hunk._loading) return;
       hunk._loading = true;
       setFoldButtons(true, 'Loading unchanged lines...');
@@ -2801,20 +3062,9 @@ function _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, rerende
           showToast('Failed to load unchanged lines', 'error');
         });
     };
-    const makeFoldButton = () => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'btn btn-secondary btn-compact history-compare-fold';
-      button.textContent = label;
-      button.addEventListener('click', expand);
-      foldButtons.push(button);
-      return button;
-    };
-    _appendHistoryCompareRowPair(leftPane, rightPane, makeFoldRow(makeFoldButton()), makeFoldRow(makeFoldButton()));
+    makeFoldButtonPair(label, expand);
     _advanceHistoryCompareUnits(context.omitted);
   }
-  const trailingLeft = context.trailing?.left || [];
-  const trailingRight = context.trailing?.right || [];
   appendLines(
     trailingLeft,
     trailingRight,
@@ -3006,9 +3256,177 @@ function _renderHistoryCompareMinimap(buckets = []) {
   return rail;
 }
 
-function _renderHistoryCompareSplitPane(data) {
+function _historyCompareApplyViewMode(mode, data) {
+  const nextMode = _historyCompareCoerceViewMode(mode);
+  data._compareViewModeRaw = nextMode;
+  if (typeof applyCompareViewModePreference === 'function') applyCompareViewModePreference(nextMode);
+  _renderHistoryComparison(data);
+}
+
+function _historyCompareApplyContext(mode, data) {
+  const nextMode = _historyCompareCoerceContext(mode);
+  data._compareContext = nextMode;
+  if (typeof applyCompareContextPreference === 'function') applyCompareContextPreference(nextMode);
+  _renderHistoryComparison(data);
+}
+
+function _closeHistoryCompareActionMenus(except = null) {
+  document.querySelectorAll('.history-compare-actions-menu-wrap.open').forEach((wrap) => {
+    if (except && wrap === except) return;
+    wrap.classList.remove('open');
+    wrap.querySelector('.history-compare-actions-trigger')?.setAttribute('aria-expanded', 'false');
+  });
+}
+
+function _renderHistoryCompareDisplayControls(data, viewMode) {
+  const controls = document.createElement('div');
+  controls.className = 'history-compare-controls';
+
+  const rawMode = _historyCompareCoerceViewMode(data._compareViewModeRaw || _historyCompareStoredViewMode());
+  const resolvedMode = _historyCompareResolveViewMode(rawMode);
+  const viewSelect = document.createElement('select');
+  viewSelect.className = 'form-select history-compare-view-select';
+  viewSelect.setAttribute('aria-label', 'Run comparison view mode');
+  _historyCompareViewModeOptions().forEach(([value, label]) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    viewSelect.appendChild(option);
+  });
+  viewSelect.value = resolvedMode;
+  viewSelect.addEventListener('change', () => _historyCompareApplyViewMode(viewSelect.value, data));
+  controls.appendChild(viewSelect);
+
+  const resetHidden = rawMode === 'auto' || rawMode === _historyCompareViewportMode();
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.className = 'btn btn-ghost btn-icon-only history-compare-reset-view';
+  reset.setAttribute('aria-label', 'Reset comparison view to default');
+  reset.title = 'Reset comparison view to default';
+  const resetIcon = document.createElement('span');
+  resetIcon.className = 'history-compare-reset-icon';
+  resetIcon.setAttribute('aria-hidden', 'true');
+  resetIcon.textContent = '↻';
+  reset.appendChild(resetIcon);
+  reset.hidden = resetHidden;
+  reset.classList.toggle('u-hidden', resetHidden);
+  reset.addEventListener('click', () => _historyCompareApplyViewMode('auto', data));
+  controls.appendChild(reset);
+
+  const contextControls = _renderHistoryCompareContextControls(data, viewMode);
+  if (contextControls) controls.appendChild(contextControls);
+
+  if (typeof enhanceAppSelects === 'function') {
+    enhanceAppSelects(controls);
+  }
+  return controls;
+}
+
+function _renderHistoryCompareContextControls(data, viewMode) {
+  if (viewMode === 'changes_only' || viewMode === 'findings_only') return null;
+  const selected = _historyCompareCoerceContext(data._compareContext || _historyCompareStoredContext());
+  const contextSelect = document.createElement('select');
+  contextSelect.className = 'form-select history-compare-context-select';
+  contextSelect.setAttribute('aria-label', 'Run comparison context');
+  [
+    ['3', 'Context: ±3'],
+    ['10', 'Context: ±10'],
+    ['all', 'Context: All'],
+  ].forEach(([value, label]) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    contextSelect.appendChild(option);
+  });
+  contextSelect.value = selected;
+  contextSelect.addEventListener('change', () => _historyCompareApplyContext(contextSelect.value, data));
+  return contextSelect;
+}
+
+function _historyCompareSummaryText(data, deltas = {}) {
+  const totalsForCopy = data.totals || {};
+  return [
+    `Compare: ${data.left.command} -> ${data.right.command}`,
+    `Exit: ${deltas.exit_code?.left ?? 'n/a'} -> ${deltas.exit_code?.right ?? 'n/a'}`,
+    `Lines: ${_compareFormatDelta(deltas.output_lines?.delta || 0)}`,
+    `Findings: ${_compareFormatDelta(deltas.findings?.delta || 0)}`,
+    `Changed: ${Number(totalsForCopy.changed_line_count || 0)}`,
+    `Added: ${Number(totalsForCopy.added_line_count || 0)}`,
+    `Removed: ${Number(totalsForCopy.removed_line_count || 0)}`,
+    `Unchanged: ${Number(totalsForCopy.equal_line_count || 0)}`,
+  ].join('\n');
+}
+
+function _renderHistoryCompareActionsMenu(data, deltas = {}) {
   const wrap = document.createElement('div');
-  wrap.className = 'history-compare-split';
+  wrap.className = 'history-compare-actions-menu-wrap save-menu-wrap save-menu-down';
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'btn btn-secondary btn-compact history-compare-actions-trigger';
+  trigger.textContent = 'Actions';
+  trigger.setAttribute('aria-haspopup', 'menu');
+  trigger.setAttribute('aria-expanded', 'false');
+  const menu = document.createElement('div');
+  menu.className = 'history-compare-actions-menu save-menu dropdown-surface';
+  menu.setAttribute('role', 'menu');
+  const addItem = (label, onClick) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'dropdown-item dropdown-item-compact';
+    item.setAttribute('role', 'menuitem');
+    item.textContent = label;
+    item.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      _closeHistoryCompareActionMenus();
+      onClick(item);
+    });
+    menu.appendChild(item);
+    return item;
+  };
+  addItem('Restore A', () => {
+    restoreHistoryRunIntoTab(data.left, { hidePanelOnSuccess: false })
+      .then(() => closeHistoryCompareOverlay())
+      .catch(() => showToast('Failed to restore run', 'error'));
+  });
+  addItem('Restore B', () => {
+    restoreHistoryRunIntoTab(data.right, { hidePanelOnSuccess: false })
+      .then(() => closeHistoryCompareOverlay())
+      .catch(() => showToast('Failed to restore run', 'error'));
+  });
+  addItem('Restore Both', (item) => {
+    item.disabled = true;
+    _restoreBothHistoryCompareRuns(data.left, data.right)
+      .then(() => closeHistoryCompareOverlay())
+      .catch(err => {
+        item.disabled = false;
+        if (err && err.message === 'not enough tab capacity') return;
+        showToast('Failed to restore both runs', 'error');
+      });
+  });
+  addItem('Copy summary', () => {
+    copyTextToClipboard(_historyCompareSummaryText(data, deltas))
+      .then(() => showToast('Comparison summary copied'))
+      .catch(() => showToast('Failed to copy summary', 'error'));
+  });
+  trigger.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const open = !wrap.classList.contains('open');
+    _closeHistoryCompareActionMenus(open ? wrap : null);
+    wrap.classList.toggle('open', open);
+    trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  if (typeof bindPressable === 'function') bindPressable(trigger);
+  wrap.append(trigger, menu);
+  return wrap;
+}
+
+function _renderHistoryCompareSplitPane(data, options = {}) {
+  const viewMode = options.viewMode || 'side_by_side';
+  const wrap = document.createElement('div');
+  wrap.className = `history-compare-split is-${viewMode.replace(/_/g, '-')}`;
+  wrap.dataset.compareViewMode = viewMode;
   const anchorMap = _historyCompareBuildAnchorMap(data);
   const leftPane = document.createElement('div');
   leftPane.className = 'history-compare-pane nice-scroll';
@@ -3031,7 +3449,12 @@ function _renderHistoryCompareSplitPane(data) {
     rightPane.appendChild(rightTitle);
     (Array.isArray(data.hunks) ? data.hunks : []).forEach(hunk => {
       if (!hunk || !hunk.op) return;
-      if (hunk.op === 'equal') _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, renderPanes, anchorMap);
+      if (hunk.op === 'equal') {
+        _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, renderPanes, anchorMap, {
+          contextLimit: options.contextLimit,
+          changesOnly: viewMode === 'changes_only',
+        });
+      }
       else if (hunk.op === 'replace') _appendHistoryCompareReplaceHunk(leftPane, rightPane, hunk, data, anchorMap);
       else if (hunk.op === 'insert' || hunk.op === 'delete') _appendHistoryCompareOneSidedHunk(leftPane, rightPane, hunk, data, anchorMap);
       _appendHistoryCompareOmittedRows(leftPane, rightPane, hunk);
@@ -3068,30 +3491,24 @@ function _renderHistoryCompareSplitPane(data) {
   return wrap;
 }
 
-function _renderHistoryCompareCountsBanner(totals = {}, truncated = {}) {
-  const banner = document.createElement('div');
-  banner.className = 'history-compare-counts';
-  const counts = [
-    ['total', Number(totals.left_total_lines || 0), 'badge-tone-muted'],
-    ['unchanged', Number(totals.equal_line_count || 0), 'badge-tone-muted'],
-    ['changed', Number(totals.changed_line_count || 0), 'badge-tone-cyan'],
-    ['added', Number(totals.added_line_count || 0), 'badge-tone-green'],
-    ['removed', Number(totals.removed_line_count || 0), 'badge-tone-muted'],
-  ];
-  counts.forEach(([label, value, tone]) => {
-    const badge = document.createElement('span');
-    badge.className = `badge ${tone} history-compare-count-badge`;
-    badge.textContent = `${label} ${Number(value).toLocaleString()}`;
-    banner.appendChild(badge);
-  });
+function _historyCompareCountsSubtitle(totals = {}) {
+  const total = Number(totals.left_total_lines || 0);
+  const unchanged = Number(totals.equal_line_count || 0);
+  const changed = Number(totals.changed_line_count || 0);
+  const added = Number(totals.added_line_count || 0);
+  const removed = Number(totals.removed_line_count || 0);
+  return `${total.toLocaleString()} lines · ${unchanged.toLocaleString()} unchanged · `
+    + `${changed.toLocaleString()} changed · ${added.toLocaleString()} added · `
+    + `${removed.toLocaleString()} removed`;
+}
+
+function _renderHistoryCompareOmittedNote(truncated = {}) {
   const omitted = _historyCompareOmittedTotal(truncated);
-  if (omitted) {
-    const note = document.createElement('div');
-    note.className = 'history-compare-counts-note';
-    note.textContent = `${omitted.toLocaleString()} changed line(s) or hunk(s) omitted by compare limits.`;
-    banner.appendChild(note);
-  }
-  return banner;
+  if (!omitted) return null;
+  const note = document.createElement('div');
+  note.className = 'history-compare-counts-note';
+  note.textContent = `${omitted.toLocaleString()} changed line(s) or hunk(s) omitted by compare limits.`;
+  return note;
 }
 
 function _historyCompareObjectText(item, kind) {
@@ -3207,9 +3624,16 @@ function _renderHistoryComparison(data) {
   const subtitle = overlay.querySelector('#history-compare-subtitle');
   if (!body) return;
   body.replaceChildren();
+  const rawViewMode = _historyCompareCoerceViewMode(data._compareViewModeRaw || _historyCompareStoredViewMode());
+  const viewMode = _historyCompareResolveViewMode(rawViewMode);
+  const contextMode = _historyCompareCoerceContext(data._compareContext || _historyCompareStoredContext());
+  data._compareViewModeRaw = rawViewMode;
+  data._compareContext = contextMode;
   const totals = data.totals || {};
   const changedOutputCount = _historyCompareTotalChangedLines(totals);
-  subtitle.textContent = changedOutputCount ? 'Split output comparison' : 'Changed findings and artifacts';
+  subtitle.textContent = viewMode === 'findings_only'
+    ? 'Changed findings and artifacts'
+    : (changedOutputCount ? _historyCompareCountsSubtitle(totals) : 'Changed findings and artifacts');
 
   const runs = document.createElement('div');
   runs.className = 'history-compare-run-grid';
@@ -3255,7 +3679,8 @@ function _renderHistoryComparison(data) {
     ));
   }
   body.appendChild(metrics);
-  body.appendChild(_renderHistoryCompareCountsBanner(totals, data.truncated || {}));
+  const omittedNote = _renderHistoryCompareOmittedNote(data.truncated || {});
+  if (omittedNote) body.appendChild(omittedNote);
 
   const findingsTruncated = !!(
     data.truncated
@@ -3285,60 +3710,16 @@ function _renderHistoryComparison(data) {
 
   const toolbar = document.createElement('div');
   toolbar.className = 'history-compare-toolbar';
-  const actions = document.createElement('div');
-  actions.className = 'history-compare-actions';
-  const restoreA = document.createElement('button');
-  restoreA.type = 'button';
-  restoreA.className = 'btn btn-secondary btn-compact';
-  restoreA.textContent = 'Restore A';
-  restoreA.addEventListener('click', () => restoreHistoryRunIntoTab(data.left, { hidePanelOnSuccess: false }).then(() => closeHistoryCompareOverlay()).catch(() => showToast('Failed to restore run', 'error')));
-  actions.appendChild(restoreA);
-  const restoreB = document.createElement('button');
-  restoreB.type = 'button';
-  restoreB.className = 'btn btn-secondary btn-compact';
-  restoreB.textContent = 'Restore B';
-  restoreB.addEventListener('click', () => restoreHistoryRunIntoTab(data.right, { hidePanelOnSuccess: false }).then(() => closeHistoryCompareOverlay()).catch(() => showToast('Failed to restore run', 'error')));
-  actions.appendChild(restoreB);
-  const restoreBoth = document.createElement('button');
-  restoreBoth.type = 'button';
-  restoreBoth.className = 'btn btn-secondary btn-compact';
-  restoreBoth.textContent = 'Restore Both';
-  restoreBoth.addEventListener('click', () => {
-    restoreBoth.disabled = true;
-    _restoreBothHistoryCompareRuns(data.left, data.right)
-      .then(() => closeHistoryCompareOverlay())
-      .catch(err => {
-        restoreBoth.disabled = false;
-        if (err && err.message === 'not enough tab capacity') return;
-        showToast('Failed to restore both runs', 'error');
-      });
-  });
-  actions.appendChild(restoreBoth);
-  const copy = document.createElement('button');
-  copy.type = 'button';
-  copy.className = 'btn btn-secondary btn-compact';
-  copy.textContent = 'Copy summary';
-  copy.addEventListener('click', () => {
-    const totalsForCopy = data.totals || {};
-    const summary = [
-      `Compare: ${data.left.command} -> ${data.right.command}`,
-      `Exit: ${deltas.exit_code?.left ?? 'n/a'} -> ${deltas.exit_code?.right ?? 'n/a'}`,
-      `Lines: ${_compareFormatDelta(deltas.output_lines?.delta || 0)}`,
-      `Findings: ${_compareFormatDelta(deltas.findings?.delta || 0)}`,
-      `Changed: ${Number(totalsForCopy.changed_line_count || 0)}`,
-      `Added: ${Number(totalsForCopy.added_line_count || 0)}`,
-      `Removed: ${Number(totalsForCopy.removed_line_count || 0)}`,
-      `Unchanged: ${Number(totalsForCopy.equal_line_count || 0)}`,
-    ].join('\n');
-    copyTextToClipboard(summary)
-      .then(() => showToast('Comparison summary copied'))
-      .catch(() => showToast('Failed to copy summary', 'error'));
-  });
-  actions.appendChild(copy);
-  toolbar.appendChild(actions);
+  toolbar.appendChild(_renderHistoryCompareDisplayControls(data, viewMode));
+  toolbar.appendChild(_renderHistoryCompareActionsMenu(data, deltas));
   toolbar.appendChild(_renderHistoryCompareNav(data));
   body.appendChild(toolbar);
-  body.appendChild(_renderHistoryCompareSplitPane(data));
+  if (viewMode !== 'findings_only') {
+    body.appendChild(_renderHistoryCompareSplitPane(data, {
+      viewMode,
+      contextLimit: _historyCompareContextLimit(contextMode),
+    }));
+  }
 
   const objects = data.objects || {};
   const findingObjects = objects.findings || {};
@@ -3375,14 +3756,24 @@ function fetchAndRenderHistoryComparison(leftId, rightId, options = {}) {
   }
   const url = options.url || `/history/compare?left=${encodeURIComponent(leftId)}&right=${encodeURIComponent(rightId)}`;
   apiFetch(url)
-    .then(resp => resp.json())
+    .then(resp => resp.json().catch(() => ({})).then(data => {
+      if (!resp.ok || data.error) {
+        const err = new Error(data.error || `Compare request failed (${resp.status || 'unknown'})`);
+        err.compareRequestError = true;
+        throw err;
+      }
+      return data;
+    }))
     .then(data => {
-      if (data.error) throw new Error(data.error);
       _renderHistoryComparison(data);
     })
-    .catch(() => {
+    .catch(err => {
+      if (typeof console !== 'undefined' && typeof console.error === 'function') {
+        console.error('[history compare] failed', err);
+      }
       if (_historyCompareState && _historyCompareState.source) _renderHistoryCompareLauncher();
-      showToast('Failed to compare runs', 'error');
+      const detail = err && err.compareRequestError && err.message ? `: ${err.message}` : '';
+      showToast(`Failed to compare runs${detail}`, 'error');
     });
 }
 
@@ -3863,15 +4254,31 @@ function refreshHistoryPanel() {
 if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
   document.addEventListener('click', (event) => {
     if (event.target && event.target.closest && event.target.closest('.history-action-menu-wrap')) return;
+    if (event.target && event.target.closest && event.target.closest('.history-compare-actions-menu-wrap')) return;
+    if (event.target && event.target.closest && event.target.closest('.history-run-action-menu-wrap')) return;
     _closeHistoryActionMenus();
+    _closeHistoryCompareActionMenus();
+    _closeHistoryRunActionMenus();
   });
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') _closeHistoryActionMenus();
+    if (event.key === 'Escape') {
+      _closeHistoryActionMenus();
+      _closeHistoryCompareActionMenus();
+      _closeHistoryRunActionMenus();
+    }
   });
 }
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-  window.addEventListener('resize', () => _closeHistoryActionMenus());
-  window.addEventListener('scroll', () => _closeHistoryActionMenus(), true);
+  window.addEventListener('resize', () => {
+    _closeHistoryActionMenus();
+    _closeHistoryCompareActionMenus();
+    _closeHistoryRunActionMenus();
+  });
+  window.addEventListener('scroll', () => {
+    _closeHistoryActionMenus();
+    _closeHistoryCompareActionMenus();
+    _closeHistoryRunActionMenus();
+  }, true);
 }
 
 if (typeof historySearchInput !== 'undefined' && historySearchInput) {
