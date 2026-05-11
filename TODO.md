@@ -79,26 +79,8 @@ This file tracks open work, known issues, technical debt, and product ideas for 
     - Consider pausing xterm rendering for hidden-tab PTYs. xterm.js running in a `display: none` panel still processes writes and grows scrollback (capped at 1000 lines, but still wasted CPU). Either drop incoming `output` chunks into the modal only when visible (queue and replay on tab focus) or accept the cost as small enough to ignore — worth measuring under a long-running ffuf in a backgrounded tab before spending engineering on it.
 
 - **Run comparison follow-ups**
-  - v1 split-pane comparison is shipped through canonical `/history/compare`; future work should build on the hunk model instead of reintroducing route- or modal-specific compare paths.
-  - Keep the diff scope split intact: transcript output remains ordered and hunk-based, while finding/artifact object comparison remains key-based and order-insensitive so reordered findings do not register as added/removed.
-  - **v2 — minimap rail, finding/artifact anchors, view-mode toggle, ±N context**
-    - **Phase 5 — View-mode toggle + ±N context chips** (both reshape the lines-region renderer, so they ship together)
-      - Add a view-mode toggle in the compare-modal header. Implement as a hidden `<select>` enhanced through `enhanceAppSelects()` per the App-native Select Primitive contract so it composes the `.dropdown-surface` / `.dropdown-item-touch` family and inherits keyboard / outside-click / `aria-expanded` behavior automatically. Modes:
-        - `Side-by-side` — v1 split layout.
-        - `Unified` — v1 unified layout.
-        - `Changes only` — collapses every `equal` hunk to a single zero-context fold and skips equal lines entirely. Equivalent to the pre-v1 view but riding on the same hunk model.
-        - `Findings only` — hides the split pane entirely, leaving the run cards, metrics row, counts banner, and findings/artifacts sections.
-      - `auto` remains a hidden default preference value, not a visible dropdown option. Ship a small `Reset to default` action that writes `pref_compare_view_mode = auto` so users can return from an explicit mode to viewport-based behavior.
-      - Read/write the chosen mode through the `pref_compare_view_mode` preference added in Phase 3.
-      - Add a `±N context` chip row above the split pane composing `.chip` + `.chip-action` with options `±3 / ±10 / All`. Hide the chip row in `Changes only` and `Findings only` modes because equal-line context is intentionally absent there. Selection writes through to `pref_compare_context` and re-renders the lines region without re-running compare; expanded fold ranges fetch lazy equal-line pages on demand and still honor `COMPARE_LAZY_EQUAL_PAGE_LIMIT` / `COMPARE_LAZY_EQUAL_BYTE_LIMIT`.
-      - Both controls funnel through the same lines-region render path so the renderer changes once for mode and context together.
-      - Tests: Vitest for mode preference application (per-mode row counts, hidden `auto` viewport resolution, and `Reset to default` behavior), `±N context` chip selection re-rendering folds without re-running compare, chip-row hiding in `Changes only` / `Findings only`, lazy fetch behavior for expanded context, and renderer-path coverage so adding another mode later does not regress the others. Update `button_primitives_allowlist.test.js` only if new pressables fall outside allowed families.
-      - Docs: `CHANGELOG.md` entry; refresh test counts.
-
-    - **Phase 6 — E2E + docs polish**
-      - Add focused Playwright coverage without overloading the already-large UI spec: one happy-path compare flow covering mode toggles, minimap-click navigation, finding-row anchoring across both panes, gutter-marker → finding-row scroll, and ±N context chip switching. Keep detailed row-count and renderer permutations in Vitest.
-      - Final `CHANGELOG.md` polish pass covering all v2 phases as a coherent feature.
-      - Refresh the test-count locations across all five files once the final E2E suite lands.
+  - Consider active-tab compare, snapshot/permalink compare, package-artifact compare, and export/share comparison once the run-vs-run model has more production use.
+  - Add focused large/noisy output regressions if real scanner output exposes performance or alignment gaps beyond the current backend, Vitest, and Playwright coverage.
 
 ## Research
 
@@ -155,7 +137,7 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - For normal runs, prefer command-specific noise classifiers over global suppression so raw output stays faithful while search, findings, summaries, and previews become easier to use.
 
 - **Run comparison enhancements**
-  - Future-state enhancements after the v1 history-row comparison flow has real use.
+  - Future-state enhancements after the shared split-pane comparison flow has real use.
     - Finding-level diffs using persisted signal/finding metadata:
       - New findings.
       - Disappeared findings.
@@ -171,12 +153,11 @@ These are product ideas and possible enhancements, not committed TODOs or planne
     - Active tab `Compare` action for restored/completed runs.
     - Findings strip action such as `Compare findings with previous run`.
     - Workflow provenance in comparison summaries once workflow-linked runs exist.
-    - Project baseline compare once projects exist.
     - Snapshot/permalink compare if the run-vs-run model continues to work well.
     - `Export comparison` once share/export packages have a stable artifact model.
   - Future UX/testing:
     - Consider date-range filters in the manual compare picker if day grouping plus `Load More` is not enough for deep history.
-    - Add Playwright coverage for the compare launcher/result flow on desktop and mobile after the UI settles.
+    - Broaden Playwright coverage for edge/mobile layout paths after the UI settles.
     - Add focused large/noisy comparison regression coverage if real-world outputs expose performance issues beyond current backend and unit coverage.
 
 - **Bulk history operations**

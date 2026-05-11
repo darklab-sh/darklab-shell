@@ -1135,39 +1135,49 @@
   }
   body.mobile-terminal-mode .history-compare-pane {
     min-height: min(38svh, 400px);
-    max-height: min(46svh, 480px);
-    overflow: auto;
-    -webkit-overflow-scrolling: touch;
+    max-height: none;
+    overflow: visible;
+    isolation: isolate;
+    /* Explicit positioned stacking context below the toolbar's z-index 40 so
+       iOS Safari's compositor can't promote the sticky pane-title's layer
+       above the toolbar's open dropdown menu. */
+    position: relative;
+    z-index: 0;
   }
   body.mobile-terminal-mode .history-compare-split.is-unified .history-compare-pane,
   body.mobile-terminal-mode .history-compare-split.is-changes-only .history-compare-pane {
     display: block;
     min-height: 0;
     max-height: none;
-    overflow: hidden;
-    -webkit-overflow-scrolling: auto;
+    overflow: visible;
   }
   body.mobile-terminal-mode .history-compare-split.is-unified .history-compare-pane + .history-compare-pane,
   body.mobile-terminal-mode .history-compare-split.is-changes-only .history-compare-pane + .history-compare-pane {
     margin-top: 10px;
   }
   body.mobile-terminal-mode .history-compare-pane-title {
-    position: relative;
-    top: auto;
-    z-index: 0;
+    position: sticky;
+    top: -14px;
+    z-index: 5;
+    background: var(--theme-chrome-row-bg);
+    box-shadow:
+      0 -2px 0 var(--theme-chrome-row-bg),
+      0 1px 0 var(--border);
+    /* Keeps the sticky title's compositor layer inside the pane's stacking
+       context so it can't out-paint the toolbar's open dropdown menu. iOS
+       Safari otherwise promotes pinned sticky+z-index layers to body level
+       where z-index 5 ends up competing with the toolbar's z-index 40. */
+    will-change: transform;
   }
   body.mobile-terminal-mode .history-compare-toolbar {
     position: relative;
     z-index: 40;
     overflow: visible;
+    isolation: isolate;
   }
   body.mobile-terminal-mode .history-compare-toolbar .history-compare-controls {
     flex: 0 0 100%;
     width: 100%;
-  }
-  body.mobile-terminal-mode .history-compare-toolbar:has(.app-select.open),
-  body.mobile-terminal-mode .history-compare-toolbar:has(.history-compare-actions-menu-wrap.open) {
-    margin-bottom: 152px;
   }
   body.mobile-terminal-mode .history-compare-actions-menu-wrap,
   body.mobile-terminal-mode .history-compare-nav {

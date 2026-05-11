@@ -804,16 +804,7 @@ test.beforeEach(async ({ page }) => {
       .poll(() => compareOverlay.locator('.history-compare-pane-title').first().evaluate((node) => {
         return getComputedStyle(node).position
       }))
-      .toBe('relative')
-    await compareOverlay.getByRole('button', { name: 'Run comparison view mode' }).click()
-    await expect
-      .poll(() => compareOverlay.evaluate((node) => {
-        const menu = node.querySelector('.history-compare-controls .app-select.open .app-select-menu')
-        const split = node.querySelector('.history-compare-split')
-        if (!menu || !split) return -999
-        return split.getBoundingClientRect().top - menu.getBoundingClientRect().bottom
-      }))
-      .toBeGreaterThanOrEqual(-1)
+      .toBe('sticky')
     await expect(page.locator('#permalink-toast')).not.toContainText('Failed to compare runs')
   })
 

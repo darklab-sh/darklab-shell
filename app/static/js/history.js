@@ -1387,6 +1387,10 @@ function _ensureHistoryCompareOverlay() {
 function closeHistoryCompareOverlay() {
   const overlay = document.getElementById('history-compare-overlay');
   if (!overlay) return;
+  // Close (and unportal) any open dropdowns before hiding the overlay,
+  // otherwise a portaled menu would remain visible in document.body.
+  _closeHistoryCompareActionMenus();
+  if (typeof closeAppSelects === 'function') closeAppSelects();
   overlay.classList.remove('open');
   overlay.classList.add('u-hidden');
   overlay.setAttribute('aria-hidden', 'true');
@@ -3275,6 +3279,9 @@ function _closeHistoryCompareActionMenus(except = null) {
     if (except && wrap === except) return;
     wrap.classList.remove('open');
     wrap.querySelector('.history-compare-actions-trigger')?.setAttribute('aria-expanded', 'false');
+    const menu = wrap._portaledMenu;
+    if (menu && typeof unportalDropdownMenu === 'function') unportalDropdownMenu(menu);
+    wrap._portaledMenu = null;
   });
 }
 
@@ -3287,6 +3294,7 @@ function _renderHistoryCompareDisplayControls(data, viewMode) {
   const viewSelect = document.createElement('select');
   viewSelect.className = 'form-select history-compare-view-select';
   viewSelect.setAttribute('aria-label', 'Run comparison view mode');
+  viewSelect.dataset.portalMenu = 'true';
   _historyCompareViewModeOptions().forEach(([value, label]) => {
     const option = document.createElement('option');
     option.value = value;
@@ -3328,6 +3336,7 @@ function _renderHistoryCompareContextControls(data, viewMode) {
   const contextSelect = document.createElement('select');
   contextSelect.className = 'form-select history-compare-context-select';
   contextSelect.setAttribute('aria-label', 'Run comparison context');
+  contextSelect.dataset.portalMenu = 'true';
   [
     ['3', 'Context: ±3'],
     ['10', 'Context: ±10'],
@@ -3409,6 +3418,7 @@ function _renderHistoryCompareActionsMenu(data, deltas = {}) {
       .then(() => showToast('Comparison summary copied'))
       .catch(() => showToast('Failed to copy summary', 'error'));
   });
+  wrap.dataset.portalMenu = 'true';
   trigger.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -3416,6 +3426,13 @@ function _renderHistoryCompareActionsMenu(data, deltas = {}) {
     _closeHistoryCompareActionMenus(open ? wrap : null);
     wrap.classList.toggle('open', open);
     trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open && typeof portalDropdownMenu === 'function') {
+      portalDropdownMenu(wrap, trigger, menu);
+      wrap._portaledMenu = menu;
+    } else if (!open && typeof unportalDropdownMenu === 'function') {
+      unportalDropdownMenu(menu);
+      wrap._portaledMenu = null;
+    }
   });
   if (typeof bindPressable === 'function') bindPressable(trigger);
   wrap.append(trigger, menu);

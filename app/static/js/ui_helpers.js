@@ -667,9 +667,52 @@
     }
   };
   const _appSelects = new Map();
+  // Portals an open dropdown menu to document.body so it escapes ancestor
+  // stacking contexts. Needed when an ancestor (e.g. .mobile-sheet-overlay
+  // with backdrop-filter) or a sticky descendant (e.g. .history-compare-pane-title
+  // promoted by iOS Safari) can paint above the menu. Opt-in via
+  // select.dataset.portalMenu = 'true' at enhancement time.
+  function _portalAppSelectMenu(wrap, trigger, menu) {
+    if (wrap.dataset.portalMenu !== 'true') return;
+    if (menu.dataset.appSelectPortaled === 'true') return;
+    const rect = trigger.getBoundingClientRect();
+    menu._portalReturnTo = wrap;
+    menu.dataset.appSelectPortaled = 'true';
+    document.body.appendChild(menu);
+    // The wrap.open menu { display: flex } selectors don't match once the
+    // menu is reparented to body, so apply visibility inline here.
+    menu.style.display = 'flex';
+    menu.style.flexDirection = 'column';
+    menu.style.position = 'fixed';
+    // Clear bottom/right that some menu base classes (e.g. .save-menu) set,
+    // otherwise both top and bottom apply and the element ends up zero-height.
+    menu.style.bottom = 'auto';
+    menu.style.right = 'auto';
+    menu.style.left = rect.left + 'px';
+    menu.style.top = (rect.bottom + 4) + 'px';
+    menu.style.width = rect.width + 'px';
+    menu.style.zIndex = '10000';
+  }
+  function _unportalAppSelectMenu(menu) {
+    if (!menu || menu.dataset.appSelectPortaled !== 'true') return;
+    const returnTo = menu._portalReturnTo;
+    delete menu.dataset.appSelectPortaled;
+    delete menu._portalReturnTo;
+    menu.style.display = '';
+    menu.style.flexDirection = '';
+    menu.style.position = '';
+    menu.style.bottom = '';
+    menu.style.right = '';
+    menu.style.left = '';
+    menu.style.top = '';
+    menu.style.width = '';
+    menu.style.zIndex = '';
+    if (returnTo) returnTo.appendChild(menu);
+  }
   function _closeAppSelects(exceptWrap = null) {
-    _appSelects.forEach(({ wrap, trigger }) => {
+    _appSelects.forEach(({ wrap, trigger, menu }) => {
       if (wrap === exceptWrap) return;
+      if (wrap.classList.contains('open')) _unportalAppSelectMenu(menu);
       wrap.classList.remove('open');
       trigger.setAttribute('aria-expanded', 'false');
     });
@@ -747,6 +790,7 @@
     select.insertAdjacentElement('afterend', wrap);
     select.classList.add('app-select-native');
     select.dataset.appSelectEnhanced = 'true';
+    if (select.dataset.portalMenu === 'true') wrap.dataset.portalMenu = 'true';
     _appSelects.set(select, { wrap, trigger, valueEl, menu, options });
     trigger.addEventListener('click', () => {
       if (select.disabled) return;
@@ -754,6 +798,8 @@
       _closeAppSelects(open ? null : wrap);
       wrap.classList.toggle('open', !open);
       trigger.setAttribute('aria-expanded', !open ? 'true' : 'false');
+      if (!open) _portalAppSelectMenu(wrap, trigger, menu);
+      else _unportalAppSelectMenu(menu);
     });
     trigger.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
@@ -785,6 +831,11 @@
   }
   global.syncAppSelect = (select) => _syncAppSelect(select);
   global.enhanceAppSelects = enhanceAppSelects;
+  global.closeAppSelects = (exceptWrap = null) => _closeAppSelects(exceptWrap);
+  // Exposed for non-app-select dropdowns (e.g. history compare actions menu)
+  // that need the same body-portal escape from ancestor stacking contexts.
+  global.portalDropdownMenu = (wrap, trigger, menu) => _portalAppSelectMenu(wrap, trigger, menu);
+  global.unportalDropdownMenu = (menu) => _unportalAppSelectMenu(menu);
   enhanceAppSelects();
   if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
     document.addEventListener('click', (event) => {
