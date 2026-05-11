@@ -1103,6 +1103,9 @@
     grid-template-columns: 1fr;
     min-height: 0;
   }
+  body.mobile-terminal-mode .history-compare-minimap {
+    display: none;
+  }
   body.mobile-terminal-mode .history-compare-pane {
     max-height: none;
     overflow: visible;

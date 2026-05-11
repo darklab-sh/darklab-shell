@@ -154,6 +154,10 @@ let _historyCompareState = {
   selected: null,
   manualQuery: '',
 };
+let _historyCompareRowPairSequence = 0;
+let _historyCompareUnitSequence = 0;
+let _historyCompareRowHeightFrame = null;
+let _historyCompareRowResizeObserver = null;
 
 function _normalizeHistoryFilterValue(value) {
   return _historyCore.normalizeFilterValue(value);
@@ -1317,7 +1321,7 @@ function _ensureHistoryCompareOverlay() {
     <section id="history-compare-modal" class="history-compare-modal mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="history-compare-title">
       <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close run comparison"></div>
       <div class="history-compare-header surface-header">
-        <div>
+        <div class="history-compare-heading">
           <div id="history-compare-title" class="history-compare-title">COMPARE RUNS</div>
           <div id="history-compare-subtitle" class="history-compare-subtitle"></div>
         </div>
@@ -2263,6 +2267,160 @@ function _historyCompareLineLimit(limits = {}) {
   return Number.isFinite(limit) && limit > 0 ? limit : 4000;
 }
 
+function _historyCompareNumber(value, fallback = null) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function _historyCompareCssEscape(value) {
+  const text = String(value);
+  if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') return CSS.escape(text);
+  return text.replace(/["\\]/g, '\\$&');
+}
+
+function _historyCompareBucketTone(bucket = {}) {
+  const changed = Number(bucket.changed || 0);
+  const added = Number(bucket.added || 0);
+  const removed = Number(bucket.removed || 0);
+  const equal = Number(bucket.equal || 0);
+  if (changed > 0) return 'changed';
+  if (added > 0 || removed > 0) return added > removed ? 'added' : 'removed';
+  if (equal > 0) return 'equal';
+  return 'empty';
+}
+
+function _historyCompareBuildAnchorMap(data = {}) {
+  const map = { a: new Map(), b: new Map() };
+  const findingObjects = data.objects?.findings || {};
+  const addAnchor = (side, item) => {
+    const index = _historyCompareNumber(item?.compare_line_index);
+    if (index === null) return;
+    const existing = map[side].get(index) || [];
+    existing.push(item);
+    map[side].set(index, existing);
+  };
+  (Array.isArray(findingObjects.added) ? findingObjects.added : []).forEach(item => addAnchor('b', item));
+  (Array.isArray(findingObjects.removed) ? findingObjects.removed : []).forEach(item => addAnchor('a', item));
+  return map;
+}
+
+function _historyCompareAnchorTone(items = []) {
+  const severities = items.map(item => String(item?.severity || '').toLowerCase());
+  if (severities.some(value => value === 'critical' || value === 'high')) return 'high';
+  if (severities.some(value => value === 'medium')) return 'medium';
+  return 'info';
+}
+
+function _historyCompareFindPaneRow(side, compareLineIndex) {
+  const overlay = document.getElementById('history-compare-overlay');
+  const pane = overlay?.querySelector(`.history-compare-pane[data-side="${side}"]`);
+  const index = String(compareLineIndex);
+  const row = pane?.querySelector(`.history-compare-row[data-compare-line-index="${_historyCompareCssEscape(index)}"]`);
+  return { pane, row };
+}
+
+function _historyComparePulseRows(rows = []) {
+  rows.filter(Boolean).forEach(row => {
+    row.classList.remove('history-compare-line-pulse');
+    void row.offsetWidth; // restart the short pulse when the same row is targeted repeatedly
+    row.classList.add('history-compare-line-pulse');
+    setTimeout(() => row.classList.remove('history-compare-line-pulse'), 900);
+  });
+}
+
+function _historyCompareScrollPaneRowIntoView(pane, row) {
+  if (!pane || !row) return;
+  const paneRect = typeof pane.getBoundingClientRect === 'function' ? pane.getBoundingClientRect() : null;
+  const rowRect = typeof row.getBoundingClientRect === 'function' ? row.getBoundingClientRect() : null;
+  const paneHeight = Number(pane.clientHeight || paneRect?.height || 0);
+  const rowHeight = Number(rowRect?.height || row.offsetHeight || 0);
+  const relativeTop = Number(rowRect?.top || 0) - Number(paneRect?.top || 0);
+  if (paneHeight > 0 && Number.isFinite(relativeTop)) {
+    pane.scrollTop = Math.max(0, pane.scrollTop + relativeTop - Math.max(0, (paneHeight - rowHeight) / 2));
+    return;
+  }
+  pane.scrollTop = Number(row.offsetTop || 0);
+}
+
+function _historyCompareScrollToLine(side, compareLineIndex, { emit = true } = {}) {
+  const primary = _historyCompareFindPaneRow(side, compareLineIndex);
+  if (!primary.row || !primary.pane) return false;
+  const otherSide = side === 'a' ? 'b' : 'a';
+  const pair = primary.row.dataset.comparePair || '';
+  const secondary = pair
+    ? {
+        pane: document.querySelector(`#history-compare-overlay .history-compare-pane[data-side="${otherSide}"]`),
+        row: document.querySelector(
+          `#history-compare-overlay .history-compare-pane[data-side="${otherSide}"] `
+          + `.history-compare-row[data-compare-pair="${_historyCompareCssEscape(pair)}"]`,
+        ),
+      }
+    : _historyCompareFindPaneRow(otherSide, compareLineIndex);
+  _historyCompareScrollPaneRowIntoView(primary.pane, primary.row);
+  if (secondary.pane) secondary.pane.scrollTop = primary.pane.scrollTop;
+  _historyComparePulseRows([primary.row, secondary.row]);
+  if (emit && typeof emitUiEvent === 'function') {
+    emitUiEvent('app:compare-anchor-scroll', {
+      side,
+      compare_line_index: compareLineIndex,
+    });
+  }
+  return true;
+}
+
+function _historyCompareScrollToRow(row, { emit = false } = {}) {
+  if (!(row instanceof Element)) return false;
+  const side = row.closest('.history-compare-pane')?.dataset.side || 'a';
+  const lineIndex = _historyCompareNumber(row.dataset.compareLineIndex);
+  if (lineIndex !== null) return _historyCompareScrollToLine(side, lineIndex, { emit });
+  const pair = row.dataset.comparePair || '';
+  if (!pair) return false;
+  const pairedChanged = document.querySelector(
+    `#history-compare-overlay .history-compare-row[data-compare-pair="${_historyCompareCssEscape(pair)}"][data-compare-line-index]`,
+  );
+  if (!pairedChanged) return false;
+  const pairedSide = pairedChanged.closest('.history-compare-pane')?.dataset.side || side;
+  return _historyCompareScrollToLine(
+    pairedSide,
+    _historyCompareNumber(pairedChanged.dataset.compareLineIndex, 0),
+    { emit },
+  );
+}
+
+function _historyCompareRenderedChangeTargets() {
+  const changedTones = new Set(['changed', 'added', 'removed']);
+  const byPair = new Map();
+  [...document.querySelectorAll('#history-compare-overlay .history-compare-row[data-compare-unit-index]')]
+    .map(row => ({
+      row,
+      index: _historyCompareNumber(row.dataset.compareUnitIndex, 0),
+      tone: row.dataset.compareUnitTone || '',
+      isSpacer: row.classList.contains('history-compare-row-spacer'),
+    }))
+    .filter(item => changedTones.has(item.tone))
+    .forEach(item => {
+      const pair = item.row.dataset.comparePair || `unit-${item.index}`;
+      const existing = byPair.get(pair);
+      if (!existing || (existing.isSpacer && !item.isSpacer)) byPair.set(pair, item);
+    });
+  return [...byPair.values()]
+    .sort((a, b) => a.index - b.index || Number(a.isSpacer) - Number(b.isSpacer));
+}
+
+function _historyCompareScrollToBucket(bucket) {
+  const start = _historyCompareNumber(bucket?.start, 0);
+  const end = Math.max(start + 1, _historyCompareNumber(bucket?.end, start + 1));
+  const rows = _historyCompareRenderedChangeTargets();
+  const inBucket = rows.filter(item => item.index >= start && item.index < end);
+  const target = inBucket.find(item => !item.isSpacer) || inBucket[0]
+    || rows.find(item => item.index >= start && !item.isSpacer)
+    || rows.find(item => item.index >= start)
+    || rows.find(item => !item.isSpacer)
+    || rows[0];
+  if (!target || !target.row) return false;
+  return _historyCompareScrollToRow(target.row, { emit: false });
+}
+
 function _renderHistoryCompareLineText(line, segments = null, limits = {}) {
   const code = document.createElement('code');
   const rawText = String((line && line.text) || '');
@@ -2300,13 +2458,44 @@ function _renderHistoryComparePaneRow(line, {
   rowClass = '',
   segments = null,
   limits = {},
+  side = '',
+  compareLineIndex = null,
+  anchorItems = [],
 } = {}) {
   const row = document.createElement('div');
   row.className = `history-compare-row${rowClass ? ` ${rowClass}` : ''}`;
+  if (side) row.dataset.side = side;
+  if (Number.isFinite(compareLineIndex)) row.dataset.compareLineIndex = String(compareLineIndex);
   const mark = document.createElement('span');
-  mark.className = signClass;
+  mark.className = `history-compare-line-mark${signClass ? ` ${signClass}` : ''}`;
   mark.textContent = sideLabel;
   row.appendChild(mark);
+  const anchorSlot = document.createElement('span');
+  anchorSlot.className = 'history-compare-line-anchor-slot';
+  const safeAnchors = Array.isArray(anchorItems) ? anchorItems : [];
+  if (safeAnchors.length && Number.isFinite(compareLineIndex)) {
+    const marker = document.createElement('button');
+    marker.type = 'button';
+    marker.className = `btn btn-ghost history-compare-finding-marker is-${_historyCompareAnchorTone(safeAnchors)}`;
+    marker.setAttribute('aria-label', 'Jump to linked finding');
+    marker.addEventListener('click', event => {
+      event.stopPropagation();
+      const findingRow = document.querySelector(
+        `.history-compare-object-row[data-object-kind="finding"][data-compare-side="${side}"][data-compare-line-index="${_historyCompareCssEscape(compareLineIndex)}"]`,
+      );
+      if (typeof findingRow?.scrollIntoView === 'function') {
+        findingRow.scrollIntoView({ block: 'center', inline: 'nearest' });
+      }
+      if (findingRow) {
+        findingRow.classList.remove('history-compare-line-pulse');
+        void findingRow.offsetWidth;
+        findingRow.classList.add('history-compare-line-pulse');
+        setTimeout(() => findingRow.classList.remove('history-compare-line-pulse'), 900);
+      }
+    });
+    anchorSlot.appendChild(marker);
+  }
+  row.appendChild(anchorSlot);
   row.appendChild(_renderHistoryCompareLineText(line, segments, limits));
   return row;
 }
@@ -2319,12 +2508,81 @@ function _renderHistoryCompareSpacer(label = '') {
   mark.textContent = label;
   row.appendChild(mark);
   row.appendChild(document.createElement('span'));
+  row.appendChild(document.createElement('span'));
   return row;
 }
 
-function _appendHistoryCompareRowPair(leftPane, rightPane, leftRow, rightRow) {
+function _historyCompareRowHeight(row) {
+  if (!row) return 0;
+  const rect = typeof row.getBoundingClientRect === 'function' ? row.getBoundingClientRect() : null;
+  return Math.ceil(Math.max(Number(rect?.height || 0), Number(row.offsetHeight || 0)));
+}
+
+function _syncHistoryCompareRowPairHeights(wrap) {
+  if (!wrap || !wrap.isConnected) return;
+  const pairs = new Map();
+  wrap.querySelectorAll('.history-compare-row[data-compare-pair]').forEach(row => {
+    row.style.minHeight = '';
+    const key = row.dataset.comparePair || '';
+    if (!key) return;
+    const rows = pairs.get(key) || [];
+    rows.push(row);
+    pairs.set(key, rows);
+  });
+  pairs.forEach(rows => {
+    if (rows.length < 2) return;
+    const height = Math.max(...rows.map(_historyCompareRowHeight));
+    if (!height) return;
+    rows.forEach(row => {
+      row.style.minHeight = `${height}px`;
+    });
+  });
+}
+
+function _scheduleHistoryCompareRowPairHeightSync(wrap) {
+  if (!wrap) return;
+  if (_historyCompareRowHeightFrame !== null) {
+    const cancel = typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame : clearTimeout;
+    cancel(_historyCompareRowHeightFrame);
+  }
+  const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : callback => setTimeout(callback, 0);
+  _historyCompareRowHeightFrame = raf(() => {
+    _historyCompareRowHeightFrame = null;
+    _syncHistoryCompareRowPairHeights(wrap);
+  });
+}
+
+function _bindHistoryCompareRowPairHeightSync(wrap) {
+  if (_historyCompareRowResizeObserver) {
+    _historyCompareRowResizeObserver.disconnect();
+    _historyCompareRowResizeObserver = null;
+  }
+  if (typeof ResizeObserver === 'function' && wrap) {
+    _historyCompareRowResizeObserver = new ResizeObserver(() => _scheduleHistoryCompareRowPairHeightSync(wrap));
+    _historyCompareRowResizeObserver.observe(wrap);
+  }
+  _scheduleHistoryCompareRowPairHeightSync(wrap);
+}
+
+function _appendHistoryCompareRowPair(leftPane, rightPane, leftRow, rightRow, unitTone = '') {
+  const pair = String(_historyCompareRowPairSequence);
+  _historyCompareRowPairSequence += 1;
+  leftRow.dataset.comparePair = pair;
+  rightRow.dataset.comparePair = pair;
+  if (unitTone) {
+    const unit = String(_historyCompareUnitSequence);
+    _historyCompareUnitSequence += 1;
+    leftRow.dataset.compareUnitIndex = unit;
+    rightRow.dataset.compareUnitIndex = unit;
+    leftRow.dataset.compareUnitTone = unitTone;
+    rightRow.dataset.compareUnitTone = unitTone;
+  }
   leftPane.appendChild(leftRow);
   rightPane.appendChild(rightRow);
+}
+
+function _advanceHistoryCompareUnits(count) {
+  _historyCompareUnitSequence += Math.max(0, Number(count || 0));
 }
 
 function _historyCompareReplaceRenderEvents(hunk) {
@@ -2427,54 +2685,102 @@ function _fetchHistoryCompareFoldSide(data, hunk, side) {
   return loadPage(range.start);
 }
 
-function _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, rerender) {
+function _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, rerender, anchorMap) {
   const limits = data.limits || {};
   const context = hunk.context || {};
-  const appendLines = (leftLines, rightLines) => {
+  const appendLines = (leftLines, rightLines, leftStart = 0, rightStart = 0) => {
     const count = Math.max(leftLines.length, rightLines.length);
     for (let index = 0; index < count; index += 1) {
+      const leftCompareIndex = Number(leftStart) + index;
+      const rightCompareIndex = Number(rightStart) + index;
       _appendHistoryCompareRowPair(
         leftPane,
         rightPane,
         leftLines[index]
-          ? _renderHistoryComparePaneRow(leftLines[index], { sideLabel: 'A', rowClass: 'is-equal', limits })
+          ? _renderHistoryComparePaneRow(leftLines[index], {
+              sideLabel: 'A',
+              rowClass: 'is-equal',
+              limits,
+              side: 'a',
+              compareLineIndex: leftCompareIndex,
+              anchorItems: anchorMap?.a?.get(leftCompareIndex) || [],
+            })
           : _renderHistoryCompareSpacer('A'),
         rightLines[index]
-          ? _renderHistoryComparePaneRow(rightLines[index], { sideLabel: 'B', rowClass: 'is-equal', limits })
+          ? _renderHistoryComparePaneRow(rightLines[index], {
+              sideLabel: 'B',
+              rowClass: 'is-equal',
+              limits,
+              side: 'b',
+              compareLineIndex: rightCompareIndex,
+              anchorItems: anchorMap?.b?.get(rightCompareIndex) || [],
+            })
           : _renderHistoryCompareSpacer('B'),
+        'equal',
       );
     }
   };
   if (Array.isArray(hunk.left?.lines) || Array.isArray(hunk.right?.lines)) {
-    appendLines(hunk.left?.lines || [], hunk.right?.lines || []);
+    appendLines(
+      hunk.left?.lines || [],
+      hunk.right?.lines || [],
+      _historyCompareNumber(hunk.left?.start, 0),
+      _historyCompareNumber(hunk.right?.start, 0),
+    );
     return;
   }
-  appendLines(context.leading?.left || [], context.leading?.right || []);
+  const leftStart = _historyCompareNumber(hunk.left?.start, 0);
+  const rightStart = _historyCompareNumber(hunk.right?.start, 0);
+  const leadingLeft = context.leading?.left || [];
+  const leadingRight = context.leading?.right || [];
+  const makeFoldRow = (button) => {
+    const row = document.createElement('div');
+    row.className = 'history-compare-row history-compare-row-fold';
+    row.appendChild(document.createElement('span'));
+    row.appendChild(document.createElement('span'));
+    row.appendChild(button);
+    return row;
+  };
+  appendLines(leadingLeft, leadingRight, leftStart, rightStart);
   if (hunk._expanded) {
-    const collapse = document.createElement('button');
-    collapse.type = 'button';
-    collapse.className = 'btn btn-ghost btn-compact history-compare-fold';
-    collapse.textContent = 'Hide unchanged lines';
-    collapse.addEventListener('click', () => {
+    const collapse = () => {
       hunk._expanded = false;
       rerender();
-    });
-    const collapseRow = document.createElement('div');
-    collapseRow.className = 'history-compare-row history-compare-row-fold';
-    collapseRow.appendChild(document.createElement('span'));
-    collapseRow.appendChild(collapse);
-    _appendHistoryCompareRowPair(leftPane, rightPane, collapseRow, _renderHistoryCompareSpacer());
-    appendLines(hunk._expandedLeft || [], hunk._expandedRight || []);
+    };
+    const makeCollapseButton = () => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn btn-secondary btn-compact history-compare-fold';
+      button.textContent = '▾ Hide unchanged lines';
+      button.addEventListener('click', collapse);
+      return button;
+    };
+    _appendHistoryCompareRowPair(leftPane, rightPane, makeFoldRow(makeCollapseButton()), makeFoldRow(makeCollapseButton()));
+    appendLines(
+      hunk._expandedLeft || [],
+      hunk._expandedRight || [],
+      leftStart + leadingLeft.length,
+      rightStart + leadingRight.length,
+    );
+    _advanceHistoryCompareUnits(
+      Number(context.omitted || 0) - Math.max(
+        Array.isArray(hunk._expandedLeft) ? hunk._expandedLeft.length : 0,
+        Array.isArray(hunk._expandedRight) ? hunk._expandedRight.length : 0,
+      ),
+    );
   } else if (Number(context.omitted || 0) > 0) {
-    const fold = document.createElement('button');
-    fold.type = 'button';
-    fold.className = 'btn btn-ghost btn-compact history-compare-fold';
-    fold.textContent = `Show ${Number(context.omitted).toLocaleString()} unchanged line(s)`;
-    fold.addEventListener('click', () => {
+    const foldButtons = [];
+    const setFoldButtons = (disabled, text) => {
+      foldButtons.forEach(button => {
+        button.disabled = disabled;
+        button.textContent = text;
+      });
+    };
+    const label = `▸ Show ${Number(context.omitted).toLocaleString()} unchanged line(s)`;
+    const expand = () => {
       if (hunk._loading) return;
       hunk._loading = true;
-      fold.disabled = true;
-      fold.textContent = 'Loading unchanged lines...';
+      setFoldButtons(true, 'Loading unchanged lines...');
       const leftPromise = hunk._expandedLeft
         ? Promise.resolve(hunk._expandedLeft)
         : _fetchHistoryCompareFoldSide(data, hunk, 'left');
@@ -2491,30 +2797,46 @@ function _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, rerende
         })
         .catch(() => {
           hunk._loading = false;
-          fold.disabled = false;
-          fold.textContent = `Show ${Number(context.omitted).toLocaleString()} unchanged line(s)`;
+          setFoldButtons(false, label);
           showToast('Failed to load unchanged lines', 'error');
         });
-    });
-    const foldRow = document.createElement('div');
-    foldRow.className = 'history-compare-row history-compare-row-fold';
-    foldRow.appendChild(document.createElement('span'));
-    foldRow.appendChild(fold);
-    _appendHistoryCompareRowPair(leftPane, rightPane, foldRow, _renderHistoryCompareSpacer());
+    };
+    const makeFoldButton = () => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn btn-secondary btn-compact history-compare-fold';
+      button.textContent = label;
+      button.addEventListener('click', expand);
+      foldButtons.push(button);
+      return button;
+    };
+    _appendHistoryCompareRowPair(leftPane, rightPane, makeFoldRow(makeFoldButton()), makeFoldRow(makeFoldButton()));
+    _advanceHistoryCompareUnits(context.omitted);
   }
-  appendLines(context.trailing?.left || [], context.trailing?.right || []);
+  const trailingLeft = context.trailing?.left || [];
+  const trailingRight = context.trailing?.right || [];
+  appendLines(
+    trailingLeft,
+    trailingRight,
+    _historyCompareNumber(hunk.left?.end, leftStart) - trailingLeft.length,
+    _historyCompareNumber(hunk.right?.end, rightStart) - trailingRight.length,
+  );
 }
 
-function _appendHistoryCompareReplaceHunk(leftPane, rightPane, hunk, data) {
+function _appendHistoryCompareReplaceHunk(leftPane, rightPane, hunk, data, anchorMap) {
   const limits = data.limits || {};
   const leftLines = hunk.left?.lines || [];
   const rightLines = hunk.right?.lines || [];
+  const leftStart = _historyCompareNumber(hunk.left?.start, 0);
+  const rightStart = _historyCompareNumber(hunk.right?.start, 0);
   _historyCompareReplaceRenderEvents(hunk).forEach(event => {
     if (event.type === 'pair') {
       const pair = event.pair || {};
       const leftLine = leftLines[pair.left_index] || {};
       const rightLine = rightLines[pair.right_index] || {};
       const segments = pair.segments || {};
+      const leftCompareIndex = leftStart + Number(pair.left_index || 0);
+      const rightCompareIndex = rightStart + Number(pair.right_index || 0);
       _appendHistoryCompareRowPair(
         leftPane,
         rightPane,
@@ -2524,6 +2846,9 @@ function _appendHistoryCompareReplaceHunk(leftPane, rightPane, hunk, data) {
           rowClass: 'is-replace',
           segments: segments.left,
           limits,
+          side: 'a',
+          compareLineIndex: leftCompareIndex,
+          anchorItems: anchorMap?.a?.get(leftCompareIndex) || [],
         }),
         _renderHistoryComparePaneRow(rightLine, {
           sideLabel: 'B',
@@ -2531,9 +2856,14 @@ function _appendHistoryCompareReplaceHunk(leftPane, rightPane, hunk, data) {
           rowClass: 'is-replace',
           segments: segments.right,
           limits,
+          side: 'b',
+          compareLineIndex: rightCompareIndex,
+          anchorItems: anchorMap?.b?.get(rightCompareIndex) || [],
         }),
+        'changed',
       );
     } else if (event.type === 'left') {
+      const leftCompareIndex = leftStart + Number(event.leftIndex || 0);
       _appendHistoryCompareRowPair(
         leftPane,
         rightPane,
@@ -2542,10 +2872,15 @@ function _appendHistoryCompareReplaceHunk(leftPane, rightPane, hunk, data) {
           signClass: 'history-compare-line-removed',
           rowClass: 'is-delete',
           limits,
+          side: 'a',
+          compareLineIndex: leftCompareIndex,
+          anchorItems: anchorMap?.a?.get(leftCompareIndex) || [],
         }),
         _renderHistoryCompareSpacer(),
+        'removed',
       );
     } else if (event.type === 'right') {
+      const rightCompareIndex = rightStart + Number(event.rightIndex || 0);
       _appendHistoryCompareRowPair(
         leftPane,
         rightPane,
@@ -2555,17 +2890,25 @@ function _appendHistoryCompareReplaceHunk(leftPane, rightPane, hunk, data) {
           signClass: 'history-compare-line-added',
           rowClass: 'is-insert',
           limits,
+          side: 'b',
+          compareLineIndex: rightCompareIndex,
+          anchorItems: anchorMap?.b?.get(rightCompareIndex) || [],
         }),
+        'added',
       );
     }
   });
 }
 
-function _appendHistoryCompareOneSidedHunk(leftPane, rightPane, hunk, data) {
+function _appendHistoryCompareOneSidedHunk(leftPane, rightPane, hunk, data, anchorMap) {
   const limits = data.limits || {};
   const op = hunk.op;
   const lines = op === 'insert' ? (hunk.right?.lines || []) : (hunk.left?.lines || []);
-  lines.forEach(line => {
+  const leftStart = _historyCompareNumber(hunk.left?.start, 0);
+  const rightStart = _historyCompareNumber(hunk.right?.start, 0);
+  lines.forEach((line, index) => {
+    const leftCompareIndex = leftStart + index;
+    const rightCompareIndex = rightStart + index;
     _appendHistoryCompareRowPair(
       leftPane,
       rightPane,
@@ -2575,6 +2918,9 @@ function _appendHistoryCompareOneSidedHunk(leftPane, rightPane, hunk, data) {
             signClass: 'history-compare-line-removed',
             rowClass: 'is-delete',
             limits,
+            side: 'a',
+            compareLineIndex: leftCompareIndex,
+            anchorItems: anchorMap?.a?.get(leftCompareIndex) || [],
           })
         : _renderHistoryCompareSpacer(),
       op === 'insert'
@@ -2583,8 +2929,12 @@ function _appendHistoryCompareOneSidedHunk(leftPane, rightPane, hunk, data) {
             signClass: 'history-compare-line-added',
             rowClass: 'is-insert',
             limits,
+            side: 'b',
+            compareLineIndex: rightCompareIndex,
+            anchorItems: anchorMap?.b?.get(rightCompareIndex) || [],
           })
         : _renderHistoryCompareSpacer(),
+      op === 'insert' ? 'added' : 'removed',
     );
   });
 }
@@ -2595,13 +2945,71 @@ function _appendHistoryCompareOmittedRows(leftPane, rightPane, hunk) {
   const row = document.createElement('div');
   row.className = 'history-compare-row history-compare-row-omitted';
   row.textContent = `${Number(omitted.total).toLocaleString()} changed line(s) omitted in this block.`;
-  leftPane.appendChild(row.cloneNode(true));
-  rightPane.appendChild(row);
+  _appendHistoryCompareRowPair(leftPane, rightPane, row.cloneNode(true), row);
+}
+
+function _historyCompareChangeBucketIndexes(data = {}) {
+  const buckets = Array.isArray(data.density_buckets) ? data.density_buckets : [];
+  return buckets
+    .map((bucket, index) => ({ bucket, index, tone: _historyCompareBucketTone(bucket) }))
+    .filter(item => ['changed', 'added', 'removed'].includes(item.tone))
+    .map(item => item.index);
+}
+
+function _historyCompareGoToChangeBucket(data, direction) {
+  const targets = _historyCompareRenderedChangeTargets();
+  if (!targets.length) return false;
+  const currentIndex = data._activeChangeTargetPair
+    ? targets.findIndex(item => (item.row.dataset.comparePair || '') === data._activeChangeTargetPair)
+    : -1;
+  const nextPosition = direction < 0
+    ? (currentIndex <= 0 ? targets.length - 1 : currentIndex - 1)
+    : (currentIndex < 0 || currentIndex >= targets.length - 1 ? 0 : currentIndex + 1);
+  const target = targets[nextPosition];
+  data._activeChangeTargetPair = target.row.dataset.comparePair || '';
+  data._activeChangeBucketIndex = Number(target.index);
+  return _historyCompareScrollToRow(target.row, { emit: false });
+}
+
+function _renderHistoryCompareNav(data = {}) {
+  const nav = document.createElement('div');
+  nav.className = 'history-compare-nav';
+  const makeButton = (label, direction) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn btn-secondary btn-compact history-compare-nav-btn';
+    button.textContent = label;
+    button.disabled = !_historyCompareChangeBucketIndexes(data).length;
+    button.addEventListener('click', () => _historyCompareGoToChangeBucket(data, direction));
+    if (typeof bindPressable === 'function') bindPressable(button);
+    return button;
+  };
+  nav.appendChild(makeButton('Prev change', -1));
+  nav.appendChild(makeButton('Next change', 1));
+  return nav;
+}
+
+function _renderHistoryCompareMinimap(buckets = []) {
+  const rail = document.createElement('div');
+  rail.className = 'history-compare-minimap';
+  rail.setAttribute('aria-hidden', 'true');
+  (Array.isArray(buckets) ? buckets : []).forEach((bucket, index) => {
+    const segment = document.createElement('div');
+    const tone = _historyCompareBucketTone(bucket);
+    segment.className = `history-compare-minimap-segment is-${tone}`;
+    segment.dataset.bucketIndex = String(index);
+    segment.dataset.bucketStart = String(bucket.start ?? 0);
+    segment.dataset.bucketEnd = String(bucket.end ?? 0);
+    segment.addEventListener('click', () => _historyCompareScrollToBucket(bucket));
+    rail.appendChild(segment);
+  });
+  return rail;
 }
 
 function _renderHistoryCompareSplitPane(data) {
   const wrap = document.createElement('div');
   wrap.className = 'history-compare-split';
+  const anchorMap = _historyCompareBuildAnchorMap(data);
   const leftPane = document.createElement('div');
   leftPane.className = 'history-compare-pane nice-scroll';
   leftPane.dataset.side = 'a';
@@ -2611,6 +3019,8 @@ function _renderHistoryCompareSplitPane(data) {
   const renderPanes = () => {
     leftPane.replaceChildren();
     rightPane.replaceChildren();
+    _historyCompareRowPairSequence = 0;
+    _historyCompareUnitSequence = 0;
     const leftTitle = document.createElement('div');
     leftTitle.className = 'history-compare-pane-title';
     leftTitle.textContent = 'Run A';
@@ -2621,18 +3031,18 @@ function _renderHistoryCompareSplitPane(data) {
     rightPane.appendChild(rightTitle);
     (Array.isArray(data.hunks) ? data.hunks : []).forEach(hunk => {
       if (!hunk || !hunk.op) return;
-      if (hunk.op === 'equal') _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, renderPanes);
-      else if (hunk.op === 'replace') _appendHistoryCompareReplaceHunk(leftPane, rightPane, hunk, data);
-      else if (hunk.op === 'insert' || hunk.op === 'delete') _appendHistoryCompareOneSidedHunk(leftPane, rightPane, hunk, data);
+      if (hunk.op === 'equal') _appendHistoryCompareEqualHunk(leftPane, rightPane, hunk, data, renderPanes, anchorMap);
+      else if (hunk.op === 'replace') _appendHistoryCompareReplaceHunk(leftPane, rightPane, hunk, data, anchorMap);
+      else if (hunk.op === 'insert' || hunk.op === 'delete') _appendHistoryCompareOneSidedHunk(leftPane, rightPane, hunk, data, anchorMap);
       _appendHistoryCompareOmittedRows(leftPane, rightPane, hunk);
     });
     if (Number(data.truncated?.hunks_omitted || 0) > 0) {
       const placeholder = document.createElement('div');
       placeholder.className = 'history-compare-row history-compare-row-omitted history-compare-surplus';
       placeholder.textContent = `${Number(data.truncated.hunks_omitted).toLocaleString()} additional changed hunk(s) omitted.`;
-      leftPane.appendChild(placeholder.cloneNode(true));
-      rightPane.appendChild(placeholder);
+      _appendHistoryCompareRowPair(leftPane, rightPane, placeholder.cloneNode(true), placeholder);
     }
+    _scheduleHistoryCompareRowPairHeightSync(wrap);
   };
   renderPanes();
   if (!(typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode())) {
@@ -2653,6 +3063,8 @@ function _renderHistoryCompareSplitPane(data) {
   }
   wrap.appendChild(leftPane);
   wrap.appendChild(rightPane);
+  wrap.appendChild(_renderHistoryCompareMinimap(data.density_buckets || []));
+  _bindHistoryCompareRowPairHeightSync(wrap);
   return wrap;
 }
 
@@ -2724,8 +3136,23 @@ function _renderHistoryCompareObjectSection(title, items, kind, sign) {
   const list = document.createElement('div');
   list.className = 'history-compare-line-list';
   safeItems.forEach(item => {
-    const row = document.createElement('div');
-    row.className = 'history-compare-line history-compare-object-row';
+    const compareLineIndex = _historyCompareNumber(item?.compare_line_index);
+    const compareSide = sign === '+' ? 'b' : 'a';
+    const row = compareLineIndex === null ? document.createElement('div') : document.createElement('button');
+    if (row.tagName === 'BUTTON') {
+      row.type = 'button';
+      row.addEventListener('click', () => {
+        _historyCompareScrollToLine(compareSide, compareLineIndex, { emit: true });
+      });
+      if (typeof bindPressable === 'function') bindPressable(row);
+    }
+    row.className = `history-compare-line history-compare-object-row${compareLineIndex === null ? '' : ' control-row'}`;
+    row.dataset.objectKind = kind;
+    row.dataset.compareSide = compareSide;
+    if (compareLineIndex !== null) {
+      row.dataset.compareLineIndex = String(compareLineIndex);
+      row.classList.add('is-anchorable');
+    }
     const mark = document.createElement('span');
     mark.className = sign === '+' ? 'history-compare-line-added' : 'history-compare-line-removed';
     mark.textContent = sign;
@@ -2856,6 +3283,8 @@ function _renderHistoryComparison(data) {
     body.appendChild(note);
   }
 
+  const toolbar = document.createElement('div');
+  toolbar.className = 'history-compare-toolbar';
   const actions = document.createElement('div');
   actions.className = 'history-compare-actions';
   const restoreA = document.createElement('button');
@@ -2906,8 +3335,9 @@ function _renderHistoryComparison(data) {
       .catch(() => showToast('Failed to copy summary', 'error'));
   });
   actions.appendChild(copy);
-  body.appendChild(actions);
-
+  toolbar.appendChild(actions);
+  toolbar.appendChild(_renderHistoryCompareNav(data));
+  body.appendChild(toolbar);
   body.appendChild(_renderHistoryCompareSplitPane(data));
 
   const objects = data.objects || {};

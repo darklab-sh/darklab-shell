@@ -189,6 +189,7 @@ test.beforeEach(async ({ page }) => {
     await runCommandMobile(page, 'commands')
 
     const output = page.locator('.tab-panel.active .output')
+    await expect(output).toContainText('[process exited with code 0]', { timeout: 15_000 })
     await expect
       .poll(async () => output.evaluate((el) => el.scrollHeight > el.clientHeight))
       .toBe(true)

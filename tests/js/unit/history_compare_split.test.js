@@ -440,7 +440,7 @@ describe('history compare split renderer', () => {
     document.querySelector('.history-compare-fold').click()
     await flushPromises()
     expect(apiFetch).not.toHaveBeenCalled()
-    expect(document.querySelector('.history-compare-fold')?.textContent).toBe('Hide unchanged lines')
+    expect(document.querySelector('.history-compare-fold')?.textContent).toBe('▾ Hide unchanged lines')
   })
 
   it('expands long line text in place', () => {

@@ -489,6 +489,7 @@ describe('history panel actions', () => {
     activeProject = null,
     showConfirmImpl = vi.fn(() => Promise.resolve(null)),
     openMetadataEditorImpl = vi.fn(),
+    emitUiEvent = vi.fn(),
   } = {}) {
     document.body.innerHTML = `
       <div id="history-panel"></div>
@@ -686,6 +687,7 @@ describe('history panel actions', () => {
             historyPanel.classList.remove('open')
             if (typeof cmdInput.focus === 'function') cmdInput.focus()
           }),
+          emitUiEvent,
           confirmHistAction: () => {},
           executeHistAction: () => {},
           bindDismissible,
@@ -728,6 +730,7 @@ describe('history panel actions', () => {
       refocusComposerAfterAction,
       showConfirm: showConfirmImpl,
       openMetadataEditor: openMetadataEditorImpl,
+      emitUiEvent,
     }
   }
 
@@ -1331,6 +1334,13 @@ describe('history panel actions', () => {
                 removed_line_count: 1,
               },
               limits: { line_display_truncate: 4000 },
+              density_buckets: [
+                { start: 0, end: 1, equal: 0, changed: 1, added: 0, removed: 0 },
+                { start: 1, end: 2, equal: 0, changed: 0, added: 1, removed: 0 },
+                { start: 2, end: 3, equal: 0, changed: 0, added: 0, removed: 1 },
+                { start: 3, end: 10, equal: 7, changed: 0, added: 0, removed: 0 },
+                { start: 10, end: 11, equal: 0, changed: 0, added: 1, removed: 0 },
+              ],
               hunks: [
                 {
                   op: 'replace',
@@ -1381,19 +1391,66 @@ describe('history panel actions', () => {
                   },
                   right: { start: 2, end: 2 },
                 },
+                {
+                  op: 'equal',
+                  left: { start: 2, end: 9 },
+                  right: { start: 2, end: 9 },
+                  context: {
+                    leading: {
+                      left: [{ text: 'same leading' }],
+                      right: [{ text: 'same leading' }],
+                    },
+                    trailing: {
+                      left: [{ text: 'same trailing' }],
+                      right: [{ text: 'same trailing' }],
+                    },
+                    omitted: 5,
+                  },
+                },
+                {
+                  op: 'insert',
+                  left: { start: 9, end: 9 },
+                  right: {
+                    start: 9,
+                    end: 10,
+                    lines: [{ text: 'new service after equal block' }],
+                  },
+                },
               ],
               objects: {
                 findings: {
-                  added: [{ title: 'open port 443', raw_line: '443/tcp open https', severity: 'high' }],
-                  removed: [{ title: 'open port 8080', raw_line: '8080/tcp open http-proxy', review_state: 'new' }],
+                  added: [{
+                    title: 'open port 443',
+                    raw_line: '443/tcp open https',
+                    severity: 'high',
+                    compare_line_index: 1,
+                  }],
+                  removed: [{
+                    title: 'open port 8080',
+                    raw_line: '8080/tcp open http-proxy',
+                    review_state: 'new',
+                    compare_line_index: 1,
+                  }],
                 },
                 artifacts: {
-                  added: [{ workspace_path: 'reports/new.json', kind: 'output', byte_size: 12 }],
+                  added: [{ workspace_path: 'reports/new.json', kind: 'output', byte_size: 12, compare_line_index: 1 }],
                   removed: [{ workspace_path: 'reports/old.json', kind: 'output', byte_size: 10 }],
                 },
               },
               truncated: {},
             }),
+        })
+      }
+      if (url.startsWith('/history/compare/lines?')) {
+        const parsed = new URL(url, 'http://localhost')
+        const start = Number(parsed.searchParams.get('start') || 0)
+        const end = Number(parsed.searchParams.get('end') || 0)
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            lines: Array.from({ length: Math.max(0, end - start) }, (_, index) => ({
+              text: `same hidden ${start + index}`,
+            })),
+          }),
         })
       }
       if (url === '/history/run-new?json&preview=1') {
@@ -1420,7 +1477,7 @@ describe('history panel actions', () => {
       }
       return Promise.resolve({ json: () => Promise.resolve({ items: [], runs: [] }) })
     })
-    const { refreshHistoryPanel, createTab, appendCommandEcho, appendLine, activateTab } =
+    const { refreshHistoryPanel, createTab, appendCommandEcho, appendLine, activateTab, emitUiEvent } =
       loadHistoryPanel({ apiFetchImpl: apiFetch })
 
     refreshHistoryPanel()
@@ -1446,6 +1503,107 @@ describe('history panel actions', () => {
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('Removed findings (1)')
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('Removed artifacts (1)')
     expect(document.querySelector('#history-compare-body')?.textContent).toContain('reports/new.json')
+    let insertedOutputRow = document.querySelector('.history-compare-pane[data-side="b"] .history-compare-row.is-insert')
+    let pairedSpacer = document.querySelector(
+      `.history-compare-pane[data-side="a"] .history-compare-row[data-compare-pair="${insertedOutputRow.dataset.comparePair}"]`,
+    )
+    expect(pairedSpacer.classList.contains('history-compare-row-spacer')).toBe(true)
+    expect(document.querySelectorAll('.history-compare-minimap-segment')).toHaveLength(5)
+    expect(document.querySelectorAll('.history-compare-minimap-segment.is-changed')).toHaveLength(1)
+    expect(document.querySelectorAll('.history-compare-minimap-segment.is-added')).toHaveLength(2)
+    expect(document.querySelectorAll('.history-compare-minimap-segment.is-removed')).toHaveLength(1)
+    expect(document.querySelectorAll('.history-compare-finding-marker.is-high')).toHaveLength(1)
+    expect(document.querySelectorAll('.history-compare-finding-marker.is-info')).toHaveLength(1)
+    const foldButtons = [...document.querySelectorAll('.history-compare-fold')]
+      .filter(button => button.textContent.includes('Show 5 unchanged'))
+    expect(foldButtons).toHaveLength(2)
+    foldButtons[1].click()
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise((resolve) => setImmediate(resolve))
+    expect([...document.querySelectorAll('.history-compare-fold')]
+      .filter(button => button.textContent.includes('Hide unchanged'))).toHaveLength(2)
+    insertedOutputRow = document.querySelector('.history-compare-pane[data-side="b"] .history-compare-row.is-insert')
+    pairedSpacer = document.querySelector(
+      `.history-compare-pane[data-side="a"] .history-compare-row[data-compare-pair="${insertedOutputRow.dataset.comparePair}"]`,
+    )
+
+    const compareBody = document.querySelector('#history-compare-body')
+    compareBody.scrollTop = 123
+    const panes = [...document.querySelectorAll('.history-compare-pane')]
+    panes.forEach(pane => {
+      Object.defineProperty(pane, 'clientHeight', { configurable: true, value: 100 })
+      pane.scrollTop = 0
+      pane.getBoundingClientRect = () => ({ top: 0, height: 100 })
+    })
+    const compareRows = [...document.querySelectorAll('.history-compare-row[data-compare-line-index]')]
+    compareRows.forEach(row => {
+      row.scrollIntoView = vi.fn()
+      row.getBoundingClientRect = () => ({
+        top: 160 + (Number(row.dataset.compareLineIndex || 0) * 30),
+        height: 44,
+      })
+    })
+
+    const allCompareRows = [...document.querySelectorAll('.history-compare-row')]
+    const clearOutputPulses = () => allCompareRows.forEach(row => row.classList.remove('history-compare-line-pulse'))
+    clearOutputPulses()
+    document.querySelector('.history-compare-minimap-segment.is-added').click()
+    expect(compareBody.scrollTop).toBe(123)
+    expect(compareRows.every(row => !row.scrollIntoView.mock.calls.length)).toBe(true)
+    expect(panes.some(pane => pane.scrollTop > 0)).toBe(true)
+    expect(insertedOutputRow.classList.contains('history-compare-line-pulse')).toBe(true)
+    expect(pairedSpacer.classList.contains('history-compare-line-pulse')).toBe(true)
+    expect(document.querySelector('.history-compare-row.is-equal')?.classList.contains('history-compare-line-pulse')).toBe(false)
+    clearOutputPulses()
+    const finalAddedSegment = [...document.querySelectorAll('.history-compare-minimap-segment.is-added')].at(-1)
+    finalAddedSegment.click()
+    const finalAddedRow = [...document.querySelectorAll('.history-compare-pane[data-side="b"] .history-compare-row.is-insert')]
+      .find(row => row.textContent.includes('new service after equal block'))
+    expect(finalAddedRow.classList.contains('history-compare-line-pulse')).toBe(true)
+    clearOutputPulses()
+    document.querySelector('.history-compare-nav-btn:last-child').click()
+    expect(compareBody.scrollTop).toBe(123)
+    expect(compareRows.every(row => !row.scrollIntoView.mock.calls.length)).toBe(true)
+    const changedRows = [...document.querySelectorAll('.history-compare-row[data-compare-unit-tone="changed"]')]
+    expect(changedRows).toHaveLength(2)
+    expect(changedRows.every(row => row.classList.contains('history-compare-line-pulse'))).toBe(true)
+    const nextChange = document.querySelector('.history-compare-nav-btn:last-child')
+    const pulsedPair = () => document.querySelector('.history-compare-row.history-compare-line-pulse')?.dataset.comparePair || ''
+    const visitedPairs = []
+    for (let index = 0; index < 4; index += 1) {
+      clearOutputPulses()
+      nextChange.click()
+      visitedPairs.push(pulsedPair())
+    }
+    expect(new Set(visitedPairs).size).toBe(4)
+    clearOutputPulses()
+    nextChange.click()
+    expect(pulsedPair()).toBe(visitedPairs[0])
+
+    const addedFindingRow = document.querySelector(
+      '.history-compare-object-row[data-object-kind="finding"][data-compare-side="b"]',
+    )
+    expect(addedFindingRow.tagName).toBe('BUTTON')
+    addedFindingRow.click()
+    expect(emitUiEvent).toHaveBeenCalledWith('app:compare-anchor-scroll', {
+      side: 'b',
+      compare_line_index: 1,
+    })
+    expect(document.querySelectorAll('.history-compare-row.history-compare-line-pulse').length).toBeGreaterThan(0)
+
+    const addedArtifactRow = document.querySelector(
+      '.history-compare-object-row[data-object-kind="artifact"][data-compare-side="b"]',
+    )
+    const removedArtifactRow = document.querySelector(
+      '.history-compare-object-row[data-object-kind="artifact"][data-compare-side="a"]',
+    )
+    expect(addedArtifactRow.tagName).toBe('BUTTON')
+    expect(removedArtifactRow.tagName).toBe('DIV')
+
+    emitUiEvent.mockClear()
+    document.querySelector('.history-compare-finding-marker.is-high').click()
+    expect(emitUiEvent).not.toHaveBeenCalledWith('app:compare-anchor-scroll', expect.anything())
 
     const restoreBoth = [...document.querySelectorAll('.history-compare-actions button')]
       .find(button => button.textContent === 'Restore Both')
