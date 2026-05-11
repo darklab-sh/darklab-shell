@@ -551,6 +551,8 @@ function _buildCurrentSessionPreferenceSnapshot() {
     pref_run_notify: getRunNotifyPreference(),
     pref_hud_clock: getHudClockPreference(),
     pref_prompt_username: getPromptUsernamePreference(),
+    pref_compare_view_mode: getCompareViewModePreference(),
+    pref_compare_context: getCompareContextPreference(),
   };
   const activeProject = typeof globalThis.getActiveProjectContext === 'function'
     ? globalThis.getActiveProjectContext()
@@ -616,6 +618,8 @@ async function loadSessionPreferences() {
     applyShareRedactionDefaultPreference(prefs.pref_share_redaction_default, false);
     applyHudClockPreference(prefs.pref_hud_clock, false);
     applyPromptUsernamePreference(prefs.pref_prompt_username, false);
+    applyCompareViewModePreference(prefs.pref_compare_view_mode, false);
+    applyCompareContextPreference(prefs.pref_compare_context, false);
     if (typeof applyRunNotifyPreference === 'function') {
       await applyRunNotifyPreference(prefs.pref_run_notify, false);
     }
@@ -650,6 +654,14 @@ function getHudClockPreference() {
 
 function getPromptUsernamePreference() {
   return PreferenceCore.normalizePromptUsername(getPreference('pref_prompt_username'));
+}
+
+function getCompareViewModePreference() {
+  return PreferenceCore.coerceCompareViewMode(getPreference('pref_compare_view_mode'));
+}
+
+function getCompareContextPreference() {
+  return PreferenceCore.coerceCompareContextMode(getPreference('pref_compare_context'));
 }
 
 function _promptUsernameInputValid(value) {
@@ -713,6 +725,8 @@ function syncOptionsControls() {
     optionsProjectAutoLinkExternalRunsToggle.checked = getProjectAutoLinkExternalRunsPreference() !== 'off';
   }
   if (optionsHudClockSelect) optionsHudClockSelect.value = getHudClockPreference();
+  if (optionsCompareViewModeSelect) optionsCompareViewModeSelect.value = getCompareViewModePreference();
+  if (optionsCompareContextSelect) optionsCompareContextSelect.value = getCompareContextPreference();
   if (optionsPromptUsernameInput) {
     optionsPromptUsernameInput.value = getPromptUsernamePreference();
     const defaultUsername = String(APP_CONFIG?.prompt_username || 'anon').trim() || 'anon';
@@ -724,6 +738,8 @@ function syncOptionsControls() {
     syncAppSelect(optionsWelcomeSelect);
     syncAppSelect(optionsShareRedactionSelect);
     syncAppSelect(optionsHudClockSelect);
+    syncAppSelect(optionsCompareViewModeSelect);
+    syncAppSelect(optionsCompareContextSelect);
   }
 }
 
@@ -776,6 +792,28 @@ function applyProjectAutoLinkExternalRunsPreference(mode, persist = true) {
     try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist project auto-link preference', err); }
   } else {
     _primePreferenceValue('pref_project_auto_link_external_runs', nextMode);
+  }
+  syncOptionsControls();
+}
+
+function applyCompareViewModePreference(mode, persist = true) {
+  const nextMode = PreferenceCore.coerceCompareViewMode(mode);
+  if (persist) {
+    _primePreferenceValue('pref_compare_view_mode', nextMode);
+    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist compare view preference', err); }
+  } else {
+    _primePreferenceValue('pref_compare_view_mode', nextMode);
+  }
+  syncOptionsControls();
+}
+
+function applyCompareContextPreference(mode, persist = true) {
+  const nextMode = PreferenceCore.coerceCompareContextMode(mode);
+  if (persist) {
+    _primePreferenceValue('pref_compare_context', nextMode);
+    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist compare context preference', err); }
+  } else {
+    _primePreferenceValue('pref_compare_context', nextMode);
   }
   syncOptionsControls();
 }

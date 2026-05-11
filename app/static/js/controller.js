@@ -470,6 +470,12 @@ optionsProjectAutoLinkExternalRunsToggle?.addEventListener('change', e => {
 optionsHudClockSelect?.addEventListener('change', e => {
   applyHudClockPreference(e.target.value);
 });
+optionsCompareViewModeSelect?.addEventListener('change', e => {
+  applyCompareViewModePreference(e.target.value);
+});
+optionsCompareContextSelect?.addEventListener('change', e => {
+  applyCompareContextPreference(e.target.value);
+});
 let promptUsernameAutosaveTimer = null;
 const PROMPT_USERNAME_AUTOSAVE_DELAY_MS = 300;
 function clearPromptUsernameAutosave() {

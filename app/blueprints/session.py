@@ -39,9 +39,13 @@ _SESSION_PREFERENCE_KEYS = {
     "pref_run_notify",
     "pref_hud_clock",
     "pref_prompt_username",
+    "pref_compare_view_mode",
+    "pref_compare_context",
 }
 
 _PROMPT_USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
+_COMPARE_VIEW_MODES = {"auto", "side_by_side", "unified", "changes_only", "findings_only"}
+_COMPARE_CONTEXT_MODES = {"3", "10", "all"}
 
 _RECENT_DOMAIN_LIMIT = 10
 _DOMAIN_LABEL_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
@@ -74,6 +78,14 @@ def _normalize_session_preferences(raw):
             value = "off" if value.lower() in {"0", "false", "no", "off"} else "on"
         if key == "pref_prompt_username" and not _PROMPT_USERNAME_RE.fullmatch(value):
             continue
+        if key == "pref_compare_view_mode":
+            value = value.lower()
+            if value not in _COMPARE_VIEW_MODES:
+                continue
+        if key == "pref_compare_context":
+            value = value.lower()
+            if value not in _COMPARE_CONTEXT_MODES:
+                continue
         prefs[key] = value
     return prefs
 

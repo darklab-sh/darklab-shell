@@ -13,10 +13,14 @@
     'pref_run_notify',
     'pref_hud_clock',
     'pref_prompt_username',
+    'pref_compare_view_mode',
+    'pref_compare_context',
   ]);
   const WELCOME_INTRO_MODES = Object.freeze(['animated', 'disable_animation', 'remove']);
   const SHARE_REDACTION_DEFAULT_MODES = Object.freeze(['unset', 'redacted', 'raw']);
   const HUD_CLOCK_MODES = Object.freeze(['utc', 'local']);
+  const COMPARE_VIEW_MODES = Object.freeze(['auto', 'side_by_side', 'unified', 'changes_only', 'findings_only']);
+  const COMPARE_CONTEXT_MODES = Object.freeze(['3', '10', 'all']);
 
   function _coerceMode(value, modes, fallback) {
     return modes.includes(value) ? value : fallback;
@@ -46,6 +50,15 @@
     return _coerceMode(value, HUD_CLOCK_MODES, 'utc');
   }
 
+  function coerceCompareViewMode(value) {
+    return _coerceMode(value, COMPARE_VIEW_MODES, 'auto');
+  }
+
+  function coerceCompareContextMode(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return _coerceMode(normalized, COMPARE_CONTEXT_MODES, '3');
+  }
+
   function normalizePromptUsername(value) {
     const username = String(value || '').trim();
     return /^[A-Za-z0-9._-]{1,32}$/.test(username) ? username : '';
@@ -63,6 +76,8 @@
       pref_run_notify: 'off',
       pref_hud_clock: 'utc',
       pref_prompt_username: '',
+      pref_compare_view_mode: 'auto',
+      pref_compare_context: '3',
     };
   }
 
@@ -83,6 +98,8 @@
     prefs.pref_run_notify = coerceRunNotifyMode(source.pref_run_notify);
     prefs.pref_hud_clock = coerceHudClockMode(source.pref_hud_clock);
     prefs.pref_prompt_username = normalizePromptUsername(source.pref_prompt_username);
+    prefs.pref_compare_view_mode = coerceCompareViewMode(source.pref_compare_view_mode);
+    prefs.pref_compare_context = coerceCompareContextMode(source.pref_compare_context);
     return prefs;
   }
 
@@ -95,12 +112,16 @@
     WELCOME_INTRO_MODES,
     SHARE_REDACTION_DEFAULT_MODES,
     HUD_CLOCK_MODES,
+    COMPARE_VIEW_MODES,
+    COMPARE_CONTEXT_MODES,
     coerceTimestampMode,
     coerceLineNumberMode,
     coerceWelcomeIntroMode,
     coerceShareRedactionDefaultMode,
     coerceRunNotifyMode,
     coerceHudClockMode,
+    coerceCompareViewMode,
+    coerceCompareContextMode,
     normalizePromptUsername,
     defaultSessionPreferences,
     normalizeSessionPreferences,

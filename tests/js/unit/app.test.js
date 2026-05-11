@@ -223,7 +223,11 @@ describe('app helpers', () => {
       'pref_welcome_intro',
       'pref_share_redaction_default',
       'pref_project_auto_link_external_runs',
+      'pref_run_notify',
+      'pref_hud_clock',
       'pref_prompt_username',
+      'pref_compare_view_mode',
+      'pref_compare_context',
     ].forEach((name) => {
       document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
     })
@@ -276,9 +280,20 @@ describe('app helpers', () => {
     })
   })
 
-  it('applies saved timestamp, line number, and HUD clock preferences from cookies at startup', async () => {
-    const { getHudClockPreference, getProjectAutoLinkExternalRunsPreference } = await loadAppFns({
-      cookies: { pref_timestamps: 'clock', pref_line_numbers: 'on', pref_hud_clock: 'local' },
+  it('applies saved timestamp, line number, HUD clock, and compare preferences from cookies at startup', async () => {
+    const {
+      getHudClockPreference,
+      getProjectAutoLinkExternalRunsPreference,
+      getCompareViewModePreference,
+      getCompareContextPreference,
+    } = await loadAppFns({
+      cookies: {
+        pref_timestamps: 'clock',
+        pref_line_numbers: 'on',
+        pref_hud_clock: 'local',
+        pref_compare_view_mode: 'unified',
+        pref_compare_context: '10',
+      },
     })
 
     expect(document.body.classList.contains('ts-clock')).toBe(true)
@@ -286,9 +301,13 @@ describe('app helpers', () => {
     expect(document.getElementById('ts-btn').textContent).toBe('timestamps: clock')
     expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
     expect(document.getElementById('options-hud-clock-select').value).toBe('local')
+    expect(document.getElementById('options-compare-view-mode-select').value).toBe('unified')
+    expect(document.getElementById('options-compare-context-select').value).toBe('10')
     expect(document.getElementById('options-project-auto-link-external-runs-toggle').checked).toBe(true)
     expect(getHudClockPreference()).toBe('local')
     expect(getProjectAutoLinkExternalRunsPreference()).toBe('on')
+    expect(getCompareViewModePreference()).toBe('unified')
+    expect(getCompareContextPreference()).toBe('10')
   })
 
   it('applies saved session preferences on startup over stale local cookies', async () => {
@@ -306,6 +325,8 @@ describe('app helpers', () => {
               pref_project_auto_link_external_runs: 'off',
               pref_run_notify: 'off',
               pref_hud_clock: 'local',
+              pref_compare_view_mode: 'changes_only',
+              pref_compare_context: 'all',
             },
           }),
         })
@@ -338,7 +359,12 @@ describe('app helpers', () => {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
     })
 
-    const { getHudClockPreference, getProjectAutoLinkExternalRunsPreference } = await loadAppFns({
+    const {
+      getHudClockPreference,
+      getProjectAutoLinkExternalRunsPreference,
+      getCompareViewModePreference,
+      getCompareContextPreference,
+    } = await loadAppFns({
       apiFetch,
       cookies: { pref_timestamps: 'off', pref_line_numbers: 'off', pref_hud_clock: 'utc' },
       themeRegistry: {
@@ -374,9 +400,13 @@ describe('app helpers', () => {
     expect(document.getElementById('options-welcome-select').value).toBe('disable_animation')
     expect(document.getElementById('options-share-redaction-select').value).toBe('redacted')
     expect(document.getElementById('options-hud-clock-select').value).toBe('local')
+    expect(document.getElementById('options-compare-view-mode-select').value).toBe('changes_only')
+    expect(document.getElementById('options-compare-context-select').value).toBe('all')
     expect(document.getElementById('options-project-auto-link-external-runs-toggle').checked).toBe(false)
     expect(getHudClockPreference()).toBe('local')
     expect(getProjectAutoLinkExternalRunsPreference()).toBe('off')
+    expect(getCompareViewModePreference()).toBe('changes_only')
+    expect(getCompareContextPreference()).toBe('all')
   })
 
   it('switches the visible prompt into confirmation mode when requested', async () => {
@@ -4465,6 +4495,8 @@ describe('app helpers', () => {
       getShareRedactionDefaultPreference,
       getProjectAutoLinkExternalRunsPreference,
       getHudClockPreference,
+      getCompareViewModePreference,
+      getCompareContextPreference,
     } = await loadAppFns({
       apiFetch,
       themeRegistry: {
@@ -4520,6 +4552,14 @@ describe('app helpers', () => {
     document
       .getElementById('options-hud-clock-select')
       .dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('options-compare-view-mode-select').value = 'side_by_side'
+    document
+      .getElementById('options-compare-view-mode-select')
+      .dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('options-compare-context-select').value = '10'
+    document
+      .getElementById('options-compare-context-select')
+      .dispatchEvent(new Event('change', { bubbles: true }))
     document.getElementById('options-project-auto-link-external-runs-toggle').checked = false
     document
       .getElementById('options-project-auto-link-external-runs-toggle')
@@ -4536,10 +4576,14 @@ describe('app helpers', () => {
     expect(document.cookie).toContain('pref_share_redaction_default=redacted')
     expect(document.cookie).toContain('pref_project_auto_link_external_runs=off')
     expect(document.cookie).toContain('pref_hud_clock=local')
+    expect(document.cookie).toContain('pref_compare_view_mode=side_by_side')
+    expect(document.cookie).toContain('pref_compare_context=10')
     expect(getWelcomeIntroPreference()).toBe('disable_animation')
     expect(getShareRedactionDefaultPreference()).toBe('redacted')
     expect(getProjectAutoLinkExternalRunsPreference()).toBe('off')
     expect(getHudClockPreference()).toBe('local')
+    expect(getCompareViewModePreference()).toBe('side_by_side')
+    expect(getCompareContextPreference()).toBe('10')
     const postCalls = apiFetch.mock.calls.filter(([url, opts]) => url === '/session/preferences' && opts?.method === 'POST')
     expect(postCalls.length).toBeGreaterThan(0)
     const lastPayload = JSON.parse(postCalls.at(-1)[1].body)
@@ -4551,6 +4595,8 @@ describe('app helpers', () => {
       pref_share_redaction_default: 'redacted',
       pref_project_auto_link_external_runs: 'off',
       pref_hud_clock: 'local',
+      pref_compare_view_mode: 'side_by_side',
+      pref_compare_context: '10',
     })
   })
 

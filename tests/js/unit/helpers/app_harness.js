@@ -243,6 +243,18 @@ export async function loadAppFns({
         <option value="utc">utc</option>
         <option value="local">local</option>
       </select>
+      <select id="options-compare-view-mode-select">
+        <option value="auto">auto</option>
+        <option value="side_by_side">side_by_side</option>
+        <option value="unified">unified</option>
+        <option value="changes_only">changes_only</option>
+        <option value="findings_only">findings_only</option>
+      </select>
+      <select id="options-compare-context-select">
+        <option value="3">3</option>
+        <option value="10">10</option>
+        <option value="all">all</option>
+      </select>
       <input id="options-prompt-username-input" />
       <div id="options-prompt-username-error" class="u-hidden"></div>
       <div id="options-prompt-username-saved" class="u-hidden"></div>
@@ -342,6 +354,8 @@ export async function loadAppFns({
     optionsNotifyToggle: document.getElementById('options-notify-toggle'),
     optionsProjectAutoLinkExternalRunsToggle: document.getElementById('options-project-auto-link-external-runs-toggle'),
     optionsHudClockSelect: document.getElementById('options-hud-clock-select'),
+    optionsCompareViewModeSelect: document.getElementById('options-compare-view-mode-select'),
+    optionsCompareContextSelect: document.getElementById('options-compare-context-select'),
     optionsPromptUsernameInput: document.getElementById('options-prompt-username-input'),
     optionsPromptUsernameError: document.getElementById('options-prompt-username-error'),
     optionsPromptUsernameSaved: document.getElementById('options-prompt-username-saved'),
@@ -628,9 +642,13 @@ export async function loadAppFns({
     getRunNotifyPreference,
     getHudClockPreference,
     getPromptUsernamePreference,
+    getCompareViewModePreference,
+    getCompareContextPreference,
     applyRunNotifyPreference,
     applyProjectAutoLinkExternalRunsPreference,
     applyHudClockPreference,
+    applyCompareViewModePreference,
+    applyCompareContextPreference,
     applyPromptUsernamePreference,
     syncOptionsControls,
     handleThemeCommand,

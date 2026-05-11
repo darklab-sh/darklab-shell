@@ -1302,6 +1302,8 @@ class TestSessionPreferences:
                 "pref_project_auto_link_external_runs": "off",
                 "pref_run_notify": "on",
                 "pref_prompt_username": "operator_1",
+                "pref_compare_view_mode": "unified",
+                "pref_compare_context": "10",
             }
         }
         save_resp = client.post("/session/preferences", json=payload, headers={"X-Session-ID": session_id})
@@ -1321,6 +1323,8 @@ class TestSessionPreferences:
                 "preferences": {
                     "pref_theme_name": "theme_light_blue",
                     "pref_prompt_username": "../bad",
+                    "pref_compare_view_mode": "split",
+                    "pref_compare_context": "0",
                     "pref_unknown": "x",
                 }
             },
