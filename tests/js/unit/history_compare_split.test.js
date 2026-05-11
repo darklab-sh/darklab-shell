@@ -154,7 +154,7 @@ describe('history compare split renderer', () => {
     expect(document.querySelectorAll('.history-compare-line-delta')).toHaveLength(2)
   })
 
-  it('resolves hidden auto mode from viewport and can reset explicit choices to default', () => {
+  it('resolves hidden auto mode from viewport and keeps modal view overrides local', () => {
     const { _renderHistoryComparison, applyCompareViewModePreference } = loadCompareHelpers({
       mobileMode: true,
       compareViewMode: 'auto',
@@ -182,14 +182,16 @@ describe('history compare split renderer', () => {
 
     select.value = 'changes_only'
     select.dispatchEvent(new Event('change', { bubbles: true }))
-    expect(applyCompareViewModePreference).toHaveBeenCalledWith('changes_only')
+    expect(applyCompareViewModePreference).not.toHaveBeenCalled()
     const reset = document.querySelector('.history-compare-reset-view')
     expect(reset.hidden).toBe(false)
     expect(reset.getAttribute('aria-label')).toBe('Reset comparison view to default')
     expect(reset.textContent).toBe('↻')
 
     reset.click()
-    expect(applyCompareViewModePreference).toHaveBeenCalledWith('auto')
+    expect(applyCompareViewModePreference).not.toHaveBeenCalled()
+    expect(document.querySelector('.history-compare-view-select').value).toBe('unified')
+    expect(document.querySelector('.history-compare-reset-view').hidden).toBe(true)
   })
 
   it('renders a fetched comparison in mobile mode with the real select enhancer', async () => {
@@ -207,10 +209,12 @@ describe('history compare split renderer', () => {
     fetchAndRenderHistoryComparison('run-a', 'run-b')
     await flushPromises()
     await flushPromises()
+    await new Promise(resolve => setTimeout(resolve, 0))
 
     expect(apiFetch).toHaveBeenCalledWith('/history/compare?left=run-a&right=run-b')
     expect(showToast).not.toHaveBeenCalledWith('Failed to compare runs', 'error')
     expect(document.getElementById('history-compare-overlay')?.classList.contains('open')).toBe(true)
+    expect(document.activeElement?.id).toBe('history-compare-modal')
     expect(document.querySelector('.history-compare-split')?.dataset.compareViewMode).toBe('unified')
     expect(document.querySelector('.history-compare-view-select')?.value).toBe('unified')
     expect(document.querySelector('.history-compare-controls .app-select-menu')?.classList.contains('dropdown-up')).toBe(false)
@@ -261,7 +265,7 @@ describe('history compare split renderer', () => {
     expect(document.querySelector('.history-compare-object-section')).not.toBeNull()
   })
 
-  it('rerenders full equal hunks when context dropdown changes without refetching compare data', () => {
+  it('rerenders full equal hunks when context dropdown changes without refetching or saving defaults', () => {
     const apiFetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve({}) }))
     const { _renderHistoryComparison, applyCompareContextPreference } = loadCompareHelpers({
       apiFetchImpl: apiFetch,
@@ -288,7 +292,7 @@ describe('history compare split renderer', () => {
     expect(contextSelect.value).toBe('3')
     contextSelect.value = 'all'
     contextSelect.dispatchEvent(new Event('change', { bubbles: true }))
-    expect(applyCompareContextPreference).toHaveBeenCalledWith('all')
+    expect(applyCompareContextPreference).not.toHaveBeenCalled()
     expect(apiFetch).not.toHaveBeenCalled()
     expect(document.querySelector('[data-side="a"]')?.textContent).toContain('left 4')
   })

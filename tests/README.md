@@ -23,11 +23,11 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 Current totals:
 
 - behavior tests: 2,596
-- docs/inventory meta-tests: 30
-- `pytest`: 1298 (1268 behavior + 30 meta)
+- docs/inventory meta-tests: 32
+- `pytest`: 1300 (1268 behavior + 32 meta)
 - `vitest`: 1081
 - `playwright`: 247
-- total: 2,626
+- total: 2,628
 
 This document is organized in two parts:
 
@@ -352,7 +352,7 @@ Practical note:
 - For tests that explicitly exercise per-IP rate-limit behavior, use `makeTestIp()` to get a deterministic `198.18.x.x` test-network address in `X-Forwarded-For`.
 - For browser tests that need a long-running command, prefer a browser-side `window.fetch` mock that returns an open SSE stream, like the kill-spec coverage.
 - When a browser test needs to exercise a `.catch(...)` branch, prefer aborting the request or rejecting the promise rather than returning a 500 response.
-- Keep this appendix, README project tree, and README configuration table in stable file-listing/config-default order. `tests/py/test_docs.py` checks appendix section order against `git ls-files --cached`, row order against each collector's test listing, the README `## Project Structure` tree against the tracked-file listing with parent directories inserted before children, and operator-facing defaults from `app/config.py` against both `app/conf/config.yaml` and README `## Configuration`.
+- Keep this appendix, README project tree, and configuration reference in stable file-listing/config-default order. `tests/py/test_docs.py` checks appendix section order against `git ls-files --cached`, row order against each collector's test listing, the README `## Project Structure` tree against the tracked-file listing with parent directories inserted before children, and operator-facing defaults from `app/config.py` against both `app/conf/config.yaml` and `CONFIGURATION.md`.
 
 ---
 
@@ -657,7 +657,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 
 #### `test_docs.py`
 
-Meta-tests that verify documentation stays in sync with the test suite and operator-facing inventories. Runs `pytest --collect-only`, `npx vitest list`, and `npx playwright test --list` as subprocesses (once per module via shared fixtures) and compares results against the appendix tables and documented totals for all three runtimes. Also checks README project-structure coverage, Flask route inventory coverage, release-draft conventions, and app configuration default coverage in `app/conf/config.yaml` plus README `## Configuration`.
+Meta-tests that verify documentation stays in sync with the test suite and operator-facing inventories. Runs `pytest --collect-only`, `npx vitest list`, and `npx playwright test --list` as subprocesses (once per module via shared fixtures) and compares results against the appendix tables and documented totals for all three runtimes. Also checks README project-structure coverage, Flask route inventory coverage, release-draft conventions, app configuration default coverage in `app/conf/config.yaml` plus `CONFIGURATION.md`, and Related Docs navigation coverage.
 
 | Test | Description |
 | --- | --- |
@@ -690,7 +690,9 @@ Meta-tests that verify documentation stays in sync with the test suite and opera
 | `TestReleaseDraftDocs.test_release_draft_convention_is_documented_when_drafts_exist` | Checks that release-draft branch docs are documented when `docs/release-drafts/` exists. |
 | `TestReleaseDraftDocs.test_release_drafts_are_paired_by_version` | Checks that each release draft version has both merge-request and release-notes files. |
 | `TestOperatorConfigurationDocs.test_config_yaml_represents_app_defaults` | Checks that every operator-facing default key from `app/config.py` is represented in the checked-in `app/conf/config.yaml` reference. |
-| `TestOperatorConfigurationDocs.test_readme_configuration_represents_app_defaults` | Checks that every operator-facing default key from `app/config.py` is represented in README.md `## Configuration`. |
+| `TestOperatorConfigurationDocs.test_configuration_reference_represents_app_defaults` | Checks that every operator-facing default key from `app/config.py` is represented in `CONFIGURATION.md` `## Application Settings`. |
+| `TestRelatedDocsNavigation.test_related_docs_sections_list_project_markdown_files` | Checks that every `## Related Docs` section lists all tracked project Markdown files except release drafts and itself. |
+| `TestRelatedDocsNavigation.test_readme_documentation_map_lists_project_markdown_files` | Checks that README.md `## Documentation Map` lists all tracked project Markdown files except release drafts and README.md itself. |
 
 #### `test_logging.py`
 
@@ -1532,7 +1534,7 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `applies a theme from the terminal theme command` | Verifies that the terminal-native `theme` command applies a selected theme through the same runtime path as the theme selector. |
 | `groups terminal theme list output by color scheme` | Verifies that `theme list` separates dark, light, and fallback theme entries using the registry `color_scheme` value. |
 | `requires explicit set before applying a theme from the terminal theme command` | Verifies that `theme <theme>` is rejected and only `theme set <theme>` applies a terminal-native theme change. |
-| `updates user options from the terminal config command` | Verifies that terminal-native `config set/get/list` updates and reports user options, including prompt username, through the same preference path as the options modal. |
+| `updates user options from the terminal config command` | Verifies that terminal-native `config set/get/list` updates and reports user options, including prompt username and run comparison defaults, through the same preference path as the options modal. |
 | `requires explicit set before updating user options from the terminal config command` | Verifies that `config <option> <value>` is rejected and only `config set <option> <value>` applies terminal-native option changes. |
 | `keeps config command output pinned to the tail when the tab is already following` | Verifies that terminal-native `config set` output preserves tail-follow state after async preference application. |
 | `serves runtime autocomplete context for theme and config values` | Verifies that theme slugs, config keys, and config values are generated into the shared autocomplete context instead of duplicated static lists. |
@@ -1928,11 +1930,11 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | Test | Description |
 | --- | --- |
 | `renders hunk counts and split-pane rows for equal, replace, insert, and delete hunks` | Verifies that the run comparison renderer maps the hunk model into paired split-pane rows and count badges. |
-| `resolves hidden auto mode from viewport and can reset explicit choices to default` | Verifies that the compare-modal view selector resolves hidden auto mode from the viewport and can restore the default preference. |
+| `resolves hidden auto mode from viewport and keeps modal view overrides local` | Verifies that the compare-modal view selector resolves hidden auto mode from the viewport, keeps modal-only overrides local, and can restore the saved default without changing it. |
 | `renders a fetched comparison in mobile mode with the real select enhancer` | Verifies that the fetched compare renderer can open the mobile unified view with the app-native select enhancer without falling into the generic failure toast. |
 | `surfaces backend compare errors instead of only the generic failure toast` | Verifies that failed compare responses include the backend validation message in the toast instead of collapsing every failure into the same generic copy. |
 | `hides equal-line context controls and rows in changes-only and findings-only modes` | Verifies that changes-only and findings-only comparison modes hide context controls and suppress transcript equal rows or the transcript pane. |
-| `rerenders full equal hunks when context dropdown changes without refetching compare data` | Verifies that the compare context dropdown reshapes already-loaded equal hunks without re-running the compare request. |
+| `rerenders full equal hunks when context dropdown changes without refetching or saving defaults` | Verifies that the compare context dropdown reshapes already-loaded equal hunks without re-running the compare request or changing the saved default. |
 | `renders replace blocks while preserving each side output order` | Verifies that replace hunks keep each pane's original transcript order while aligning changed pairs. |
 | `keeps right-only replace lines before later paired right lines` | Verifies that a right-side inserted service line renders before a later paired summary line when that was the original B-side order. |
 | `renders per-hunk and surplus truncation placeholders` | Verifies that per-hunk line omissions and surplus hunk omissions are visible in the split-pane output. |
@@ -3129,8 +3131,17 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 
 ## Related Docs
 
-- [README.md](../README.md) — quick start, feature summary, and operator configuration reference
-- [CONTRIBUTING.md](../CONTRIBUTING.md) — development setup, branch workflow, and merge request process
-- [ARCHITECTURE.md](../ARCHITECTURE.md) — runtime layers, request flow, and persistence schema
-- [DECISIONS.md](../DECISIONS.md) — architectural rationale, tradeoffs, and implementation history
-- [THEME.md](../THEME.md) — theme registry, key reference, and custom theme authoring
+- [Default.md](../.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
+- [ARCHITECTURE.md](../ARCHITECTURE.md) - runtime layers, request flow, persistence, security, and app internals
+- [CHANGELOG.md](../CHANGELOG.md) - release-by-release changes
+- [CONFIGURATION.md](../CONFIGURATION.md) - operator config reference for `app/conf/`, `.env`, Compose, storage, and production tuning
+- [CONTRIBUTING.md](../CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
+- [CONTRIBUTORS.md](../CONTRIBUTORS.md) - contributor and acknowledgement notes
+- [DECISIONS.md](../DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
+- [DOCS_STANDARDS.md](../DOCS_STANDARDS.md) - documentation structure, templates, and review rules
+- [FEATURES.md](../FEATURES.md) - full per-feature reference
+- [README.md](../README.md) - project overview, quick start, documentation map, and installed tools
+- [THEME.md](../THEME.md) - theme registry, token reference, and custom theme authoring
+- [TODO.md](../TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [docs/external-command-integrations.md](../docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
+- [tests/ui-capture-scenes.md](ui-capture-scenes.md) - UI screenshot capture scene inventory

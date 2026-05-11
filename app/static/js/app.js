@@ -2294,6 +2294,48 @@ function _cliConfigEntries() {
       set: (value) => applyHudClockPreference(value),
     },
     {
+      key: 'compare-view',
+      description: 'Default run comparison view',
+      values: ['auto', 'side-by-side', 'unified', 'changes-only', 'findings-only'],
+      aliases: {
+        automatic: 'auto',
+        responsive: 'auto',
+        default: 'auto',
+        split: 'side-by-side',
+        sidebyside: 'side-by-side',
+        changes: 'changes-only',
+        findings: 'findings-only',
+      },
+      toStored: {
+        auto: 'auto',
+        'side-by-side': 'side_by_side',
+        unified: 'unified',
+        'changes-only': 'changes_only',
+        'findings-only': 'findings_only',
+      },
+      fromStored: {
+        auto: 'auto',
+        side_by_side: 'side-by-side',
+        unified: 'unified',
+        changes_only: 'changes-only',
+        findings_only: 'findings-only',
+      },
+      get: function getCompareViewCliValue() {
+        return this.fromStored[getCompareViewModePreference()] || 'auto';
+      },
+      set: function setCompareViewCliValue(value) {
+        applyCompareViewModePreference(this.toStored[value] || value);
+      },
+    },
+    {
+      key: 'compare-context',
+      description: 'Default unchanged-line context in run comparison',
+      values: ['3', '10', 'all'],
+      aliases: { default: '3', minimal: '3', expanded: '10', full: 'all' },
+      get: () => getCompareContextPreference(),
+      set: (value) => applyCompareContextPreference(value),
+    },
+    {
       key: 'prompt-username',
       description: 'Username shown before the prompt domain',
       values: null,

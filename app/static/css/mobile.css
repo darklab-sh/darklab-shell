@@ -1199,6 +1199,18 @@
   body.mobile-terminal-mode .history-compare-actions-menu {
     z-index: 900;
   }
+  body.mobile-terminal-mode .app-select-menu .dropdown-item,
+  body.mobile-terminal-mode .save-menu.dropdown-surface .dropdown-item,
+  body.mobile-terminal-mode .sheet-filter-menu.dropdown-surface .dropdown-item,
+  body.mobile-terminal-mode .project-target-filter-options.dropdown-surface .dropdown-item {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 10px 14px;
+    font-size: 14px;
+    line-height: 1.25;
+    text-align: left;
+  }
   body.mobile-terminal-mode .history-compare-subtitle {
     max-width: 74vw;
   }

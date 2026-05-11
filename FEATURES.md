@@ -19,6 +19,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 - [Command Findings](#command-findings)
 - [Copy, Save, and Export](#copy-save-and-export)
 - [Tabs & Run History](#tabs--run-history)
+- [Run Comparison](#run-comparison)
 - [Guided Workflows](#guided-workflows)
 - [Permalinks](#permalinks)
 - [Share Redaction](#share-redaction)
@@ -79,7 +80,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 
 **Limits:** compact recents and Up/Down history use only the newest distinct commands. They stay hidden until history exists and are capped by `recent_commands_limit`. The full desktop drawer and mobile recents sheet are paginated by `history_panel_limit`.
 
-**Configuration:** `recent_commands_limit` in `config.yaml` (default 50).
+**Configuration:** `recent_commands_limit` in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
 **Related files:** `app/static/js/shell_chrome.js` (desktop rail), `app/static/js/mobile_chrome.js` (mobile peek + sheet), `app/conf/config.yaml`.
 
@@ -107,7 +108,7 @@ This is the detailed feature reference for darklab_shell. If you want the short 
 
 **Limits:** external-tool completions come from the command-registry YAML, while app-owned built-ins come from the browser runtime. The app does not inspect the live shell and does not parse `--help` output.
 
-**Configuration:** external-tool suggestions use `conf/commands.yaml` (plus optional `conf/commands.local.yaml`). App-owned built-ins use `app/builtin_autocomplete.yaml`, which is packaged with the application rather than treated as operator config. YAML changes reload on the next page load — no server restart needed.
+**Configuration:** external-tool suggestions use `conf/commands.yaml` plus optional local overlays; see [CONFIGURATION.md](CONFIGURATION.md) and [docs/external-command-integrations.md](docs/external-command-integrations.md). App-owned built-ins use `app/builtin_autocomplete.yaml`.
 
 **Related files:** `app/static/js/autocomplete.js`, `app/static/js/app.js`, `app/builtin_autocomplete.yaml`, `app/conf/commands.yaml`, `app/blueprints/session.py`, `app/database.py`.
 
@@ -642,6 +643,27 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 ---
 
+## Run Comparison
+
+**Purpose:** compare two saved runs without manually switching between transcripts, while preserving enough surrounding context to understand what changed.
+
+**Behavior:**
+
+- Run comparison can launch from the History drawer, Run Details modal, mobile history sheet, and Projects modal. Project-scoped comparison uses the same canonical compare flow as History after resolving the selected linked runs or baseline label.
+- Transcript comparison strips app chrome lines before diffing, keeps each run's original output order, and aligns changed hunks across Run A and Run B. Unchanged context is folded by default with **Show unchanged lines** controls and lazy expansion for large equal regions.
+- Users can switch between responsive view modes: automatic for the current screen, side-by-side where space allows, unified, changes-only, and findings-only. Context controls expose compact, expanded, and all-context views for the current comparison without changing the user's saved default options.
+- **Prev change** and **Next change** navigate between changed transcript regions. Restore actions can load Run A, Run B, or both runs back into terminal tabs, and **Copy summary** creates a concise text summary of the comparison.
+- Findings and run-owned artifacts are compared as objects rather than raw line positions. This keeps matching findings/artifacts stable even when tools emit the same results in a different order. Added, removed, and changed object groups include per-side totals and truncation metadata.
+- Mobile uses the same comparison overlay with stacked output panes, mobile-safe dropdown placement, and touch-friendly controls.
+
+**Limits:** comparison is optimized for saved run history, not live streams. Very large equal regions are summarized until expanded, and backend byte/hunk caps protect the compare payload from unbounded responses.
+
+**Configuration:** compare view and compare context defaults are saved user options. Server-side compare limits are fixed application constants rather than operator-facing `config.yaml` settings.
+
+**Related files:** `app/run_comparison.py` (shared compare helpers), `app/blueprints/history.py` (history compare routes), `app/blueprints/projects.py` (project compare route), `app/static/js/history.js` (compare launcher and renderer), and `app/static/css/components.css` / `app/static/css/mobile.css` (desktop/mobile compare layout).
+
+---
+
 ## Guided Workflows
 
 **Purpose:** curated and user-saved multi-step diagnostic sequences that turn repeat checks into reviewable command playbooks.
@@ -838,7 +860,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Selected command flags declared in `commands.yaml` can consume or write session files. At execution time, user-facing names such as `targets.txt` are validated and rewritten to the session workspace path passed to the subprocess.
 - Shell navigation and redirection remain blocked; all file access must go through the Files panel, workspace routes, the `file` built-in, or explicitly declared command flags.
 
-**Configuration:** `workspace_enabled`, `workspace_backend`, `workspace_root`, `workspace_quota_mb`, `workspace_max_file_mb`, `workspace_max_files`, and `workspace_inactivity_ttl_hours` in `conf/config.yaml`; per-command `workspace_flags` in `conf/commands.yaml`.
+**Configuration:** Files use `workspace_*` settings in `conf/config.yaml` and per-command `workspace_flags` in `conf/commands.yaml`; see [CONFIGURATION.md](CONFIGURATION.md) for storage recipes.
 
 **Related files:** `app/workspace.py` (path, quota, permission, and cleanup helpers), `app/blueprints/workspace.py` (workspace file routes), `app/static/js/workspace.js` (Files panel), `app/builtin_commands.py` (`file` built-in), `app/commands.py` (workspace flag validation and rewrite).
 
@@ -857,12 +879,12 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Finding review supports status updates, source-run restore with line highlighting, target attribution, filtering, and sorting. Artifact rows show availability/checksum state and offer scoped preview/download actions for still-available workspace files.
 - Evidence packages are draft project manifests. The wizard records name/description, package labels/notes, transcript/finding/artifact/target selections, redaction mode, artifact inclusion, private-note inclusion, and size estimates. Existing package rows support download, re-package, manifest preview, delete, and metadata edit actions.
 - Package downloads produce a capped archive with `manifest.json`, `README.md`, static `index.html`, selected run transcript pages, finding/target JSON and Markdown exports, selected metadata/notes exports, optional raw artifacts, and redacted variants when requested.
-- Project run comparison uses the same canonical `/history/compare` flow as the History drawer. It can compare two linked runs directly or compare a selected run against the newest linked run with a chosen run label, then renders split-pane transcript hunks with folded equal context, lazy equal-line expansion, responsive view modes, and order-insensitive finding/artifact object diffs with per-side totals and truncation metadata.
+- Project run comparison uses the same canonical `/history/compare` flow as the History drawer. It can compare two linked runs directly or compare a selected run against the newest linked run with a chosen run label; the dedicated Run Comparison section covers the shared transcript, finding, and artifact comparison behavior.
 - History project filtering returns linked runs for the selected project. Run-subtype filters can further split all runs, built-in runs, and external runs while snapshots remain available through the normal snapshot filter.
 
 **Limits:** projects are session-scoped and do not copy source history. Deleting a project removes its project metadata, targets, packages, and links, but not the underlying run history or workspace files. Entity notes are intentionally one note per supported entity rather than comment threads.
 
-**Configuration:** `max_projects_per_session`, `max_project_links_per_project`, `max_project_targets_per_project`, `max_evidence_packages_per_project`, `max_entity_labels_per_session`, `max_entity_labels_per_entity`, `max_entity_notes_per_session`, `evidence_package_max_mb`, `evidence_package_max_artifacts`, `evidence_package_download_rate_limit_per_minute`, and `evidence_package_download_rate_limit_per_second` in `conf/config.yaml`.
+**Configuration:** project, metadata, and evidence-package limits are configured in `conf/config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
 **Related files:** `app/project_workspace.py` (project relationship, metadata, and package helpers), `app/blueprints/projects.py` (project routes), `app/static/js/shell_chrome.js` (Projects modal), `app/static/js/history.js` (history project filters and metadata actions), `app/static/js/workspace.js` (workspace file metadata), and `app/database.py` (project workspace schema).
 
@@ -881,7 +903,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Limits:** package manifests are draft records, and the archive is built at download time from still-available project data and workspace artifacts. Redacted packages exclude raw artifacts until artifact-content redaction exists.
 
-**Configuration:** `max_evidence_packages_per_project`, `evidence_package_max_mb`, `evidence_package_max_artifacts`, `evidence_package_download_rate_limit_per_minute`, and `evidence_package_download_rate_limit_per_second`.
+**Configuration:** evidence-package limits are configured in `conf/config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
 **Related files:** `app/project_workspace.py` (manifest and archive builder), `app/blueprints/projects.py` (package routes), and `app/static/js/shell_chrome.js` (wizard, package rows, and manifest preview).
 
@@ -906,7 +928,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Limits:** prefix matching is deliberately coarse — operators must be explicit with deny entries to block flag combinations on otherwise-allowed tools. Deny matching only applies once the tool prefix matches (e.g., `!nmap -sU` only affects `nmap` commands). Restricted command inputs only inspect literal values in metadata-known target slots; domain names are not DNS-resolved.
 
-**Configuration:** `conf/commands.yaml`, re-read per request for command policy; `restricted_command_input_cidrs` in `conf/config.yaml`.
+**Configuration:** command policy uses `conf/commands.yaml`; restricted target inputs use `restricted_command_input_cidrs` in `conf/config.yaml`. See [CONFIGURATION.md](CONFIGURATION.md) and [docs/external-command-integrations.md](docs/external-command-integrations.md).
 
 ```yaml
 commands:
@@ -955,7 +977,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Limits:** disabled by default, desktop-only, and restricted to commands that explicitly declare PTY behavior in the command registry. PTY runs have a configured max runtime and per-session concurrency cap. Multi-worker deployments require Redis unless `run_broker_require_redis` is intentionally relaxed for local development.
 
-**Configuration:** `interactive_pty_enabled`, `interactive_pty_max_runtime_seconds`, `interactive_pty_max_concurrent_per_session`, plus each command's `interactive` registry block in `conf/commands.yaml`.
+**Configuration:** Interactive PTY uses `interactive_pty_*` settings plus each command's `interactive` registry block; see [CONFIGURATION.md](CONFIGURATION.md).
 
 **Related files:** `app/pty_service.py` (server-side PTY lifecycle and snapshots), `app/blueprints/run.py` (PTY routes), `app/static/js/pty.js` (browser terminal controller), `app/static/js/vendor/xterm.js`, `app/static/js/vendor/xterm-addon-fit.js`, and `app/conf/commands.yaml` (interactive command metadata).
 
@@ -1252,7 +1274,7 @@ If a session has run history, workspace files, project workspace records, user w
 
 **Limits:** field names and level semantics are stable, but specific numeric codes and free-form `message` strings are not part of the contract. Downstream consumers should key off event names and structured fields, not prose.
 
-**Configuration:** `log_format` and `log_level` in `config.yaml` (`text` / `gelf`, default `text`; `DEBUG` / `INFO` / `WARNING` / `ERROR`, default `INFO`).
+**Configuration:** `log_format` and `log_level` in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
 **Related files:** `app/logging_setup.py` (format + level wiring), `app/blueprints/run.py` (run lifecycle events), `app/blueprints/history.py` (history/share events), `app/blueprints/session.py` (token, preference, and starred-command events), `app/blueprints/assets.py` (diagnostics events).
 
@@ -1305,7 +1327,7 @@ curl http://localhost:8888/diag?format=json
 
 **Limits:** `/diag` is gated entirely by IP/CIDR allowlists, not by an authentication layer. Empty `diagnostics_allowed_cidrs` disables it completely.
 
-**Configuration:** `diagnostics_allowed_cidrs` in `config.yaml`; access resolution also depends on `trusted_proxy_cidrs` when the app is behind a proxy.
+**Configuration:** `diagnostics_allowed_cidrs` and `trusted_proxy_cidrs` in `config.yaml`; see [CONFIGURATION.md](CONFIGURATION.md).
 
 **Related files:** `app/blueprints/assets.py` (`/diag` HTML + JSON responses), `app/static/css/diag.css` (page styling + mobile breakpoint behavior), `app/templates/diag.html` (diagnostics page markup), `README.md` (operator-facing config reference), `ARCHITECTURE.md` (diagnostics and logging runtime details).
 
@@ -1313,9 +1335,17 @@ curl http://localhost:8888/diag?format=json
 
 ## Related Docs
 
-- [README.md](README.md) — quick summary, quick start, installed tools, and configuration reference
-- [ARCHITECTURE.md](ARCHITECTURE.md) — runtime layers, request flow, persistence schema, and security mechanics
-- [CONTRIBUTING.md](CONTRIBUTING.md) — local setup, test workflow, linting, and merge request guidance
-- [DECISIONS.md](DECISIONS.md) — architectural rationale, tradeoffs, and implementation-history notes
-- [THEME.md](THEME.md) — theme registry, selector metadata, and override behavior
-- [tests/README.md](tests/README.md) — test suite appendix, smoke-test coverage, and focused test commands
+- [Default.md](.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
+- [ARCHITECTURE.md](ARCHITECTURE.md) - runtime layers, request flow, persistence, security, and app internals
+- [CHANGELOG.md](CHANGELOG.md) - release-by-release changes
+- [CONFIGURATION.md](CONFIGURATION.md) - operator config reference for `app/conf/`, `.env`, Compose, storage, and production tuning
+- [CONTRIBUTING.md](CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
+- [CONTRIBUTORS.md](CONTRIBUTORS.md) - contributor and acknowledgement notes
+- [DECISIONS.md](DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
+- [DOCS_STANDARDS.md](DOCS_STANDARDS.md) - documentation structure, templates, and review rules
+- [README.md](README.md) - project overview, quick start, documentation map, and installed tools
+- [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
+- [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
+- [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
+- [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

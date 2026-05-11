@@ -671,7 +671,64 @@
       if (except && wrap === except) return;
       wrap.classList.remove('open');
       wrap.querySelector('.sheet-item-action-menu-trigger')?.setAttribute('aria-expanded', 'false');
+      _recentsResetActionMenuPosition(wrap);
     });
+  }
+  function _recentsResetActionMenuPosition(wrap) {
+    const menu = wrap?.querySelector?.('.sheet-item-action-menu');
+    if (!menu) return;
+    menu.style.position = '';
+    menu.style.left = '';
+    menu.style.top = '';
+    menu.style.right = '';
+    menu.style.bottom = '';
+    menu.style.width = '';
+    menu.style.maxHeight = '';
+    menu.style.overflowY = '';
+    wrap.classList.add('save-menu-down');
+  }
+  function _recentsPositionActionMenu(wrap) {
+    const trigger = wrap?.querySelector?.('.sheet-item-action-menu-trigger');
+    const menu = wrap?.querySelector?.('.sheet-item-action-menu');
+    if (!trigger || !menu || typeof trigger.getBoundingClientRect !== 'function') return;
+    const triggerRect = trigger.getBoundingClientRect();
+    const sheetRect = recentsSheet?.getBoundingClientRect?.();
+    const viewportHeight = typeof window !== 'undefined'
+      ? window.innerHeight
+      : document.documentElement.clientHeight;
+    const gutter = 8;
+    const lowerBound = Math.min(viewportHeight || 0, sheetRect?.bottom || viewportHeight || 0) - gutter;
+    const upperBound = Math.max(0, sheetRect?.top || 0) + gutter;
+    const spaceBelow = Math.max(0, lowerBound - triggerRect.bottom);
+    const spaceAbove = Math.max(0, triggerRect.top - upperBound);
+    const viewportWidth = typeof window !== 'undefined'
+      ? window.innerWidth
+      : document.documentElement.clientWidth;
+    const menuWidth = Math.max(190, menu.offsetWidth || 190);
+    const menuHeight = Math.max(1, menu.scrollHeight || menu.offsetHeight || 1);
+    const openDown = spaceBelow >= menuHeight || spaceBelow >= spaceAbove;
+    wrap.classList.toggle('save-menu-down', openDown);
+    const availableSpace = openDown ? spaceBelow : spaceAbove;
+    const left = Math.min(
+      Math.max(gutter, triggerRect.right - menuWidth),
+      Math.max(gutter, (viewportWidth || menuWidth) - menuWidth - gutter),
+    );
+    const top = openDown
+      ? triggerRect.bottom + 4
+      : Math.max(gutter, triggerRect.top - Math.min(menuHeight, Math.max(44, availableSpace)) - 4);
+    menu.style.position = 'fixed';
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+    menu.style.right = 'auto';
+    menu.style.bottom = 'auto';
+    menu.style.width = `${menuWidth}px`;
+    if (menuHeight > availableSpace && availableSpace > 0) {
+      menu.style.maxHeight = `${Math.max(44, availableSpace)}px`;
+      menu.style.overflowY = 'auto';
+    } else {
+      menu.style.maxHeight = '';
+      menu.style.overflowY = '';
+    }
   }
   function _recentsCopyCommand(run) {
     const command = run?.command || '';
@@ -757,6 +814,11 @@
         _recentsCloseActionMenus(open ? wrap : null);
         wrap.classList.toggle('open', open);
         trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) {
+          _recentsPositionActionMenu(wrap);
+        } else {
+          _recentsResetActionMenuPosition(wrap);
+        }
       },
     });
     wrap.append(trigger, menu);

@@ -1231,11 +1231,11 @@ The test stack is intentionally split into three layers:
 Current totals:
 
 - behavior tests: 2,596
-- docs/inventory meta-tests: 30
-- `pytest`: 1298 (1268 behavior + 30 meta)
+- docs/inventory meta-tests: 32
+- `pytest`: 1300 (1268 behavior + 32 meta)
 - `vitest`: 1081
 - `playwright`: 247
-- total: 2,626
+- total: 2,628
 
 ### Testing Architecture
 
@@ -1263,10 +1263,17 @@ Keep the detailed suite appendix, focused run commands, and maintenance notes in
 
 ## Related Docs
 
-- [README.md](README.md) — quick summary, quick start, installed tools, configuration reference, and production deployment notes
-- [FEATURES.md](FEATURES.md) — full per-feature reference including purpose and use
-- [docs/external-command-integrations.md](docs/external-command-integrations.md) — external-tool rewrite, environment, workspace, and smoke-test contracts
-- [CONTRIBUTING.md](CONTRIBUTING.md) — local setup, test workflow, linting, and merge request guidance
-- [DECISIONS.md](DECISIONS.md) — architectural rationale, tradeoffs, and implementation-history notes
-- [THEME.md](THEME.md) — theme registry, selector metadata, and override behavior
-- [tests/README.md](tests/README.md) — test suite appendix, smoke-test coverage, and focused test commands
+- [Default.md](.gitlab/merge_request_templates/Default.md) - default GitLab merge request template
+- [CHANGELOG.md](CHANGELOG.md) - release-by-release changes
+- [CONFIGURATION.md](CONFIGURATION.md) - operator config reference for `app/conf/`, `.env`, Compose, storage, and production tuning
+- [CONTRIBUTING.md](CONTRIBUTING.md) - local setup, test workflow, linting, branch workflow, and merge request guidance
+- [CONTRIBUTORS.md](CONTRIBUTORS.md) - contributor and acknowledgement notes
+- [DECISIONS.md](DECISIONS.md) - architectural rationale, tradeoffs, and implementation-history notes
+- [DOCS_STANDARDS.md](DOCS_STANDARDS.md) - documentation structure, templates, and review rules
+- [FEATURES.md](FEATURES.md) - full per-feature reference
+- [README.md](README.md) - project overview, quick start, documentation map, and installed tools
+- [THEME.md](THEME.md) - theme registry, token reference, and custom theme authoring
+- [TODO.md](TODO.md) - open follow-ups, research notes, known issues, and future ideas
+- [docs/external-command-integrations.md](docs/external-command-integrations.md) - external command registry, rewrites, workspace integration, and smoke-test contracts
+- [tests/README.md](tests/README.md) - detailed suite appendix, smoke-test coverage, and focused test commands
+- [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory

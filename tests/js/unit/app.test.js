@@ -907,12 +907,16 @@ describe('app helpers', () => {
           pref_timestamps: 'off',
           pref_welcome_intro: 'animated',
           pref_prompt_username: '',
+          pref_compare_view_mode: 'auto',
+          pref_compare_context: '3',
         },
       })
 
     await handleConfigCommand('config set line-numbers on', 'tab-1')
     await handleConfigCommand('config set welcome static', 'tab-1')
     await handleConfigCommand('config set prompt-username nona', 'tab-1')
+    await handleConfigCommand('config set compare-view changes-only', 'tab-1')
+    await handleConfigCommand('config set compare-context all', 'tab-1')
     await handleConfigCommand('config get prompt-username', 'tab-1')
     await handleConfigCommand('config list', 'tab-1')
 
@@ -921,10 +925,14 @@ describe('app helpers', () => {
     expect(document.cookie).toContain('pref_line_numbers=on')
     expect(document.cookie).toContain('pref_welcome_intro=disable_animation')
     expect(document.cookie).toContain('pref_prompt_username=nona')
+    expect(document.cookie).toContain('pref_compare_view_mode=changes_only')
+    expect(document.cookie).toContain('pref_compare_context=all')
     expect(document.querySelector('#shell-prompt-wrap .prompt-prefix').textContent).toBe('nona@darklab.sh:~ $')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set line-numbers on')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set welcome static')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set prompt-username nona')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set compare-view changes-only')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set compare-context all')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config get prompt-username')
     expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config list')
     expect(setStatus).toHaveBeenCalledWith('ok')
@@ -1014,7 +1022,16 @@ describe('app helpers', () => {
       .toContain('(current)')
     expect(context.config.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'get', 'set'])
     expect(context.config.arg_hints.set.map(item => item.value)).toContain('prompt-username')
+    expect(context.config.arg_hints.set.map(item => item.value)).toContain('compare-view')
     expect(context.config.sequence_arg_hints['set line-numbers'].map(item => item.value)).toEqual(['on', 'off'])
+    expect(context.config.sequence_arg_hints['set compare-view'].map(item => item.value)).toEqual([
+      'auto',
+      'side-by-side',
+      'unified',
+      'changes-only',
+      'findings-only',
+    ])
+    expect(context.config.sequence_arg_hints['set compare-context'].map(item => item.value)).toEqual(['3', '10', 'all'])
     expect(context.config.sequence_arg_hints['set prompt-username'].map(item => item.value)).toEqual(['<username> | default'])
     expect(context.var.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'set', 'unset'])
     expect(context.var.arg_hints.set.filter(item => item.value === 'HOST')).toEqual([

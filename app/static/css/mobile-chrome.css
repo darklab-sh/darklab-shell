@@ -463,13 +463,19 @@ body.mobile-terminal-mode {
   .recents-sheet .sheet-item-action-menu-wrap .sheet-item-action-menu {
     min-width: 190px;
     z-index: 520;
+    overscroll-behavior: contain;
   }
   .recents-sheet .sheet-item-action-menu-wrap.open .sheet-item-action-menu {
     display: block;
   }
   .recents-sheet .sheet-item-action-menu .dropdown-item {
-    display: block;
+    display: flex;
+    align-items: center;
     width: 100%;
+    min-height: 44px;
+    padding: 10px 14px;
+    font-size: 14px;
+    line-height: 1.25;
     text-align: left;
     white-space: nowrap;
   }

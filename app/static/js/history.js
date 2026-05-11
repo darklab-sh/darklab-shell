@@ -1348,7 +1348,7 @@ function _ensureHistoryCompareOverlay() {
   overlay.id = 'history-compare-overlay';
   overlay.className = 'modal-overlay mobile-sheet-overlay u-hidden history-compare-overlay';
   overlay.innerHTML = `
-    <section id="history-compare-modal" class="history-compare-modal mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="history-compare-title">
+    <section id="history-compare-modal" class="history-compare-modal mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="history-compare-title" tabindex="-1">
       <div class="sheet-grab gesture-handle" role="button" tabindex="0" aria-label="Close run comparison"></div>
       <div class="history-compare-header surface-header">
         <div class="history-compare-heading">
@@ -1399,11 +1399,32 @@ function closeHistoryCompareOverlay() {
   }
 }
 
+function _focusHistoryCompareOverlay() {
+  const overlay = document.getElementById('history-compare-overlay');
+  if (!overlay || !overlay.classList.contains('open')) return;
+  const modal = overlay.querySelector('#history-compare-modal');
+  if (!modal || typeof modal.focus !== 'function') return;
+  if (modal.contains(document.activeElement)) return;
+  try {
+    modal.focus({ preventScroll: true });
+  } catch (_) {
+    modal.focus();
+  }
+}
+
+function _queueHistoryCompareInitialFocus() {
+  const schedule = typeof requestAnimationFrame === 'function'
+    ? requestAnimationFrame
+    : (callback) => setTimeout(callback, 0);
+  schedule(_focusHistoryCompareOverlay);
+}
+
 function _openHistoryCompareOverlay() {
   const overlay = _ensureHistoryCompareOverlay();
   overlay.classList.remove('u-hidden');
   overlay.classList.add('open');
   overlay.setAttribute('aria-hidden', 'false');
+  _queueHistoryCompareInitialFocus();
 }
 
 function isHistoryCompareOverlayOpen() {
@@ -3263,14 +3284,12 @@ function _renderHistoryCompareMinimap(buckets = []) {
 function _historyCompareApplyViewMode(mode, data) {
   const nextMode = _historyCompareCoerceViewMode(mode);
   data._compareViewModeRaw = nextMode;
-  if (typeof applyCompareViewModePreference === 'function') applyCompareViewModePreference(nextMode);
   _renderHistoryComparison(data);
 }
 
 function _historyCompareApplyContext(mode, data) {
   const nextMode = _historyCompareCoerceContext(mode);
   data._compareContext = nextMode;
-  if (typeof applyCompareContextPreference === 'function') applyCompareContextPreference(nextMode);
   _renderHistoryComparison(data);
 }
 
@@ -3289,7 +3308,8 @@ function _renderHistoryCompareDisplayControls(data, viewMode) {
   const controls = document.createElement('div');
   controls.className = 'history-compare-controls';
 
-  const rawMode = _historyCompareCoerceViewMode(data._compareViewModeRaw || _historyCompareStoredViewMode());
+  const defaultMode = _historyCompareCoerceViewMode(data._compareViewModeDefault || _historyCompareStoredViewMode());
+  const rawMode = _historyCompareCoerceViewMode(data._compareViewModeRaw || defaultMode);
   const resolvedMode = _historyCompareResolveViewMode(rawMode);
   const viewSelect = document.createElement('select');
   viewSelect.className = 'form-select history-compare-view-select';
@@ -3305,7 +3325,7 @@ function _renderHistoryCompareDisplayControls(data, viewMode) {
   viewSelect.addEventListener('change', () => _historyCompareApplyViewMode(viewSelect.value, data));
   controls.appendChild(viewSelect);
 
-  const resetHidden = rawMode === 'auto' || rawMode === _historyCompareViewportMode();
+  const resetHidden = rawMode === defaultMode || (defaultMode === 'auto' && rawMode === _historyCompareViewportMode());
   const reset = document.createElement('button');
   reset.type = 'button';
   reset.className = 'btn btn-ghost btn-icon-only history-compare-reset-view';
@@ -3318,7 +3338,7 @@ function _renderHistoryCompareDisplayControls(data, viewMode) {
   reset.appendChild(resetIcon);
   reset.hidden = resetHidden;
   reset.classList.toggle('u-hidden', resetHidden);
-  reset.addEventListener('click', () => _historyCompareApplyViewMode('auto', data));
+  reset.addEventListener('click', () => _historyCompareApplyViewMode(defaultMode, data));
   controls.appendChild(reset);
 
   const contextControls = _renderHistoryCompareContextControls(data, viewMode);
@@ -3641,9 +3661,11 @@ function _renderHistoryComparison(data) {
   const subtitle = overlay.querySelector('#history-compare-subtitle');
   if (!body) return;
   body.replaceChildren();
-  const rawViewMode = _historyCompareCoerceViewMode(data._compareViewModeRaw || _historyCompareStoredViewMode());
+  if (!data._compareViewModeDefault) data._compareViewModeDefault = _historyCompareStoredViewMode();
+  if (!data._compareContextDefault) data._compareContextDefault = _historyCompareStoredContext();
+  const rawViewMode = _historyCompareCoerceViewMode(data._compareViewModeRaw || data._compareViewModeDefault);
   const viewMode = _historyCompareResolveViewMode(rawViewMode);
-  const contextMode = _historyCompareCoerceContext(data._compareContext || _historyCompareStoredContext());
+  const contextMode = _historyCompareCoerceContext(data._compareContext || data._compareContextDefault);
   data._compareViewModeRaw = rawViewMode;
   data._compareContext = contextMode;
   const totals = data.totals || {};

@@ -39,7 +39,12 @@ Part 5 — release-draft docs:
 Part 6 — operator configuration docs:
   Operator-facing defaults from app/config.py's load_config() defaults must
   be represented in the checked-in app/conf/config.yaml reference and the
-  README.md "## Configuration" table.
+  CONFIGURATION.md "## Application Settings" table.
+
+Part 7 — related-doc navigation:
+  Every "## Related Docs" section must link to every tracked project Markdown
+  file except release drafts and itself. README.md's "## Documentation Map"
+  follows the same inventory.
 """
 
 import ast
@@ -56,6 +61,7 @@ _TESTS_README = _HERE.parent / "README.md"
 _REPO_ROOT = _HERE.parent.parent
 _CONTRIBUTING = _REPO_ROOT / "CONTRIBUTING.md"
 _ARCHITECTURE = _REPO_ROOT / "ARCHITECTURE.md"
+_CONFIGURATION = _REPO_ROOT / "CONFIGURATION.md"
 _DOCS_STANDARDS = _REPO_ROOT / "DOCS_STANDARDS.md"
 _README = _REPO_ROOT / "README.md"
 _CONFIG_PY = _REPO_ROOT / "app" / "config.py"
@@ -336,13 +342,66 @@ def _documented_default_config_keys() -> set[str]:
     return keys
 
 
-def _readme_configuration_table_keys() -> set[str]:
-    """Return setting names from the README.md '## Configuration' settings table."""
-    text = _README.read_text()
-    match = re.search(r"^## Configuration\n(?P<body>.*?)(?:^### Config file reload behavior\n)",
+def _configuration_reference_table_keys() -> set[str]:
+    """Return setting names from the CONFIGURATION.md application settings table."""
+    text = _CONFIGURATION.read_text()
+    match = re.search(r"^## Application Settings\n(?P<body>.*?)(?:^---\n\n## Files Under app/conf\n)",
                       text, re.M | re.S)
-    assert match, "Could not find README.md '## Configuration' settings table"
+    assert match, "Could not find CONFIGURATION.md '## Application Settings' table"
     return set(re.findall(r"^\|\s+`([^`]+)`\s+\|", match.group("body"), re.M))
+
+
+def _tracked_markdown_docs() -> list[str]:
+    return [
+        path for path in _git_tracked_files()
+        if path.endswith(".md")
+        and not path.startswith("docs/release-drafts/")
+    ]
+
+
+def _markdown_path_for(path: Path) -> str:
+    return path.relative_to(_REPO_ROOT).as_posix()
+
+
+def _normalise_doc_link(source_path: Path, href: str) -> str | None:
+    target = href.split("#", 1)[0]
+    if not target or re.match(r"^[a-z][a-z0-9+.-]*:", target):
+        return None
+    resolved = (source_path.parent / target).resolve()
+    try:
+        return resolved.relative_to(_REPO_ROOT).as_posix()
+    except ValueError:
+        return None
+
+
+def _markdown_links_in_body(source_path: Path, body: str) -> list[str]:
+    links: list[str] = []
+    for href in re.findall(r"\[[^\]]+\]\(([^)]+)\)", body):
+        target = _normalise_doc_link(source_path, href)
+        if target and target.endswith(".md"):
+            _append_unique(links, target)
+    return links
+
+
+def _related_docs_links(source_path: Path) -> list[str] | None:
+    match = re.search(
+        r"^## Related Docs\n\n(?P<body>.*?)(?:\n^## |\Z)",
+        source_path.read_text(),
+        re.M | re.S,
+    )
+    if not match:
+        return None
+    return _markdown_links_in_body(source_path, match.group("body"))
+
+
+def _documentation_map_links(source_path: Path) -> list[str]:
+    match = re.search(
+        r"^## Documentation Map\n\n(?P<body>.*?)(?:\n^---\n|\n^## |\Z)",
+        source_path.read_text(),
+        re.M | re.S,
+    )
+    assert match, "Could not find README.md '## Documentation Map' section"
+    return _markdown_links_in_body(source_path, match.group("body"))
 
 
 # ── Shared fixtures ───────────────────────────────────────────────────────────
@@ -1032,7 +1091,7 @@ class TestReleaseDraftDocs:
 
 class TestOperatorConfigurationDocs:
     """Operator-facing config defaults must stay represented in both the
-    checked-in config reference and the README settings table."""
+    checked-in config override file and the operator configuration reference."""
 
     def test_config_yaml_represents_app_defaults(self):
         expected = _config_default_keys()
@@ -1043,11 +1102,53 @@ class TestOperatorConfigurationDocs:
             + "\n".join(f"  {key}" for key in missing)
         )
 
-    def test_readme_configuration_represents_app_defaults(self):
+    def test_configuration_reference_represents_app_defaults(self):
         expected = _config_default_keys()
-        documented = _readme_configuration_table_keys()
+        documented = _configuration_reference_table_keys()
         missing = [key for key in expected if key not in documented]
         assert not missing, (
-            "README.md '## Configuration' table is missing app/config.py default keys:\n"
+            "CONFIGURATION.md '## Application Settings' table is missing app/config.py default keys:\n"
             + "\n".join(f"  {key}" for key in missing)
+        )
+
+
+# ── Part 7: related-doc navigation ───────────────────────────────────────────
+
+class TestRelatedDocsNavigation:
+    def test_related_docs_sections_list_project_markdown_files(self):
+        markdown_docs = _tracked_markdown_docs()
+        issues = []
+        for path in markdown_docs:
+            source_path = _REPO_ROOT / path
+            links = _related_docs_links(source_path)
+            if links is None:
+                continue
+            expected = [candidate for candidate in markdown_docs if candidate != path]
+            if links != expected:
+                missing = [candidate for candidate in expected if candidate not in links]
+                extra = [candidate for candidate in links if candidate not in expected]
+                if missing:
+                    issues.append(
+                        f"{path} is missing Related Docs links:\n"
+                        + "\n".join(f"  {candidate}" for candidate in missing)
+                    )
+                if extra:
+                    issues.append(
+                        f"{path} has unexpected Related Docs links:\n"
+                        + "\n".join(f"  {candidate}" for candidate in extra)
+                    )
+                if not missing and not extra:
+                    issues.append(
+                        f"{path} Related Docs order drift. Keep links in git ls-files order, "
+                        "excluding release drafts and the current file."
+                    )
+        assert not issues, "\n\n".join(issues)
+
+    def test_readme_documentation_map_lists_project_markdown_files(self):
+        markdown_docs = _tracked_markdown_docs()
+        expected = [path for path in markdown_docs if path != "README.md"]
+        links = _documentation_map_links(_README)
+        assert links == expected, (
+            "README.md '## Documentation Map' drift. Keep links in git ls-files "
+            "order, excluding release drafts and README.md itself."
         )

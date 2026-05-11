@@ -35,7 +35,8 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Status Monitor** — a desktop modal and mobile sheet for DB/Redis health, workspace quota, session stats, CPU-driven heartbeat visuals, activity heatmaps, command mix, recent-run constellation popovers, active-run CPU/RSS meters, Attach/Kill actions, and safe close-tab prompts that can leave a backend run running in the background
 - **Mobile shell** — dedicated mobile composer, keyboard helper row, character and word-level cursor movement, stable Firefox-friendly layout, shared desktop/mobile Run-button state, output-follow behavior when the keyboard opens, and a mobile history sheet with the same type / command name / exit / date / starred filters as desktop
 - **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy, `save ▾` exports (txt / html / pdf), jump-to-live / jump-to-bottom controls, and exports that keep permalink pages, saved HTML, and PDF output visually aligned where the PDF renderer allows
-- **History and sharing** — recent command chips, desktop/mobile history with full-text search across command text and stored output, filters, stars, split-pane run comparison, active-run reconnect after reload, idle-tab restore, run permalinks, snapshot rows, native mobile sharing, and full-output files for longer runs
+- **History and sharing** — recent command chips, desktop/mobile history with full-text search across command text and stored output, filters, stars, active-run reconnect after reload, idle-tab restore, run permalinks, snapshot rows, native mobile sharing, and full-output files for longer runs
+- **Run comparison** — compare any two saved runs from History, Run Details, or Projects with responsive side-by-side/unified transcript views, folded unchanged context with lazy expansion, Prev/Next change navigation, copyable summaries, restore actions, and order-insensitive finding/artifact diffs
 - **Session command variables** — `var set HOST ip.darklab.sh`, `var list`, and `var unset HOST` define per-session values you can reuse as `$HOST` or `${HOST}`. Expansion happens before command validation, typed history stays readable, and the transcript shows the expanded command that actually ran
 - **Session files** — optional per-session Files support for tools that need small input/output files. Users can create, view, edit, move/rename, download, delete, label, and note files; drag files into folders; preview JSON, JSONL/NDJSON, CSV/TSV, XML, HTTP responses, and large text; see quota/usage; use cwd-aware `ls`, `cat`, `mv`, and confirmed `rm`; use simple `*` patterns for list/move/delete flows; and let selected command flags safely read/write session files without opening shell navigation or redirection
 - **Project workspaces** — lightweight case folders group related runs, run-owned workspace artifacts, targets, findings, labels, notes, and draft evidence packages without copying the source records. Active projects can auto-link completed runs, project views expose finding/artifact review and metadata editing, and package exports preserve the selected project evidence with raw/redacted modes
@@ -153,109 +154,19 @@ For system design, contributor workflow, and detailed test references, use the s
 
 ## Configuration
 
-All application settings live in `app/conf/config.yaml`. The values below are the built-in server defaults from `app/config.py`.
+Runtime settings live in `app/conf/config.yaml`, with optional untracked overrides in `app/conf/config.local.yaml`. The other operator-owned files under `app/conf/` customize commands, FAQ entries, welcome content, app hints, workflows, wordlists, and themes.
 
-- `config.yaml` is read at startup; changes take effect after `docker compose restart` with no rebuild needed.
-- The checked-in `config.yaml` acts as an override file: settings that match built-in defaults stay commented out, while deployment-specific differences remain active.
-- For an untracked local override layer, add `app/conf/config.local.yaml`. It loads after `config.yaml` and can override any subset of keys.
-- The same sibling `*.local.*` overlay pattern is also supported for the other operator-controlled config files under `app/conf/` and `app/conf/themes/`.
+Use [CONFIGURATION.md](CONFIGURATION.md) for the full operator reference, including:
 
-Project workspace settings cap session-scoped case folders, links, targets, labels, notes, and package exports. Interactive PTY settings enable a separate guarded terminal path for approved screen-oriented tools; leave `interactive_pty_enabled` off unless the deployment is prepared for the runtime and Redis requirements described below.
+- every `config.yaml` key and default value
+- `*.local.*` overlay behavior
+- config reload behavior
+- `.env` variables such as `APP_PORT`, `WORKSPACE_ROOT`, `WEB_CONCURRENCY`, `WEB_THREADS`, and `DOCKER_GELF_ADDRESS`
+- `docker-compose.yml` and `examples/docker-compose.prod.yml`
+- Files/workspace storage recipes
+- production host tuning notes
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `app_name` | `darklab_shell` | Name shown in the browser tab, header, and permalink pages |
-| `prompt_username` | `anon` | Default username shown in the shell prompt and welcome samples. Users can override this in Options for their own session |
-| `prompt_domain` | `darklab.sh` | Domain shown after the prompt username. The UI renders `<username>@<domain>:~ $` when workspaces are disabled and `<username>@<domain>:<workspace path> $` when workspaces are enabled |
-| `motd` | _(empty)_ | Optional operator message shown at the top of the welcome sequence as a centered “Message From The Operator” notice. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
-| `default_theme` | `darklab_obsidian.yaml` | Default theme filename for new visitors. Must match a file in `app/conf/themes/`. Overridden by the user's saved preference |
-| `share_redaction_enabled` | `true` | Enables the built-in basic snapshot-share redaction baseline for bearer tokens, email addresses, IPv4 addresses, IPv6 addresses, and hostnames/dotted domains. When enabled, the `share snapshot` action asks whether to share the raw or redacted snapshot until the user sets a persistent default in the Options modal. If the prompt’s checkbox is enabled, the chosen raw/redacted mode is written back to that same persistent default. When disabled, no built-in or custom snapshot-share redaction rules run |
-| `share_redaction_rules` | `[]` | Optional operator-defined regex rules appended after the built-in snapshot-share redaction baseline. Each rule supports `label`, `pattern`, `replacement`, and `flags` (`i`, `m`). This does not change stored run history or the history drawer permalink path; it affects only snapshot sharing |
-| `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
-| `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access the `/diag` operator diagnostics page. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list (default) disables the page entirely (returns 404). When enabled, a `⊕ diag` button appears in the desktop rail and the mobile menu for matching visitors. The page shows app version, operational config, DB/Redis status, vendor asset source, tool availability, run activity by period, exit-code outcomes, and top commands by frequency and duration |
-| `restricted_command_input_cidrs` | `[]` | IPs / CIDRs that command validation rejects when supplied in metadata-known target slots. Applies to literal IP/CIDR values, URLs with literal IP hosts, host:port values, and inspectable workspace input files passed through declared read flags. Domain names are not DNS-resolved |
-| `history_panel_limit` | `50` | Number of history rows shown per page in the desktop history drawer and mobile recents sheet |
-| `recent_commands_limit` | `50` | Number of distinct recent commands loaded into prompt Up/Down history, desktop rail recents, and the mobile recent peek |
-| `data_dir` | auto | Server-side only. Directory used for SQLite history and compressed full-output artifacts. Leave unset to use `/data` when it is writable, otherwise `/tmp` for local/dev fallback. If set explicitly, the directory must be writable at startup |
-| `permalink_retention_days` | `365` | Delete runs and snapshots older than this many days on startup. `0` = unlimited |
-| `rate_limit_enabled` | `true` | Enables the `/runs` rate limiter. Set to `false` only for test-only or maintenance overlays where throttling should be bypassed |
-| `rate_limit_per_minute` | `30` | Max `/runs` requests per minute per IP |
-| `rate_limit_per_second` | `5` | Max `/runs` requests per second per IP |
-| `max_tabs` | `8` | Maximum number of tabs a user can have open at once. `0` = unlimited |
-| `max_output_lines` | `5000` | Max rows retained in the live tab DOM and in the SQLite run preview. Oldest rendered rows are dropped from the top when exceeded, while visible line numbers continue reflecting emitted output order. `0` = unlimited |
-| `output_preview_max_mb` | `1 MB` | Server-side only. Hard cap on the SQLite run preview payload so huge single-line outputs, such as JSON, cannot make history rows enormous. `0` = unlimited |
-| `persist_full_run_output` | `true` | Server-side only. Persists full output for completed runs as compressed artifacts while the history drawer and normal run permalink keep using the capped SQLite preview |
-| `full_output_max_mb` | `5 MB` | Server-side only. Hard cap on the uncompressed UTF-8 payload written into a full-output artifact before gzip compression. The app multiplies this value by `1024 * 1024` internally. `0` = unlimited |
-| `workspace_enabled` | `false` | Server-side only. Enables the app-managed per-session workspace foundation. This does not enable shell navigation or redirection by itself |
-| `workspace_backend` | `tmpfs` | Server-side only. Storage intent label for workspaces: `tmpfs` for short-lived in-memory storage or `volume` for a Docker-mounted location. The label does not mount storage by itself |
-| `workspace_root` | `/tmp/darklab_shell-workspaces` | Server-side only. Root directory that contains hashed per-session workspace directories. If changed, also point the Compose `WORKSPACE_ROOT` environment variable at the same path so the entrypoint prepares permissions there |
-| `workspace_quota_mb` | `50 MB` | Server-side only. Per-session workspace quota |
-| `workspace_max_file_mb` | `5 MB` | Server-side only. Maximum single app-managed text file size |
-| `workspace_max_files` | `100` | Server-side only. Maximum file count per session workspace |
-| `workspace_inactivity_ttl_hours` | `1` | Server-side only. Inactive session workspace cleanup threshold in hours; `0` disables age-based cleanup. Workspace activity touches the hashed session directory, and periodic cleanup removes expired `sess_*` directories rather than aging out individual files |
-| `max_projects_per_session` | `100` | Server-side only. Maximum project workspace records one session can create |
-| `max_project_links_per_project` | `1000` | Server-side only. Maximum linked source records per project |
-| `max_project_targets_per_project` | `200` | Server-side only. Maximum targets per project |
-| `max_evidence_packages_per_project` | `25` | Server-side only. Maximum draft evidence package manifests per project |
-| `max_entity_labels_per_session` | `5000` | Server-side only. Maximum entity labels one session can create |
-| `max_entity_labels_per_entity` | `20` | Server-side only. Maximum labels attached to a single supported entity |
-| `max_entity_notes_per_session` | `2000` | Server-side only. Maximum one-note-per-entity records one session can create |
-| `evidence_package_max_mb` | `25 MB` | Server-side only. Maximum uncompressed evidence package archive size before download is rejected |
-| `evidence_package_max_artifacts` | `100` | Server-side only. Maximum workspace artifacts included in one evidence package archive |
-| `evidence_package_download_rate_limit_per_minute` | `10` | Server-side only. Per-session evidence package download limit per minute |
-| `evidence_package_download_rate_limit_per_second` | `2` | Server-side only. Per-session evidence package download burst limit per second |
-| `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` = disabled |
-| `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
-| `run_broker_enabled` | `true` | Enables the brokered run model for command start, output replay, and live reattachment |
-| `run_broker_require_redis` | `true` | Requires Redis for brokered live reattachment. Keep enabled for Docker/production deployments; set to `false` only for single-process local development where in-memory replay limitations are acceptable |
-| `run_broker_active_stream_ttl_seconds` | `14400` | Safety TTL for active broker streams, refreshed while a run is active |
-| `run_broker_completed_stream_ttl_seconds` | `3600` | How long completed broker streams remain replayable after history finalization before completed-run restore relies on SQLite/history artifacts |
-| `run_broker_max_replay_bytes` | `10485760` | Maximum replay payload retained per brokered run stream. Replay is also bounded by `max_output_lines`; there is no separate line-limit setting |
-| `run_broker_subscriber_block_seconds` | `15` | How long broker stream subscribers wait for new events before receiving a heartbeat |
-| `run_broker_heartbeat_seconds` | `20` | How often broker workers emit heartbeat events while a process is idle |
-| `run_broker_owner_stale_seconds` | `75` | How long an owner browser can go without touching a run before ownership is considered stale |
-| `interactive_pty_enabled` | `false` | Enables the guarded interactive PTY path for allowlisted screen tools such as `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`. Multi-worker deployments require Redis so PTY output, input, and resize events can be brokered across workers; without Redis this mode is limited to `WEB_CONCURRENCY=1` |
-| `interactive_pty_max_runtime_seconds` | `900` | Maximum lifetime for an interactive PTY command before the server terminates it |
-| `interactive_pty_max_concurrent_per_session` | `4` | Maximum number of active interactive PTY commands one browser session can run at the same time |
-| `welcome_char_ms` | `18` | Base delay between each typed character in the welcome animation (ms). Lower = faster typing |
-| `welcome_jitter_ms` | `12` | Random extra delay added per character (ms). `0` for perfectly even typing; higher for a more organic feel |
-| `welcome_post_cmd_ms` | `650` | Pause after a welcome command finishes typing, before the next visual step begins (ms) |
-| `welcome_inter_block_ms` | `850` | Gap between one sampled welcome command block finishing and the next sampled command starting (ms) |
-| `welcome_first_prompt_idle_ms` | `1500` | Minimum idle time for the first ready prompt before the featured command starts typing (ms). Useful for giving the cursor a few visible blinks |
-| `welcome_post_status_pause_ms` | `500` | Extra pause after the fake startup-status block completes and before the first command prompt appears (ms) |
-| `welcome_sample_count` | `5` | Number of sampled command examples shown after the ASCII/status intro. `0` disables sampled commands |
-| `welcome_status_labels` | `["CONFIG","RUNNER","HISTORY","LIMITS","AUTOCOMPLETE"]` | Labels shown in the fake startup-status block during the welcome animation. Best with 4-6 short labels |
-| `welcome_hint_interval_ms` | `4200` | Delay between footer-hint rotations while the welcome tab remains idle (ms) |
-| `welcome_hint_rotations` | `0` | Maximum number of hint states shown while the welcome tab remains idle. `0` keeps rotating until interrupted; `1` keeps only the first hint visible |
-| `log_level` | `INFO` | Log verbosity. Options: `ERROR`, `WARN`, `INFO`, `DEBUG` |
-| `log_format` | `text` | Log output format. Options: `text` (human-readable), `gelf` (GELF 1.1 JSON for Graylog) |
-
-### Config file reload behavior
-
-| File | When changes take effect |
-|------|--------------------------|
-| `conf/faq.yaml` | Immediately — re-read on every request |
-| `conf/ascii.txt` | On next page load — fetched once by the browser on load |
-| `conf/ascii_mobile.txt` | On next page load — fetched once by the browser on load |
-| `conf/app_hints.txt` | On next page load — fetched once by the browser on load |
-| `conf/app_hints_mobile.txt` | On next page load — fetched once by the browser on load |
-| `conf/welcome.yaml` | On next page load — fetched once by the browser on load |
-| `conf/commands.yaml` | On next page load for autocomplete; immediately for command policy, catalog, diagnostics, and smoke-corpus helpers |
-| `conf/config.yaml` | After `docker compose restart` (no rebuild needed) |
-
-Most files under `app/conf/` and `app/conf/themes/` support an optional sibling overlay named `*.local.*` alongside the checked-in base file. `config.local.yaml` works as the main server override file, `commands.local.yaml` appends command-registry entries, `faq.local.yaml` and `welcome.local.yaml` append local list items, `ascii.local.txt` and `ascii_mobile.local.txt` replace the banner art, and `app_hints.local.txt` / `app_hints_mobile.local.txt` append local hints. Theme files can also use `<name>.local.yaml` overlays under `app/conf/themes/`.
-
-### Theme System
-
-Theme configuration is documented in [THEME.md](THEME.md). The runtime model is:
-
-- `app/conf/themes/` contains the selectable theme variants used by the browser-facing registry
-- `default_theme` in `config.yaml` points at one of those filenames
-- `theme_dark.yaml.example` and `theme_light.yaml.example` are generated reference templates; regenerate them with [scripts/generate_theme_examples.py](scripts/generate_theme_examples.py) after changing `_THEME_DEFAULTS` in `app/config.py`
-- theme resolution order is: `localStorage.theme`, then `default_theme`, then the built-in dark fallback palette
-- the resolved theme is injected into the live shell, permalink pages, diagnostics page, and HTML export path so those views stay visually aligned
-
-See [THEME.md](THEME.md) for the full theme architecture, token reference, and authoring workflow.
+Theme authoring details stay in [THEME.md](THEME.md), and command registry integration details stay in [docs/external-command-integrations.md](docs/external-command-integrations.md).
 
 ---
 
@@ -338,147 +249,15 @@ When Files are enabled, ProjectDiscovery tools (`nuclei`, `subfinder`, `dnsx`, `
 
 ## Production Deployment
 
-The base `docker-compose.yml` is suitable for local use and testing. For a production deployment, the repo includes an optional Compose overlay at `examples/docker-compose.prod.yml` that adds GELF log transport, a reverse-proxy-aware network model, and container-level network tuning for high-volume scanning workloads. The sections below cover the knobs available to operators before and after applying that overlay.
-
-### Environment Variables
-
-The repo includes a [`.env.example`](.env.example) template. Copy it to `.env` and edit before starting Compose:
-
-```bash
-cp .env.example .env
-```
-
-```env
-APP_PORT=8888
-WORKSPACE_ROOT=/tmp/darklab_shell-workspaces
-# WEB_CONCURRENCY=4
-# WEB_THREADS=4
-```
-
-To run on a different port, edit `.env` first, then start Compose again. That single value propagates through the Dockerfile `EXPOSE`, Gunicorn bind address, iptables rule, healthcheck, and published port.
-
-The same file is also the operator-facing place to tune Gunicorn runtime sizing:
-
-- `WEB_CONCURRENCY` controls the number of Gunicorn worker processes
-- `WEB_THREADS` controls the number of threads per worker
-- `WORKSPACE_ROOT` controls which path the Docker entrypoint prepares before
-  dropping privileges. Keep it aligned with `workspace_root` in
-  `app/conf/config.yaml` or `app/conf/config.local.yaml`
-
-If they are unset, the entrypoint defaults remain `4` workers and `4` threads.
-
-```bash
-docker compose restart
-```
-
-### Production Override
-
-The base [docker-compose.yml](docker-compose.yml) is the standalone shape used for local runs. The optional production overlay at [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) layers in deployment-specific behavior:
-
-1. Docker container log transport:
-   - enables the Docker `gelf` log driver for both `shell` and `redis`
-   - reads `DOCKER_GELF_ADDRESS` from `.env`
-2. Reverse-proxy-aware environment:
-   - sets `VIRTUAL_HOST`
-   - sets `LETSENCRYPT_HOST`
-3. Network model:
-   - removes the host `ports:` binding from the base file
-   - switches the app to `expose:`
-   - joins the external Docker network `darklab-net`
-4. Deployment naming:
-   - sets deployment-specific `container_name` values for the `shell` and `redis` services
-5. Application log format:
-   - still requires `log_format: gelf` in [app/conf/config.yaml](app/conf/config.yaml) or [app/conf/config.local.yaml](app/conf/config.local.yaml)
-6. Optional runtime sizing:
-   - `WEB_CONCURRENCY` and `WEB_THREADS` can be set in `.env` so operators can tune Gunicorn without editing `entrypoint.sh`
-
-#### Network tuning for port scanners
-
-Tools like `naabu` and `masscan` open a large number of sockets in rapid succession. Without tuning, the kernel's default limits on open file descriptors and ephemeral port ranges will throttle or fail wide scans. The prod overlay addresses this at two layers:
-
-**`ulimits.nofile` — open file descriptor limit**
-
-The `ulimits.nofile` setting in the compose file raises the container's file descriptor ceiling to 65 535. However, Docker cannot grant a container a limit higher than what the Docker daemon itself is allowed. If the daemon's own `nofile` limit is still at the system default (typically 1,024), this compose setting will silently have no effect.
-
-Run this on the **host** to raise the daemon's limit for the current session:
-
-```bash
-sudo systemctl edit docker
-```
-
-Add (or verify) these lines under `[Service]`:
-
-```ini
-[Service]
-LimitNOFILE=1048576
-```
-
-Then reload and restart the daemon:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl restart docker
-```
-
-This change is written to a drop-in unit file under `/etc/systemd/system/docker.service.d/` and persists across reboots automatically.
-
-**Network-namespace sysctls — source ports and TIME_WAIT headroom**
-
-The sysctls in the overlay are scoped to the container's network namespace and do not require any host changes:
-
-| sysctl | value | why |
-|---|---|---|
-| `net.ipv4.ip_local_port_range` | `1024 65535` | widens the ephemeral port range from the kernel default (~32768–60999), giving scanners ~64k source ports instead of ~28k |
-| `net.ipv4.tcp_tw_reuse` | `1` | allows TIME_WAIT sockets to be reused for new outbound connections |
-| `net.ipv4.tcp_fin_timeout` | `15` | reduces the FIN_WAIT_2 timeout from the 60-second default so sockets are released faster |
-| `net.ipv4.tcp_max_tw_buckets` | `131072` | raises the TIME_WAIT bucket ceiling before the kernel starts silently dropping sockets |
-
-**`nf_conntrack_max` — connection tracking table size**
-
-The Linux kernel's connection tracking table (`nf_conntrack`) records every active and recently-closed connection seen by the firewall. Under a wide port scan the table fills quickly; once full the kernel drops new connections and logs `nf_conntrack: table full, dropping packet`. This is a **host-level** setting — it cannot be set from inside the container — so it must be applied on the Docker host directly.
-
-Apply immediately (takes effect without a reboot):
-
-```bash
-sudo sysctl -w net.netfilter.nf_conntrack_max=131072
-```
-
-Persist across reboots by writing a drop-in sysctl file:
-
-```bash
-echo "net.netfilter.nf_conntrack_max=131072" | sudo tee /etc/sysctl.d/99-conntrack.conf
-```
-
-The file in `/etc/sysctl.d/` is loaded automatically at boot by `systemd-sysctl`, so no further configuration is needed.
-
-#### Redis host memory overcommit
-
-Redis may log this warning on Linux hosts:
-
-```text
-WARNING Memory overcommit must be enabled!
-```
-
-This is host-level Redis hygiene rather than a darklab_shell app setting. Redis uses fork-style background work for persistence and replication; with memory overcommit disabled, those operations can fail under memory pressure and sometimes even before the host looks low on memory. Since production darklab_shell uses Redis for rate limiting, run broker replay, active process metadata, and live reattach behavior, enable overcommit on the Docker host.
-
-Apply immediately:
-
-```bash
-sudo sysctl vm.overcommit_memory=1
-```
-
-Persist across reboots:
-
-```bash
-echo "vm.overcommit_memory = 1" | sudo tee /etc/sysctl.d/99-redis-overcommit.conf
-sudo sysctl --system
-```
-
-Once all configuration is in place, start the stack with the production overlay applied on top of the base:
+The base [docker-compose.yml](docker-compose.yml) is suitable for local use and testing. For production, layer [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) on top of the base stack:
 
 ```bash
 docker compose -f docker-compose.yml -f examples/docker-compose.prod.yml up --build
 ```
+
+The production overlay adds reverse-proxy-aware environment values, GELF Docker log transport, an external Docker network model, persistent workspace storage at `/workspaces`, scanner-friendly `ulimits` and network sysctls, and optional Gunicorn sizing through `.env`.
+
+Use [CONFIGURATION.md](CONFIGURATION.md) for the full production configuration reference, including `.env`, `DOCKER_GELF_ADDRESS`, workspace bind-mount permissions, Docker daemon `nofile` limits, connection-tracking tuning, and Redis memory-overcommit guidance.
 
 ---
 
@@ -577,14 +356,20 @@ To prevent commands from writing to either path directly, the app blocks any com
 
 ## Documentation Map
 
+- [Default.md](.gitlab/merge_request_templates/Default.md) - Default GitLab merge request template used by contributors
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Runtime layers, request flow, persistence, security mechanics, and application internals
+- [CHANGELOG.md](CHANGELOG.md) - Release-by-release change log organised by version
+- [CONFIGURATION.md](CONFIGURATION.md) - Operator configuration reference for `app/conf/`, `.env`, Compose overlays, workspace storage, and production tuning
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Local setup, test workflow, linting, branch workflow, and merge request guidance
-- [DOCS_STANDARDS.md](DOCS_STANDARDS.md) - Documentation structure, preferred templates, and review rules for ongoing doc updates
+- [CONTRIBUTORS.md](CONTRIBUTORS.md) - Contributor and acknowledgement notes
 - [DECISIONS.md](DECISIONS.md) - Architectural rationale, tradeoffs, and implementation-history notes
-- [tests/README.md](tests/README.md) - Detailed suite appendix, smoke-test coverage, and focused test commands
-- [THEME.md](THEME.md) - Theme registry, selector metadata, and override behavior
-- [docs/external-command-integrations.md](docs/external-command-integrations.md) - External command registry, rewrite, environment, Files, and smoke-test contracts
+- [DOCS_STANDARDS.md](DOCS_STANDARDS.md) - Documentation structure, preferred templates, and review rules for ongoing doc updates
 - [FEATURES.md](FEATURES.md) - Full per-feature reference: autocomplete, pipe support, keyboard shortcuts, allowlist, welcome animation, history, permalinks, themes, and more
+- [THEME.md](THEME.md) - Theme registry, selector metadata, and override behavior
+- [TODO.md](TODO.md) - Open follow-ups, research notes, known issues, and future ideas
+- [docs/external-command-integrations.md](docs/external-command-integrations.md) - External command registry, rewrite, environment, Files, and smoke-test contracts
+- [tests/README.md](tests/README.md) - Detailed suite appendix, smoke-test coverage, and focused test commands
+- [tests/ui-capture-scenes.md](tests/ui-capture-scenes.md) - UI screenshot capture scene inventory
 
 ---
 
@@ -606,6 +391,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── .shellcheckrc               # shellcheck config — suppresses false positives (e.g. CDPATH= idiom)
 ├── ARCHITECTURE.md            # Current system structure, diagrams, runtime layers, persistence, and app internals
 ├── CHANGELOG.md               # Release-by-release change log organised by version (Added / Changed / Fixed / Removed)
+├── CONFIGURATION.md           # Operator config reference for app/conf, .env, Compose overlays, storage, and production tuning
 ├── CONTRIBUTING.md            # Contributor setup, local workflow, and merge request guidance
 ├── CONTRIBUTORS.md            # Project contributors
 ├── DECISIONS.md               # Architectural rationale, tradeoffs, and implementation-history notes
@@ -635,7 +421,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── ascii_mobile.txt        # Mobile ASCII banner shown during the mobile welcome animation (optional)
 │   │   ├── commands.yaml           # Structured command registry for catalog grouping, autocomplete hints, runtime adaptations, and smoke-test examples
 │   │   ├── config.local.yaml       # Optional untracked deployment overrides loaded after config.yaml; sibling *.local.* overlays are also supported
-│   │   ├── config.yaml             # Application configuration (see Configuration section)
+│   │   ├── config.yaml             # Application configuration (see CONFIGURATION.md)
 │   │   ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
 │   │   ├── theme_dark.yaml.example # Generated dark-theme reference template — regenerate with scripts/generate_theme_examples.py
 │   │   ├── theme_light.yaml.example # Generated light-theme reference template — regenerate with scripts/generate_theme_examples.py
