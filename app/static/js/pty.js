@@ -6,9 +6,11 @@ const PTY_DEFAULT_COLS = 100;
 const PTY_MIN_ROWS = 10;
 const PTY_MIN_COLS = 40;
 const PTY_INPUT_MAX_BYTES = 4096;
+const PTY_INPUT_BATCH_MS = 16;
 const _ptyModalState = {
   sessions: new Map(),
   activeSession: null,
+  pendingInput: new Map(),
 };
 let _xtermAssetsPromise = null;
 let _xtermAssetPreloadScheduled = false;
@@ -353,6 +355,7 @@ function _ptyInstallResizeHandlers(session) {
 
 function _ptyDisposeResizeHandlers(session) {
   if (!session) return;
+  if (session.runId) _ptyFlushInputQueue(session.runId, session.tabId || '');
   if (session.inputDisposable && typeof session.inputDisposable.dispose === 'function') {
     session.inputDisposable.dispose();
   }
@@ -365,6 +368,7 @@ function _ptyDisposeResizeHandlers(session) {
   session.resizeDisposable = null;
   session.resizeObserver = null;
   session.resizeListener = null;
+  if (session.runId) _ptyClearInputQueue(session.runId, session.tabId || '');
 }
 
 function _ptyInputPayload(data) {
@@ -383,7 +387,11 @@ function _ptyInputPayload(data) {
   return { text: value, truncated: true };
 }
 
-function _ptySendInput(runId, data, tabId = '') {
+function _ptyInputQueueKey(runId, tabId = '') {
+  return `${String(runId || '')}\u0000${String(tabId || '')}`;
+}
+
+function _ptyPostInput(runId, data, tabId = '') {
   if (!runId || !data || typeof apiFetch !== 'function') return;
   const payload = _ptyInputPayload(data);
   if (!payload.text) return;
@@ -403,6 +411,40 @@ function _ptySendInput(runId, data, tabId = '') {
         }
       });
   }).catch(() => {});
+}
+
+function _ptyFlushInputQueue(runId, tabId = '') {
+  const key = _ptyInputQueueKey(runId, tabId);
+  const pending = _ptyModalState.pendingInput.get(key);
+  if (!pending) return;
+  window.clearTimeout(pending.timer);
+  _ptyModalState.pendingInput.delete(key);
+  _ptyPostInput(pending.runId, pending.data, pending.tabId);
+}
+
+function _ptyClearInputQueue(runId, tabId = '') {
+  const key = _ptyInputQueueKey(runId, tabId);
+  const pending = _ptyModalState.pendingInput.get(key);
+  if (!pending) return;
+  window.clearTimeout(pending.timer);
+  _ptyModalState.pendingInput.delete(key);
+}
+
+function _ptySendInput(runId, data, tabId = '') {
+  if (!runId || !data) return;
+  const key = _ptyInputQueueKey(runId, tabId);
+  const existing = _ptyModalState.pendingInput.get(key);
+  if (existing) {
+    existing.data += String(data || '');
+    return;
+  }
+  const pending = {
+    runId,
+    tabId,
+    data: String(data || ''),
+    timer: window.setTimeout(() => _ptyFlushInputQueue(runId, tabId), PTY_INPUT_BATCH_MS),
+  };
+  _ptyModalState.pendingInput.set(key, pending);
 }
 
 function _ptyConfirmSessionKill(session) {

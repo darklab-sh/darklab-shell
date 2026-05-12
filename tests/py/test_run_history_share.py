@@ -200,8 +200,9 @@ class TestInteractivePtyRuns:
             started=started,
         )
 
-        def _allow(command, session_id=None, cfg=None, workspace_cwd=""):  # noqa: ARG001
+        def _allow(command, session_id=None, cfg=None, workspace_cwd="", extra_allowed_prefixes=None):  # noqa: ARG001
             assert command == "mtr darklab.sh"
+            assert extra_allowed_prefixes == ["mtr"]
             return run_routes.CommandValidationResult(
                 True,
                 "",
@@ -265,9 +266,10 @@ class TestInteractivePtyRuns:
         fake_run = SimpleNamespace(run_id="pty-run-cwd", rows=30, cols=120)
         seen = {}
 
-        def _allow(command, session_id=None, cfg=None, workspace_cwd=""):  # noqa: ARG001
+        def _allow(command, session_id=None, cfg=None, workspace_cwd="", extra_allowed_prefixes=None):  # noqa: ARG001
             seen["command"] = command
             seen["workspace_cwd"] = workspace_cwd
+            seen["extra_allowed_prefixes"] = extra_allowed_prefixes
             return run_routes.CommandValidationResult(
                 True,
                 "",
@@ -293,6 +295,7 @@ class TestInteractivePtyRuns:
         assert seen == {
             "command": "ffuf -w targets.txt -u https://example.test/FUZZ",
             "workspace_cwd": "darklab",
+            "extra_allowed_prefixes": ["ffuf"],
         }
         assert start_pty.call_args.kwargs["argv"] == [
             "ffuf",
@@ -317,8 +320,9 @@ class TestInteractivePtyRuns:
             "transcript_mode": "scrollback_findings",
         }
 
-        def _allow(command, session_id=None, cfg=None, workspace_cwd=""):  # noqa: ARG001
+        def _allow(command, session_id=None, cfg=None, workspace_cwd="", extra_allowed_prefixes=None):  # noqa: ARG001
             assert command == "watcher"
+            assert extra_allowed_prefixes == ["watcher"]
             return run_routes.CommandValidationResult(
                 True,
                 "",
@@ -374,8 +378,9 @@ class TestInteractivePtyRuns:
         client = get_client()
         fake_run = SimpleNamespace(run_id="pty-run-second", rows=24, cols=100)
 
-        def _allow(command, session_id=None, cfg=None, workspace_cwd=""):  # noqa: ARG001
+        def _allow(command, session_id=None, cfg=None, workspace_cwd="", extra_allowed_prefixes=None):  # noqa: ARG001
             assert command == "mtr example.com"
+            assert extra_allowed_prefixes == ["mtr"]
             return run_routes.CommandValidationResult(
                 True,
                 "",
@@ -406,8 +411,9 @@ class TestInteractivePtyRuns:
     def test_start_interactive_pty_rejects_when_session_reaches_concurrency_limit(self):
         client = get_client()
 
-        def _allow(command, session_id=None, cfg=None, workspace_cwd=""):  # noqa: ARG001
+        def _allow(command, session_id=None, cfg=None, workspace_cwd="", extra_allowed_prefixes=None):  # noqa: ARG001
             assert command == "mtr example.com"
+            assert extra_allowed_prefixes == ["mtr"]
             return run_routes.CommandValidationResult(
                 True,
                 "",
@@ -573,6 +579,13 @@ class TestInteractivePtyRuns:
         assert hasattr(run_routes.resize_interactive_pty_run, "__wrapped__")
         assert "__wrapper-limiter-instance" in run_routes.send_interactive_pty_input.__dict__
         assert "__wrapper-limiter-instance" in run_routes.resize_interactive_pty_run.__dict__
+
+    def test_interactive_pty_input_route_uses_dedicated_rate_limit(self):
+        with mock.patch.dict(run_routes.CFG, {
+            "interactive_pty_input_rate_limit_per_minute": 500,
+            "interactive_pty_input_rate_limit_per_second": 10,
+        }):
+            assert run_routes._interactive_pty_input_limit() == "500 per minute; 10 per second"
 
 
 # ── /runs streaming ───────────────────────────────────────────────────────────
@@ -3145,8 +3158,9 @@ class TestRunStreaming:
             headers={"X-Session-ID": session_id},
         )
 
-        def _deny_expanded(command, session_id=None, cfg=None, workspace_cwd=""):  # noqa: ARG001
+        def _deny_expanded(command, session_id=None, cfg=None, workspace_cwd="", extra_allowed_prefixes=None):  # noqa: ARG001
             assert command == "curl https://blocked.darklab.sh"
+            assert extra_allowed_prefixes is None
             return run_routes.CommandValidationResult(
                 False,
                 "blocked after expansion",

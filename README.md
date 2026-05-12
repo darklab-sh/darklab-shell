@@ -40,7 +40,7 @@ The app ships with 30+ security tools, SecLists, live multi-tab output, a mobile
 - **Session command variables** — `var set HOST ip.darklab.sh`, `var list`, and `var unset HOST` define per-session values you can reuse as `$HOST` or `${HOST}`. Expansion happens before command validation, typed history stays readable, and the transcript shows the expanded command that actually ran
 - **Session files** — optional per-session Files support for tools that need small input/output files. Users can create, view, edit, move/rename, download, delete, label, and note files; drag files into folders; preview JSON, JSONL/NDJSON, CSV/TSV, XML, HTTP responses, and large text; see quota/usage; use cwd-aware `ls`, `cat`, `mv`, and confirmed `rm`; use simple `*` patterns for list/move/delete flows; and let selected command flags safely read/write session files without opening shell navigation or redirection
 - **Project workspaces** — lightweight case folders group related runs, run-owned workspace artifacts, targets, findings, labels, notes, and draft evidence packages without copying the source records. Active projects can auto-link completed runs, project views expose finding/artifact review and metadata editing, and package exports preserve the selected project evidence with raw/redacted modes
-- **Interactive PTY mode** — optional xterm.js-backed live terminals for registry-approved screen tools such as `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`, with guarded input/resize routes, bounded runtime/concurrency, Redis-backed reattach in multi-worker deployments, and completed transcripts saved back into normal history
+- **Interactive PTY mode** — optional xterm.js-backed live terminals for registry-approved interactive tools such as `nc --interactive`, `telnet --interactive`, `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`, with guarded input/resize routes, bounded runtime/concurrency, Redis-backed reattach in multi-worker deployments, and completed transcripts saved back into normal history
 - **Session tokens** — persistent `tok_` session tokens carry history, shell identity, command variables, workspace files, project workspace records, active-project context, user workflows, recent domain autocomplete, and saved options across browsers and devices. A phone or second browser using the same token can attach to a live command, replay earlier output, follow new output, and kill the run from the terminal or Status Monitor. `session-token generate/set/copy/clear/rotate/list/revoke` manage the token lifecycle with migration, rollback-safe rotate, confirmations, cross-tab sync, revocation, masked token history, and Options-panel shortcuts
 - **Safer sharing** — a built-in basic redaction baseline can mask common secrets or infrastructure details on snapshot permalinks, with optional operator regex rules appended on top. Permalink creation can choose raw vs redacted sharing per snapshot without changing the stored run history; local `save txt/html/pdf` exports remain raw
 - **Run notifications** — optional browser desktop notifications fire on run completion (any exit code or kill); toggled from the Options panel on desktop and intentionally hidden from the mobile Options sheet; uses only the command root in the notification title to avoid exposing arguments or token values
@@ -183,7 +183,7 @@ SecLists is installed at `/usr/share/wordlists/seclists/`. The app-native `wordl
 | `dig` / `nslookup` / `host` | DNS lookups |
 | `whois` | Domain & IP registration info |
 | `traceroute` / `tcptraceroute` | Route tracing (ICMP and TCP) |
-| `nc` | TCP connection testing and simple banner checks |
+| `nc` / `telnet` | TCP connection testing, simple banner checks, and interactive socket troubleshooting |
 | `mtr` | Combined ping + traceroute (auto-rewritten to report mode, see Tool Notes) |
 | `nmap` | Port scanning and service detection |
 | `openssl` | TLS client diagnostics and cipher inspection |
@@ -650,6 +650,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   ├── conftest.py         # pytest configuration (sets working directory and sys.path to app/)
     │   ├── fixtures/
     │   │   ├── container_smoke_test-expectations.json # Stored expected output for the Container Smoke Test corpus
+    │   │   ├── container_smoke_test-interactive-expectations.json # Interactive PTY smoke fixtures
     │   │   └── container_smoke_test-workspace-expectations.json # Workspace file-flag smoke fixtures
     │   ├── test_backend_modules.py # DB init/migration, loader/overlay helpers, config/theme/FAQ coverage
     │   ├── test_container_smoke_test.py # Opt-in Docker build/run smoke test (see scripts/container_smoke_test.sh)

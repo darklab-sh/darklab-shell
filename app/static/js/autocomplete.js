@@ -352,11 +352,35 @@ function _concreteAutocompleteTokens(spec) {
     .filter(value => value && !value.startsWith('-') && !value.startsWith('+')));
 }
 
+function _positionalHintPosition(hint) {
+  const position = Number(hint && hint.position);
+  return Number.isInteger(position) && position > 0 ? position : 0;
+}
+
+function _positionalHintsForSlot(spec, slotIndex) {
+  const hints = spec && spec.arg_hints && Array.isArray(spec.arg_hints.__positional__)
+    ? spec.arg_hints.__positional__
+    : [];
+  if (!hints.some(hint => _positionalHintPosition(hint) > 0)) return hints;
+  const position = slotIndex + 1;
+  return hints.filter(hint => {
+    const hintPosition = _positionalHintPosition(hint);
+    return !hintPosition || hintPosition === position;
+  });
+}
+
 function _positionalHintSlotsForValueType(spec, type) {
   const hints = spec && spec.arg_hints && Array.isArray(spec.arg_hints.__positional__)
     ? spec.arg_hints.__positional__
     : [];
-  return hints.map(hint => _valueTypeSlotFromHints(type, [hint]));
+  const maxPosition = hints.reduce(
+    (max, hint) => Math.max(max, _positionalHintPosition(hint)),
+    0,
+  );
+  if (!maxPosition) return hints.map(hint => _valueTypeSlotFromHints(type, [hint]));
+  return Array.from({ length: maxPosition }, (_, index) => (
+    _valueTypeSlotFromHints(type, _positionalHintsForSlot(spec, index))
+  ));
 }
 
 function _walkAutocompletePositionalValues(ctx, spec, contextSpec = {}, visitor = () => {}, options = {}) {
@@ -1027,7 +1051,10 @@ function _buildContextAutocomplete(ctx) {
   }
 
   const positionalHints = Object.prototype.hasOwnProperty.call(argHints, '__positional__')
-    ? argHints.__positional__
+    ? _positionalHintsForSlot(
+      spec,
+      _countCompletedPositionalValues(ctx, spec, contextSpec),
+    )
     : [];
 
   if (!ctx.currentToken || currentIsFlag) {

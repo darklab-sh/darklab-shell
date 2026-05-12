@@ -84,6 +84,8 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `rate_limit_enabled` | `true` | Enables the `/runs` rate limiter. Set to `false` only for test-only or maintenance overlays where throttling should be bypassed |
 | `rate_limit_per_minute` | `30` | Max `/runs` requests per minute per IP |
 | `rate_limit_per_second` | `5` | Max `/runs` requests per second per IP |
+| `interactive_pty_input_rate_limit_per_minute` | `500` | Max interactive PTY input requests per minute per IP. This is separate from `/runs` because normal terminal typing produces many small input requests |
+| `interactive_pty_input_rate_limit_per_second` | `10` | Max interactive PTY input request burst per second per IP |
 | `max_tabs` | `8` | Maximum number of tabs a user can have open at once. `0` means unlimited |
 | `max_output_lines` | `5000` | Max rows retained in the live tab DOM and in the SQLite run preview. Oldest rendered rows are dropped from the top when exceeded, while visible line numbers continue reflecting emitted output order. `0` means unlimited |
 | `output_preview_max_mb` | `1 MB` | Server-side only. Hard cap on the SQLite run preview payload so huge single-line outputs, such as JSON, cannot make history rows enormous. `0` means unlimited |
@@ -117,7 +119,7 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `run_broker_subscriber_block_seconds` | `15` | How long broker stream subscribers wait for new events before receiving a heartbeat |
 | `run_broker_heartbeat_seconds` | `20` | How often broker workers emit heartbeat events while a process is idle |
 | `run_broker_owner_stale_seconds` | `75` | How long an owner browser can go without touching a run before ownership is considered stale |
-| `interactive_pty_enabled` | `false` | Enables the guarded interactive PTY path for allowlisted screen tools such as `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`. Multi-worker deployments require Redis so PTY output, input, and resize events can be brokered across workers; without Redis this mode is limited to `WEB_CONCURRENCY=1` |
+| `interactive_pty_enabled` | `false` | Enables the guarded interactive PTY path for allowlisted tools such as `nc --interactive`, `telnet --interactive`, `mtr --interactive`, `ffuf --interactive`, and `masscan --interactive`. Multi-worker deployments require Redis so PTY output, input, and resize events can be brokered across workers; without Redis this mode is limited to `WEB_CONCURRENCY=1` |
 | `interactive_pty_max_runtime_seconds` | `900` | Maximum lifetime for an interactive PTY command before the server terminates it |
 | `interactive_pty_max_concurrent_per_session` | `4` | Maximum number of active interactive PTY commands one browser session can run at the same time |
 | `welcome_char_ms` | `18` | Base delay between each typed character in the welcome animation, in milliseconds. Lower means faster typing |
@@ -154,6 +156,271 @@ Project workspace settings cap session-scoped case folders, links, targets, labe
 | `app/conf/theme_light.yaml.example` | Generated light-theme reference template |
 
 Theme authoring details live in [THEME.md](THEME.md). Command integration details live in [docs/external-command-integrations.md](docs/external-command-integrations.md).
+
+---
+
+## Command Registry Autocomplete
+
+`app/conf/commands.yaml` stores each external command under `commands`, with policy, runtime adaptations, workspace file flags, and root-aware flag, argument, subcommand, and example hints. Optional local additions can live in `app/conf/commands.local.yaml`.
+
+```yaml
+commands:
+  - root: nmap
+    category: Port & Service Scanning
+    policy:
+      allow:
+        - nmap
+      deny:
+        - nmap -sU
+    runtime_adaptations:
+      inject_flags:
+        - flags: [-sT]
+          position: prepend
+          unless_any_regex: ["^-s[AFILMNOSTUWXYZn]"]
+    autocomplete:
+      flags:
+        - value: -sV
+          description: Service/version detection
+```
+
+Inside each command's `autocomplete` block, a root can define:
+
+```yaml
+argument_limit: 1
+arguments:
+  - value: https://
+    description: Start an HTTP or HTTPS URL
+  - placeholder: <url>
+    position: 1
+    value_type: url
+    description: Target URL to request
+```
+
+How the keys work:
+
+- `argument_limit`
+  - optional cap on how many positional arguments should keep receiving autocomplete hints
+  - once that many positional arguments are already filled, positional hints stop, but flags and other non-positional suggestions can still appear
+- `examples`
+  - complete command examples shown while a root command or unique subcommand prefix is being typed
+  - root examples and scoped subcommand examples are flattened only for the root-typing discovery view; they stay separate in the schema so subcommand-specific matching remains clean
+  - when an example is accepted, it replaces the typed command prefix rather than only the active token
+  - `interactive: true` hides an example unless `interactive_pty_enabled` is enabled; use this for examples that include the command's configured interactive trigger flag
+- `flags`
+  - suggestions shown when the current token is a flag position for that command root, for example `nmap -`
+  - each flag can carry its own next-token behavior:
+    - `takes_value: true` means the next token is a value slot for that flag
+    - `value_hint` adds display-only guidance for that value slot
+    - `suggest` adds concrete insertable examples for that value slot
+    - `closes: true` suppresses further autocomplete after that token is accepted
+    - `feature_required: workspace` hides workspace-only flags, examples, and value suggestions unless Files are enabled
+- `arguments`
+  - unflagged argument slots like `<target>`, `<url>`, `<domain>`, or `<port>`
+  - these appear both at `command ` and while the user types the argument value
+  - use `placeholder` for display guidance and `value` for text the user can insert
+  - use 1-based `position` when a command has ordered operands so autocomplete only shows the current slot
+  - unpositioned argument hints keep the legacy behavior and can appear in any positional slot; when mixed with positioned hints, they remain general guidance alongside the slot-specific hints
+- `subcommands`
+  - command trees such as `gobuster dir`, `gobuster vhost`, or other external-tool subcommands
+  - each subcommand can also use `takes_value`, `value_hint`, `suggest`, `insert`, and `closes`
+  - for tools where each subcommand has its own flags and examples, use a mapping of subcommand names to scoped autocomplete blocks
+  - nested examples appear during root discovery and while typing a unique matching subcommand prefix; nested flags appear after the subcommand has been selected
+- `pipe_helpers`
+  - top-level registry entries for helpers that appear after `command |`
+  - each helper has its own `autocomplete.pipe.enabled`, flags, arguments, and optional insert/display metadata
+
+More examples:
+
+```yaml
+commands:
+  - root: curl
+    category: HTTP & Web
+    policy:
+      allow:
+        - curl
+      deny:
+        - curl -K
+    autocomplete:
+      flags:
+        - value: -H
+          description: Add request header
+          takes_value: true
+          suggest:
+            - value: "Authorization: Bearer <token>"
+              description: Example auth header
+        - value: -o
+          description: Write body to file
+          takes_value: true
+          suggest:
+            - value: /dev/null
+              description: Discard body and keep metadata
+      arguments:
+        - value: https://
+          description: Start an HTTP or HTTPS URL
+        - placeholder: <url>
+          position: 1
+          value_type: url
+          description: Target URL to request
+```
+
+That means:
+
+- `curl -` suggests curl flags
+- `curl -H <cursor>` suggests header values
+- `curl -o <cursor>` suggests file/value targets like `/dev/null`
+- `curl <cursor>` can show both a starter value like `https://` and a persistent `<url>` hint
+
+For commands where positional operands have a strict order, assign each slot a 1-based `position`:
+
+```yaml
+commands:
+  - root: tcptraceroute
+    autocomplete:
+      arguments:
+        - placeholder: <host>
+          position: 1
+          hint_only: true
+          value_type: domain
+          description: Hostname or IP to trace
+        - placeholder: <port>
+          position: 2
+          hint_only: true
+          value_type: port_set
+          description: TCP port to probe
+```
+
+That means:
+
+- `tcptraceroute <cursor>` shows `<host>` guidance, plus any root flags
+- `tcptraceroute darklab.sh <cursor>` shows `<port>` guidance instead of repeating `<host>`
+- while typing either operand, autocomplete keeps only the hint for that argument slot visible
+
+Interactive PTY examples can be gated separately from the command's normal examples:
+
+```yaml
+examples:
+  - value: telnet --interactive darklab.sh 443
+    description: Connect to a service port through the PTY view
+    interactive: true
+```
+
+Use `closes: true` for flags or subcommands that should suppress the dropdown after they are typed. This is used for help flags, version flags, and exclusive subcommands that end the command:
+
+```yaml
+nmap:
+  flags:
+    - value: -h
+      description: Show help
+      closes: true
+    - value: -p
+      description: Port list
+      takes_value: true
+      suggest:
+        - value: "80,443"
+          description: Common web ports
+
+session-token:
+  subcommands:
+    - value: set
+      description: Activate an existing session token
+      takes_value: true
+      value_hint:
+        placeholder: "<token>"
+        description: Paste a tok_... token or UUID from another device
+    - value: generate
+      description: Generate a new session token
+      closes: true
+    - value: clear
+      description: Remove the active session token after confirmation
+      closes: true
+```
+
+For external tools with richer subcommands, prefer subcommand-scoped blocks. Root flags stay global, root and nested examples are visible during root discovery, and the selected subcommand contributes its own scoped flags, examples, value hints, and positional argument hints:
+
+```yaml
+amass:
+  flags:
+    - value: -h
+      description: Show help
+      closes: true
+  subcommands:
+    enum:
+      description: Enumerate discovered assets
+      examples:
+        - value: amass enum -d darklab.sh
+          description: Enumerate a root domain
+      flags:
+        - value: -d
+          description: Domain to enumerate
+          takes_value: true
+          value_hint:
+            placeholder: <domain>
+            description: Root domain
+        - value: -timeout
+          description: Minutes to run without progress before terminating
+          takes_value: true
+          suggest:
+            - value: "10"
+              description: Ten-minute timeout
+    subs:
+      description: Print subdomains from the Amass database
+      examples:
+        - value: amass subs -d darklab.sh -names
+          description: Print discovered names
+      flags:
+        - value: -names
+          description: Print discovered names
+        - value: -ip
+          description: Include IP addresses when used with -names
+```
+
+Practical authoring guidance:
+
+- use nested `flags`, `arguments`, and `subcommands` when the next useful suggestion depends on the command root or the preceding flag/subcommand
+- use `argument_limit` for commands such as `man`, `which`, or `type` where the shell should stop suggesting additional positional operands after one topic/command has already been provided
+- group related behavior together: root `examples` for broadly useful top-level invocations, subcommand `examples` for complete mode-specific invocations, flag value hints under the flag, and subcommand-specific flags under `subcommands`
+- use `arguments` for unflagged inputs like hosts, URLs, domains, files, or CIDR targets
+- use `position` on multi-operand commands such as `tcptraceroute <host> <port>` or `telnet --interactive <host> <port>` so each placeholder appears only when that argument is next
+- use `interactive: true` on examples that should only appear when the instance has Interactive PTY enabled
+- add `value_type: domain` to flag or positional value slots that should capture and suggest recent domains
+- add `value_type: target` to workspace-required file/folder slots that should be replaced with live session workspace suggestions
+- use `placeholder: "<...>"` when the hint is explanatory and should persist while typing
+- use `value: "..."` when the suggestion should be inserted and prefix-filtered normally
+- use `pipe_helpers` entries with `autocomplete.pipe.enabled: true` when a helper should appear after `command |`
+
+The shipped file is intentionally small and focused. Add entries only for commands where token-aware guidance is clearly more useful than the flat whole-command list.
+
+For built-in pipe support, the same file can describe the narrow pipe stage:
+
+```yaml
+grep:
+  pipe:
+    enabled: true
+    description: Filter lines by pattern
+  flags:
+    - value: -i
+      description: Ignore case
+    - value: -v
+      description: Invert match
+    - value: -E
+      description: Extended regex
+
+wc:
+  pipe:
+    enabled: true
+    insert: "wc -l"
+    label: "wc -l"
+    description: Count lines
+```
+
+That means:
+
+- `help | ` can suggest `grep`, `head`, `tail`, and `wc -l`
+- `help | grep -` can suggest `-i`, `-v`, and `-E`
+- `help | head -n ` or `help | tail -n ` can suggest common count values
+- `help | wc ` can suggest `-l`
+
+To update suggestions, edit `conf/commands.yaml` and/or `conf/commands.local.yaml`, then reload the page. No server restart is needed for autocomplete changes.
 
 ---
 

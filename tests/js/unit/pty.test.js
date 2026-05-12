@@ -545,25 +545,54 @@ describe('interactive PTY terminal', () => {
     })).toBe(true)
   })
 
-  it('truncates PTY input by UTF-8 byte length and reports truncation before posting', () => {
+  it('truncates PTY input by UTF-8 byte length and reports truncation before posting', async () => {
+    vi.useFakeTimers()
     const appendLine = vi.fn()
     const apiFetch = vi.fn(() => Promise.resolve({ ok: true }))
     globalThis.appendLine = appendLine
     globalThis.apiFetch = apiFetch
 
-    const payload = _ptyInputPayload('a'.repeat(4095) + 'é')
-    expect(new TextEncoder().encode(payload.text).length).toBe(4095)
-    expect(payload.truncated).toBe(true)
+    try {
+      const payload = _ptyInputPayload('a'.repeat(4095) + 'é')
+      expect(new TextEncoder().encode(payload.text).length).toBe(4095)
+      expect(payload.truncated).toBe(true)
 
-    _ptySendInput('run-1', 'é'.repeat(3000), 'tab-1')
+      _ptySendInput('run-1', 'é'.repeat(3000), 'tab-1')
+      expect(apiFetch).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(20)
 
-    const posted = JSON.parse(apiFetch.mock.calls[0][1].body)
-    expect(new TextEncoder().encode(posted.data).length).toBeLessThanOrEqual(4096)
-    expect(appendLine).toHaveBeenCalledWith(
-      '[interactive PTY input truncated to 4096 bytes]',
-      'notice',
-      'tab-1',
-    )
+      const posted = JSON.parse(apiFetch.mock.calls[0][1].body)
+      expect(new TextEncoder().encode(posted.data).length).toBeLessThanOrEqual(4096)
+      expect(appendLine).toHaveBeenCalledWith(
+        '[interactive PTY input truncated to 4096 bytes]',
+        'notice',
+        'tab-1',
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('batches rapid PTY input chunks into one request', async () => {
+    vi.useFakeTimers()
+    const apiFetch = vi.fn(() => Promise.resolve({ ok: true }))
+    globalThis.apiFetch = apiFetch
+
+    try {
+      _ptySendInput('run-1', 'h', 'tab-1')
+      _ptySendInput('run-1', 'e', 'tab-1')
+      _ptySendInput('run-1', 'llo', 'tab-1')
+
+      expect(apiFetch).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(20)
+
+      expect(apiFetch).toHaveBeenCalledTimes(1)
+      const posted = JSON.parse(apiFetch.mock.calls[0][1].body)
+      expect(posted.data).toBe('hello')
+      expect(posted.tab_id).toBe('tab-1')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('reattaches an active PTY from a snapshot and follows the live stream', async () => {

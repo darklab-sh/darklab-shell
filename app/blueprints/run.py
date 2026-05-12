@@ -96,7 +96,13 @@ def _active_run_owner_value(value: object) -> str:
     return str(value or "").strip()[:128]
 
 
-def _validate_command_for_run(command: str, session_id: str, workspace_cwd: str = "") -> CommandValidationResult:
+def _validate_command_for_run(
+    command: str,
+    session_id: str,
+    workspace_cwd: str = "",
+    *,
+    extra_allowed_prefixes: list[str] | None = None,
+) -> CommandValidationResult:
     # Several route tests monkeypatch this module's legacy is_command_allowed
     # symbol to keep subprocess behavior focused. Honor that seam while the
     # runtime path uses the richer validator for workspace rewrites.
@@ -108,7 +114,13 @@ def _validate_command_for_run(command: str, session_id: str, workspace_cwd: str 
             display_command=command,
             exec_command=command,
         )
-    return validate_command(command, session_id=session_id, cfg=CFG, workspace_cwd=workspace_cwd)
+    return validate_command(
+        command,
+        session_id=session_id,
+        cfg=CFG,
+        workspace_cwd=workspace_cwd,
+        extra_allowed_prefixes=extra_allowed_prefixes,
+    )
 
 
 def _workspace_notice_lines(validation: CommandValidationResult) -> list[str]:
@@ -979,6 +991,12 @@ def _interactive_pty_concurrency_limit() -> int:
     return _coerce_positive_int(CFG.get("interactive_pty_max_concurrent_per_session", 4), 4)
 
 
+def _interactive_pty_input_limit() -> str:
+    per_minute = _coerce_positive_int(CFG.get("interactive_pty_input_rate_limit_per_minute"), 500)
+    per_second = _coerce_positive_int(CFG.get("interactive_pty_input_rate_limit_per_second"), 10)
+    return f"{per_minute} per minute; {per_second} per second"
+
+
 def _active_interactive_pty_count(session_id: str) -> int:
     return sum(
         1 for item in active_runs_for_session(session_id)
@@ -1009,7 +1027,12 @@ def _prepare_interactive_pty_command(
         root = str(spec.get("root") or tokens[0].lower())
         raise _RunPreparationError(f"{root} {trigger_flag} requires command arguments", status_code=400)
     execution_command = shlex.join(argv)
-    validation = _validate_command_for_run(execution_command, session_id, workspace_cwd)
+    validation = _validate_command_for_run(
+        execution_command,
+        session_id,
+        workspace_cwd,
+        extra_allowed_prefixes=[str(spec.get("root") or tokens[0].lower())],
+    )
     if not validation.allowed:
         log.warning("CMD_DENIED", extra={
             "ip": client_ip, "session": get_log_session_id(session_id),
@@ -1589,9 +1612,7 @@ def snapshot_interactive_pty_run(run_id):
 
 
 @run_bp.route("/pty/runs/<run_id>/input", methods=["POST"])
-@limiter.limit(lambda: (
-    f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second"
-))
+@limiter.limit(_interactive_pty_input_limit)
 def send_interactive_pty_input(run_id):
     session_id = get_session_id()
     data = request.get_json() or {}

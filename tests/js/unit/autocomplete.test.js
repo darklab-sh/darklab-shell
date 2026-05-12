@@ -2181,6 +2181,59 @@ describe('autocomplete helpers', () => {
     expect(typingItems[0].hintOnly).toBe(true)
   })
 
+  it('honors ordered positional hints one argument slot at a time', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete_core.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'tcptraceroute ',
+        acSuggestions: [],
+        acContextRegistry: {
+          tcptraceroute: {
+            flags: [{ value: '-n', description: 'Do not resolve hop addresses' }],
+            expects_value: [],
+            arg_hints: {
+              __positional__: [
+                {
+                  value: '<host>',
+                  position: 1,
+                  hintOnly: true,
+                  value_type: 'domain',
+                  description: 'Hostname or IP to trace',
+                },
+                {
+                  value: '<port>',
+                  position: 2,
+                  hintOnly: true,
+                  value_type: 'port_set',
+                  description: 'TCP port to probe',
+                },
+              ],
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('tcptraceroute ', 14).map((item) => item.value)).toEqual(['-n', '<host>'])
+    expect(getAutocompleteMatches('tcptraceroute dark', 18).map((item) => item.value)).toEqual(['<host>'])
+    expect(getAutocompleteMatches('tcptraceroute darklab.sh ', 25).map((item) => item.value)).toEqual([
+      '-n',
+      '<port>',
+    ])
+    expect(getAutocompleteMatches('tcptraceroute darklab.sh 4', 26).map((item) => item.value)).toEqual(['<port>'])
+  })
+
   it('stops suggesting more positional arguments after reaching argument_limit, but still allows flags', () => {
     const { getAutocompleteMatches } = fromDomScripts(
       ['app/static/js/utils.js', 'app/static/js/autocomplete_core.js', 'app/static/js/autocomplete.js'],

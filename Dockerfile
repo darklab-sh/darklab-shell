@@ -35,7 +35,7 @@ RUN apt-get install -y  man-db procps net-tools curl wget iputils-ping nmap dnsu
                         mtr whois tcptraceroute dnsrecon git libnet-ssleay-perl rubygems \
                         libxml-writer-perl libjson-perl ruby-dev build-essential fping python3-requests fierce \
                         dnsenum libcap2-bin sudo gosu groff-base bsdextrautils iptables masscan libpcap-dev \
-                        ca-certificates perl zlib1g-dev unzip
+                        ca-certificates perl zlib1g-dev unzip inetutils-telnet
 
 # Update the man page database
 RUN mandb -c

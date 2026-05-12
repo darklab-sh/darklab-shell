@@ -1098,8 +1098,9 @@
       "no_output": false,
       "exit_code": null,
       "command": "curl -sH Accept:application/json https://ip.darklab.sh/api",
-      "expected_text": [
-        "108.79.194.246"
+      "any_of": [
+        { "expected_text": ["108.79.194.246"] },
+        { "expected_text": ["10.20.0.2"] }
       ]
     },
     {

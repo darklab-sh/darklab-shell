@@ -260,6 +260,16 @@
 # Server default if unset: 5
 # rate_limit_per_second: 5
 
+# Maximum number of interactive PTY input requests per minute per IP. This is
+# intentionally higher than /runs because normal typing can produce many small
+# terminal input events.
+# Server default if unset: 500
+# interactive_pty_input_rate_limit_per_minute: 500
+
+# Maximum number of interactive PTY input requests per second per IP.
+# Server default if unset: 10
+# interactive_pty_input_rate_limit_per_second: 10
+
 # ── Terminal ──────────────────────────────────────────────────────────────────
 
 # Maximum number of tabs a user can have open at once.
@@ -343,8 +353,8 @@
 # Server default if unset: 75
 # run_broker_owner_stale_seconds: 75
 
-# Enable first-pass interactive PTY mode for allowlisted screen tools such as
-# mtr --interactive. Multi-worker deployments require Redis so PTY output,
+# Enable interactive PTY mode for allowlisted interactive tools such
+# as nc --interactive and mtr --interactive. Multi-worker deployments require Redis so PTY output,
 # input, and resize events can be brokered across workers. Without Redis, this
 # mode is limited to single-worker local/dev deployments.
 # Server default if unset: false

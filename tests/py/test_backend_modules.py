@@ -49,7 +49,7 @@ from commands import (
     load_welcome, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
     load_mobile_welcome_hints, autocomplete_context_from_commands_registry,
     load_autocomplete_context_from_commands_registry, load_command_policy, load_container_smoke_test_commands,
-    load_allow_grouping_flags, load_commands_registry, load_workflows,
+    load_container_smoke_test_interactive_commands, load_allow_grouping_flags, load_commands_registry, load_workflows,
     interactive_pty_specs_from_registry,
     command_catalog_entry, command_catalog_from_registry, is_command_allowed, rewrite_command,
 )
@@ -1060,6 +1060,18 @@ class TestDerivedCommandRegistry:
                 spec = spec["subcommands"][subcommand]
             assert spec["arg_hints"][trigger][0]["value_type"] == value_type
 
+    def test_real_registry_positional_argument_order_covers_known_host_port_slots(self):
+        context = load_autocomplete_context_from_commands_registry({"workspace_enabled": True})
+
+        for root in ("tcptraceroute", "telnet"):
+            hints = context[root]["arg_hints"]["__positional__"]
+            assert hints[0]["value"] == "<host>"
+            assert hints[0]["position"] == 1
+            assert hints[0]["value_type"] == "domain"
+            assert hints[1]["value"] == "<port>"
+            assert hints[1]["position"] == 2
+            assert hints[1]["value_type"] == "port_set"
+
     def test_nuclei_url_target_discovery_ignores_template_path_flags(self):
         inputs = commands.command_project_target_inputs(
             "nuclei -u https://ip.darklab.sh -t http/",
@@ -1401,6 +1413,11 @@ class TestDerivedCommandRegistry:
                         "examples": [
                             {"value": "nmap ip.darklab.sh", "description": "Scan host"},
                             {
+                                "value": "nmap --interactive ip.darklab.sh",
+                                "description": "Scan host in PTY mode",
+                                "interactive": True,
+                            },
+                            {
                                 "value": "nmap -iL targets.txt -oN nmap.txt",
                                 "description": "Scan file targets",
                                 "feature_required": "workspace",
@@ -1448,6 +1465,10 @@ class TestDerivedCommandRegistry:
 
         disabled = autocomplete_context_from_commands_registry(registry, cfg={"workspace_enabled": False})
         enabled = autocomplete_context_from_commands_registry(registry, cfg={"workspace_enabled": True})
+        interactive_enabled = autocomplete_context_from_commands_registry(
+            registry,
+            cfg={"workspace_enabled": False, "interactive_pty_enabled": True},
+        )
 
         assert [item["value"] for item in disabled["nmap"]["examples"]] == ["nmap ip.darklab.sh"]
         assert [item["value"] for item in disabled["nmap"]["flags"]] == ["-sV"]
@@ -1460,6 +1481,10 @@ class TestDerivedCommandRegistry:
         assert [item["value"] for item in enabled["nmap"]["examples"]] == [
             "nmap ip.darklab.sh",
             "nmap -iL targets.txt -oN nmap.txt",
+        ]
+        assert [item["value"] for item in interactive_enabled["nmap"]["examples"]] == [
+            "nmap ip.darklab.sh",
+            "nmap --interactive ip.darklab.sh",
         ]
         assert [item["value"] for item in enabled["nmap"]["flags"]] == ["-sV", "-iL"]
         assert enabled["nmap"]["arg_hints"]["-iL"][0]["value"] == "targets.txt"
@@ -2858,8 +2883,20 @@ class TestActiveRunMetadata:
 class TestInteractivePtyRegistry:
     def test_live_registry_publishes_each_supported_interactive_tool(self):
         specs = {spec["root"]: spec for spec in interactive_pty_specs_from_registry()}
-        assert set(specs) == {"mtr", "ffuf", "masscan"}
+        assert set(specs) == {"nc", "telnet", "mtr", "ffuf", "masscan"}
         for root, expected in (
+            ("nc", {
+                "trigger_flag": "--interactive",
+                "requires_args": True,
+                "transcript_mode": "all_sanitized",
+                "input_safety": "scanner_controls",
+            }),
+            ("telnet", {
+                "trigger_flag": "--interactive",
+                "requires_args": False,
+                "transcript_mode": "all_sanitized",
+                "input_safety": "scanner_controls",
+            }),
             ("mtr", {
                 "trigger_flag": "--interactive",
                 "requires_args": True,
@@ -2887,6 +2924,12 @@ class TestInteractivePtyRegistry:
             assert spec["allow_input"] is True
             max_runtime = spec["max_runtime_seconds"]
             assert isinstance(max_runtime, int) and max_runtime > 0
+        assert is_command_allowed("nc -zv ip.darklab.sh 80")[0]
+        assert not is_command_allowed("nc ip.darklab.sh 80")[0]
+        assert not is_command_allowed("nc --interactive ip.darklab.sh 80")[0]
+        assert not is_command_allowed("nc -l 4444")[0]
+        assert not is_command_allowed("telnet ip.darklab.sh 80")[0]
+        assert not is_command_allowed("telnet --interactive ip.darklab.sh 80")[0]
 
 
 class TestPtyBrokerService:
@@ -4143,6 +4186,11 @@ class TestAutocompleteContextLoading:
                 "examples": [
                     {"value": "curl -I https://ip.darklab.sh", "description": "Headers"},
                     {
+                        "value": "curl --interactive https://ip.darklab.sh",
+                        "description": "Interactive curl",
+                        "interactive": True,
+                    },
+                    {
                         "value": "curl -L -o response.html https://noc.darklab.sh",
                         "description": "Save response",
                         "feature_required": "workspace",
@@ -4169,6 +4217,49 @@ class TestAutocompleteContextLoading:
 
         load_context.assert_called_once_with({"workspace_enabled": False})
         assert result == ["curl -I https://ip.darklab.sh"]
+
+    def test_container_smoke_test_interactive_commands_include_only_pty_examples(self):
+        registry_context = {
+            "curl": {
+                "examples": [
+                    {"value": "curl -I https://ip.darklab.sh", "description": "Headers"},
+                    {
+                        "value": "curl --interactive https://ip.darklab.sh",
+                        "description": "Interactive curl",
+                        "interactive": True,
+                    },
+                    {
+                        "value": "curl --interactive -o response.html https://ip.darklab.sh",
+                        "description": "Interactive workspace curl",
+                        "feature_required": ["workspace", "interactive_pty"],
+                    },
+                ],
+            },
+            "telnet": {
+                "examples": [
+                    {
+                        "value": "telnet --interactive ip.darklab.sh 80",
+                        "description": "Interactive telnet",
+                        "feature_required": "interactive_pty",
+                    },
+                ],
+            },
+        }
+
+        with mock.patch(
+            "commands.load_autocomplete_context_from_commands_registry",
+            return_value=registry_context,
+        ) as load_context:
+            result = load_container_smoke_test_interactive_commands()
+
+        load_context.assert_called_once_with({
+            "workspace_enabled": False,
+            "interactive_pty_enabled": True,
+        })
+        assert result == [
+            "curl --interactive https://ip.darklab.sh",
+            "telnet --interactive ip.darklab.sh 80",
+        ]
 
 
 class TestWordlistCatalog:

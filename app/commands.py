@@ -141,6 +141,10 @@ def _builtin_faq(app_name="darklab_shell", project_readme=None, cfg=None):
             "answer_html": (
                 "<strong>Interactive PTY</strong> mode is for tools that work better in a live "
                 "terminal-style view instead of plain scrolling output. Commands such as "
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"nc --interactive darklab.sh 80\">"
+                "nc --interactive</span>, "
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"telnet --interactive darklab.sh 80\">"
+                "telnet --interactive</span>, "
                 "<span class=\"allowed-chip faq-chip\" data-faq-command=\"mtr --interactive darklab.sh\">"
                 "mtr --interactive</span>, "
                 "<span class=\"allowed-chip faq-chip\" data-faq-command=\"ffuf --interactive "
@@ -2074,6 +2078,30 @@ def _load_yaml_mapping(path):
     return loaded if isinstance(loaded, dict) else {}
 
 
+def _suggestion_interactive_enabled(item) -> bool:
+    raw_interactive = item.get("interactive") if isinstance(item, dict) else None
+    if isinstance(raw_interactive, str):
+        return raw_interactive.strip().lower() in {"1", "true", "yes", "on"}
+    return raw_interactive is True
+
+
+def _suggestion_required_features(item) -> list[str]:
+    if not isinstance(item, dict):
+        return []
+    feature_required = item.get("feature_required") or item.get("requires_feature") or item.get("feature")
+    required_features = []
+    if feature_required:
+        if isinstance(feature_required, (list, tuple, set)):
+            required_features.extend(str(value).strip().lower() for value in feature_required if str(value).strip())
+        else:
+            feature = str(feature_required).strip().lower()
+            if feature:
+                required_features.append(feature)
+    if _suggestion_interactive_enabled(item):
+        required_features.append("interactive_pty")
+    return list(dict.fromkeys(required_features))
+
+
 def _normalize_context_suggestion(item):
     if isinstance(item, str):
         value = item.strip()
@@ -2104,6 +2132,15 @@ def _normalize_context_suggestion(item):
     value_type = str(item.get("value_type") or item.get("value_kind") or item.get("type") or "").strip().lower()
     if value_type:
         result["value_type"] = value_type
+    raw_position = (
+        item.get("position")
+        or item.get("order")
+        or item.get("argument_position")
+        or item.get("argument_order")
+    )
+    position = _coerce_positive_int(raw_position, 0)
+    if position:
+        result["position"] = position
     raw_wordlist_category = item.get("wordlist_category")
     if raw_wordlist_category:
         if isinstance(raw_wordlist_category, (list, tuple, set)):
@@ -2118,24 +2155,19 @@ def _normalize_context_suggestion(item):
             category = str(raw_wordlist_category).strip().lower()
             if category:
                 result["wordlist_category"] = category
-    feature_required = item.get("feature_required") or item.get("requires_feature") or item.get("feature")
-    if feature_required:
-        if isinstance(feature_required, (list, tuple, set)):
-            result["feature_required"] = [str(value).strip().lower() for value in feature_required if str(value).strip()]
-        else:
-            result["feature_required"] = str(feature_required).strip().lower()
+    required_features = _suggestion_required_features(item)
+    if required_features:
+        result["feature_required"] = required_features if len(required_features) > 1 else required_features[0]
     return result
 
 
 def _suggestion_enabled_for_features(item, cfg=None) -> bool:
     if not isinstance(item, dict):
         return True
-    feature_required = item.get("feature_required") or item.get("requires_feature") or item.get("feature")
-    if not feature_required:
+    required_features = _suggestion_required_features(item)
+    if not required_features:
         return True
-    if isinstance(feature_required, (list, tuple, set)):
-        return all(_feature_enabled(value, cfg) for value in feature_required)
-    return _feature_enabled(feature_required, cfg)
+    return all(_feature_enabled(value, cfg) for value in required_features)
 
 
 def _filter_autocomplete_context_by_features(context: dict, cfg=None) -> dict:
@@ -2675,6 +2707,42 @@ def load_container_smoke_test_commands():
             commands.append(command)
 
     return _spread_sensitive_smoke_commands(commands)
+
+
+def _feature_required_includes(item: dict, feature: str) -> bool:
+    required_features = _suggestion_required_features(item)
+    return feature.strip().lower() in required_features
+
+
+def load_container_smoke_test_interactive_commands():
+    """Return interactive PTY examples for the dedicated smoke-test corpus."""
+    commands = []
+    seen = set()
+    cfg = {"workspace_enabled": False, "interactive_pty_enabled": True}
+
+    def _example_sources(spec: dict):
+        yield from spec.get("examples") or []
+        for sub_spec in (spec.get("subcommands") or {}).values():
+            if isinstance(sub_spec, dict):
+                yield from _example_sources(sub_spec)
+
+    for spec in load_autocomplete_context_from_commands_registry(cfg).values():
+        if not isinstance(spec, dict):
+            continue
+        for example in _example_sources(spec):
+            if not isinstance(example, dict):
+                continue
+            if not _feature_required_includes(example, "interactive_pty"):
+                continue
+            if not _suggestion_enabled_for_features(example, cfg):
+                continue
+            command = str(example.get("value") or "").strip()
+            if not command or command in seen:
+                continue
+            seen.add(command)
+            commands.append(command)
+
+    return commands
 
 
 def split_command_argv(command: str) -> list[str]:
@@ -3728,6 +3796,7 @@ def validate_command(
     session_id: str = "",
     cfg: dict | None = None,
     workspace_cwd: str = "",
+    extra_allowed_prefixes: list[str] | None = None,
 ) -> CommandValidationResult:
     """Validate a command and return the display command plus execution command.
 
@@ -3740,6 +3809,8 @@ def validate_command(
     allow_grouping = load_allow_grouping_flags()
     if allowed is None:
         return CommandValidationResult(True, display_command=command, exec_command=command)
+    if extra_allowed_prefixes:
+        allowed = [*allowed, *extra_allowed_prefixes]
 
     synthetic_postfilter, postfilter_error = parse_synthetic_postfilter(command)
     if postfilter_error:

@@ -136,6 +136,8 @@ def load_config(conf_dir=None):
         "interactive_pty_enabled":     False,
         "interactive_pty_max_runtime_seconds": 900,
         "interactive_pty_max_concurrent_per_session": 4,
+        "interactive_pty_input_rate_limit_per_minute": 500,
+        "interactive_pty_input_rate_limit_per_second": 10,
         "welcome_char_ms":            18,
         "welcome_jitter_ms":          12,
         "welcome_post_cmd_ms":        650,

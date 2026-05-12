@@ -177,22 +177,38 @@ commands:
               description: Two-second per-hop timeout
       arguments:
         - placeholder: <host>
+          position: 1
           hint_only: true
           value_type: domain
           description: Hostname or IP to trace
         - placeholder: <port>
+          position: 2
           hint_only: true
+          value_type: port_set
           description: TCP port to probe
   - root: nc
-    description: Tests TCP port reachability and basic socket connectivity.
+    description: Tests TCP port reachability and basic interactive socket connectivity.
     category: Network Diagnostics
     policy:
       allow:
         - nc -z
         - nc -h
+        - nc --interactive
       deny:
         - nc -e
         - nc -c
+        - nc -l
+        - nc --interactive
+    interactive:
+      mode: pty
+      trigger_flag: --interactive
+      default_rows: 24
+      default_cols: 100
+      max_runtime_seconds: 900
+      allow_input: true
+      input_safety: scanner_controls
+      requires_args: true
+      transcript_mode: all_sanitized
     autocomplete:
       examples:
         - value: nc -h
@@ -201,10 +217,15 @@ commands:
           description: Check if port 80 is open
         - value: nc -zv ip.darklab.sh 443 80
           description: Check multiple ports at once
+        - value: nc --interactive ip.darklab.sh 80
+          description: Open an interactive TCP troubleshooting session
+          interactive: true
       flags:
         - value: -h
           description: Show help and usage
           closes: true
+        - value: --interactive
+          description: Start the constrained interactive PTY view
         - value: -z
           description: Zero-I/O mode for port scanning
           allow_grouping: true
@@ -225,6 +246,46 @@ commands:
           hint_only: true
           value_type: domain
           description: Hostname or IP followed by one or more ports
+  - root: telnet
+    description: Opens an interactive Telnet-style TCP session for protocol and banner troubleshooting.
+    category: Network Diagnostics
+    policy:
+      allow:
+        - telnet --interactive
+      deny:
+        - telnet --interactive
+    interactive:
+      mode: pty
+      trigger_flag: --interactive
+      default_rows: 24
+      default_cols: 100
+      max_runtime_seconds: 900
+      allow_input: true
+      input_safety: scanner_controls
+      requires_args: false
+      transcript_mode: all_sanitized
+    autocomplete:
+      examples:
+        - value: telnet --interactive ip.darklab.sh 80
+          description: Open an interactive TCP troubleshooting session
+          interactive: true
+        - value: telnet --interactive darklab.sh 443
+          description: Connect to a service port through the PTY view
+          interactive: true
+      flags:
+        - value: --interactive
+          description: Start the constrained interactive PTY view
+      arguments:
+        - placeholder: <host>
+          position: 1
+          hint_only: true
+          value_type: domain
+          description: Hostname or IP to connect to
+        - placeholder: <port>
+          position: 2
+          hint_only: true
+          value_type: port_set
+          description: TCP port to connect to
   - root: mtr
     description: Combines traceroute and ping to show live hop-by-hop reachability and loss.
     category: Network Diagnostics
@@ -263,6 +324,9 @@ commands:
           description: Stop after 20 probes
         - value: mtr -n -c 20 ip.darklab.sh
           description: 20 probes, no DNS resolution
+        - value: mtr --interactive ip.darklab.sh
+          description: Open an interactive hop-by-hop trace
+          interactive: true
       flags:
         - value: -h
           description: Show help and usage
@@ -2260,6 +2324,9 @@ commands:
           description: Show help and usage
         - value: ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
           description: Directory brute force with common wordlist
+        - value: ffuf --interactive -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+          description: Run ffuf in the interactive PTY view
+          interactive: true
         - value: ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
             -mc 200,301,302
           description: Filter for successful and redirect responses
@@ -2875,6 +2942,9 @@ commands:
           description: Show help and usage
         - value: masscan -p 80,443 8.8.8.8
           description: Fast scan of web ports
+        - value: masscan --interactive -p 80,443 --rate 500 8.8.8.8
+          description: Run a controlled interactive scan of web ports
+          interactive: true
         - value: masscan -p 80,443 -iL targets.txt -oL masscan-results.txt
           description: Scan targets from a session file and save list output
           feature_required: workspace
