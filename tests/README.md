@@ -22,12 +22,12 @@ Project workspace behavior follows the same split: pytest owns project routes, s
 
 Current totals:
 
-- behavior tests: 2,626
+- behavior tests: 2,631
 - docs/inventory meta-tests: 32
 - `pytest`: 1324 (1292 behavior + 32 meta)
-- `vitest`: 1087
+- `vitest`: 1092
 - `playwright`: 247
-- total: 2,658
+- total: 2,663
 
 This document is organized in two parts:
 
@@ -2704,6 +2704,11 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `cancelWelcome clears active and done flags` | Verifies that cancelWelcome clears active and done flags. |
 | `runWelcome stops cleanly when the server returns no blocks` | Verifies that runWelcome stops cleanly when the server returns no blocks. |
 | `runWelcome appends command and notice lines and marks completion` | Verifies that runWelcome appends command and notice lines and marks completion. |
+| `runWelcome renders an emphasized tour CTA when the tour has not been opened` | Verifies that the welcome tour CTA is emphasized before the current tour version has been opened. |
+| `runWelcome demotes the tour CTA after the current version has been opened` | Verifies that the welcome tour CTA remains visible but demoted after the current tour version has been opened. |
+| `runWelcome re-emphasizes the tour CTA when the tour version changes` | Verifies that a newer tour version restores emphasis to the welcome tour CTA. |
+| `runWelcome suppresses the tour CTA when disabled or no chapters are visible` | Verifies that the welcome tour CTA is hidden when the tour is disabled or chapter filtering leaves nothing to show. |
+| `mobile welcome renders the CLI-only tour CTA copy` | Verifies that mobile welcome output keeps the tour CTA scoped to the terminal command entry point. |
 | `renders the operator message inside the welcome banner when motd is configured` | Verifies that renders the operator message inside the welcome banner when motd is configured. |
 | `runWelcome falls back to darklab_shell banner text when /welcome/ascii fails` | Verifies that runWelcome falls back to darklab_shell banner text when /welcome/ascii fails. |
 | `runWelcome falls back to the static hint when /welcome/hints fails` | Verifies that runWelcome falls back to the static hint when /welcome/hints fails. |

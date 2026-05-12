@@ -38,6 +38,8 @@ test.describe('welcome animation', () => {
     await expect(page.locator('.welcome-command').nth(0)).toContainText('echo ready')
     await expect(page.locator('.welcome-command-featured')).toHaveCount(0)
     await expect(page.locator('.welcome-command-badge')).toContainText('try this first')
+    await expect(page.locator('.welcome-tour-cta')).toContainText('Tour the app')
+    await expect(page.locator('.welcome-tour-cta')).toHaveClass(/welcome-tour-cta-emphasis/)
     await expect(page.locator('.welcome-section-header').nth(1)).toContainText('Helpful hints')
     await expect(page.locator('.line.welcome-hint')).toContainText(
       'Use the history panel to reopen saved runs.',

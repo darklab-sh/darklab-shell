@@ -202,6 +202,26 @@ body .welcome-status-loaded {
   white-space: nowrap;
   flex: 0 0 auto;
 }
+.welcome-tour-cta {
+  color: var(--text);
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  margin-top: 8px;
+  font-size: 14px;
+}
+.welcome-tour-cta-emphasis {
+  color: color-mix(in srgb, var(--green) 84%, var(--text));
+  text-shadow: 0 0 10px color-mix(in srgb, var(--green) 10%, transparent);
+}
+.welcome-tour-cta-demoted {
+  color: var(--muted);
+  opacity: 0.8;
+}
+.welcome-tour-cta-command {
+  color: var(--green);
+  font-weight: 700;
+}
 .line.wlc-live {
   opacity: 1;
 }

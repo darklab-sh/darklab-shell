@@ -44,6 +44,31 @@ function _shouldUseMobileWelcomeSequence() {
   return false;
 }
 
+function _visibleWelcomeTourChapters() {
+  return Array.isArray(APP_CONFIG?.tour_chapters) ? APP_CONFIG.tour_chapters : [];
+}
+
+function _welcomeTourSeenVersion() {
+  if (typeof getTourSeenVersionPreference === 'function') {
+    return Number(getTourSeenVersionPreference() || 0) || 0;
+  }
+  return 0;
+}
+
+function _welcomeTourVersion() {
+  return Number(APP_CONFIG?.tour_version || 0) || 0;
+}
+
+function _welcomeTourCtaState() {
+  if (!(APP_CONFIG && APP_CONFIG.tour_enabled === true)) return null;
+  if (!_visibleWelcomeTourChapters().length) return null;
+  const version = _welcomeTourVersion();
+  const seenVersion = _welcomeTourSeenVersion();
+  return {
+    demoted: version > 0 && seenVersion === version,
+  };
+}
+
 function welcomeOwnsTab(tabId) {
   return !!tabId && _welcomeTabId === tabId && (_welcomeActive || _welcomeDone);
 }
@@ -249,6 +274,7 @@ async function _runWelcomeAnimation(tabId, {
   }
 
   if (_welcomeActive) {
+    _appendWelcomeTourCta(tabId);
     _welcomeDone = true;
     if (hints.length) {
       _appendWelcomeSectionHeader(tabId, 'Helpful hints', 'helpful-hints');
@@ -437,6 +463,51 @@ function _appendWelcomeCommand(tabId, cmd, commentText = null, { interactive = t
       onActivate: loadCommand,
     });
   }
+  out.appendChild(line);
+  out.scrollTop = out.scrollHeight;
+  return line;
+}
+
+function _loadWelcomeTourCommand(tabId) {
+  if (_welcomeActive && welcomeOwnsTab(tabId)) settleWelcome(tabId);
+  refocusComposerAfterAction();
+  setComposerValue('tour', 4, 4, { dispatch: false });
+  setTimeout(() => {
+    if (typeof cmdInput.dispatchEvent === 'function') cmdInput.dispatchEvent(new Event('input'));
+  }, 0);
+}
+
+function _appendWelcomeTourCta(tabId) {
+  const state = _welcomeTourCtaState();
+  const out = getOutput(tabId);
+  if (!state || !out) return null;
+  const existing = out.querySelector('[data-welcome-section="tour-cta"]');
+  if (existing) return existing;
+
+  const line = document.createElement('span');
+  line.className = 'line welcome-tour-cta';
+  line.classList.toggle('welcome-tour-cta-demoted', state.demoted);
+  line.classList.toggle('welcome-tour-cta-emphasis', !state.demoted);
+  line.dataset.welcomeSection = 'tour-cta';
+
+  const label = document.createElement('span');
+  label.className = 'welcome-tour-cta-label';
+  label.textContent = 'Tour the app - type ';
+
+  const chip = document.createElement('span');
+  chip.className = 'welcome-tour-cta-command welcome-command-loadable';
+  chip.textContent = 'tour';
+  chip.tabIndex = 0;
+  chip.setAttribute('role', 'button');
+  chip.title = 'Click to load into prompt';
+  chip.setAttribute('aria-label', 'Load command: tour');
+  bindPressable(chip, {
+    refocusComposer: false,
+    clearPressStyle: true,
+    onActivate: () => _loadWelcomeTourCommand(tabId),
+  });
+
+  line.append(label, chip);
   out.appendChild(line);
   out.scrollTop = out.scrollHeight;
   return line;
@@ -809,6 +880,7 @@ function settleWelcome(tabId = activeTabId) {
     }
   }
   _welcomeNextBlockIndex = blocks.length;
+  _appendWelcomeTourCta(tabId);
 
   _welcomeDone = true;
   if (_welcomePlan && Array.isArray(_welcomePlan.hints) && _welcomePlan.hints.length) {
